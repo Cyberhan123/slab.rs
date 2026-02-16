@@ -1,0 +1,31 @@
+[package]
+name = "slab-whisper"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+slab-whisper-sys = { path = "../slab-whisper-sys" }
+libloading = "0.8.9"
+log = { version = "0.4.29", optional = true }
+tracing = { version = "0.1.44", optional = true }
+
+[dev-dependencies]
+rand = "0.10.0"
+
+[features]
+default = []
+
+test-with-tiny-model = []
+
+# Bring logs into Rust via the log crate. *Warning*: not mutually exclusive with tracing_backend,
+# will result in duplicate logs if both are enabled and one consumes logs from the other.
+log_backend = ["dep:log"]
+
+# Bring logs into Rust via the tracing crate. *Warning*: not mutually exclusive with log_backend,
+# will result in duplicate logs if both are enabled and one consumes logs from the other.
+tracing_backend = ["dep:tracing"]
