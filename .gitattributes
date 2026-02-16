@@ -1,0 +1,8 @@
+*.png !text !filter !merge !diff
+*.jpg !text !filter !merge !diff
+*.mp3 !text !filter !merge !diff
+*.wav !text !filter !merge !diff
+*.bin !text !filter !merge !diff
+*.dll !text !filter !merge !diff
+*.so !text !filter !merge !diff
+*.dylib !text !filter !merge !diff

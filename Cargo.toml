@@ -1,0 +1,28 @@
+[workspace]
+resolver = "2"
+members = [
+    "slab-diffusion", 
+    "slab-diffusion-sys",
+    "slab-libfetch",
+    "slab-llama",
+    "slab-llama-sys",
+    "slab-whisper",
+    "slab-whisper-sys",
+]
+
+[workspace.package]
+version = "0.0.1"
+edition = "2021"
+description = "slab ML"
+repository = "https://github.com/cyberhan123/slab.rs"
+keywords = ["blas", "tensor", "machine-learning"]
+categories = ["science"]
+license = "Apache-2.0"
+
+[workspace.dependencies]
+slab-diffusion-sys = { path = "./slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.0.1" }
+slab-diffusion = { path = "./slab-diffusion", package = "slab-diffusion", version = "0.0.1" }
+slab-llama = { path = "./slab-llama", package = "slab-llama", version = "0.0.1" }
+slab-llama-sys = { path = "./slab-llama-sys", package = "slab-llama-sys", version = "0.0.1" }
+slab-whisper = { path = "./slab-whisper", package = "slab-whisper", version = "0.0.1" }
+slab-whisper-sys = { path = "./slab-whisper-sys", package = "slab-whisper-sys", version = "0.0.1" }

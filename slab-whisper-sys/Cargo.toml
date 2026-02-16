@@ -1,0 +1,17 @@
+[package]
+name = "slab-whisper-sys"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[build-dependencies]
+slab-libfetch = { path = "../slab-libfetch" }
+bindgen = "0.72.1"
+tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+
+[dependencies]
+libloading = "0.8.9"

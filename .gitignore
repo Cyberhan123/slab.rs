@@ -1,0 +1,10 @@
+## File system
+.DS_Store
+desktop.ini
+
+## Editors
+.idea
+.vscode
+
+## Build output
+/target
