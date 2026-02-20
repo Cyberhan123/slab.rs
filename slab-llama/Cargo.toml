@@ -9,3 +9,5 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
+slab-llama-sys = { workspace = true }
+libloading = { workspace = true }
