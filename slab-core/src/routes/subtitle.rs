@@ -8,5 +8,5 @@ use crate::handlers::subtitle;
 
 pub fn router() -> Router {
     Router::new()
-        .route("/generate", post(subtitle::create_user))
+        .route("/generate", post(subtitle::generate))
 }

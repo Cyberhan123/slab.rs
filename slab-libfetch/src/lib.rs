@@ -75,9 +75,8 @@ pub async fn fetch_header(
     tag: Option<&str>,
     target_include_path: &Path,
 ) -> Result<()> {
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .unwrap();
+    // Ignore error if a provider has already been installed
+    let _ = rustls::crypto::ring::default_provider().install_default();
 
     let instance = octocrab::instance();
     let repo_handler = instance.repos(owner, repo);
