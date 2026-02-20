@@ -1,3 +1,10 @@
+pub mod api;
+pub mod downloader;
+pub mod install;
+
+pub use api::{Api, RepoApi, VersionApi};
+pub use install::VersionInfo;
+
 use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use octocrab;
