@@ -4493,6 +4493,10 @@ dependencies = [
 [[package]]
 name = "slab-llama"
 version = "0.0.1"
+dependencies = [
+ "libloading 0.8.9",
+ "slab-llama-sys",
+]
 
 [[package]]
 name = "slab-llama-sys"
