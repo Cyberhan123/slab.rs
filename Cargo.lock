@@ -4494,8 +4494,10 @@ dependencies = [
 name = "slab-llama"
 version = "0.0.1"
 dependencies = [
+ "anyhow",
  "libloading 0.8.9",
  "slab-llama-sys",
+ "thiserror 2.0.18",
 ]
 
 [[package]]
