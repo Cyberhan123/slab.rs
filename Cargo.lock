@@ -4845,8 +4845,11 @@ dependencies = [
  "octocrab",
  "reqwest",
  "rustls",
+ "serde",
+ "serde_json",
  "tar",
  "tokio",
+ "zip",
 ]
 
 [[package]]
