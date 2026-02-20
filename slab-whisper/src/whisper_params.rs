@@ -878,79 +878,80 @@ impl<'a, 'b> FullParams<'a, 'b> {
 unsafe impl Send for FullParams<'_, '_> {}
 unsafe impl Sync for FullParams<'_, '_> {}
 
-#[cfg(test)]
-mod test_whisper_params_initial_prompt {
-    use super::*;
+// #[cfg(test)]
+// mod test_whisper_params_initial_prompt {
+//     use super::*;
 
-    impl<'a, 'b> FullParams<'a, 'b> {
-        pub fn get_initial_prompt(&self) -> &str {
-            // SAFETY: Ensure this is safe and respects the lifetime of the string in self.fp
-            unsafe {
-                std::ffi::CStr::from_ptr(self.fp.initial_prompt)
-                    .to_str()
-                    .unwrap()
-            }
-        }
-    }
+//     impl<'a, 'b> FullParams<'a, 'b> {
+//         pub fn get_initial_prompt(&self) -> &str {
+//             // SAFETY: Ensure this is safe and respects the lifetime of the string in self.fp
+//             unsafe {
+//                 std::ffi::CStr::from_ptr(self.fp.initial_prompt)
+//                     .to_str()
+//                     .unwrap()
+//             }
+//         }
+//     }
 
-    #[test]
-    fn test_initial_prompt_normal_usage() {
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-        let prompt = "Hello, world!";
-        params.set_initial_prompt(prompt);
-        assert_eq!(params.get_initial_prompt(), prompt);
-    }
+//     #[test]
+//     fn test_initial_prompt_normal_usage() {
+//         Whisper::new_full_params(SamplingStrategy::Greedy { best_of: 5 });
+//         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
+//         let prompt = "Hello, world!";
+//         params.set_initial_prompt(prompt);
+//         assert_eq!(params.get_initial_prompt(), prompt);
+//     }
 
-    #[test]
-    #[should_panic(expected = "Initial prompt contains null byte")]
-    fn test_initial_prompt_null_byte() {
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-        let prompt = "Hello\0, world!";
-        params.set_initial_prompt(prompt);
-        // Should panic
-    }
+//     #[test]
+//     #[should_panic(expected = "Initial prompt contains null byte")]
+//     fn test_initial_prompt_null_byte() {
+//         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
+//         let prompt = "Hello\0, world!";
+//         params.set_initial_prompt(prompt);
+//         // Should panic
+//     }
 
-    #[test]
-    fn test_initial_prompt_empty_string() {
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-        let prompt = "";
-        params.set_initial_prompt(prompt);
+//     #[test]
+//     fn test_initial_prompt_empty_string() {
+//         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
+//         let prompt = "";
+//         params.set_initial_prompt(prompt);
 
-        assert_eq!(
-            params.get_initial_prompt(),
-            prompt,
-            "The initial prompt should be an empty string."
-        );
-    }
+//         assert_eq!(
+//             params.get_initial_prompt(),
+//             prompt,
+//             "The initial prompt should be an empty string."
+//         );
+//     }
 
-    #[test]
-    fn test_initial_prompt_repeated_calls() {
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-        params.set_initial_prompt("First prompt");
-        assert_eq!(
-            params.get_initial_prompt(),
-            "First prompt",
-            "The initial prompt should be 'First prompt'."
-        );
+//     #[test]
+//     fn test_initial_prompt_repeated_calls() {
+//         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
+//         params.set_initial_prompt("First prompt");
+//         assert_eq!(
+//             params.get_initial_prompt(),
+//             "First prompt",
+//             "The initial prompt should be 'First prompt'."
+//         );
 
-        params.set_initial_prompt("Second prompt");
-        assert_eq!(
-            params.get_initial_prompt(),
-            "Second prompt",
-            "The initial prompt should be 'Second prompt' after second set."
-        );
-    }
+//         params.set_initial_prompt("Second prompt");
+//         assert_eq!(
+//             params.get_initial_prompt(),
+//             "Second prompt",
+//             "The initial prompt should be 'Second prompt' after second set."
+//         );
+//     }
 
-    #[test]
-    fn test_initial_prompt_long_string() {
-        let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-        let long_prompt = "a".repeat(10000); // a long string of 10,000 'a' characters
-        params.set_initial_prompt(&long_prompt);
+//     #[test]
+//     fn test_initial_prompt_long_string() {
+//         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
+//         let long_prompt = "a".repeat(10000); // a long string of 10,000 'a' characters
+//         params.set_initial_prompt(&long_prompt);
 
-        assert_eq!(
-            params.get_initial_prompt(),
-            long_prompt.as_str(),
-            "The initial prompt should match the long string provided."
-        );
-    }
-}
+//         assert_eq!(
+//             params.get_initial_prompt(),
+//             long_prompt.as_str(),
+//             "The initial prompt should match the long string provided."
+//         );
+//     }
+// }

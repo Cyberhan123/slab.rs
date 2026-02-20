@@ -6,6 +6,7 @@ use crate::{
     WhisperContextParameters, WhisperError, WhisperInnerContext, WhisperState, WhisperTokenId,
 };
 
+#[derive(Clone)]
 pub struct WhisperContext {
     ctx: Arc<WhisperInnerContext>,
 }

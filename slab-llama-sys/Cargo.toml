@@ -8,4 +8,14 @@ keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
+include = [
+    "wrapper.h",
+]
+
+[build-dependencies]
+slab-libfetch = { workspace = true }
+bindgen = { workspace = true }
+tokio = { workspace = true }
+
 [dependencies]
+libloading = { workspace = true }

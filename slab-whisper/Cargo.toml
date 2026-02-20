@@ -9,8 +9,8 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
-slab-whisper-sys = { path = "../slab-whisper-sys" }
-libloading = "0.8.9"
+slab-whisper-sys = { workspace = true }
+libloading = { workspace = true }
 log = { version = "0.4.29", optional = true }
 tracing = { version = "0.1.44", optional = true }
 
