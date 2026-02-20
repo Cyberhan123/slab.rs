@@ -1,8 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
 use std::fmt;
-use anyhow::Result;
-
 
 mod common_logging;
 mod error;
@@ -52,7 +50,7 @@ pub struct Whisper {
 }
 
 impl Whisper {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, ::libloading::Error> {
+    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, WhisperError> {
         // 1. 在 unsafe 块中尝试加载库，并使用 ? 提取出 lib
         let lib = unsafe { slab_whisper_sys::WhisperLib::new(path.as_ref())? };
 

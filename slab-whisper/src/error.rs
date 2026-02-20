@@ -5,7 +5,7 @@ use std::str::Utf8Error;
 /// [crate::whisper_sys_tracing::install_whisper_tracing_trampoline],
 /// then `whisper.cpp`'s errors will be output to stderr,
 /// so you can check there for more information upon receiving a `WhisperError`.
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum WhisperError {
     /// Failed to create a new context.
     InitError,
@@ -48,6 +48,8 @@ pub enum WhisperError {
     InputOutputLengthMismatch { input_len: usize, output_len: usize },
     /// Input slice was not an even number of samples.
     HalfSampleMissing(usize),
+    /// Failed to load the whisper dynamic library.
+    LoadLibraryError(String),
 }
 
 impl From<Utf8Error> for WhisperError {
@@ -64,6 +66,12 @@ impl From<NulError> for WhisperError {
         Self::NullByteInString {
             idx: e.nul_position(),
         }
+    }
+}
+
+impl From<libloading::Error> for WhisperError {
+    fn from(e: libloading::Error) -> Self {
+        Self::LoadLibraryError(e.to_string())
     }
 }
 
@@ -133,6 +141,9 @@ impl std::fmt::Display for WhisperError {
                     size,
                     size + 1
                 )
+            }
+            LoadLibraryError(msg) => {
+                write!(f, "Failed to load the whisper dynamic library: {}", msg)
             }
         }
     }

@@ -1,6 +1,7 @@
 use std::env;
 use std::path::{Path, PathBuf};
 use crate::downloader::Downloader;
+use crate::error::FetchError;
 use crate::install::{Install, VersionInfo};
 
 /// Top-level builder for the libfetch API.
@@ -125,7 +126,7 @@ impl RepoApi {
     }
 
     /// Return the installed version information from `version.json`.
-    pub fn get_installed_version(&self) -> anyhow::Result<VersionInfo> {
+    pub fn get_installed_version(&self) -> Result<VersionInfo, FetchError> {
         Install::new(&self.repo, &self.api.install_dir).get_installed_version()
     }
 }
@@ -134,7 +135,7 @@ impl VersionApi {
     /// Download and extract the release asset produced by `asset_func(version)`.
     ///
     /// `asset_func` receives the resolved version tag and must return the asset file name.
-    pub async fn install<F>(self, asset_func: F) -> anyhow::Result<PathBuf>
+    pub async fn install<F>(self, asset_func: F) -> Result<PathBuf, FetchError>
     where
         F: Fn(&str) -> String,
     {
@@ -168,7 +169,7 @@ impl VersionApi {
     /// found, falls back to extracting every `.h`, `.hpp`, and `.hxx` file.
     /// Skips the download entirely when `version.json` already records the
     /// same version.
-    pub async fn fetch_header(self, target_path: &Path) -> anyhow::Result<()> {
+    pub async fn fetch_header(self, target_path: &Path) -> Result<(), FetchError> {
         let downloader = Downloader::new(
             &self.repo,
             self.api.retry_count,
