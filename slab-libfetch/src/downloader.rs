@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::error::FetchError;
 use flate2::read::GzDecoder;
 use reqwest::Client;
 use std::io::Cursor;
@@ -62,13 +62,15 @@ impl Downloader {
     }
 
     /// Fetch the latest release tag from GitHub for the configured repo.
-    pub async fn latest_version(&self) -> Result<String> {
+    pub async fn latest_version(&self) -> Result<String, FetchError> {
         let api_url = format!(
             "https://api.github.com/repos/{}/releases/latest",
             self.repo
         );
 
-        let mut last_err = anyhow::anyhow!("unable to fetch latest version");
+        let mut last_err: FetchError = FetchError::InvalidResponse {
+            message: "unable to fetch latest version".to_string(),
+        };
         for attempt in 0..self.retry_count {
             match self.get_latest_version_once(&api_url).await {
                 Ok(v) => return Ok(v),
@@ -83,7 +85,7 @@ impl Downloader {
         Err(last_err)
     }
 
-    async fn get_latest_version_once(&self, url: &str) -> Result<String> {
+    async fn get_latest_version_once(&self, url: &str) -> Result<String, FetchError> {
         let resp = self
             .client
             .get(url)
@@ -96,7 +98,9 @@ impl Downloader {
         let json: serde_json::Value = resp.json().await?;
         json["tag_name"]
             .as_str()
-            .context("tag_name not found in GitHub API response")
+            .ok_or_else(|| FetchError::InvalidResponse {
+                message: "tag_name not found in GitHub API response".to_string(),
+            })
             .map(|s| s.to_string())
     }
 
@@ -109,7 +113,7 @@ impl Downloader {
     }
 
     /// Download and extract a release asset into `dest`.
-    pub async fn download_asset(&self, asset_name: &str, version: &str, dest: &Path) -> Result<()> {
+    pub async fn download_asset(&self, asset_name: &str, version: &str, dest: &Path) -> Result<(), FetchError> {
         let url = self.asset_url(asset_name, version);
 
         if self.show_progress {
@@ -146,7 +150,7 @@ impl Downloader {
     ///
     /// Prefers the `include/` sub-directory; if none is found, falls back to
     /// extracting every `.h`, `.hpp`, and `.hxx` file in the archive.
-    pub async fn download_source_headers(&self, version: &str, dest: &Path) -> Result<()> {
+    pub async fn download_source_headers(&self, version: &str, dest: &Path) -> Result<(), FetchError> {
         let tarball_url = format!(
             "https://github.com/{}/archive/refs/tags/{}.tar.gz",
             self.repo, version
@@ -177,7 +181,7 @@ impl Downloader {
 /// `repo-v1.0.0/`). Files at the root of the archive (with no directory
 /// component) are silently skipped. Only deflate-compressed entries are
 /// supported; other compression methods will return an error.
-pub(crate) fn extract_zip(bytes: &[u8], dest: &Path) -> Result<()> {
+pub(crate) fn extract_zip(bytes: &[u8], dest: &Path) -> Result<(), FetchError> {
     let cursor = Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(cursor)?;
 
@@ -214,7 +218,7 @@ pub(crate) fn extract_zip(bytes: &[u8], dest: &Path) -> Result<()> {
 /// Archives are expected to contain a single top-level directory (e.g.
 /// `repo-v1.0.0/`). Entries at the archive root (with no directory component)
 /// are silently skipped.
-pub(crate) fn extract_tar_gz_strip_top(bytes: &[u8], dest: &Path) -> Result<()> {
+pub(crate) fn extract_tar_gz_strip_top(bytes: &[u8], dest: &Path) -> Result<(), FetchError> {
     let tar_gz = GzDecoder::new(Cursor::new(bytes));
     let mut archive = Archive::new(tar_gz);
 
@@ -242,7 +246,7 @@ pub(crate) fn extract_tar_gz_strip_top(bytes: &[u8], dest: &Path) -> Result<()> 
 /// the `include/` prefix in the destination).  If no `include/` directory is
 /// found, a second pass extracts all `.h`, `.hpp`, and `.hxx` files (stripping
 /// the archive root directory).
-pub(crate) fn extract_source_headers(bytes: &[u8], dest: &Path, show_progress: bool) -> Result<()> {
+pub(crate) fn extract_source_headers(bytes: &[u8], dest: &Path, show_progress: bool) -> Result<(), FetchError> {
     // First pass – prefer the `include/` directory.
     let tar_gz = GzDecoder::new(Cursor::new(bytes));
     let mut archive = Archive::new(tar_gz);

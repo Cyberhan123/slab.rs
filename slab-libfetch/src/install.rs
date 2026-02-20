@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use crate::error::FetchError;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -46,14 +46,13 @@ impl Install {
     }
 
     /// Read the stored `version.json`.
-    pub fn get_installed_version(&self) -> Result<VersionInfo> {
-        let data = fs::read_to_string(self.version_file())
-            .context("Failed to read version.json")?;
-        serde_json::from_str(&data).context("Failed to parse version.json")
+    pub fn get_installed_version(&self) -> Result<VersionInfo, FetchError> {
+        let data = fs::read_to_string(self.version_file())?;
+        serde_json::from_str(&data).map_err(FetchError::from)
     }
 
     /// Write a `version.json` with the given tag and repo.
-    pub fn create_version_file(&self, version: &str) -> Result<()> {
+    pub fn create_version_file(&self, version: &str) -> Result<(), FetchError> {
         fs::create_dir_all(&self.install_path)?;
         let info = VersionInfo {
             tag_name: version.to_string(),
@@ -76,15 +75,12 @@ impl Install {
         asset_name: &str,
         version: &str,
         allow_upgrade: bool,
-    ) -> Result<PathBuf> {
+    ) -> Result<PathBuf, FetchError> {
         if self.already_installed() {
             let installed = self.get_installed_version()?;
 
             if installed.repo != self.repo {
-                anyhow::bail!(
-                    "installed version is for a different repository: {}",
-                    installed.repo
-                );
+                return Err(FetchError::RepositoryMismatch(installed.repo));
             }
 
             if allow_upgrade {
@@ -132,10 +128,9 @@ impl Install {
         Ok(self.install_path.clone())
     }
 
-    fn remove_install_dir(&self) -> Result<()> {
+    fn remove_install_dir(&self) -> Result<(), FetchError> {
         if self.install_path.exists() {
-            fs::remove_dir_all(&self.install_path)
-                .context("Failed to remove existing install directory")?;
+            fs::remove_dir_all(&self.install_path)?;
         }
         Ok(())
     }
