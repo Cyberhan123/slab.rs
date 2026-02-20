@@ -9,3 +9,4 @@ desktop.ini
 ## Build output
 /target
 /testdata/whisper
+**/target/
