@@ -4302,6 +4302,7 @@ dependencies = [
  "slab-whisper",
  "subparse",
  "tokio",
+ "tracing",
  "tracing-subscriber",
 ]
 

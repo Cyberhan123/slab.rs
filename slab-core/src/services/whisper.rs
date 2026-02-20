@@ -12,6 +12,13 @@ pub struct WhisperService {
     ctx: Arc<Mutex<Option<WhisperContext>>>,
 }
 
+// SAFETY: WhisperService is only accessed through Arc<Mutex<...>> for mutable state.
+// The `instance: Arc<Whisper>` field wraps a dynamically loaded library handle which is
+// immutable after creation (contexts and params are created from it, not mutated).
+// All mutable inference state is guarded by the `ctx: Arc<Mutex<...>>` field.
+unsafe impl Send for WhisperService {}
+unsafe impl Sync for WhisperService {}
+
 impl WhisperService {
     pub fn init(path: String) -> &'static Self {
         INSTANCE.get_or_init(|| {
@@ -43,10 +50,6 @@ impl WhisperService {
 
     pub async fn inference(&self, path: String) -> Result<Vec<SubtitleEntry>> {
         let ctx_lock = self.ctx.lock().unwrap();
-
-        if ctx_lock.is_none() {
-            return Err(anyhow::anyhow!("context not initialized"));
-        }
 
         let ctx = ctx_lock.as_ref().ok_or_else(|| anyhow::anyhow!("context not initialized"))?;
 
