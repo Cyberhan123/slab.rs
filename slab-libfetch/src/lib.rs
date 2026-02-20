@@ -83,27 +83,22 @@ pub async fn fetch_header(
     let repo_handler = instance.repos(owner, repo);
     let release_handler = repo_handler.releases();
 
-    let release = match tag {
+    let version = match tag {
         Some(t) => {
-            println!("🔍 正在定位指定版本: {}/{} @ {}", owner, repo, t);
-            release_handler
-                .get_by_tag(t)
-                .await
-                .context(format!("找不到指定的 Tag: {}", t))?
+           t.to_string()
         }
         None => {
             println!("🔍 未指定版本，正在获取 {}/{} 的最新版本...", owner, repo);
-            release_handler
+            let release= release_handler
                 .get_latest()
                 .await
-                .context("无法获取最新 Release")?
+                .context("无法获取最新 Release")?;
+            release.tag_name
         }
     };
 
-    let version = &release.tag_name;
-
     // 检查是否已经下载过该版本
-    if check_version_file(target_include_path, version)? {
+    if check_version_file(target_include_path, &version)? {
         println!("✅ 版本 {} 的头文件已存在，跳过下载。", version);
         return Ok(());
     }
@@ -170,7 +165,7 @@ pub async fn fetch_header(
     }
 
     // 写入版本文件
-    write_version_file(target_include_path, version)?;
+    write_version_file(target_include_path, &version)?;
 
     println!("✨ 版本 {} 的头文件已准备就绪。", version);
     Ok(())

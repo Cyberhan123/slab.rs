@@ -1,6 +1,7 @@
 [workspace]
 resolver = "2"
 members = [
+    "slab-app/src-tauri",
     "slab-diffusion", 
     "slab-diffusion-sys",
     "slab-libfetch",
@@ -8,6 +9,11 @@ members = [
     "slab-llama-sys",
     "slab-whisper",
     "slab-whisper-sys",
+    "slab-core"
+]
+
+exclude = [
+    "slab-app/src",
 ]
 
 [workspace.package]
@@ -26,3 +32,8 @@ slab-llama = { path = "./slab-llama", package = "slab-llama", version = "0.0.1" 
 slab-llama-sys = { path = "./slab-llama-sys", package = "slab-llama-sys", version = "0.0.1" }
 slab-whisper = { path = "./slab-whisper", package = "slab-whisper", version = "0.0.1" }
 slab-whisper-sys = { path = "./slab-whisper-sys", package = "slab-whisper-sys", version = "0.0.1" }
+slab-libfetch={ path = "./slab-libfetch", package = "slab-libfetch", version = "0.0.1" }
+
+bindgen = "0.72.1"
+tokio = { version = "1.49.0", features = ["full"] }
+libloading = "0.8.9"

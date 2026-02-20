@@ -8,10 +8,14 @@ keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
+include = [
+    "wrapper.h",
+]
+
 [build-dependencies]
-slab-libfetch = { path = "../slab-libfetch" }
-bindgen = "0.72.1"
-tokio = { version = "1.49.0", features = ["macros", "rt-multi-thread"] }
+slab-libfetch = { workspace = true }
+bindgen = { workspace = true }
+tokio = { workspace = true }
 
 [dependencies]
-libloading = "0.8.9"
+libloading = { workspace = true }
