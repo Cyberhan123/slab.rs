@@ -3,7 +3,7 @@ use axum::{http::StatusCode, Json};
 use crate::api::subtitle;
 
 #[axum::debug_handler]
-pub async fn init(
+pub async fn generate(
     // this argument tells axum to parse the request body
     // as JSON into a `CreateUser` type
     Json(payload): Json<subtitle::CreateUser>,

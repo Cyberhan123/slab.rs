@@ -5,6 +5,7 @@ use ffmpeg_sidecar::{
 };
 use std::io::Read;
 use tokio::task;
+use tracing::info;
 
 const AUDIO_PIPE_NAME: &str = pipe_name!("ffmpeg_audio");
 
@@ -12,8 +13,9 @@ pub async fn read_audio_data(input: String) -> Result<Vec<f32>> {
 
     task::spawn_blocking(move || -> Result<Vec<f32>> {
         let mut pipe = NamedPipe::new(AUDIO_PIPE_NAME)?;
-        println!("[audio] pipe created");
+        info!("[audio] pipe created");
 
+        let input_path = input.clone();
         let ffmpeg_handle = std::thread::spawn(move || -> Result<()> {
             let mut command = FfmpegCommand::new();
             command
@@ -38,7 +40,7 @@ pub async fn read_audio_data(input: String) -> Result<Vec<f32>> {
                 .iter()?
                 .for_each(|event| {
                     if let FfmpegEvent::Log(level, msg) = event {
-                        println!("[FFmpeg {:?}] {}", level, msg);
+                        info!("[FFmpeg {:?}] {}", level, msg);
                     }
                 });
             Ok(())
@@ -66,7 +68,9 @@ pub async fn read_audio_data(input: String) -> Result<Vec<f32>> {
         }
 
         // 等待 FFmpeg 完成
-        ffmpeg_handle.join().unwrap()?;
+        ffmpeg_handle
+            .join()
+            .map_err(|_| anyhow::anyhow!("ffmpeg thread panicked while processing: {}", input_path))??;
         let samples: Vec<f32> = cast_slice::<u8, f32>(&buffer).to_vec();
         Ok(samples)
     })
