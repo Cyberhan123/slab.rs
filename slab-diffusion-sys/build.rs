@@ -12,7 +12,7 @@ fn main() {
     // 2. 在 build.rs 中调用 fetch_header 来确保头文件存在
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        fetch_header("leejet", "diffusion.cpp", Some("master-504-636d3cb"), include_path.as_path())
+        fetch_header("leejet", "stable-diffusion.cpp", Some("master-504-636d3cb"), include_path.as_path())
             .await
             .expect("Failed to fetch diffusion headers");
     });

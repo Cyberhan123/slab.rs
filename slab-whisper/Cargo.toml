@@ -13,6 +13,7 @@ slab-whisper-sys = { workspace = true }
 libloading = { workspace = true }
 log = { version = "0.4.29", optional = true }
 tracing = { version = "0.1.44", optional = true }
+anyhow={ workspace = true }
 
 [dev-dependencies]
 rand = "0.10.0"

@@ -1,6 +1,5 @@
 use std::env;
-use std::path::Path;
-
+use std::path::{Path, PathBuf};
 use crate::downloader::Downloader;
 use crate::install::{Install, VersionInfo};
 
@@ -20,7 +19,7 @@ use crate::install::{Install, VersionInfo};
 /// # })
 /// ```
 pub struct Api {
-    pub(crate) install_dir: String,
+    pub(crate) install_dir: PathBuf,
     pub(crate) retry_count: usize,
     pub(crate) retry_delay_secs: u64,
     pub(crate) proxy: Option<String>,
@@ -57,7 +56,7 @@ impl Api {
             .or_else(|| env::var("HTTPS_PROXY").ok());
 
         Self {
-            install_dir: ".".to_string(),
+            install_dir: PathBuf::from("."),
             retry_count: 3,
             retry_delay_secs: 3,
             proxy,
@@ -66,8 +65,8 @@ impl Api {
     }
 
     /// Set the directory where assets are installed (default: `"."`).
-    pub fn set_install_dir(mut self, dir: impl Into<String>) -> Self {
-        self.install_dir = dir.into();
+    pub fn set_install_dir<P: AsRef<Path>>(mut self, dir: P) -> Self {
+        self.install_dir = dir.as_ref().components().collect();
         self
     }
 
@@ -135,7 +134,7 @@ impl VersionApi {
     /// Download and extract the release asset produced by `asset_func(version)`.
     ///
     /// `asset_func` receives the resolved version tag and must return the asset file name.
-    pub async fn install<F>(self, asset_func: F) -> anyhow::Result<()>
+    pub async fn install<F>(self, asset_func: F) -> anyhow::Result<PathBuf>
     where
         F: Fn(&str) -> String,
     {
@@ -217,12 +216,14 @@ impl VersionApi {
 
 #[cfg(test)]
 mod tests {
+    use std::path;
+
     use super::*;
 
     #[test]
     fn test_api_defaults() {
         let api = Api::new();
-        assert_eq!(api.install_dir, ".");
+        assert_eq!(api.install_dir,PathBuf::from("."));
         assert_eq!(api.retry_count, 3);
         assert_eq!(api.retry_delay_secs, 3);
         assert!(api.show_progress);
@@ -231,13 +232,13 @@ mod tests {
     #[test]
     fn test_api_builder_methods() {
         let api = Api::new()
-            .set_install_dir("./mydir")
+            .set_install_dir(PathBuf::from("."))
             .set_retry_count(5)
             .set_retry_delay_secs(10)
             .set_proxy("http://proxy:8080")
             .no_progress();
 
-        assert_eq!(api.install_dir, "./mydir");
+        assert_eq!(api.install_dir, PathBuf::from("."));
         assert_eq!(api.retry_count, 5);
         assert_eq!(api.retry_delay_secs, 10);
         assert_eq!(api.proxy, Some("http://proxy:8080".to_string()));

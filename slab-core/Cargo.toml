@@ -13,10 +13,14 @@ slab-libfetch = { workspace = true }
 
 
 [dependencies]
-ffmpeg-sidecar = {version="2.4.0", features=["download_ffmpeg", "named_pipes"]}
 libloading = { workspace = true }
 slab-whisper = { workspace = true }
 tokio = { workspace = true }
+slab-libfetch = { workspace = true }
+hf-hub = { workspace = true }
+thiserror = { workspace = true }
+
+ffmpeg-sidecar = {version="2.4.0", features=["download_ffmpeg", "named_pipes"]}
 serde = {version="1.0.228",features=["derive"]}
 axum = {version="0.8.8", features=["macros"]}
 tracing-subscriber = "0.3.22"
@@ -24,3 +28,5 @@ tracing = "0.1"
 anyhow = "1.0.101"
 bytemuck = "1.25.0"
 subparse = "0.7.0"
+tracing-test = "0.2.6"
+

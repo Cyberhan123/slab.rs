@@ -21,17 +21,19 @@ pub struct Install {
 }
 
 impl Install {
-    pub fn new(repo: &str, install_path: &str) -> Self {
+    pub fn new<P: AsRef<Path>>(repo: &str, install_path: P) -> Self {
+        let path = install_path.as_ref().components().collect();
         Self {
             repo: repo.to_string(),
-            install_path: PathBuf::from(install_path),
+            install_path: path,
         }
     }
 
-    pub fn new_with_path(repo: &str, install_path: &Path) -> Self {
+    pub fn new_with_path<P: AsRef<Path>>(repo: &str, install_path: P) -> Self {
+       let path = install_path.as_ref().components().collect();
         Self {
             repo: repo.to_string(),
-            install_path: install_path.to_path_buf(),
+            install_path: path,
         }
     }
 
@@ -74,7 +76,7 @@ impl Install {
         asset_name: &str,
         version: &str,
         allow_upgrade: bool,
-    ) -> Result<()> {
+    ) -> Result<PathBuf> {
         if self.already_installed() {
             let installed = self.get_installed_version()?;
 
@@ -93,7 +95,7 @@ impl Install {
                         "✅ 版本 {} 已是最新，跳过下载。",
                         installed.tag_name
                     );
-                    return Ok(());
+                    return Ok(self.install_path.clone());
                 }
                 // Upgrade
                 self.remove_install_dir()?;
@@ -108,7 +110,7 @@ impl Install {
                         "✅ 版本 {} 的资产已存在，跳过下载。",
                         version
                     );
-                    return Ok(());
+                    return Ok(self.install_path.clone());
                 }
                 // Different pinned version – reinstall.
                 self.remove_install_dir()?;
@@ -118,7 +120,7 @@ impl Install {
                 self.create_version_file(version)?;
             }
 
-            return Ok(());
+            return Ok(self.install_path.clone());
         }
 
         // First install
@@ -127,7 +129,7 @@ impl Install {
             .await?;
 
         self.create_version_file(version)?;
-        Ok(())
+        Ok(self.install_path.clone())
     }
 
     fn remove_install_dir(&self) -> Result<()> {
