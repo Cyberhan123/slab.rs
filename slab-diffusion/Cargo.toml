@@ -15,3 +15,6 @@ tokio = { workspace = true }
 
 [dependencies]
 libloading = { workspace = true }
+slab-diffusion-sys = { workspace = true }
+thiserror = { workspace = true }
+libc = { workspace = true }
