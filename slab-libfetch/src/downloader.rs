@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use flate2::read::GzDecoder;
 use reqwest::Client;
 use std::io::Cursor;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tar::Archive;
 
@@ -132,6 +132,34 @@ impl Downloader {
 
         Ok(())
     }
+
+    /// Download the source tarball for `version` and extract header files into `dest`.
+    ///
+    /// Prefers the `include/` sub-directory; if none is found, falls back to
+    /// extracting every `.h`, `.hpp`, and `.hxx` file in the archive.
+    pub async fn download_source_headers(&self, version: &str, dest: &Path) -> Result<()> {
+        let tarball_url = format!(
+            "https://github.com/{}/archive/refs/tags/{}.tar.gz",
+            self.repo, version
+        );
+
+        if self.show_progress {
+            println!("🚀 正在从 {} 下载...", tarball_url);
+        }
+
+        let bytes = self
+            .client
+            .get(&tarball_url)
+            .send()
+            .await?
+            .error_for_status()?
+            .bytes()
+            .await?;
+
+        std::fs::create_dir_all(dest)?;
+        extract_source_headers(&bytes, dest, self.show_progress)?;
+        Ok(())
+    }
 }
 
 /// Extract a ZIP archive into `dest`, stripping the top-level directory.
@@ -188,4 +216,83 @@ pub(crate) fn extract_tar_gz_strip_top(bytes: &[u8], dest: &Path) -> Result<()> 
     }
 
     Ok(())
+}
+
+/// Extract header files from a source `.tar.gz` into `dest`.
+///
+/// First pass: extracts everything under an `include/` directory (preserving
+/// the `include/` prefix in the destination).  If no `include/` directory is
+/// found, a second pass extracts all `.h`, `.hpp`, and `.hxx` files (stripping
+/// the archive root directory).
+pub(crate) fn extract_source_headers(bytes: &[u8], dest: &Path, show_progress: bool) -> Result<()> {
+    // First pass – prefer the `include/` directory.
+    let tar_gz = GzDecoder::new(Cursor::new(bytes));
+    let mut archive = Archive::new(tar_gz);
+    let mut has_include_dir = false;
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let full_path = entry.path()?.to_path_buf();
+
+        if let Some(rel_path) = extract_include_part(&full_path) {
+            has_include_dir = true;
+            let dest_path = dest.join(rel_path);
+            if let Some(p) = dest_path.parent() {
+                std::fs::create_dir_all(p)?;
+            }
+            entry.unpack(dest_path)?;
+        }
+    }
+
+    if has_include_dir {
+        return Ok(());
+    }
+
+    // Second pass – no `include/` dir found; extract all header files.
+    if show_progress {
+        println!("⚠️  未找到 include 目录，提取所有头文件...");
+    }
+    let tar_gz = GzDecoder::new(Cursor::new(bytes));
+    let mut archive = Archive::new(tar_gz);
+
+    for entry in archive.entries()? {
+        let mut entry = entry?;
+        let full_path = entry.path()?.to_path_buf();
+
+        if let Some(rel_path) = filter_header_files(&full_path) {
+            let dest_path = dest.join(rel_path);
+            if let Some(p) = dest_path.parent() {
+                std::fs::create_dir_all(p)?;
+            }
+            entry.unpack(dest_path)?;
+        }
+    }
+
+    Ok(())
+}
+
+/// Return the path starting from the `include/` component, or `None` if there
+/// is no `include/` component in `path`.
+fn extract_include_part(path: &Path) -> Option<PathBuf> {
+    let comps: Vec<_> = path.components().collect();
+    comps
+        .iter()
+        .position(|c| c.as_os_str() == "include")
+        .map(|index| comps.iter().skip(index).collect())
+}
+
+/// Return the path relative to the archive root directory for `.h`, `.hpp`, and
+/// `.hxx` files, skipping the top-level directory.  Returns `None` for
+/// directories and non-header files.
+fn filter_header_files(path: &Path) -> Option<PathBuf> {
+    let comps: Vec<_> = path.components().collect();
+    if comps.len() <= 1 {
+        return None;
+    }
+    let name = path.file_name()?.to_string_lossy();
+    if name.ends_with(".h") || name.ends_with(".hpp") || name.ends_with(".hxx") {
+        Some(comps.iter().skip(1).collect())
+    } else {
+        None
+    }
 }

@@ -1,4 +1,5 @@
 use std::env;
+use std::path::Path;
 
 use crate::downloader::Downloader;
 use crate::install::{Install, VersionInfo};
@@ -159,6 +160,58 @@ impl VersionApi {
         install
             .install_asset(&downloader, &asset_name, &version, self.is_latest)
             .await
+    }
+
+    /// Download header files from the source tarball and extract them to
+    /// `target_path`.
+    ///
+    /// Prefers the `include/` sub-directory inside the archive; if none is
+    /// found, falls back to extracting every `.h`, `.hpp`, and `.hxx` file.
+    /// Skips the download entirely when `version.json` already records the
+    /// same version.
+    pub async fn fetch_header(self, target_path: &Path) -> anyhow::Result<()> {
+        let downloader = Downloader::new(
+            &self.repo,
+            self.api.retry_count,
+            self.api.retry_delay_secs,
+            self.api.proxy.clone(),
+            self.api.show_progress,
+        );
+
+        let version = if self.is_latest {
+            if self.api.show_progress {
+                println!("🔍 未指定版本，正在获取 {} 的最新版本...", self.repo);
+            }
+            downloader.latest_version().await?
+        } else {
+            self.version.clone()
+        };
+
+        // Skip if already at this version.
+        let install = Install::new_with_path(&self.repo, target_path);
+        if install.already_installed() {
+            if let Ok(info) = install.get_installed_version() {
+                if info.tag_name == version {
+                    if self.api.show_progress {
+                        println!("✅ 版本 {} 的头文件已存在，跳过下载。", version);
+                    }
+                    return Ok(());
+                }
+            }
+            // Different version – clean up before re-downloading.
+            std::fs::remove_dir_all(target_path)?;
+        }
+
+        downloader
+            .download_source_headers(&version, target_path)
+            .await?;
+
+        install.create_version_file(&version)?;
+
+        if self.api.show_progress {
+            println!("✨ 版本 {} 的头文件已准备就绪。", version);
+        }
+        Ok(())
     }
 }
 
