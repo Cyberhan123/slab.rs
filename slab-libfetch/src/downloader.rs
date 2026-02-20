@@ -40,7 +40,16 @@ impl Downloader {
             }
         }
 
-        let client = builder.build().unwrap_or_default();
+        let client = match builder.build() {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!(
+                    "slab-libfetch: failed to build HTTP client (falling back to default): {}",
+                    e
+                );
+                Client::new()
+            }
+        };
 
         Self {
             repo: repo.to_string(),
@@ -163,6 +172,11 @@ impl Downloader {
 }
 
 /// Extract a ZIP archive into `dest`, stripping the top-level directory.
+///
+/// Archives are expected to contain a single top-level directory (e.g.
+/// `repo-v1.0.0/`). Files at the root of the archive (with no directory
+/// component) are silently skipped. Only deflate-compressed entries are
+/// supported; other compression methods will return an error.
 pub(crate) fn extract_zip(bytes: &[u8], dest: &Path) -> Result<()> {
     let cursor = Cursor::new(bytes);
     let mut archive = zip::ZipArchive::new(cursor)?;
@@ -196,6 +210,10 @@ pub(crate) fn extract_zip(bytes: &[u8], dest: &Path) -> Result<()> {
 }
 
 /// Extract a `.tar.gz` archive into `dest`, stripping the top-level directory.
+///
+/// Archives are expected to contain a single top-level directory (e.g.
+/// `repo-v1.0.0/`). Entries at the archive root (with no directory component)
+/// are silently skipped.
 pub(crate) fn extract_tar_gz_strip_top(bytes: &[u8], dest: &Path) -> Result<()> {
     let tar_gz = GzDecoder::new(Cursor::new(bytes));
     let mut archive = Archive::new(tar_gz);

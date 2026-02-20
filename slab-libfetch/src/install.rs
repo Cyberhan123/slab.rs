@@ -126,13 +126,7 @@ impl Install {
             .download_asset(asset_name, version, &self.install_path)
             .await?;
 
-        let actual_version = if version.is_empty() {
-            downloader.latest_version().await?
-        } else {
-            version.to_string()
-        };
-
-        self.create_version_file(&actual_version)?;
+        self.create_version_file(version)?;
         Ok(())
     }
 
