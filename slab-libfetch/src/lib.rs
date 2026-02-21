@@ -1,11 +1,12 @@
 pub mod api;
 pub mod downloader;
+pub mod error;
 pub mod install;
 
 pub use api::{Api, RepoApi, VersionApi};
+pub use error::FetchError;
 pub use install::VersionInfo;
 
-use anyhow::Result;
 use std::path::Path;
 
 /// Download header files for a GitHub repository and extract them to
@@ -23,11 +24,13 @@ pub async fn fetch_header(
     repo: &str,
     tag: Option<&str>,
     target_include_path: &Path,
-) -> Result<()> {
+) -> Result<(), FetchError> {
     let repo_full = format!("{}/{}", owner, repo);
     let install_dir = target_include_path
         .to_str()
-        .ok_or_else(|| anyhow::anyhow!("target_include_path contains invalid UTF-8: {:?}", target_include_path))?
+        .ok_or_else(|| FetchError::InvalidPath {
+            message: format!("target_include_path contains invalid UTF-8: {:?}", target_include_path),
+        })?
         .to_string();
 
     let version_api = match tag {
