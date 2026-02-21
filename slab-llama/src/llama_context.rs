@@ -147,3 +147,9 @@ impl LlamaContext {
         unsafe { self.model.lib.llama_memory_seq_rm(mem, seq_id, p0, p1) }
     }
 }
+
+impl std::fmt::Debug for LlamaContext {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlamaContext").finish()
+    }
+}
