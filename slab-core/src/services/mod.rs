@@ -13,10 +13,6 @@ pub enum ServiceError {
     #[error("I/O error {0}")]
     IoError(#[from] std::io::Error),
 
-    /// The part file is corrupted
-    #[error("Invalid part file - corrupted file")]
-    InvalidResume,
-
     #[error("FFmpeg service error {0}")]
     FFmpegError(#[from] ffmpeg::FFmpegServiceError),
 
