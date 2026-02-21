@@ -4,7 +4,9 @@ use std::sync::Arc;
 use crate::context_params::LlamaContextParams;
 use crate::error::LlamaError;
 use crate::llama_context::LlamaContext;
+use crate::llama_sampler::SamplerChainBuilder;
 use crate::token::LlamaToken;
+use crate::LlamaSampler;
 use crate::Llama;
 
 /// Inner (non-Clone) model data.  Wrapped in Arc so that LlamaContext can keep
@@ -26,6 +28,7 @@ impl Drop for LlamaModelInner {
 /// A safe wrapper around a loaded `llama_model`.
 ///
 /// Created via [`Llama::load_model_from_file`].
+#[derive(Clone)]
 pub struct LlamaModel {
     pub(crate) inner: Arc<LlamaModelInner>,
 }
@@ -346,6 +349,14 @@ impl LlamaModel {
     /// Whether the model is a recurrent model.
     pub fn is_recurrent(&self) -> bool {
         unsafe { self.inner.lib.llama_model_is_recurrent(self.inner.model) }
+    }
+
+    /// Create a new default sampler chain for this model.
+    ///
+    /// Convenience helper so callers do not need direct access to the
+    /// underlying `LlamaLib` handle.
+    pub fn new_sampler(&self) -> LlamaSampler {
+        SamplerChainBuilder::new(Arc::clone(&self.inner.lib)).build()
     }
 
     /// Retrieve a metadata value by key.
