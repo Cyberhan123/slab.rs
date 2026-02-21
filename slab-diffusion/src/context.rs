@@ -17,10 +17,9 @@ fn cstr_ptr_or_empty<'a>(
 ) -> *const std::os::raw::c_char {
     match cs.as_ref() {
         Some(s) => s.as_ptr(),
-        None => {
-            *fallback = Some(std::ffi::CString::new("").unwrap());
-            fallback.as_ref().unwrap().as_ptr()
-        }
+        None => fallback
+            .get_or_insert_with(|| std::ffi::CString::new("").unwrap())
+            .as_ptr(),
     }
 }
 
@@ -79,6 +78,10 @@ impl SdContext {
         let prompt_ptr = cstr_ptr_or_empty(&prompt_cs, &mut prompt_fallback);
         let neg_ptr = cstr_ptr_or_empty(&neg_prompt_cs, &mut neg_fallback);
 
+        // Clamp batch_count to at least 1 so neither the C function nor the
+        // slice interpretation ever receives a zero/negative count.
+        let batch = params.batch_count.max(1) as usize;
+
         // ── Build the C parameter struct ───────────────────────────────────────
         let guidance = slab_diffusion_sys::sd_guidance_params_t {
             txt_cfg: params.cfg_scale,
@@ -112,8 +115,8 @@ impl SdContext {
         };
 
         let mask_image = slab_diffusion_sys::sd_image_t {
-            width: params.width as u32,
-            height: params.height as u32,
+            width: params.width,
+            height: params.height,
             channel: 1,
             data: ptr::null_mut(),
         };
@@ -166,12 +169,14 @@ impl SdContext {
             auto_resize_ref_image: true,
             increase_ref_index: false,
             mask_image,
-            width: params.width,
-            height: params.height,
+            width: params.width as i32,
+            height: params.height as i32,
             sample_params,
             strength: params.strength,
             seed: params.seed,
-            batch_count: params.batch_count,
+            // Use the validated batch (>= 1) so the C function always gets a
+            // sensible value even if the caller passed 0 or a negative number.
+            batch_count: batch as i32,
             control_image: slab_diffusion_sys::sd_image_t {
                 width: 0,
                 height: 0,
@@ -185,7 +190,6 @@ impl SdContext {
         };
 
         // ── Call generate_image ───────────────────────────────────────────────
-        let batch = params.batch_count.max(1) as usize;
         let images_ptr = unsafe { self.lib.generate_image(self.ctx, &gen_params) };
 
         if images_ptr.is_null() {
@@ -193,11 +197,18 @@ impl SdContext {
         }
 
         // ── Copy pixel data into Rust-owned SdImage values ────────────────────
+        // stable-diffusion.cpp allocates image data with standard malloc (see
+        // stable-diffusion.cpp source); libc::free is therefore the correct
+        // deallocation function. There is no dedicated sd_free_image helper.
         let images: Vec<SdImage> = unsafe {
             slice::from_raw_parts(images_ptr, batch)
                 .iter()
                 .map(|img| {
-                    let len = (img.width * img.height * img.channel) as usize;
+                    // Use saturating_mul to avoid u32 overflow for pathologically
+                    // large dimensions before casting to usize.
+                    let len = (img.width as usize)
+                        .saturating_mul(img.height as usize)
+                        .saturating_mul(img.channel as usize);
                     let data = if img.data.is_null() || len == 0 {
                         Vec::new()
                     } else {
@@ -231,7 +242,10 @@ impl Drop for SdContext {
     }
 }
 
-// stable-diffusion.cpp states the context is thread-safe for inference.
+// Each sd_ctx_t owns its own model weights and intermediate tensors; there is
+// no shared mutable state between separate context instances.  Callers should
+// use one SdContext per thread for concurrent inference.
+// See: https://github.com/leejet/stable-diffusion.cpp (README / architecture)
 unsafe impl Send for SdContext {}
 unsafe impl Sync for SdContext {}
 

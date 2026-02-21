@@ -57,12 +57,17 @@ pub use slab_diffusion_sys::{
 
 // ── Internal helpers ─────────────────────────────────────────────────────────
 
-/// Convert a Rust &str to a CString, returning None when the string is empty.
+/// Convert a non-empty Rust &str to a `CString`.
+///
+/// Returns `None` for empty strings (treated as "not provided" by the C API).
+///
+/// # Panics
+/// Panics if `s` contains an interior null byte, which is a programming error.
 pub(crate) fn opt_cstring(s: &str) -> Option<CString> {
     if s.is_empty() {
         None
     } else {
-        CString::new(s).ok()
+        Some(CString::new(s).expect("opt_cstring: string contains an interior null byte"))
     }
 }
 
@@ -189,7 +194,7 @@ impl Default for SdContextParams {
             photo_maker_path: String::new(),
             n_threads: 0,
             weight_type: WEIGHT_TYPE_AUTO,
-            rng_type: RNG_CUDA,
+            rng_type: RNG_STD_DEFAULT,
             prediction: PREDICTION_COUNT,
             lora_apply_mode: LORA_APPLY_AUTO,
             keep_vae_on_cpu: false,
@@ -234,10 +239,10 @@ pub struct SdImgGenParams {
     pub clip_skip: i32,
 
     /// Output image width in pixels.
-    pub width: i32,
+    pub width: u32,
 
     /// Output image height in pixels.
-    pub height: i32,
+    pub height: u32,
 
     /// Classifier-Free Guidance scale (text guidance strength).
     pub cfg_scale: f32,
@@ -274,8 +279,8 @@ impl Default for SdImgGenParams {
             prompt: String::new(),
             negative_prompt: String::new(),
             clip_skip: 0,
-            width: 512,
-            height: 512,
+            width: 512u32,
+            height: 512u32,
             cfg_scale: 7.0,
             guidance: 3.5,
             sample_steps: 20,
