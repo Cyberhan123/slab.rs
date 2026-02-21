@@ -495,8 +495,14 @@ struct InferenceWorkerState {
     model: Arc<LlamaModel>,
     ctx: LlamaContext,
     sessions: HashMap<SessionId, SessionState>,
-    /// Monotonically increasing counter used to assign per-worker sequence IDs.
+    /// Monotonically increasing counter used to mint fresh sequence IDs when the
+    /// free-list is empty.
     next_seq_id: LlamaSeqId,
+    /// Pool of sequence IDs freed by `end_session` that can be reused.
+    ///
+    /// Reusing freed IDs keeps the seq_id space bounded even when many sessions
+    /// are created and destroyed over the worker's lifetime.
+    free_seq_ids: Vec<LlamaSeqId>,
     cmd_rx: mpsc::Receiver<WorkerCommand>,
 }
 
@@ -504,8 +510,16 @@ impl InferenceWorkerState {
     fn handle_command(&mut self, cmd: WorkerCommand) {
         match cmd {
             WorkerCommand::CreateSession { session_id, reply_tx } => {
-                let seq_id = self.next_seq_id;
-                self.next_seq_id += 1;
+                // Prefer a recycled sequence ID; only mint a new one when the
+                // free-list is empty, to keep the seq_id space bounded.
+                let seq_id = self
+                    .free_seq_ids
+                    .pop()
+                    .unwrap_or_else(|| {
+                        let id = self.next_seq_id;
+                        self.next_seq_id += 1;
+                        id
+                    });
                 let sampler = self.model.new_sampler();
                 self.sessions.insert(
                     session_id,
@@ -574,6 +588,9 @@ impl InferenceWorkerState {
                     Some(session) => {
                         // Release KV cache entries for this sequence only.
                         self.ctx.kv_cache_seq_rm(session.seq_id, 0, i32::MAX);
+                        // Return the sequence ID to the free-list so it can be
+                        // reused by a future session without exhausting the ID space.
+                        self.free_seq_ids.push(session.seq_id);
                         let _ = reply_tx.send(Ok(()));
                     }
                 }
@@ -656,12 +673,11 @@ impl InferenceWorkerState {
                     let is_last = i == n - 1;
                     // Request logits only for the final prefill token so we can
                     // sample the first generated token immediately.
-                    let _ = batch.add(
-                        token,
-                        session.n_past + i as i32,
-                        &[session.seq_id],
-                        is_last,
-                    );
+                    // INVARIANT: capacity is verified above; `add` cannot return
+                    // BatchFull here.
+                    batch
+                        .add(token, session.n_past + i as i32, &[session.seq_id], is_last)
+                        .expect("batch capacity verified; add cannot fail");
                     if is_last {
                         logit_owners.push(session_id);
                     }
@@ -670,7 +686,10 @@ impl InferenceWorkerState {
             } else if let Some(last_token) = session.last_token {
                 // ── Generation step ──────────────────────────────────────────
                 if (batch.n_tokens() as usize) < batch_capacity {
-                    let _ = batch.add(last_token, session.n_past, &[session.seq_id], true);
+                    // INVARIANT: capacity is verified by the condition above.
+                    batch
+                        .add(last_token, session.n_past, &[session.seq_id], true)
+                        .expect("batch capacity verified; add cannot fail");
                     logit_owners.push(session_id);
                     gen_sessions.push(session_id);
                 }
@@ -926,7 +945,7 @@ impl MasterWorkerState {
                 }
 
                 GlobalCommand::EndSession { session_id, reply_tx } => {
-                    match self.session_map.remove(&session_id) {
+                    match self.session_map.get(&session_id).copied() {
                         None => {
                             let _ = reply_tx.send(Err(LlamaServiceError::SessionNotFound {
                                 session_id,
@@ -946,8 +965,14 @@ impl MasterWorkerState {
                                 continue;
                             }
                             match ack_rx.await {
-                                Ok(r) => {
-                                    let _ = reply_tx.send(r);
+                                Ok(Ok(())) => {
+                                    // Remove the mapping only after the worker has
+                                    // confirmed it released the session's KV entries.
+                                    self.session_map.remove(&session_id);
+                                    let _ = reply_tx.send(Ok(()));
+                                }
+                                Ok(Err(e)) => {
+                                    let _ = reply_tx.send(Err(e));
                                 }
                                 Err(_) => {
                                     let _ =
@@ -1036,6 +1061,13 @@ impl LlamaInferenceEngine {
     /// * `model`       – shared model weights wrapped in `Arc`.
     /// * `ctx_params`  – context creation parameters cloned for every worker.
     ///
+    /// # Shutdown
+    /// The engine shuts down naturally when all [`LlamaInferenceEngine`] clones
+    /// are dropped: the underlying `global_tx` sender is closed, which causes
+    /// the master task to exit its `recv()` loop, which in turn drops all
+    /// `worker_tx` senders, causing each inference worker thread to exit its
+    /// `blocking_recv()` call.  No explicit `shutdown()` call is required.
+    ///
     /// # Panics
     /// Panics if called outside of a Tokio runtime.
     pub fn start(
@@ -1063,6 +1095,7 @@ impl LlamaInferenceEngine {
                 ctx,
                 sessions: HashMap::new(),
                 next_seq_id: 0,
+                free_seq_ids: Vec::new(),
                 cmd_rx,
             };
 
@@ -1129,6 +1162,13 @@ impl LlamaInferenceEngine {
     /// # Note
     /// Call [`Self::append_input`] at least once before calling this method so
     /// that the session has pending tokens for prefilling.
+    ///
+    /// If called while a previous generation is still in progress for the same
+    /// session, the previous generation is implicitly cancelled: the old stream
+    /// sender is replaced by the new one and the old [`StreamHandle`] will
+    /// receive no further messages (it will block on `recv` indefinitely unless
+    /// the caller drops it).  Use [`Self::cancel_generate`] first if you need
+    /// an explicit `Done` on the previous stream.
     pub async fn generate_stream(
         &self,
         session_id: SessionId,
@@ -1166,6 +1206,15 @@ impl LlamaInferenceEngine {
     ///
     /// The KV cache is preserved, and a new [`Self::generate_stream`] call can
     /// be made after appending more input.
+    ///
+    /// # KV cache consistency note
+    /// If a token has already been sampled and emitted to the stream but not yet
+    /// decoded into the KV cache (i.e. the worker loop is between the sampling
+    /// and the next decode step), cancellation discards that pending token.
+    /// This leaves the KV cache one token behind the text that was already sent
+    /// to the caller.  To continue a conversation from the exact emitted text,
+    /// re-append that final text delta with [`Self::append_input`] before
+    /// calling [`Self::generate_stream`] again.
     pub async fn cancel_generate(
         &self,
         session_id: SessionId,
@@ -1245,5 +1294,223 @@ mod test {
 
         println!("Generated: {result}");
         assert!(!result.is_empty(), "expected non-empty output");
+    }
+
+    /// Resolve the canonical path of the llama shared library inside `dir`.
+    fn llama_lib_path(dir: &std::path::Path) -> PathBuf {
+        let lib_name = format!(
+            "{}llama{}",
+            std::env::consts::DLL_PREFIX,
+            std::env::consts::DLL_SUFFIX
+        );
+        std::fs::canonicalize(dir.join(&lib_name))
+            .expect("failed to canonicalize llama lib path")
+    }
+
+    /// Helper that loads the model from HF hub and starts a `LlamaInferenceEngine`.
+    async fn make_engine(llama_dir: &std::path::Path) -> (Llama, Arc<LlamaModel>, LlamaInferenceEngine) {
+        let api = Api::new().expect("failed to init hf-api");
+        let model_path = api
+            .model("bartowski/Qwen2.5-0.5B-Instruct-GGUF".into())
+            .get("Qwen2.5-0.5B-Instruct-Q4_K_M.gguf")
+            .expect("failed to download model");
+
+        let lib_path = llama_lib_path(llama_dir);
+        let llama = Llama::new(&lib_path).expect("failed to load llama lib");
+        llama.backend_init();
+
+        let model = Arc::new(
+            llama
+                .load_model_from_file(
+                    model_path.to_str().expect("model path utf-8"),
+                    LlamaModelParams::default(),
+                )
+                .expect("failed to load model"),
+        );
+
+        let engine = LlamaInferenceEngine::start(
+            1,
+            Arc::clone(&model),
+            LlamaContextParams::default(),
+        )
+        .expect("failed to start engine");
+
+        (llama, model, engine)
+    }
+
+    #[tokio::test]
+    async fn test_engine_basic_generation() {
+        let llama_dir = ensure_llama_dir().await;
+        let (_llama, _model, engine) = make_engine(&llama_dir).await;
+
+        let sid = engine.create_session().await.expect("create_session failed");
+        engine
+            .append_input(sid, "Hello, my name is".to_string())
+            .await
+            .expect("append_input failed");
+
+        let mut stream = engine
+            .generate_stream(sid, 32)
+            .await
+            .expect("generate_stream failed");
+
+        let mut output = String::new();
+        while let Some(chunk) = stream.recv().await {
+            match chunk {
+                StreamChunk::Token(text) => output.push_str(&text),
+                StreamChunk::Done => break,
+                StreamChunk::Error(e) => panic!("generation error: {e}"),
+            }
+        }
+
+        println!("engine basic output: {output}");
+        assert!(!output.is_empty(), "expected non-empty output");
+
+        engine.end_session(sid).await.expect("end_session failed");
+    }
+
+    #[tokio::test]
+    async fn test_engine_session_not_found() {
+        let llama_dir = ensure_llama_dir().await;
+        let (_llama, _model, engine) = make_engine(&llama_dir).await;
+
+        let err = engine
+            .append_input(9999, "hello".to_string())
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(err, LlamaServiceError::SessionNotFound { session_id: 9999 }),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_engine_kv_reuse_multiturn() {
+        let llama_dir = ensure_llama_dir().await;
+        let (_llama, _model, engine) = make_engine(&llama_dir).await;
+
+        let sid = engine.create_session().await.expect("create_session failed");
+
+        // First turn.
+        engine
+            .append_input(sid, "What is 1+1?".to_string())
+            .await
+            .expect("first append failed");
+        let mut stream = engine
+            .generate_stream(sid, 16)
+            .await
+            .expect("first generate_stream failed");
+        let mut turn1 = String::new();
+        while let Some(chunk) = stream.recv().await {
+            match chunk {
+                StreamChunk::Token(t) => turn1.push_str(&t),
+                StreamChunk::Done => break,
+                StreamChunk::Error(e) => panic!("turn1 error: {e}"),
+            }
+        }
+        assert!(!turn1.is_empty(), "first turn should produce output");
+
+        // Second turn (KV reuse; n_past carries over from turn 1).
+        engine
+            .append_input(sid, " And what is 2+2?".to_string())
+            .await
+            .expect("second append failed");
+        let mut stream2 = engine
+            .generate_stream(sid, 16)
+            .await
+            .expect("second generate_stream failed");
+        let mut turn2 = String::new();
+        while let Some(chunk) = stream2.recv().await {
+            match chunk {
+                StreamChunk::Token(t) => turn2.push_str(&t),
+                StreamChunk::Done => break,
+                StreamChunk::Error(e) => panic!("turn2 error: {e}"),
+            }
+        }
+        assert!(!turn2.is_empty(), "second turn should produce output");
+
+        engine.end_session(sid).await.expect("end_session failed");
+    }
+
+    #[tokio::test]
+    async fn test_engine_cancel_and_resume() {
+        let llama_dir = ensure_llama_dir().await;
+        let (_llama, _model, engine) = make_engine(&llama_dir).await;
+
+        let sid = engine.create_session().await.expect("create_session failed");
+        engine
+            .append_input(sid, "Count to one hundred:".to_string())
+            .await
+            .expect("append failed");
+
+        let mut stream = engine
+            .generate_stream(sid, 512)
+            .await
+            .expect("generate_stream failed");
+
+        // Read a few tokens then cancel.
+        let mut tokens_before_cancel = 0usize;
+        loop {
+            match stream.recv().await {
+                Some(StreamChunk::Token(_)) => {
+                    tokens_before_cancel += 1;
+                    if tokens_before_cancel >= 3 {
+                        break;
+                    }
+                }
+                Some(StreamChunk::Done) | None => break,
+                Some(StreamChunk::Error(e)) => panic!("stream error: {e}"),
+            }
+        }
+
+        engine.cancel_generate(sid).await.expect("cancel failed");
+
+        // After cancellation the session should still be usable.
+        engine
+            .append_input(sid, " Just say done.".to_string())
+            .await
+            .expect("append after cancel failed");
+        let mut stream2 = engine
+            .generate_stream(sid, 8)
+            .await
+            .expect("generate after cancel failed");
+        let mut post_cancel = String::new();
+        while let Some(chunk) = stream2.recv().await {
+            match chunk {
+                StreamChunk::Token(t) => post_cancel.push_str(&t),
+                StreamChunk::Done => break,
+                StreamChunk::Error(e) => panic!("post-cancel error: {e}"),
+            }
+        }
+        assert!(!post_cancel.is_empty(), "should generate after cancel");
+
+        engine.end_session(sid).await.expect("end_session failed");
+    }
+
+    #[tokio::test]
+    async fn test_engine_seq_id_reuse() {
+        // Create and end many sessions to exercise the free-list path.
+        let llama_dir = ensure_llama_dir().await;
+        let (_llama, _model, engine) = make_engine(&llama_dir).await;
+
+        for _ in 0..4 {
+            let sid = engine.create_session().await.expect("create_session");
+            engine
+                .append_input(sid, "hi".to_string())
+                .await
+                .expect("append");
+            let mut stream = engine
+                .generate_stream(sid, 4)
+                .await
+                .expect("generate_stream");
+            while let Some(chunk) = stream.recv().await {
+                match chunk {
+                    StreamChunk::Done => break,
+                    StreamChunk::Error(e) => panic!("{e}"),
+                    _ => {}
+                }
+            }
+            engine.end_session(sid).await.expect("end_session");
+        }
     }
 }
