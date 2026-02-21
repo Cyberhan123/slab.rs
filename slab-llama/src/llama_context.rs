@@ -94,16 +94,19 @@ impl LlamaContext {
         unsafe { std::slice::from_raw_parts(ptr, n_vocab) }
     }
 
-    /// Return logits for all output tokens in the last decoded batch.
+    /// Return the logits for a single output token from the last decoded batch.
+    ///
+    /// This returns a slice of length `n_vocab` corresponding to one token's
+    /// logits (typically the last token processed by the most recent decode).
+    /// For individual token logits by index use [`Self::get_logits_ith`].
     ///
     /// # Panics
     /// Panics if the returned pointer is null.
     pub fn get_logits(&self) -> &[f32] {
         let n_vocab = self.n_vocab();
-        let n_tokens = unsafe { self.model.lib.llama_n_ctx(self.ctx) } as usize;
         let ptr = unsafe { self.model.lib.llama_get_logits(self.ctx) };
         assert!(!ptr.is_null(), "llama_get_logits returned null");
-        unsafe { std::slice::from_raw_parts(ptr, n_vocab * n_tokens) }
+        unsafe { std::slice::from_raw_parts(ptr, n_vocab) }
     }
 
     // ── Thread control ────────────────────────────────────────────────────────
