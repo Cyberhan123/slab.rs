@@ -8,6 +8,7 @@ pub enum DiffusionError {
     #[error("Image generation failed (NULL returned from generate_image)")]
     GenerationFailed,
 
+    /// Reserved for future upscaling support (ESRGAN / RealESRGAN).
     #[error("Upscaling failed (NULL data in upscaled image)")]
     UpscalerFailed,
 }
