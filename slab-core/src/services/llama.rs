@@ -277,7 +277,7 @@ impl LlamaService {
     /// Runs autoregressive decoding until `max_tokens` new tokens are produced
     /// or an end-of-generation token is sampled.  Each call resets the KV cache
     /// so generations are independent.
-    pub async fn generate(
+    pub fn generate(
         &self,
         prompt: &str,
         max_tokens: usize,
@@ -434,7 +434,6 @@ mod test {
 
         let result = ls
             .generate("Hello, my name is", 64)
-            .await
             .expect("generate failed");
 
         println!("Generated: {result}");
