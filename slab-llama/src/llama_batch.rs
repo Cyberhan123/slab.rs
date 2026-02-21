@@ -76,10 +76,10 @@ impl LlamaBatch {
         self.tokens.push(token);
         self.pos.push(pos);
 
-        let mut ids: Vec<LlamaSeqId> = seq_ids.to_vec();
-        let ptr = ids.as_mut_ptr();
+        let ids: Vec<LlamaSeqId> = seq_ids.to_vec();
         self.seq_ids.push(ids);
-        self.seq_id_ptrs.push(ptr);
+        // Store a placeholder; actual pointers are synchronized in `as_llama_batch`.
+        self.seq_id_ptrs.push(std::ptr::null_mut());
         self.n_seq_id.push(seq_ids.len() as i32);
         self.logits.push(if logit { 1 } else { 0 });
 
