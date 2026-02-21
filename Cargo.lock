@@ -4461,8 +4461,11 @@ name = "slab-diffusion"
 version = "0.0.1"
 dependencies = [
  "bindgen",
+ "libc",
  "libloading 0.8.9",
+ "slab-diffusion-sys",
  "slab-libfetch",
+ "thiserror 2.0.18",
  "tokio",
 ]
 
