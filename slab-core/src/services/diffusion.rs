@@ -225,7 +225,7 @@ impl DiffusionService {
     /// Generate one or more images from the supplied parameters.
     ///
     /// The returned `Vec` contains exactly `params.batch_count` images.
-    pub async fn generate_image(
+    pub fn generate_image(
         &self,
         params: &SdImgGenParams,
     ) -> Result<Vec<SdImage>, services::ServiceError> {
@@ -319,7 +319,6 @@ mod test {
 
         let images = ds
             .generate_image(&gen_params)
-            .await
             .expect("generate_image failed");
 
         assert_eq!(images.len(), 1);
