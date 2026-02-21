@@ -86,11 +86,13 @@ pub enum LlamaServiceError {
 }
 
 /// Holds the loaded model and its inference context.
+#[derive(Debug)]
 struct LlamaState {
     model: LlamaModel,
     ctx: LlamaContext,
 }
 
+#[derive(Debug)]
 pub struct LlamaService {
     instance: Arc<Llama>,
     state: Arc<Mutex<Option<LlamaState>>>,
@@ -102,12 +104,6 @@ pub struct LlamaService {
 // All mutable inference state is guarded by the `state: Arc<Mutex<...>>` field.
 unsafe impl Send for LlamaService {}
 unsafe impl Sync for LlamaService {}
-
-impl std::fmt::Debug for LlamaService {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("LlamaService").finish()
-    }
-}
 
 impl LlamaService {
     fn resolve_lib_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, services::ServiceError> {

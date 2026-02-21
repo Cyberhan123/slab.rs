@@ -389,3 +389,9 @@ impl LlamaModel {
         cstr.to_str().map_err(LlamaError::from)
     }
 }
+
+impl std::fmt::Debug for LlamaModel {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LlamaModel").finish()
+    }
+}
