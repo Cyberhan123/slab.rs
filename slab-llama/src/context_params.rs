@@ -1,4 +1,5 @@
 /// Parameters for creating a llama inference context.
+#[derive(Clone)]
 pub struct LlamaContextParams {
     /// Context window size (0 = use model default).
     pub n_ctx: u32,
