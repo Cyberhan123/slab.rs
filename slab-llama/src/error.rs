@@ -51,4 +51,8 @@ pub enum LlamaError {
     /// A state operation failed (returned 0 bytes).
     #[error("llama state operation failed")]
     StateFailed,
+
+    /// A LoRA adapter metadata lookup failed (key not found or index out of range).
+    #[error("LoRA adapter metadata lookup failed")]
+    AdapterMetaFailed,
 }

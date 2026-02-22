@@ -31,20 +31,31 @@ impl LlamaLoraAdapter {
     /// the value cannot be decoded as UTF-8.
     pub fn meta_val_str(&self, key: &str) -> Result<String, LlamaError> {
         let c_key = CString::new(key)?;
-        let mut buf = vec![0u8; 512];
-        let n = unsafe {
-            self.model.lib.llama_adapter_meta_val_str(
-                self.adapter as *const _,
-                c_key.as_ptr(),
-                buf.as_mut_ptr() as *mut std::os::raw::c_char,
-                buf.len(),
-            )
-        };
-        if n < 0 {
-            return Err(LlamaError::NullPointer);
+        // Start with a 512-byte payload buffer, plus one byte for the null terminator.
+        let mut payload_len: usize = 512;
+        loop {
+            // Allocate payload_len bytes for data, plus one extra for the terminator.
+            let mut buf = vec![0u8; payload_len + 1];
+            let n = unsafe {
+                self.model.lib.llama_adapter_meta_val_str(
+                    self.adapter as *const _,
+                    c_key.as_ptr(),
+                    buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                    payload_len,
+                )
+            };
+            if n < 0 {
+                return Err(LlamaError::AdapterMetaFailed);
+            }
+            let n_usize = n as usize;
+            // If the returned length exceeds the payload capacity, retry with a larger buffer.
+            if n_usize > payload_len {
+                payload_len = n_usize;
+                continue;
+            }
+            buf.truncate(n_usize);
+            return String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()));
         }
-        buf.truncate(n as usize);
-        String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()))
     }
 
     /// Return the number of metadata key/value pairs in the adapter.
@@ -57,20 +68,29 @@ impl LlamaLoraAdapter {
     /// # Errors
     /// Returns `Err(LlamaError)` if `i` is out of range or on UTF-8 error.
     pub fn meta_key_by_index(&self, i: i32) -> Result<String, LlamaError> {
-        let mut buf = vec![0u8; 256];
-        let n = unsafe {
-            self.model.lib.llama_adapter_meta_key_by_index(
-                self.adapter as *const _,
-                i,
-                buf.as_mut_ptr() as *mut std::os::raw::c_char,
-                buf.len(),
-            )
-        };
-        if n < 0 {
-            return Err(LlamaError::NullPointer);
+        // Start with a 256-byte payload buffer, plus one byte for the null terminator.
+        let mut payload_len: usize = 256;
+        loop {
+            let mut buf = vec![0u8; payload_len + 1];
+            let n = unsafe {
+                self.model.lib.llama_adapter_meta_key_by_index(
+                    self.adapter as *const _,
+                    i,
+                    buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                    payload_len,
+                )
+            };
+            if n < 0 {
+                return Err(LlamaError::AdapterMetaFailed);
+            }
+            let n_usize = n as usize;
+            if n_usize > payload_len {
+                payload_len = n_usize;
+                continue;
+            }
+            buf.truncate(n_usize);
+            return String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()));
         }
-        buf.truncate(n as usize);
-        String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()))
     }
 
     /// Retrieve a metadata value string by its index.
@@ -78,20 +98,29 @@ impl LlamaLoraAdapter {
     /// # Errors
     /// Returns `Err(LlamaError)` if `i` is out of range or on UTF-8 error.
     pub fn meta_val_str_by_index(&self, i: i32) -> Result<String, LlamaError> {
-        let mut buf = vec![0u8; 512];
-        let n = unsafe {
-            self.model.lib.llama_adapter_meta_val_str_by_index(
-                self.adapter as *const _,
-                i,
-                buf.as_mut_ptr() as *mut std::os::raw::c_char,
-                buf.len(),
-            )
-        };
-        if n < 0 {
-            return Err(LlamaError::NullPointer);
+        // Start with a 512-byte payload buffer, plus one byte for the null terminator.
+        let mut payload_len: usize = 512;
+        loop {
+            let mut buf = vec![0u8; payload_len + 1];
+            let n = unsafe {
+                self.model.lib.llama_adapter_meta_val_str_by_index(
+                    self.adapter as *const _,
+                    i,
+                    buf.as_mut_ptr() as *mut std::os::raw::c_char,
+                    payload_len,
+                )
+            };
+            if n < 0 {
+                return Err(LlamaError::AdapterMetaFailed);
+            }
+            let n_usize = n as usize;
+            if n_usize > payload_len {
+                payload_len = n_usize;
+                continue;
+            }
+            buf.truncate(n_usize);
+            return String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()));
         }
-        buf.truncate(n as usize);
-        String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()))
     }
 
     // ── ALora helpers ────────────────────────────────────────────────────────
