@@ -26,13 +26,14 @@ categories = ["science"]
 license = "Apache-2.0"
 
 [workspace.dependencies]
+slab-core = { path = "./slab-core", package = "slab-core", version = "0.0.1" }
 slab-diffusion-sys = { path = "./slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.0.1" }
 slab-diffusion = { path = "./slab-diffusion", package = "slab-diffusion", version = "0.0.1" }
 slab-llama = { path = "./slab-llama", package = "slab-llama", version = "0.0.1" }
 slab-llama-sys = { path = "./slab-llama-sys", package = "slab-llama-sys", version = "0.0.1" }
 slab-whisper = { path = "./slab-whisper", package = "slab-whisper", version = "0.0.1" }
 slab-whisper-sys = { path = "./slab-whisper-sys", package = "slab-whisper-sys", version = "0.0.1" }
-slab-libfetch={ path = "./slab-libfetch", package = "slab-libfetch", version = "0.0.1" }
+slab-libfetch = { path = "./slab-libfetch", package = "slab-libfetch", version = "0.0.1" }
 
 anyhow = "1.0.101"
 bindgen = "0.72.1"
