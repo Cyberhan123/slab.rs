@@ -86,6 +86,7 @@ where
             .unwrap_or_else(Uuid::new_v4);
 
         // Inject the trace ID into request headers for downstream handlers.
+        // SAFETY: UUID v4 is hex + hyphens – always a valid HeaderValue.
         req.headers_mut().insert(
             X_TRACE_ID.clone(),
             HeaderValue::from_str(&trace_id.to_string()).unwrap(),
@@ -132,6 +133,7 @@ where
                 info!(status, latency_ms, "← response");
 
                 // Echo the trace ID back in the response headers.
+                // SAFETY: UUID v4 is hex + hyphens – always a valid HeaderValue.
                 response.headers_mut().insert(
                     X_TRACE_ID.clone(),
                     HeaderValue::from_str(&trace_id.to_string()).unwrap(),
