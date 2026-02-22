@@ -23,6 +23,7 @@ hf-hub = { workspace = true }
 thiserror = { workspace = true }
 
 ffmpeg-sidecar = {version="2.4.0", features=["download_ffmpeg", "named_pipes"]}
+serde_json = { workspace = true }
 serde = {version="1.0.228",features=["derive"]}
 axum = {version="0.8.8", features=["macros"]}
 tracing-subscriber = "0.3.22"
