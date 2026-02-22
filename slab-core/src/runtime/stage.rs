@@ -1,5 +1,3 @@
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
@@ -12,9 +10,6 @@ use crate::runtime::types::{Payload, RuntimeError};
 /// The closure receives an input `Payload` and returns either a new `Payload`
 /// or an error string.
 pub type CpuFn = Arc<dyn Fn(Payload) -> Result<Payload, String> + Send + Sync + 'static>;
-
-/// Type alias for a boxed async future (used internally for GPU dispatch).
-pub type BoxFuture<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
 /// Describes a single stage in a pipeline.
 ///

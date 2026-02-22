@@ -7,7 +7,7 @@
 //!
 //! ```rust,no_run
 //! use slab_core::api;
-//! use bytes::Bytes;
+//! use slab_core::api::Payload;
 //!
 //! # #[tokio::main]
 //! # async fn main() {
@@ -22,16 +22,21 @@
 //! });
 //! api::backend("ggml.llama")
 //!     .op("model.load")
-//!     .input(Bytes::from(cfg.to_string()))
+//!     .input(Payload::Json(Arc::from(cfg)))
 //!     .run_wait()
 //!     .await
 //!     .unwrap();
 //!
-//! // 3. Whisper unary transcription.
-//! let audio_bytes: Bytes = Bytes::new(); // load PCM f32 bytes
+//! // 3. Whisper unary transcription with custom CPU pre-processing.
+//! let media_input: Payload = Payload::Text(Arc::from("/path/to/video.mp4"));
 //! let result = api::backend("ggml.whisper")
-//!     .op("transcribe")
-//!     .input(audio_bytes)
+//!     .op("inference")
+//!     .input(media_input)
+//!     .preprocess("ffmpeg.to_pcm_f32le", |input| {
+//!         // You can call ffmpeg here and return mono/16k PCM f32 bytes.
+//!         // This demo keeps it as-is.
+//!         Ok(input)
+//!     })
 //!     .run_wait()
 //!     .await
 //!     .unwrap();
@@ -40,8 +45,8 @@
 //! // 4. Llama streaming generation.
 //! use futures::StreamExt;
 //! let mut stream = api::backend("ggml.llama")
-//!     .op("generate.stream")
-//!     .input(Bytes::from("Hello, world!"))
+//!     .op("inference.stream")
+//!     .input(Payload::Text(Arc::from("Hello, world!")))
 //!     .stream()
 //!     .await
 //!     .unwrap();
@@ -64,6 +69,8 @@ use crate::runtime::backend::admission::ResourceManager;
 use crate::runtime::backend::protocol::{BackendOp, BackendRequest, StreamChunk};
 use crate::runtime::orchestrator::Orchestrator;
 use crate::runtime::pipeline::PipelineBuilder;
+use crate::runtime::stage::CpuStage;
+use crate::runtime::storage::TaskStatusView;
 use crate::runtime::types::{Payload, RuntimeError, TaskId, TaskStatus};
 
 // ── Timeout constants ──────────────────────────────────────────────────────────
@@ -156,6 +163,36 @@ pub fn backend(id: &str) -> BackendBuilder {
     BackendBuilder { id: id.to_owned() }
 }
 
+/// Fetch a snapshot of a task's current status by `TaskId`.
+pub async fn status(task_id: TaskId) -> Result<TaskStatusView, RuntimeError> {
+    let rt = CallBuilder::runtime()?;
+    rt.orchestrator.get_status(task_id).await
+}
+
+/// Try to fetch the completed result payload for a non-streaming task.
+///
+/// Returns `Ok(None)` if the task has not completed yet.
+pub async fn result(task_id: TaskId) -> Result<Option<Payload>, RuntimeError> {
+    let rt = CallBuilder::runtime()?;
+    let view = rt.orchestrator.get_status(task_id).await?;
+    match view.status {
+        TaskStatus::Failed { error } => return Err(error),
+        TaskStatus::SucceededStreaming => {
+            return Err(RuntimeError::GpuStageFailed {
+                stage_name: "result".into(),
+                message: "streaming task has no unary result".into(),
+            })
+        }
+        _ => {}
+    }
+
+    let payload = rt.orchestrator.get_result(task_id).await;
+    match payload {
+        Some(p) => Ok(Some(p.to_owned())),
+        None => Ok(None),
+    }
+}
+
 // ── BackendBuilder ─────────────────────────────────────────────────────────────
 
 /// Selects a backend; produced by [`backend`].
@@ -168,16 +205,18 @@ impl BackendBuilder {
     ///
     /// Standard op names:
     /// - `"model.load"` – load (or reload) a model; params in `input: Bytes`
-    /// - `"generate"` – unary text generation (llama)
-    /// - `"generate.stream"` – streaming text generation (llama)
-    /// - `"transcribe"` – speech-to-text (whisper); input is raw PCM `f32` bytes
-    /// - `"generate_image"` – image generation (diffusion); input is JSON bytes
+    /// - `"inference"` – unary text generation (llama)
+    /// - `"inference.stream"` – streaming text generation (llama)
+    /// - `"inference"` – speech-to-text (whisper); input is raw PCM `f32` bytes
+    /// - `"inference_image"` – image generation (diffusion); input is JSON bytes
     pub fn op(self, name: &str) -> CallBuilder {
         CallBuilder {
             backend_id: self.id,
             op_name: name.to_owned(),
-            op_options: serde_json::Value::Object(Default::default()),
-            input: Bytes::new(),
+            op_options: Payload::default(),
+            input: Payload::default(),
+            preprocess_stages: Vec::new(),
+            postprocess_stages: Vec::new(),
         }
     }
 }
@@ -190,13 +229,15 @@ impl BackendBuilder {
 pub struct CallBuilder {
     backend_id: String,
     op_name: String,
-    op_options: serde_json::Value,
-    input: Bytes,
+    op_options: Payload,
+    input: Payload,
+    preprocess_stages: Vec<CpuStage>,
+    postprocess_stages: Vec<CpuStage>,
 }
 
 impl CallBuilder {
     /// Attach the input payload (replaces any previous `input` call).
-    pub fn input(mut self, data: Bytes) -> Self {
+    pub fn input(mut self, data: Payload) -> Self {
         self.input = data;
         self
     }
@@ -205,8 +246,30 @@ impl CallBuilder {
     ///
     /// Most parameters should travel via [`input`]; `options` is for
     /// small structural hints and is kept as `{}` by default.
-    pub fn options(mut self, opts: serde_json::Value) -> Self {
+    pub fn options(mut self, opts: Payload) -> Self {
         self.op_options = opts;
+        self
+    }
+
+    /// Append a custom pre-process stage with full [`Payload`] input/output control.
+    ///
+    /// Useful before backend calls, e.g. ffmpeg conversion before whisper transcription.
+    pub fn preprocess(
+        mut self,
+        name: impl Into<String>,
+        work: impl Fn(Payload) -> Result<Payload, String> + Send + Sync + 'static,
+    ) -> Self {
+        self.preprocess_stages.push(CpuStage::new(name, work));
+        self
+    }
+
+    /// Append a custom post-process stage with full [`Payload`] input/output control.
+    pub fn postprocess(
+        mut self,
+        name: impl Into<String>,
+        work: impl Fn(Payload) -> Result<Payload, String> + Send + Sync + 'static,
+    ) -> Self {
+        self.postprocess_stages.push(CpuStage::new(name, work));
         self
     }
 
@@ -216,13 +279,40 @@ impl CallBuilder {
         RUNTIME.get().ok_or(RuntimeError::NotInitialized)
     }
 
-    fn ingress_tx(rt: &ApiRuntime, backend_id: &str) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
+    fn ingress_tx(
+        rt: &ApiRuntime,
+        backend_id: &str,
+    ) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
         rt.backends
             .get(backend_id)
             .cloned()
             .ok_or_else(|| RuntimeError::Busy {
                 backend_id: backend_id.to_owned(),
             })
+    }
+
+    fn build_unary_pipeline(
+        self,
+        rt: &ApiRuntime,
+        ingress_tx: mpsc::Sender<BackendRequest>,
+    ) -> PipelineBuilder {
+        let payload = self.input.clone();
+        let op = BackendOp {
+            name: self.op_name.clone(),
+            options: self.op_options,
+        };
+
+        let mut builder = PipelineBuilder::new(rt.orchestrator.clone(), payload);
+        for stage in self.preprocess_stages {
+            builder = builder.cpu_stage(stage);
+        }
+
+        let mut builder = builder.gpu(self.op_name, self.backend_id, op, ingress_tx);
+        for stage in self.postprocess_stages {
+            builder = builder.cpu_stage(stage);
+        }
+
+        builder
     }
 
     // ── terminal methods ─────────────────────────────────────────────────────
@@ -233,15 +323,8 @@ impl CallBuilder {
     pub async fn run(self) -> Result<TaskId, RuntimeError> {
         let rt = Self::runtime()?;
         let ingress_tx = Self::ingress_tx(rt, &self.backend_id)?;
-        let payload = Payload::Bytes(Arc::from(self.input.as_ref()));
-        let op = BackendOp {
-            name: self.op_name.clone(),
-            options: self.op_options,
-        };
-        PipelineBuilder::new(rt.orchestrator.clone(), payload)
-            .gpu(self.op_name, self.backend_id, op, ingress_tx)
-            .run()
-            .await
+        let builder = self.build_unary_pipeline(rt, ingress_tx);
+        builder.run().await
     }
 
     /// Submit the call and block until the result is available.
@@ -259,16 +342,8 @@ impl CallBuilder {
     pub async fn run_wait_timeout(self, timeout: Duration) -> Result<Bytes, RuntimeError> {
         let rt = Self::runtime()?;
         let ingress_tx = Self::ingress_tx(rt, &self.backend_id)?;
-        let payload = Payload::Bytes(Arc::from(self.input.as_ref()));
-        let op = BackendOp {
-            name: self.op_name.clone(),
-            options: self.op_options,
-        };
-
-        let task_id = PipelineBuilder::new(rt.orchestrator.clone(), payload)
-            .gpu(self.op_name, self.backend_id, op, ingress_tx)
-            .run()
-            .await?;
+        let builder = self.build_unary_pipeline(rt, ingress_tx);
+        let task_id = builder.run().await?;
 
         // Poll until the task reaches a terminal state.
         tokio::time::timeout(timeout, async {
@@ -308,15 +383,27 @@ impl CallBuilder {
     pub async fn stream(
         self,
     ) -> Result<impl Stream<Item = Result<Bytes, RuntimeError>>, RuntimeError> {
+        if !self.postprocess_stages.is_empty() {
+            return Err(RuntimeError::CpuStageFailed {
+                stage_name: "postprocess".into(),
+                message: "postprocess is not supported for streaming calls".into(),
+            });
+        }
+
         let rt = Self::runtime()?;
         let ingress_tx = Self::ingress_tx(rt, &self.backend_id)?;
-        let payload = Payload::Bytes(Arc::from(self.input.as_ref()));
+   
         let op = BackendOp {
             name: self.op_name.clone(),
             options: self.op_options,
         };
 
-        let task_id = PipelineBuilder::new(rt.orchestrator.clone(), payload)
+        let mut builder = PipelineBuilder::new(rt.orchestrator.clone(), self.input.clone());
+        for stage in self.preprocess_stages {
+            builder = builder.cpu_stage(stage);
+        }
+
+        let task_id = builder
             .gpu_stream(self.op_name, self.backend_id, op, ingress_tx)
             .run_stream()
             .await?;
@@ -355,6 +442,13 @@ impl CallBuilder {
                     }),
                     rx,
                 )),
+                Some(StreamChunk::Image(e)) => Some((
+                    Err(RuntimeError::GpuStageFailed {
+                        stage_name: "stream".into(),
+                        message: format!("unexpected image chunk now: {e:?}"),
+                    }),
+                    rx,
+                )),
             }
         });
 
@@ -380,6 +474,8 @@ fn payload_to_bytes(p: Payload) -> Result<Bytes, RuntimeError> {
 
 #[cfg(test)]
 mod tests {
+    use std::f32::consts::E;
+
     use super::*;
     use crate::runtime::backend::protocol::BackendReply;
     use tokio::sync::mpsc;
@@ -408,9 +504,7 @@ mod tests {
                 let (stream_tx, stream_rx) = mpsc::channel::<StreamChunk>(16);
                 let _ = req.reply_tx.send(BackendReply::Stream(stream_rx));
                 for t in &tokens {
-                    let _ = stream_tx
-                        .send(StreamChunk::Token(t.to_string()))
-                        .await;
+                    let _ = stream_tx.send(StreamChunk::Token(t.to_string())).await;
                 }
                 let _ = stream_tx.send(StreamChunk::Done).await;
             }
@@ -445,7 +539,7 @@ mod tests {
 
         let op = BackendOp {
             name: "echo".to_owned(),
-            options: serde_json::Value::Null,
+            options: Payload::default(),
         };
 
         let task_id = PipelineBuilder::new(
@@ -465,9 +559,7 @@ mod tests {
                     .await
                     .expect("task should exist");
                 match view.status {
-                    TaskStatus::Succeeded { .. } | TaskStatus::Failed { .. } => {
-                        break view.status
-                    }
+                    TaskStatus::Succeeded { .. } | TaskStatus::Failed { .. } => break view.status,
                     _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
                 }
             }
@@ -502,7 +594,7 @@ mod tests {
 
         let op = BackendOp {
             name: "gen".to_owned(),
-            options: serde_json::Value::Null,
+            options: Payload::default(),
         };
 
         let task_id = PipelineBuilder::new(
@@ -534,6 +626,7 @@ mod tests {
                 StreamChunk::Token(t) => tokens.push_str(&t),
                 StreamChunk::Done => break,
                 StreamChunk::Error(e) => panic!("unexpected error: {e}"),
+                StreamChunk::Image(e) => panic!("unexpected image chunk now: {e:?}"),
             }
         }
         assert_eq!(tokens, "foo bar");
@@ -560,7 +653,7 @@ mod tests {
 
         let op = BackendOp {
             name: "generate".to_owned(),
-            options: serde_json::Value::Null,
+            options: Payload::default(),
         };
 
         let task_id = PipelineBuilder::new(
@@ -576,9 +669,7 @@ mod tests {
             loop {
                 let view = orchestrator.get_status(task_id).await.unwrap();
                 match view.status {
-                    TaskStatus::Failed { .. } | TaskStatus::Succeeded { .. } => {
-                        break view.status
-                    }
+                    TaskStatus::Failed { .. } | TaskStatus::Succeeded { .. } => break view.status,
                     _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
                 }
             }
@@ -597,8 +688,8 @@ mod tests {
     #[test]
     fn payload_bytes_roundtrip() {
         let data = b"hello world";
-        let p = Payload::Bytes(Arc::from(data as &[u8]));
-        let b = payload_to_bytes(p).unwrap();
+        let payload = Payload::Bytes(Arc::from(&data[..]));
+        let b = payload_to_bytes(payload).unwrap();
         assert_eq!(&b[..], data);
     }
 
@@ -607,5 +698,43 @@ mod tests {
         let p = Payload::Text(Arc::from("hello"));
         let b = payload_to_bytes(p).unwrap();
         assert_eq!(&b[..], b"hello");
+    }
+
+    #[tokio::test]
+    async fn callbuilder_preprocess_and_postprocess_stage_transform_bytes() {
+        let builder = CallBuilder {
+            backend_id: "test.backend".to_owned(),
+            op_name: "test.op".to_owned(),
+            op_options: Payload::default(),
+            input:  Payload::Bytes(Arc::from(b"ignored" as &[u8])),
+            preprocess_stages: Vec::new(),
+            postprocess_stages: Vec::new(),
+        }
+        .preprocess("upper", |payload| {
+            let b = payload_to_bytes(payload).unwrap();
+            let uppercased = b
+                .iter()
+                .map(|b| b.to_ascii_uppercase())
+                .collect::<Vec<u8>>();
+            Ok(Payload::Bytes(Arc::from(uppercased)))
+        })
+        .postprocess("suffix", |payload| {
+            let b = payload_to_bytes(payload).unwrap();
+            let mut out = b.to_vec();
+            out.extend_from_slice(b"!");
+            Ok(Payload::Bytes(Arc::from(out)))
+        });
+
+        assert_eq!(builder.preprocess_stages.len(), 1);
+        assert_eq!(builder.postprocess_stages.len(), 1);
+        let out = builder.preprocess_stages[0]
+            .run(Payload::Bytes(Arc::from(b"abc" as &[u8])))
+            .await
+            .unwrap();
+
+        match out {
+            Payload::Bytes(v) => assert_eq!(&*v, b"ABC"),
+            _ => panic!("unexpected payload variant"),
+        }
     }
 }

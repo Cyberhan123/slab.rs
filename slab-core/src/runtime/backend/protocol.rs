@@ -11,6 +11,8 @@ pub enum StreamChunk {
     Done,
     /// Generation terminated due to a backend error.
     Error(String),
+    /// A generated image (placeholder for now).
+    Image(bytes::Bytes),//TODO: A generated image.
 }
 
 /// A handle to a streaming inference response.
@@ -25,8 +27,8 @@ pub type StreamHandle = mpsc::Receiver<StreamChunk>;
 pub struct BackendOp {
     /// Logical operation name (e.g. `"transcribe"`, `"generate"`).
     pub name: String,
-    /// Arbitrary JSON options forwarded to the backend.
-    pub options: serde_json::Value,
+    /// Arbitrary Payload options forwarded to the backend.
+    pub options: Payload,
 }
 
 /// A request sent by the orchestrator to a backend worker via its ingress queue.

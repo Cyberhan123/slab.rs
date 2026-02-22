@@ -60,30 +60,27 @@ impl LlamaWorker {
             ..
         } = req;
 
-        let input_bytes = match &input {
-            Payload::Bytes(b) => bytes::Bytes::copy_from_slice(b),
-            _ => bytes::Bytes::new(),
-        };
-
         match op.name.as_str() {
-            "model.load" => self.handle_load(input_bytes, reply_tx).await,
-            "generate" => {
-                let max_tokens = op
-                    .options
+            "model.load" => self.handle_load(input, reply_tx).await,
+            "inference" => {
+                let max_tokens = serde_json::to_value(&op.options)
+                    .unwrap_or(serde_json::Value::Null)
                     .get("max_tokens")
                     .and_then(|v| v.as_u64())
                     .map(|v| v as usize)
                     .unwrap_or(256);
-                self.handle_generate(input_bytes, max_tokens, reply_tx).await;
+                self.handle_inference(input, max_tokens, reply_tx)
+                    .await;
             }
-            "generate.stream" => {
-                let max_tokens = op
-                    .options
+            "inference.stream" => {
+                let max_tokens = serde_json::to_value(&op.options)
+                    .unwrap_or(serde_json::Value::Null)
                     .get("max_tokens")
                     .and_then(|v| v.as_u64())
                     .map(|v| v as usize)
                     .unwrap_or(256);
-                self.handle_generate_stream(input_bytes, max_tokens, reply_tx).await;
+                self.handle_inference_stream(input, max_tokens, reply_tx)
+                    .await;
             }
             other => {
                 let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {other}")));
@@ -93,13 +90,15 @@ impl LlamaWorker {
 
     async fn handle_load(
         &mut self,
-        input_bytes: bytes::Bytes,
+        input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let config: LoadConfig = match serde_json::from_slice(&input_bytes) {
+        let config: LoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid model.load config: {e}"
+                )));
                 return;
             }
         };
@@ -120,6 +119,7 @@ impl LlamaWorker {
         use slab_llama::{LlamaContextParams, LlamaModelParams};
         if let Err(e) = engine.load_model_with_workers(
             &config.model_path,
+            //TODO: expose these params in the config
             LlamaModelParams::default(),
             LlamaContextParams::default(),
             config.num_workers,
@@ -129,12 +129,15 @@ impl LlamaWorker {
         }
 
         self.engine = Some(engine);
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+        
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+            Arc::from([] as [u8; 0]),
+        )));
     }
 
-    async fn handle_generate(
+    async fn handle_inference(
         &self,
-        input_bytes: bytes::Bytes,
+        input: Payload,
         max_tokens: usize,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
@@ -146,10 +149,10 @@ impl LlamaWorker {
             }
         };
 
-        let prompt = match std::str::from_utf8(&input_bytes) {
-            Ok(s) => s.to_owned(),
+        let prompt = match input.to_str() {
+            Ok(s) => s,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("prompt not utf-8: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!("prompt not str: {e}")));
                 return;
             }
         };
@@ -166,9 +169,9 @@ impl LlamaWorker {
         }
     }
 
-    async fn handle_generate_stream(
+    async fn handle_inference_stream(
         &self,
-        input_bytes: bytes::Bytes,
+        input: Payload,
         max_tokens: usize,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
@@ -180,10 +183,10 @@ impl LlamaWorker {
             }
         };
 
-        let prompt = match std::str::from_utf8(&input_bytes) {
-            Ok(s) => s.to_owned(),
+        let prompt = match input.to_str_arc() {
+            Ok(s) => s,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("prompt not utf-8: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!("prompt not str: {e}")));
                 return;
             }
         };

@@ -67,13 +67,6 @@ pub enum GGMLWhisperEngineError {
         source: anyhow::Error,
     },
 
-    #[error("Failed to read audio data for GGMLWhisperEngine inference from: {path}")]
-    ReadAudioData {
-        path: PathBuf,
-        #[source]
-        source: anyhow::Error,
-    },
-
     #[error("Failed to create GGMLWhisperEngine inference state")]
     CreateInferenceState {
         #[source]
@@ -249,9 +242,9 @@ impl GGMLWhisperEngine {
         Ok(())
     }
 
-    pub async fn inference<P: AsRef<Path>>(
+    pub fn inference<P: AsRef<Path>>(
         &self,
-        audio_data: Vec<f32>,
+        audio_data: &[f32],
     ) -> Result<Vec<SubtitleEntry>, engine::EngineError> {
 
         let ctx_lock = self

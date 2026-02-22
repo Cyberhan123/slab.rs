@@ -222,7 +222,7 @@ mod tests {
 
         let op = BackendOp {
             name: "echo".to_owned(),
-            options: serde_json::Value::Null,
+            options: Payload::default(),
         };
 
         let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("ping"))
@@ -267,7 +267,7 @@ mod tests {
         let (ingress_tx, _ingress_rx) = mpsc::channel::<BackendRequest>(4);
         let op = BackendOp {
             name: "noop".to_owned(),
-            options: serde_json::Value::Null,
+            options: Payload::default(),
         };
 
         let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("x"))
@@ -306,7 +306,7 @@ mod tests {
         let (ingress_tx, mut ingress_rx) = mpsc::channel::<BackendRequest>(16);
         let op = BackendOp {
             name: "stream-gen".to_owned(),
-            options: serde_json::Value::Null,
+            options: Payload::default(),
         };
 
         // Backend worker that emits a few tokens then Done.
@@ -362,6 +362,9 @@ mod tests {
                 crate::runtime::backend::protocol::StreamChunk::Done => break,
                 crate::runtime::backend::protocol::StreamChunk::Error(e) => {
                     panic!("stream error: {e}")
+                }
+                crate::runtime::backend::protocol::StreamChunk::Image(_) => {
+                    panic!("unexpected image chunk now stream")
                 }
             }
         }

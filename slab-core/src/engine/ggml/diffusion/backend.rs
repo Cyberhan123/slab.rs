@@ -79,14 +79,9 @@ impl DiffusionWorker {
             ..
         } = req;
 
-        let input_bytes = match &input {
-            Payload::Bytes(b) => bytes::Bytes::copy_from_slice(b),
-            _ => bytes::Bytes::new(),
-        };
-
         match op.name.as_str() {
-            "model.load" => self.handle_load(input_bytes, reply_tx).await,
-            "generate_image" => self.handle_generate_image(input_bytes, reply_tx).await,
+            "model.load" => self.handle_load(input, reply_tx).await,
+            "inference_image" => self.handle_inference_image(input, reply_tx).await,
             other => {
                 let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {other}")));
             }
@@ -95,10 +90,10 @@ impl DiffusionWorker {
 
     async fn handle_load(
         &mut self,
-        input_bytes: bytes::Bytes,
+        input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let config: LoadConfig = match serde_json::from_slice(&input_bytes) {
+        let config: LoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
@@ -125,9 +120,9 @@ impl DiffusionWorker {
         let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
     }
 
-    async fn handle_generate_image(
+    async fn handle_inference_image(
         &self,
-        input_bytes: bytes::Bytes,
+        input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -138,7 +133,7 @@ impl DiffusionWorker {
             }
         };
 
-        let gen_params: GenImageParams = match serde_json::from_slice(&input_bytes) {
+        let gen_params: GenImageParams = match input.to_json() {
             Ok(p) => p,
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(format!("invalid generate_image params: {e}")));
