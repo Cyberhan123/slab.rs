@@ -6,6 +6,7 @@ use crate::llama_adapter::LlamaLoraAdapter;
 use crate::llama_batch::LlamaBatch;
 use crate::llama_model::LlamaModelInner;
 use crate::token::{LlamaSeqId, LlamaToken};
+use crate::LlamaStateSeqFlags;
 
 /// A safe wrapper around a llama inference context.
 ///
@@ -172,6 +173,13 @@ impl LlamaContext {
         );
         let mut ptrs: Vec<*mut slab_llama_sys::llama_adapter_lora> =
             adapters.iter().map(|a| a.adapter).collect();
+        // Pass null for both adapters and scales when the list is empty so the
+        // C implementation receives a proper NULL rather than a dangling pointer.
+        let adapters_ptr = if ptrs.is_empty() {
+            std::ptr::null_mut()
+        } else {
+            ptrs.as_mut_ptr()
+        };
         let scales_ptr = if scales.is_empty() {
             std::ptr::null_mut()
         } else {
@@ -182,7 +190,7 @@ impl LlamaContext {
         let ret = unsafe {
             self.model.lib.llama_set_adapters_lora(
                 self.ctx,
-                ptrs.as_mut_ptr(),
+                adapters_ptr,
                 ptrs.len(),
                 scales_ptr,
             )
@@ -262,11 +270,17 @@ impl LlamaContext {
         let c_path = CString::new(path)?;
         let mut tokens: Vec<LlamaToken> = vec![0; token_capacity];
         let mut n_token_count: usize = 0;
+        // Pass null when capacity is 0 to avoid passing a dangling pointer to the C API.
+        let tokens_ptr = if token_capacity == 0 {
+            std::ptr::null_mut()
+        } else {
+            tokens.as_mut_ptr()
+        };
         let ok = unsafe {
             self.model.lib.llama_state_load_file(
                 self.ctx,
                 c_path.as_ptr(),
-                tokens.as_mut_ptr(),
+                tokens_ptr,
                 token_capacity,
                 &mut n_token_count,
             )
@@ -292,12 +306,18 @@ impl LlamaContext {
         tokens: &[LlamaToken],
     ) -> Result<(), LlamaError> {
         let c_path = CString::new(path)?;
+        // Pass null when tokens is empty to avoid passing a dangling pointer to the C API.
+        let (tokens_ptr, tokens_len) = if tokens.is_empty() {
+            (std::ptr::null(), 0)
+        } else {
+            (tokens.as_ptr(), tokens.len())
+        };
         let ok = unsafe {
             self.model.lib.llama_state_save_file(
                 self.ctx,
                 c_path.as_ptr(),
-                tokens.as_ptr(),
-                tokens.len(),
+                tokens_ptr,
+                tokens_len,
             )
         };
         if !ok {
@@ -382,13 +402,19 @@ impl LlamaContext {
         tokens: &[LlamaToken],
     ) -> Result<usize, LlamaError> {
         let c_path = CString::new(filepath)?;
+        // Pass null when tokens is empty to avoid passing a dangling pointer to the C API.
+        let (tokens_ptr, tokens_len) = if tokens.is_empty() {
+            (std::ptr::null(), 0)
+        } else {
+            (tokens.as_ptr(), tokens.len())
+        };
         let n = unsafe {
             self.model.lib.llama_state_seq_save_file(
                 self.ctx,
                 c_path.as_ptr(),
                 seq_id,
-                tokens.as_ptr(),
-                tokens.len(),
+                tokens_ptr,
+                tokens_len,
             )
         };
         if n == 0 {
@@ -419,12 +445,18 @@ impl LlamaContext {
         let c_path = CString::new(filepath)?;
         let mut tokens: Vec<LlamaToken> = vec![0; token_capacity];
         let mut n_token_count: usize = 0;
+        // Pass null when capacity is 0 to avoid passing a dangling pointer to the C API.
+        let tokens_ptr = if token_capacity == 0 {
+            std::ptr::null_mut()
+        } else {
+            tokens.as_mut_ptr()
+        };
         let n = unsafe {
             self.model.lib.llama_state_seq_load_file(
                 self.ctx,
                 c_path.as_ptr(),
                 dest_seq_id,
-                tokens.as_mut_ptr(),
+                tokens_ptr,
                 token_capacity,
                 &mut n_token_count,
             )
@@ -441,7 +473,7 @@ impl LlamaContext {
     pub fn state_seq_get_size_ext(
         &self,
         seq_id: LlamaSeqId,
-        flags: slab_llama_sys::llama_state_seq_flags,
+        flags: LlamaStateSeqFlags,
     ) -> usize {
         unsafe {
             self.model
@@ -461,7 +493,7 @@ impl LlamaContext {
         &self,
         dst: &mut [u8],
         seq_id: LlamaSeqId,
-        flags: slab_llama_sys::llama_state_seq_flags,
+        flags: LlamaStateSeqFlags,
     ) -> Result<usize, LlamaError> {
         let n = unsafe {
             self.model.lib.llama_state_seq_get_data_ext(
@@ -490,7 +522,7 @@ impl LlamaContext {
         &mut self,
         src: &[u8],
         dest_seq_id: LlamaSeqId,
-        flags: slab_llama_sys::llama_state_seq_flags,
+        flags: LlamaStateSeqFlags,
     ) -> Result<usize, LlamaError> {
         let n = unsafe {
             self.model.lib.llama_state_seq_set_data_ext(

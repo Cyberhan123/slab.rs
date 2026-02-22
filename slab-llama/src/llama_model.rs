@@ -96,6 +96,13 @@ impl LlamaModel {
     /// # Arguments
     /// * `path_lora` – path to the LoRA adapter file (`.gguf` format).
     ///
+    /// # Precondition
+    /// The underlying `llama_adapter_lora_init` API requires that **all** LoRA
+    /// adapters be loaded **before** any [`LlamaContext`] is created from this
+    /// model (for example, via [`LlamaModel::new_context`]). Calling this
+    /// method after a context has been created for the model is undefined or
+    /// unsupported behavior and may cause failures.
+    ///
     /// # Errors
     /// Returns [`LlamaError::LoraAdapterLoadFailed`] if loading fails.
     pub fn adapter_lora_init(&self, path_lora: &str) -> Result<LlamaLoraAdapter, LlamaError> {
