@@ -446,7 +446,7 @@ impl Drop for WhisperInnerContext {
 // see https://github.com/ggerganov/whisper.cpp/issues/32#issuecomment-1272790388
 unsafe impl Send for WhisperInnerContext {}
 unsafe impl Sync for WhisperInnerContext {}
-
+#[derive(Debug, Clone)]
 pub struct WhisperContextParameters<'a> {
     /// Use GPU if available.
     pub use_gpu: bool,

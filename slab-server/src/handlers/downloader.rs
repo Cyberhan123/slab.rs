@@ -4,11 +4,11 @@ use slab_libfetch::Api;
 
 use anyhow::Result;
 
-pub struct DylibService {
+pub struct Downloader {
     prefix_path: Option<PathBuf>,
 }
 
-impl DylibService {
+impl Downloader {
     pub fn new() -> Self {
         Self { prefix_path: None }
     }
@@ -80,7 +80,7 @@ mod test {
 
     #[tokio::test]
     async fn test_download_diffusion() {
-        DylibService::new()
+        Downloader::new()
             .with_prefix_path("../../../testdata".to_string())
             .download_diffusion()
             .await
@@ -93,7 +93,7 @@ mod test {
         path.pop();
         path.push("../../../testdata");
         print!("Current executable path: {:?}", path);
-        DylibService::new()
+        Downloader::new()
             .with_prefix_path(path)
             .download_whisper()
             .await
@@ -106,7 +106,7 @@ mod test {
         path.pop();
         path.push("../../../testdata");
         print!("Current executable path: {:?}", path);  
-        DylibService::new()
+        Downloader::new()
             .with_prefix_path(path)
             .download_llama()
             .await

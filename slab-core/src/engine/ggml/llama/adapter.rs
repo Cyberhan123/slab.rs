@@ -1,4 +1,4 @@
-use crate::services;
+use crate::engine;
 use slab_llama::{
     Llama, LlamaContextParams, LlamaModelParams,
 };
@@ -9,36 +9,36 @@ use std::sync::{Arc, Mutex, OnceLock, RwLock};
 use tracing::info;
 
 use super::engine::LlamaInferenceEngine;
-use super::{LlamaServiceError, SessionId, StreamChunk, StreamHandle};
+use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 
 /// Process-wide singleton holder for the loaded llama dynamic library service.
 struct LlamaGlobal {
-    service: Arc<LlamaService>,
+    service: Arc<GGMLLlamaEngine>,
     lib_path: PathBuf,
 }
 
-/// Lazily-initialized global storage for `LlamaService`.
+/// Lazily-initialized global storage for `GGMLLlamaEngine`.
 static INSTANCE: OnceLock<RwLock<Option<LlamaGlobal>>> = OnceLock::new();
 
 #[derive(Debug)]
-pub struct LlamaService {
+pub struct GGMLLlamaEngine {
     instance: Arc<Llama>,
     engine: Arc<Mutex<Option<LlamaInferenceEngine>>>,
 }
 
-// SAFETY: LlamaService is only accessed through Arc<Mutex<...>> for mutable state.
+// SAFETY: GGMLLlamaEngine is only accessed through Arc<Mutex<...>> for mutable state.
 // The `instance: Arc<Llama>` field wraps a dynamically loaded library handle which is
 // immutable after creation. Mutable lifecycle state (loaded engine handle)
 // is guarded by the `engine: Arc<Mutex<...>>` field.
-unsafe impl Send for LlamaService {}
-unsafe impl Sync for LlamaService {}
+unsafe impl Send for GGMLLlamaEngine {}
+unsafe impl Sync for GGMLLlamaEngine {}
 
-impl LlamaService {
+impl GGMLLlamaEngine {
     /// Resolve the final shared-library path and canonicalize it.
     ///
     /// Accepts either a directory containing the llama library or a direct path
     /// to the library file itself.
-    fn resolve_lib_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, services::ServiceError> {
+    fn resolve_lib_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, engine::EngineError> {
         let llama_lib_name = format!("{}llama{}", DLL_PREFIX, DLL_SUFFIX);
 
         let mut lib_path = path.as_ref().to_path_buf();
@@ -47,7 +47,7 @@ impl LlamaService {
         }
 
         std::fs::canonicalize(&lib_path).map_err(|source| {
-            LlamaServiceError::CanonicalizeLibraryPath {
+            GGMLLlamaEngineError::CanonicalizeLibraryPath {
                 path: lib_path,
                 source,
             }
@@ -55,10 +55,10 @@ impl LlamaService {
         })
     }
 
-    fn build_service(normalized_path: &Path) -> Result<Self, services::ServiceError> {
+    fn build_service(normalized_path: &Path) -> Result<Self, engine::EngineError> {
         info!("current llama path is: {}", normalized_path.display());
         let llama = Llama::new(normalized_path).map_err(|source| {
-            LlamaServiceError::InitializeDynamicLibrary {
+            GGMLLlamaEngineError::InitializeDynamicLibrary {
                 path: normalized_path.to_path_buf(),
                 source: source.into(),
             }
@@ -77,7 +77,7 @@ impl LlamaService {
     /// If already initialized with the same canonical library path, returns the
     /// existing instance. If initialized with a different path, returns
     /// `LibraryPathMismatch`.
-    pub fn init<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, services::ServiceError> {
+    pub fn init<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
         let normalized_path = Self::resolve_lib_path(path)?;
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
 
@@ -85,12 +85,12 @@ impl LlamaService {
             let read_guard =
                 global_lock
                     .read()
-                    .map_err(|_| LlamaServiceError::LockPoisoned {
+                    .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                         operation: "read llama global state",
                     })?;
             if let Some(global) = read_guard.as_ref() {
                 if global.lib_path != normalized_path {
-                    return Err(LlamaServiceError::LibraryPathMismatch {
+                    return Err(GGMLLlamaEngineError::LibraryPathMismatch {
                         existing: global.lib_path.clone(),
                         requested: normalized_path.clone(),
                     }
@@ -103,13 +103,13 @@ impl LlamaService {
         let service = Arc::new(Self::build_service(&normalized_path)?);
         let mut write_guard = global_lock
             .write()
-            .map_err(|_| LlamaServiceError::LockPoisoned {
+            .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                 operation: "write llama global state",
             })?;
 
         if let Some(global) = write_guard.as_ref() {
             if global.lib_path != normalized_path {
-                return Err(LlamaServiceError::LibraryPathMismatch {
+                return Err(GGMLLlamaEngineError::LibraryPathMismatch {
                     existing: global.lib_path.clone(),
                     requested: normalized_path.clone(),
                 }
@@ -130,13 +130,13 @@ impl LlamaService {
     ///
     /// This replaces the global instance unconditionally and logs the previous
     /// and current library path.
-    pub fn reload<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, services::ServiceError> {
+    pub fn reload<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
         let normalized_path = Self::resolve_lib_path(path)?;
         let service = Arc::new(Self::build_service(&normalized_path)?);
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
         let mut write_guard = global_lock
             .write()
-            .map_err(|_| LlamaServiceError::LockPoisoned {
+            .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                 operation: "write llama global state",
             })?;
 
@@ -160,19 +160,19 @@ impl LlamaService {
     }
 
     /// Return the currently initialized global `LlamaService`.
-    pub fn current() -> Result<Arc<Self>, services::ServiceError> {
+    pub fn current() -> Result<Arc<Self>, engine::EngineError> {
         let global_lock = INSTANCE
             .get()
-            .ok_or(LlamaServiceError::GlobalStorageNotInitialized)?;
+            .ok_or(GGMLLlamaEngineError::GlobalStorageNotInitialized)?;
         let read_guard = global_lock
             .read()
-            .map_err(|_| LlamaServiceError::LockPoisoned {
+            .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                 operation: "read llama global state",
             })?;
         read_guard
             .as_ref()
             .map(|global| global.service.clone())
-            .ok_or(LlamaServiceError::InstanceNotInitialized.into())
+            .ok_or(GGMLLlamaEngineError::InstanceNotInitialized.into())
     }
 
     /// Load a model and start a multi-worker inference engine.
@@ -184,15 +184,15 @@ impl LlamaService {
         model_params: LlamaModelParams,
         ctx_params: LlamaContextParams,
         num_workers: usize,
-    ) -> Result<(), services::ServiceError> {
+    ) -> Result<(), engine::EngineError> {
         if num_workers == 0 {
-            return Err(LlamaServiceError::InvalidWorkerCount { num_workers }.into());
+            return Err(GGMLLlamaEngineError::InvalidWorkerCount { num_workers }.into());
         }
 
         let mut engine_lock =
             self.engine
                 .lock()
-                .map_err(|_| LlamaServiceError::LockPoisoned {
+                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                     operation: "lock llama engine state",
                 })?;
         *engine_lock = None;
@@ -200,13 +200,13 @@ impl LlamaService {
         let path = path_to_model
             .as_ref()
             .to_str()
-            .ok_or(LlamaServiceError::InvalidModelPathUtf8)?;
+            .ok_or(GGMLLlamaEngineError::InvalidModelPathUtf8)?;
 
         let model = Arc::new(
             self
             .instance
             .load_model_from_file(path, model_params)
-            .map_err(|source| LlamaServiceError::LoadModel {
+            .map_err(|source| GGMLLlamaEngineError::LoadModel {
                 model_path: path.to_string(),
                 source: source.into(),
             })?,
@@ -218,19 +218,19 @@ impl LlamaService {
         Ok(())
     }
 
-    fn require_engine(&self) -> Result<LlamaInferenceEngine, services::ServiceError> {
+    fn require_engine(&self) -> Result<LlamaInferenceEngine, engine::EngineError> {
         let engine_lock =
             self.engine
                 .lock()
-                .map_err(|_| LlamaServiceError::LockPoisoned {
+                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                     operation: "lock llama engine state",
                 })?;
-        let engine = engine_lock.as_ref().ok_or(LlamaServiceError::ModelNotLoaded)?;
+        let engine = engine_lock.as_ref().ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
         Ok(engine.clone())
     }
 
     /// Create a new session on the underlying inference engine.
-    pub async fn create_session(&self) -> Result<SessionId, services::ServiceError> {
+    pub async fn create_session(&self) -> Result<SessionId, engine::EngineError> {
         let engine = self.require_engine()?;
         engine.create_session().await.map_err(Into::into)
     }
@@ -240,7 +240,7 @@ impl LlamaService {
         &self,
         session_id: SessionId,
         text_delta: String,
-    ) -> Result<(), services::ServiceError> {
+    ) -> Result<(), engine::EngineError> {
         let engine = self.require_engine()?;
         engine
             .append_input(session_id, text_delta)
@@ -253,7 +253,7 @@ impl LlamaService {
         &self,
         session_id: SessionId,
         max_new_tokens: usize,
-    ) -> Result<StreamHandle, services::ServiceError> {
+    ) -> Result<StreamHandle, engine::EngineError> {
         let engine = self.require_engine()?;
         engine
             .generate_stream(session_id, max_new_tokens)
@@ -262,7 +262,7 @@ impl LlamaService {
     }
 
     /// End a session and release its KV entries.
-    pub async fn end_session(&self, session_id: SessionId) -> Result<(), services::ServiceError> {
+    pub async fn end_session(&self, session_id: SessionId) -> Result<(), engine::EngineError> {
         let engine = self.require_engine()?;
         engine.end_session(session_id).await.map_err(Into::into)
     }
@@ -271,7 +271,7 @@ impl LlamaService {
     pub async fn cancel_generate(
         &self,
         session_id: SessionId,
-    ) -> Result<(), services::ServiceError> {
+    ) -> Result<(), engine::EngineError> {
         let engine = self.require_engine()?;
         engine.cancel_generate(session_id).await.map_err(Into::into)
     }
@@ -288,7 +288,7 @@ impl LlamaService {
         prompt: &str,
         max_tokens: usize,
         session_id: Option<SessionId>,
-    ) -> Result<String, services::ServiceError> {
+    ) -> Result<String, engine::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
             None => self.create_session().await?,
@@ -312,14 +312,17 @@ impl LlamaService {
             }
         };
         let mut output = String::new();
-        let mut stream_error: Option<anyhow::Error> = None;
+        let mut stream_error: Option<GGMLLlamaEngineError> = None;
 
         while let Some(chunk) = stream.recv().await {
             match chunk {
                 StreamChunk::Token(piece) => output.push_str(&piece),
                 StreamChunk::Done => break,
                 StreamChunk::Error(message) => {
-                    stream_error = Some(anyhow::anyhow!("inference stream error: {message}"));
+                    stream_error = Some(GGMLLlamaEngineError::InferenceStreamError {
+                        source: anyhow::anyhow!("stream error in session {sid}: {message}"),
+                        message,
+                    });
                     break;
                 }
             }
@@ -351,7 +354,7 @@ impl LlamaService {
         prompt: &str,
         max_tokens: usize,
         session_id: Option<SessionId>,
-    ) -> Result<(StreamHandle, SessionId), services::ServiceError> {
+    ) -> Result<(StreamHandle, SessionId), engine::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
             None => self.create_session().await?,

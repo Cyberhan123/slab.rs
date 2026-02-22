@@ -1,4 +1,4 @@
-use crate::services;
+use crate::engine;
 use anyhow;
 use anyhow::Result;
 use bytemuck::cast_slice;
@@ -6,7 +6,7 @@ use ffmpeg_sidecar::{
     command::FfmpegCommand, event::FfmpegEvent, named_pipes::NamedPipe, pipe_name,
 };
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::mpsc;
 use thiserror::Error;
 use tokio::task;
@@ -21,7 +21,7 @@ pub enum FFmpegServiceError {
     InvalidResume,
 
     #[error("Thread join error {0}")]
-   JoinError(#[from] tokio::task::JoinError),
+    JoinError(#[from] tokio::task::JoinError),
 }
 
 pub struct FfmpegService;
@@ -35,7 +35,7 @@ impl FfmpegService {
     pub fn convert_video<P: AsRef<Path>>(
         input_path: P,
         output_path: P,
-    ) -> Result<(), services::ServiceError> {
+    ) -> Result<(), engine::EngineError> {
         let input_path = input_path.as_ref().to_path_buf();
         let output_path = output_path.as_ref().to_path_buf();
 
@@ -71,11 +71,11 @@ impl FfmpegService {
     /// Read audio data from a video file and return it as a vector of f32 samples.
     pub async fn read_audio_data<P: AsRef<Path>>(
         input: P,
-    ) -> Result<Vec<f32>, services::ServiceError> {
+    ) -> Result<Vec<f32>, engine::EngineError> {
         let mut input_path = input.as_ref().to_path_buf();
         input_path = input_path.components().collect();
 
-        task::spawn_blocking(move || -> Result<Vec<f32>, services::ServiceError> {
+        task::spawn_blocking(move || -> Result<Vec<f32>, engine::EngineError> {
             let mut pipe = NamedPipe::new(AUDIO_PIPE_NAME)?;
             info!("[audio] pipe created");
             let (ready_sender, ready_receiver) = mpsc::channel::<()>();
@@ -175,11 +175,11 @@ mod test {
     use super::*;
     use tokio;
     use tracing_test::traced_test;
-
+  
     #[tokio::test]
     #[traced_test]
     async fn test_whisper() {
-        let mut test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let mut test_data_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         test_data_path.push("../testdata/samples");
         println!("Current executable path: {:?}", test_data_path);
 

@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
-use super::{LlamaServiceError, SessionId, StreamChunk};
+use super::{GGMLLlamaEngineError, SessionId, StreamChunk};
 
 // ── Internal channel protocol ─────────────────────────────────────────────────
 
@@ -11,26 +11,26 @@ use super::{LlamaServiceError, SessionId, StreamChunk};
 pub(super) enum WorkerCommand {
     CreateSession {
         session_id: SessionId,
-        reply_tx: oneshot::Sender<Result<(), LlamaServiceError>>,
+        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
     AppendInput {
         session_id: SessionId,
         text_delta: String,
-        reply_tx: oneshot::Sender<Result<(), LlamaServiceError>>,
+        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
     GenerateStream {
         session_id: SessionId,
         max_new_tokens: usize,
         stream_tx: mpsc::Sender<StreamChunk>,
-        reply_tx: oneshot::Sender<Result<(), LlamaServiceError>>,
+        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
     EndSession {
         session_id: SessionId,
-        reply_tx: oneshot::Sender<Result<(), LlamaServiceError>>,
+        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
     Cancel {
         session_id: SessionId,
-        reply_tx: oneshot::Sender<Result<(), LlamaServiceError>>,
+        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
 }
 
@@ -128,7 +128,7 @@ impl InferenceWorkerState {
                 reply_tx,
             } => match self.sessions.get_mut(&session_id) {
                 None => {
-                    let _ = reply_tx.send(Err(LlamaServiceError::SessionNotFound { session_id }));
+                    let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                 }
                 Some(session) => {
                     // Tokenize the delta (no BOS, parse special tokens).
@@ -138,7 +138,7 @@ impl InferenceWorkerState {
                         .map(|tokens| {
                             session.pending_tokens.extend(tokens);
                         })
-                        .map_err(|source| LlamaServiceError::TokenizeFailed {
+                        .map_err(|source| GGMLLlamaEngineError::TokenizeFailed {
                             source: source.into(),
                         });
                     let _ = reply_tx.send(result);
@@ -152,7 +152,7 @@ impl InferenceWorkerState {
                 reply_tx,
             } => match self.sessions.get_mut(&session_id) {
                 None => {
-                    let _ = reply_tx.send(Err(LlamaServiceError::SessionNotFound { session_id }));
+                    let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                 }
                 Some(session) => {
                     session.stream_tx = Some(stream_tx);
@@ -167,7 +167,7 @@ impl InferenceWorkerState {
                 reply_tx,
             } => match self.sessions.remove(&session_id) {
                 None => {
-                    let _ = reply_tx.send(Err(LlamaServiceError::SessionNotFound { session_id }));
+                    let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                 }
                 Some(session) => {
                     // Release KV cache entries for this sequence only.
@@ -184,7 +184,7 @@ impl InferenceWorkerState {
                 reply_tx,
             } => match self.sessions.get_mut(&session_id) {
                 None => {
-                    let _ = reply_tx.send(Err(LlamaServiceError::SessionNotFound { session_id }));
+                    let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                 }
                 Some(session) => {
                     session.cancelled = true;

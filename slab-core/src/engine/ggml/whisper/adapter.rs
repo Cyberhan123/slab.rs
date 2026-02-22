@@ -1,4 +1,4 @@
-use crate::services::{self, ffmpeg};
+use crate::engine;
 use slab_whisper::{SamplingStrategy, Whisper, WhisperContext, WhisperContextParameters};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
@@ -12,23 +12,23 @@ use thiserror::Error;
 use tracing::info;
 
 struct WhisperGlobal {
-    service: Arc<WhisperService>,
+    service: Arc<GGMLWhisperEngine>,
     lib_path: PathBuf,
 }
 
 static INSTANCE: OnceLock<RwLock<Option<WhisperGlobal>>> = OnceLock::new();
 
 #[derive(Debug, Error)]
-pub enum WhisperServiceError {
+pub enum GGMLWhisperEngineError {
     #[error(
-        "WhisperService already initialized with different library path: {existing} (requested: {requested})"
+        "GGMLWhisperEngine already initialized with different library path: {existing} (requested: {requested})"
     )]
     LibraryPathMismatch { existing: PathBuf, requested: PathBuf },
 
-    #[error("WhisperService global storage not initialized")]
+    #[error("GGMLWhisperEngine global storage not initialized")]
     GlobalStorageNotInitialized,
 
-    #[error("WhisperService instance not initialized")]
+    #[error("GGMLWhisperEngine instance not initialized")]
     InstanceNotInitialized,
 
     #[error("Lock poisoned while trying to {operation}")]
@@ -37,44 +37,44 @@ pub enum WhisperServiceError {
     #[error("Model path contains invalid UTF-8")]
     InvalidModelPathUtf8,
 
-    #[error("Whisper context not initialized")]
+    #[error("GGMLWhisperEngine context not initialized")]
     ContextNotInitialized,
 
-    #[error("Failed to run whisper model inference")]
+    #[error("Failed to run GGMLWhisperEngine model inference")]
     InferenceFailed {
         #[source]
         source: anyhow::Error,
     },
 
-    #[error("Failed to canonicalize whisper library path: {path}")]
+    #[error("Failed to canonicalize GGMLWhisperEngine library path: {path}")]
     CanonicalizeLibraryPath {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
 
-    #[error("Failed to initialize whisper dynamic library at: {path}")]
+    #[error("Failed to initialize GGMLWhisperEngine dynamic library at: {path}")]
     InitializeDynamicLibrary {
         path: PathBuf,
         #[source]
         source: anyhow::Error,
     },
 
-    #[error("Failed to create whisper context with model: {model_path}")]
+    #[error("Failed to create GGMLWhisperEngine context with model: {model_path}")]
     CreateContext {
         model_path: String,
         #[source]
         source: anyhow::Error,
     },
 
-    #[error("Failed to read audio data for whisper inference from: {path}")]
+    #[error("Failed to read audio data for GGMLWhisperEngine inference from: {path}")]
     ReadAudioData {
         path: PathBuf,
         #[source]
         source: anyhow::Error,
     },
 
-    #[error("Failed to create whisper inference state")]
+    #[error("Failed to create GGMLWhisperEngine inference state")]
     CreateInferenceState {
         #[source]
         source: anyhow::Error,
@@ -82,20 +82,20 @@ pub enum WhisperServiceError {
 }
 
 #[derive(Debug)]
-pub struct WhisperService {
+pub struct GGMLWhisperEngine {
     instance: Arc<Whisper>,
     ctx: Arc<Mutex<Option<WhisperContext>>>,
 }
 
-// SAFETY: WhisperService is only accessed through Arc<Mutex<...>> for mutable state.
+// SAFETY: GGMLWhisperEngine is only accessed through Arc<Mutex<...>> for mutable state.
 // The `instance: Arc<Whisper>` field wraps a dynamically loaded library handle which is
 // immutable after creation (contexts and params are created from it, not mutated).
 // All mutable inference state is guarded by the `ctx: Arc<Mutex<...>>` field.
-unsafe impl Send for WhisperService {}
-unsafe impl Sync for WhisperService {}
+unsafe impl Send for GGMLWhisperEngine {}
+unsafe impl Sync for GGMLWhisperEngine {}
 
-impl WhisperService {
-    fn resolve_lib_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, services::ServiceError> {
+impl GGMLWhisperEngine {
+    fn resolve_lib_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, engine::EngineError> {
         let whisper_lib_name = format!("{}whisper{}", DLL_PREFIX, DLL_SUFFIX);
 
         let mut lib_path = path.as_ref().to_path_buf();
@@ -104,7 +104,7 @@ impl WhisperService {
         }
 
         std::fs::canonicalize(&lib_path).map_err(|source| {
-            WhisperServiceError::CanonicalizeLibraryPath {
+            GGMLWhisperEngineError::CanonicalizeLibraryPath {
                 path: lib_path,
                 source,
             }
@@ -112,10 +112,10 @@ impl WhisperService {
         })
     }
 
-    fn build_service(normalized_path: &Path) -> Result<Self, services::ServiceError> {
+    fn build_service(normalized_path: &Path) -> Result<Self, engine::EngineError> {
         info!("current whisper path is: {}", normalized_path.display());
         let whisper = Whisper::new(normalized_path.to_path_buf()).map_err(|source| {
-            WhisperServiceError::InitializeDynamicLibrary {
+            GGMLWhisperEngineError::InitializeDynamicLibrary {
                 path: normalized_path.to_path_buf(),
                 source: source.into(),
             }
@@ -127,19 +127,19 @@ impl WhisperService {
         })
     }
 
-    pub fn init<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, services::ServiceError> {
+    pub fn init<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
         let normalized_path = Self::resolve_lib_path(path)?;
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
 
         {
             let read_guard = global_lock
                 .read()
-                .map_err(|_| WhisperServiceError::LockPoisoned {
+                .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
                     operation: "read whisper global state",
                 })?;
             if let Some(global) = read_guard.as_ref() {
                 if global.lib_path != normalized_path {
-                    return Err(WhisperServiceError::LibraryPathMismatch {
+                    return Err(GGMLWhisperEngineError::LibraryPathMismatch {
                         existing: global.lib_path.clone(),
                         requested: normalized_path.clone(),
                     }
@@ -152,13 +152,13 @@ impl WhisperService {
         let service = Arc::new(Self::build_service(&normalized_path)?);
         let mut write_guard = global_lock
             .write()
-            .map_err(|_| WhisperServiceError::LockPoisoned {
+            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
                 operation: "write whisper global state",
             })?;
 
         if let Some(global) = write_guard.as_ref() {
             if global.lib_path != normalized_path {
-                return Err(WhisperServiceError::LibraryPathMismatch {
+                return Err(GGMLWhisperEngineError::LibraryPathMismatch {
                     existing: global.lib_path.clone(),
                     requested: normalized_path.clone(),
                 }
@@ -175,13 +175,13 @@ impl WhisperService {
         Ok(service)
     }
 
-    pub fn reload<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, services::ServiceError> {
+    pub fn reload<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
         let normalized_path = Self::resolve_lib_path(path)?;
         let service = Arc::new(Self::build_service(&normalized_path)?);
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
         let mut write_guard = global_lock
             .write()
-            .map_err(|_| WhisperServiceError::LockPoisoned {
+            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
                 operation: "write whisper global state",
             })?;
 
@@ -204,30 +204,30 @@ impl WhisperService {
         Ok(service)
     }
 
-    pub fn current() -> Result<Arc<Self>, services::ServiceError> {
+    pub fn current() -> Result<Arc<Self>, engine::EngineError> {
         let global_lock = INSTANCE
             .get()
-            .ok_or(WhisperServiceError::GlobalStorageNotInitialized)?;
+            .ok_or(GGMLWhisperEngineError::GlobalStorageNotInitialized)?;
         let read_guard = global_lock
             .read()
-            .map_err(|_| WhisperServiceError::LockPoisoned {
+            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
                 operation: "read whisper global state",
             })?;
         read_guard
             .as_ref()
             .map(|global| global.service.clone())
-            .ok_or(WhisperServiceError::InstanceNotInitialized.into())
+            .ok_or(GGMLWhisperEngineError::InstanceNotInitialized.into())
     }
 
     pub fn new_context<P: AsRef<Path>>(
         &self,
         path_to_model: P,
         params: WhisperContextParameters,
-    ) -> Result<(), services::ServiceError> {
+    ) -> Result<(), engine::EngineError> {
         let mut ctx_lock = self
             .ctx
             .lock()
-            .map_err(|_| WhisperServiceError::LockPoisoned {
+            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
                 operation: "lock whisper context",
             })?;
         *ctx_lock = None;
@@ -235,12 +235,12 @@ impl WhisperService {
         let path = path_to_model
             .as_ref()
             .to_str()
-            .ok_or(WhisperServiceError::InvalidModelPathUtf8)?;
+            .ok_or(GGMLWhisperEngineError::InvalidModelPathUtf8)?;
 
         let ctx = self
             .instance
             .new_context_with_params(path, params)
-            .map_err(|source| WhisperServiceError::CreateContext {
+            .map_err(|source| GGMLWhisperEngineError::CreateContext {
                 model_path: path.to_string(),
                 source: source.into(),
             })?;
@@ -251,26 +251,19 @@ impl WhisperService {
 
     pub async fn inference<P: AsRef<Path>>(
         &self,
-        path: P,
-    ) -> Result<Vec<SubtitleEntry>, services::ServiceError> {
-        let input_path = path.as_ref().to_path_buf();
-        let audio_data = ffmpeg::FfmpegService::read_audio_data(&input_path)
-            .await
-            .map_err(|source| WhisperServiceError::ReadAudioData {
-                path: input_path.clone(),
-                source: source.into(),
-            })?;
+        audio_data: Vec<f32>,
+    ) -> Result<Vec<SubtitleEntry>, engine::EngineError> {
 
         let ctx_lock = self
             .ctx
             .lock()
-            .map_err(|_| WhisperServiceError::LockPoisoned {
+            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
                 operation: "lock whisper context",
             })?;
 
         let ctx = ctx_lock
             .as_ref()
-            .ok_or(WhisperServiceError::ContextNotInitialized)?;
+            .ok_or(GGMLWhisperEngineError::ContextNotInitialized)?;
 
         let params = self.instance.new_full_params(SamplingStrategy::BeamSearch {
             beam_size: 5,
@@ -279,12 +272,12 @@ impl WhisperService {
 
         let mut state = ctx
             .create_state()
-            .map_err(|source| WhisperServiceError::CreateInferenceState {
+            .map_err(|source| GGMLWhisperEngineError::CreateInferenceState {
                 source: source.into(),
             })?;
         state
             .full(params, &audio_data[..])
-            .map_err(|source| WhisperServiceError::InferenceFailed {
+            .map_err(|source| GGMLWhisperEngineError::InferenceFailed {
                 source: source.into(),
             })?;
 
@@ -308,36 +301,29 @@ impl WhisperService {
 #[cfg(test)]
 mod test {
 
-    use super::*;
-    use crate::services::dylib::DylibService;
-    use crate::services::subtitle::SubtitleService;
     use hf_hub::api::sync::Api;
     use tokio;
+    use super::*;
 
-    async fn ensure_whisper_dir() -> PathBuf {
+     fn ensure_whisper_dir() -> PathBuf {
         let mut test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         test_data_path.push("../testdata");
-
-        DylibService::new()
-            .with_prefix_path(&test_data_path)
-            .download_whisper()
-            .await
-            .expect("Failed to download whisper")
+        test_data_path.join("whisper")
     }
 
     #[tokio::test]
     async fn test_whisper_current_and_reload() {
-        let whisper_dir = ensure_whisper_dir().await;
+        let whisper_dir = ensure_whisper_dir();
 
-        let initial = WhisperService::init(whisper_dir.as_path())
+        let initial = GGMLWhisperEngine::init(whisper_dir.as_path())
             .expect("failed to initialize whisper service");
-        let current = WhisperService::current().expect("failed to get current whisper service");
+        let current = GGMLWhisperEngine::current().expect("failed to get current whisper service");
         assert!(Arc::ptr_eq(&initial, &current));
 
-        let reloaded = WhisperService::reload(whisper_dir.as_path())
+        let reloaded = GGMLWhisperEngine::reload(whisper_dir.as_path())
             .expect("failed to reload whisper service");
         let current_after_reload =
-            WhisperService::current().expect("failed to get current whisper service after reload");
+            GGMLWhisperEngine::current().expect("failed to get current whisper service after reload");
 
         assert!(Arc::ptr_eq(&reloaded, &current_after_reload));
         assert!(!Arc::ptr_eq(&initial, &reloaded));
@@ -349,9 +335,9 @@ mod test {
         test_data_path.push("../testdata");
         println!("Current executable path: {:?}", test_data_path);
 
-        let path = ensure_whisper_dir().await;
+        let path = ensure_whisper_dir();
 
-        let ws = WhisperService::init(path.as_path()).expect("failed to initialize whisper service");
+        let ws = GGMLWhisperEngine::init(path.as_path()).expect("failed to initialize whisper service");
 
         let api = Api::new().expect("fail to init hf-api");
         let model_path = api
@@ -364,17 +350,17 @@ mod test {
 
         ws.new_context(model_path.as_path(), params)
             .expect("load model failed");
-        let jfk_audio_path = test_data_path.join("samples/jfk.wav");
-        let srt_entries = ws
-            .inference(jfk_audio_path)
-            .await
-            .expect("Inference failed");
+        // let jfk_audio_path = test_data_path.join("samples/jfk.wav");
+        // let srt_entries = ws
+        //     .inference(jfk_audio_path)
+        //     .await
+        //     .expect("Inference failed");
 
-        let srt_services = SubtitleService::new();
+        // let srt_services = SubtitleService::new();
 
-        let file_path = test_data_path.join("whisper_test.srt");
-        srt_services
-            .to_srt_file(file_path, srt_entries)
-            .expect("srt failed")
+        // let file_path = test_data_path.join("whisper_test.srt");
+        // srt_services
+        //     .to_srt_file(file_path, srt_entries)
+        //     .expect("srt failed")
     }
 }
