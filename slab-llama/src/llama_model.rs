@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::context_params::LlamaContextParams;
 use crate::error::LlamaError;
+use crate::llama_adapter::LlamaLoraAdapter;
 use crate::llama_context::LlamaContext;
 use crate::llama_sampler::SamplerChainBuilder;
 use crate::token::LlamaToken;
@@ -85,6 +86,37 @@ impl LlamaModel {
         } else {
             Ok(LlamaContext {
                 ctx,
+                model: Arc::clone(&self.inner),
+            })
+        }
+    }
+
+    /// Load a LoRA adapter from a file and associate it with this model.
+    ///
+    /// # Arguments
+    /// * `path_lora` – path to the LoRA adapter file (`.gguf` format).
+    ///
+    /// # Precondition
+    /// The underlying `llama_adapter_lora_init` API requires that **all** LoRA
+    /// adapters be loaded **before** any [`LlamaContext`] is created from this
+    /// model (for example, via [`LlamaModel::new_context`]). Calling this
+    /// method after a context has been created for the model is undefined or
+    /// unsupported behavior and may cause failures.
+    ///
+    /// # Errors
+    /// Returns [`LlamaError::LoraAdapterLoadFailed`] if loading fails.
+    pub fn adapter_lora_init(&self, path_lora: &str) -> Result<LlamaLoraAdapter, LlamaError> {
+        let c_path = CString::new(path_lora)?;
+        let adapter = unsafe {
+            self.inner
+                .lib
+                .llama_adapter_lora_init(self.inner.model, c_path.as_ptr())
+        };
+        if adapter.is_null() {
+            Err(LlamaError::LoraAdapterLoadFailed)
+        } else {
+            Ok(LlamaLoraAdapter {
+                adapter,
                 model: Arc::clone(&self.inner),
             })
         }
