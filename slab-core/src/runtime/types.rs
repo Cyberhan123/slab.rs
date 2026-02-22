@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::sync::Arc;
 use thiserror::Error;
@@ -9,8 +10,11 @@ pub type TaskId = u64;
 ///
 /// All variants use `Arc` or value types so that moving a `Payload` between
 /// stages never copies large buffers.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(untagged)]
 pub enum Payload {
+    #[default]
+    None,
     /// Raw bytes (e.g. encoded audio, image data).
     Bytes(Arc<[u8]>),
     /// 32-bit float samples (e.g. PCM audio, embeddings).
@@ -19,8 +23,104 @@ pub enum Payload {
     Text(Arc<str>),
     /// Structured JSON metadata.  Not zero-copy but allowed for small objects.
     Json(serde_json::Value),
-    /// Escape hatch for arbitrary typed data.  Discouraged in core pipelines.
-    Any(Arc<dyn Any + Send + Sync>),
+    /// Escape hatch for arbitrary typed data. Discouraged in core pipelines.
+    #[serde(skip_serializing, skip_deserializing)]
+    Any(#[serde(skip)] Arc<dyn Any + Send + Sync>),
+}
+
+impl Payload {
+    pub fn text(s: impl Into<Arc<str>>) -> Self {
+        Payload::Text(s.into())
+    }
+
+    pub fn bytes(b: impl Into<Arc<[u8]>>) -> Self {
+        Payload::Bytes(b.into())
+    }
+
+    pub fn f32_slice(f: impl Into<Arc<[f32]>>) -> Self {
+        Payload::F32(f.into())
+    }
+
+    pub fn json(j: impl Into<serde_json::Value>) -> Self {
+        Payload::Json(j.into())
+    }
+
+    pub fn to_str_arc(&self) -> Result<Arc<str>, String> {
+        match self {
+            Payload::Text(t) => Ok(Arc::clone(t)),
+            _ => Err(format!("Type error: expected Text variant, got {:?}", self)),
+        }
+    }
+
+    pub fn to_str(&self) -> Result<&str, String> {
+        match self {
+            Payload::Text(t) => Ok(t),
+            _ => Err(format!("Type error: expected Text variant, got {:?}", self)),
+        }
+    }
+
+    pub fn to_string(&self) -> Result<String, String> {
+        match self {
+            Payload::Text(t) => Ok(t.to_string()),
+            _ => Err(format!("Type error: expected Text variant, got {:?}", self)),
+        }
+    }
+
+    pub fn to_f32_arc(&self) -> Result<Arc<[f32]>, String> {
+        match self {
+            Payload::F32(f) => Ok(Arc::clone(f)),
+            _ => Err(format!("Type error: expected F32 variant, got {:?}", self)),
+        }
+    }
+
+    pub fn to_f32_slice(&self) -> Result<&[f32], String> {
+        match self {
+            Payload::F32(f) => Ok(f),
+            _ => Err(format!("Type error: expected F32 variant, got {:?}", self)),
+        }
+    }
+
+    pub fn to_json<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
+        match self {
+            Payload::Json(v) => serde_json::from_value(v.clone())
+                .map_err(|e| format!("JSON Deserialize error: {e}")),
+            _ => Err(format!("Type error: expected Json variant, got {:?}", self)),
+        }
+    }
+
+    pub fn to_bytes(&self) -> Result<bytes::Bytes, String> {
+        match self {
+            Payload::Bytes(b) => Ok(bytes::Bytes::copy_from_slice(b)),
+            _ => Err(format!(
+                "Type error: expected Bytes variant, got {:?}",
+                self
+            )),
+        }
+    }
+}
+
+impl From<Vec<u8>> for Payload {
+    fn from(v: Vec<u8>) -> Self {
+        Payload::Bytes(Arc::from(v))
+    }
+}
+
+impl From<Vec<f32>> for Payload {
+    fn from(v: Vec<f32>) -> Self {
+        Payload::F32(Arc::from(v))
+    }
+}
+
+impl From<&str> for Payload {
+    fn from(s: &str) -> Self {
+        Payload::Text(Arc::from(s))
+    }
+}
+
+impl From<serde_json::Value> for Payload {
+    fn from(v: serde_json::Value) -> Self {
+        Payload::Json(v)
+    }
 }
 
 /// High-level lifecycle state of a task managed by the [`Orchestrator`].

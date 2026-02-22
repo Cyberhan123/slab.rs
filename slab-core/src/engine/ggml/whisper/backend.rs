@@ -54,14 +54,9 @@ impl WhisperWorker {
             ..
         } = req;
 
-        let input_bytes = match &input {
-            Payload::Bytes(b) => bytes::Bytes::copy_from_slice(b),
-            _ => bytes::Bytes::new(),
-        };
-
         match op.name.as_str() {
-            "model.load" => self.handle_load(input_bytes, reply_tx).await,
-            "transcribe" => self.handle_transcribe(input_bytes, reply_tx).await,
+            "model.load" => self.handle_load(input, reply_tx).await,
+            "inference" => self.handle_inference(input, reply_tx).await,
             other => {
                 let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {other}")));
             }
@@ -70,13 +65,15 @@ impl WhisperWorker {
 
     async fn handle_load(
         &mut self,
-        input_bytes: bytes::Bytes,
+        input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let config: LoadConfig = match serde_json::from_slice(&input_bytes) {
+        let config: LoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid model.load config: {e}"
+                )));
                 return;
             }
         };
@@ -97,12 +94,14 @@ impl WhisperWorker {
         }
 
         self.engine = Some(engine);
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+            Arc::from([] as [u8; 0]),
+        )));
     }
 
-    async fn handle_transcribe(
+    async fn handle_inference(
         &self,
-        input_bytes: bytes::Bytes,
+        input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -114,21 +113,22 @@ impl WhisperWorker {
         };
 
         // Input bytes must be packed little-endian f32 PCM samples.
-        let samples = if input_bytes.len() % 4 != 0 {
-            let _ = reply_tx.send(BackendReply::Error(
-                "transcribe input must be f32 PCM bytes (length divisible by 4)".into(),
-            ));
-            return;
-        } else {
-            bytemuck::cast_slice::<u8, f32>(&input_bytes).to_vec()
+        let samples = match input.to_f32_arc() {
+            Ok(b) => b,
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "transcribe input must be f32 PCM bytes: {e}"
+                )));
+
+                return;
+            }
         };
 
-        // Whisper inference is CPU-bound; run in spawn_blocking to avoid blocking
+        // Whisper inference is is CPU/GPU-bound; run in spawn_blocking to avoid blocking
         // the async runtime.
         let result = tokio::task::spawn_blocking(move || {
-            // Use the tokio block_on for the async inference call within spawn_blocking.
             // Since inference holds a std::sync::Mutex, it's safe to call here.
-            tokio::runtime::Handle::current().block_on(engine.inference::<std::path::PathBuf>(samples))
+            engine.inference::<std::path::PathBuf>(&samples)
         })
         .await;
 
