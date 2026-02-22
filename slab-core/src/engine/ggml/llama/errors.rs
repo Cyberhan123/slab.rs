@@ -7,7 +7,7 @@ use tokio::sync::mpsc;
 pub type SessionId = u64;
 
 #[derive(Debug, Error)]
-pub enum LlamaServiceError {
+pub enum GGMLLlamaEngineError {
     #[error(
         "LlamaService already initialized with different library path: {existing} (requested: {requested})"
     )]
@@ -74,6 +74,13 @@ pub enum LlamaServiceError {
     SpawnWorkerFailed {
         #[source]
         source: std::io::Error,
+    },
+
+    #[error("Inference stream error: {message}")]
+    InferenceStreamError {   
+        #[source]
+        source: anyhow::Error,
+        message: String,
     },
 }
 

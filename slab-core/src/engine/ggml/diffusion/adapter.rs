@@ -1,5 +1,5 @@
-use crate::services;
-use slab_diffusion::{Diffusion, SdContextParams, SdImgGenParams, SdImage};
+use crate::engine;
+use slab_diffusion::{Diffusion, SdContextParams, SdImage, SdImgGenParams};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -8,52 +8,55 @@ use thiserror::Error;
 use tracing::info;
 
 struct DiffusionGlobal {
-    service: Arc<DiffusionService>,
+    service: Arc<GGMLDiffusionEngine>,
     lib_path: PathBuf,
 }
 
 static INSTANCE: OnceLock<RwLock<Option<DiffusionGlobal>>> = OnceLock::new();
 
 #[derive(Debug, Error)]
-pub enum DiffusionServiceError {
+pub enum GGMLDiffusionEngineError {
     #[error(
-        "DiffusionService already initialized with different library path: {existing} (requested: {requested})"
+        "GGMLDiffusionEngine already initialized with different library path: {existing} (requested: {requested})"
     )]
-    LibraryPathMismatch { existing: PathBuf, requested: PathBuf },
+    LibraryPathMismatch {
+        existing: PathBuf,
+        requested: PathBuf,
+    },
 
-    #[error("DiffusionService global storage not initialized")]
+    #[error("GGMLDiffusionEngine global storage not initialized")]
     GlobalStorageNotInitialized,
 
-    #[error("DiffusionService instance not initialized")]
+    #[error("GGMLDiffusionEngine instance not initialized")]
     InstanceNotInitialized,
 
     #[error("Lock poisoned while trying to {operation}")]
     LockPoisoned { operation: &'static str },
 
-    #[error("Diffusion context not initialized")]
+    #[error("GGMLDiffusionEngine context not initialized")]
     ContextNotInitialized,
 
-    #[error("Failed to canonicalize diffusion library path: {path}")]
+    #[error("Failed to canonicalize GGMLDiffusionEngine library path: {path}")]
     CanonicalizeLibraryPath {
         path: PathBuf,
         #[source]
         source: std::io::Error,
     },
 
-    #[error("Failed to initialize diffusion dynamic library at: {path}")]
+    #[error("Failed to initialize GGMLDiffusionEngine dynamic library at: {path}")]
     InitializeDynamicLibrary {
         path: PathBuf,
         #[source]
         source: anyhow::Error,
     },
 
-    #[error("Failed to create diffusion context")]
+    #[error("Failed to create GGMLDiffusionEngine context")]
     CreateContext {
         #[source]
         source: anyhow::Error,
     },
 
-    #[error("Failed to run diffusion image generation")]
+    #[error("Failed to run GGMLDiffusionEngine image generation")]
     InferenceFailed {
         #[source]
         source: anyhow::Error,
@@ -61,21 +64,21 @@ pub enum DiffusionServiceError {
 }
 
 #[derive(Debug)]
-pub struct DiffusionService {
+pub struct GGMLDiffusionEngine {
     instance: Arc<Diffusion>,
     ctx: Arc<Mutex<Option<slab_diffusion::SdContext>>>,
 }
 
-// SAFETY: DiffusionService is only accessed through Arc<Mutex<...>> for mutable state.
+// SAFETY: GGMLDiffusionEngine is only accessed through Arc<Mutex<...>> for mutable state.
 // The `instance: Arc<Diffusion>` field wraps a dynamically loaded library handle which is
 // immutable after creation (contexts are created from it, not mutated).
 // All mutable inference state is guarded by the `ctx: Arc<Mutex<...>>` field.
 // See: https://github.com/leejet/stable-diffusion.cpp (README / architecture)
-unsafe impl Send for DiffusionService {}
-unsafe impl Sync for DiffusionService {}
+unsafe impl Send for GGMLDiffusionEngine {}
+unsafe impl Sync for GGMLDiffusionEngine {}
 
-impl DiffusionService {
-    fn resolve_lib_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, services::ServiceError> {
+impl GGMLDiffusionEngine {
+    fn resolve_lib_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, engine::EngineError> {
         let sd_lib_name = format!("{}stable-diffusion{}", DLL_PREFIX, DLL_SUFFIX);
 
         let mut lib_path = path.as_ref().to_path_buf();
@@ -84,7 +87,7 @@ impl DiffusionService {
         }
 
         std::fs::canonicalize(&lib_path).map_err(|source| {
-            DiffusionServiceError::CanonicalizeLibraryPath {
+            GGMLDiffusionEngineError::CanonicalizeLibraryPath {
                 path: lib_path,
                 source,
             }
@@ -92,10 +95,10 @@ impl DiffusionService {
         })
     }
 
-    fn build_service(normalized_path: &Path) -> Result<Self, services::ServiceError> {
+    fn build_service(normalized_path: &Path) -> Result<Self, engine::EngineError> {
         info!("current diffusion path is: {}", normalized_path.display());
         let diffusion = Diffusion::new(normalized_path).map_err(|source| {
-            DiffusionServiceError::InitializeDynamicLibrary {
+            GGMLDiffusionEngineError::InitializeDynamicLibrary {
                 path: normalized_path.to_path_buf(),
                 source: source.into(),
             }
@@ -107,19 +110,20 @@ impl DiffusionService {
         })
     }
 
-    pub fn init<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, services::ServiceError> {
+    pub fn init<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
         let normalized_path = Self::resolve_lib_path(path)?;
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
 
         {
-            let read_guard = global_lock
-                .read()
-                .map_err(|_| DiffusionServiceError::LockPoisoned {
-                    operation: "read diffusion global state",
-                })?;
+            let read_guard =
+                global_lock
+                    .read()
+                    .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
+                        operation: "read diffusion global state",
+                    })?;
             if let Some(global) = read_guard.as_ref() {
                 if global.lib_path != normalized_path {
-                    return Err(DiffusionServiceError::LibraryPathMismatch {
+                    return Err(GGMLDiffusionEngineError::LibraryPathMismatch {
                         existing: global.lib_path.clone(),
                         requested: normalized_path.clone(),
                     }
@@ -130,15 +134,16 @@ impl DiffusionService {
         }
 
         let service = Arc::new(Self::build_service(&normalized_path)?);
-        let mut write_guard = global_lock
-            .write()
-            .map_err(|_| DiffusionServiceError::LockPoisoned {
-                operation: "write diffusion global state",
-            })?;
+        let mut write_guard =
+            global_lock
+                .write()
+                .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
+                    operation: "write diffusion global state",
+                })?;
 
         if let Some(global) = write_guard.as_ref() {
             if global.lib_path != normalized_path {
-                return Err(DiffusionServiceError::LibraryPathMismatch {
+                return Err(GGMLDiffusionEngineError::LibraryPathMismatch {
                     existing: global.lib_path.clone(),
                     requested: normalized_path.clone(),
                 }
@@ -155,15 +160,16 @@ impl DiffusionService {
         Ok(service)
     }
 
-    pub fn reload<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, services::ServiceError> {
+    pub fn reload<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
         let normalized_path = Self::resolve_lib_path(path)?;
         let service = Arc::new(Self::build_service(&normalized_path)?);
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
-        let mut write_guard = global_lock
-            .write()
-            .map_err(|_| DiffusionServiceError::LockPoisoned {
-                operation: "write diffusion global state",
-            })?;
+        let mut write_guard =
+            global_lock
+                .write()
+                .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
+                    operation: "write diffusion global state",
+                })?;
 
         let previous = write_guard
             .as_ref()
@@ -184,39 +190,38 @@ impl DiffusionService {
         Ok(service)
     }
 
-    pub fn current() -> Result<Arc<Self>, services::ServiceError> {
+    pub fn current() -> Result<Arc<Self>, engine::EngineError> {
         let global_lock = INSTANCE
             .get()
-            .ok_or(DiffusionServiceError::GlobalStorageNotInitialized)?;
+            .ok_or(GGMLDiffusionEngineError::GlobalStorageNotInitialized)?;
         let read_guard = global_lock
             .read()
-            .map_err(|_| DiffusionServiceError::LockPoisoned {
+            .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
                 operation: "read diffusion global state",
             })?;
         read_guard
             .as_ref()
             .map(|global| global.service.clone())
-            .ok_or(DiffusionServiceError::InstanceNotInitialized.into())
+            .ok_or(GGMLDiffusionEngineError::InstanceNotInitialized.into())
     }
 
     /// Create (or replace) the Stable Diffusion inference context.
     ///
     /// Loading the model files specified in `params` may take several seconds.
-    pub fn new_context(&self, params: &SdContextParams) -> Result<(), services::ServiceError> {
+    pub fn new_context(&self, params: &SdContextParams) -> Result<(), engine::EngineError> {
         let mut ctx_lock = self
             .ctx
             .lock()
-            .map_err(|_| DiffusionServiceError::LockPoisoned {
+            .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
                 operation: "lock diffusion context",
             })?;
         *ctx_lock = None;
 
-        let ctx = self
-            .instance
-            .new_context(params)
-            .map_err(|source| DiffusionServiceError::CreateContext {
+        let ctx = self.instance.new_context(params).map_err(|source| {
+            GGMLDiffusionEngineError::CreateContext {
                 source: source.into(),
-            })?;
+            }
+        })?;
         *ctx_lock = Some(ctx);
 
         Ok(())
@@ -228,59 +233,52 @@ impl DiffusionService {
     pub fn generate_image(
         &self,
         params: &SdImgGenParams,
-    ) -> Result<Vec<SdImage>, services::ServiceError> {
+    ) -> Result<Vec<SdImage>, engine::EngineError> {
         let ctx_lock = self
             .ctx
             .lock()
-            .map_err(|_| DiffusionServiceError::LockPoisoned {
+            .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
                 operation: "lock diffusion context",
             })?;
 
         let ctx = ctx_lock
             .as_ref()
-            .ok_or(DiffusionServiceError::ContextNotInitialized)?;
+            .ok_or(GGMLDiffusionEngineError::ContextNotInitialized)?;
 
-        ctx.generate_image(params)
-            .map_err(|source| {
-                DiffusionServiceError::InferenceFailed {
-                    source: source.into(),
-                }
-                .into()
-            })
+        ctx.generate_image(params).map_err(|source| {
+            GGMLDiffusionEngineError::InferenceFailed {
+                source: source.into(),
+            }
+            .into()
+        })
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::services::dylib::DylibService;
+
     use std::path::PathBuf;
     use tokio;
 
     async fn ensure_diffusion_dir() -> PathBuf {
         let mut test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         test_data_path.push("../testdata");
-
-        DylibService::new()
-            .with_prefix_path(&test_data_path)
-            .download_diffusion()
-            .await
-            .expect("Failed to download diffusion")
+        test_data_path.join("diffusion")
     }
 
     #[tokio::test]
     async fn test_diffusion_current_and_reload() {
         let diffusion_dir = ensure_diffusion_dir().await;
 
-        let initial = DiffusionService::init(diffusion_dir.as_path())
+        let initial = GGMLDiffusionEngine::init(diffusion_dir.as_path())
             .expect("failed to initialize diffusion service");
-        let current =
-            DiffusionService::current().expect("failed to get current diffusion service");
+        let current = GGMLDiffusionEngine::current().expect("failed to get current diffusion service");
         assert!(Arc::ptr_eq(&initial, &current));
 
-        let reloaded = DiffusionService::reload(diffusion_dir.as_path())
+        let reloaded = GGMLDiffusionEngine::reload(diffusion_dir.as_path())
             .expect("failed to reload diffusion service");
-        let current_after_reload = DiffusionService::current()
+        let current_after_reload = GGMLDiffusionEngine::current()
             .expect("failed to get current diffusion service after reload");
 
         assert!(Arc::ptr_eq(&reloaded, &current_after_reload));
@@ -294,7 +292,7 @@ mod test {
 
         let diffusion_dir = ensure_diffusion_dir().await;
 
-        let ds = DiffusionService::init(diffusion_dir.as_path())
+        let ds = GGMLDiffusionEngine::init(diffusion_dir.as_path())
             .expect("failed to initialize diffusion service");
 
         // Use a tiny FLUX-dev GGUF for the test.  The test is skipped

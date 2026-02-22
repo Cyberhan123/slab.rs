@@ -4,33 +4,33 @@ use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
 
 use super::worker::{InferenceWorkerState, WorkerCommand};
-use super::{LlamaServiceError, SessionId, StreamChunk, StreamHandle};
+use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 
 // ── Master worker ─────────────────────────────────────────────────────────────
 
 /// Commands sent by API callers to the global ingress queue (master worker).
 enum GlobalCommand {
     CreateSession {
-        reply_tx: oneshot::Sender<Result<SessionId, LlamaServiceError>>,
+        reply_tx: oneshot::Sender<Result<SessionId, GGMLLlamaEngineError>>,
     },
     AppendInput {
         session_id: SessionId,
         text_delta: String,
-        reply_tx: oneshot::Sender<Result<(), LlamaServiceError>>,
+        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
     GenerateStream {
         session_id: SessionId,
         max_new_tokens: usize,
         stream_tx: mpsc::Sender<StreamChunk>,
-        reply_tx: oneshot::Sender<Result<(), LlamaServiceError>>,
+        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
     EndSession {
         session_id: SessionId,
-        reply_tx: oneshot::Sender<Result<(), LlamaServiceError>>,
+        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
     Cancel {
         session_id: SessionId,
-        reply_tx: oneshot::Sender<Result<(), LlamaServiceError>>,
+        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
 }
 
@@ -67,7 +67,7 @@ impl MasterWorkerState {
                         .await
                         .is_err()
                     {
-                        let _ = reply_tx.send(Err(LlamaServiceError::WorkerShutdown));
+                        let _ = reply_tx.send(Err(GGMLLlamaEngineError::WorkerShutdown));
                         continue;
                     }
                     match ack_rx.await {
@@ -79,7 +79,7 @@ impl MasterWorkerState {
                             let _ = reply_tx.send(Err(e));
                         }
                         Err(_) => {
-                            let _ = reply_tx.send(Err(LlamaServiceError::WorkerShutdown));
+                            let _ = reply_tx.send(Err(GGMLLlamaEngineError::WorkerShutdown));
                         }
                     }
                 }
@@ -90,7 +90,7 @@ impl MasterWorkerState {
                     reply_tx,
                 } => match self.session_map.get(&session_id) {
                     None => {
-                        let _ = reply_tx.send(Err(LlamaServiceError::SessionNotFound { session_id }));
+                        let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                     }
                     Some(&worker_id) => {
                         let (ack_tx, ack_rx) = oneshot::channel();
@@ -103,7 +103,7 @@ impl MasterWorkerState {
                             .await
                             .is_err()
                         {
-                            let _ = reply_tx.send(Err(LlamaServiceError::WorkerShutdown));
+                            let _ = reply_tx.send(Err(GGMLLlamaEngineError::WorkerShutdown));
                             continue;
                         }
                         match ack_rx.await {
@@ -111,7 +111,7 @@ impl MasterWorkerState {
                                 let _ = reply_tx.send(r);
                             }
                             Err(_) => {
-                                let _ = reply_tx.send(Err(LlamaServiceError::WorkerShutdown));
+                                let _ = reply_tx.send(Err(GGMLLlamaEngineError::WorkerShutdown));
                             }
                         }
                     }
@@ -124,7 +124,7 @@ impl MasterWorkerState {
                     reply_tx,
                 } => match self.session_map.get(&session_id) {
                     None => {
-                        let _ = reply_tx.send(Err(LlamaServiceError::SessionNotFound { session_id }));
+                        let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                     }
                     Some(&worker_id) => {
                         let (ack_tx, ack_rx) = oneshot::channel();
@@ -138,7 +138,7 @@ impl MasterWorkerState {
                             .await
                             .is_err()
                         {
-                            let _ = reply_tx.send(Err(LlamaServiceError::WorkerShutdown));
+                            let _ = reply_tx.send(Err(GGMLLlamaEngineError::WorkerShutdown));
                             continue;
                         }
                         match ack_rx.await {
@@ -146,7 +146,7 @@ impl MasterWorkerState {
                                 let _ = reply_tx.send(r);
                             }
                             Err(_) => {
-                                let _ = reply_tx.send(Err(LlamaServiceError::WorkerShutdown));
+                                let _ = reply_tx.send(Err(GGMLLlamaEngineError::WorkerShutdown));
                             }
                         }
                     }
@@ -157,7 +157,7 @@ impl MasterWorkerState {
                     reply_tx,
                 } => match self.session_map.get(&session_id).copied() {
                     None => {
-                        let _ = reply_tx.send(Err(LlamaServiceError::SessionNotFound { session_id }));
+                        let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                     }
                     Some(worker_id) => {
                         let (ack_tx, ack_rx) = oneshot::channel();
@@ -169,7 +169,7 @@ impl MasterWorkerState {
                             .await
                             .is_err()
                         {
-                            let _ = reply_tx.send(Err(LlamaServiceError::WorkerShutdown));
+                            let _ = reply_tx.send(Err(GGMLLlamaEngineError::WorkerShutdown));
                             continue;
                         }
                         match ack_rx.await {
@@ -183,7 +183,7 @@ impl MasterWorkerState {
                                 let _ = reply_tx.send(Err(e));
                             }
                             Err(_) => {
-                                let _ = reply_tx.send(Err(LlamaServiceError::WorkerShutdown));
+                                let _ = reply_tx.send(Err(GGMLLlamaEngineError::WorkerShutdown));
                             }
                         }
                     }
@@ -194,7 +194,7 @@ impl MasterWorkerState {
                     reply_tx,
                 } => match self.session_map.get(&session_id) {
                     None => {
-                        let _ = reply_tx.send(Err(LlamaServiceError::SessionNotFound { session_id }));
+                        let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                     }
                     Some(&worker_id) => {
                         let (ack_tx, ack_rx) = oneshot::channel();
@@ -206,7 +206,7 @@ impl MasterWorkerState {
                             .await
                             .is_err()
                         {
-                            let _ = reply_tx.send(Err(LlamaServiceError::WorkerShutdown));
+                            let _ = reply_tx.send(Err(GGMLLlamaEngineError::WorkerShutdown));
                             continue;
                         }
                         match ack_rx.await {
@@ -214,7 +214,7 @@ impl MasterWorkerState {
                                 let _ = reply_tx.send(r);
                             }
                             Err(_) => {
-                                let _ = reply_tx.send(Err(LlamaServiceError::WorkerShutdown));
+                                let _ = reply_tx.send(Err(GGMLLlamaEngineError::WorkerShutdown));
                             }
                         }
                     }
@@ -276,7 +276,7 @@ impl LlamaInferenceEngine {
         num_workers: usize,
         model: Arc<LlamaModel>,
         ctx_params: LlamaContextParams,
-    ) -> Result<Self, LlamaServiceError> {
+    ) -> Result<Self, GGMLLlamaEngineError> {
         assert!(num_workers > 0, "num_workers must be > 0");
 
         let mut worker_txs: Vec<mpsc::Sender<WorkerCommand>> = Vec::with_capacity(num_workers);
@@ -287,7 +287,7 @@ impl LlamaInferenceEngine {
 
             let ctx = model
                 .new_context(ctx_params.clone())
-                .map_err(|source| LlamaServiceError::CreateContext {
+                .map_err(|source| GGMLLlamaEngineError::CreateContext {
                     source: source.into(),
                 })?;
 
@@ -297,7 +297,7 @@ impl LlamaInferenceEngine {
             std::thread::Builder::new()
                 .name(format!("llama-worker-{worker_id}"))
                 .spawn(move || worker_state.run())
-                .map_err(|source| LlamaServiceError::SpawnWorkerFailed { source })?;
+                .map_err(|source| GGMLLlamaEngineError::SpawnWorkerFailed { source })?;
         }
 
         let (global_tx, global_rx) = mpsc::channel::<GlobalCommand>(256);
@@ -318,13 +318,13 @@ impl LlamaInferenceEngine {
     /// Create a new inference session.
     ///
     /// Returns the [`SessionId`] to use in subsequent API calls.
-    pub(super) async fn create_session(&self) -> Result<SessionId, LlamaServiceError> {
+    pub(super) async fn create_session(&self) -> Result<SessionId, GGMLLlamaEngineError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
             .send(GlobalCommand::CreateSession { reply_tx })
             .await
-            .map_err(|_| LlamaServiceError::WorkerShutdown)?;
-        reply_rx.await.map_err(|_| LlamaServiceError::WorkerShutdown)?
+            .map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?;
+        reply_rx.await.map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?
     }
 
     /// Append delta text to the session's input buffer.
@@ -336,7 +336,7 @@ impl LlamaInferenceEngine {
         &self,
         session_id: SessionId,
         text_delta: String,
-    ) -> Result<(), LlamaServiceError> {
+    ) -> Result<(), GGMLLlamaEngineError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
             .send(GlobalCommand::AppendInput {
@@ -345,8 +345,8 @@ impl LlamaInferenceEngine {
                 reply_tx,
             })
             .await
-            .map_err(|_| LlamaServiceError::WorkerShutdown)?;
-        reply_rx.await.map_err(|_| LlamaServiceError::WorkerShutdown)?
+            .map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?;
+        reply_rx.await.map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?
     }
 
     /// Start streaming generation for a session.
@@ -372,7 +372,7 @@ impl LlamaInferenceEngine {
         &self,
         session_id: SessionId,
         max_new_tokens: usize,
-    ) -> Result<StreamHandle, LlamaServiceError> {
+    ) -> Result<StreamHandle, GGMLLlamaEngineError> {
         let (stream_tx, stream_rx) = mpsc::channel::<StreamChunk>(64);
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
@@ -383,8 +383,8 @@ impl LlamaInferenceEngine {
                 reply_tx,
             })
             .await
-            .map_err(|_| LlamaServiceError::WorkerShutdown)?;
-        reply_rx.await.map_err(|_| LlamaServiceError::WorkerShutdown)??;
+            .map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?;
+        reply_rx.await.map_err(|_| GGMLLlamaEngineError::WorkerShutdown)??;
         Ok(stream_rx)
     }
 
@@ -392,7 +392,7 @@ impl LlamaInferenceEngine {
     ///
     /// Uses `kv_cache_seq_rm` internally so other sessions' KV data is
     /// unaffected.
-    pub(super) async fn end_session(&self, session_id: SessionId) -> Result<(), LlamaServiceError> {
+    pub(super) async fn end_session(&self, session_id: SessionId) -> Result<(), GGMLLlamaEngineError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
             .send(GlobalCommand::EndSession {
@@ -400,8 +400,8 @@ impl LlamaInferenceEngine {
                 reply_tx,
             })
             .await
-            .map_err(|_| LlamaServiceError::WorkerShutdown)?;
-        reply_rx.await.map_err(|_| LlamaServiceError::WorkerShutdown)?
+            .map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?;
+        reply_rx.await.map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?
     }
 
     /// Cancel the active generation for a session without ending the session.
@@ -417,7 +417,7 @@ impl LlamaInferenceEngine {
     /// to the caller. To continue a conversation from the exact emitted text,
     /// re-append that final text delta with [`Self::append_input`] before
     /// calling [`Self::generate_stream`] again.
-    pub(super) async fn cancel_generate(&self, session_id: SessionId) -> Result<(), LlamaServiceError> {
+    pub(super) async fn cancel_generate(&self, session_id: SessionId) -> Result<(), GGMLLlamaEngineError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
             .send(GlobalCommand::Cancel {
@@ -425,7 +425,7 @@ impl LlamaInferenceEngine {
                 reply_tx,
             })
             .await
-            .map_err(|_| LlamaServiceError::WorkerShutdown)?;
-        reply_rx.await.map_err(|_| LlamaServiceError::WorkerShutdown)?
+            .map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?;
+        reply_rx.await.map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?
     }
 }

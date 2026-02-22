@@ -1,4 +1,5 @@
 /// Parameters for loading a llama model.
+#[derive(Debug, Clone)]
 pub struct LlamaModelParams {
     /// Number of GPU layers to offload (-1 = all).
     pub n_gpu_layers: i32,

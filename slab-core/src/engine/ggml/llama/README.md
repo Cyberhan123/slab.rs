@@ -58,7 +58,7 @@ flowchart TB
 - **`SessionId`** – Opaque session handle (u64).
 - **`StreamChunk`** – Generated tokens or error messages.
 - **`StreamHandle`** – Async stream receiver.
-- **`LlamaServiceError`** – Error enum with variants for init, load, tokenize, and worker failures.
+- **`GGMLLlamaEngineError`** – Error enum with variants for init, load, tokenize, and worker failures.
 
 ## Architecture
 
@@ -183,7 +183,7 @@ API Layer (5 Sessions)
 
 ## Error Handling
 
-All errors flow through `LlamaServiceError`:
+All errors flow through `GGMLLlamaEngineError`:
 - **Init/Load** – Model file not found, initialization failure.
 - **Session** – Session not found, worker shutdown during op.
 - **Tokenize** – Tokenizer failure.
