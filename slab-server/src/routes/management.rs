@@ -74,13 +74,18 @@ pub async fn load_model(
 }
 
 /// Get the current status of a model backend (`GET /api/models/{type}/status`).
+///
+/// Returns whether the backend is registered and ready to accept requests.
+/// **Note:** `status: "ready"` confirms the backend worker is running, but
+/// does **not** guarantee a model file has been loaded.  Use the `load`
+/// endpoint and check for errors to confirm full model readiness.
 #[utoipa::path(
     get,
     path = "/api/models/{model_type}/status",
     tag = "management",
     params(("model_type" = String, Path, description = "One of: llama, whisper, diffusion")),
     responses(
-        (status = 200, description = "Model status", body = ModelStatusResponse),
+        (status = 200, description = "Backend worker is running", body = ModelStatusResponse),
         (status = 400, description = "Unknown model type"),
     )
 )]
@@ -91,6 +96,8 @@ pub async fn model_status(
     let bid = backend_id(&model_type)
         .ok_or_else(|| ServerError::BadRequest(format!("unknown model type: {model_type}")))?;
 
+    // slab-core does not expose a "is model loaded" query; we report "ready"
+    // to indicate the backend worker channel is registered and accepting tasks.
     Ok(Json(ModelStatusResponse {
         backend: bid.to_owned(),
         status:  "ready".into(),

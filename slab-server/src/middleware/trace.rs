@@ -86,10 +86,11 @@ where
             .unwrap_or_else(Uuid::new_v4);
 
         // Inject the trace ID into request headers for downstream handlers.
-        // SAFETY: UUID v4 is hex + hyphens – always a valid HeaderValue.
+        // UUID v4 is ASCII hex + hyphens, which is always a valid HeaderValue.
         req.headers_mut().insert(
             X_TRACE_ID.clone(),
-            HeaderValue::from_str(&trace_id.to_string()).unwrap(),
+            HeaderValue::from_str(&trace_id.to_string())
+                .expect("UUID v4 string is always a valid header value"),
         );
 
         let method  = req.method().to_string();
@@ -133,10 +134,11 @@ where
                 info!(status, latency_ms, "← response");
 
                 // Echo the trace ID back in the response headers.
-                // SAFETY: UUID v4 is hex + hyphens – always a valid HeaderValue.
+                // UUID v4 is ASCII hex + hyphens, which is always a valid HeaderValue.
                 response.headers_mut().insert(
                     X_TRACE_ID.clone(),
-                    HeaderValue::from_str(&trace_id.to_string()).unwrap(),
+                    HeaderValue::from_str(&trace_id.to_string())
+                        .expect("UUID v4 string is always a valid header value"),
                 );
 
                 // Update the database record with the final status and latency.
