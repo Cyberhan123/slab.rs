@@ -85,4 +85,12 @@ pub enum RuntimeError {
     /// Orchestrator submission queue is full.
     #[error("orchestrator queue full (capacity {capacity})")]
     OrchestratorQueueFull { capacity: usize },
+
+    /// `api::init` was not called before using the API.
+    #[error("api runtime not initialized; call api::init first")]
+    NotInitialized,
+
+    /// A timed wait exceeded its deadline.
+    #[error("operation timed out")]
+    Timeout,
 }
