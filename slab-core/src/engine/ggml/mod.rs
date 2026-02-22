@@ -1,7 +1,6 @@
 pub mod whisper;
 pub mod llama;
 pub mod diffusion;
-
 use thiserror::Error;
 
 #[derive(Debug, Error)]
