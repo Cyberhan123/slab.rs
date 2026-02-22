@@ -1,0 +1,29 @@
+[package]
+name = "slab-server"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[build-dependencies]
+slab-libfetch = { workspace = true }
+
+
+[dependencies]
+tokio = { workspace = true }
+slab-libfetch = { workspace = true }
+hf-hub = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+serde = {version="1.0.228",features=["derive"]}
+axum = {version="0.8.8", features=["macros"]}
+tracing-subscriber = "0.3.22"
+tracing = "0.1"
+anyhow = "1.0.101"
+bytemuck = "1.25.0"
+subparse = "0.7.0"
+tracing-test = "0.2.6"
+
