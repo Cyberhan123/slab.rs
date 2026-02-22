@@ -39,6 +39,7 @@ use std::sync::Arc;
 
 mod context_params;
 mod error;
+mod llama_adapter;
 mod llama_batch;
 mod llama_context;
 mod llama_model;
@@ -48,12 +49,16 @@ mod token;
 
 pub use context_params::LlamaContextParams;
 pub use error::LlamaError;
+pub use llama_adapter::LlamaLoraAdapter;
 pub use llama_batch::LlamaBatch;
 pub use llama_context::LlamaContext;
 pub use llama_model::LlamaModel;
 pub use llama_sampler::{LlamaSampler, SamplerChainBuilder};
 pub use model_params::LlamaModelParams;
 pub use token::{LlamaPos, LlamaSeqId, LlamaToken};
+
+/// The type alias for per-sequence state flags (used in `state_seq_*_ext` methods).
+pub type LlamaStateSeqFlags = slab_llama_sys::llama_state_seq_flags;
 
 /// The default seed value for samplers.
 pub const LLAMA_DEFAULT_SEED: u32 = slab_llama_sys::LLAMA_DEFAULT_SEED;

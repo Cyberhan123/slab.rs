@@ -39,4 +39,20 @@ pub enum LlamaError {
     /// Batch is full - cannot add more tokens.
     #[error("batch is full, cannot add more tokens")]
     BatchFull,
+
+    /// Failed to load a LoRA adapter (llama returned null).
+    #[error("failed to load LoRA adapter")]
+    LoraAdapterLoadFailed,
+
+    /// Failed to set LoRA adapters on a context.
+    #[error("failed to set LoRA adapters with code {0}")]
+    SetAdaptersFailed(i32),
+
+    /// A state operation failed (returned 0 bytes).
+    #[error("llama state operation failed")]
+    StateFailed,
+
+    /// A LoRA adapter metadata lookup failed (key not found or index out of range).
+    #[error("LoRA adapter metadata lookup failed")]
+    AdapterMetaFailed,
 }
