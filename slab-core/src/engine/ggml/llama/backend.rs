@@ -67,8 +67,24 @@ impl LlamaWorker {
 
         match op.name.as_str() {
             "model.load" => self.handle_load(input_bytes, reply_tx).await,
-            "generate" => self.handle_generate(input_bytes, reply_tx).await,
-            "generate.stream" => self.handle_generate_stream(input_bytes, reply_tx).await,
+            "generate" => {
+                let max_tokens = op
+                    .options
+                    .get("max_tokens")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize)
+                    .unwrap_or(256);
+                self.handle_generate(input_bytes, max_tokens, reply_tx).await;
+            }
+            "generate.stream" => {
+                let max_tokens = op
+                    .options
+                    .get("max_tokens")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize)
+                    .unwrap_or(256);
+                self.handle_generate_stream(input_bytes, max_tokens, reply_tx).await;
+            }
             other => {
                 let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {other}")));
             }
@@ -119,6 +135,7 @@ impl LlamaWorker {
     async fn handle_generate(
         &self,
         input_bytes: bytes::Bytes,
+        max_tokens: usize,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -137,7 +154,7 @@ impl LlamaWorker {
             }
         };
 
-        match engine.inference(&prompt, 256, None).await {
+        match engine.inference(&prompt, max_tokens, None).await {
             Ok(text) => {
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(
                     text.as_bytes(),
@@ -152,6 +169,7 @@ impl LlamaWorker {
     async fn handle_generate_stream(
         &self,
         input_bytes: bytes::Bytes,
+        max_tokens: usize,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -178,7 +196,7 @@ impl LlamaWorker {
         tokio::spawn(async move {
             use crate::engine::ggml::llama::StreamChunk as LlamaChunk;
 
-            match engine.inference_stream(&prompt, 256, None).await {
+            match engine.inference_stream(&prompt, max_tokens, None).await {
                 Ok((mut llama_rx, sid)) => {
                     while let Some(chunk) = llama_rx.recv().await {
                         let mapped = match chunk {

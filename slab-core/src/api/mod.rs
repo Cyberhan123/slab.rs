@@ -66,7 +66,13 @@ use crate::runtime::orchestrator::Orchestrator;
 use crate::runtime::pipeline::PipelineBuilder;
 use crate::runtime::types::{Payload, RuntimeError, TaskId, TaskStatus};
 
-// ── Global runtime ─────────────────────────────────────────────────────────────
+// ── Timeout constants ──────────────────────────────────────────────────────────
+
+/// Default wait timeout for [`CallBuilder::run_wait`].
+const DEFAULT_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Timeout for waiting until a streaming task reaches `SucceededStreaming`.
+const STREAM_INIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Holds the live runtime state after [`init`] is called.
 pub(crate) struct ApiRuntime {
@@ -240,10 +246,10 @@ impl CallBuilder {
 
     /// Submit the call and block until the result is available.
     ///
-    /// Default timeout is 300 seconds; use
+    /// Default timeout is [`DEFAULT_WAIT_TIMEOUT`] (300 s); use
     /// [`run_wait_timeout`](Self::run_wait_timeout) for a custom deadline.
     pub async fn run_wait(self) -> Result<Bytes, RuntimeError> {
-        self.run_wait_timeout(Duration::from_secs(300)).await
+        self.run_wait_timeout(DEFAULT_WAIT_TIMEOUT).await
     }
 
     /// Submit the call and block until the result is available or `timeout`
@@ -316,7 +322,7 @@ impl CallBuilder {
             .await?;
 
         // Wait for the backend to open the stream (task → SucceededStreaming).
-        tokio::time::timeout(Duration::from_secs(30), async {
+        tokio::time::timeout(STREAM_INIT_TIMEOUT, async {
             loop {
                 match rt.orchestrator.get_status(task_id).await {
                     Err(e) => return Err(e),
@@ -362,14 +368,7 @@ fn payload_to_bytes(p: Payload) -> Result<Bytes, RuntimeError> {
     match p {
         Payload::Bytes(b) => Ok(Bytes::copy_from_slice(&b)),
         Payload::Text(s) => Ok(Bytes::from(s.as_bytes().to_vec())),
-        Payload::F32(v) => {
-            let byte_len = v.len() * std::mem::size_of::<f32>();
-            let src = unsafe {
-                // SAFETY: f32 is valid for any bit pattern; we copy to owned vec.
-                std::slice::from_raw_parts(v.as_ptr() as *const u8, byte_len)
-            };
-            Ok(Bytes::copy_from_slice(src))
-        }
+        Payload::F32(v) => Ok(Bytes::copy_from_slice(bytemuck::cast_slice::<f32, u8>(&v))),
         _ => Err(RuntimeError::GpuStageFailed {
             stage_name: "result".into(),
             message: "unsupported payload type for Bytes conversion".into(),
