@@ -140,9 +140,10 @@ pub async fn transcribe(
                                 }
                             }
                         }
-                        _ => {
-                            let e = "ffmpeg produced misaligned PCM output";
-                            store.update_task_status(&tid, "failed", None, Some(e)).await.ok();
+                        Err(e) => {
+                            let msg = format!("failed to read ffmpeg PCM output: {e}");
+                            warn!(task_id = %tid, error = %e, "failed to read ffmpeg PCM output");
+                            store.update_task_status(&tid, "failed", None, Some(&msg)).await.ok();
                             task_manager.remove(&tid);
                             return;
                         }

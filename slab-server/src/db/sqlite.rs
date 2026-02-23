@@ -167,8 +167,14 @@ impl TaskStore for SqliteStore {
                 input_data,
                 result_data,
                 error_msg,
-                created_at: created_at.parse().unwrap_or_else(|_| chrono::Utc::now()),
-                updated_at: updated_at.parse().unwrap_or_else(|_| chrono::Utc::now()),
+                created_at: created_at.parse().unwrap_or_else(|e: chrono::ParseError| {
+                    tracing::warn!(raw = %created_at, error = %e, "failed to parse task created_at; using now");
+                    Utc::now()
+                }),
+                updated_at: updated_at.parse().unwrap_or_else(|e: chrono::ParseError| {
+                    tracing::warn!(raw = %updated_at, error = %e, "failed to parse task updated_at; using now");
+                    Utc::now()
+                }),
             }
         }))
     }
@@ -201,8 +207,14 @@ impl TaskStore for SqliteStore {
                     input_data,
                     result_data,
                     error_msg,
-                    created_at: created_at.parse().unwrap_or_else(|_| chrono::Utc::now()),
-                    updated_at: updated_at.parse().unwrap_or_else(|_| chrono::Utc::now()),
+                    created_at: created_at.parse().unwrap_or_else(|e: chrono::ParseError| {
+                        tracing::warn!(raw = %created_at, error = %e, "failed to parse task created_at; using now");
+                        Utc::now()
+                    }),
+                    updated_at: updated_at.parse().unwrap_or_else(|e: chrono::ParseError| {
+                        tracing::warn!(raw = %updated_at, error = %e, "failed to parse task updated_at; using now");
+                        Utc::now()
+                    }),
                 }
             })
             .collect())
