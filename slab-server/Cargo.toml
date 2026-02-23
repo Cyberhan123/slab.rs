@@ -8,22 +8,52 @@ keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
+[[bin]]
+name = "slab-server"
+path = "src/main.rs"
+
 [build-dependencies]
 slab-libfetch = { workspace = true }
 
-
 [dependencies]
-tokio = { workspace = true }
+# Core AI runtime
+slab-core     = { workspace = true }
 slab-libfetch = { workspace = true }
-hf-hub = { workspace = true }
-thiserror = { workspace = true }
-serde_json = { workspace = true }
-serde = {version="1.0.228",features=["derive"]}
-axum = {version="0.8.8", features=["macros"]}
-tracing-subscriber = "0.3.22"
-tracing = "0.1"
-anyhow = "1.0.101"
-bytemuck = "1.25.0"
-subparse = "0.7.0"
-tracing-test = "0.2.6"
 
+# Async runtime
+tokio   = { workspace = true }
+futures = { workspace = true }
+bytes   = { workspace = true }
+
+# Web framework + middleware
+axum       = { version = "0.8", features = ["macros", "multipart"] }
+tower      = { version = "0.5" }
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "set-header"] }
+
+# Serialization
+serde      = { workspace = true }
+serde_json = { workspace = true }
+
+# Database (SQLite; swappable via trait)
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono", "uuid"] }
+
+# IDs & time
+uuid   = { workspace = true }
+chrono = { workspace = true }
+
+# OpenAPI / Swagger
+utoipa            = { version = "5", features = ["axum_extras", "uuid", "chrono"] }
+utoipa-axum       = { version = "0.2" }
+utoipa-swagger-ui = { version = "9", features = ["axum"] }
+
+# Logging
+tracing            = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow    = { workspace = true }
+
+# Misc
+base64    = "0.22"
+bytemuck  = "1"
