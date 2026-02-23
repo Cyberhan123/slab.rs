@@ -25,7 +25,6 @@ use tower::{Layer, Service};
 use tracing::{info, info_span, Instrument};
 use uuid::Uuid;
 
-use crate::db::{RequestRecord, RequestStore};
 use crate::state::AppState;
 
 /// HTTP header carrying the per-request trace ID.
@@ -97,9 +96,8 @@ where
                 .expect("UUID v4 string is always a valid header value"),
         );
 
-        let method  = req.method().to_string();
-        let path    = req.uri().path().to_owned();
-        let state   = Arc::clone(&self.state);
+        let method = req.method().to_string();
+        let path = req.uri().path().to_owned();
         let started = Instant::now();
 
         let span = info_span!(
@@ -110,32 +108,12 @@ where
         );
 
         let mut inner = self.inner.clone();
+
         Box::pin(
             async move {
                 info!(%method, %path, "→ request");
 
-                // Insert the request record BEFORE calling the handler so the
-                // row exists in the database when the response-side UPDATE runs.
-                // This prevents the race condition where the UPDATE could arrive
-                // before the INSERT when both were fire-and-forget spawns.
-                if let Err(e) = state.store.insert(RequestRecord {
-                    id:         trace_id,
-                    method:     method.clone(),
-                    path:       path.clone(),
-                    status:     None,
-                    latency_ms: None,
-                    created_at: chrono::Utc::now(),
-                }).await {
-                    tracing::warn!(trace_id = %trace_id, error = %e, "failed to log request");
-                }
-
                 let mut response = inner.call(req).await?;
-
-                let status     = response.status().as_u16();
-                let latency_ms = started.elapsed().as_millis() as i64;
-
-                info!(status, latency_ms, "← response");
-
                 // Echo the trace ID back in the response headers.
                 // UUID v4 is ASCII hex + hyphens, which is always a valid HeaderValue.
                 response.headers_mut().insert(
@@ -144,19 +122,10 @@ where
                         .expect("UUID v4 string is always a valid header value"),
                 );
 
-                // Update the database record with the final status and latency.
-                // Fire-and-forget: the INSERT above guarantees the row exists, so
-                // there is no race condition here.
-                let store_resp = Arc::clone(&state.store);
-                tokio::spawn(async move {
-                    if let Err(e) = store_resp.update_response(trace_id, status as i64, latency_ms).await {
-                        tracing::warn!(
-                            trace_id = %trace_id,
-                            error    = %e,
-                            "failed to update request log"
-                        );
-                    }
-                });
+                let status = response.status().as_u16();
+                let latency_ms = started.elapsed().as_millis() as i64;
+
+                info!(status, latency_ms, "← response");
 
                 Ok(response)
             }

@@ -15,12 +15,19 @@ use chrono::Utc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::db::{TaskRecord, TaskStore};
+use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::state::AppState;
+use utoipa::OpenApi;
 
 /// Maximum allowed audio body size (50 MiB).
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(transcribe),
+)]
+pub struct AudioApi;
 
 /// Register audio routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -132,6 +139,7 @@ pub async fn transcribe(
 
     // Clean up the temp file asynchronously (best effort).
     let tmp_cleanup = tmp_path.clone();
+
     tokio::spawn(async move {
         tokio::fs::remove_file(&tmp_cleanup).await.ok();
     });

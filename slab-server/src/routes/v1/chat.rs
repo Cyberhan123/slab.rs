@@ -9,20 +9,21 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::{Path, State};
+use axum::extract::{ State};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, get, post};
+use axum::routing::{post};
 use axum::{Json, Router};
 use chrono::Utc;
 use futures::StreamExt;
-use serde::{Deserialize, Serialize};
+
 use tracing::{debug, info};
 use uuid::Uuid;
+use utoipa::OpenApi;
 
-use crate::db::{ChatMessage, ChatSession, MessageStore, SessionStore};
+use crate::entities::{ChatMessage, ChatStore};
 use crate::error::ServerError;
-use crate::models::openai::{
+use crate::schemas::v1::chat::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
 };
 use crate::state::AppState;
@@ -30,59 +31,27 @@ use crate::state::AppState;
 /// Maximum allowed prompt length in bytes to prevent memory exhaustion.
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
 
+#[derive(OpenApi)]
+#[openapi(
+    paths(chat_completions),
+    components(schemas(
+        ChatCompletionRequest, 
+        ChatCompletionResponse, 
+        OpenAiMessage, 
+        ChatChoice
+    )),
+)]
+pub struct ChatApi;
+
 /// Register chat-completion routes.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/chat/completions",    post(chat_completions))
-        .route("/chat/sessions",       post(create_session).get(list_sessions))
-        .route("/chat/sessions/{id}",  delete(delete_session))
-        .route("/chat/sessions/{id}/messages", get(list_session_messages))
 }
 
 // ── Request / response types for sessions ─────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct CreateSessionRequest {
-    pub name: Option<String>,
-}
 
-#[derive(Serialize)]
-pub struct SessionResponse {
-    pub id: String,
-    pub name: String,
-    pub state_path: Option<String>,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-#[derive(Serialize)]
-pub struct MessageResponse {
-    pub id: String,
-    pub session_id: String,
-    pub role: String,
-    pub content: String,
-    pub created_at: String,
-}
-
-fn to_session_response(s: ChatSession) -> SessionResponse {
-    SessionResponse {
-        id: s.id,
-        name: s.name,
-        state_path: s.state_path,
-        created_at: s.created_at.to_rfc3339(),
-        updated_at: s.updated_at.to_rfc3339(),
-    }
-}
-
-fn to_message_response(m: ChatMessage) -> MessageResponse {
-    MessageResponse {
-        id: m.id,
-        session_id: m.session_id,
-        role: m.role,
-        content: m.content,
-        created_at: m.created_at.to_rfc3339(),
-    }
-}
 
 // ── Chat completions ──────────────────────────────────────────────────────────
 
@@ -137,13 +106,13 @@ pub async fn chat_completions(
         )));
     }
 
-    debug!(model = %req.model, prompt_len = user_content.len(), stream = req.stream, session_id = ?req.session_id, "chat completion request");
+    debug!(model = %req.model, prompt_len = user_content.len(), stream = req.stream, session_id = ?req.id, "chat completion request");
 
     // Build the full prompt from session history + current message.
-    let prompt = build_prompt(&state, req.session_id.as_deref(), &req.messages).await?;
+    let prompt = build_prompt(&state, req.id.as_deref(), &req.messages).await?;
 
     // Persist the user message if a session is active.
-    if let Some(sid) = req.session_id.as_deref() {
+    if let Some(sid) = req.id.as_deref() {
         state
             .store
             .append_message(ChatMessage {
@@ -162,7 +131,7 @@ pub async fn chat_completions(
     let options = serde_json::json!({
         "max_tokens":  max_tokens,
         "temperature": temperature,
-        "session_key": req.session_id,   // null → no KV-cache pinning
+        "session_key": req.id,   // null → no KV-cache pinning
     });
 
     if req.stream {
@@ -207,7 +176,7 @@ pub async fn chat_completions(
     info!(model = %req.model, output_len = generated.len(), "chat completion done");
 
     // Persist the assistant reply.
-    if let Some(sid) = req.session_id.as_deref() {
+    if let Some(sid) = req.id.as_deref() {
         state
             .store
             .append_message(ChatMessage {
@@ -272,53 +241,13 @@ fn capitalize_role(role: &str) -> &str {
     }
 }
 
-// ── Session handlers ──────────────────────────────────────────────────────────
-
-pub async fn create_session(
-    State(state): State<Arc<AppState>>,
-    Json(req): Json<CreateSessionRequest>,
-) -> Result<Json<SessionResponse>, ServerError> {
-    let now = Utc::now();
-    let session = ChatSession {
-        id: Uuid::new_v4().to_string(),
-        name: req.name.unwrap_or_default(),
-        state_path: None,
-        created_at: now,
-        updated_at: now,
-    };
-    state.store.create_session(session.clone()).await?;
-    Ok(Json(to_session_response(session)))
-}
-
-pub async fn list_sessions(
-    State(state): State<Arc<AppState>>,
-) -> Result<Json<Vec<SessionResponse>>, ServerError> {
-    let sessions = state.store.list_sessions().await?;
-    Ok(Json(sessions.into_iter().map(to_session_response).collect()))
-}
-
-pub async fn delete_session(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, ServerError> {
-    state.store.delete_session(&id).await?;
-    Ok(Json(serde_json::json!({ "deleted": true })))
-}
-
-pub async fn list_session_messages(
-    State(state): State<Arc<AppState>>,
-    Path(id): Path<String>,
-) -> Result<Json<Vec<MessageResponse>>, ServerError> {
-    let messages = state.store.list_messages(&id).await?;
-    Ok(Json(messages.into_iter().map(to_message_response).collect()))
-}
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::models::openai::ChatMessage as OpenAiMsg;
+    use crate::schemas::v1::chat::ChatMessage as OpenAiMsg;
 
     fn make_request(role: &str, content: &str) -> ChatCompletionRequest {
         ChatCompletionRequest {
@@ -327,7 +256,7 @@ mod test {
             stream:      false,
             max_tokens:  None,
             temperature: None,
-            session_id:  None,
+            id:  None,
         }
     }
 

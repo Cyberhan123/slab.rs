@@ -10,3 +10,6 @@ desktop.ini
 /target
 /testdata/whisper
 slab-libfetch/target/
+
+## SQLite Databases
+*.db

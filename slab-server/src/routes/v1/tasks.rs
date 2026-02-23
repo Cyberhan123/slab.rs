@@ -9,68 +9,65 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::{Deserialize, Serialize};
-use tracing::{info, warn};
 
-use crate::db::{TaskRecord, TaskStore};
+use tracing::{info, warn};
+use utoipa::OpenApi;
+
+use crate::entities::TaskStore;
 use crate::error::ServerError;
+use crate::schemas::v1::task::TaskStatusEnumExt;
+use crate::schemas::v1::task::{TaskResponse, TaskTypeQuery};
 use crate::state::AppState;
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(list_tasks, get_task, get_task_result, cancel_task, restart_task),
+    components(schemas(TaskResponse, TaskTypeQuery))
+)]
+pub struct TasksApi;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/tasks",               get(list_tasks))
-        .route("/tasks/{id}",          get(get_task))
-        .route("/tasks/{id}/result",   get(get_task_result))
-        .route("/tasks/{id}/cancel",   post(cancel_task))
-        .route("/tasks/{id}/restart",  post(restart_task))
+        .route("/tasks", get(list_tasks))
+        .route("/tasks/{id}", get(get_task))
+        .route("/tasks/{id}/result", get(get_task_result))
+        .route("/tasks/{id}/cancel", post(cancel_task))
+        .route("/tasks/{id}/restart", post(restart_task))
 }
 
-#[derive(Deserialize)]
-pub struct TaskTypeQuery {
-    #[serde(rename = "type")]
-    pub task_type: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct TaskResponse {
-    pub id: String,
-    pub task_type: String,
-    pub status: String,
-    pub created_at: String,
-    pub updated_at: String,
-}
-
-fn to_response(r: TaskRecord) -> TaskResponse {
-    TaskResponse {
-        id: r.id,
-        task_type: r.task_type,
-        status: r.status,
-        created_at: r.created_at.to_rfc3339(),
-        updated_at: r.updated_at.to_rfc3339(),
-    }
-}
-
-/// Map a slab-core `TaskStatus` to a string status used by the server task API.
-fn map_core_status(view: &slab_core::TaskStatusView) -> &'static str {
-    use slab_core::TaskStatus;
-    match &view.status {
-        TaskStatus::Pending                 => "pending",
-        TaskStatus::Running { .. }          => "running",
-        TaskStatus::Succeeded { .. }        => "succeeded",
-        TaskStatus::SucceededStreaming      => "succeeded",
-        TaskStatus::Failed { .. }           => "failed",
-        TaskStatus::Cancelled               => "cancelled",
-    }
-}
-
+#[utoipa::path(
+    post,
+    path = "/v1/tasks",
+    tag = "tasks",
+        params(TaskTypeQuery),
+    responses(
+        (status = 200, description = "Tasks listed", body = [TaskResponse]),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Backend error"),
+    )
+)]
 pub async fn list_tasks(
     State(state): State<Arc<AppState>>,
     Query(q): Query<TaskTypeQuery>,
 ) -> Result<Json<Vec<TaskResponse>>, ServerError> {
     let records = state.store.list_tasks(q.task_type.as_deref()).await?;
-    Ok(Json(records.into_iter().map(to_response).collect()))
+    Ok(Json(records.into_iter().map(|r| r.to_response()).collect()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/tasks/{id}",
+    tag = "tasks",
+    params(
+        ("id" = String, Path, description = "ID of the task to retrieve")
+    ),
+    responses(
+        (status = 200, description = "Task retrieved", body = TaskResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Task not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
 pub async fn get_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -84,10 +81,11 @@ pub async fn get_task(
     // For slab-core-backed tasks, refresh status from the runtime.
     if let Some(core_tid) = record.core_task_id {
         if let Ok(view) = slab_core::api::status(core_tid as u64).await {
-            let live_status = map_core_status(&view);
+            let live_status = view.status.as_str();
             // Sync DB if status changed.
             if live_status != record.status {
-                state.store
+                state
+                    .store
                     .update_task_status(&id, live_status, None, None)
                     .await
                     .unwrap_or_else(|e| warn!(error = %e, "failed to sync task status"));
@@ -96,9 +94,23 @@ pub async fn get_task(
         }
     }
 
-    Ok(Json(to_response(record)))
+    Ok(Json(record.to_response()))
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/tasks/{id}/result",
+    tag = "tasks",
+    params(
+        ("id" = String, Path, description = "ID of the task to retrieve result for")
+    ),
+    responses(
+        (status = 200, description = "Task result retrieved", body = TaskResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Task not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
 pub async fn get_task_result(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -123,7 +135,8 @@ pub async fn get_task_result(
                     _ => serde_json::Value::Null,
                 };
                 // Persist result in DB for future queries.
-                state.store
+                state
+                    .store
                     .update_task_status(&id, "succeeded", Some(&result_json.to_string()), None)
                     .await
                     .unwrap_or_else(|e| warn!(error = %e, "failed to persist result"));
@@ -155,6 +168,20 @@ pub async fn get_task_result(
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/tasks/{id}/cancel",
+    tag = "tasks",
+    params(
+        ("id" = String, Path, description = "ID of the task to cancel")
+    ),
+    responses(
+        (status = 200, description = "Task cancelled", body = TaskResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Task not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
 pub async fn cancel_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -192,6 +219,20 @@ pub async fn cancel_task(
     Ok(Json(serde_json::json!({ "status": "cancelled" })))
 }
 
+#[utoipa::path(
+    post,
+    path = "/v1/tasks/{id}/restart",
+    tag = "tasks",
+    params(
+        ("id" = String, Path, description = "ID of the task to restart")
+    ),
+    responses(
+        (status = 200, description = "Task restarted", body = TaskResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Task not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
 pub async fn restart_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -202,7 +243,10 @@ pub async fn restart_task(
         .await?
         .ok_or_else(|| ServerError::NotFound(format!("task {id} not found")))?;
 
-    if !matches!(record.status.as_str(), "failed" | "cancelled" | "interrupted") {
+    if !matches!(
+        record.status.as_str(),
+        "failed" | "cancelled" | "interrupted"
+    ) {
         return Err(ServerError::BadRequest(format!(
             "task {id} cannot be restarted (status: {})",
             record.status
@@ -217,7 +261,9 @@ pub async fn restart_task(
                     Ok(v) => v,
                     Err(e) => {
                         warn!(task_id = %id, error = %e, "invalid stored input_data for whisper restart");
-                        return Err(ServerError::Internal(format!("invalid stored input_data: {e}")));
+                        return Err(ServerError::Internal(format!(
+                            "invalid stored input_data: {e}"
+                        )));
                     }
                 };
                 if let Some(tmp_path) = input["tmp_path"].as_str().map(str::to_owned) {
@@ -232,18 +278,31 @@ pub async fn restart_task(
                         // Bytes payload is an empty placeholder that gets replaced by it.
                         let core_result = slab_core::api::backend("ggml.whisper")
                             .op("inference")
-                            .input(slab_core::Payload::Bytes(std::sync::Arc::from([] as [u8; 0])))
+                            .input(slab_core::Payload::Bytes(std::sync::Arc::from(
+                                [] as [u8; 0]
+                            )))
                             .preprocess("ffmpeg.to_pcm_f32le", move |_| {
-                                crate::routes::audio::convert_to_pcm_f32le(&tmp_path)
+                                crate::routes::v1::audio::convert_to_pcm_f32le(&tmp_path)
                             })
                             .run()
                             .await;
                         match core_result {
                             Ok(core_task_id) => {
-                                store.set_core_task_id(&task_id, core_task_id as i64).await.ok();
+                                store
+                                    .set_core_task_id(&task_id, core_task_id as i64)
+                                    .await
+                                    .ok();
                             }
                             Err(e) => {
-                                store.update_task_status(&task_id, "failed", None, Some(&e.to_string())).await.ok();
+                                store
+                                    .update_task_status(
+                                        &task_id,
+                                        "failed",
+                                        None,
+                                        Some(&e.to_string()),
+                                    )
+                                    .await
+                                    .ok();
                             }
                         }
                     });
@@ -254,7 +313,9 @@ pub async fn restart_task(
                     Ok(v) => v,
                     Err(e) => {
                         warn!(task_id = %id, error = %e, "invalid stored input_data for image restart");
-                        return Err(ServerError::Internal(format!("invalid stored input_data: {e}")));
+                        return Err(ServerError::Internal(format!(
+                            "invalid stored input_data: {e}"
+                        )));
                     }
                 };
                 let task_id = id.clone();
@@ -271,10 +332,16 @@ pub async fn restart_task(
                         .await;
                     match core_result {
                         Ok(core_task_id) => {
-                            store.set_core_task_id(&task_id, core_task_id as i64).await.ok();
+                            store
+                                .set_core_task_id(&task_id, core_task_id as i64)
+                                .await
+                                .ok();
                         }
                         Err(e) => {
-                            store.update_task_status(&task_id, "failed", None, Some(&e.to_string())).await.ok();
+                            store
+                                .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
+                                .await
+                                .ok();
                         }
                     }
                 });
@@ -287,31 +354,15 @@ pub async fn restart_task(
                     .update_task_status(&id, "pending", None, None)
                     .await?;
                 info!(task_id = %id, task_type = %record.task_type, "task reset to pending for restart");
-                return Ok(Json(serde_json::json!({ "task_id": id, "status": "pending" })));
+                return Ok(Json(
+                    serde_json::json!({ "task_id": id, "status": "pending" }),
+                ));
             }
         }
     }
 
     info!(task_id = %id, task_type = %record.task_type, "task restarted");
-    Ok(Json(serde_json::json!({ "task_id": id, "status": "running" })))
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn cancellable_statuses() {
-        assert!(matches!("pending", "pending" | "running"));
-        assert!(matches!("running", "pending" | "running"));
-        assert!(!matches!("succeeded", "pending" | "running"));
-    }
-
-    #[test]
-    fn restartable_statuses() {
-        assert!(matches!("failed", "failed" | "cancelled" | "interrupted"));
-        assert!(matches!("cancelled", "failed" | "cancelled" | "interrupted"));
-        assert!(matches!("interrupted", "failed" | "cancelled" | "interrupted"));
-        assert!(!matches!("running", "failed" | "cancelled" | "interrupted"));
-    }
+    Ok(Json(
+        serde_json::json!({ "task_id": id, "status": "running" }),
+    ))
 }

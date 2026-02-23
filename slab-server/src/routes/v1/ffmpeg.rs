@@ -6,31 +6,27 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
 use tracing::{info, warn};
 use uuid::Uuid;
+use utoipa::OpenApi;
 
-use crate::db::{TaskRecord, TaskStore};
+use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::state::AppState;
+use crate::schemas::v1::ffmpeg::{ConvertRequest, ConvertResponse};
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(convert),
+    components(schemas(
+        ConvertRequest, 
+        ConvertResponse, 
+    )),
+)]
+pub struct FfmpegApi;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new().route("/ffmpeg/convert", post(convert))
-}
-
-#[derive(Deserialize)]
-pub struct ConvertRequest {
-    /// Absolute path to the source file.
-    pub source_path: String,
-    /// Desired output format (e.g. `"mp3"`, `"wav"`, `"mp4"`).
-    pub output_format: String,
-    /// Optional output path; defaults to source path with new extension.
-    pub output_path: Option<String>,
-}
-
-#[derive(Serialize)]
-pub struct ConvertResponse {
-    pub task_id: String,
 }
 
 /// Allowlisted output formats for ffmpeg conversions.
@@ -40,6 +36,17 @@ const ALLOWED_OUTPUT_FORMATS: &[&str] = &[
     "avi", "mkv", "mov", "aac", "m4a", "m4v", "f32le", "pcm",
 ];
 
+#[utoipa::path(
+    post,
+    path = "/v1/ffmpeg/convert",
+    tag = "ffmpeg",
+    request_body = ConvertRequest,
+    responses(
+        (status = 200, description = "Conversion task created", body = ConvertResponse),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Backend error"),
+    )
+)]
 pub async fn convert(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ConvertRequest>,

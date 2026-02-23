@@ -5,68 +5,20 @@
 //! - Optional Swagger UI / OpenAPI spec endpoint (disable with `SLAB_ENABLE_SWAGGER=false`)
 //! - Health / heartbeat route
 //! - OpenAI-compatible `/v1` routes
-//! - Model-management `/api` routes (optionally protected by bearer token)
+//! - admin `/admin` routes (optionally protected by bearer token)
 
-mod audio;
-mod chat;
-mod config_api;
-mod ffmpeg_api;
+
 mod health;
-mod images;
-mod management;
-mod tasks;
+mod v1;
+mod admin;
+pub mod doc;
 
 use std::sync::Arc;
-
 use axum::Router;
 use tower_http::cors::{Any, CorsLayer};
-use utoipa::OpenApi;
 use utoipa_swagger_ui::SwaggerUi;
-
 use crate::middleware::TraceLayer;
 use crate::state::AppState;
-
-// ── OpenAPI spec ─────────────────────────────────────────────────────────────
-
-#[derive(OpenApi)]
-#[openapi(
-    info(
-        title = "slab-server",
-        description = "slab-server AI inference API – OpenAI-compatible",
-        version = "0.0.1",
-        contact(name = "slab-rs", url = "https://github.com/Cyberhan123/slab.rs")
-    ),
-    paths(
-        health::get_health,
-        chat::chat_completions,
-        audio::transcribe,
-        images::generate_images,
-        management::load_model,
-        management::model_status,
-    ),
-    components(schemas(
-        crate::models::openai::ChatMessage,
-        crate::models::openai::ChatCompletionRequest,
-        crate::models::openai::ChatChoice,
-        crate::models::openai::ChatCompletionResponse,
-        crate::models::openai::TranscriptionResponse,
-        crate::models::openai::ImageGenerationRequest,
-        crate::models::openai::ImageData,
-        crate::models::openai::ImageGenerationResponse,
-        crate::models::openai::ModelInfo,
-        crate::models::openai::ModelListResponse,
-        crate::models::management::LoadModelRequest,
-        crate::models::management::ModelStatusResponse,
-    )),
-    tags(
-        (name = "health",     description = "Health & heartbeat"),
-        (name = "chat",       description = "OpenAI-compatible chat completions"),
-        (name = "audio",      description = "Speech-to-text transcription"),
-        (name = "images",     description = "Image generation"),
-        (name = "management", description = "Model management"),
-    )
-)]
-pub struct ApiDoc;
 
 // ── Router builder ────────────────────────────────────────────────────────────
 
@@ -95,18 +47,20 @@ pub fn build(state: Arc<AppState>) -> Router {
 
     let api_router = Router::new()
         .merge(health::router())
-        .nest("/v1",  v1_router())
-        .nest("/api", api_mgmt_router());
+        .nest("/v1",  v1::router())
+        .nest("/admin", admin::router());
 
     let mut app = Router::new().merge(api_router);
 
     // ── Swagger UI ────────────────────────────────────────────────────────────
     // Enabled by default; disable with SLAB_ENABLE_SWAGGER=false in production
     // to avoid exposing the API structure to potential attackers.
+    let api_doc = doc::get_docs();
+
     if state.config.enable_swagger {
         app = app.merge(
             SwaggerUi::new("/swagger-ui")
-                .url("/api-docs/openapi.json", ApiDoc::openapi()),
+                .url("/api-docs/openapi.json", api_doc),
         );
     }
 
@@ -117,19 +71,4 @@ pub fn build(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
-/// Routes nested under `/v1` (OpenAI-compatible).
-fn v1_router() -> Router<Arc<AppState>> {
-    Router::new()
-        .merge(chat::router())
-        .merge(audio::router())
-        .merge(images::router())
-}
 
-/// Routes nested under `/api` (management, tasks, config, ffmpeg).
-fn api_mgmt_router() -> Router<Arc<AppState>> {
-    Router::new()
-        .merge(management::router())
-        .merge(tasks::router())
-        .merge(config_api::router())
-        .merge(ffmpeg_api::router())
-}
