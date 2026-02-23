@@ -54,11 +54,11 @@ pub struct Config {
     /// but should be restricted to trusted origins in production.
     pub cors_allowed_origins: Option<String>,
 
-    /// Optional bearer token required for model-management endpoints
-    /// (`/api/models/…`).  Set `SLAB_MANAGEMENT_TOKEN=<secret>` to require
+    /// Optional bearer token required for admin endpoints
+    /// (`/api/models/…`).  Set `SLAB_ADMIN_TOKEN=<secret>` to require
     /// an `Authorization: Bearer <secret>` header on those routes.
-    /// When `None`, management endpoints are unauthenticated.
-    pub management_api_token: Option<String>,
+    /// When `None`, admin endpoints are unauthenticated.
+    pub admin_api_token: Option<String>,
 
     /// Transport mode: `"http"`, `"ipc"`, or `"both"` (default: `"http"`).
     pub transport_mode: String,
@@ -84,7 +84,7 @@ impl Config {
     pub fn from_env() -> Self {
         Self {
             bind_address:        env_or("SLAB_BIND", "0.0.0.0:3000"),
-            database_url:        env_or("SLAB_DATABASE_URL", "sqlite://slab.db"),
+            database_url:        env_or("SLAB_DATABASE_URL", "sqlite://slab.db?mode=rwc"),
             ipc_socket_path:     env_or("SLAB_IPC_SOCKET", "/tmp/slab-server.sock"),
             log_level:           env_or("SLAB_LOG", "info"),
             log_json: std::env::var("SLAB_LOG_JSON")
@@ -96,7 +96,7 @@ impl Config {
                 .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
                 .unwrap_or(true),
             cors_allowed_origins: std::env::var("SLAB_CORS_ORIGINS").ok(),
-            management_api_token: std::env::var("SLAB_MANAGEMENT_TOKEN").ok(),
+            admin_api_token: std::env::var("SLAB_ADMIN_TOKEN").ok(),
             transport_mode:       env_or("SLAB_TRANSPORT", "http"),
             llama_lib_dir:        std::env::var("SLAB_LLAMA_LIB_DIR").ok(),
             whisper_lib_dir:      std::env::var("SLAB_WHISPER_LIB_DIR").ok(),

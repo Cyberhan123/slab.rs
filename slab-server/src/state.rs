@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::config::Config;
-use crate::db::sqlite::SqliteStore;
+use crate::entities::AnyStore;
 
 /// Tracks in-flight tokio task abort handles, keyed by task ID.
 pub struct TaskManager {
@@ -58,7 +58,7 @@ pub struct AppState {
     /// Server configuration (env-derived).
     pub config: Arc<Config>,
     /// Persistent request / response audit store.
-    pub store: Arc<SqliteStore>,
+    pub store: Arc<AnyStore>,
     /// Tracks abort handles for running async tasks.
     pub task_manager: Arc<TaskManager>,
 }

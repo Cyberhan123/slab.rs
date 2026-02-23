@@ -9,12 +9,12 @@
 //! 6. Build the Axum router and start the HTTP server with graceful shutdown.
 
 mod config;
-mod db;
+mod entities;
 mod error;
 mod ipc;
 mod middleware;
-mod models;
 mod routes;
+mod schemas;
 mod state;
 
 use std::net::SocketAddr;
@@ -23,8 +23,8 @@ use std::sync::Arc;
 use tracing::{info, warn};
 
 use crate::config::Config;
-use crate::db::sqlite::SqliteStore;
-use crate::db::TaskStore;
+use crate::entities::{AnyStore, TaskStore};
+
 use crate::state::{AppState, TaskManager};
 
 #[tokio::main]
@@ -64,15 +64,15 @@ async fn main() -> anyhow::Result<()> {
     info!(version = env!("CARGO_PKG_VERSION"), "slab-server starting");
 
     // ── 3. Database ────────────────────────────────────────────────────────────
-    let store = SqliteStore::connect(&cfg.database_url).await?;
+    let store = AnyStore::connect(&cfg.database_url).await?;
     info!(database_url = %cfg.database_url, "database ready");
 
     // ── 4. slab-core AI runtime ────────────────────────────────────────────────
     slab_core::api::init(slab_core::api::Config {
-        queue_capacity:   cfg.queue_capacity,
+        queue_capacity: cfg.queue_capacity,
         backend_capacity: cfg.backend_capacity,
-        llama_lib_dir:    cfg.llama_lib_dir.clone(),
-        whisper_lib_dir:  cfg.whisper_lib_dir.clone(),
+        llama_lib_dir: cfg.llama_lib_dir.clone(),
+        whisper_lib_dir: cfg.whisper_lib_dir.clone(),
         diffusion_lib_dir: cfg.diffusion_lib_dir.clone(),
     })?;
     info!("slab-core runtime initialised");
@@ -84,16 +84,16 @@ async fn main() -> anyhow::Result<()> {
 
     // ── 6. Shared application state ────────────────────────────────────────────
     let state = Arc::new(AppState {
-        config:       Arc::new(cfg.clone()),
-        store:        Arc::new(store.clone()),
+        config: Arc::new(cfg.clone()),
+        store: Arc::new(store.clone()),
         task_manager: Arc::new(TaskManager::new()),
     });
 
     // ── 7. IPC listener ────────────────────────────────────────────────────────
     let transport = cfg.transport_mode.as_str();
-    let ipc_path  = cfg.ipc_socket_path.clone();
-    let ipc_state = Arc::clone(&state);
     if transport == "ipc" || transport == "both" {
+        let ipc_path = cfg.ipc_socket_path.clone();
+        let ipc_state = Arc::clone(&state);
         tokio::spawn(async move {
             if let Err(e) = ipc::serve(ipc_path, ipc_state).await {
                 warn!(error = %e, "IPC listener exited");
@@ -102,12 +102,9 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // ── 8. HTTP server with graceful shutdown ──────────────────────────────────
-    let app      = routes::build(Arc::clone(&state));
-    let addr: SocketAddr = cfg.bind_address.parse()?;
-
-    let ipc_cleanup = cfg.ipc_socket_path.clone();
-
     if transport == "http" || transport == "both" {
+        let app = routes::build(Arc::clone(&state));
+        let addr: SocketAddr = cfg.bind_address.parse()?;
         let listener = tokio::net::TcpListener::bind(addr).await?;
         info!(%addr, "HTTP server listening");
         axum::serve(listener, app)
@@ -124,12 +121,15 @@ async fn main() -> anyhow::Result<()> {
     }
 
     // Clean up the IPC socket file so the next startup can bind immediately.
-    if let Err(e) = tokio::fs::remove_file(&ipc_cleanup).await {
-        warn!(
-            path = %ipc_cleanup,
-            error = %e,
-            "failed to remove IPC socket file on shutdown (may not exist)"
-        );
+    if transport == "ipc" || transport == "both" {
+        let ipc_cleanup = cfg.ipc_socket_path.clone();
+        if let Err(e) = tokio::fs::remove_file(&ipc_cleanup).await {
+            warn!(
+                path = %ipc_cleanup,
+                error = %e,
+                "failed to remove IPC socket file on shutdown (may not exist)"
+            );
+        }
     }
 
     info!("slab-server stopped");
@@ -148,8 +148,10 @@ async fn shutdown_signal() {
     let terminate = async {
         use tokio::signal::unix::{signal, SignalKind};
         match signal(SignalKind::terminate()) {
-            Ok(mut s) => { s.recv().await; }
-            Err(e)    => warn!(error = %e, "failed to install SIGTERM handler"),
+            Ok(mut s) => {
+                s.recv().await;
+            }
+            Err(e) => warn!(error = %e, "failed to install SIGTERM handler"),
         }
     };
 

@@ -3,5 +3,6 @@
 //! Re-exports the trace module and the [`TraceLayer`] type.
 
 pub mod trace;
+pub mod auth;
 
 pub use trace::TraceLayer;

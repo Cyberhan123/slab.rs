@@ -12,10 +12,11 @@ use axum::{Json, Router};
 use chrono::Utc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
+use utoipa::OpenApi;
 
-use crate::db::{TaskRecord, TaskStore};
+use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
-use crate::models::openai::ImageGenerationRequest;
+use crate::schemas::v1::images::ImageGenerationRequest;
 use crate::state::AppState;
 
 /// Maximum allowed prompt length in bytes.
@@ -26,6 +27,15 @@ const MAX_IMAGES_PER_REQUEST: u32 = 10;
 
 /// Accepted image size strings.
 const VALID_SIZES: &[&str] = &["256x256", "512x512", "1024x1024"];
+
+#[derive(OpenApi)]
+#[openapi(
+    paths(generate_images),
+    components(schemas(
+        ImageGenerationRequest, 
+    )),
+)]
+pub struct ImagesApi;
 
 /// Register image generation routes.
 pub fn router() -> Router<Arc<AppState>> {
