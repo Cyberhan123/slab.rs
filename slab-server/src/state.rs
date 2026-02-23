@@ -24,25 +24,30 @@ impl TaskManager {
     }
 
     pub fn insert(&self, id: impl Into<String>, handle: tokio::task::AbortHandle) {
-        if let Ok(mut map) = self.handles.lock() {
-            map.insert(id.into(), handle);
+        match self.handles.lock() {
+            Ok(mut map) => { map.insert(id.into(), handle); }
+            Err(e) => tracing::warn!(error = %e, "TaskManager mutex poisoned on insert; handle leaked"),
         }
     }
 
     /// Cancel and remove a task.  Returns `true` if the handle was found.
     pub fn cancel(&self, id: &str) -> bool {
-        if let Ok(mut map) = self.handles.lock() {
-            if let Some(h) = map.remove(id) {
-                h.abort();
-                return true;
+        match self.handles.lock() {
+            Ok(mut map) => {
+                if let Some(h) = map.remove(id) {
+                    h.abort();
+                    return true;
+                }
             }
+            Err(e) => tracing::warn!(error = %e, "TaskManager mutex poisoned on cancel"),
         }
         false
     }
 
     pub fn remove(&self, id: &str) {
-        if let Ok(mut map) = self.handles.lock() {
-            map.remove(id);
+        match self.handles.lock() {
+            Ok(mut map) => { map.remove(id); }
+            Err(e) => tracing::warn!(error = %e, "TaskManager mutex poisoned on remove"),
         }
     }
 }

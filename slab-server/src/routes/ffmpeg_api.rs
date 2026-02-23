@@ -52,6 +52,13 @@ pub async fn convert(
             "output_format must not be empty".into(),
         ));
     }
+    // Verify the source file exists and is readable before accepting the task.
+    if !tokio::fs::try_exists(&req.source_path).await.unwrap_or(false) {
+        return Err(ServerError::BadRequest(format!(
+            "source_path '{}' does not exist or is not accessible",
+            req.source_path
+        )));
+    }
 
     let task_id = Uuid::new_v4().to_string();
     let now = Utc::now();
