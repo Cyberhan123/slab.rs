@@ -125,6 +125,87 @@ pub struct ReloadLibRequest {
 
 fn default_workers() -> u32 { 1 }
 
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+/// Shared logic for libfetch-backed download tasks (models and libraries).
+///
+/// Both `download_model` and `download_lib` follow identical patterns:
+/// validate input, build an asset-name closure specific to the artifact type,
+/// and run `VersionApi::install` in a background task.
+async fn run_libfetch_download(
+    store: Arc<crate::db::sqlite::SqliteStore>,
+    task_manager: Arc<crate::state::TaskManager>,
+    tid: String,
+    input_data: String,
+    default_asset_fn: Box<dyn Fn(&str) -> String + Send + 'static>,
+) {
+    store.update_task_status(&tid, "running", None, None).await.ok();
+
+    let input: serde_json::Value = serde_json::from_str(&input_data).unwrap_or_default();
+    let owner       = input["owner"].as_str().unwrap_or("").to_owned();
+    let repo        = input["repo"].as_str().unwrap_or("").to_owned();
+    let tag         = input["tag"].as_str().map(str::to_owned);
+    let target_path = input["target_path"].as_str().unwrap_or("").to_owned();
+    let asset_name  = input["asset_name"].as_str().map(str::to_owned);
+
+    if owner.is_empty() || repo.is_empty() {
+        store
+            .update_task_status(&tid, "failed", None, Some("owner and repo are required"))
+            .await
+            .ok();
+        task_manager.remove(&tid);
+        return;
+    }
+
+    let target_dir = match std::path::Path::new(&target_path).parent() {
+        Some(p) => p.to_owned(),
+        None => {
+            store
+                .update_task_status(
+                    &tid,
+                    "failed",
+                    None,
+                    Some("invalid target_path: no parent directory"),
+                )
+                .await
+                .ok();
+            task_manager.remove(&tid);
+            return;
+        }
+    };
+
+    let repo_full = format!("{owner}/{repo}");
+    let api = slab_libfetch::Api::new()
+        .set_install_dir(&target_dir)
+        .repo(repo_full);
+    let version_api = match tag.as_deref() {
+        Some(t) => api.version(t),
+        None    => api.latest(),
+    };
+
+    let asset_fn: Box<dyn Fn(&str) -> String + Send> = match asset_name {
+        Some(name) => Box::new(move |_| name.clone()),
+        None       => default_asset_fn,
+    };
+
+    match version_api.install(asset_fn).await {
+        Ok(path) => {
+            let result_json = serde_json::json!({ "path": path }).to_string();
+            store
+                .update_task_status(&tid, "succeeded", Some(&result_json), None)
+                .await
+                .ok();
+        }
+        Err(e) => {
+            store
+                .update_task_status(&tid, "failed", None, Some(&e.to_string()))
+                .await
+                .ok();
+        }
+    }
+    task_manager.remove(&tid);
+}
+
 // ── Handlers ──────────────────────────────────────────────────────────────────
 
 /// Load (or hot-reload) a model (`POST /api/models/{type}/load`).
@@ -349,69 +430,13 @@ pub async fn download_model(
     let task_manager = Arc::clone(&state.task_manager);
     let tid = task_id.clone();
 
-    let join = tokio::spawn(async move {
-        store.update_task_status(&tid, "running", None, None).await.ok();
-
-        let input: serde_json::Value = serde_json::from_str(&input_data).unwrap_or_default();
-        let owner = input["owner"].as_str().unwrap_or("").to_owned();
-        let repo  = input["repo"].as_str().unwrap_or("").to_owned();
-        let tag   = input["tag"].as_str().map(str::to_owned);
-        let target_path = input["target_path"].as_str().unwrap_or("").to_owned();
-        let asset_name = input["asset_name"].as_str().map(str::to_owned);
-
-        if owner.is_empty() || repo.is_empty() {
-            store
-                .update_task_status(&tid, "failed", None, Some("owner and repo are required"))
-                .await
-                .ok();
-            task_manager.remove(&tid);
-            return;
-        }
-
-        let target_dir = match std::path::Path::new(&target_path).parent() {
-            Some(p) => p.to_owned(),
-            None => {
-                store
-                    .update_task_status(&tid, "failed", None, Some("invalid target_path: no parent directory"))
-                    .await
-                    .ok();
-                task_manager.remove(&tid);
-                return;
-            }
-        };
-
-        let repo_full = format!("{owner}/{repo}");
-        let api = slab_libfetch::Api::new()
-            .set_install_dir(&target_dir)
-            .repo(repo_full);
-        let version_api = match tag.as_deref() {
-            Some(t) => api.version(t),
-            None    => api.latest(),
-        };
-
-        let asset_fn: Box<dyn Fn(&str) -> String + Send> = match asset_name {
-            Some(name) => Box::new(move |_| name.clone()),
-            None => Box::new(|v: &str| format!("model-{v}.gguf")),
-        };
-
-        let result = version_api.install(asset_fn).await;
-        match result {
-            Ok(path) => {
-                let result_json = serde_json::json!({ "path": path }).to_string();
-                store
-                    .update_task_status(&tid, "succeeded", Some(&result_json), None)
-                    .await
-                    .ok();
-            }
-            Err(e) => {
-                store
-                    .update_task_status(&tid, "failed", None, Some(&e.to_string()))
-                    .await
-                    .ok();
-            }
-        }
-        task_manager.remove(&tid);
-    });
+    let join = tokio::spawn(run_libfetch_download(
+        store,
+        task_manager,
+        tid,
+        input_data,
+        Box::new(|v: &str| format!("model-{v}.gguf")),
+    ));
 
     state.task_manager.insert(task_id.clone(), join.abort_handle());
     Ok(Json(serde_json::json!({ "task_id": task_id })))
@@ -455,69 +480,13 @@ pub async fn download_lib(
     let task_manager = Arc::clone(&state.task_manager);
     let tid = task_id.clone();
 
-    let join = tokio::spawn(async move {
-        store.update_task_status(&tid, "running", None, None).await.ok();
-
-        let input: serde_json::Value = serde_json::from_str(&input_data).unwrap_or_default();
-        let owner = input["owner"].as_str().unwrap_or("").to_owned();
-        let repo  = input["repo"].as_str().unwrap_or("").to_owned();
-        let tag   = input["tag"].as_str().map(str::to_owned);
-        let target_path = input["target_path"].as_str().unwrap_or("").to_owned();
-        let asset_name = input["asset_name"].as_str().map(str::to_owned);
-
-        if owner.is_empty() || repo.is_empty() {
-            store
-                .update_task_status(&tid, "failed", None, Some("owner and repo are required"))
-                .await
-                .ok();
-            task_manager.remove(&tid);
-            return;
-        }
-
-        let target_dir = match std::path::Path::new(&target_path).parent() {
-            Some(p) => p.to_owned(),
-            None => {
-                store
-                    .update_task_status(&tid, "failed", None, Some("invalid target_path: no parent directory"))
-                    .await
-                    .ok();
-                task_manager.remove(&tid);
-                return;
-            }
-        };
-
-        let repo_full = format!("{owner}/{repo}");
-        let api = slab_libfetch::Api::new()
-            .set_install_dir(&target_dir)
-            .repo(repo_full);
-        let version_api = match tag.as_deref() {
-            Some(t) => api.version(t),
-            None    => api.latest(),
-        };
-
-        let asset_fn: Box<dyn Fn(&str) -> String + Send> = match asset_name {
-            Some(name) => Box::new(move |_| name.clone()),
-            None => Box::new(|v: &str| format!("lib-{v}.so")),
-        };
-
-        let result = version_api.install(asset_fn).await;
-        match result {
-            Ok(path) => {
-                let result_json = serde_json::json!({ "path": path }).to_string();
-                store
-                    .update_task_status(&tid, "succeeded", Some(&result_json), None)
-                    .await
-                    .ok();
-            }
-            Err(e) => {
-                store
-                    .update_task_status(&tid, "failed", None, Some(&e.to_string()))
-                    .await
-                    .ok();
-            }
-        }
-        task_manager.remove(&tid);
-    });
+    let join = tokio::spawn(run_libfetch_download(
+        store,
+        task_manager,
+        tid,
+        input_data,
+        Box::new(|v: &str| format!("lib-{v}.so")),
+    ));
 
     state.task_manager.insert(task_id.clone(), join.abort_handle());
     Ok(Json(serde_json::json!({ "task_id": task_id })))

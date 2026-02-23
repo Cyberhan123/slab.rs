@@ -18,6 +18,15 @@ use crate::state::{AppState, TaskManager};
 /// Maximum allowed audio body size (50 MiB).
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
 
+/// Cast aligned byte slice to f32 samples, returning `None` if length is not a multiple of 4.
+fn try_cast_f32(bytes: &[u8]) -> Option<Vec<f32>> {
+    if bytes.len() % 4 == 0 {
+        Some(bytemuck::cast_slice::<u8, f32>(bytes).to_vec())
+    } else {
+        None
+    }
+}
+
 /// Register audio routes.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new().route("/audio/transcriptions", post(transcribe))
@@ -100,8 +109,8 @@ pub async fn transcribe(
             }
         };
 
-        let samples: Vec<f32> = if audio_bytes.len() % 4 == 0 {
-            bytemuck::cast_slice::<u8, f32>(&audio_bytes).to_vec()
+        let samples: Vec<f32> = if let Some(s) = try_cast_f32(&audio_bytes) {
+            s
         } else {
             // Attempt ffmpeg conversion to PCM f32-le.
             // Whisper requires 16 kHz mono f32 PCM input.
@@ -117,8 +126,19 @@ pub async fn transcribe(
             match ffmpeg_result {
                 Ok(out) if out.status.success() => {
                     match tokio::fs::read(&pcm_path).await {
-                        Ok(pcm_bytes) if pcm_bytes.len() % 4 == 0 => {
-                            bytemuck::cast_slice::<u8, f32>(&pcm_bytes).to_vec()
+                        Ok(pcm_bytes) => {
+                            match try_cast_f32(&pcm_bytes) {
+                                Some(s) => s,
+                                None => {
+                                    let e = format!(
+                                        "ffmpeg produced misaligned PCM output ({} bytes, not a multiple of 4)",
+                                        pcm_bytes.len()
+                                    );
+                                    store.update_task_status(&tid, "failed", None, Some(&e)).await.ok();
+                                    task_manager.remove(&tid);
+                                    return;
+                                }
+                            }
                         }
                         _ => {
                             let e = "ffmpeg produced misaligned PCM output";
