@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{body::Body, Json, Router};
 use serde::Deserialize;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::db::{TaskRecord, TaskStore};
 use crate::error::ServerError;
@@ -141,7 +141,15 @@ async fn run_libfetch_download(
 ) {
     store.update_task_status(&tid, "running", None, None).await.ok();
 
-    let input: serde_json::Value = serde_json::from_str(&input_data).unwrap_or_default();
+    let input: serde_json::Value = match serde_json::from_str(&input_data) {
+        Ok(v) => v,
+        Err(e) => {
+            warn!(task_id = %tid, error = %e, "invalid stored input_data for download task");
+            store.update_task_status(&tid, "failed", None, Some(&format!("invalid stored input_data: {e}"))).await.ok();
+            task_manager.remove(&tid);
+            return;
+        }
+    };
     let owner       = input["owner"].as_str().unwrap_or("").to_owned();
     let repo        = input["repo"].as_str().unwrap_or("").to_owned();
     let tag         = input["tag"].as_str().map(str::to_owned);
@@ -421,6 +429,7 @@ pub async fn download_model(
             input_data: Some(input_data.clone()),
             result_data: None,
             error_msg: None,
+            core_task_id: None,
             created_at: now,
             updated_at: now,
         })
@@ -471,6 +480,7 @@ pub async fn download_lib(
             input_data: Some(input_data.clone()),
             result_data: None,
             error_msg: None,
+            core_task_id: None,
             created_at: now,
             updated_at: now,
         })
@@ -485,7 +495,14 @@ pub async fn download_lib(
         task_manager,
         tid,
         input_data,
-        Box::new(|version: &str| format!("lib-{version}.so")),
+        Box::new(|version: &str| {
+            let ext = match std::env::consts::OS {
+                "macos"   => "dylib",
+                "windows" => "dll",
+                _         => "so",
+            };
+            format!("lib-{version}.{ext}")
+        }),
     ));
 
     state.task_manager.insert(task_id.clone(), join.abort_handle());

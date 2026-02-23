@@ -1,6 +1,10 @@
 //! OpenAI-compatible chat-completion routes.
 //!
 //! Delegates to the `ggml.llama` backend in slab-core.
+//! When a `session_id` is provided in the request, the conversation history
+//! is loaded from the database and prepended to the prompt.  The session's
+//! llama KV-cache is preserved between turns via a `session_key` option
+//! passed to the backend.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -8,7 +12,7 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{delete, post};
+use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use futures::StreamExt;
@@ -16,10 +20,10 @@ use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 use uuid::Uuid;
 
-use crate::db::{ChatSession, SessionStore};
+use crate::db::{ChatMessage, ChatSession, MessageStore, SessionStore};
 use crate::error::ServerError;
 use crate::models::openai::{
-    ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage,
+    ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
 };
 use crate::state::AppState;
 
@@ -32,6 +36,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/chat/completions",    post(chat_completions))
         .route("/chat/sessions",       post(create_session).get(list_sessions))
         .route("/chat/sessions/{id}",  delete(delete_session))
+        .route("/chat/sessions/{id}/messages", get(list_session_messages))
 }
 
 // ── Request / response types for sessions ─────────────────────────────────────
@@ -50,6 +55,15 @@ pub struct SessionResponse {
     pub updated_at: String,
 }
 
+#[derive(Serialize)]
+pub struct MessageResponse {
+    pub id: String,
+    pub session_id: String,
+    pub role: String,
+    pub content: String,
+    pub created_at: String,
+}
+
 fn to_session_response(s: ChatSession) -> SessionResponse {
     SessionResponse {
         id: s.id,
@@ -60,11 +74,23 @@ fn to_session_response(s: ChatSession) -> SessionResponse {
     }
 }
 
+fn to_message_response(m: ChatMessage) -> MessageResponse {
+    MessageResponse {
+        id: m.id,
+        session_id: m.session_id,
+        role: m.role,
+        content: m.content,
+        created_at: m.created_at.to_rfc3339(),
+    }
+}
+
 // ── Chat completions ──────────────────────────────────────────────────────────
 
 /// OpenAI chat completions (`POST /v1/chat/completions`).
 ///
 /// When `stream: true`, the response is streamed token-by-token using SSE.
+/// When `session_id` is provided, conversation history is loaded from the DB
+/// and the llama KV-cache is preserved between turns.
 #[utoipa::path(
     post,
     path = "/v1/chat/completions",
@@ -77,11 +103,11 @@ fn to_session_response(s: ChatSession) -> SessionResponse {
     )
 )]
 pub async fn chat_completions(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
-    // Use the last user-role message as the prompt.
-    let prompt = req
+    // Use the last user-role message as the current prompt.
+    let user_content = req
         .messages
         .iter()
         .rev()
@@ -89,10 +115,10 @@ pub async fn chat_completions(
         .map(|m| m.content.clone())
         .ok_or_else(|| ServerError::BadRequest("no user message found".into()))?;
 
-    if prompt.len() > MAX_PROMPT_BYTES {
+    if user_content.len() > MAX_PROMPT_BYTES {
         return Err(ServerError::BadRequest(format!(
             "prompt too large ({} bytes); maximum is {} bytes",
-            prompt.len(),
+            user_content.len(),
             MAX_PROMPT_BYTES,
         )));
     }
@@ -111,16 +137,39 @@ pub async fn chat_completions(
         )));
     }
 
-    debug!(model = %req.model, prompt_len = prompt.len(), stream = req.stream, "chat completion request");
+    debug!(model = %req.model, prompt_len = user_content.len(), stream = req.stream, session_id = ?req.session_id, "chat completion request");
+
+    // Build the full prompt from session history + current message.
+    let prompt = build_prompt(&state, req.session_id.as_deref(), &req.messages).await?;
+
+    // Persist the user message if a session is active.
+    if let Some(sid) = req.session_id.as_deref() {
+        state
+            .store
+            .append_message(ChatMessage {
+                id: Uuid::new_v4().to_string(),
+                session_id: sid.to_owned(),
+                role: "user".into(),
+                content: user_content.clone(),
+                created_at: Utc::now(),
+            })
+            .await
+            .unwrap_or_else(|e| tracing::warn!(error = %e, "failed to persist user message"));
+    }
+
+    // Build the options payload; include session_key so the backend can reuse
+    // the llama KV-cache across turns in the same session.
+    let options = serde_json::json!({
+        "max_tokens":  max_tokens,
+        "temperature": temperature,
+        "session_key": req.session_id,   // null → no KV-cache pinning
+    });
 
     if req.stream {
         let backend_stream = slab_core::api::backend("ggml.llama")
             .op("inference.stream")
             .input(slab_core::Payload::Text(std::sync::Arc::from(prompt.as_str())))
-            .options(slab_core::Payload::Json(serde_json::json!({
-                "max_tokens":  max_tokens,
-                "temperature": temperature,
-            })))
+            .options(slab_core::Payload::Json(options))
             .stream()
             .await
             .map_err(ServerError::Runtime)?;
@@ -136,16 +185,18 @@ pub async fn chat_completions(
             Ok::<Event, Infallible>(Event::default().data(data))
         });
 
+        // Persisting the assistant reply for streaming sessions would require
+        // collecting the full stream before returning.  Streaming callers can
+        // use `GET /v1/chat/sessions/{id}/messages` to view history from
+        // non-streaming turns.
+
         return Ok(Sse::new(sse_stream).into_response());
     }
 
     let result_bytes = slab_core::api::backend("ggml.llama")
         .op("inference")
         .input(slab_core::Payload::Text(std::sync::Arc::from(prompt.as_str())))
-        .options(slab_core::Payload::Json(serde_json::json!({
-            "max_tokens":  max_tokens,
-            "temperature": temperature,
-        })))
+        .options(slab_core::Payload::Json(options))
         .run_wait()
         .await
         .map_err(ServerError::Runtime)?;
@@ -155,6 +206,21 @@ pub async fn chat_completions(
 
     info!(model = %req.model, output_len = generated.len(), "chat completion done");
 
+    // Persist the assistant reply.
+    if let Some(sid) = req.session_id.as_deref() {
+        state
+            .store
+            .append_message(ChatMessage {
+                id: Uuid::new_v4().to_string(),
+                session_id: sid.to_owned(),
+                role: "assistant".into(),
+                content: generated.clone(),
+                created_at: Utc::now(),
+            })
+            .await
+            .unwrap_or_else(|e| tracing::warn!(error = %e, "failed to persist assistant message"));
+    }
+
     let resp = ChatCompletionResponse {
         id:      format!("chatcmpl-{}", Uuid::new_v4()),
         object:  "chat.completion".into(),
@@ -162,12 +228,48 @@ pub async fn chat_completions(
         model:   req.model,
         choices: vec![ChatChoice {
             index:         0,
-            message:       ChatMessage { role: "assistant".into(), content: generated },
+            message:       OpenAiMessage { role: "assistant".into(), content: generated },
             finish_reason: "stop".into(),
         }],
     };
 
     Ok(Json(resp).into_response())
+}
+
+/// Build the full prompt string from session history and the current messages.
+///
+/// If `session_id` is provided, loads all previous messages from DB and
+/// prepends them.  The format is a simple `Role: content\n` concatenation,
+/// consistent with how many chat models expect multi-turn context.
+async fn build_prompt(
+    state: &AppState,
+    session_id: Option<&str>,
+    current_messages: &[OpenAiMessage],
+) -> Result<String, ServerError> {
+    let mut parts: Vec<String> = Vec::new();
+
+    if let Some(sid) = session_id {
+        let history = state.store.list_messages(sid).await?;
+        for msg in history {
+            parts.push(format!("{}: {}", capitalize_role(&msg.role), msg.content));
+        }
+    }
+
+    for msg in current_messages {
+        parts.push(format!("{}: {}", capitalize_role(&msg.role), msg.content));
+    }
+    parts.push("Assistant:".into());
+
+    Ok(parts.join("\n"))
+}
+
+fn capitalize_role(role: &str) -> &str {
+    match role {
+        "user"      => "User",
+        "assistant" => "Assistant",
+        "system"    => "System",
+        other       => other,
+    }
 }
 
 // ── Session handlers ──────────────────────────────────────────────────────────
@@ -203,17 +305,25 @@ pub async fn delete_session(
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
+pub async fn list_session_messages(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<MessageResponse>>, ServerError> {
+    let messages = state.store.list_messages(&id).await?;
+    Ok(Json(messages.into_iter().map(to_message_response).collect()))
+}
+
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::models::openai::ChatMessage;
+    use crate::models::openai::ChatMessage as OpenAiMsg;
 
     fn make_request(role: &str, content: &str) -> ChatCompletionRequest {
         ChatCompletionRequest {
             model:       "test".into(),
-            messages:    vec![ChatMessage { role: role.into(), content: content.into() }],
+            messages:    vec![OpenAiMsg { role: role.into(), content: content.into() }],
             stream:      false,
             max_tokens:  None,
             temperature: None,

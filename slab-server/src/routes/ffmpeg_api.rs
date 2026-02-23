@@ -93,6 +93,7 @@ pub async fn convert(
             input_data: Some(input_data.clone()),
             result_data: None,
             error_msg: None,
+            core_task_id: None,
             created_at: now,
             updated_at: now,
         })
@@ -105,28 +106,36 @@ pub async fn convert(
     let join = tokio::spawn(async move {
         store.update_task_status(&tid, "running", None, None).await.ok();
 
-        let input: serde_json::Value = serde_json::from_str(&input_data).unwrap_or_default();
+        let input: serde_json::Value = match serde_json::from_str(&input_data) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(task_id = %tid, error = %e, "invalid stored input_data for ffmpeg task");
+                store.update_task_status(&tid, "failed", None, Some(&format!("invalid stored input_data: {e}"))).await.ok();
+                task_manager.remove(&tid);
+                return;
+            }
+        };
 
+        let source_path    = input["source_path"].as_str().unwrap_or("").to_owned();
+        let output_format  = input["output_format"].as_str().unwrap_or("out").to_owned();
         let output_path = input["output_path"]
             .as_str()
             .map(str::to_owned)
             .unwrap_or_else(|| {
-                let src = input["source_path"].as_str().unwrap_or("output");
-                let fmt = input["output_format"].as_str().unwrap_or("out");
-                let base = std::path::Path::new(src)
+                let base = std::path::Path::new(&source_path)
                     .file_stem()
                     .and_then(|s| s.to_str())
                     .unwrap_or("output");
                 std::env::temp_dir()
-                    .join(format!("{base}.{fmt}"))
+                    .join(format!("{base}.{output_format}"))
                     .to_string_lossy()
                     .into_owned()
             });
 
-        let source_path = input["source_path"].as_str().unwrap_or("").to_owned();
-
+        // Pass `-f {output_format}` explicitly so ffmpeg uses the validated
+        // format regardless of the output filename extension.
         let result = tokio::process::Command::new("ffmpeg")
-            .args(["-y", "-i", &source_path, &output_path])
+            .args(["-y", "-i", &source_path, "-f", &output_format, &output_path])
             .output()
             .await;
 
