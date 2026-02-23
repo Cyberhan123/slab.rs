@@ -17,12 +17,14 @@
 //! Any op called before `"model.load"` returns
 //! `BackendReply::Error("model not loaded")`.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
 use crate::engine::ggml::llama::adapter::GGMLLlamaEngine;
+use crate::engine::ggml::llama::errors::SessionId;
 use crate::runtime::backend::protocol::{BackendReply, BackendRequest, StreamChunk};
 use crate::runtime::types::Payload;
 
@@ -45,11 +47,15 @@ fn default_workers() -> usize {
 struct LlamaWorker {
     /// Non-None after a successful `model.load`.
     engine: Option<Arc<GGMLLlamaEngine>>,
+    /// Maps a caller-provided session key (arbitrary string) to the
+    /// engine-internal `SessionId` (u64).  Allows multi-turn conversations to
+    /// reuse the same KV-cache slot across successive inference calls.
+    sessions: HashMap<String, SessionId>,
 }
 
 impl LlamaWorker {
     fn new() -> Self {
-        Self { engine: None }
+        Self { engine: None, sessions: HashMap::new() }
     }
 
     async fn handle(&mut self, req: BackendRequest) {
@@ -62,25 +68,18 @@ impl LlamaWorker {
 
         match op.name.as_str() {
             "model.load" => self.handle_load(input, reply_tx).await,
+            "model.unload" => self.handle_unload(reply_tx).await,
             "inference" => {
-                let max_tokens = serde_json::to_value(&op.options)
-                    .unwrap_or(serde_json::Value::Null)
-                    .get("max_tokens")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as usize)
-                    .unwrap_or(256);
-                self.handle_inference(input, max_tokens, reply_tx)
-                    .await;
+                let opts = serde_json::to_value(&op.options).unwrap_or(serde_json::Value::Null);
+                let max_tokens = opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
+                let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
+                self.handle_inference(input, max_tokens, session_key, reply_tx).await;
             }
             "inference.stream" => {
-                let max_tokens = serde_json::to_value(&op.options)
-                    .unwrap_or(serde_json::Value::Null)
-                    .get("max_tokens")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as usize)
-                    .unwrap_or(256);
-                self.handle_inference_stream(input, max_tokens, reply_tx)
-                    .await;
+                let opts = serde_json::to_value(&op.options).unwrap_or(serde_json::Value::Null);
+                let max_tokens = opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
+                let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
+                self.handle_inference_stream(input, max_tokens, session_key, reply_tx).await;
             }
             other => {
                 let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {other}")));
@@ -135,10 +134,16 @@ impl LlamaWorker {
         )));
     }
 
+    async fn handle_unload(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
+        self.engine = None;
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(std::sync::Arc::from(&b""[..]))));
+    }
+
     async fn handle_inference(
-        &self,
+        &mut self,
         input: Payload,
         max_tokens: usize,
+        session_key: Option<String>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -157,8 +162,22 @@ impl LlamaWorker {
             }
         };
 
-        match engine.inference(&prompt, max_tokens, None).await {
+        // Resolve the optional persistent session for KV-cache reuse.
+        let llama_sid = match &session_key {
+            Some(key) => self.sessions.get(key).copied(),
+            None => None,
+        };
+
+        match engine.inference(prompt, max_tokens, llama_sid).await {
             Ok(text) => {
+                // For multi-turn sessions: the engine creates a new session each call
+                // when no prior llama_sid is given, or reuses an existing one.
+                // `GGMLLlamaEngine::inference` ends the session when `should_end=true`
+                // (i.e. when llama_sid was None).  For persistent sessions we rely on
+                // `inference_stream` path which returns the new sid; here, if a session
+                // key was requested but no prior sid existed, the session was already
+                // ended inside `inference`.  Future improvement: expose a create/reuse
+                // session variant from the engine for non-streaming paths too.
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(
                     text.as_bytes(),
                 ))));
@@ -170,9 +189,10 @@ impl LlamaWorker {
     }
 
     async fn handle_inference_stream(
-        &self,
+        &mut self,
         input: Payload,
         max_tokens: usize,
+        session_key: Option<String>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -191,16 +211,28 @@ impl LlamaWorker {
             }
         };
 
+        // Resolve the optional persistent session for KV-cache reuse.
+        let llama_sid = match &session_key {
+            Some(key) => self.sessions.get(key).copied(),
+            None => None,
+        };
+
         // Create the protocol stream channel and immediately hand it to the caller.
         let (proto_tx, proto_rx) = mpsc::channel::<StreamChunk>(64);
         let _ = reply_tx.send(BackendReply::Stream(proto_rx));
+
+        // Capture the session map update channel: after stream ends, persist the
+        // new session ID so the next message in the same session reuses the KV cache.
+        // We cannot mutate `self.sessions` from inside `tokio::spawn` (not Send),
+        // so we use a one-shot channel to send the new ID back.
+        let (sid_tx, sid_rx) = tokio::sync::oneshot::channel::<(String, SessionId)>();
 
         // Stream inference runs in the background.
         tokio::spawn(async move {
             use crate::engine::ggml::llama::StreamChunk as LlamaChunk;
 
-            match engine.inference_stream(&prompt, max_tokens, None).await {
-                Ok((mut llama_rx, sid)) => {
+            match engine.inference_stream(&prompt, max_tokens, llama_sid).await {
+                Ok((mut llama_rx, new_sid)) => {
                     while let Some(chunk) = llama_rx.recv().await {
                         let mapped = match chunk {
                             LlamaChunk::Token(t) => StreamChunk::Token(t),
@@ -213,13 +245,24 @@ impl LlamaWorker {
                             break;
                         }
                     }
-                    let _ = engine.end_session(sid).await;
+                    // If the caller provided a session key, persist the new session ID
+                    // so the next turn can reuse the KV cache.
+                    if let Some(key) = session_key {
+                        let _ = sid_tx.send((key, new_sid));
+                        return; // Don't end the session – keep KV state for reuse.
+                    }
+                    let _ = engine.end_session(new_sid).await;
                 }
                 Err(e) => {
                     let _ = proto_tx.send(StreamChunk::Error(e.to_string())).await;
                 }
             }
         });
+
+        // Collect the persisted session ID (fire-and-forget; best effort).
+        if let Ok((key, new_sid)) = sid_rx.await {
+            self.sessions.insert(key, new_sid);
+        }
     }
 }
 

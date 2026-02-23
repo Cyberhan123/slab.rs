@@ -19,6 +19,7 @@ slab-libfetch = { workspace = true }
 # Core AI runtime
 slab-core     = { workspace = true }
 slab-libfetch = { workspace = true }
+hf-hub        = { workspace = true }
 
 # Async runtime
 tokio   = { workspace = true }
