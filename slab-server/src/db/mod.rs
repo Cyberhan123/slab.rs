@@ -42,10 +42,13 @@ pub trait RequestStore: Send + Sync + 'static {
     ) -> impl std::future::Future<Output = Result<(), sqlx::Error>> + Send;
 
     /// Update the `status` and `latency_ms` fields once the response is known.
+    ///
+    /// `status` is the HTTP status code stored as `i64` to match SQLite's
+    /// `INTEGER` affinity (all HTTP status codes fit comfortably in i64).
     fn update_response(
         &self,
         id: Uuid,
-        status: u16,
+        status: i64,
         latency_ms: i64,
     ) -> impl std::future::Future<Output = Result<(), sqlx::Error>> + Send;
 

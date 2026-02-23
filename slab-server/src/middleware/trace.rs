@@ -5,8 +5,12 @@
 //! the same `trace_id` field, and echoes it back in the response
 //! `X-Trace-Id` header.
 //!
-//! Additionally, each request is inserted into the database on arrival and
-//! updated with the final status code and latency once the response is ready.
+//! **Audit log timing:**
+//! The incoming request record is inserted into the database **synchronously**
+//! (inside the same async task, before the handler runs) so that the row is
+//! guaranteed to exist when the response update fires.  The response-side
+//! update is still fire-and-forget because it runs after the response has
+//! already been returned to the caller.
 
 use std::sync::Arc;
 use std::task::{Context, Poll};
@@ -105,26 +109,25 @@ where
             path     = %path,
         );
 
-        // Log the incoming request (fire-and-forget; never blocks the handler).
-        let store_req = Arc::clone(&state.store);
-        let record = RequestRecord {
-            id:         trace_id,
-            method:     method.clone(),
-            path:       path.clone(),
-            status:     None,
-            latency_ms: None,
-            created_at: chrono::Utc::now(),
-        };
-        tokio::spawn(async move {
-            if let Err(e) = store_req.insert(record).await {
-                tracing::warn!(trace_id = %trace_id, error = %e, "failed to log request");
-            }
-        });
-
         let mut inner = self.inner.clone();
         Box::pin(
             async move {
                 info!(%method, %path, "→ request");
+
+                // Insert the request record BEFORE calling the handler so the
+                // row exists in the database when the response-side UPDATE runs.
+                // This prevents the race condition where the UPDATE could arrive
+                // before the INSERT when both were fire-and-forget spawns.
+                if let Err(e) = state.store.insert(RequestRecord {
+                    id:         trace_id,
+                    method:     method.clone(),
+                    path:       path.clone(),
+                    status:     None,
+                    latency_ms: None,
+                    created_at: chrono::Utc::now(),
+                }).await {
+                    tracing::warn!(trace_id = %trace_id, error = %e, "failed to log request");
+                }
 
                 let mut response = inner.call(req).await?;
 
@@ -142,9 +145,11 @@ where
                 );
 
                 // Update the database record with the final status and latency.
+                // Fire-and-forget: the INSERT above guarantees the row exists, so
+                // there is no race condition here.
                 let store_resp = Arc::clone(&state.store);
                 tokio::spawn(async move {
-                    if let Err(e) = store_resp.update_response(trace_id, status, latency_ms).await {
+                    if let Err(e) = store_resp.update_response(trace_id, status as i64, latency_ms).await {
                         tracing::warn!(
                             trace_id = %trace_id,
                             error    = %e,

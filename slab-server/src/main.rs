@@ -6,7 +6,7 @@
 //! 3. Open the SQLite database and run pending migrations.
 //! 4. Initialise the slab-core AI runtime.
 //! 5. Start the IPC listener in a background task.
-//! 6. Build the Axum router and start the HTTP server.
+//! 6. Build the Axum router and start the HTTP server with graceful shutdown.
 
 mod config;
 mod db;
@@ -32,11 +32,25 @@ async fn main() -> anyhow::Result<()> {
     let cfg = Config::from_env();
 
     // ── 2. Tracing ─────────────────────────────────────────────────────────────
+    // Build the log-level filter, warning loudly if the configured value is
+    // not a valid tracing filter expression.
+    let env_filter = match tracing_subscriber::EnvFilter::try_from_default_env() {
+        Ok(f) => f,
+        Err(_) => match cfg.log_level.parse::<tracing_subscriber::EnvFilter>() {
+            Ok(f) => f,
+            Err(e) => {
+                eprintln!(
+                    "WARN: SLAB_LOG='{}' is not a valid tracing filter ({}); \
+                     falling back to 'info'",
+                    cfg.log_level, e
+                );
+                tracing_subscriber::EnvFilter::new("info")
+            }
+        },
+    };
+
     let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| cfg.log_level.parse().unwrap_or_default()),
-        )
+        .with_env_filter(env_filter)
         .with_target(true)
         .with_thread_ids(true);
 
@@ -61,7 +75,8 @@ async fn main() -> anyhow::Result<()> {
 
     // ── 5. Shared application state ────────────────────────────────────────────
     let state = Arc::new(AppState {
-        store: Arc::new(store),
+        config: Arc::new(cfg.clone()),
+        store:  Arc::new(store),
     });
 
     // ── 6. IPC listener ────────────────────────────────────────────────────────
@@ -73,12 +88,54 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // ── 7. HTTP server ─────────────────────────────────────────────────────────
+    // ── 7. HTTP server with graceful shutdown ──────────────────────────────────
     let app      = routes::build(Arc::clone(&state));
     let addr: SocketAddr = cfg.bind_address.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!(%addr, "HTTP server listening");
-    axum::serve(listener, app).await?;
 
+    let ipc_cleanup = cfg.ipc_socket_path.clone();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+
+    // Clean up the IPC socket file so the next startup can bind immediately.
+    if let Err(e) = tokio::fs::remove_file(&ipc_cleanup).await {
+        warn!(
+            path = %ipc_cleanup,
+            error = %e,
+            "failed to remove IPC socket file on shutdown (may not exist)"
+        );
+    }
+
+    info!("slab-server stopped");
     Ok(())
+}
+
+/// Returns a future that resolves when SIGINT (Ctrl-C) or SIGTERM is received.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        if let Err(e) = tokio::signal::ctrl_c().await {
+            warn!(error = %e, "failed to install CTRL+C signal handler");
+        }
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        use tokio::signal::unix::{signal, SignalKind};
+        match signal(SignalKind::terminate()) {
+            Ok(mut s) => { s.recv().await; }
+            Err(e)    => warn!(error = %e, "failed to install SIGTERM handler"),
+        }
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c   => {}
+        _ = terminate => {}
+    }
+
+    info!("shutdown signal received; starting graceful shutdown");
 }

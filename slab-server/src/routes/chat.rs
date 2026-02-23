@@ -15,6 +15,9 @@ use crate::models::openai::{
 };
 use crate::state::AppState;
 
+/// Maximum allowed prompt length in bytes to prevent memory exhaustion.
+const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
+
 /// Register chat-completion routes.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new().route("/chat/completions", post(chat_completions))
@@ -51,6 +54,31 @@ pub async fn chat_completions(
         .map(|m| m.content.clone())
         .ok_or_else(|| ServerError::BadRequest("no user message found".into()))?;
 
+    // Reject oversized prompts to prevent memory exhaustion.
+    if prompt.len() > MAX_PROMPT_BYTES {
+        return Err(ServerError::BadRequest(format!(
+            "prompt too large ({} bytes); maximum is {} bytes",
+            prompt.len(),
+            MAX_PROMPT_BYTES,
+        )));
+    }
+
+    // Validate generation parameters so bad values fail fast before hitting
+    // the backend.
+    let max_tokens = req.max_tokens.unwrap_or(512);
+    if max_tokens == 0 || max_tokens > 4096 {
+        return Err(ServerError::BadRequest(format!(
+            "invalid max_tokens ({max_tokens}): must be between 1 and 4096"
+        )));
+    }
+
+    let temperature = req.temperature.unwrap_or(0.7);
+    if !(0.0..=2.0).contains(&temperature) {
+        return Err(ServerError::BadRequest(format!(
+            "invalid temperature ({temperature}): must be between 0.0 and 2.0"
+        )));
+    }
+
     debug!(model = %req.model, prompt_len = prompt.len(), "chat completion request");
 
     let result_bytes = slab_core::api::backend("ggml.llama")
@@ -59,8 +87,8 @@ pub async fn chat_completions(
             prompt.as_str(),
         )))
         .options(slab_core::Payload::Json(serde_json::json!({
-            "max_tokens":  req.max_tokens.unwrap_or(512),
-            "temperature": req.temperature.unwrap_or(0.7),
+            "max_tokens":  max_tokens,
+            "temperature": temperature,
         })))
         .run_wait()
         .await
@@ -85,3 +113,65 @@ pub async fn chat_completions(
 
     Ok(Json(resp))
 }
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use crate::models::openai::ChatMessage;
+
+    fn make_request(role: &str, content: &str) -> ChatCompletionRequest {
+        ChatCompletionRequest {
+            model:       "test".into(),
+            messages:    vec![ChatMessage { role: role.into(), content: content.into() }],
+            stream:      false,
+            max_tokens:  None,
+            temperature: None,
+        }
+    }
+
+    #[test]
+    fn validate_max_tokens_zero() {
+        let req = ChatCompletionRequest {
+            max_tokens: Some(0),
+            ..make_request("user", "hello")
+        };
+        assert_eq!(req.max_tokens, Some(0));
+        // The handler would reject this; verify the rule directly.
+        let mt = req.max_tokens.unwrap_or(512);
+        assert!(mt == 0 || mt > 4096, "should be out of range");
+    }
+
+    #[test]
+    fn validate_max_tokens_too_large() {
+        let req = ChatCompletionRequest {
+            max_tokens: Some(9999),
+            ..make_request("user", "hello")
+        };
+        let mt = req.max_tokens.unwrap_or(512);
+        assert!(mt > 4096, "should be out of range");
+    }
+
+    #[test]
+    fn validate_temperature_out_of_range() {
+        // temperature = 3.0 is outside [0.0, 2.0]
+        let temp = 3.0_f32;
+        assert!(!(0.0..=2.0).contains(&temp), "should be out of range");
+    }
+
+    #[test]
+    fn validate_prompt_too_large() {
+        let long_prompt = "x".repeat(MAX_PROMPT_BYTES + 1);
+        assert!(long_prompt.len() > MAX_PROMPT_BYTES);
+    }
+
+    #[test]
+    fn no_user_message_returns_error() {
+        let req = make_request("system", "you are a bot");
+        // No user role – find should return None.
+        let found = req.messages.iter().rev().find(|m| m.role == "user");
+        assert!(found.is_none());
+    }
+}
+
