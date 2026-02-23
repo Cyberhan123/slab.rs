@@ -1,11 +1,14 @@
 //! Image generation routes (Stable Diffusion) – async task pattern.
+//!
+//! Submits a slab-core diffusion pipeline via `api::backend(...).run()` and
+//! returns a `task_id` immediately.  Poll status via `GET /api/tasks/{id}` and
+//! retrieve the result via `GET /api/tasks/{id}/result`.
 
 use std::sync::Arc;
 
 use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
-use base64::Engine as _;
 use chrono::Utc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
@@ -30,6 +33,10 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 /// Image generation (`POST /v1/images/generations`).
+///
+/// Submits the generation request as a slab-core task and returns a `task_id`.
+/// The caller should poll `GET /api/tasks/{task_id}` for status and
+/// `GET /api/tasks/{task_id}/result` for the base64-encoded image.
 #[utoipa::path(
     post,
     path = "/v1/images/generations",
@@ -75,70 +82,54 @@ pub async fn generate_images(
 
     let task_id = Uuid::new_v4().to_string();
     let now = Utc::now();
-    let input_data = serde_json::json!({
+    let input_json = serde_json::json!({
         "prompt": req.prompt,
         "n": req.n,
         "size": size,
         "model": req.model,
-    })
-    .to_string();
+    });
 
     state
         .store
         .insert_task(TaskRecord {
             id: task_id.clone(),
             task_type: "image".into(),
-            status: "pending".into(),
-            input_data: Some(input_data.clone()),
+            status: "running".into(),
+            input_data: Some(input_json.to_string()),
             result_data: None,
             error_msg: None,
+            core_task_id: None,
             created_at: now,
             updated_at: now,
         })
         .await?;
 
-    let store = Arc::clone(&state.store);
-    let task_manager = Arc::clone(&state.task_manager);
-    let tid = task_id.clone();
+    // Submit the pipeline to slab-core and get the core TaskId immediately.
+    let core_task_result = slab_core::api::backend("ggml.diffusion")
+        .op("inference_image")
+        .input(slab_core::Payload::Json(input_json))
+        .run()
+        .await;
 
-    let join = tokio::spawn(async move {
-        store.update_task_status(&tid, "running", None, None).await.ok();
-
-        let input: serde_json::Value = serde_json::from_str(&input_data).unwrap_or_default();
-
-        let result = slab_core::api::backend("ggml.diffusion")
-            .op("inference_image")
-            .input(slab_core::Payload::Json(input))
-            .run_wait()
-            .await;
-
-        match result {
-            Ok(bytes) => {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&bytes);
-                let result_json = serde_json::json!({
-                    "created": chrono::Utc::now().timestamp(),
-                    "data": [{ "b64_json": b64 }],
-                })
-                .to_string();
-                store
-                    .update_task_status(&tid, "succeeded", Some(&result_json), None)
-                    .await
-                    .ok();
-                info!(task_id = %tid, image_bytes = bytes.len(), "image generation done");
-            }
-            Err(e) => {
-                warn!(task_id = %tid, error = %e, "image generation failed");
-                store
-                    .update_task_status(&tid, "failed", None, Some(&e.to_string()))
-                    .await
-                    .ok();
-            }
+    match core_task_result {
+        Ok(core_task_id) => {
+            state
+                .store
+                .set_core_task_id(&task_id, core_task_id as i64)
+                .await
+                .unwrap_or_else(|e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"));
+            info!(task_id = %task_id, core_task_id, "image generation task submitted to slab-core");
         }
-        task_manager.remove(&tid);
-    });
+        Err(e) => {
+            warn!(task_id = %task_id, error = %e, "failed to submit image generation to slab-core");
+            state
+                .store
+                .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
+                .await
+                .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to update task status"));
+        }
+    }
 
-    state.task_manager.insert(task_id.clone(), join.abort_handle());
-    info!(task_id = %task_id, "image generation task accepted");
     Ok(Json(serde_json::json!({ "task_id": task_id })))
 }
 

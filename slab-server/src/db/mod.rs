@@ -72,6 +72,9 @@ pub struct TaskRecord {
     pub input_data: Option<String>,
     pub result_data: Option<String>,
     pub error_msg: Option<String>,
+    /// slab-core runtime `TaskId` (u64) for tasks submitted via `api::backend(...).run()`.
+    /// `None` for server-only tasks (e.g. pure ffmpeg conversion, download).
+    pub core_task_id: Option<i64>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -85,6 +88,7 @@ pub trait TaskStore: Send + Sync + 'static {
         result_data: Option<&str>,
         error_msg: Option<&str>,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
+    fn set_core_task_id(&self, id: &str, core_task_id: i64) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
     fn get_task(&self, id: &str) -> impl Future<Output = Result<Option<TaskRecord>, sqlx::Error>> + Send;
     fn list_tasks(&self, task_type: Option<&str>) -> impl Future<Output = Result<Vec<TaskRecord>, sqlx::Error>> + Send;
     fn interrupt_running_tasks(&self) -> impl Future<Output = Result<u64, sqlx::Error>> + Send;
@@ -108,6 +112,24 @@ pub trait SessionStore: Send + Sync + 'static {
     fn list_sessions(&self) -> impl Future<Output = Result<Vec<ChatSession>, sqlx::Error>> + Send;
     fn update_session_state_path(&self, id: &str, path: &str) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
     fn delete_session(&self, id: &str) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
+}
+
+// ── Chat messages ─────────────────────────────────────────────────────────────
+
+/// A single message row in the `chat_messages` table.
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub id: String,
+    pub session_id: String,
+    /// `"user"`, `"assistant"`, or `"system"`.
+    pub role: String,
+    pub content: String,
+    pub created_at: DateTime<Utc>,
+}
+
+pub trait MessageStore: Send + Sync + 'static {
+    fn append_message(&self, msg: ChatMessage) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
+    fn list_messages(&self, session_id: &str) -> impl Future<Output = Result<Vec<ChatMessage>, sqlx::Error>> + Send;
 }
 
 // ── Config store ──────────────────────────────────────────────────────────────

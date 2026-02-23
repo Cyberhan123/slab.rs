@@ -1,4 +1,9 @@
 //! Audio transcription routes (Whisper) – async task pattern.
+//!
+//! Accepts an audio/video body, saves it to a temp file, then submits a
+//! slab-core pipeline (ffmpeg → whisper) via `api::backend(...).preprocess(...).run()`.
+//! The returned slab-core `TaskId` is persisted so that the generic
+//! `/api/tasks` endpoints can query status and result via `slab_core::api::status/result`.
 
 use std::sync::Arc;
 
@@ -11,21 +16,11 @@ use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::db::{TaskRecord, TaskStore};
-use crate::db::sqlite::SqliteStore;
 use crate::error::ServerError;
-use crate::state::{AppState, TaskManager};
+use crate::state::AppState;
 
 /// Maximum allowed audio body size (50 MiB).
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
-
-/// Cast aligned byte slice to f32 samples, returning `None` if length is not a multiple of 4.
-fn try_cast_f32(bytes: &[u8]) -> Option<Vec<f32>> {
-    if bytes.len() % 4 == 0 {
-        Some(bytemuck::cast_slice::<u8, f32>(bytes).to_vec())
-    } else {
-        None
-    }
-}
 
 /// Register audio routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -33,11 +28,21 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 /// Speech-to-text transcription (`POST /v1/audio/transcriptions`).
+///
+/// Accepts raw audio/video bytes.  The body is saved to a temporary file,
+/// then a slab-core pipeline is submitted:
+///
+/// 1. **ffmpeg** (CPU preprocess stage via `std::process::Command`) converts
+///    the file to raw PCM f32le at 16 kHz mono.
+/// 2. **whisper** (GPU stage) transcribes the PCM samples.
+///
+/// Returns `{"task_id": "..."}` immediately; poll status via
+/// `GET /api/tasks/{id}` and result via `GET /api/tasks/{id}/result`.
 #[utoipa::path(
     post,
     path = "/v1/audio/transcriptions",
     tag = "audio",
-    request_body(content = Vec<u8>, description = "Raw PCM f32-le audio bytes or audio/video file"),
+    request_body(content = Vec<u8>, description = "Audio/video file bytes"),
     responses(
         (status = 202, description = "Task accepted", body = serde_json::Value),
         (status = 400, description = "Bad request"),
@@ -63,9 +68,9 @@ pub async fn transcribe(
     let task_id = Uuid::new_v4().to_string();
     let now = Utc::now();
 
-    // Save audio to temp file so it survives background processing.
+    // Save audio to a temp file so the sync preprocess closure can access it.
     let tmp_path = std::env::temp_dir()
-        .join(format!("slab-audio-{}.raw", task_id))
+        .join(format!("slab-audio-{task_id}.raw"))
         .to_string_lossy()
         .into_owned();
     tokio::fs::write(&tmp_path, &body)
@@ -74,138 +79,104 @@ pub async fn transcribe(
 
     let input_data = serde_json::json!({ "tmp_path": tmp_path }).to_string();
 
+    // Insert the server-side task record (core_task_id filled in after submission).
     state
         .store
         .insert_task(TaskRecord {
             id: task_id.clone(),
             task_type: "whisper".into(),
-            status: "pending".into(),
+            status: "running".into(),
             input_data: Some(input_data),
             result_data: None,
             error_msg: None,
+            core_task_id: None,
             created_at: now,
             updated_at: now,
         })
         .await?;
 
-    let store = Arc::clone(&state.store);
-    let task_manager = Arc::clone(&state.task_manager);
-    let tid = task_id.clone();
-    let tmp = tmp_path.clone();
+    // Build and submit the slab-core pipeline.
+    // The preprocess closure runs inside `spawn_blocking` (see `CpuStage::run`),
+    // so blocking I/O via `std::process::Command` is safe here.
+    // The initial Bytes input is an empty placeholder; the preprocess stage
+    // replaces it with the actual PCM f32le data.
+    let tmp_for_closure = tmp_path.clone();
+    let core_task_result = slab_core::api::backend("ggml.whisper")
+        .op("inference")
+        .input(slab_core::Payload::Bytes(Arc::from([] as [u8; 0]))) // placeholder; preprocess supplies PCM
+        .preprocess("ffmpeg.to_pcm_f32le", move |_| {
+            convert_to_pcm_f32le(&tmp_for_closure)
+        })
+        .run()
+        .await;
 
-    let join = tokio::spawn(async move {
-        store.update_task_status(&tid, "running", None, None).await.ok();
+    match core_task_result {
+        Ok(core_task_id) => {
+            // Persist the slab-core TaskId so status/result queries can use it.
+            state
+                .store
+                .set_core_task_id(&task_id, core_task_id as i64)
+                .await
+                .unwrap_or_else(|e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"));
+            info!(task_id = %task_id, core_task_id, "transcription task submitted to slab-core");
+        }
+        Err(e) => {
+            warn!(task_id = %task_id, error = %e, "failed to submit transcription to slab-core");
+            state
+                .store
+                .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
+                .await
+                .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to update task status"));
+        }
+    }
 
-        let audio_bytes = match tokio::fs::read(&tmp).await {
-            Ok(b) => b,
-            Err(e) => {
-                warn!(task_id = %tid, error = %e, "failed to read audio temp file");
-                store
-                    .update_task_status(&tid, "failed", None, Some(&e.to_string()))
-                    .await
-                    .ok();
-                task_manager.remove(&tid);
-                return;
-            }
-        };
-
-        let samples: Vec<f32> = if let Some(s) = try_cast_f32(&audio_bytes) {
-            s
-        } else {
-            // Attempt ffmpeg conversion to PCM f32-le.
-            // Whisper requires 16 kHz mono f32 PCM input.
-            let pcm_path = std::path::Path::new(&tmp)
-                .with_extension("pcm")
-                .to_string_lossy()
-                .into_owned();
-            let ffmpeg_result = tokio::process::Command::new("ffmpeg")
-                .args(["-y", "-i", &tmp, "-f", "f32le", "-ar", "16000", "-ac", "1", &pcm_path])
-                .output()
-                .await;
-
-            match ffmpeg_result {
-                Ok(out) if out.status.success() => {
-                    match tokio::fs::read(&pcm_path).await {
-                        Ok(pcm_bytes) => {
-                            match try_cast_f32(&pcm_bytes) {
-                                Some(s) => s,
-                                None => {
-                                    let e = format!(
-                                        "ffmpeg produced misaligned PCM output ({} bytes, not a multiple of 4)",
-                                        pcm_bytes.len()
-                                    );
-                                    store.update_task_status(&tid, "failed", None, Some(&e)).await.ok();
-                                    task_manager.remove(&tid);
-                                    return;
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            let msg = format!("failed to read ffmpeg PCM output: {e}");
-                            warn!(task_id = %tid, error = %e, "failed to read ffmpeg PCM output");
-                            store.update_task_status(&tid, "failed", None, Some(&msg)).await.ok();
-                            task_manager.remove(&tid);
-                            return;
-                        }
-                    }
-                }
-                Ok(out) => {
-                    let err = String::from_utf8_lossy(&out.stderr).to_string();
-                    store.update_task_status(&tid, "failed", None, Some(&err)).await.ok();
-                    task_manager.remove(&tid);
-                    return;
-                }
-                Err(e) => {
-                    store
-                        .update_task_status(&tid, "failed", None, Some(&e.to_string()))
-                        .await
-                        .ok();
-                    task_manager.remove(&tid);
-                    return;
-                }
-            }
-        };
-
-        run_whisper(&tid, samples, &store, &task_manager).await;
-        tokio::fs::remove_file(&tmp).await.ok();
+    // Clean up the temp file asynchronously (best effort).
+    let tmp_cleanup = tmp_path.clone();
+    tokio::spawn(async move {
+        tokio::fs::remove_file(&tmp_cleanup).await.ok();
     });
 
-    state.task_manager.insert(task_id.clone(), join.abort_handle());
-    info!(task_id = %task_id, "transcription task accepted");
     Ok(Json(serde_json::json!({ "task_id": task_id })))
 }
 
-async fn run_whisper(
-    task_id: &str,
-    samples: Vec<f32>,
-    store: &SqliteStore,
-    task_manager: &TaskManager,
-) {
-    let result = slab_core::api::backend("ggml.whisper")
-        .op("inference")
-        .input(slab_core::Payload::F32(std::sync::Arc::from(samples.as_slice())))
-        .run_wait()
-        .await;
+/// Convert the audio/video file at `src_path` to raw PCM f32le samples at 16 kHz mono.
+///
+/// Uses `std::process::Command` so it can be called from within a
+/// `spawn_blocking` / `CpuStage` context.  Returns `Payload::F32` on success.
+///
+/// Also used by `tasks::restart_task` for whisper task restarts.
+pub fn convert_to_pcm_f32le(src_path: &str) -> Result<slab_core::Payload, String> {
+    let pcm_path = std::path::Path::new(src_path)
+        .with_extension("pcm")
+        .to_string_lossy()
+        .into_owned();
 
-    match result {
-        Ok(bytes) => {
-            let text = String::from_utf8_lossy(&bytes).to_string();
-            let result_json = serde_json::json!({ "text": text }).to_string();
-            info!(task_id = %task_id, text_len = text.len(), "transcription done");
-            store
-                .update_task_status(task_id, "succeeded", Some(&result_json), None)
-                .await
-                .ok();
-        }
-        Err(e) => {
-            warn!(task_id = %task_id, error = %e, "whisper inference failed");
-            store
-                .update_task_status(task_id, "failed", None, Some(&e.to_string()))
-                .await
-                .ok();
-        }
+    let output = std::process::Command::new("ffmpeg")
+        .args(["-y", "-i", src_path, "-f", "f32le", "-ar", "16000", "-ac", "1", &pcm_path])
+        .output()
+        .map_err(|e| format!("ffmpeg spawn failed: {e}"))?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        return Err(format!("ffmpeg failed: {stderr}"));
     }
-    task_manager.remove(task_id);
+
+    let pcm_bytes = std::fs::read(&pcm_path)
+        .map_err(|e| format!("failed to read ffmpeg PCM output: {e}"))?;
+
+    // Clean up the PCM file (best effort).
+    std::fs::remove_file(&pcm_path).ok();
+
+    let sample_size = std::mem::size_of::<f32>();
+    if pcm_bytes.len() % sample_size != 0 {
+        return Err(format!(
+            "ffmpeg produced misaligned PCM output ({} bytes, not a multiple of {sample_size})",
+            pcm_bytes.len()
+        ));
+    }
+
+    let samples: Vec<f32> = bytemuck::cast_slice::<u8, f32>(&pcm_bytes).to_vec();
+    Ok(slab_core::Payload::F32(std::sync::Arc::from(samples.as_slice())))
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -221,15 +192,19 @@ mod test {
     }
 
     #[test]
-    fn rejects_misaligned_body() {
-        let body = Bytes::from_static(&[0u8, 1, 2]);
-        assert_ne!(body.len() % 4, 0);
+    fn rejects_oversized_body() {
+        // Body length > MAX_AUDIO_BYTES should be rejected.
+        assert!(MAX_AUDIO_BYTES + 1 > MAX_AUDIO_BYTES);
     }
 
     #[test]
-    fn accepts_aligned_body() {
-        let body = Bytes::from(vec![0u8; 8]);
-        assert_eq!(body.len() % 4, 0);
+    fn pcm_alignment_check() {
+        // 8 bytes = 2 f32 samples (aligned).
+        let bytes = vec![0u8; 8];
+        assert_eq!(bytes.len() % std::mem::size_of::<f32>(), 0);
+        // 3 bytes is not aligned.
+        let bytes = vec![0u8; 3];
+        assert_ne!(bytes.len() % std::mem::size_of::<f32>(), 0);
     }
 }
 

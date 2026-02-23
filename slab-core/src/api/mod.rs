@@ -224,6 +224,17 @@ pub async fn result(task_id: TaskId) -> Result<Option<Payload>, RuntimeError> {
     }
 }
 
+/// Request best-effort cancellation of a task.
+///
+/// Returns immediately; the orchestrator processes the cancellation
+/// asynchronously.  The task status transitions to `Cancelled` once the
+/// running stage observes the cancellation signal.
+pub fn cancel(task_id: TaskId) -> Result<(), RuntimeError> {
+    let rt = CallBuilder::runtime()?;
+    rt.orchestrator.cancel(task_id);
+    Ok(())
+}
+
 // ── BackendBuilder ─────────────────────────────────────────────────────────────
 
 /// Selects a backend; produced by [`backend`].
