@@ -30,3 +30,22 @@ pub async fn get_health() -> Json<Value> {
         "version": env!("CARGO_PKG_VERSION"),
     }))
 }
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[tokio::test]
+    async fn health_response_has_ok_status() {
+        let Json(body) = get_health().await;
+        assert_eq!(body["status"], "ok");
+    }
+
+    #[tokio::test]
+    async fn health_response_has_version() {
+        let Json(body) = get_health().await;
+        assert!(!body["version"].as_str().unwrap_or("").is_empty());
+    }
+}

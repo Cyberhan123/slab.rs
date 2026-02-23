@@ -3,7 +3,17 @@
 //! Uses [`sqlx`] with the `sqlite` feature.  Migrations are run automatically
 //! on startup via [`SqliteStore::connect`].
 //!
-//! The `sqlx::query` (runtime-checked) form is used deliberately so that no
+//! # Migrations path
+//!
+//! `sqlx::migrate!("./migrations")` resolves the path **at compile time**
+//! relative to `CARGO_MANIFEST_DIR` (the crate root), so the directory is
+//! embedded into the binary.  The database file location is determined at
+//! runtime by the `SLAB_DATABASE_URL` environment variable and is **not**
+//! related to the current working directory at runtime.
+//!
+//! # Queries
+//!
+//! The `sqlx::query` (runtime-verified) form is used deliberately so that no
 //! `DATABASE_URL` environment variable is needed at compile time.
 
 use chrono::{DateTime, Utc};
@@ -25,6 +35,7 @@ impl SqliteStore {
     /// or `"sqlite://:memory:"` for tests.
     pub async fn connect(url: &str) -> Result<Self, sqlx::Error> {
         let pool = SqlitePool::connect(url).await?;
+        // Path is resolved relative to CARGO_MANIFEST_DIR at compile time.
         sqlx::migrate!("./migrations").run(&pool).await?;
         Ok(Self { pool })
     }
@@ -52,15 +63,14 @@ impl RequestStore for SqliteStore {
     async fn update_response(
         &self,
         id: Uuid,
-        status: u16,
+        status: i64,
         latency_ms: i64,
     ) -> Result<(), sqlx::Error> {
         let id_str = id.to_string();
-        let status_i64 = status as i64;
         sqlx::query(
             "UPDATE request_log SET status = ?1, latency_ms = ?2 WHERE id = ?3",
         )
-        .bind(status_i64)
+        .bind(status)
         .bind(latency_ms)
         .bind(&id_str)
         .execute(&self.pool)

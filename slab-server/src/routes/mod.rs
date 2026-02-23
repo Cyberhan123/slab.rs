@@ -2,10 +2,10 @@
 //!
 //! [`build`] assembles the complete application router, including:
 //! - Middleware layers (CORS, per-request trace-ID injection)
-//! - Swagger UI / OpenAPI spec endpoint
+//! - Optional Swagger UI / OpenAPI spec endpoint (disable with `SLAB_ENABLE_SWAGGER=false`)
 //! - Health / heartbeat route
 //! - OpenAI-compatible `/v1` routes
-//! - Model-management `/api` routes
+//! - Model-management `/api` routes (optionally protected by bearer token)
 
 mod audio;
 mod chat;
@@ -69,23 +69,45 @@ pub struct ApiDoc;
 
 /// Build the complete Axum [`Router`] for the application.
 pub fn build(state: Arc<AppState>) -> Router {
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_headers(Any)
-        .allow_methods(Any);
+    // ── CORS ─────────────────────────────────────────────────────────────────
+    // Default allows all origins.  In production, restrict via SLAB_CORS_ORIGINS.
+    let cors = if let Some(origins_str) = &state.config.cors_allowed_origins {
+        // Parse the comma-separated origin list and build a restrictive layer.
+        let origins: Vec<axum::http::HeaderValue> = origins_str
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect();
+        if origins.is_empty() {
+            CorsLayer::new().allow_origin(Any).allow_headers(Any).allow_methods(Any)
+        } else {
+            CorsLayer::new()
+                .allow_origin(origins)
+                .allow_headers(Any)
+                .allow_methods(Any)
+        }
+    } else {
+        // Wildcard – suitable for development; set SLAB_CORS_ORIGINS in production.
+        CorsLayer::new().allow_origin(Any).allow_headers(Any).allow_methods(Any)
+    };
 
     let api_router = Router::new()
         .merge(health::router())
         .nest("/v1",  v1_router())
         .nest("/api", management::router());
 
-    Router::new()
-        // Swagger UI served at /swagger-ui; spec at /api-docs/openapi.json
-        .merge(
+    let mut app = Router::new().merge(api_router);
+
+    // ── Swagger UI ────────────────────────────────────────────────────────────
+    // Enabled by default; disable with SLAB_ENABLE_SWAGGER=false in production
+    // to avoid exposing the API structure to potential attackers.
+    if state.config.enable_swagger {
+        app = app.merge(
             SwaggerUi::new("/swagger-ui")
                 .url("/api-docs/openapi.json", ApiDoc::openapi()),
-        )
-        .merge(api_router)
+        );
+    }
+
+    app
         // Outermost layers execute first on the way in.
         .layer(TraceLayer::new(Arc::clone(&state)))
         .layer(cors)
