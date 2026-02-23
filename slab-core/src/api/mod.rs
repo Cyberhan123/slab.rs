@@ -100,6 +100,12 @@ pub struct Config {
     pub queue_capacity: usize,
     /// Maximum concurrent in-flight requests per backend.  Defaults to `4`.
     pub backend_capacity: usize,
+    /// Optional filesystem directory that contains the llama shared library.
+    pub llama_lib_dir: Option<String>,
+    /// Optional filesystem directory that contains the whisper shared library.
+    pub whisper_lib_dir: Option<String>,
+    /// Optional filesystem directory that contains the diffusion shared library.
+    pub diffusion_lib_dir: Option<String>,
 }
 
 impl Default for Config {
@@ -107,8 +113,26 @@ impl Default for Config {
         Self {
             queue_capacity: 64,
             backend_capacity: 4,
+            llama_lib_dir: None,
+            whisper_lib_dir: None,
+            diffusion_lib_dir: None,
         }
     }
+}
+
+/// Holds the configured library directories after [`init`].
+pub struct LibDirs {
+    pub llama: Option<String>,
+    pub whisper: Option<String>,
+    pub diffusion: Option<String>,
+}
+
+static LIB_DIRS: std::sync::OnceLock<LibDirs> = std::sync::OnceLock::new();
+
+/// Return a reference to the configured library directories, if [`init`] has
+/// been called and any lib dirs were provided.
+pub fn lib_dirs() -> Option<&'static LibDirs> {
+    LIB_DIRS.get()
 }
 
 // ── Initialization ─────────────────────────────────────────────────────────────
@@ -149,6 +173,13 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
         orchestrator,
         backends,
     });
+
+    let _ = LIB_DIRS.set(LibDirs {
+        llama: config.llama_lib_dir.clone(),
+        whisper: config.whisper_lib_dir.clone(),
+        diffusion: config.diffusion_lib_dir.clone(),
+    });
+
     Ok(())
 }
 
