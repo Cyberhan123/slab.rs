@@ -19,7 +19,7 @@ use crate::state::AppState;
 /// Register model-management routes.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/models",                          get(list_models))
+        .route("/models",                          get(list_backends))
         .route("/models/available",               get(list_available_models))
         .route("/models/{model_type}/load",        post(load_model))
         .route("/models/{model_type}/status",      get(model_status))
@@ -99,11 +99,13 @@ pub struct SwitchModelRequest {
 
 #[derive(Deserialize)]
 pub struct DownloadModelRequest {
-    pub owner: Option<String>,
-    pub repo: Option<String>,
-    pub tag: Option<String>,
-    pub target_path: String,
-    pub asset_name: Option<String>,
+    /// HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`.
+    pub repo_id: String,
+    /// Filename inside the repo to download, e.g. `"Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"`.
+    pub filename: String,
+    /// Optional directory where the downloaded file will be placed.
+    /// If omitted, the hf-hub default cache (`~/.cache/huggingface/hub`) is used.
+    pub target_dir: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -310,7 +312,7 @@ pub async fn unload_model(
 }
 
 /// List all registered backends and their status (`GET /api/models`).
-pub async fn list_models(
+pub async fn list_backends(
     State(_state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     let backends = ["llama", "whisper", "diffusion"]
@@ -320,39 +322,44 @@ pub async fn list_models(
             serde_json::json!({ "model_type": name, "backend": bid, "status": "ready" })
         })
         .collect::<Vec<_>>();
-    Ok(Json(serde_json::json!({ "models": backends })))
+    Ok(Json(serde_json::json!({ "backends": backends })))
 }
 
-/// Scan the model directory and list available model files (`GET /api/models/available`).
+// ── HuggingFace repo / file listing ──────────────────────────────────────────
+
+/// Query parameters for listing files in a HuggingFace repo.
+#[derive(Deserialize)]
+pub struct ListAvailableQuery {
+    /// HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`.
+    pub repo_id: String,
+}
+
+/// List the files available in a HuggingFace model repo (`GET /api/models/available?repo_id=...`).
+///
+/// Uses the `hf-hub` sync API (wrapped in `spawn_blocking`) to fetch repo metadata
+/// and returns a list of filenames in the repo.
 pub async fn list_available_models(
-    State(state): State<Arc<AppState>>,
+    State(_state): State<Arc<AppState>>,
+    axum::extract::Query(q): axum::extract::Query<ListAvailableQuery>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    let model_dir = state.config.model_dir.as_deref().ok_or_else(|| {
-        ServerError::BadRequest("SLAB_MODEL_DIR is not configured".into())
-    })?;
-
-    let mut entries = tokio::fs::read_dir(model_dir)
-        .await
-        .map_err(|e| ServerError::Internal(format!("failed to read model dir: {e}")))?;
-
-    let mut models = Vec::new();
-    while let Some(entry) = entries
-        .next_entry()
-        .await
-        .map_err(|e| ServerError::Internal(format!("dir entry error: {e}")))?
-    {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("gguf") {
-            if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                models.push(serde_json::json!({
-                    "name": name,
-                    "path": path.to_string_lossy(),
-                }));
-            }
-        }
+    if q.repo_id.is_empty() {
+        return Err(ServerError::BadRequest("repo_id query parameter must not be empty".into()));
     }
 
-    Ok(Json(serde_json::json!({ "models": models })))
+    let repo_id = q.repo_id.clone();
+    let files: Vec<String> = tokio::task::spawn_blocking(move || {
+        use hf_hub::api::sync::Api;
+        let api = Api::new().map_err(|e| format!("hf-hub init failed: {e}"))?;
+        let repo = api.model(repo_id);
+        let info = repo.info().map_err(|e| format!("hf-hub info failed: {e}"))?;
+        let names = info.siblings.into_iter().map(|s| s.rfilename).collect();
+        Ok::<Vec<String>, String>(names)
+    })
+    .await
+    .map_err(|e| ServerError::Internal(format!("spawn_blocking panicked: {e}")))?
+    .map_err(ServerError::Internal)?;
+
+    Ok(Json(serde_json::json!({ "repo_id": q.repo_id, "files": files })))
 }
 
 /// Switch the loaded model to a different weights file (`POST /api/models/{type}/switch`).
@@ -400,23 +407,30 @@ pub async fn switch_model(
     Ok(Json(ModelStatusResponse { backend: bid.to_owned(), status: "loaded".into() }))
 }
 
-/// Download a model weight file from a GitHub release (`POST /api/models/{type}/download`).
+/// Download a model weight file from HuggingFace (`POST /api/models/{type}/download`).
+///
+/// Uses the `hf-hub` sync API (wrapped in `spawn_blocking`) to fetch the file
+/// from the given HuggingFace repo.  Returns the local cache path where the
+/// file was stored.  The download is async; poll `GET /api/tasks/{id}` for status.
 pub async fn download_model(
     State(state): State<Arc<AppState>>,
     Path(ModelTypePath { model_type }): Path<ModelTypePath>,
     Json(req): Json<DownloadModelRequest>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    validate_path("target_path", &req.target_path)?;
+    if req.repo_id.is_empty() {
+        return Err(ServerError::BadRequest("repo_id must not be empty".into()));
+    }
+    if req.filename.is_empty() {
+        return Err(ServerError::BadRequest("filename must not be empty".into()));
+    }
 
     let task_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now();
     let input_data = serde_json::json!({
         "model_type": model_type,
-        "owner": req.owner,
-        "repo":  req.repo,
-        "tag":   req.tag,
-        "target_path": req.target_path,
-        "asset_name": req.asset_name,
+        "repo_id":    req.repo_id,
+        "filename":   req.filename,
+        "target_dir": req.target_dir,
     })
     .to_string();
 
@@ -439,15 +453,80 @@ pub async fn download_model(
     let task_manager = Arc::clone(&state.task_manager);
     let tid = task_id.clone();
 
-    let join = tokio::spawn(run_libfetch_download(
-        store,
-        task_manager,
-        tid,
-        input_data,
-        Box::new(|version: &str| format!("model-{version}.gguf")),
-    ));
+    let join = tokio::spawn(async move {
+        store.update_task_status(&tid, "running", None, None).await.ok();
+
+        let input: serde_json::Value = match serde_json::from_str(&input_data) {
+            Ok(v) => v,
+            Err(e) => {
+                warn!(task_id = %tid, error = %e, "invalid stored input_data for model_download task");
+                store.update_task_status(&tid, "failed", None, Some(&format!("invalid stored input_data: {e}"))).await.ok();
+                task_manager.remove(&tid);
+                return;
+            }
+        };
+
+        let repo_id  = input["repo_id"].as_str().unwrap_or("").to_owned();
+        let filename = input["filename"].as_str().unwrap_or("").to_owned();
+        let target_dir = input["target_dir"].as_str().map(str::to_owned);
+
+        // Fail early if required fields are missing or empty.
+        if repo_id.is_empty() || filename.is_empty() {
+            warn!(task_id = %tid, "model_download task is missing repo_id or filename in stored input_data");
+            store.update_task_status(&tid, "failed", None, Some("missing repo_id or filename in stored input_data")).await.ok();
+            task_manager.remove(&tid);
+            return;
+        }
+
+        // Validate target_dir to prevent directory traversal.
+        if let Some(dir) = &target_dir {
+            if let Err(e) = validate_path("target_dir", dir) {
+                warn!(task_id = %tid, error = %e, "invalid target_dir in model_download task");
+                store.update_task_status(&tid, "failed", None, Some(&e.to_string())).await.ok();
+                task_manager.remove(&tid);
+                return;
+            }
+        }
+
+        let result = tokio::task::spawn_blocking(move || {
+            use hf_hub::api::sync::{Api, ApiBuilder};
+            // If a custom target_dir was provided, configure hf-hub to use it as cache root.
+            let api = if let Some(dir) = target_dir {
+                ApiBuilder::new()
+                    .with_cache_dir(std::path::PathBuf::from(dir))
+                    .build()
+                    .map_err(|e| format!("hf-hub build failed: {e}"))?
+            } else {
+                Api::new().map_err(|e| format!("hf-hub init failed: {e}"))?
+            };
+            let path = api
+                .model(repo_id)
+                .get(&filename)
+                .map_err(|e| format!("hf-hub download failed: {e}"))?;
+            Ok::<String, String>(path.to_string_lossy().into_owned())
+        })
+        .await;
+
+        match result {
+            Ok(Ok(local_path)) => {
+                let result_json = serde_json::json!({ "local_path": local_path }).to_string();
+                store.update_task_status(&tid, "succeeded", Some(&result_json), None).await.ok();
+                info!(task_id = %tid, local_path = %local_path, "model download succeeded");
+            }
+            Ok(Err(e)) => {
+                warn!(task_id = %tid, error = %e, "model download failed");
+                store.update_task_status(&tid, "failed", None, Some(&e)).await.ok();
+            }
+            Err(e) => {
+                warn!(task_id = %tid, error = %e, "model download task panicked");
+                store.update_task_status(&tid, "failed", None, Some(&e.to_string())).await.ok();
+            }
+        }
+        task_manager.remove(&tid);
+    });
 
     state.task_manager.insert(task_id.clone(), join.abort_handle());
+    info!(task_id = %task_id, model_type = %model_type, "model download task accepted");
     Ok(Json(serde_json::json!({ "task_id": task_id })))
 }
 
