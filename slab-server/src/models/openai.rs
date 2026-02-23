@@ -34,6 +34,9 @@ pub struct ChatCompletionRequest {
     /// Sampling temperature in [0, 2].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
+    /// Optional chat session ID for stateful conversations.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub session_id: Option<String>,
 }
 
 /// A single choice in the completion response.

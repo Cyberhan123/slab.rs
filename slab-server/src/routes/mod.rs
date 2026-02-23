@@ -9,9 +9,12 @@
 
 mod audio;
 mod chat;
+mod config_api;
+mod ffmpeg_api;
 mod health;
 mod images;
 mod management;
+mod tasks;
 
 use std::sync::Arc;
 
@@ -93,7 +96,7 @@ pub fn build(state: Arc<AppState>) -> Router {
     let api_router = Router::new()
         .merge(health::router())
         .nest("/v1",  v1_router())
-        .nest("/api", management::router());
+        .nest("/api", api_mgmt_router());
 
     let mut app = Router::new().merge(api_router);
 
@@ -120,4 +123,13 @@ fn v1_router() -> Router<Arc<AppState>> {
         .merge(chat::router())
         .merge(audio::router())
         .merge(images::router())
+}
+
+/// Routes nested under `/api` (management, tasks, config, ffmpeg).
+fn api_mgmt_router() -> Router<Arc<AppState>> {
+    Router::new()
+        .merge(management::router())
+        .merge(tasks::router())
+        .merge(config_api::router())
+        .merge(ffmpeg_api::router())
 }
