@@ -4862,6 +4862,7 @@ dependencies = [
  "bytes",
  "chrono",
  "futures",
+ "hf-hub",
  "serde",
  "serde_json",
  "slab-core",
