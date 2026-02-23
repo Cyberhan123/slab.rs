@@ -56,6 +56,7 @@ impl WhisperWorker {
 
         match op.name.as_str() {
             "model.load" => self.handle_load(input, reply_tx).await,
+            "model.unload" => self.handle_unload(reply_tx).await,
             "inference" => self.handle_inference(input, reply_tx).await,
             other => {
                 let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {other}")));
@@ -97,6 +98,11 @@ impl WhisperWorker {
         let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
             Arc::from([] as [u8; 0]),
         )));
+    }
+
+    async fn handle_unload(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
+        self.engine = None;
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(std::sync::Arc::from(&b""[..]))));
     }
 
     async fn handle_inference(

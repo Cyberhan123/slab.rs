@@ -9,9 +9,12 @@
 
 mod audio;
 mod chat;
+mod config_api;
+mod ffmpeg_api;
 mod health;
 mod images;
 mod management;
+mod tasks;
 
 use std::sync::Arc;
 
@@ -120,4 +123,7 @@ fn v1_router() -> Router<Arc<AppState>> {
         .merge(chat::router())
         .merge(audio::router())
         .merge(images::router())
+        .merge(tasks::router())
+        .merge(config_api::router())
+        .merge(ffmpeg_api::router())
 }

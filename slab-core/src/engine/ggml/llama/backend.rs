@@ -62,6 +62,7 @@ impl LlamaWorker {
 
         match op.name.as_str() {
             "model.load" => self.handle_load(input, reply_tx).await,
+            "model.unload" => self.handle_unload(reply_tx).await,
             "inference" => {
                 let max_tokens = serde_json::to_value(&op.options)
                     .unwrap_or(serde_json::Value::Null)
@@ -133,6 +134,11 @@ impl LlamaWorker {
         let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
             Arc::from([] as [u8; 0]),
         )));
+    }
+
+    async fn handle_unload(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
+        self.engine = None;
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(std::sync::Arc::from(&b""[..]))));
     }
 
     async fn handle_inference(

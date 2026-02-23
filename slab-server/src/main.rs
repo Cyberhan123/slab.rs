@@ -24,7 +24,8 @@ use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::db::sqlite::SqliteStore;
-use crate::state::AppState;
+use crate::db::TaskStore;
+use crate::state::{AppState, TaskManager};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -70,34 +71,57 @@ async fn main() -> anyhow::Result<()> {
     slab_core::api::init(slab_core::api::Config {
         queue_capacity:   cfg.queue_capacity,
         backend_capacity: cfg.backend_capacity,
+        llama_lib_dir:    cfg.llama_lib_dir.clone(),
+        whisper_lib_dir:  cfg.whisper_lib_dir.clone(),
+        diffusion_lib_dir: cfg.diffusion_lib_dir.clone(),
     })?;
     info!("slab-core runtime initialised");
 
-    // ── 5. Shared application state ────────────────────────────────────────────
+    // ── 5. Session state directory ─────────────────────────────────────────────
+    if let Err(e) = tokio::fs::create_dir_all(&cfg.session_state_dir).await {
+        warn!(path = %cfg.session_state_dir, error = %e, "failed to create session state dir");
+    }
+
+    // ── 6. Shared application state ────────────────────────────────────────────
     let state = Arc::new(AppState {
-        config: Arc::new(cfg.clone()),
-        store:  Arc::new(store),
+        config:       Arc::new(cfg.clone()),
+        store:        Arc::new(store.clone()),
+        task_manager: Arc::new(TaskManager::new()),
     });
 
-    // ── 6. IPC listener ────────────────────────────────────────────────────────
+    // ── 7. IPC listener ────────────────────────────────────────────────────────
+    let transport = cfg.transport_mode.as_str();
     let ipc_path  = cfg.ipc_socket_path.clone();
     let ipc_state = Arc::clone(&state);
-    tokio::spawn(async move {
-        if let Err(e) = ipc::serve(ipc_path, ipc_state).await {
-            warn!(error = %e, "IPC listener exited");
-        }
-    });
+    if transport == "ipc" || transport == "both" {
+        tokio::spawn(async move {
+            if let Err(e) = ipc::serve(ipc_path, ipc_state).await {
+                warn!(error = %e, "IPC listener exited");
+            }
+        });
+    }
 
-    // ── 7. HTTP server with graceful shutdown ──────────────────────────────────
+    // ── 8. HTTP server with graceful shutdown ──────────────────────────────────
     let app      = routes::build(Arc::clone(&state));
     let addr: SocketAddr = cfg.bind_address.parse()?;
-    let listener = tokio::net::TcpListener::bind(addr).await?;
-    info!(%addr, "HTTP server listening");
 
     let ipc_cleanup = cfg.ipc_socket_path.clone();
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await?;
+
+    if transport == "http" || transport == "both" {
+        let listener = tokio::net::TcpListener::bind(addr).await?;
+        info!(%addr, "HTTP server listening");
+        axum::serve(listener, app)
+            .with_graceful_shutdown(shutdown_signal())
+            .await?;
+    } else {
+        // IPC-only mode: wait for shutdown signal without binding TCP.
+        shutdown_signal().await;
+    }
+
+    // Interrupt any tasks that were running when the server stopped.
+    if let Err(e) = store.interrupt_running_tasks().await {
+        warn!(error = %e, "failed to interrupt running tasks on shutdown");
+    }
 
     // Clean up the IPC socket file so the next startup can bind immediately.
     if let Err(e) = tokio::fs::remove_file(&ipc_cleanup).await {
