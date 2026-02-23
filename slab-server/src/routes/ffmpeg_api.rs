@@ -33,6 +33,13 @@ pub struct ConvertResponse {
     pub task_id: String,
 }
 
+/// Allowlisted output formats for ffmpeg conversions.
+/// Only these formats are accepted to prevent command injection through format strings.
+const ALLOWED_OUTPUT_FORMATS: &[&str] = &[
+    "mp3", "mp4", "wav", "flac", "ogg", "opus", "webm",
+    "avi", "mkv", "mov", "aac", "m4a", "m4v", "f32le", "pcm",
+];
+
 pub async fn convert(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ConvertRequest>,
@@ -51,6 +58,14 @@ pub async fn convert(
         return Err(ServerError::BadRequest(
             "output_format must not be empty".into(),
         ));
+    }
+    // Validate output format against allowlist to prevent command injection.
+    if !ALLOWED_OUTPUT_FORMATS.contains(&req.output_format.to_ascii_lowercase().as_str()) {
+        return Err(ServerError::BadRequest(format!(
+            "unsupported output_format '{}'; must be one of: {}",
+            req.output_format,
+            ALLOWED_OUTPUT_FORMATS.join(", ")
+        )));
     }
     // Verify the source file exists and is readable before accepting the task.
     if !tokio::fs::try_exists(&req.source_path).await.unwrap_or(false) {
@@ -163,5 +178,21 @@ mod test {
     fn rejects_traversal_path() {
         let path = "/foo/../../../etc/passwd";
         assert!(path.contains(".."));
+    }
+
+    #[test]
+    fn accepts_allowed_formats() {
+        for fmt in &["mp3", "mp4", "wav", "flac", "ogg"] {
+            assert!(
+                ALLOWED_OUTPUT_FORMATS.contains(fmt),
+                "{fmt} should be allowed"
+            );
+        }
+    }
+
+    #[test]
+    fn rejects_unknown_format() {
+        assert!(!ALLOWED_OUTPUT_FORMATS.contains(&"exe"));
+        assert!(!ALLOWED_OUTPUT_FORMATS.contains(&"sh"));
     }
 }

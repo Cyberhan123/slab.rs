@@ -183,12 +183,12 @@ async fn run_libfetch_download(
         None    => api.latest(),
     };
 
-    let asset_fn: Box<dyn Fn(&str) -> String + Send> = match asset_name {
+    let asset_resolver: Box<dyn Fn(&str) -> String + Send> = match asset_name {
         Some(name) => Box::new(move |_| name.clone()),
         None       => default_asset_fn,
     };
 
-    match version_api.install(asset_fn).await {
+    match version_api.install(asset_resolver).await {
         Ok(path) => {
             let result_json = serde_json::json!({ "path": path }).to_string();
             store
@@ -435,7 +435,7 @@ pub async fn download_model(
         task_manager,
         tid,
         input_data,
-        Box::new(|v: &str| format!("model-{v}.gguf")),
+        Box::new(|version: &str| format!("model-{version}.gguf")),
     ));
 
     state.task_manager.insert(task_id.clone(), join.abort_handle());
@@ -485,7 +485,7 @@ pub async fn download_lib(
         task_manager,
         tid,
         input_data,
-        Box::new(|v: &str| format!("lib-{v}.so")),
+        Box::new(|version: &str| format!("lib-{version}.so")),
     ));
 
     state.task_manager.insert(task_id.clone(), join.abort_handle());

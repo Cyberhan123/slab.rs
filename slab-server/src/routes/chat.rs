@@ -127,8 +127,11 @@ pub async fn chat_completions(
 
         let sse_stream = backend_stream.map(|chunk| {
             let data = match chunk {
-                Ok(bytes) => String::from_utf8_lossy(&bytes).to_string(),
-                Err(e) => format!("[ERROR] {e}"),
+                Ok(bytes) => {
+                    let token = String::from_utf8_lossy(&bytes).to_string();
+                    serde_json::json!({ "delta": token }).to_string()
+                }
+                Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
             };
             Ok::<Event, Infallible>(Event::default().data(data))
         });
