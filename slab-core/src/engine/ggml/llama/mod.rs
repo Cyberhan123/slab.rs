@@ -5,7 +5,7 @@ mod worker;
 mod backend;
 
 pub use errors::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
-pub use backend::spawn_backend;
+pub use backend::{spawn_backend, spawn_backend_with_path};
 
 
 #[cfg(test)]

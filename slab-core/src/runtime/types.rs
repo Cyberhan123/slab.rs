@@ -1,4 +1,3 @@
-use serde::{Deserialize, Serialize};
 use std::any::Any;
 use std::sync::Arc;
 use thiserror::Error;
@@ -10,8 +9,7 @@ pub type TaskId = u64;
 ///
 /// All variants use `Arc` or value types so that moving a `Payload` between
 /// stages never copies large buffers.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(untagged)]
+#[derive(Debug, Clone, Default)]
 pub enum Payload {
     #[default]
     None,
@@ -24,8 +22,21 @@ pub enum Payload {
     /// Structured JSON metadata.  Not zero-copy but allowed for small objects.
     Json(serde_json::Value),
     /// Escape hatch for arbitrary typed data. Discouraged in core pipelines.
-    #[serde(skip_serializing, skip_deserializing)]
-    Any(#[serde(skip)] Arc<dyn Any + Send + Sync>),
+    Any(Arc<dyn Any + Send + Sync>),
+}
+
+impl Payload {
+    /// Convert to a `serde_json::Value` for use as operation options.
+    ///
+    /// - `Json` variants are returned as-is.
+    /// - `None` returns `serde_json::Value::Null`.
+    /// - All other variants return `serde_json::Value::Null`.
+    pub fn to_serde_value(&self) -> serde_json::Value {
+        match self {
+            Payload::Json(v) => v.clone(),
+            _ => serde_json::Value::Null,
+        }
+    }
 }
 
 impl Payload {
@@ -193,4 +204,8 @@ pub enum RuntimeError {
     /// A timed wait exceeded its deadline.
     #[error("operation timed out")]
     Timeout,
+
+    /// Failed to load a shared library for a backend.
+    #[error("library load failed for backend '{backend}': {message}")]
+    LibraryLoadFailed { backend: String, message: String },
 }
