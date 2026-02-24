@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::runtime::types::RuntimeError;
@@ -77,6 +78,37 @@ impl ResourceManager {
 
         semaphore
             .try_acquire_owned()
+            .map(|permit| Permit { permit })
+            .map_err(|_| RuntimeError::Busy {
+                backend_id: backend_id.to_owned(),
+            })
+    }
+
+    /// Acquire a permit for `backend_id`, waiting up to `timeout`.
+    ///
+    /// Returns `Ok(Permit)` when a slot becomes available, or
+    /// `Err(RuntimeError::Timeout)` if the deadline elapses before a slot is
+    /// released.
+    ///
+    /// Unlike [`Self::try_acquire`] this method suspends the caller instead of
+    /// failing immediately, which is appropriate for GPU workloads where a
+    /// brief wait is preferable to an outright rejection.
+    pub async fn acquire_with_timeout(
+        &self,
+        backend_id: &str,
+        timeout: Duration,
+    ) -> Result<Permit, RuntimeError> {
+        let semaphore = self
+            .semaphores
+            .get(backend_id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::Busy {
+                backend_id: backend_id.to_owned(),
+            })?;
+
+        tokio::time::timeout(timeout, semaphore.acquire_owned())
+            .await
+            .map_err(|_| RuntimeError::Timeout)?
             .map(|permit| Permit { permit })
             .map_err(|_| RuntimeError::Busy {
                 backend_id: backend_id.to_owned(),

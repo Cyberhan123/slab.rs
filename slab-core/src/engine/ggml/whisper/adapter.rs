@@ -181,4 +181,17 @@ impl GGMLWhisperEngine {
     pub fn unload(&mut self) {
         self.ctx = None;
     }
+
+    /// Create a new engine that shares the same library handle but has no
+    /// model context loaded.
+    ///
+    /// Used when spawning additional workers so each worker has its own
+    /// `ctx` slot (loaded independently) while all workers share the same
+    /// dynamic-library `Arc`.
+    pub fn fork_library(&self) -> Self {
+        Self {
+            instance: Arc::clone(&self.instance),
+            ctx: None,
+        }
+    }
 }

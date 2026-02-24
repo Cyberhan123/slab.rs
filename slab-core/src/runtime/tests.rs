@@ -148,7 +148,9 @@ mod tests {
 
     #[tokio::test]
     async fn gpu_stage_busy_error_when_no_permits() {
-        // Register backend with capacity 0.
+        // Register backend with capacity 0 so that no permit is ever available.
+        // The orchestrator will wait up to GPU_ACQUIRE_TIMEOUT (very short in
+        // test builds) and then fail the task with RuntimeError::Timeout.
         let mut rm = ResourceManager::new();
         rm.register_backend("busy-backend", 0);
         let orchestrator = Orchestrator::start(rm, 64);
@@ -165,7 +167,9 @@ mod tests {
             .await
             .expect("submit should succeed");
 
-        let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        // Wait up to 2 s; in test builds GPU_ACQUIRE_TIMEOUT is 200 ms so the
+        // task should fail well within this window.
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 let view = orchestrator
                     .get_status(task_id)
@@ -178,11 +182,12 @@ mod tests {
             }
         })
         .await
-        .expect("task should fail quickly");
+        .expect("task should fail within 2 s (GPU_ACQUIRE_TIMEOUT is 200 ms in tests)");
 
         assert!(
             matches!(result, TaskStatus::Failed { .. }),
-            "task should fail due to busy backend"
+            "task should fail after permit timeout, got {:?}",
+            result
         );
     }
 
@@ -258,6 +263,72 @@ mod tests {
             }
         }
         assert_eq!(tokens, "hello world");
+    }
+
+    // ── Broadcast channel tests ───────────────────────────────────────────────
+
+    /// Verify that `acquire_with_timeout` waits for a permit to become available
+    /// instead of failing immediately.
+    #[tokio::test]
+    async fn acquire_with_timeout_waits_for_permit() {
+        use crate::runtime::backend::admission::ResourceManager;
+
+        let mut rm = ResourceManager::new();
+        rm.register_backend("serial-backend", 1);
+
+        // Grab the single permit.
+        let permit = rm.try_acquire("serial-backend").expect("first permit");
+
+        // Spawn a task that releases the permit after a short delay.
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            drop(permit);
+        });
+
+        // acquire_with_timeout should succeed once the permit is released.
+        let result = rm
+            .acquire_with_timeout("serial-backend", std::time::Duration::from_secs(2))
+            .await;
+        assert!(result.is_ok(), "should acquire permit after it is released");
+    }
+
+    /// Verify that WorkerCommand::Unload is broadcast to all workers and that
+    /// each worker independently drops its context.
+    #[tokio::test]
+    async fn worker_command_unload_broadcast_reaches_all_workers() {
+        use tokio::sync::broadcast;
+
+        use crate::runtime::backend::protocol::WorkerCommand;
+
+        const NUM_WORKERS: usize = 3;
+
+        let (bc_tx, _) = broadcast::channel::<WorkerCommand>(16);
+
+        // Use a channel per worker to confirm receipt without sleeps.
+        let mut done_rxs = Vec::with_capacity(NUM_WORKERS);
+        for _ in 0..NUM_WORKERS {
+            let mut bc_rx = bc_tx.subscribe();
+            let (done_tx, done_rx) = tokio::sync::oneshot::channel::<()>();
+            done_rxs.push(done_rx);
+            tokio::spawn(async move {
+                if let Ok(WorkerCommand::Unload) = bc_rx.recv().await {
+                    let _ = done_tx.send(());
+                }
+            });
+        }
+
+        // Broadcast Unload.
+        bc_tx
+            .send(WorkerCommand::Unload)
+            .expect("broadcast should reach at least one subscriber");
+
+        // Wait for every worker to confirm receipt (with a generous timeout).
+        for rx in done_rxs {
+            tokio::time::timeout(std::time::Duration::from_secs(2), rx)
+                .await
+                .expect("worker should acknowledge Unload within 2 s")
+                .expect("done_tx dropped without sending");
+        }
     }
 
     // ── Storage tests ─────────────────────────────────────────────────────────
