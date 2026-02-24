@@ -3,15 +3,12 @@ use slab_diffusion::{Diffusion, SdContextParams, SdImage, SdImgGenParams};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use thiserror::Error;
 use tracing::info;
 
 #[derive(Debug, Error)]
 pub enum GGMLDiffusionEngineError {
-    #[error("Lock poisoned while trying to {operation}")]
-    LockPoisoned { operation: &'static str },
-
     #[error("GGMLDiffusionEngine context not initialized")]
     ContextNotInitialized,
 
@@ -42,17 +39,23 @@ pub enum GGMLDiffusionEngineError {
     },
 }
 
+/// Engine wrapping a Stable Diffusion shared library handle.
+///
+/// Each instance owns its own model context (`ctx`).  There is no shared
+/// mutable state between separate `GGMLDiffusionEngine` instances, so no
+/// `Mutex` is needed.  Workers that need concurrent inference must own
+/// independent engine instances (see [`Self::fork_library`]).
 #[derive(Debug)]
 pub struct GGMLDiffusionEngine {
     instance: Arc<Diffusion>,
-    // can't use RwLock here because the context is mutated in-place during inference
-    ctx: Mutex<Option<slab_diffusion::SdContext>>,
+    // Owned per-engine context; not shared across instances.
+    ctx: Option<slab_diffusion::SdContext>,
 }
 
-// SAFETY: GGMLDiffusionEngine is only accessed through Arc<Mutex<...>> for mutable state.
-// The `instance: Arc<Diffusion>` field wraps a dynamically loaded library handle which is
-// immutable after creation (contexts are created from it, not mutated).
-// All mutable inference state is guarded by the `ctx: Mutex<...>` field.
+// SAFETY: GGMLDiffusionEngine is owned exclusively by its worker task.
+// `instance: Arc<Diffusion>` is an immutable library handle safe to move
+// between threads.  `ctx: Option<SdContext>` implements Send + Sync per
+// the upstream stable-diffusion.cpp documentation (one context per thread).
 unsafe impl Send for GGMLDiffusionEngine {}
 unsafe impl Sync for GGMLDiffusionEngine {}
 
@@ -85,7 +88,7 @@ impl GGMLDiffusionEngine {
 
         Ok(Self {
             instance: Arc::new(diffusion),
-            ctx: Mutex::new(None),
+            ctx: None,
         })
     }
 
@@ -93,30 +96,36 @@ impl GGMLDiffusionEngine {
     /// any process-wide singleton.
     ///
     /// Call [`new_context`] afterwards to load a model.
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, engine::EngineError> {
         let normalized = Self::resolve_lib_path(path)?;
-        let engine = Self::build_engine(&normalized)?;
-        Ok(Arc::new(engine))
+        Self::build_engine(&normalized)
+    }
+
+    /// Create a new engine instance that shares the same library handle as
+    /// `self` but starts with no model context loaded.
+    ///
+    /// Useful when spawning multiple workers: each worker calls
+    /// `fork_library` to get its own context-free engine, then loads a model
+    /// via [`new_context`] independently.
+    pub(crate) fn fork_library(&self) -> Self {
+        Self {
+            instance: Arc::clone(&self.instance),
+            ctx: None,
+        }
     }
 
     /// Create (or replace) the Stable Diffusion inference context.
     ///
     /// Loading the model files specified in `params` may take several seconds.
-    pub fn new_context(&self, params: &SdContextParams) -> Result<(), engine::EngineError> {
-        let mut ctx_lock = self
-            .ctx
-            .lock()
-            .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
-                operation: "lock diffusion context",
-            })?;
-        *ctx_lock = None;
+    pub fn new_context(&mut self, params: &SdContextParams) -> Result<(), engine::EngineError> {
+        self.ctx = None;
 
         let ctx = self.instance.new_context(params).map_err(|source| {
             GGMLDiffusionEngineError::CreateContext {
                 source: source.into(),
             }
         })?;
-        *ctx_lock = Some(ctx);
+        self.ctx = Some(ctx);
 
         Ok(())
     }
@@ -128,14 +137,8 @@ impl GGMLDiffusionEngine {
         &self,
         params: &SdImgGenParams,
     ) -> Result<Vec<SdImage>, engine::EngineError> {
-        let ctx_lock = self
+        let ctx = self
             .ctx
-            .lock()
-            .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
-                operation: "lock diffusion context",
-            })?;
-
-        let ctx = ctx_lock
             .as_ref()
             .ok_or(GGMLDiffusionEngineError::ContextNotInitialized)?;
 
@@ -148,15 +151,8 @@ impl GGMLDiffusionEngine {
     }
 
     /// Unload the current context and release its resources.
-    pub fn unload(&self) -> Result<(), engine::EngineError> {
-        let mut ctx_lock = self
-            .ctx
-            .lock()
-            .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
-                operation: "lock diffusion context",
-            })?;
-        *ctx_lock = None;
-        Ok(())
+    pub fn unload(&mut self) {
+        self.ctx = None;
     }
 }
 
@@ -180,7 +176,7 @@ mod test {
 
         let diffusion_dir = ensure_diffusion_dir().await;
 
-        let ds = GGMLDiffusionEngine::from_path(diffusion_dir.as_path())
+        let mut ds = GGMLDiffusionEngine::from_path(diffusion_dir.as_path())
             .expect("failed to initialize diffusion service");
 
         // Use a tiny FLUX-dev GGUF for the test.  The test is skipped

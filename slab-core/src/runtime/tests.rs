@@ -32,7 +32,7 @@ mod tests {
 
     #[test]
     fn permit_acquired_and_released() {
-        let rm = ResourceManager::new();
+        let mut rm = ResourceManager::new();
         rm.register_backend("test-backend", 2);
 
         let p1 = rm.try_acquire("test-backend").expect("first permit");
@@ -51,7 +51,7 @@ mod tests {
 
     #[test]
     fn permit_unknown_backend_returns_busy() {
-        let rm = ResourceManager::new();
+        let mut rm = ResourceManager::new();
         let err = rm.try_acquire("nonexistent").unwrap_err();
         assert!(
             matches!(err, crate::runtime::types::RuntimeError::Busy { .. }),
@@ -93,7 +93,7 @@ mod tests {
     #[tokio::test]
     async fn gpu_stage_dispatches_and_receives_reply() {
         let orchestrator = {
-            let rm = ResourceManager::new();
+            let mut rm = ResourceManager::new();
             rm.register_backend("echo-backend", 4);
             Orchestrator::start(rm, 64)
         };
@@ -149,7 +149,7 @@ mod tests {
     #[tokio::test]
     async fn gpu_stage_busy_error_when_no_permits() {
         // Register backend with capacity 0.
-        let rm = ResourceManager::new();
+        let mut rm = ResourceManager::new();
         rm.register_backend("busy-backend", 0);
         let orchestrator = Orchestrator::start(rm, 64);
 
@@ -188,7 +188,7 @@ mod tests {
 
     #[tokio::test]
     async fn streaming_pipeline_returns_stream_handle() {
-        let rm = ResourceManager::new();
+        let mut rm = ResourceManager::new();
         rm.register_backend("stream-backend", 4);
         let orchestrator = Orchestrator::start(rm, 64);
 

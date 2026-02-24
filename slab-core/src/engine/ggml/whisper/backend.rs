@@ -1,7 +1,7 @@
 //! Backend worker adapter for `ggml.whisper`.
 //!
-//! Provides [`spawn_backend`] and [`spawn_backend_with_path`] which start a
-//! Tokio task translating [`BackendRequest`] messages into whisper inference calls.
+//! Provides [`spawn_backend_with_engine`] which starts one or more Tokio tasks
+//! translating [`BackendRequest`] messages into whisper inference calls.
 //!
 //! # Supported ops
 //!
@@ -48,16 +48,22 @@ struct ModelLoadConfig {
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
+/// A single whisper backend worker.
+///
+/// Each worker **owns** its engine (library handle + model context).  There is
+/// no shared mutable state between workers, so no `Mutex` is needed on the
+/// context.  When `backend_capacity > 1` multiple workers are spawned; each
+/// worker owns an independent engine forked from the same library handle and
+/// manages its own model context independently.
 struct WhisperWorker {
-    /// Wraps both the library handle and the optional model context.
     /// - `None` → library not loaded.
     /// - `Some(e)` where `e.ctx` is None → lib loaded, no model.
     /// - `Some(e)` where `e.ctx` is Some → lib + model loaded.
-    engine: Option<Arc<GGMLWhisperEngine>>,
+    engine: Option<GGMLWhisperEngine>,
 }
 
 impl WhisperWorker {
-    fn new(engine: Option<Arc<GGMLWhisperEngine>>) -> Self {
+    fn new(engine: Option<GGMLWhisperEngine>) -> Self {
         Self { engine }
     }
 
@@ -156,8 +162,8 @@ impl WhisperWorker {
         input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let engine = match self.engine.as_ref() {
-            Some(e) => Arc::clone(e),
+        let engine = match self.engine.as_mut() {
+            Some(e) => e,
             None => {
                 let _ = reply_tx.send(BackendReply::Error(
                     "library not loaded; call lib.load first".into(),
@@ -198,24 +204,17 @@ impl WhisperWorker {
     // ── model.unload ──────────────────────────────────────────────────────────
 
     async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
-        let engine = match self.engine.as_ref() {
-            Some(e) => Arc::clone(e),
-            None => {
-                let _ = reply_tx.send(BackendReply::Error(
-                    "library not loaded; call lib.load first".into(),
-                ));
-                return;
-            }
-        };
-
-        match engine.unload() {
-            Ok(()) => {
+        match self.engine.as_mut() {
+            Some(e) => {
+                e.unload();
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
             }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+            None => {
+                let _ = reply_tx.send(BackendReply::Error(
+                    "library not loaded; call lib.load first".into(),
+                ));
             }
         }
     }
@@ -228,7 +227,7 @@ impl WhisperWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
-            Some(e) => Arc::clone(e),
+            Some(e) => e,
             None => {
                 let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
                 return;
@@ -246,8 +245,7 @@ impl WhisperWorker {
         };
 
         // Whisper inference is CPU/GPU-bound; use block_in_place so the engine
-        // (and its internal Mutex<ctx>) stays on this thread without needing
-        // an additional spawn_blocking call.
+        // context stays on this thread without needing an additional spawn_blocking.
         let result =
             tokio::task::block_in_place(|| engine.inference::<std::path::PathBuf>(&samples));
 
@@ -277,20 +275,41 @@ impl WhisperWorker {
 }
 
 // ── Public entry points ───────────────────────────────────────────────────────
-/// Spawn a whisper backend worker with a pre-loaded engine handle.
+/// Spawn `num_workers` whisper backend workers sharing a single ingress channel.
 ///
 /// Used by `api::init` to separate library loading (phase 1) from worker
 /// spawning (phase 2) so that no tasks are started if any library fails.
+///
+/// When `num_workers > 1` each worker receives an independent engine forked
+/// from the same library handle (sharing the underlying `Arc<Whisper>`) but
+/// with its own empty model context.  This allows `backend_capacity` concurrent
+/// inference requests without any lock contention on the model context.
 pub(crate) fn spawn_backend_with_engine(
-    capacity: usize,
-    engine: Option<Arc<GGMLWhisperEngine>>,
+    channel_capacity: usize,
+    num_workers: usize,
+    engine: Option<GGMLWhisperEngine>,
 ) -> mpsc::Sender<BackendRequest> {
-    let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
-    tokio::spawn(async move {
-        let mut worker = WhisperWorker::new(engine);
-        while let Some(req) = rx.recv().await {
-            worker.handle(req).await;
-        }
-    });
+    let (tx, rx) = mpsc::channel::<BackendRequest>(channel_capacity);
+    // Wrap the receiver in an Arc<Mutex<...>> so multiple worker tasks can
+    // share a single ingress channel without a separate dispatcher.
+    let rx = Arc::new(tokio::sync::Mutex::new(rx));
+
+    let n = num_workers.max(1);
+    for _ in 0..n {
+        // Each worker gets its own engine fork (same library, empty ctx).
+        let worker_engine = engine.as_ref().map(|e| e.fork_library());
+        let worker_rx = Arc::clone(&rx);
+        tokio::spawn(async move {
+            let mut worker = WhisperWorker::new(worker_engine);
+            loop {
+                let req = { worker_rx.lock().await.recv().await };
+                match req {
+                    Some(req) => worker.handle(req).await,
+                    None => break,
+                }
+            }
+        });
+    }
+
     tx
 }
