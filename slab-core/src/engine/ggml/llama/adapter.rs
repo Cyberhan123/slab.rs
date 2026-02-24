@@ -12,13 +12,13 @@ use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 #[derive(Debug)]
 pub struct GGMLLlamaEngine {
     instance: Arc<Llama>,
-    ineference_engine: Arc<Mutex<Option<LlamaInferenceEngine>>>,
+    inference_engine: Mutex<Option<LlamaInferenceEngine>>,
 }
 
-// SAFETY: GGMLLlamaEngine is only accessed through Arc<Mutex<...>> for mutable state.
+// SAFETY: GGMLLlamaEngine is always owned through Arc<GGMLLlamaEngine> by backend workers.
 // The `instance: Arc<Llama>` field wraps a dynamically loaded library handle which is
 // immutable after creation. Mutable lifecycle state (loaded engine handle)
-// is guarded by the `engine: Arc<Mutex<...>>` field.
+// is guarded by the `inference_engine: Mutex<...>` field.
 unsafe impl Send for GGMLLlamaEngine {}
 unsafe impl Sync for GGMLLlamaEngine {}
 
@@ -57,7 +57,7 @@ impl GGMLLlamaEngine {
 
         Ok(Self {
             instance: Arc::new(llama),
-            ineference_engine: Arc::new(Mutex::new(None)),
+            inference_engine: Mutex::new(None),
         })
     }
 
@@ -86,7 +86,7 @@ impl GGMLLlamaEngine {
         }
 
         let mut engine_lock =
-            self.ineference_engine
+            self.inference_engine
                 .lock()
                 .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                     operation: "lock llama engine state",
@@ -115,7 +115,7 @@ impl GGMLLlamaEngine {
 
     fn require_engine(&self) -> Result<LlamaInferenceEngine, engine::EngineError> {
         let engine_lock: std::sync::MutexGuard<'_, Option<LlamaInferenceEngine>> = self
-            .ineference_engine
+            .inference_engine
             .lock()
             .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                 operation: "lock llama engine state",
