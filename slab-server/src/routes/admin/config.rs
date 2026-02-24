@@ -24,10 +24,11 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/config", get(list_config))
         .route("/config/{key}", get(get_config_value).put(set_config_value))
 }
+
 #[utoipa::path(
     get,
     path = "/admin/config",
-    tag = "management",
+    tag = "admin",
     responses(
         (status = 200, description = "List of all configuration entries", body = Vec<ConfigEntry>),
         (status = 401, description = "Unauthorised (management token required)"),
@@ -48,7 +49,7 @@ pub async fn list_config(
 #[utoipa::path(
     get,
     path = "/admin/config/{key}",
-    tag = "management",
+    tag = "admin",
     responses(
         (status = 200, description = "Get a configuration entry by key", body = ConfigEntry),
         (status = 401, description = "Unauthorised (management token required)"),
@@ -70,7 +71,7 @@ pub async fn get_config_value(
 #[utoipa::path(
     put,
     path = "/admin/config/{key}",
-    tag = "management",
+    tag = "admin",
     request_body = SetConfigBody,
     responses(
         (status = 200, description = "Set a configuration entry by key", body = ConfigEntry),

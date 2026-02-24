@@ -24,7 +24,6 @@
 //! { "model_path": "/path/to/model.gguf" }
 //! ```
 
-use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -34,7 +33,7 @@ use tokio::sync::mpsc;
 use crate::api::Event;
 use crate::engine::ggml::diffusion::adapter::GGMLDiffusionEngine;
 use crate::runtime::backend::protocol::{BackendReply, BackendRequest};
-use crate::runtime::types::{Payload, RuntimeError};
+use crate::runtime::types::{Payload};
 
 // ── Configurations ────────────────────────────────────────────────────────────
 
@@ -293,51 +292,6 @@ impl DiffusionWorker {
 }
 
 // ── Public entry points ───────────────────────────────────────────────────────
-
-/// Spawn the diffusion backend worker without a pre-loaded library.
-///
-/// # Panics
-/// Panics if called outside a Tokio runtime.
-pub fn spawn_backend(capacity: usize) -> mpsc::Sender<BackendRequest> {
-    spawn_backend_inner(capacity, None)
-}
-
-/// Spawn the diffusion backend worker, optionally pre-loading the shared library.
-///
-/// `lib_path` should point to the directory containing
-/// `libstable-diffusion.{so,dylib,dll}` or directly to the library file.
-///
-/// # Panics
-/// Panics if called outside a Tokio runtime.
-pub fn spawn_backend_with_path(
-    capacity: usize,
-    lib_path: Option<&Path>,
-) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
-    let engine = lib_path
-        .map(|path| {
-            GGMLDiffusionEngine::from_path(path).map_err(|e| RuntimeError::LibraryLoadFailed {
-                backend: "ggml.diffusion".into(),
-                message: e.to_string(),
-            })
-        })
-        .transpose()?;
-    Ok(spawn_backend_inner(capacity, engine))
-}
-
-fn spawn_backend_inner(
-    capacity: usize,
-    engine: Option<Arc<GGMLDiffusionEngine>>,
-) -> mpsc::Sender<BackendRequest> {
-    let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
-    tokio::spawn(async move {
-        let mut worker = DiffusionWorker::new(engine);
-        while let Some(req) = rx.recv().await {
-            worker.handle(req).await;
-        }
-    });
-    tx
-}
-
 /// Spawn a diffusion backend worker with a pre-loaded engine handle.
 ///
 /// Used by `api::init` to separate library loading (phase 1) from worker
@@ -346,5 +300,12 @@ pub(crate) fn spawn_backend_with_engine(
     capacity: usize,
     engine: Option<Arc<GGMLDiffusionEngine>>,
 ) -> mpsc::Sender<BackendRequest> {
-    spawn_backend_inner(capacity, engine)
+     let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
+    tokio::spawn(async move {
+        let mut worker = DiffusionWorker::new(engine);
+        while let Some(req) = rx.recv().await {
+            worker.handle(req).await;
+        }
+    });
+    tx
 }

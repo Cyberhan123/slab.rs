@@ -3,20 +3,11 @@ use slab_llama::{Llama, LlamaContextParams, LlamaModelParams};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock, RwLock};
+use std::sync::{Arc, Mutex};
 use tracing::info;
 
 use super::engine::LlamaInferenceEngine;
 use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
-
-/// Process-wide singleton holder for the loaded llama dynamic library service.
-struct LlamaGlobal {
-    engine: Arc<GGMLLlamaEngine>,
-    lib_path: PathBuf,
-}
-
-/// Lazily-initialized global storage for `GGMLLlamaEngine`.
-static INSTANCE: OnceLock<RwLock<Option<LlamaGlobal>>> = OnceLock::new();
 
 #[derive(Debug)]
 pub struct GGMLLlamaEngine {
@@ -78,111 +69,6 @@ impl GGMLLlamaEngine {
         let normalized = Self::resolve_lib_path(path)?;
         let engine = Self::build_engine(&normalized)?;
         Ok(Arc::new(engine))
-    }
-
-    /// Initialize the global `LlamaService` if needed.
-    ///
-    /// If already initialized with the same canonical library path, returns the
-    /// existing instance. If initialized with a different path, returns
-    /// `LibraryPathMismatch`.
-    pub fn init<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
-        let normalized_path = Self::resolve_lib_path(path)?;
-        let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
-
-        {
-            let read_guard =
-                global_lock
-                    .read()
-                    .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                        operation: "read llama global state",
-                    })?;
-            if let Some(global) = read_guard.as_ref() {
-                if global.lib_path != normalized_path {
-                    return Err(GGMLLlamaEngineError::LibraryPathMismatch {
-                        existing: global.lib_path.clone(),
-                        requested: normalized_path.clone(),
-                    }
-                    .into());
-                }
-                return Ok(global.engine.clone());
-            }
-        }
-
-        let engine = Arc::new(Self::build_engine(&normalized_path)?);
-        let mut write_guard =
-            global_lock
-                .write()
-                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                    operation: "write llama global state",
-                })?;
-
-        if let Some(global) = write_guard.as_ref() {
-            if global.lib_path != normalized_path {
-                return Err(GGMLLlamaEngineError::LibraryPathMismatch {
-                    existing: global.lib_path.clone(),
-                    requested: normalized_path.clone(),
-                }
-                .into());
-            }
-            return Ok(global.engine.clone());
-        }
-
-        *write_guard = Some(LlamaGlobal {
-            engine: engine.clone(),
-            lib_path: normalized_path,
-        });
-
-        Ok(engine)
-    }
-
-    /// Force-reload the global `LlamaService` from a (possibly new) library path.
-    ///
-    /// This replaces the global instance unconditionally and logs the previous
-    /// and current library path.
-    pub fn reload<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
-        let normalized_path = Self::resolve_lib_path(path)?;
-        let engine = Arc::new(Self::build_engine(&normalized_path)?);
-        let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
-        let mut write_guard =
-            global_lock
-                .write()
-                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                    operation: "write llama global state",
-                })?;
-
-        let previous = write_guard
-            .as_ref()
-            .map(|g| g.lib_path.display().to_string())
-            .unwrap_or_else(|| "<uninitialized>".to_string());
-
-        *write_guard = Some(LlamaGlobal {
-            engine: engine.clone(),
-            lib_path: normalized_path.clone(),
-        });
-
-        info!(
-            "llama service reloaded: {} -> {}",
-            previous,
-            normalized_path.display()
-        );
-
-        Ok(engine)
-    }
-
-    /// Return the currently initialized global `LlamaService`.
-    pub fn current() -> Result<Arc<Self>, engine::EngineError> {
-        let global_lock = INSTANCE
-            .get()
-            .ok_or(GGMLLlamaEngineError::GlobalStorageNotInitialized)?;
-        let read_guard = global_lock
-            .read()
-            .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                operation: "read llama global state",
-            })?;
-        read_guard
-            .as_ref()
-            .map(|global| global.engine.clone())
-            .ok_or(GGMLLlamaEngineError::InstanceNotInitialized.into())
     }
 
     /// Load a model and start a multi-worker inference engine.

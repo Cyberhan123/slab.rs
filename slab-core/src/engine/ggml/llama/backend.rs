@@ -25,7 +25,6 @@
 //! ```
 
 use std::collections::HashMap;
-use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -36,7 +35,7 @@ use crate::api::Event;
 use crate::engine::ggml::llama::adapter::GGMLLlamaEngine;
 use crate::engine::ggml::llama::errors::SessionId;
 use crate::runtime::backend::protocol::{BackendReply, BackendRequest, StreamChunk};
-use crate::runtime::types::{Payload, RuntimeError};
+use crate::runtime::types::{Payload };
 
 // ── Configurations ────────────────────────────────────────────────────────────
 
@@ -386,49 +385,6 @@ impl LlamaWorker {
 
 // ── Public entry points ───────────────────────────────────────────────────────
 
-/// Spawn the llama backend worker without a pre-loaded library.
-///
-/// # Panics
-/// Panics if called outside a Tokio runtime.
-pub fn spawn_backend(capacity: usize) -> mpsc::Sender<BackendRequest> {
-    spawn_backend_inner(capacity, None)
-}
-
-/// Spawn the llama backend worker, optionally pre-loading the shared library.
-///
-/// `lib_path` should point to the directory containing `libllama.{so,dylib,dll}`
-/// or directly to the library file.
-///
-/// # Panics
-/// Panics if called outside a Tokio runtime.
-pub fn spawn_backend_with_path(
-    capacity: usize,
-    lib_path: Option<&Path>,
-) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
-    let engine = lib_path
-        .map(|path| {
-            GGMLLlamaEngine::from_path(path).map_err(|e| RuntimeError::LibraryLoadFailed {
-                backend: "ggml.llama".into(),
-                message: e.to_string(),
-            })
-        })
-        .transpose()?;
-    Ok(spawn_backend_inner(capacity, engine))
-}
-
-fn spawn_backend_inner(
-    capacity: usize,
-    engine: Option<Arc<GGMLLlamaEngine>>,
-) -> mpsc::Sender<BackendRequest> {
-    let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
-    tokio::spawn(async move {
-        let mut worker = LlamaWorker::new(engine);
-        while let Some(req) = rx.recv().await {
-            worker.handle(req).await;
-        }
-    });
-    tx
-}
 
 /// Spawn a llama backend worker with a pre-loaded engine handle.
 ///
@@ -438,5 +394,12 @@ pub(crate) fn spawn_backend_with_engine(
     capacity: usize,
     engine: Option<Arc<GGMLLlamaEngine>>,
 ) -> mpsc::Sender<BackendRequest> {
-    spawn_backend_inner(capacity, engine)
+      let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
+    tokio::spawn(async move {
+        let mut worker = LlamaWorker::new(engine);
+        while let Some(req) = rx.recv().await {
+            worker.handle(req).await;
+        }
+    });
+    tx
 }

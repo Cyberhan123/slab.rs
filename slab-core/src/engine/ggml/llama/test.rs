@@ -32,7 +32,7 @@ async fn make_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
     let model_path = download_test_model();
 
     let service =
-        GGMLLlamaEngine::init(llama_dir.as_path()).expect("failed to initialize llama service");
+        GGMLLlamaEngine::from_path(llama_dir.as_path()).expect("failed to initialize llama service");
     service
         .load_model_with_workers(
             model_path.as_path(),
@@ -45,32 +45,7 @@ async fn make_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
     service
 }
 
-/// Verifies singleton lifecycle semantics for `LlamaService`:
-/// - `init` creates (or returns) the current instance;
-/// - `current` returns that same instance;
-/// - `reload` replaces it with a new instance.
-#[tokio::test]
-async fn test_llama_current_and_reload() {
-    let llama_dir = ensure_llama_dir().await;
 
-    let initial =
-        GGMLLlamaEngine::init(llama_dir.as_path()).expect("failed to initialize llama service");
-    let current = GGMLLlamaEngine::current().expect("failed to get current llama service");
-    assert!(Arc::ptr_eq(&initial, &current));
-
-    let reloaded =
-        GGMLLlamaEngine::reload(llama_dir.as_path()).expect("failed to reload llama service");
-    let current_after_reload =
-        GGMLLlamaEngine::current().expect("failed to get current llama service after reload");
-
-    assert!(Arc::ptr_eq(&reloaded, &current_after_reload));
-    assert!(!Arc::ptr_eq(&initial, &reloaded));
-}
-
-/// End-to-end smoke test for `LlamaService::inference`.
-///
-/// Covers: dynamic library init, model loading, engine startup, and non-empty
-/// output contract for a basic prompt.
 #[tokio::test]
 async fn test_llama_inference() {
     let service = make_service(1).await;

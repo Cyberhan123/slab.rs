@@ -175,7 +175,7 @@ async fn run_libfetch_download(
 #[utoipa::path(
     get,
     path = "/admin/backends/status",
-    tag = "management",
+    tag = "admin",
   params(BackendTypeQuery),
     responses(
         (status = 200, description = "Backend worker is running", body = BackendStatusResponse),
@@ -197,7 +197,7 @@ pub async fn backend_status(
 #[utoipa::path(
     get,
     path = "/admin/backends",
-    tag = "management",
+    tag = "admin",
     responses(
         (status = 200, description = "List of all registered backends", body = serde_json::Value),
         (status = 401, description = "Unauthorised (management token required)"),

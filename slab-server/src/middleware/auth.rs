@@ -1,26 +1,31 @@
-use axum::body::Body;
-use axum::http::{Request, StatusCode};
-use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
+use crate::state::AppState;
+use axum::{
+    extract::{Request, State},
+    http::{header::AUTHORIZATION, HeaderMap, StatusCode},
+    middleware::Next,
+    response::{IntoResponse, Response},
+};
+use std::sync::Arc;
 
-pub async fn check_management_auth(req: Request<Body>, next: Next) -> Response {
-    let expected = std::env::var("SLAB_ADMIN_TOKEN").ok();
-    if let Some(expected_token) = expected {
-        let provided = req
-            .headers()
-            .get(axum::http::header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| v.strip_prefix("Bearer "));
-        match provided {
-            Some(token) if token == expected_token => {}
-            _ => {
-                return (
-                    StatusCode::UNAUTHORIZED,
-                    axum::Json(serde_json::json!({ "error": "unauthorised" })),
-                )
-                    .into_response();
-            }
-        }
+pub async fn auth_middleware(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    req: Request,
+    next: Next,
+) -> Response {
+    let provided = headers
+        .get(AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "));
+
+    let is_authorized = provided
+        .zip(state.config.admin_api_token.as_deref())
+        .map(|(p, a)| p == a)
+        .unwrap_or(false);
+
+    if is_authorized {
+        return next.run(req).await;
+    } else {
+        StatusCode::UNAUTHORIZED.into_response()
     }
-    next.run(req).await
 }

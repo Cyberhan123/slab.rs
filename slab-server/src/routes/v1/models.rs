@@ -6,7 +6,6 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use std::str::FromStr;
 use tracing::{info, warn};
 use utoipa::OpenApi;
 
