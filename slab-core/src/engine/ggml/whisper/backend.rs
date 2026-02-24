@@ -11,7 +11,7 @@
 //! | `"lib.reload"`     | `ReloadLibrary`  | Replace the library, discarding current model.     |
 //! | `"model.load"`     | `LoadModel`      | Load a model from the pre-loaded library.          |
 //! | `"model.unload"`   | `UnloadModel`    | Drop the current model (library stays loaded).     |
-//! | `"inference.image"`| `InferenceImage` | Transcribe audio; input is packed `f32` PCM.       |
+//! | `"inference"`      | `Inference`      | Transcribe audio; input is packed `f32` PCM.       |
 //!
 //! ### `lib.load` / `lib.reload` input JSON
 //! ```json
@@ -70,7 +70,7 @@ impl WhisperWorker {
             Ok(Event::ReloadLibrary) => self.handle_reload_library(input, reply_tx).await,
             Ok(Event::LoadModel) => self.handle_load_model(input, reply_tx).await,
             Ok(Event::UnloadModel) => self.handle_unload_model(reply_tx).await,
-            Ok(Event::InferenceImage) => self.handle_inference(input, reply_tx).await,
+            Ok(Event::Inference) => self.handle_inference(input, reply_tx).await,
             Ok(_) | Err(_) => {
                 let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
             }
@@ -269,8 +269,8 @@ pub fn spawn_backend_with_path(
     lib_path: Option<&Path>,
 ) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
     let engine = lib_path
-        .map(|p| {
-            GGMLWhisperEngine::from_path(p).map_err(|e| RuntimeError::LibraryLoadFailed {
+        .map(|path| {
+            GGMLWhisperEngine::from_path(path).map_err(|e| RuntimeError::LibraryLoadFailed {
                 backend: "ggml.whisper".into(),
                 message: e.to_string(),
             })

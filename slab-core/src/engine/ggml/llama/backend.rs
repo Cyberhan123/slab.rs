@@ -383,8 +383,8 @@ pub fn spawn_backend_with_path(
     lib_path: Option<&Path>,
 ) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
     let engine = lib_path
-        .map(|p| {
-            GGMLLlamaEngine::from_path(p).map_err(|e| RuntimeError::LibraryLoadFailed {
+        .map(|path| {
+            GGMLLlamaEngine::from_path(path).map_err(|e| RuntimeError::LibraryLoadFailed {
                 backend: "ggml.llama".into(),
                 message: e.to_string(),
             })
