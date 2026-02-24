@@ -10,7 +10,7 @@
 //! | `"lib.load"`       | `LoadLibrary`    | Load (skip if already loaded) the whisper dylib.   |
 //! | `"lib.reload"`     | `ReloadLibrary`  | Replace the library, discarding current model.     |
 //! | `"model.load"`     | `LoadModel`      | Load a model from the pre-loaded library.          |
-//! | `"model.unload"`   | `UnloadModel`    | Drop the model and library handle; call lib.load + model.load to restore. |
+//! | `"model.unload"`   | `UnloadModel`    | Drop the model handle; call model.load to restore. |
 //! | `"inference"`      | `Inference`      | Transcribe audio; input is packed `f32` PCM.       |
 //!
 //! ### `lib.load` / `lib.reload` input JSON
@@ -198,15 +198,26 @@ impl WhisperWorker {
     // ── model.unload ──────────────────────────────────────────────────────────
 
     async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
-        // Drop the current GGMLWhisperEngine instance (model context + library handle)
-        // by clearing our handle to it.  Subsequent inference calls will observe
-        // `self.engine == None` and return "model not loaded" until lib.load +
-        // model.load are called again.
-        //
-        // Note: there is no API in slab_whisper to clear only the model context
-        // while keeping the library alive, so this drops everything.
-        self.engine = None;
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(&b""[..]))));
+        let engine = match self.engine.as_ref() {
+            Some(e) => Arc::clone(e),
+            None => {
+                let _ = reply_tx.send(BackendReply::Error(
+                    "library not loaded; call lib.load first".into(),
+                ));
+                return;
+            }
+        };
+
+        match engine.unload() {
+            Ok(()) => {
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
+            }
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+            }
+        }
     }
 
     // ── inference ─────────────────────────────────────────────────────────────

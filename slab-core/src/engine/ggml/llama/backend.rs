@@ -10,7 +10,7 @@
 //! | `"lib.load"`         | `LoadLibrary`    | Load (skip if already loaded) the llama dylib. |
 //! | `"lib.reload"`       | `ReloadLibrary`  | Replace the library, discarding current model. |
 //! | `"model.load"`       | `LoadModel`      | Load a GGUF model from the pre-loaded library. |
-//! | `"model.unload"`     | `UnloadModel`    | Drop the model and library handle; call lib.load + model.load to restore. |
+//! | `"model.unload"`     | `UnloadModel`    | Drop the model handle; call model.load to restore. |
 //! | `"inference"`        | `Inference`      | Unary text generation; input is UTF-8 prompt.  |
 //! | `"inference.stream"` | `InferenceStream`| Streaming text generation.                     |
 //!
@@ -35,7 +35,7 @@ use crate::api::Event;
 use crate::engine::ggml::llama::adapter::GGMLLlamaEngine;
 use crate::engine::ggml::llama::errors::SessionId;
 use crate::runtime::backend::protocol::{BackendReply, BackendRequest, StreamChunk};
-use crate::runtime::types::{Payload };
+use crate::runtime::types::Payload;
 
 // ── Configurations ────────────────────────────────────────────────────────────
 
@@ -256,16 +256,29 @@ impl LlamaWorker {
     // ── model.unload ──────────────────────────────────────────────────────────
 
     async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
-        // Drop the current GGMLLlamaEngine instance (and thus the loaded model and
-        // its associated OS worker threads) by clearing our handle to it.
-        // Subsequent inference calls will observe `self.engine == None` and return
-        // "model not loaded" until lib.load + model.load are called again.
-        //
-        // Note: this also releases the dynamic library handle held inside the engine.
-        // Call lib.load first before model.load to restore full functionality.
+        
+        let engine = match self.engine.as_ref() {
+            Some(e) => Arc::clone(e),
+            None => {
+                let _ = reply_tx.send(BackendReply::Error(
+                    "library not loaded; call lib.load first".into(),
+                ));
+                return;
+            }
+        };
+
+        match engine.unload() {
+            Ok(()) => {
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
+            }
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+            }
+        }
+
         self.sessions.clear();
-        self.engine = None;
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(&b""[..]))));
     }
 
     // ── inference ─────────────────────────────────────────────────────────────
@@ -385,7 +398,6 @@ impl LlamaWorker {
 
 // ── Public entry points ───────────────────────────────────────────────────────
 
-
 /// Spawn a llama backend worker with a pre-loaded engine handle.
 ///
 /// Used by `api::init` to separate library loading (phase 1) from worker
@@ -394,7 +406,7 @@ pub(crate) fn spawn_backend_with_engine(
     capacity: usize,
     engine: Option<Arc<GGMLLlamaEngine>>,
 ) -> mpsc::Sender<BackendRequest> {
-      let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
+    let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
     tokio::spawn(async move {
         let mut worker = LlamaWorker::new(engine);
         while let Some(req) = rx.recv().await {
