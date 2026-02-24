@@ -3,7 +3,7 @@ use slab_whisper::{SamplingStrategy, Whisper, WhisperContext, WhisperContextPara
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use subparse::{
     timetypes::{TimePoint, TimeSpan},
     SubtitleEntry,
@@ -13,9 +13,6 @@ use tracing::info;
 
 #[derive(Debug, Error)]
 pub enum GGMLWhisperEngineError {
-    #[error("Lock poisoned while trying to {operation}")]
-    LockPoisoned { operation: &'static str },
-
     #[error("Model path contains invalid UTF-8")]
     InvalidModelPathUtf8,
 
@@ -56,16 +53,23 @@ pub enum GGMLWhisperEngineError {
     },
 }
 
+/// Engine wrapping a Whisper shared library handle.
+///
+/// Each instance owns its own model context (`ctx`).  There is no shared
+/// mutable state between separate `GGMLWhisperEngine` instances, so no
+/// `Mutex` is needed.  Workers that need concurrent inference must own
+/// independent engine instances (see [`Self::fork_library`]).
 #[derive(Debug)]
 pub struct GGMLWhisperEngine {
     instance: Arc<Whisper>,
-    ctx: Mutex<Option<WhisperContext>>,
+    // Owned per-engine context; not shared across instances.
+    ctx: Option<WhisperContext>,
 }
 
-// SAFETY: GGMLWhisperEngine is only accessed through Arc<Mutex<...>> for mutable state.
-// The `instance: Arc<Whisper>` field wraps a dynamically loaded library handle which is
-// immutable after creation (contexts and params are created from it, not mutated).
-// All mutable inference state is guarded by the `ctx: Mutex<...>` field.
+// SAFETY: GGMLWhisperEngine is owned exclusively by its worker task.
+// `instance: Arc<Whisper>` is an immutable library handle safe to move
+// between threads.  `ctx: Option<WhisperContext>` wraps Arc<WhisperInnerContext>
+// which is Send + Sync per the upstream whisper.cpp thread-safety guarantees.
 unsafe impl Send for GGMLWhisperEngine {}
 unsafe impl Sync for GGMLWhisperEngine {}
 
@@ -98,7 +102,7 @@ impl GGMLWhisperEngine {
 
         Ok(Self {
             instance: Arc::new(whisper),
-            ctx: Mutex::new(None),
+            ctx: None,
         })
     }
 
@@ -106,24 +110,29 @@ impl GGMLWhisperEngine {
     /// any process-wide singleton.
     ///
     /// Call [`new_context`] afterwards to load a model.
-    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, engine::EngineError> {
         let normalized = Self::resolve_lib_path(path)?;
-        let engine = Self::build_engine(&normalized)?;
-        Ok(Arc::new(engine))
+        Self::build_engine(&normalized)
+    }
+
+    /// Create a new engine instance that shares the same library handle as
+    /// `self` but starts with no model context loaded.
+    ///
+    /// Useful when spawning multiple workers: each worker calls
+    /// `fork_library` to get its own context-free engine, then loads a model
+    /// via [`new_context`] independently.
+    pub(crate) fn fork_library(&self) -> Self {
+        Self {
+            instance: Arc::clone(&self.instance),
+            ctx: None,
+        }
     }
 
     pub fn new_context<P: AsRef<Path>>(
-        &self,
+        &mut self,
         path_to_model: P,
         params: WhisperContextParameters,
     ) -> Result<(), engine::EngineError> {
-        let mut ctx_lock = self
-            .ctx
-            .lock()
-            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
-                operation: "lock whisper context",
-            })?;
-
         let path = path_to_model
             .as_ref()
             .to_str()
@@ -136,7 +145,7 @@ impl GGMLWhisperEngine {
                 model_path: path.to_string(),
                 source: source.into(),
             })?;
-        *ctx_lock = Some(ctx);
+        self.ctx = Some(ctx);
         Ok(())
     }
 
@@ -144,14 +153,8 @@ impl GGMLWhisperEngine {
         &self,
         audio_data: &[f32],
     ) -> Result<Vec<SubtitleEntry>, engine::EngineError> {
-        let ctx_lock = self
+        let ctx = self
             .ctx
-            .lock()
-            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
-                operation: "lock whisper context",
-            })?;
-
-        let ctx = ctx_lock
             .as_ref()
             .ok_or(GGMLWhisperEngineError::ContextNotInitialized)?;
 
@@ -188,15 +191,7 @@ impl GGMLWhisperEngine {
     }
 
     // unload the model. free ctx
-    pub fn unload(&self) -> Result<(), engine::EngineError> {
-        let mut ctx_lock = self
-            .ctx
-            .lock()
-            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
-                operation: "lock whisper context",
-            })?;
-
-        *ctx_lock = None;
-        Ok(())
+    pub fn unload(&mut self) {
+        self.ctx = None;
     }
 }
