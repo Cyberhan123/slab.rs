@@ -31,7 +31,8 @@ async fn make_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
     let llama_dir = ensure_llama_dir().await;
     let model_path = download_test_model();
 
-    let service = GGMLLlamaEngine::init(llama_dir.as_path()).expect("failed to initialize llama service");
+    let service =
+        GGMLLlamaEngine::init(llama_dir.as_path()).expect("failed to initialize llama service");
     service
         .load_model_with_workers(
             model_path.as_path(),
@@ -52,11 +53,13 @@ async fn make_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
 async fn test_llama_current_and_reload() {
     let llama_dir = ensure_llama_dir().await;
 
-    let initial = GGMLLlamaEngine::init(llama_dir.as_path()).expect("failed to initialize llama service");
+    let initial =
+        GGMLLlamaEngine::init(llama_dir.as_path()).expect("failed to initialize llama service");
     let current = GGMLLlamaEngine::current().expect("failed to get current llama service");
     assert!(Arc::ptr_eq(&initial, &current));
 
-    let reloaded = GGMLLlamaEngine::reload(llama_dir.as_path()).expect("failed to reload llama service");
+    let reloaded =
+        GGMLLlamaEngine::reload(llama_dir.as_path()).expect("failed to reload llama service");
     let current_after_reload =
         GGMLLlamaEngine::current().expect("failed to get current llama service after reload");
 
@@ -87,7 +90,10 @@ async fn test_llama_inference() {
 async fn test_service_basic_generation() {
     let service = make_service(1).await;
 
-    let sid = service.create_session().await.expect("create_session failed");
+    let sid = service
+        .create_session()
+        .await
+        .expect("create_session failed");
     service
         .append_input(sid, "Hello, my name is".to_string())
         .await
@@ -127,7 +133,7 @@ async fn test_service_session_not_found() {
     // todo: fix this test once error variants are stable and can be matched on directly
     // assert!(
     //     matches!(
-    //         err, 
+    //         err,
     //         engine::EngineError(
     //         GGMLEngineError(GGMLLlamaEngineError::SessionNotFound { session_id: 9999 })
     //     ),
@@ -143,7 +149,10 @@ async fn test_service_session_not_found() {
 async fn test_service_kv_reuse_multiturn() {
     let service = make_service(1).await;
 
-    let sid = service.create_session().await.expect("create_session failed");
+    let sid = service
+        .create_session()
+        .await
+        .expect("create_session failed");
 
     service
         .append_input(sid, "What is 1+1?".to_string())
@@ -192,7 +201,10 @@ async fn test_service_kv_reuse_multiturn() {
 async fn test_service_cancel_and_resume() {
     let service = make_service(1).await;
 
-    let sid = service.create_session().await.expect("create_session failed");
+    let sid = service
+        .create_session()
+        .await
+        .expect("create_session failed");
     service
         .append_input(sid, "Count to one hundred:".to_string())
         .await

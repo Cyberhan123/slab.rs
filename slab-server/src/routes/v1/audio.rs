@@ -18,16 +18,14 @@ use uuid::Uuid;
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::state::AppState;
-use utoipa::OpenApi;
 use slab_core::api::{Backend, Event};
+use utoipa::OpenApi;
 
 /// Maximum allowed audio body size (50 MiB).
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
 
 #[derive(OpenApi)]
-#[openapi(
-    paths(transcribe),
-)]
+#[openapi(paths(transcribe))]
 pub struct AudioApi;
 
 /// Register audio routes.
@@ -125,7 +123,9 @@ pub async fn transcribe(
                 .store
                 .set_core_task_id(&task_id, core_task_id as i64)
                 .await
-                .unwrap_or_else(|e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"));
+                .unwrap_or_else(
+                    |e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"),
+                );
             info!(task_id = %task_id, core_task_id, "transcription task submitted to slab-core");
         }
         Err(e) => {
@@ -161,7 +161,9 @@ pub fn convert_to_pcm_f32le(src_path: &str) -> Result<slab_core::Payload, String
         .into_owned();
 
     let output = std::process::Command::new("ffmpeg")
-        .args(["-y", "-i", src_path, "-f", "f32le", "-ar", "16000", "-ac", "1", &pcm_path])
+        .args([
+            "-y", "-i", src_path, "-f", "f32le", "-ar", "16000", "-ac", "1", &pcm_path,
+        ])
         .output()
         .map_err(|e| format!("ffmpeg spawn failed: {e}"))?;
 
@@ -170,8 +172,8 @@ pub fn convert_to_pcm_f32le(src_path: &str) -> Result<slab_core::Payload, String
         return Err(format!("ffmpeg failed: {stderr}"));
     }
 
-    let pcm_bytes = std::fs::read(&pcm_path)
-        .map_err(|e| format!("failed to read ffmpeg PCM output: {e}"))?;
+    let pcm_bytes =
+        std::fs::read(&pcm_path).map_err(|e| format!("failed to read ffmpeg PCM output: {e}"))?;
 
     // Clean up the PCM file (best effort).
     std::fs::remove_file(&pcm_path).ok();
@@ -185,7 +187,9 @@ pub fn convert_to_pcm_f32le(src_path: &str) -> Result<slab_core::Payload, String
     }
 
     let samples: Vec<f32> = bytemuck::cast_slice::<u8, f32>(&pcm_bytes).to_vec();
-    Ok(slab_core::Payload::F32(std::sync::Arc::from(samples.as_slice())))
+    Ok(slab_core::Payload::F32(std::sync::Arc::from(
+        samples.as_slice(),
+    )))
 }
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
@@ -216,4 +220,3 @@ mod test {
         assert_ne!(bytes.len() % std::mem::size_of::<f32>(), 0);
     }
 }
-

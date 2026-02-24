@@ -12,7 +12,7 @@ pub enum StreamChunk {
     /// Generation terminated due to a backend error.
     Error(String),
     /// A generated image (placeholder for now).
-    Image(bytes::Bytes),//TODO: A generated image.
+    Image(bytes::Bytes), //TODO: A generated image.
 }
 
 /// A handle to a streaming inference response.

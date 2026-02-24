@@ -1,8 +1,7 @@
+use axum::body::Body;
 use axum::http::{Request, StatusCode};
-use axum::middleware::{ Next};
+use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
-use axum::{body::Body};
-
 
 pub async fn check_management_auth(req: Request<Body>, next: Next) -> Response {
     let expected = std::env::var("SLAB_ADMIN_TOKEN").ok();

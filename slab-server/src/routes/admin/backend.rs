@@ -311,7 +311,8 @@ pub async fn reload_lib(
 
     info!(backend = %bid, lib_path = %req.lib_path, "reloading lib");
 
-    let backend = Backend::from_str(bid).map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
+    let backend = Backend::from_str(bid)
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
     slab_core::api::backend(backend)
         .op(Event::UnloadLibrary)
         .input(slab_core::Payload::Json(serde_json::json!({

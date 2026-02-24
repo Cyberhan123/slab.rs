@@ -1,12 +1,22 @@
-use crate::entities::{AnyStore, dao::ChatSession};
+use crate::entities::{dao::ChatSession, AnyStore};
 use chrono::{DateTime, Utc};
 use std::future::Future;
 
 pub trait SessionStore: Send + Sync + 'static {
-    fn create_session(&self, session: ChatSession) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
-    fn get_session(&self, id: &str) -> impl Future<Output = Result<Option<ChatSession>, sqlx::Error>> + Send;
+    fn create_session(
+        &self,
+        session: ChatSession,
+    ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
+    fn get_session(
+        &self,
+        id: &str,
+    ) -> impl Future<Output = Result<Option<ChatSession>, sqlx::Error>> + Send;
     fn list_sessions(&self) -> impl Future<Output = Result<Vec<ChatSession>, sqlx::Error>> + Send;
-    fn update_session_state_path(&self, id: &str, path: &str) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
+    fn update_session_state_path(
+        &self,
+        id: &str,
+        path: &str,
+    ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
     fn delete_session(&self, id: &str) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
 }
 

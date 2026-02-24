@@ -1,4 +1,3 @@
-
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
@@ -7,7 +6,6 @@ pub struct ConfigEntry {
     pub key: String,
     pub value: String,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct SetConfigBody {

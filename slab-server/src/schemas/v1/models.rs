@@ -28,7 +28,6 @@ pub struct ModelStatusResponse {
     pub status: String,
 }
 
-
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct SwitchModelRequest {
     pub model_path: String,
@@ -39,7 +38,7 @@ pub struct SwitchModelRequest {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct DownloadModelRequest {
-    pub  backend_id: String,
+    pub backend_id: String,
     /// HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`.
     pub repo_id: String,
     /// Filename inside the repo to download, e.g. `"Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"`.

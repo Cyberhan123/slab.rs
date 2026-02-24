@@ -47,7 +47,9 @@ mod tests {
         );
         drop(p1);
         // After releasing one permit, a new acquisition should succeed.
-        let _p3 = rm.try_acquire("test-backend").expect("permit after release");
+        let _p3 = rm
+            .try_acquire("test-backend")
+            .expect("permit after release");
         drop(p2);
     }
 
@@ -314,13 +316,13 @@ mod tests {
             while let Some(req) = ingress_rx.recv().await {
                 let (stream_tx, stream_rx) =
                     mpsc::channel::<crate::runtime::backend::protocol::StreamChunk>(8);
-                let _ = req
-                    .reply_tx
-                    .send(BackendReply::Stream(stream_rx));
+                let _ = req.reply_tx.send(BackendReply::Stream(stream_rx));
                 for word in ["hello", " ", "world"] {
-                    let _ = stream_tx.send(
-                        crate::runtime::backend::protocol::StreamChunk::Token(word.to_owned()),
-                    ).await;
+                    let _ = stream_tx
+                        .send(crate::runtime::backend::protocol::StreamChunk::Token(
+                            word.to_owned(),
+                        ))
+                        .await;
                 }
                 let _ = stream_tx
                     .send(crate::runtime::backend::protocol::StreamChunk::Done)

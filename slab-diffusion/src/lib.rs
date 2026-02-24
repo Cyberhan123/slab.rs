@@ -42,9 +42,7 @@ impl Diffusion {
     /// required symbol is missing.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, ::libloading::Error> {
         let lib = unsafe { slab_diffusion_sys::DiffusionLib::new(path.as_ref())? };
-        Ok(Self {
-            lib: Arc::new(lib),
-        })
+        Ok(Self { lib: Arc::new(lib) })
     }
 
     /// Return a string describing the capabilities of the loaded build
@@ -54,9 +52,7 @@ impl Diffusion {
         if ptr.is_null() {
             return "";
         }
-        unsafe { CStr::from_ptr(ptr) }
-            .to_str()
-            .unwrap_or("")
+        unsafe { CStr::from_ptr(ptr) }.to_str().unwrap_or("")
     }
 
     /// Return the number of physical CPU cores available.
@@ -70,9 +66,7 @@ impl Diffusion {
         if ptr.is_null() {
             return "";
         }
-        unsafe { CStr::from_ptr(ptr) }
-            .to_str()
-            .unwrap_or("")
+        unsafe { CStr::from_ptr(ptr) }.to_str().unwrap_or("")
     }
 
     /// Return the stable-diffusion.cpp version string.
@@ -81,9 +75,7 @@ impl Diffusion {
         if ptr.is_null() {
             return "";
         }
-        unsafe { CStr::from_ptr(ptr) }
-            .to_str()
-            .unwrap_or("")
+        unsafe { CStr::from_ptr(ptr) }.to_str().unwrap_or("")
     }
 
     /// Set a callback that receives log messages from the native library.
@@ -201,4 +193,3 @@ impl fmt::Debug for Diffusion {
         f.debug_struct("Diffusion").finish()
     }
 }
-

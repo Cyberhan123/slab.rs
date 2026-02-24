@@ -23,8 +23,8 @@ impl Downloader {
         proxy: Option<String>,
         show_progress: bool,
     ) -> Self {
-        let mut builder = Client::builder()
-            .user_agent(concat!("slab-libfetch/", env!("CARGO_PKG_VERSION")));
+        let mut builder =
+            Client::builder().user_agent(concat!("slab-libfetch/", env!("CARGO_PKG_VERSION")));
 
         if let Some(ref proxy_url) = proxy {
             match reqwest::Proxy::all(proxy_url) {
@@ -63,10 +63,7 @@ impl Downloader {
 
     /// Fetch the latest release tag from GitHub for the configured repo.
     pub async fn latest_version(&self) -> Result<String, FetchError> {
-        let api_url = format!(
-            "https://api.github.com/repos/{}/releases/latest",
-            self.repo
-        );
+        let api_url = format!("https://api.github.com/repos/{}/releases/latest", self.repo);
 
         let mut last_err: FetchError = FetchError::InvalidResponse {
             message: "unable to fetch latest version".to_string(),
@@ -113,7 +110,12 @@ impl Downloader {
     }
 
     /// Download and extract a release asset into `dest`.
-    pub async fn download_asset(&self, asset_name: &str, version: &str, dest: &Path) -> Result<(), FetchError> {
+    pub async fn download_asset(
+        &self,
+        asset_name: &str,
+        version: &str,
+        dest: &Path,
+    ) -> Result<(), FetchError> {
         let url = self.asset_url(asset_name, version);
 
         if self.show_progress {
@@ -150,7 +152,11 @@ impl Downloader {
     ///
     /// Prefers the `include/` sub-directory; if none is found, falls back to
     /// extracting every `.h`, `.hpp`, and `.hxx` file in the archive.
-    pub async fn download_source_headers(&self, version: &str, dest: &Path) -> Result<(), FetchError> {
+    pub async fn download_source_headers(
+        &self,
+        version: &str,
+        dest: &Path,
+    ) -> Result<(), FetchError> {
         let tarball_url = format!(
             "https://github.com/{}/archive/refs/tags/{}.tar.gz",
             self.repo, version
@@ -246,7 +252,11 @@ pub(crate) fn extract_tar_gz_strip_top(bytes: &[u8], dest: &Path) -> Result<(), 
 /// the `include/` prefix in the destination).  If no `include/` directory is
 /// found, a second pass extracts all `.h`, `.hpp`, and `.hxx` files (stripping
 /// the archive root directory).
-pub(crate) fn extract_source_headers(bytes: &[u8], dest: &Path, show_progress: bool) -> Result<(), FetchError> {
+pub(crate) fn extract_source_headers(
+    bytes: &[u8],
+    dest: &Path,
+    show_progress: bool,
+) -> Result<(), FetchError> {
     // First pass – prefer the `include/` directory.
     let tar_gz = GzDecoder::new(Cursor::new(bytes));
     let mut archive = Archive::new(tar_gz);

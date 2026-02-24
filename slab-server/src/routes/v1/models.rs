@@ -5,12 +5,12 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use std::str::FromStr;
 use tracing::{info, warn};
 use utoipa::OpenApi;
 
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
-use crate::routes::admin::backend;
 use crate::schemas::v1::models::{
     DownloadModelRequest, ListAvailableQuery, LoadModelRequest, ModelStatusResponse,
     SwitchModelRequest,

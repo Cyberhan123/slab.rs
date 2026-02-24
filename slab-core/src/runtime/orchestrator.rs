@@ -142,25 +142,23 @@ impl Orchestrator {
                 .await;
 
             match stage {
-                Stage::Cpu(cpu_stage) => {
-                    match cpu_stage.run(payload).await {
-                        Ok(next_payload) => {
-                            storage
-                                .set_stage_status(task_id, idx, StageStatus::StageCompleted)
-                                .await;
-                            payload = next_payload;
-                        }
-                        Err(err) => {
-                            storage
-                                .set_stage_status(task_id, idx, StageStatus::StageFailed)
-                                .await;
-                            storage
-                                .set_status(task_id, TaskStatus::Failed { error: err })
-                                .await;
-                            return;
-                        }
+                Stage::Cpu(cpu_stage) => match cpu_stage.run(payload).await {
+                    Ok(next_payload) => {
+                        storage
+                            .set_stage_status(task_id, idx, StageStatus::StageCompleted)
+                            .await;
+                        payload = next_payload;
                     }
-                }
+                    Err(err) => {
+                        storage
+                            .set_stage_status(task_id, idx, StageStatus::StageFailed)
+                            .await;
+                        storage
+                            .set_status(task_id, TaskStatus::Failed { error: err })
+                            .await;
+                        return;
+                    }
+                },
 
                 Stage::Gpu(gpu_stage) => {
                     // Acquire admission permit before dispatching.

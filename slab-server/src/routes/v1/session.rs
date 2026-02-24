@@ -4,30 +4,26 @@ use axum::extract::{Path, State};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use chrono::Utc;
-use uuid::Uuid;
 use utoipa::OpenApi;
+use uuid::Uuid;
 
 use crate::entities::{ChatSession, ChatStore, SessionStore};
 use crate::error::ServerError;
-use crate::schemas::v1::session::{CreateSessionRequest,MessageResponse, SessionResponse};
+use crate::schemas::v1::session::{CreateSessionRequest, MessageResponse, SessionResponse};
 use crate::state::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
     paths(create_session, list_sessions, delete_session, list_session_messages),
-    components(schemas(
-        CreateSessionRequest,
-        SessionResponse,
-        MessageResponse
-    ))
+    components(schemas(CreateSessionRequest, SessionResponse, MessageResponse))
 )]
 pub struct SessionApi;
 
 /// Register session routes.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/sessions",       post(create_session).get(list_sessions))
-        .route("/sessions/{id}",  delete(delete_session))
+        .route("/sessions", post(create_session).get(list_sessions))
+        .route("/sessions/{id}", delete(delete_session))
         .route("/sessions/{id}/messages", get(list_session_messages))
 }
 
@@ -73,7 +69,9 @@ pub async fn list_sessions(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<SessionResponse>>, ServerError> {
     let sessions = state.store.list_sessions().await?;
-    Ok(Json(sessions.into_iter().map(|s| s.to_response()).collect()))
+    Ok(Json(
+        sessions.into_iter().map(|s| s.to_response()).collect(),
+    ))
 }
 
 #[utoipa::path(
@@ -109,5 +107,7 @@ pub async fn list_session_messages(
     Path(id): Path<String>,
 ) -> Result<Json<Vec<MessageResponse>>, ServerError> {
     let messages = state.store.list_messages(&id).await?;
-    Ok(Json(messages.into_iter().map(|m| m.to_response()).collect()))
+    Ok(Json(
+        messages.into_iter().map(|m| m.to_response()).collect(),
+    ))
 }

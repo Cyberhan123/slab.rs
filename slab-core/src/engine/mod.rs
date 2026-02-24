@@ -2,7 +2,6 @@ pub mod ggml;
 //todo
 pub mod candle;
 
-
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -21,7 +20,6 @@ impl From<ggml::whisper::GGMLWhisperEngineError> for EngineError {
         EngineError::GGMLEngineError(ggml::GGMLEngineError::from(err))
     }
 }
-
 
 impl From<ggml::llama::GGMLLlamaEngineError> for EngineError {
     fn from(err: ggml::llama::GGMLLlamaEngineError) -> Self {

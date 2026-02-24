@@ -24,9 +24,11 @@ pub enum GGMLDiffusionEngineError {
         requested: PathBuf,
     },
 
+    #[allow(unused)]
     #[error("GGMLDiffusionEngine global storage not initialized")]
     GlobalStorageNotInitialized,
 
+    #[allow(unused)]
     #[error("GGMLDiffusionEngine instance not initialized")]
     InstanceNotInitialized,
 
@@ -194,11 +196,12 @@ impl GGMLDiffusionEngine {
         let global_lock = INSTANCE
             .get()
             .ok_or(GGMLDiffusionEngineError::GlobalStorageNotInitialized)?;
-        let read_guard = global_lock
-            .read()
-            .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
-                operation: "read diffusion global state",
-            })?;
+        let read_guard =
+            global_lock
+                .read()
+                .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
+                    operation: "read diffusion global state",
+                })?;
         read_guard
             .as_ref()
             .map(|global| global.service.clone())
@@ -273,7 +276,8 @@ mod test {
 
         let initial = GGMLDiffusionEngine::init(diffusion_dir.as_path())
             .expect("failed to initialize diffusion service");
-        let current = GGMLDiffusionEngine::current().expect("failed to get current diffusion service");
+        let current =
+            GGMLDiffusionEngine::current().expect("failed to get current diffusion service");
         assert!(Arc::ptr_eq(&initial, &current));
 
         let reloaded = GGMLDiffusionEngine::reload(diffusion_dir.as_path())

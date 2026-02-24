@@ -21,7 +21,7 @@ pub enum Event {
 #[derive(Debug, Display, EnumString)]
 pub enum Backend {
     #[strum(serialize = "ggml.llama")]
-    GGMLLLama,
+    GGMLLlama,
     #[strum(serialize = "ggml.whisper")]
     GGMLWhisper,
     #[strum(serialize = "ggml.diffusion")]

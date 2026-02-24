@@ -43,7 +43,7 @@ impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
         let (status, client_message) = match &self {
             // Client-facing errors: expose the message directly.
-            ServerError::NotFound(m)   => (StatusCode::NOT_FOUND, m.clone()),
+            ServerError::NotFound(m) => (StatusCode::NOT_FOUND, m.clone()),
             ServerError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
 
             // Internal errors: log the full detail, return a generic message
@@ -51,15 +51,24 @@ impl IntoResponse for ServerError {
             // the caller.
             ServerError::Runtime(e) => {
                 error!(error = %e, "AI runtime error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "inference backend error".to_owned())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "inference backend error".to_owned(),
+                )
             }
             ServerError::Database(e) => {
                 error!(error = %e, "database error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".to_owned())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_owned(),
+                )
             }
             ServerError::Internal(m) => {
                 error!(message = %m, "internal server error");
-                (StatusCode::INTERNAL_SERVER_ERROR, "internal server error".to_owned())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "internal server error".to_owned(),
+                )
             }
         };
         (status, Json(json!({ "error": client_message }))).into_response()

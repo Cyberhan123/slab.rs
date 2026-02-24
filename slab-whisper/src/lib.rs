@@ -1,6 +1,6 @@
+use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
-use std::fmt;
 
 mod common_logging;
 mod error;
@@ -80,10 +80,8 @@ impl Whisper {
     }
 }
 
-
 impl fmt::Debug for Whisper {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("Whisper")
-            .finish()
+        f.debug_struct("Whisper").finish()
     }
 }

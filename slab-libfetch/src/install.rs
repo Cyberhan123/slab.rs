@@ -30,7 +30,7 @@ impl Install {
     }
 
     pub fn new_with_path<P: AsRef<Path>>(repo: &str, install_path: P) -> Self {
-       let path = install_path.as_ref().components().collect();
+        let path = install_path.as_ref().components().collect();
         Self {
             repo: repo.to_string(),
             install_path: path,
@@ -87,10 +87,7 @@ impl Install {
                 // Resolve "latest" and skip if already current.
                 let latest = downloader.latest_version().await?;
                 if latest == installed.tag_name {
-                    println!(
-                        "✅ 版本 {} 已是最新，跳过下载。",
-                        installed.tag_name
-                    );
+                    println!("✅ 版本 {} 已是最新，跳过下载。", installed.tag_name);
                     return Ok(self.install_path.clone());
                 }
                 // Upgrade
@@ -102,10 +99,7 @@ impl Install {
             } else {
                 // Pinned version – skip if already installed at that version.
                 if installed.tag_name == version {
-                    println!(
-                        "✅ 版本 {} 的资产已存在，跳过下载。",
-                        version
-                    );
+                    println!("✅ 版本 {} 的资产已存在，跳过下载。", version);
                     return Ok(self.install_path.clone());
                 }
                 // Different pinned version – reinstall.

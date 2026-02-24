@@ -5,9 +5,7 @@ use std::sync::Arc;
 use libc::free;
 
 use crate::error::DiffusionError;
-use crate::params::{
-    opt_cstring, SdImgGenParams, SdImage, SAMPLE_METHOD_COUNT, SCHEDULER_COUNT,
-};
+use crate::params::{opt_cstring, SdImage, SdImgGenParams, SAMPLE_METHOD_COUNT, SCHEDULER_COUNT};
 
 /// Return the C string pointer from an `Option<CString>`, or the pointer of a
 /// freshly-allocated empty C string stored in `fallback`.

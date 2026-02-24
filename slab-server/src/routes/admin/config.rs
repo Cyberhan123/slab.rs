@@ -9,23 +9,19 @@ use utoipa::OpenApi;
 
 use crate::entities::ConfigStore;
 use crate::error::ServerError;
-use crate::state::AppState;
 use crate::schemas::admin::config::{ConfigEntry, SetConfigBody};
+use crate::state::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
     paths(list_config, get_config_value, set_config_value),
-    components(schemas(
-        ConfigEntry,
-        SetConfigBody,
-        
-    ))
+    components(schemas(ConfigEntry, SetConfigBody,))
 )]
 pub struct ConfigApi;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/config",       get(list_config))
+        .route("/config", get(list_config))
         .route("/config/{key}", get(get_config_value).put(set_config_value))
 }
 #[utoipa::path(
@@ -36,7 +32,7 @@ pub fn router() -> Router<Arc<AppState>> {
         (status = 200, description = "List of all configuration entries", body = Vec<ConfigEntry>),
         (status = 401, description = "Unauthorised (management token required)"),
     )
-)]  
+)]
 pub async fn list_config(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<Vec<ConfigEntry>>, ServerError> {
@@ -88,7 +84,10 @@ pub async fn set_config_value(
     Json(body): Json<SetConfigBody>,
 ) -> Result<Json<ConfigEntry>, ServerError> {
     state.store.set_config_value(&key, &body.value).await?;
-    Ok(Json(ConfigEntry { key, value: body.value }))
+    Ok(Json(ConfigEntry {
+        key,
+        value: body.value,
+    }))
 }
 
 #[cfg(test)]
@@ -97,7 +96,10 @@ mod test {
 
     #[test]
     fn config_entry_fields() {
-        let e = ConfigEntry { key: "foo".into(), value: "bar".into() };
+        let e = ConfigEntry {
+            key: "foo".into(),
+            value: "bar".into(),
+        };
         assert_eq!(e.key, "foo");
         assert_eq!(e.value, "bar");
     }

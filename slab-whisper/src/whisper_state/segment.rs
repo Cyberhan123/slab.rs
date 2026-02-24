@@ -14,9 +14,13 @@ pub struct WhisperSegment<'a> {
 }
 
 impl Whisper {
-     /// # Safety
+    /// # Safety
     /// You must ensure `segment_idx` is in bounds for the linked [`WhisperState`].
-    pub(super) unsafe fn new_unchecked_segment<'a>(&self,state: &'a WhisperState, segment_idx: c_int) -> WhisperSegment<'a>  {
+    pub(super) unsafe fn new_unchecked_segment<'a>(
+        &self,
+        state: &'a WhisperState,
+        segment_idx: c_int,
+    ) -> WhisperSegment<'a> {
         assert!(
             state.segment_in_bounds(segment_idx),
             "tried to create a WhisperSegment out of bounds for linked state"
@@ -25,16 +29,15 @@ impl Whisper {
             state,
             segment_idx,
             token_count: unsafe {
-                self.lib.whisper_full_n_tokens_from_state(state.ptr, segment_idx)
+                self.lib
+                    .whisper_full_n_tokens_from_state(state.ptr, segment_idx)
             },
             instance: self.clone(),
         }
     }
 }
 
-
 impl<'a> WhisperSegment<'a> {
-
     pub(super) fn get_state(&self) -> &WhisperState {
         self.state
     }
@@ -53,7 +56,9 @@ impl<'a> WhisperSegment<'a> {
     /// `int64_t whisper_full_get_segment_t0(struct whisper_context * ctx, int i_segment)`
     pub fn start_timestamp(&self) -> i64 {
         unsafe {
-            self.instance.lib.whisper_full_get_segment_t0_from_state(self.state.ptr, self.segment_idx)
+            self.instance
+                .lib
+                .whisper_full_get_segment_t0_from_state(self.state.ptr, self.segment_idx)
         }
     }
 
@@ -66,7 +71,9 @@ impl<'a> WhisperSegment<'a> {
     /// `int64_t whisper_full_get_segment_t1(struct whisper_context * ctx, int i_segment)`
     pub fn end_timestamp(&self) -> i64 {
         unsafe {
-            self.instance.lib.whisper_full_get_segment_t1_from_state(self.state.ptr, self.segment_idx)
+            self.instance
+                .lib
+                .whisper_full_get_segment_t1_from_state(self.state.ptr, self.segment_idx)
         }
     }
 
@@ -90,10 +97,12 @@ impl<'a> WhisperSegment<'a> {
     /// `bool whisper_full_get_segment_speaker_turn_next_from_state(struct whisper_state * state, int i_segment)`
     pub fn next_segment_speaker_turn(&self) -> bool {
         unsafe {
-            self.instance.lib.whisper_full_get_segment_speaker_turn_next_from_state(
-                self.state.ptr,
-                self.segment_idx,
-            )
+            self.instance
+                .lib
+                .whisper_full_get_segment_speaker_turn_next_from_state(
+                    self.state.ptr,
+                    self.segment_idx,
+                )
         }
     }
 
@@ -106,19 +115,20 @@ impl<'a> WhisperSegment<'a> {
     /// `float whisper_full_get_segment_no_speech_prob_from_state(struct whisper_state * state, int i_segment)`
     pub fn no_speech_probability(&self) -> f32 {
         unsafe {
-            self.instance.lib.whisper_full_get_segment_no_speech_prob_from_state(
-                self.state.ptr,
-                self.segment_idx,
-            )
+            self.instance
+                .lib
+                .whisper_full_get_segment_no_speech_prob_from_state(
+                    self.state.ptr,
+                    self.segment_idx,
+                )
         }
     }
 
     fn to_raw_cstr(&self) -> Result<&'a CStr, WhisperError> {
         let ret = unsafe {
-            self.instance.lib.whisper_full_get_segment_text_from_state(
-                self.state.ptr,
-                self.segment_idx,
-            )
+            self.instance
+                .lib
+                .whisper_full_get_segment_text_from_state(self.state.ptr, self.segment_idx)
         };
         if ret.is_null() {
             return Err(WhisperError::NullPointer);
@@ -174,9 +184,7 @@ impl<'a> WhisperSegment<'a> {
     pub fn get_token(&self, token: c_int) -> Option<WhisperToken<'_, '_>> {
         self.token_in_bounds(token)
             // SAFETY: we've just asserted that this token is in bounds
-            .then(|| unsafe { 
-                self.instance.new_unchecked_token(self, token)
-            })
+            .then(|| unsafe { self.instance.new_unchecked_token(self, token) })
     }
 
     /// The same as [`Self::get_token`] but without any bounds check.
