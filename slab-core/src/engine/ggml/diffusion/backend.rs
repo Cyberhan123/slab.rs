@@ -1,8 +1,7 @@
 //! Backend worker adapter for `ggml.diffusion`.
 //!
-//! Provides [`spawn_backend`] and [`spawn_backend_with_path`] which start a
-//! Tokio task translating [`BackendRequest`] messages into stable-diffusion
-//! inference calls.
+//! Provides [`spawn_backend_with_engine`] which starts one or more Tokio tasks
+//! translating [`BackendRequest`] messages into stable-diffusion inference calls.
 //!
 //! # Supported ops
 //!
@@ -72,16 +71,22 @@ fn default_steps() -> i32 {
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
+/// A single diffusion backend worker.
+///
+/// Each worker **owns** its engine (library handle + model context).  There is
+/// no shared mutable state between workers, so no `Mutex` is needed on the
+/// context.  When `backend_capacity > 1` multiple workers are spawned; each
+/// worker owns an independent engine forked from the same library handle and
+/// manages its own model context independently.
 struct DiffusionWorker {
-    /// Wraps both the library handle and the optional model context.
     /// - `None` → library not loaded.
     /// - `Some(e)` where `e.ctx` is None → lib loaded, no model.
     /// - `Some(e)` where `e.ctx` is Some → lib + model loaded.
-    engine: Option<Arc<GGMLDiffusionEngine>>,
+    engine: Option<GGMLDiffusionEngine>,
 }
 
 impl DiffusionWorker {
-    fn new(engine: Option<Arc<GGMLDiffusionEngine>>) -> Self {
+    fn new(engine: Option<GGMLDiffusionEngine>) -> Self {
         Self { engine }
     }
 
@@ -180,8 +185,8 @@ impl DiffusionWorker {
         input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let engine = match self.engine.as_ref() {
-            Some(e) => Arc::clone(e),
+        let engine = match self.engine.as_mut() {
+            Some(e) => e,
             None => {
                 let _ = reply_tx.send(BackendReply::Error(
                     "library not loaded; call lib.load first".into(),
@@ -222,24 +227,17 @@ impl DiffusionWorker {
     // ── model.unload ──────────────────────────────────────────────────────────
 
     async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
-        let engine = match self.engine.as_ref() {
-            Some(e) => Arc::clone(e),
-            None => {
-                let _ = reply_tx.send(BackendReply::Error(
-                    "library not loaded; call lib.load first".into(),
-                ));
-                return;
-            }
-        };
-
-        match engine.unload() {
-            Ok(()) => {
+        match self.engine.as_mut() {
+            Some(e) => {
+                e.unload();
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
             }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+            None => {
+                let _ = reply_tx.send(BackendReply::Error(
+                    "library not loaded; call lib.load first".into(),
+                ));
             }
         }
     }
@@ -252,9 +250,11 @@ impl DiffusionWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
-            Some(e) => Arc::clone(e),
+            Some(e) => e,
             None => {
-                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
+                let _ = reply_tx.send(BackendReply::Error(
+                    "library not loaded; call lib.load first".into(),
+                ));
                 return;
             }
         };
@@ -270,7 +270,7 @@ impl DiffusionWorker {
         };
 
         // Image generation is CPU/GPU-bound; use block_in_place so the engine
-        // (and its internal Mutex<ctx>) stays on this thread.
+        // context stays on this thread without needing an additional spawn_blocking.
         let result = tokio::task::block_in_place(|| {
             use slab_diffusion::SdImgGenParams;
             let params = SdImgGenParams {
@@ -307,11 +307,19 @@ impl DiffusionWorker {
 ///
 /// Used by `api::init` to separate library loading (phase 1) from worker
 /// spawning (phase 2) so that no tasks are started if any library fails.
+///
+/// A single worker is used even when `backend_capacity > 1` because stateful
+/// ops (`lib.load`, `lib.reload`, `model.load`, `model.unload`) must be applied
+/// to one shared engine/context.  Distributing these ops across multiple workers
+/// would leave some workers with stale library handles or unloaded models,
+/// causing nondeterministic inference failures.  The `ResourceManager` semaphore
+/// still guards admission so the worker is never overwhelmed.
 pub(crate) fn spawn_backend_with_engine(
-    capacity: usize,
-    engine: Option<Arc<GGMLDiffusionEngine>>,
+    channel_capacity: usize,
+    _num_workers: usize,
+    engine: Option<GGMLDiffusionEngine>,
 ) -> mpsc::Sender<BackendRequest> {
-    let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
+    let (tx, mut rx) = mpsc::channel::<BackendRequest>(channel_capacity);
     tokio::spawn(async move {
         let mut worker = DiffusionWorker::new(engine);
         while let Some(req) = rx.recv().await {

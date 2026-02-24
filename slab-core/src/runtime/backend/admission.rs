@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
 use crate::runtime::types::RuntimeError;
@@ -24,25 +24,42 @@ impl std::fmt::Debug for Permit {
 /// Each backend is registered with a maximum concurrency (`capacity`).  Before
 /// dispatching work to a backend the orchestrator calls [`Self::try_acquire`];
 /// if no permit is available it receives [`RuntimeError::Busy`] immediately.
+///
+/// Backends must be registered via [`Self::register_backend`] before the
+/// [`ResourceManager`] is cloned (e.g. passed to an [`Orchestrator`]).  After
+/// cloning the semaphore map is immutable and all reads are lock-free.
 #[derive(Debug, Clone)]
 pub struct ResourceManager {
-    /// `backend_id` → semaphore pair.
-    semaphores: Arc<Mutex<HashMap<String, Arc<Semaphore>>>>,
+    /// `backend_id` → semaphore.  Immutable after the manager is shared.
+    semaphores: Arc<HashMap<String, Arc<Semaphore>>>,
 }
 
 impl ResourceManager {
     /// Create an empty `ResourceManager`.
     pub fn new() -> Self {
         Self {
-            semaphores: Arc::new(Mutex::new(HashMap::new())),
+            semaphores: Arc::new(HashMap::new()),
         }
     }
 
     /// Register (or replace) a backend with the given concurrency capacity.
-    pub fn register_backend(&self, backend_id: impl Into<String>, capacity: usize) {
+    ///
+    /// Must be called before this `ResourceManager` is cloned or passed to an
+    /// [`Orchestrator`]; calling it afterwards would otherwise have no effect on
+    /// existing clones.
+    ///
+    /// # Panics
+    ///
+    /// Panics if this `ResourceManager` has already been cloned (`Arc::strong_count > 1`),
+    /// which would silently leave other clones without the newly registered backend.
+    pub fn register_backend(&mut self, backend_id: impl Into<String>, capacity: usize) {
+        assert!(
+            Arc::strong_count(&self.semaphores) == 1,
+            "register_backend called after ResourceManager was cloned; \
+             other clones will not see the new backend"
+        );
         let key = backend_id.into();
-        let mut map = self.semaphores.lock().unwrap();
-        map.insert(key, Arc::new(Semaphore::new(capacity)));
+        Arc::make_mut(&mut self.semaphores).insert(key, Arc::new(Semaphore::new(capacity)));
     }
 
     /// Try to acquire a permit for `backend_id`.
@@ -50,14 +67,13 @@ impl ResourceManager {
     /// Returns `Ok(Permit)` if a slot is available, or
     /// `Err(RuntimeError::Busy)` if all slots are taken.
     pub fn try_acquire(&self, backend_id: &str) -> Result<Permit, RuntimeError> {
-        let semaphore = {
-            let map = self.semaphores.lock().unwrap();
-            map.get(backend_id)
-                .cloned()
-                .ok_or_else(|| RuntimeError::Busy {
-                    backend_id: backend_id.to_owned(),
-                })?
-        };
+        let semaphore = self
+            .semaphores
+            .get(backend_id)
+            .cloned()
+            .ok_or_else(|| RuntimeError::Busy {
+                backend_id: backend_id.to_owned(),
+            })?;
 
         semaphore
             .try_acquire_owned()
