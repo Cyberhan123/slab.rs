@@ -277,18 +277,17 @@ pub async fn restart_task(
                     tokio::spawn(async move {
                         // The preprocess stage provides the real PCM data; the initial
                         // Bytes payload is an empty placeholder that gets replaced by it.
-                        let core_result = slab_core::api::backend(
-                            slab_core::api::Backend::from_str("ggml.whisper").unwrap(),
-                        )
-                        .op(slab_core::api::Event::Inference)
-                        .input(slab_core::Payload::Bytes(std::sync::Arc::from(
-                            [] as [u8; 0]
-                        )))
-                        .preprocess("ffmpeg.to_pcm_f32le", move |_| {
-                            crate::routes::v1::audio::convert_to_pcm_f32le(&tmp_path)
-                        })
-                        .run()
-                        .await;
+                        let core_result =
+                            slab_core::api::backend(slab_core::api::Backend::GGMLWhisper)
+                                .op(slab_core::api::Event::Inference)
+                                .input(slab_core::Payload::Bytes(std::sync::Arc::from(
+                                    [] as [u8; 0]
+                                )))
+                                .preprocess("ffmpeg.to_pcm_f32le", move |_| {
+                                    crate::routes::v1::audio::convert_to_pcm_f32le(&tmp_path)
+                                })
+                                .run()
+                                .await;
                         match core_result {
                             Ok(core_task_id) => {
                                 store
@@ -328,13 +327,12 @@ pub async fn restart_task(
                     .update_task_status(&id, "running", None, None)
                     .await?;
                 tokio::spawn(async move {
-                    let core_result = slab_core::api::backend(
-                        slab_core::api::Backend::from_str("ggml.diffusion").unwrap(),
-                    )
-                    .op(slab_core::api::Event::InferenceImage)
-                    .input(slab_core::Payload::Json(input))
-                    .run()
-                    .await;
+                    let core_result =
+                        slab_core::api::backend(slab_core::api::Backend::GGMLDiffusion)
+                            .op(slab_core::api::Event::InferenceImage)
+                            .input(slab_core::Payload::Json(input))
+                            .run()
+                            .await;
                     match core_result {
                         Ok(core_task_id) => {
                             store
