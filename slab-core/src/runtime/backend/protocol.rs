@@ -2,6 +2,21 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::runtime::types::Payload;
 
+/// Management commands broadcast to **all** backend workers so that their
+/// internal state stays consistent.
+///
+/// Unlike [`BackendRequest`] (which is competitive – only one worker
+/// handles each message), these commands are delivered to every worker
+/// simultaneously via a `tokio::sync::broadcast` channel.
+#[derive(Clone, Debug)]
+pub enum WorkerCommand {
+    /// Drop the current model context on every worker.
+    ///
+    /// Sent after a `model.unload` request is processed by one worker so
+    /// that all other workers also clear their (possibly stale) contexts.
+    Unload,
+}
+
 /// A single chunk emitted by a streaming backend.
 #[derive(Debug, Clone)]
 pub enum StreamChunk {
