@@ -205,10 +205,10 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
 
     // ── Phase 2: all loads succeeded; spawn worker tasks ──────────────────────
     let llama_tx = spawn_llama(128, llama_engine);
-    let whisper_tx = spawn_whisper(128, whisper_engine);
-    let diffusion_tx = spawn_diffusion(128, diffusion_engine);
+    let whisper_tx = spawn_whisper(128, config.backend_capacity, whisper_engine);
+    let diffusion_tx = spawn_diffusion(128, config.backend_capacity, diffusion_engine);
 
-    let rm = ResourceManager::new();
+    let mut rm = ResourceManager::new();
     rm.register_backend(Backend::GGMLLlama.to_string(), config.backend_capacity);
     rm.register_backend(Backend::GGMLWhisper.to_string(), config.backend_capacity);
     rm.register_backend(Backend::GGMLDiffusion.to_string(), config.backend_capacity);
@@ -674,7 +674,7 @@ mod tests {
     async fn mock_unary_backend_echo() {
         let echo_tx = spawn_echo_backend(16);
 
-        let rm = ResourceManager::new();
+        let mut rm = ResourceManager::new();
         rm.register_backend("test.echo", 4);
         let orchestrator = Orchestrator::start(rm, 64);
 
@@ -729,7 +729,7 @@ mod tests {
     async fn mock_stream_backend_collects_tokens() {
         let stream_tx = spawn_stream_backend(16, vec!["foo", " ", "bar"]);
 
-        let rm = ResourceManager::new();
+        let mut rm = ResourceManager::new();
         rm.register_backend("test.stream", 4);
         let orchestrator = Orchestrator::start(rm, 64);
 
@@ -788,7 +788,7 @@ mod tests {
             }
         });
 
-        let rm = ResourceManager::new();
+        let mut rm = ResourceManager::new();
         rm.register_backend("test.notloaded", 4);
         let orchestrator = Orchestrator::start(rm, 64);
 
