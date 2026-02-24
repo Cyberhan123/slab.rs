@@ -45,14 +45,15 @@ impl ResourceManager {
     /// Register (or replace) a backend with the given concurrency capacity.
     ///
     /// Must be called before this `ResourceManager` is cloned or passed to an
-    /// [`Orchestrator`]; calling it afterwards has no effect on existing clones.
+    /// [`Orchestrator`]; calling it afterwards would otherwise have no effect on
+    /// existing clones.
     ///
-    /// # Panics (debug builds)
+    /// # Panics
     ///
     /// Panics if this `ResourceManager` has already been cloned (`Arc::strong_count > 1`),
     /// which would silently leave other clones without the newly registered backend.
     pub fn register_backend(&mut self, backend_id: impl Into<String>, capacity: usize) {
-        debug_assert!(
+        assert!(
             Arc::strong_count(&self.semaphores) == 1,
             "register_backend called after ResourceManager was cloned; \
              other clones will not see the new backend"

@@ -229,7 +229,9 @@ impl WhisperWorker {
         let engine = match self.engine.as_ref() {
             Some(e) => e,
             None => {
-                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
+                let _ = reply_tx.send(BackendReply::Error(
+                    "library not loaded; call lib.load first".into(),
+                ));
                 return;
             }
         };
@@ -275,41 +277,28 @@ impl WhisperWorker {
 }
 
 // ── Public entry points ───────────────────────────────────────────────────────
-/// Spawn `num_workers` whisper backend workers sharing a single ingress channel.
+/// Spawn a whisper backend worker with a pre-loaded engine handle.
 ///
 /// Used by `api::init` to separate library loading (phase 1) from worker
 /// spawning (phase 2) so that no tasks are started if any library fails.
 ///
-/// When `num_workers > 1` each worker receives an independent engine forked
-/// from the same library handle (sharing the underlying `Arc<Whisper>`) but
-/// with its own empty model context.  This allows `backend_capacity` concurrent
-/// inference requests without any lock contention on the model context.
+/// A single worker is used even when `backend_capacity > 1` because stateful
+/// ops (`lib.load`, `lib.reload`, `model.load`, `model.unload`) must be applied
+/// to one shared engine/context.  Distributing these ops across multiple workers
+/// would leave some workers with stale library handles or unloaded models,
+/// causing nondeterministic inference failures.  The `ResourceManager` semaphore
+/// still guards admission so the worker is never overwhelmed.
 pub(crate) fn spawn_backend_with_engine(
     channel_capacity: usize,
-    num_workers: usize,
+    _num_workers: usize,
     engine: Option<GGMLWhisperEngine>,
 ) -> mpsc::Sender<BackendRequest> {
-    let (tx, rx) = mpsc::channel::<BackendRequest>(channel_capacity);
-    // Wrap the receiver in an Arc<Mutex<...>> so multiple worker tasks can
-    // share a single ingress channel without a separate dispatcher.
-    let rx = Arc::new(tokio::sync::Mutex::new(rx));
-
-    let n = num_workers.max(1);
-    for _ in 0..n {
-        // Each worker gets its own engine fork (same library, empty ctx).
-        let worker_engine = engine.as_ref().map(|e| e.fork_library());
-        let worker_rx = Arc::clone(&rx);
-        tokio::spawn(async move {
-            let mut worker = WhisperWorker::new(worker_engine);
-            loop {
-                let req = { worker_rx.lock().await.recv().await };
-                match req {
-                    Some(req) => worker.handle(req).await,
-                    None => break,
-                }
-            }
-        });
-    }
-
+    let (tx, mut rx) = mpsc::channel::<BackendRequest>(channel_capacity);
+    tokio::spawn(async move {
+        let mut worker = WhisperWorker::new(engine);
+        while let Some(req) = rx.recv().await {
+            worker.handle(req).await;
+        }
+    });
     tx
 }
