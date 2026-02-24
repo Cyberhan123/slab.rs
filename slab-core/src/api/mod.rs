@@ -154,21 +154,54 @@ pub fn lib_dirs() -> Option<&'static LibDirs> {
 /// Returns [`RuntimeError::LibraryLoadFailed`] if any configured library
 /// cannot be resolved or opened.
 pub fn init(config: Config) -> Result<(), RuntimeError> {
+    use crate::engine::ggml::{
+        diffusion::{GGMLDiffusionEngine, spawn_backend_with_engine as spawn_diffusion},
+        llama::{GGMLLlamaEngine, spawn_backend_with_engine as spawn_llama},
+        whisper::{GGMLWhisperEngine, spawn_backend_with_engine as spawn_whisper},
+    };
     use std::path::Path;
 
-    // Pre-load libraries synchronously if paths are provided.
-    let llama_tx = crate::engine::ggml::llama::spawn_backend_with_path(
-        128,
-        config.llama_lib_dir.as_deref().map(Path::new),
-    )?;
-    let whisper_tx = crate::engine::ggml::whisper::spawn_backend_with_path(
-        128,
-        config.whisper_lib_dir.as_deref().map(Path::new),
-    )?;
-    let diffusion_tx = crate::engine::ggml::diffusion::spawn_backend_with_path(
-        128,
-        config.diffusion_lib_dir.as_deref().map(Path::new),
-    )?;
+    // ── Phase 1: load all library handles synchronously ───────────────────────
+    //
+    // No worker tasks are spawned yet.  If any library load fails here, we
+    // return an error without having started any background threads.
+    let llama_engine = config
+        .llama_lib_dir
+        .as_deref()
+        .map(|p| {
+            GGMLLlamaEngine::from_path(Path::new(p)).map_err(|e| RuntimeError::LibraryLoadFailed {
+                backend: "ggml.llama".into(),
+                message: e.to_string(),
+            })
+        })
+        .transpose()?;
+
+    let whisper_engine = config
+        .whisper_lib_dir
+        .as_deref()
+        .map(|p| {
+            GGMLWhisperEngine::from_path(Path::new(p)).map_err(|e| RuntimeError::LibraryLoadFailed {
+                backend: "ggml.whisper".into(),
+                message: e.to_string(),
+            })
+        })
+        .transpose()?;
+
+    let diffusion_engine = config
+        .diffusion_lib_dir
+        .as_deref()
+        .map(|p| {
+            GGMLDiffusionEngine::from_path(Path::new(p)).map_err(|e| RuntimeError::LibraryLoadFailed {
+                backend: "ggml.diffusion".into(),
+                message: e.to_string(),
+            })
+        })
+        .transpose()?;
+
+    // ── Phase 2: all loads succeeded; spawn worker tasks ──────────────────────
+    let llama_tx = spawn_llama(128, llama_engine);
+    let whisper_tx = spawn_whisper(128, whisper_engine);
+    let diffusion_tx = spawn_diffusion(128, diffusion_engine);
 
     let rm = ResourceManager::new();
     rm.register_backend(Backend::GGMLLama.to_string(), config.backend_capacity);

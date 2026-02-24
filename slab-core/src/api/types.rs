@@ -22,7 +22,7 @@ pub enum Event {
     InferenceImage,
 }
 
-#[derive(Debug, Display, EnumString)]
+#[derive(Debug, Clone, Copy, Display, EnumString)]
 pub enum Backend {
     #[strum(serialize = "ggml.llama")]
     GGMLLama,
