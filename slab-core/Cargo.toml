@@ -21,8 +21,6 @@ tokio = { workspace = true }
 slab-libfetch = { workspace = true }
 hf-hub = { workspace = true }
 thiserror = { workspace = true }
-
-ffmpeg-sidecar = {version="2.4.0", features=["download_ffmpeg", "named_pipes"]}
 serde_json = { workspace = true }
 serde = {version="1.0.228",features=["derive"]}
 axum = {version="0.8.8", features=["macros"]}
@@ -34,4 +32,6 @@ subparse = "0.7.0"
 tracing-test = "0.2.6"
 bytes = { workspace = true }
 futures = { workspace = true }
+strum = { version = "0.28.0", features = ["derive", "strum_macros"] }
+strum_macros = "0.28.0"
 

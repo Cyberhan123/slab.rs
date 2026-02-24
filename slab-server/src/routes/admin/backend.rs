@@ -6,6 +6,9 @@ use axum::extract::{Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 
+use slab_core::api::Backend;
+use slab_core::api::Event;
+use std::str::FromStr;
 use tracing::{info, warn};
 use utoipa::OpenApi;
 
@@ -308,8 +311,9 @@ pub async fn reload_lib(
 
     info!(backend = %bid, lib_path = %req.lib_path, "reloading lib");
 
-    slab_core::api::backend(bid)
-        .op("model.load")
+    let backend = Backend::from_str(bid).map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
+    slab_core::api::backend(backend)
+        .op(Event::UnloadLibrary)
         .input(slab_core::Payload::Json(serde_json::json!({
             "lib_path":    req.lib_path,
             "model_path":  req.model_path,

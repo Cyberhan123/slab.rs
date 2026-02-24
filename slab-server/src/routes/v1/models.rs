@@ -10,6 +10,7 @@ use utoipa::OpenApi;
 
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
+use crate::routes::admin::backend;
 use crate::schemas::v1::models::{
     DownloadModelRequest, ListAvailableQuery, LoadModelRequest, ModelStatusResponse,
     SwitchModelRequest,
@@ -97,8 +98,11 @@ pub async fn load_model(
         "loading model"
     );
 
-    slab_core::api::backend(bid)
-        .op("model.load")
+    let backend = slab_core::api::Backend::from_str(bid)
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
+
+    slab_core::api::backend(backend)
+        .op(slab_core::api::Event::LoadModel)
         .input(slab_core::Payload::Json(serde_json::json!({
             // "lib_path":    req.lib_path,
             "model_path":  req.model_path,
@@ -133,8 +137,11 @@ pub async fn unload_model(
 
     info!(backend = %bid, "unloading model");
 
-    slab_core::api::backend(bid)
-        .op("model.unload")
+    let backend = slab_core::api::Backend::from_str(bid)
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
+
+    slab_core::api::backend(backend)
+        .op(slab_core::api::Event::UnloadModel)
         .input(slab_core::Payload::default())
         .run_wait()
         .await
@@ -232,8 +239,10 @@ pub async fn switch_model(
 
     info!(backend = %bid, model_path = %req.model_path, "switching model");
 
-    slab_core::api::backend(bid)
-        .op("model.load")
+    let backend = slab_core::api::Backend::from_str(bid)
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
+    slab_core::api::backend(backend)
+        .op(slab_core::api::Event::LoadModel)
         .input(slab_core::Payload::Json(serde_json::json!({
             // "lib_path":    lib_path,
             "model_path":  req.model_path,

@@ -21,8 +21,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::Deserialize;
+use std::str::FromStr;
 use tokio::sync::mpsc;
 
+use crate::api::Event;
 use crate::engine::ggml::llama::adapter::GGMLLlamaEngine;
 use crate::engine::ggml::llama::errors::SessionId;
 use crate::runtime::backend::protocol::{BackendReply, BackendRequest, StreamChunk};
@@ -55,7 +57,10 @@ struct LlamaWorker {
 
 impl LlamaWorker {
     fn new() -> Self {
-        Self { engine: None, sessions: HashMap::new() }
+        Self {
+            engine: None,
+            sessions: HashMap::new(),
+        }
     }
 
     async fn handle(&mut self, req: BackendRequest) {
@@ -66,23 +71,42 @@ impl LlamaWorker {
             ..
         } = req;
 
-        match op.name.as_str() {
-            "model.load" => self.handle_load(input, reply_tx).await,
-            "model.unload" => self.handle_unload(reply_tx).await,
-            "inference" => {
+        match Event::from_str(&op.name) {
+            Ok(Event::LoadLibrary) => self.handle_load(input, reply_tx).await,
+            Ok(Event::UnloadLibrary) => self.handle_unload(reply_tx).await,
+            Ok(Event::Inference) => {
                 let opts = serde_json::to_value(&op.options).unwrap_or(serde_json::Value::Null);
-                let max_tokens = opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
-                let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
-                self.handle_inference(input, max_tokens, session_key, reply_tx).await;
+                let max_tokens = opts
+                    .get("max_tokens")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize)
+                    .unwrap_or(256);
+                let session_key = opts
+                    .get("session_key")
+                    .and_then(|s| s.as_str())
+                    .map(str::to_owned);
+                self.handle_inference(input, max_tokens, session_key, reply_tx)
+                    .await;
             }
-            "inference.stream" => {
+            Ok(Event::InferenceStream) => {
                 let opts = serde_json::to_value(&op.options).unwrap_or(serde_json::Value::Null);
-                let max_tokens = opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
-                let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
-                self.handle_inference_stream(input, max_tokens, session_key, reply_tx).await;
+                let max_tokens = opts
+                    .get("max_tokens")
+                    .and_then(|v| v.as_u64())
+                    .map(|v| v as usize)
+                    .unwrap_or(256);
+                let session_key = opts
+                    .get("session_key")
+                    .and_then(|s| s.as_str())
+                    .map(str::to_owned);
+                self.handle_inference_stream(input, max_tokens, session_key, reply_tx)
+                    .await;
             }
-            other => {
-                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {other}")));
+            Ok(_) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
+            }
+            Err(_) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
             }
         }
     }
@@ -128,7 +152,7 @@ impl LlamaWorker {
         }
 
         self.engine = Some(engine);
-        
+
         let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
             Arc::from([] as [u8; 0]),
         )));
@@ -136,7 +160,9 @@ impl LlamaWorker {
 
     async fn handle_unload(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
         self.engine = None;
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(std::sync::Arc::from(&b""[..]))));
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(std::sync::Arc::from(
+            &b""[..],
+        ))));
     }
 
     async fn handle_inference(
@@ -231,7 +257,10 @@ impl LlamaWorker {
         tokio::spawn(async move {
             use crate::engine::ggml::llama::StreamChunk as LlamaChunk;
 
-            match engine.inference_stream(&prompt, max_tokens, llama_sid).await {
+            match engine
+                .inference_stream(&prompt, max_tokens, llama_sid)
+                .await
+            {
                 Ok((mut llama_rx, new_sid)) => {
                     while let Some(chunk) = llama_rx.recv().await {
                         let mapped = match chunk {

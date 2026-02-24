@@ -12,7 +12,7 @@ use thiserror::Error;
 use tracing::info;
 
 struct WhisperGlobal {
-    service: Arc<GGMLWhisperEngine>,
+    engine: Arc<GGMLWhisperEngine>,
     lib_path: PathBuf,
 }
 
@@ -138,11 +138,11 @@ impl GGMLWhisperEngine {
                     }
                     .into());
                 }
-                return Ok(global.service.clone());
+                return Ok(global.engine.clone());
             }
         }
 
-        let service = Arc::new(Self::build_service(&normalized_path)?);
+        let engine = Arc::new(Self::build_service(&normalized_path)?);
         let mut write_guard = global_lock
             .write()
             .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
@@ -157,20 +157,20 @@ impl GGMLWhisperEngine {
                 }
                 .into());
             }
-            return Ok(global.service.clone());
+            return Ok(global.engine.clone());
         }
 
         *write_guard = Some(WhisperGlobal {
-            service: service.clone(),
+            engine: engine.clone(),
             lib_path: normalized_path,
         });
 
-        Ok(service)
+        Ok(engine)
     }
 
     pub fn reload<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
         let normalized_path = Self::resolve_lib_path(path)?;
-        let service = Arc::new(Self::build_service(&normalized_path)?);
+        let engine = Arc::new(Self::build_service(&normalized_path)?);
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
         let mut write_guard = global_lock
             .write()
@@ -184,17 +184,17 @@ impl GGMLWhisperEngine {
             .unwrap_or_else(|| "<uninitialized>".to_string());
 
         *write_guard = Some(WhisperGlobal {
-            service: service.clone(),
+            engine: engine.clone(),
             lib_path: normalized_path.clone(),
         });
 
         info!(
-            "whisper service reloaded: {} -> {}",
+            "whisper engine reloaded: {} -> {}",
             previous,
             normalized_path.display()
         );
 
-        Ok(service)
+        Ok(engine)
     }
 
     pub fn current() -> Result<Arc<Self>, engine::EngineError> {
@@ -208,7 +208,7 @@ impl GGMLWhisperEngine {
             })?;
         read_guard
             .as_ref()
-            .map(|global| global.service.clone())
+            .map(|global| global.engine.clone())
             .ok_or(GGMLWhisperEngineError::InstanceNotInitialized.into())
     }
 

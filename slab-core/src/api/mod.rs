@@ -56,6 +56,7 @@
 //! }
 //! # }
 //! ```
+mod types;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -72,6 +73,8 @@ use crate::runtime::pipeline::PipelineBuilder;
 use crate::runtime::stage::CpuStage;
 use crate::runtime::storage::TaskStatusView;
 use crate::runtime::types::{Payload, RuntimeError, TaskId, TaskStatus};
+pub use types::Event;
+pub use types::Backend;
 
 // ── Timeout constants ──────────────────────────────────────────────────────────
 
@@ -153,9 +156,9 @@ pub fn lib_dirs() -> Option<&'static LibDirs> {
 /// happen in normal usage).
 pub fn init(config: Config) -> Result<(), RuntimeError> {
     let rm = ResourceManager::new();
-    rm.register_backend("ggml.llama", config.backend_capacity);
-    rm.register_backend("ggml.whisper", config.backend_capacity);
-    rm.register_backend("ggml.diffusion", config.backend_capacity);
+    rm.register_backend(Backend::GGMLLama.to_string(), config.backend_capacity);
+    rm.register_backend(Backend::GGMLWhisper.to_string(), config.backend_capacity);
+    rm.register_backend(Backend::GGMLDiffusion.to_string(), config.backend_capacity);
 
     let orchestrator = Orchestrator::start(rm, config.queue_capacity);
 
@@ -164,9 +167,9 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
     let diffusion_tx = crate::engine::ggml::diffusion::spawn_backend(128);
 
     let mut backends = HashMap::new();
-    backends.insert("ggml.llama".to_owned(), llama_tx);
-    backends.insert("ggml.whisper".to_owned(), whisper_tx);
-    backends.insert("ggml.diffusion".to_owned(), diffusion_tx);
+    backends.insert(Backend::GGMLLama.to_string(), llama_tx);
+    backends.insert(Backend::GGMLWhisper.to_string(), whisper_tx);
+    backends.insert(Backend::GGMLDiffusion.to_string(), diffusion_tx);
 
     // set() is a no-op if already initialized — idempotent.
     let _ = RUNTIME.set(ApiRuntime {
@@ -190,8 +193,8 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
 /// Known backend ids: `"ggml.llama"`, `"ggml.whisper"`, `"ggml.diffusion"`.
 ///
 /// Errors surface at the terminal step (`.run()`, `.run_wait()`, `.stream()`).
-pub fn backend(id: &str) -> BackendBuilder {
-    BackendBuilder { id: id.to_owned() }
+pub fn backend(id: Backend) -> BackendBuilder {
+    BackendBuilder { id }
 }
 
 /// Fetch a snapshot of a task's current status by `TaskId`.
@@ -239,7 +242,7 @@ pub fn cancel(task_id: TaskId) -> Result<(), RuntimeError> {
 
 /// Selects a backend; produced by [`backend`].
 pub struct BackendBuilder {
-    id: String,
+    id: Backend,
 }
 
 impl BackendBuilder {
@@ -251,10 +254,10 @@ impl BackendBuilder {
     /// - `"inference.stream"` – streaming text generation (llama)
     /// - `"inference"` – speech-to-text (whisper); input is raw PCM `f32` bytes
     /// - `"inference_image"` – image generation (diffusion); input is JSON bytes
-    pub fn op(self, name: &str) -> CallBuilder {
+    pub fn op(self, event: Event) -> CallBuilder {
         CallBuilder {
-            backend_id: self.id,
-            op_name: name.to_owned(),
+            backend_id: self.id.to_string(),
+            op_name: event.to_string(),
             op_options: Payload::default(),
             input: Payload::default(),
             preprocess_stages: Vec::new(),
@@ -434,7 +437,7 @@ impl CallBuilder {
 
         let rt = Self::runtime()?;
         let ingress_tx = Self::ingress_tx(rt, &self.backend_id)?;
-   
+
         let op = BackendOp {
             name: self.op_name.clone(),
             options: self.op_options,
@@ -748,7 +751,7 @@ mod tests {
             backend_id: "test.backend".to_owned(),
             op_name: "test.op".to_owned(),
             op_options: Payload::default(),
-            input:  Payload::Bytes(Arc::from(b"ignored" as &[u8])),
+            input: Payload::Bytes(Arc::from(b"ignored" as &[u8])),
             preprocess_stages: Vec::new(),
             postprocess_stages: Vec::new(),
         }

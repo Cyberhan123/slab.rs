@@ -9,17 +9,17 @@
 use std::convert::Infallible;
 use std::sync::Arc;
 
-use axum::extract::{ State};
+use axum::extract::State;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{post};
+use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
 use futures::StreamExt;
 
 use tracing::{debug, info};
-use uuid::Uuid;
 use utoipa::OpenApi;
+use uuid::Uuid;
 
 use crate::entities::{ChatMessage, ChatStore};
 use crate::error::ServerError;
@@ -35,23 +35,20 @@ const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
 #[openapi(
     paths(chat_completions),
     components(schemas(
-        ChatCompletionRequest, 
-        ChatCompletionResponse, 
-        OpenAiMessage, 
+        ChatCompletionRequest,
+        ChatCompletionResponse,
+        OpenAiMessage,
         ChatChoice
-    )),
+    ))
 )]
 pub struct ChatApi;
 
 /// Register chat-completion routes.
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/chat/completions",    post(chat_completions))
+    Router::new().route("/chat/completions", post(chat_completions))
 }
 
 // ── Request / response types for sessions ─────────────────────────────────────
-
-
 
 // ── Chat completions ──────────────────────────────────────────────────────────
 
@@ -135,9 +132,12 @@ pub async fn chat_completions(
     });
 
     if req.stream {
-        let backend_stream = slab_core::api::backend("ggml.llama")
-            .op("inference.stream")
-            .input(slab_core::Payload::Text(std::sync::Arc::from(prompt.as_str())))
+        let backend_stream = 
+        slab_core::api::backend(slab_core::api::Backend::GGMLLlama)
+            .op(slab_core::api::Event::InferenceStream)
+            .input(slab_core::Payload::Text(std::sync::Arc::from(
+                prompt.as_str(),
+            )))
             .options(slab_core::Payload::Json(options))
             .stream()
             .await
@@ -162,9 +162,11 @@ pub async fn chat_completions(
         return Ok(Sse::new(sse_stream).into_response());
     }
 
-    let result_bytes = slab_core::api::backend("ggml.llama")
-        .op("inference")
-        .input(slab_core::Payload::Text(std::sync::Arc::from(prompt.as_str())))
+    let result_bytes = slab_core::api::backend(slab_core::api::Backend::GGMLLama)
+        .op(slab_core::api::Event::Inference)
+        .input(slab_core::Payload::Text(std::sync::Arc::from(
+            prompt.as_str(),
+        )))
         .options(slab_core::Payload::Json(options))
         .run_wait()
         .await
@@ -191,13 +193,16 @@ pub async fn chat_completions(
     }
 
     let resp = ChatCompletionResponse {
-        id:      format!("chatcmpl-{}", Uuid::new_v4()),
-        object:  "chat.completion".into(),
+        id: format!("chatcmpl-{}", Uuid::new_v4()),
+        object: "chat.completion".into(),
         created: Utc::now().timestamp(),
-        model:   req.model,
+        model: req.model,
         choices: vec![ChatChoice {
-            index:         0,
-            message:       OpenAiMessage { role: "assistant".into(), content: generated },
+            index: 0,
+            message: OpenAiMessage {
+                role: "assistant".into(),
+                content: generated,
+            },
             finish_reason: "stop".into(),
         }],
     };
@@ -234,13 +239,12 @@ async fn build_prompt(
 
 fn capitalize_role(role: &str) -> &str {
     match role {
-        "user"      => "User",
+        "user" => "User",
         "assistant" => "Assistant",
-        "system"    => "System",
-        other       => other,
+        "system" => "System",
+        other => other,
     }
 }
-
 
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
@@ -251,12 +255,15 @@ mod test {
 
     fn make_request(role: &str, content: &str) -> ChatCompletionRequest {
         ChatCompletionRequest {
-            model:       "test".into(),
-            messages:    vec![OpenAiMsg { role: role.into(), content: content.into() }],
-            stream:      false,
-            max_tokens:  None,
+            model: "test".into(),
+            messages: vec![OpenAiMsg {
+                role: role.into(),
+                content: content.into(),
+            }],
+            stream: false,
+            max_tokens: None,
             temperature: None,
-            id:  None,
+            id: None,
         }
     }
 
@@ -300,4 +307,3 @@ mod test {
         assert!(found.is_none());
     }
 }
-
