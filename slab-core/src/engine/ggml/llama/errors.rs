@@ -8,20 +8,6 @@ pub type SessionId = u64;
 
 #[derive(Debug, Error)]
 pub enum GGMLLlamaEngineError {
-    #[error(
-        "LlamaService already initialized with different library path: {existing} (requested: {requested})"
-    )]
-    LibraryPathMismatch {
-        existing: PathBuf,
-        requested: PathBuf,
-    },
-
-    #[error("LlamaService global storage not initialized")]
-    GlobalStorageNotInitialized,
-
-    #[error("LlamaService instance not initialized")]
-    InstanceNotInitialized,
-
     #[error("Lock poisoned while trying to {operation}")]
     LockPoisoned { operation: &'static str },
 

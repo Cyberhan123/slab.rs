@@ -1,135 +1,107 @@
-//! Request-tracing middleware.
-//!
-//! Assigns a `X-Trace-Id` UUID (v4) to every incoming request, injects it
-//! into the [`tracing`] span so all log lines emitted during the request carry
-//! the same `trace_id` field, and echoes it back in the response
-//! `X-Trace-Id` header.
-//!
-//! **Audit log timing:**
-//! The incoming request record is inserted into the database **synchronously**
-//! (inside the same async task, before the handler runs) so that the row is
-//! guaranteed to exist when the response update fires.  The response-side
-//! update is still fire-and-forget because it runs after the response has
-//! already been returned to the caller.
-
+use crate::state::AppState;
+use axum::{
+    body::{Body, Bytes},
+    extract::{Request, State},
+    http::header,
+    middleware::Next,
+    response::Response,
+};
+use http_body_util::BodyExt; // cargo add http_body_util
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Instant;
-
-use axum::body::Body;
-use axum::extract::Request;
-use axum::http::header::HeaderName;
-use axum::http::{HeaderValue, Response};
-use futures::future::BoxFuture;
-use tower::{Layer, Service};
 use tracing::{info, info_span, Instrument};
 use uuid::Uuid;
 
-use crate::state::AppState;
+pub static X_TRACE_ID: &str = "x-trace-id";
 
-/// HTTP header carrying the per-request trace ID.
-pub static X_TRACE_ID: HeaderName = HeaderName::from_static("x-trace-id");
+pub async fn trace_middleware(
+    State(_state): State<Arc<AppState>>, // 自动获取 State
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let start_time = Instant::now();
 
-// ── Layer ────────────────────────────────────────────────────────────────────
+    // 1. 提取或生成 Trace ID
+    let trace_id = req
+        .headers()
+        .get(X_TRACE_ID)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| Uuid::parse_str(s).ok())
+        .unwrap_or_else(Uuid::new_v4);
 
-/// [`tower::Layer`] that wraps each handler with trace-ID injection and
-/// request audit logging.
-#[derive(Clone)]
-pub struct TraceLayer {
-    state: Arc<AppState>,
-}
+    let method = req.method().clone();
+    let path = req.uri().path().to_string();
 
-impl TraceLayer {
-    /// Create a new [`TraceLayer`] backed by the given shared state.
-    pub fn new(state: Arc<AppState>) -> Self {
-        Self { state }
+    // 2. 创建 Tracing Span
+    let span = info_span!(
+        "http_request",
+        trace_id = %trace_id,
+        method = %method,
+        path = %path,
+    );
+
+    // 在 Span 范围内执行逻辑
+    async move {
+        info!("→ request started");
+        let (parts, body) = req.into_parts();
+        
+        let req_bytes = buffer_and_log("request", &trace_id.to_string(), &parts.headers, body).await;
+        let mut req = Request::from_parts(parts, Body::from(req_bytes));
+
+        req.headers_mut()
+            .insert(X_TRACE_ID, trace_id.to_string().parse().unwrap());
+
+        let response = next.run(req).await;
+
+        let (parts, body) = response.into_parts();
+
+        let res_bytes = buffer_and_log("response", &trace_id.to_string(), &parts.headers, body).await;
+
+        let mut response = Response::from_parts(parts, Body::from(res_bytes));
+
+        let latency = start_time.elapsed();
+
+        response
+            .headers_mut()
+            .insert(X_TRACE_ID, trace_id.to_string().parse().unwrap());
+
+        info!(
+            status = response.status().as_u16(),
+            latency_ms = latency.as_millis(),
+            "← response finished"
+        );
+
+        response
     }
+    .instrument(span)
+    .await
 }
 
-impl<S> Layer<S> for TraceLayer {
-    type Service = TraceMiddleware<S>;
+/// 辅助函数：根据类型和大小决定是否打印 Body
+async fn buffer_and_log(
+    direction: &str,
+    trace_id: &str,
+    headers: &header::HeaderMap,
+    body: Body,
+) -> Bytes {
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    let is_json = content_type.contains("application/json");
 
-    fn layer(&self, inner: S) -> Self::Service {
-        TraceMiddleware {
-            inner,
-            state: Arc::clone(&self.state),
+    let bytes = match body.collect().await {
+        Ok(collected) => collected.to_bytes(),
+        Err(_) => return Bytes::new(),
+    };
+
+    if is_json && bytes.len() < 1024 {
+        if let Ok(text) = std::str::from_utf8(&bytes) {
+            info!(id = %trace_id, "{} Body: {}", direction, text);
         }
-    }
-}
-
-// ── Service ──────────────────────────────────────────────────────────────────
-
-/// The middleware service produced by [`TraceLayer`].
-#[derive(Clone)]
-pub struct TraceMiddleware<S> {
-    inner: S,
-    state: Arc<AppState>,
-}
-
-impl<S> Service<Request<Body>> for TraceMiddleware<S>
-where
-    S: Service<Request<Body>, Response = Response<Body>> + Clone + Send + 'static,
-    S::Future: Send + 'static,
-{
-    type Response = Response<Body>;
-    type Error = S::Error;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
-
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        self.inner.poll_ready(cx)
+    } else if !bytes.is_empty() {
+        info!(id = %trace_id, "{} Body: [Skipped: Type={}, Size={}]", direction, content_type, bytes.len());
     }
 
-    fn call(&mut self, mut req: Request<Body>) -> Self::Future {
-        // ── Assign or inherit a trace ID ───────────────────────────────────────
-        let trace_id: Uuid = req
-            .headers()
-            .get(&X_TRACE_ID)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|s| s.parse().ok())
-            .unwrap_or_else(Uuid::new_v4);
-
-        // Inject the trace ID into request headers for downstream handlers.
-        // UUID v4 is ASCII hex + hyphens, which is always a valid HeaderValue.
-        req.headers_mut().insert(
-            X_TRACE_ID.clone(),
-            HeaderValue::from_str(&trace_id.to_string())
-                .expect("UUID v4 string is always a valid header value"),
-        );
-
-        let method = req.method().to_string();
-        let path = req.uri().path().to_owned();
-        let started = Instant::now();
-
-        let span = info_span!(
-            "http_request",
-            trace_id = %trace_id,
-            method   = %method,
-            path     = %path,
-        );
-
-        let mut inner = self.inner.clone();
-
-        Box::pin(
-            async move {
-                info!(%method, %path, "→ request");
-
-                let mut response = inner.call(req).await?;
-                // Echo the trace ID back in the response headers.
-                // UUID v4 is ASCII hex + hyphens, which is always a valid HeaderValue.
-                response.headers_mut().insert(
-                    X_TRACE_ID.clone(),
-                    HeaderValue::from_str(&trace_id.to_string())
-                        .expect("UUID v4 string is always a valid header value"),
-                );
-
-                let status = response.status().as_u16();
-                let latency_ms = started.elapsed().as_millis() as i64;
-
-                info!(status, latency_ms, "← response");
-
-                Ok(response)
-            }
-            .instrument(span),
-        )
-    }
+    bytes
 }

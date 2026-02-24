@@ -4865,6 +4865,8 @@ dependencies = [
  "ffmpeg-sidecar",
  "futures",
  "hf-hub",
+ "http",
+ "http-body-util",
  "serde",
  "serde_json",
  "slab-core",

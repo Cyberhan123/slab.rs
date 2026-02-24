@@ -72,9 +72,6 @@ pub struct Config {
     /// Directory containing the stable-diffusion shared library.
     pub diffusion_lib_dir: Option<String>,
 
-    /// Directory to scan for model weight files.
-    pub model_dir: Option<String>,
-
     /// Directory where chat session state files are stored.
     pub session_state_dir: String,
 }
@@ -101,7 +98,6 @@ impl Config {
             llama_lib_dir: std::env::var("SLAB_LLAMA_LIB_DIR").ok(),
             whisper_lib_dir: std::env::var("SLAB_WHISPER_LIB_DIR").ok(),
             diffusion_lib_dir: std::env::var("SLAB_DIFFUSION_LIB_DIR").ok(),
-            model_dir: std::env::var("SLAB_MODEL_DIR").ok(),
             session_state_dir: env_or("SLAB_SESSION_STATE_DIR", "/tmp/slab-sessions"),
         }
     }

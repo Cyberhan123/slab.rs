@@ -11,49 +11,23 @@ mod admin;
 pub mod doc;
 mod health;
 mod v1;
-
-use crate::middleware::TraceLayer;
+use axum::{
+    middleware::{self},
+    Router,
+};
+use crate::middleware::{cors,trace};
 use crate::state::AppState;
-use axum::Router;
 use std::sync::Arc;
-use tower_http::cors::{Any, CorsLayer};
+use tower::ServiceBuilder;
 use utoipa_swagger_ui::SwaggerUi;
-
 // ── Router builder ────────────────────────────────────────────────────────────
 
 /// Build the complete Axum [`Router`] for the application.
 pub fn build(state: Arc<AppState>) -> Router {
-    // ── CORS ─────────────────────────────────────────────────────────────────
-    // Default allows all origins.  In production, restrict via SLAB_CORS_ORIGINS.
-    let cors = if let Some(origins_str) = &state.config.cors_allowed_origins {
-        // Parse the comma-separated origin list and build a restrictive layer.
-        let origins: Vec<axum::http::HeaderValue> = origins_str
-            .split(',')
-            .filter_map(|s| s.trim().parse().ok())
-            .collect();
-        if origins.is_empty() {
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_headers(Any)
-                .allow_methods(Any)
-        } else {
-            CorsLayer::new()
-                .allow_origin(origins)
-                .allow_headers(Any)
-                .allow_methods(Any)
-        }
-    } else {
-        // Wildcard – suitable for development; set SLAB_CORS_ORIGINS in production.
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_headers(Any)
-            .allow_methods(Any)
-    };
-
     let api_router = Router::new()
         .merge(health::router())
         .nest("/v1", v1::router())
-        .nest("/admin", admin::router());
+        .nest("/admin", admin::router(state.clone()));
 
     let mut app = Router::new().merge(api_router);
 
@@ -68,7 +42,10 @@ pub fn build(state: Arc<AppState>) -> Router {
 
     app
         // Outermost layers execute first on the way in.
-        .layer(TraceLayer::new(Arc::clone(&state)))
-        .layer(cors)
+        .layer(ServiceBuilder::new().layer(cors::cors_layer(state.clone())))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            trace::trace_middleware,
+        ))
         .with_state(state)
 }

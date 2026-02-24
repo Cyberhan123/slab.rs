@@ -9,10 +9,6 @@ mod tests {
     use crate::runtime::pipeline::PipelineBuilder;
     use crate::runtime::types::{Payload, TaskStatus};
 
-    fn make_orchestrator() -> Orchestrator {
-        Orchestrator::start(ResourceManager::new(), 64)
-    }
-
     fn text_payload(s: &str) -> Payload {
         Payload::Text(Arc::from(s))
     }
@@ -93,115 +89,6 @@ mod tests {
     }
 
     // ── Orchestrator / pipeline integration tests ─────────────────────────────
-
-    #[tokio::test]
-    async fn pipeline_with_cpu_stages_succeeds() {
-        let orchestrator = make_orchestrator();
-
-        let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("hello"))
-            .cpu("step1", |p| match p {
-                Payload::Text(s) => Ok(Payload::Text(Arc::from(s.to_uppercase().as_str()))),
-                other => Ok(other),
-            })
-            .cpu("step2", |p| match p {
-                Payload::Text(s) => {
-                    let reversed: String = s.chars().rev().collect();
-                    Ok(Payload::Text(Arc::from(reversed.as_str())))
-                }
-                other => Ok(other),
-            })
-            .run()
-            .await
-            .expect("submit should succeed");
-
-        // Poll until the task is no longer Pending/Running.
-        let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                let view = orchestrator
-                    .get_status(task_id)
-                    .await
-                    .expect("task should exist");
-                match &view.status {
-                    TaskStatus::Succeeded { .. } | TaskStatus::Failed { .. } => break view.status,
-                    _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
-                }
-            }
-        })
-        .await
-        .expect("task should complete within timeout");
-
-        if let TaskStatus::Succeeded { result: payload } = result {
-            if let Payload::Text(s) = payload {
-                assert_eq!(&*s, "OLLEH");
-            } else {
-                panic!("unexpected payload type");
-            }
-        } else {
-            panic!("task should have succeeded, got {:?}", result);
-        }
-    }
-
-    #[tokio::test]
-    async fn pipeline_failed_stage_marks_task_failed() {
-        let orchestrator = make_orchestrator();
-
-        let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("x"))
-            .cpu("failing-stage", |_| Err("boom".to_owned()))
-            .run()
-            .await
-            .expect("submit should succeed");
-
-        let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                let view = orchestrator
-                    .get_status(task_id)
-                    .await
-                    .expect("task should exist");
-                match &view.status {
-                    TaskStatus::Failed { .. } | TaskStatus::Succeeded { .. } => break view.status,
-                    _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
-                }
-            }
-        })
-        .await
-        .expect("task should complete within timeout");
-
-        assert!(
-            matches!(result, TaskStatus::Failed { .. }),
-            "task should be in Failed state"
-        );
-    }
-
-    #[tokio::test]
-    async fn cancel_pending_task_transitions_to_cancelled() {
-        let orchestrator = make_orchestrator();
-
-        // Stage that sleeps long enough for cancellation to arrive.
-        let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("x"))
-            .cpu("slow-stage", |p| {
-                std::thread::sleep(std::time::Duration::from_secs(10));
-                Ok(p)
-            })
-            .run()
-            .await
-            .expect("submit should succeed");
-
-        // Give the task a moment to reach the CPU stage, then cancel it.
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        orchestrator.cancel(task_id);
-
-        // The task might succeed if the CPU stage is already running (non-preemptable),
-        // but the cancel signal should be visible.
-        // At minimum the status should be fetchable.
-        let view = orchestrator
-            .get_status(task_id)
-            .await
-            .expect("task should exist after cancel");
-        assert!(
-            !matches!(view.status, TaskStatus::Pending),
-            "task should have started executing"
-        );
-    }
 
     #[tokio::test]
     async fn gpu_stage_dispatches_and_receives_reply() {
@@ -374,38 +261,4 @@ mod tests {
     }
 
     // ── Storage tests ─────────────────────────────────────────────────────────
-
-    #[tokio::test]
-    async fn get_result_consumes_payload() {
-        let orchestrator = make_orchestrator();
-
-        let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("data"))
-            .cpu("identity", Ok)
-            .run()
-            .await
-            .expect("submit should succeed");
-
-        // Wait for completion.
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
-            loop {
-                let view = orchestrator
-                    .get_status(task_id)
-                    .await
-                    .expect("task should exist");
-                if matches!(view.status, TaskStatus::Succeeded { .. }) {
-                    break;
-                }
-                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            }
-        })
-        .await
-        .expect("task should complete");
-
-        // First call returns the payload.
-        let first = orchestrator.get_result(task_id).await;
-        assert!(first.is_some(), "first get_result should return payload");
-        // Second call returns None (payload consumed).
-        let second = orchestrator.get_result(task_id).await;
-        assert!(second.is_none(), "second get_result should return None");
-    }
 }

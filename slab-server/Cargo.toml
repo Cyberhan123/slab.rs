@@ -28,8 +28,10 @@ bytes   = { workspace = true }
 
 # Web framework + middleware
 axum       = { version = "0.8", features = ["macros", "multipart"] }
-tower      = { version = "0.5" }
-tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "set-header"] }
+tower      = "0.5"
+tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "set-header","util"] }
+http = "1.4.0"
+http-body-util = "0.1.3"
 
 # Serialization
 serde      = { workspace = true }

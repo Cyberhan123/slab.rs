@@ -23,7 +23,6 @@
 //! { "model_path": "/path/to/model.bin" }
 //! ```
 
-use std::path::Path;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -33,7 +32,7 @@ use tokio::sync::mpsc;
 use crate::api::Event;
 use crate::engine::ggml::whisper::adapter::GGMLWhisperEngine;
 use crate::runtime::backend::protocol::{BackendReply, BackendRequest};
-use crate::runtime::types::{Payload, RuntimeError};
+use crate::runtime::types::Payload;
 
 // ── Configurations ────────────────────────────────────────────────────────────
 
@@ -267,38 +266,11 @@ impl WhisperWorker {
 }
 
 // ── Public entry points ───────────────────────────────────────────────────────
-
-/// Spawn the whisper backend worker without a pre-loaded library.
+/// Spawn a whisper backend worker with a pre-loaded engine handle.
 ///
-/// # Panics
-/// Panics if called outside a Tokio runtime.
-pub fn spawn_backend(capacity: usize) -> mpsc::Sender<BackendRequest> {
-    spawn_backend_inner(capacity, None)
-}
-
-/// Spawn the whisper backend worker, optionally pre-loading the shared library.
-///
-/// `lib_path` should point to the directory containing `libwhisper.{so,dylib,dll}`
-/// or directly to the library file.
-///
-/// # Panics
-/// Panics if called outside a Tokio runtime.
-pub fn spawn_backend_with_path(
-    capacity: usize,
-    lib_path: Option<&Path>,
-) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
-    let engine = lib_path
-        .map(|path| {
-            GGMLWhisperEngine::from_path(path).map_err(|e| RuntimeError::LibraryLoadFailed {
-                backend: "ggml.whisper".into(),
-                message: e.to_string(),
-            })
-        })
-        .transpose()?;
-    Ok(spawn_backend_inner(capacity, engine))
-}
-
-fn spawn_backend_inner(
+/// Used by `api::init` to separate library loading (phase 1) from worker
+/// spawning (phase 2) so that no tasks are started if any library fails.
+pub(crate) fn spawn_backend_with_engine(
     capacity: usize,
     engine: Option<Arc<GGMLWhisperEngine>>,
 ) -> mpsc::Sender<BackendRequest> {
@@ -310,15 +282,4 @@ fn spawn_backend_inner(
         }
     });
     tx
-}
-
-/// Spawn a whisper backend worker with a pre-loaded engine handle.
-///
-/// Used by `api::init` to separate library loading (phase 1) from worker
-/// spawning (phase 2) so that no tasks are started if any library fails.
-pub(crate) fn spawn_backend_with_engine(
-    capacity: usize,
-    engine: Option<Arc<GGMLWhisperEngine>>,
-) -> mpsc::Sender<BackendRequest> {
-    spawn_backend_inner(capacity, engine)
 }
