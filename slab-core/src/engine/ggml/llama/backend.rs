@@ -10,7 +10,7 @@
 //! | `"lib.load"`         | `LoadLibrary`    | Load (skip if already loaded) the llama dylib. |
 //! | `"lib.reload"`       | `ReloadLibrary`  | Replace the library, discarding current model. |
 //! | `"model.load"`       | `LoadModel`      | Load a GGUF model from the pre-loaded library. |
-//! | `"model.unload"`     | `UnloadModel`    | Drop the current model (library stays loaded). |
+//! | `"model.unload"`     | `UnloadModel`    | Drop the model and library handle; call lib.load + model.load to restore. |
 //! | `"inference"`        | `Inference`      | Unary text generation; input is UTF-8 prompt.  |
 //! | `"inference.stream"` | `InferenceStream`| Streaming text generation.                     |
 //!
@@ -80,13 +80,7 @@ impl LlamaWorker {
             Ok(Event::LoadLibrary) => self.handle_load_library(input, reply_tx).await,
             Ok(Event::ReloadLibrary) => self.handle_reload_library(input, reply_tx).await,
             Ok(Event::LoadModel) => {
-                let opts = op.options.to_serde_value();
-                let num_workers = opts
-                    .get("num_workers")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as usize)
-                    .unwrap_or(1);
-                self.handle_load_model(input, num_workers, reply_tx).await;
+                self.handle_load_model(input, reply_tx).await;
             }
             Ok(Event::UnloadModel) => self.handle_unload_model(reply_tx).await,
             Ok(Event::Inference) => {
@@ -188,7 +182,6 @@ impl LlamaWorker {
     async fn handle_load_model(
         &mut self,
         input: Payload,
-        num_workers: usize,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -209,7 +202,7 @@ impl LlamaWorker {
             }
         };
 
-        if num_workers == 0 {
+        if config.num_workers == 0 {
             let _ = reply_tx.send(BackendReply::Error("num_workers must be > 0".into()));
             return;
         }
@@ -225,7 +218,7 @@ impl LlamaWorker {
                 &config.model_path,
                 LlamaModelParams::default(),
                 LlamaContextParams::default(),
-                num_workers,
+                config.num_workers,
             )
         });
 
@@ -242,16 +235,15 @@ impl LlamaWorker {
     // ── model.unload ──────────────────────────────────────────────────────────
 
     async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
-        // GGMLLlamaEngine holds the inference engine (model + OS worker threads)
-        // behind an Arc<Mutex<Option<...>>>.  The only way to release the model
-        // without dropping the library handle is to call load_model_with_workers
-        // again with a new model path.  For now we signal "unloaded" by returning
-        // success; subsequent inference calls will return "model not loaded" because
-        // the inference_engine inside the adapter was never populated.
+        // Drop the current GGMLLlamaEngine instance (and thus the loaded model and
+        // its associated OS worker threads) by clearing our handle to it.
+        // Subsequent inference calls will observe `self.engine == None` and return
+        // "model not loaded" until lib.load + model.load are called again.
         //
-        // If a proper `unload` API is added to GGMLLlamaEngine in the future, it
-        // can be called here.
+        // Note: this also releases the dynamic library handle held inside the engine.
+        // Call lib.load first before model.load to restore full functionality.
         self.sessions.clear();
+        self.engine = None;
         let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(&b""[..]))));
     }
 
@@ -405,4 +397,15 @@ fn spawn_backend_inner(
         }
     });
     tx
+}
+
+/// Spawn a llama backend worker with a pre-loaded engine handle.
+///
+/// Used by `api::init` to separate library loading (phase 1) from worker
+/// spawning (phase 2) so that no tasks are started if any library fails.
+pub(crate) fn spawn_backend_with_engine(
+    capacity: usize,
+    engine: Option<Arc<GGMLLlamaEngine>>,
+) -> mpsc::Sender<BackendRequest> {
+    spawn_backend_inner(capacity, engine)
 }

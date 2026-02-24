@@ -10,7 +10,7 @@
 //! | `"lib.load"`       | `LoadLibrary`    | Load (skip if already loaded) the whisper dylib.   |
 //! | `"lib.reload"`     | `ReloadLibrary`  | Replace the library, discarding current model.     |
 //! | `"model.load"`     | `LoadModel`      | Load a model from the pre-loaded library.          |
-//! | `"model.unload"`   | `UnloadModel`    | Drop the current model (library stays loaded).     |
+//! | `"model.unload"`   | `UnloadModel`    | Drop the model and library handle; call lib.load + model.load to restore. |
 //! | `"inference"`      | `Inference`      | Transcribe audio; input is packed `f32` PCM.       |
 //!
 //! ### `lib.load` / `lib.reload` input JSON
@@ -182,13 +182,14 @@ impl WhisperWorker {
     // ── model.unload ──────────────────────────────────────────────────────────
 
     async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
-        // Unload the model context but keep the library handle.
-        // Since GGMLWhisperEngine::new_context resets the ctx, we can simulate
-        // "no model" by clearing the context inside the engine.
-        // The simplest approach: drop the engine and recreate from the same lib.
-        // For now, the engine's ctx stays empty (no new_context call = ctx=None).
-        // We don't have a direct "clear ctx" API, so unload means the engine
-        // reports "context not initialized" on next inference – same semantics.
+        // Drop the current GGMLWhisperEngine instance (model context + library handle)
+        // by clearing our handle to it.  Subsequent inference calls will observe
+        // `self.engine == None` and return "model not loaded" until lib.load +
+        // model.load are called again.
+        //
+        // Note: there is no API in slab_whisper to clear only the model context
+        // while keeping the library alive, so this drops everything.
+        self.engine = None;
         let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(&b""[..]))));
     }
 
@@ -291,4 +292,15 @@ fn spawn_backend_inner(
         }
     });
     tx
+}
+
+/// Spawn a whisper backend worker with a pre-loaded engine handle.
+///
+/// Used by `api::init` to separate library loading (phase 1) from worker
+/// spawning (phase 2) so that no tasks are started if any library fails.
+pub(crate) fn spawn_backend_with_engine(
+    capacity: usize,
+    engine: Option<Arc<GGMLWhisperEngine>>,
+) -> mpsc::Sender<BackendRequest> {
+    spawn_backend_inner(capacity, engine)
 }

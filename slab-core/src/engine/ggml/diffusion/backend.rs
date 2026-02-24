@@ -11,7 +11,7 @@
 //! | `"lib.load"`        | `LoadLibrary`    | Load (skip if already loaded) the dylib.          |
 //! | `"lib.reload"`      | `ReloadLibrary`  | Replace the library, discarding current model.    |
 //! | `"model.load"`      | `LoadModel`      | Load a model from the pre-loaded library.         |
-//! | `"model.unload"`    | `UnloadModel`    | Drop the current model (library stays loaded).    |
+//! | `"model.unload"`    | `UnloadModel`    | Drop the model and library handle; call lib.load + model.load to restore. |
 //! | `"inference.image"` | `InferenceImage` | Text-to-image; input is JSON generation params.   |
 //!
 //! ### `lib.load` / `lib.reload` input JSON
@@ -200,6 +200,14 @@ impl DiffusionWorker {
     // ── model.unload ──────────────────────────────────────────────────────────
 
     async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
+        // Drop the current GGMLDiffusionEngine instance (model context + library handle)
+        // by clearing our handle to it.  Subsequent inference calls will observe
+        // `self.engine == None` and return "model not loaded" until lib.load +
+        // model.load are called again.
+        //
+        // Note: there is no API in slab_diffusion to clear only the model context
+        // while keeping the library alive, so this drops everything.
+        self.engine = None;
         let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(&b""[..]))));
     }
 
@@ -305,4 +313,15 @@ fn spawn_backend_inner(
         }
     });
     tx
+}
+
+/// Spawn a diffusion backend worker with a pre-loaded engine handle.
+///
+/// Used by `api::init` to separate library loading (phase 1) from worker
+/// spawning (phase 2) so that no tasks are started if any library fails.
+pub(crate) fn spawn_backend_with_engine(
+    capacity: usize,
+    engine: Option<Arc<GGMLDiffusionEngine>>,
+) -> mpsc::Sender<BackendRequest> {
+    spawn_backend_inner(capacity, engine)
 }
