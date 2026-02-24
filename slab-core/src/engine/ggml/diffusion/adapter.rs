@@ -142,6 +142,11 @@ impl GGMLDiffusionEngine {
         self.ctx = None;
     }
 
+    /// Returns `true` if a model context has been loaded.
+    pub fn is_model_loaded(&self) -> bool {
+        self.ctx.is_some()
+    }
+
     /// Create a new engine that shares the same library handle but has no
     /// model context loaded.
     ///

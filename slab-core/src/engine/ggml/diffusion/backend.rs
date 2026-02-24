@@ -142,6 +142,10 @@ impl DiffusionWorker {
         match GGMLDiffusionEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
+                // Broadcast so peer workers also load the same library.
+                let _ = self
+                    .bc_tx
+                    .send(WorkerCommand::LoadLibrary { lib_path: config.lib_path });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -175,6 +179,10 @@ impl DiffusionWorker {
         match GGMLDiffusionEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
+                // Broadcast so peer workers drop their old engine and reload too.
+                let _ = self
+                    .bc_tx
+                    .send(WorkerCommand::ReloadLibrary { lib_path: config.lib_path });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -221,6 +229,10 @@ impl DiffusionWorker {
 
         match result {
             Ok(()) => {
+                // Broadcast so peer workers also load the same model.
+                let _ = self
+                    .bc_tx
+                    .send(WorkerCommand::LoadModel { model_path: config.model_path });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -367,6 +379,43 @@ pub(crate) fn spawn_backend_with_engine(
                     // ── Broadcast arm: management commands ────────────────
                     cmd = bc_rx.recv() => {
                         match cmd {
+                            Ok(WorkerCommand::LoadLibrary { lib_path }) => {
+                                // Load library only if not already loaded (idempotent
+                                // for the broadcasting worker which already loaded it).
+                                if worker.engine.is_none() {
+                                    if let Ok(engine) = GGMLDiffusionEngine::from_path(&lib_path) {
+                                        worker.engine = Some(engine);
+                                    }
+                                }
+                            }
+                            Ok(WorkerCommand::ReloadLibrary { lib_path }) => {
+                                // Drop existing engine and reload from the new path.
+                                worker.engine = None;
+                                if let Ok(engine) = GGMLDiffusionEngine::from_path(&lib_path) {
+                                    worker.engine = Some(engine);
+                                }
+                            }
+                            Ok(WorkerCommand::LoadModel { model_path }) => {
+                                // Load model only if not already loaded (idempotent
+                                // for the broadcasting worker which already loaded it).
+                                if let Some(engine) = worker.engine.as_mut() {
+                                    if !engine.is_model_loaded() {
+                                        let result = tokio::task::block_in_place(|| {
+                                            use slab_diffusion::SdContextParams;
+                                            let ctx_params =
+                                                SdContextParams::with_model(&model_path);
+                                            engine.new_context(&ctx_params)
+                                        });
+                                        if let Err(e) = result {
+                                            tracing::warn!(
+                                                model_path,
+                                                error = %e,
+                                                "diffusion worker: broadcast LoadModel failed"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                             Ok(WorkerCommand::Unload) => {
                                 if let Some(e) = worker.engine.as_mut() {
                                     e.unload();
@@ -374,9 +423,15 @@ pub(crate) fn spawn_backend_with_engine(
                             }
                             // Sender dropped → no more commands; exit.
                             Err(broadcast::error::RecvError::Closed) => break,
-                            // Fell behind; missed messages.  Continue so we
-                            // process the next broadcast without stalling.
-                            Err(broadcast::error::RecvError::Lagged(_)) => {}
+                            // Fell behind; missed one or more messages.  To avoid
+                            // keeping stale context (e.g. if an Unload was missed),
+                            // conservatively unload so the worker returns to a
+                            // known-safe state.
+                            Err(broadcast::error::RecvError::Lagged(_)) => {
+                                if let Some(e) = worker.engine.as_mut() {
+                                    e.unload();
+                                }
+                            }
                         }
                     }
 
