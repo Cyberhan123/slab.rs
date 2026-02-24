@@ -63,7 +63,12 @@ impl WhisperWorker {
     }
 
     async fn handle(&mut self, req: BackendRequest) {
-        let BackendRequest { op, input, reply_tx, .. } = req;
+        let BackendRequest {
+            op,
+            input,
+            reply_tx,
+            ..
+        } = req;
 
         match Event::from_str(&op.name) {
             Ok(Event::LoadLibrary) => self.handle_load_library(input, reply_tx).await,
@@ -85,7 +90,9 @@ impl WhisperWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         if self.engine.is_some() {
-            let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+            let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                Arc::from([] as [u8; 0]),
+            )));
             return;
         }
 
@@ -100,7 +107,9 @@ impl WhisperWorker {
         match GGMLWhisperEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -118,7 +127,9 @@ impl WhisperWorker {
         let config: LibLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid lib.reload config: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid lib.reload config: {e}"
+                )));
                 return;
             }
         };
@@ -129,7 +140,9 @@ impl WhisperWorker {
         match GGMLWhisperEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -157,7 +170,9 @@ impl WhisperWorker {
         let config: ModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid model.load config: {e}"
+                )));
                 return;
             }
         };
@@ -171,7 +186,9 @@ impl WhisperWorker {
 
         match result {
             Ok(()) => {
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -221,7 +238,8 @@ impl WhisperWorker {
         // Whisper inference is CPU/GPU-bound; use block_in_place so the engine
         // (and its internal Mutex<ctx>) stays on this thread without needing
         // an additional spawn_blocking call.
-        let result = tokio::task::block_in_place(|| engine.inference::<std::path::PathBuf>(&samples));
+        let result =
+            tokio::task::block_in_place(|| engine.inference::<std::path::PathBuf>(&samples));
 
         match result {
             Err(e) => {
