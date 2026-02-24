@@ -276,8 +276,8 @@ pub async fn restart_task(
                     tokio::spawn(async move {
                         // The preprocess stage provides the real PCM data; the initial
                         // Bytes payload is an empty placeholder that gets replaced by it.
-                        let core_result = slab_core::api::backend("ggml.whisper")
-                            .op("inference")
+                        let core_result = slab_core::api::backend(slab_core::api::Backend::GGMLWhisper)
+                            .op(slab_core::api::Event::InferenceImage)
                             .input(slab_core::Payload::Bytes(std::sync::Arc::from(
                                 [] as [u8; 0]
                             )))
@@ -325,8 +325,8 @@ pub async fn restart_task(
                     .update_task_status(&id, "running", None, None)
                     .await?;
                 tokio::spawn(async move {
-                    let core_result = slab_core::api::backend("ggml.diffusion")
-                        .op("inference_image")
+                    let core_result = slab_core::api::backend(slab_core::api::Backend::GGMLDiffusion)
+                        .op(slab_core::api::Event::InferenceImage)
                         .input(slab_core::Payload::Json(input))
                         .run()
                         .await;

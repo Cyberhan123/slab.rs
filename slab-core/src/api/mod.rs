@@ -6,46 +6,34 @@
 //! # Quick-start
 //!
 //! ```rust,no_run
-//! use slab_core::api;
-//! use slab_core::api::Payload;
+//! use slab_core::api::{self, Backend, Event, Payload};
+//! use std::sync::Arc;
 //!
 //! # #[tokio::main]
 //! # async fn main() {
-//! // 1. Initialize once at process start (no model loaded yet).
-//! api::init(api::Config::default()).unwrap();
+//! // 1. Initialize once at process start.
+//! //    Passing lib_*_dir paths loads the dynamic libraries synchronously.
+//! api::init(api::Config {
+//!     llama_lib_dir: Some("/usr/local/lib".into()),
+//!     ..Default::default()
+//! })
+//! .unwrap();
 //!
-//! // 2. Load a model (example: llama).
-//! let cfg = serde_json::json!({
-//!     "lib_path": "/usr/local/lib/libllama.so",
-//!     "model_path": "/models/qwen.gguf",
-//!     "num_workers": 1
-//! });
-//! api::backend("ggml.llama")
-//!     .op("model.load")
-//!     .input(Payload::Json(Arc::from(cfg)))
+//! // 2. Load a model into the already-loaded library.
+//! api::backend(Backend::GGMLLama)
+//!     .op(Event::LoadModel)
+//!     .input(Payload::Json(serde_json::json!({
+//!         "model_path": "/models/qwen.gguf",
+//!         "num_workers": 1
+//!     })))
 //!     .run_wait()
 //!     .await
 //!     .unwrap();
 //!
-//! // 3. Whisper unary transcription with custom CPU pre-processing.
-//! let media_input: Payload = Payload::Text(Arc::from("/path/to/video.mp4"));
-//! let result = api::backend("ggml.whisper")
-//!     .op("inference")
-//!     .input(media_input)
-//!     .preprocess("ffmpeg.to_pcm_f32le", |input| {
-//!         // You can call ffmpeg here and return mono/16k PCM f32 bytes.
-//!         // This demo keeps it as-is.
-//!         Ok(input)
-//!     })
-//!     .run_wait()
-//!     .await
-//!     .unwrap();
-//! println!("{}", String::from_utf8_lossy(&result));
-//!
-//! // 4. Llama streaming generation.
+//! // 3. Llama streaming generation.
 //! use futures::StreamExt;
-//! let mut stream = api::backend("ggml.llama")
-//!     .op("inference.stream")
+//! let mut stream = api::backend(Backend::GGMLLama)
+//!     .op(Event::InferenceStream)
 //!     .input(Payload::Text(Arc::from("Hello, world!")))
 //!     .stream()
 //!     .await
@@ -54,6 +42,11 @@
 //!     let bytes = chunk.unwrap();
 //!     print!("{}", String::from_utf8_lossy(&bytes));
 //! }
+//!
+//! // 4. Hot-reload the llama library (drops current model and OS threads).
+//! api::reload_library(Backend::GGMLLama, "/new/path/to/libs")
+//!     .await
+//!     .unwrap();
 //! # }
 //! ```
 mod types;
@@ -143,28 +136,46 @@ pub fn lib_dirs() -> Option<&'static LibDirs> {
 /// Initialize the API runtime.
 ///
 /// Registers the three ggml backends (`ggml.llama`, `ggml.whisper`,
-/// `ggml.diffusion`) and starts their worker tasks.  No model is loaded at
-/// this point; call `model.load` via [`backend`] to load one.
+/// `ggml.diffusion`) and starts their worker tasks.
+///
+/// If `lib_*_dir` fields are set in `config`, the corresponding shared
+/// libraries are loaded **synchronously** in the calling thread before the
+/// worker tasks are spawned.  This means that when `init` returns successfully
+/// the dynamic libraries are ready for use.
+///
+/// To load only a model after the libraries are loaded call `model.load` via
+/// [`backend`].  To replace a library at runtime call [`reload_library`].
 ///
 /// Must be called inside a Tokio runtime.  Calling it a second time is a
 /// no-op — the first configuration wins.
 ///
 /// # Errors
 ///
-/// Returns [`RuntimeError::NotInitialized`] only when the internal
-/// `OnceLock` has already been set with an incompatible value (shouldn't
-/// happen in normal usage).
+/// Returns [`RuntimeError::LibraryLoadFailed`] if any configured library
+/// cannot be resolved or opened.
 pub fn init(config: Config) -> Result<(), RuntimeError> {
+    use std::path::Path;
+
+    // Pre-load libraries synchronously if paths are provided.
+    let llama_tx = crate::engine::ggml::llama::spawn_backend_with_path(
+        128,
+        config.llama_lib_dir.as_deref().map(Path::new),
+    )?;
+    let whisper_tx = crate::engine::ggml::whisper::spawn_backend_with_path(
+        128,
+        config.whisper_lib_dir.as_deref().map(Path::new),
+    )?;
+    let diffusion_tx = crate::engine::ggml::diffusion::spawn_backend_with_path(
+        128,
+        config.diffusion_lib_dir.as_deref().map(Path::new),
+    )?;
+
     let rm = ResourceManager::new();
     rm.register_backend(Backend::GGMLLama.to_string(), config.backend_capacity);
     rm.register_backend(Backend::GGMLWhisper.to_string(), config.backend_capacity);
     rm.register_backend(Backend::GGMLDiffusion.to_string(), config.backend_capacity);
 
     let orchestrator = Orchestrator::start(rm, config.queue_capacity);
-
-    let llama_tx = crate::engine::ggml::llama::spawn_backend(128);
-    let whisper_tx = crate::engine::ggml::whisper::spawn_backend(128);
-    let diffusion_tx = crate::engine::ggml::diffusion::spawn_backend(128);
 
     let mut backends = HashMap::new();
     backends.insert(Backend::GGMLLama.to_string(), llama_tx);
@@ -186,7 +197,69 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
     Ok(())
 }
 
-// ── Builder entry point ────────────────────────────────────────────────────────
+// ── Library management ─────────────────────────────────────────────────────────
+
+/// Reload (or initially load) the shared library for a specific backend.
+///
+/// Sends a `lib.reload` command to the named backend worker and waits for it
+/// to complete.  Any currently loaded model for that backend is discarded
+/// before the new library is opened.
+///
+/// The `lib_path` argument should be either:
+/// - a directory containing the library file (`libllama.so` / `libwhisper.so`
+///   / `libstable-diffusion.so`), or
+/// - a direct path to the library file.
+///
+/// After this call succeeds, send `model.load` via [`backend`] to load a model
+/// into the freshly loaded library.
+///
+/// # Errors
+///
+/// - [`RuntimeError::NotInitialized`] – [`init`] was not called first.
+/// - [`RuntimeError::BackendShutdown`] – the backend worker has stopped.
+/// - [`RuntimeError::GpuStageFailed`] – the library could not be loaded.
+pub async fn reload_library(backend_id: Backend, lib_path: &str) -> Result<(), RuntimeError> {
+    use crate::runtime::backend::protocol::{BackendOp, BackendReply};
+
+    let rt = RUNTIME.get().ok_or(RuntimeError::NotInitialized)?;
+    let backend_str = backend_id.to_string();
+    let tx = rt
+        .backends
+        .get(&backend_str)
+        .cloned()
+        .ok_or_else(|| RuntimeError::Busy { backend_id: backend_str.clone() })?;
+
+    let (watch_tx, watch_rx) = tokio::sync::watch::channel(false);
+    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+    let req = BackendRequest {
+        op: BackendOp {
+            name: Event::ReloadLibrary.to_string(),
+            options: Payload::default(),
+        },
+        input: Payload::Json(serde_json::json!({ "lib_path": lib_path })),
+        cancel_rx: watch_rx,
+        reply_tx,
+    };
+    drop(watch_tx);
+
+    tx.send(req)
+        .await
+        .map_err(|_| RuntimeError::BackendShutdown)?;
+
+    match reply_rx.await.map_err(|_| RuntimeError::BackendShutdown)? {
+        BackendReply::Value(_) => Ok(()),
+        BackendReply::Error(e) => Err(RuntimeError::GpuStageFailed {
+            stage_name: "lib.reload".into(),
+            message: e,
+        }),
+        BackendReply::Stream(_) => Err(RuntimeError::GpuStageFailed {
+            stage_name: "lib.reload".into(),
+            message: "unexpected stream reply".into(),
+        }),
+    }
+}
+
+
 
 /// Start building a call to the named backend.
 ///

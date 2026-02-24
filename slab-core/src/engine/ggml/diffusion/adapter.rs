@@ -110,6 +110,16 @@ impl GGMLDiffusionEngine {
         })
     }
 
+    /// Create a new engine from the library at `path` **without** registering
+    /// any process-wide singleton.
+    ///
+    /// Call [`new_context`] afterwards to load a model.
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
+        let normalized = Self::resolve_lib_path(path)?;
+        let engine = Self::build_service(&normalized)?;
+        Ok(Arc::new(engine))
+    }
+
     pub fn init<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
         let normalized_path = Self::resolve_lib_path(path)?;
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
