@@ -43,8 +43,8 @@ pub enum GGMLDiffusionEngineError {
 ///
 /// Each instance owns its own model context (`ctx`).  There is no shared
 /// mutable state between separate `GGMLDiffusionEngine` instances, so no
-/// `Mutex` is needed.  Workers that need concurrent inference must own
-/// independent engine instances (see [`Self::fork_library`]).
+/// `Mutex` is needed.  The backend worker owns the engine exclusively and
+/// mutates it via `&mut self`.
 #[derive(Debug)]
 pub struct GGMLDiffusionEngine {
     instance: Arc<Diffusion>,
@@ -99,19 +99,6 @@ impl GGMLDiffusionEngine {
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, engine::EngineError> {
         let normalized = Self::resolve_lib_path(path)?;
         Self::build_engine(&normalized)
-    }
-
-    /// Create a new engine instance that shares the same library handle as
-    /// `self` but starts with no model context loaded.
-    ///
-    /// Useful when spawning multiple workers: each worker calls
-    /// `fork_library` to get its own context-free engine, then loads a model
-    /// via [`new_context`] independently.
-    pub(crate) fn fork_library(&self) -> Self {
-        Self {
-            instance: Arc::clone(&self.instance),
-            ctx: None,
-        }
     }
 
     /// Create (or replace) the Stable Diffusion inference context.
