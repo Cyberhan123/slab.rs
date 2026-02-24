@@ -23,11 +23,13 @@
 //! Any op called before `"model.load"` returns
 //! `BackendReply::Error("model not loaded")`.
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use serde::Deserialize;
 use tokio::sync::mpsc;
 
+use crate::api::Event;
 use crate::engine::ggml::diffusion::adapter::GGMLDiffusionEngine;
 use crate::runtime::backend::protocol::{BackendReply, BackendRequest};
 use crate::runtime::types::Payload;
@@ -55,9 +57,15 @@ struct GenImageParams {
     sample_steps: i32,
 }
 
-fn default_width() -> u32 { 512 }
-fn default_height() -> u32 { 512 }
-fn default_steps() -> i32 { 20 }
+fn default_width() -> u32 {
+    512
+}
+fn default_height() -> u32 {
+    512
+}
+fn default_steps() -> i32 {
+    20
+}
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -79,12 +87,15 @@ impl DiffusionWorker {
             ..
         } = req;
 
-        match op.name.as_str() {
-            "model.load" => self.handle_load(input, reply_tx).await,
-            "model.unload" => self.handle_unload(reply_tx).await,
-            "inference_image" => self.handle_inference_image(input, reply_tx).await,
-            other => {
-                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {other}")));
+        match Event::from_str(&op.name) {
+            Ok(Event::LoadLibrary) => self.handle_load(input, reply_tx).await,
+            Ok(Event::UnloadLibrary) => self.handle_unload(reply_tx).await,
+            Ok(Event::InferenceImage) => self.handle_inference_image(input, reply_tx).await,
+            Ok(_) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
+            }
+            Err(_) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
             }
         }
     }
@@ -97,7 +108,9 @@ impl DiffusionWorker {
         let config: LoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid model.load config: {e}"
+                )));
                 return;
             }
         };
@@ -118,12 +131,16 @@ impl DiffusionWorker {
         }
 
         self.engine = Some(engine);
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+            Arc::from([] as [u8; 0]),
+        )));
     }
 
     async fn handle_unload(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
         self.engine = None;
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(std::sync::Arc::from(&b""[..]))));
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(std::sync::Arc::from(
+            &b""[..],
+        ))));
     }
 
     async fn handle_inference_image(
@@ -142,7 +159,9 @@ impl DiffusionWorker {
         let gen_params: GenImageParams = match input.to_json() {
             Ok(p) => p,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid generate_image params: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid generate_image params: {e}"
+                )));
                 return;
             }
         };
@@ -170,7 +189,11 @@ impl DiffusionWorker {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
             }
             Ok(Ok(images)) => {
-                let data = images.into_iter().next().map(|img| img.data).unwrap_or_default();
+                let data = images
+                    .into_iter()
+                    .next()
+                    .map(|img| img.data)
+                    .unwrap_or_default();
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(
                     data.as_slice(),
                 ))));

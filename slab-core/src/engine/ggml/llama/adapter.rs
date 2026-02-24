@@ -1,7 +1,5 @@
 use crate::engine;
-use slab_llama::{
-    Llama, LlamaContextParams, LlamaModelParams,
-};
+use slab_llama::{Llama, LlamaContextParams, LlamaModelParams};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -13,7 +11,7 @@ use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 
 /// Process-wide singleton holder for the loaded llama dynamic library service.
 struct LlamaGlobal {
-    service: Arc<GGMLLlamaEngine>,
+    engine: Arc<GGMLLlamaEngine>,
     lib_path: PathBuf,
 }
 
@@ -23,7 +21,7 @@ static INSTANCE: OnceLock<RwLock<Option<LlamaGlobal>>> = OnceLock::new();
 #[derive(Debug)]
 pub struct GGMLLlamaEngine {
     instance: Arc<Llama>,
-    engine: Arc<Mutex<Option<LlamaInferenceEngine>>>,
+    ineference_engine: Arc<Mutex<Option<LlamaInferenceEngine>>>,
 }
 
 // SAFETY: GGMLLlamaEngine is only accessed through Arc<Mutex<...>> for mutable state.
@@ -55,7 +53,7 @@ impl GGMLLlamaEngine {
         })
     }
 
-    fn build_service(normalized_path: &Path) -> Result<Self, engine::EngineError> {
+    fn build_engine(normalized_path: &Path) -> Result<Self, engine::EngineError> {
         info!("current llama path is: {}", normalized_path.display());
         let llama = Llama::new(normalized_path).map_err(|source| {
             GGMLLlamaEngineError::InitializeDynamicLibrary {
@@ -68,7 +66,7 @@ impl GGMLLlamaEngine {
 
         Ok(Self {
             instance: Arc::new(llama),
-            engine: Arc::new(Mutex::new(None)),
+            ineference_engine: Arc::new(Mutex::new(None)),
         })
     }
 
@@ -96,16 +94,17 @@ impl GGMLLlamaEngine {
                     }
                     .into());
                 }
-                return Ok(global.service.clone());
+                return Ok(global.engine.clone());
             }
         }
 
-        let service = Arc::new(Self::build_service(&normalized_path)?);
-        let mut write_guard = global_lock
-            .write()
-            .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                operation: "write llama global state",
-            })?;
+        let engine = Arc::new(Self::build_engine(&normalized_path)?);
+        let mut write_guard =
+            global_lock
+                .write()
+                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+                    operation: "write llama global state",
+                })?;
 
         if let Some(global) = write_guard.as_ref() {
             if global.lib_path != normalized_path {
@@ -115,15 +114,15 @@ impl GGMLLlamaEngine {
                 }
                 .into());
             }
-            return Ok(global.service.clone());
+            return Ok(global.engine.clone());
         }
 
         *write_guard = Some(LlamaGlobal {
-            service: service.clone(),
+            engine: engine.clone(),
             lib_path: normalized_path,
         });
 
-        Ok(service)
+        Ok(engine)
     }
 
     /// Force-reload the global `LlamaService` from a (possibly new) library path.
@@ -132,13 +131,14 @@ impl GGMLLlamaEngine {
     /// and current library path.
     pub fn reload<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
         let normalized_path = Self::resolve_lib_path(path)?;
-        let service = Arc::new(Self::build_service(&normalized_path)?);
+        let engine = Arc::new(Self::build_engine(&normalized_path)?);
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
-        let mut write_guard = global_lock
-            .write()
-            .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                operation: "write llama global state",
-            })?;
+        let mut write_guard =
+            global_lock
+                .write()
+                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+                    operation: "write llama global state",
+                })?;
 
         let previous = write_guard
             .as_ref()
@@ -146,7 +146,7 @@ impl GGMLLlamaEngine {
             .unwrap_or_else(|| "<uninitialized>".to_string());
 
         *write_guard = Some(LlamaGlobal {
-            service: service.clone(),
+            engine: engine.clone(),
             lib_path: normalized_path.clone(),
         });
 
@@ -156,7 +156,7 @@ impl GGMLLlamaEngine {
             normalized_path.display()
         );
 
-        Ok(service)
+        Ok(engine)
     }
 
     /// Return the currently initialized global `LlamaService`.
@@ -171,7 +171,7 @@ impl GGMLLlamaEngine {
             })?;
         read_guard
             .as_ref()
-            .map(|global| global.service.clone())
+            .map(|global| global.engine.clone())
             .ok_or(GGMLLlamaEngineError::InstanceNotInitialized.into())
     }
 
@@ -190,7 +190,7 @@ impl GGMLLlamaEngine {
         }
 
         let mut engine_lock =
-            self.engine
+            self.ineference_engine
                 .lock()
                 .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                     operation: "lock llama engine state",
@@ -203,13 +203,12 @@ impl GGMLLlamaEngine {
             .ok_or(GGMLLlamaEngineError::InvalidModelPathUtf8)?;
 
         let model = Arc::new(
-            self
-            .instance
-            .load_model_from_file(path, model_params)
-            .map_err(|source| GGMLLlamaEngineError::LoadModel {
-                model_path: path.to_string(),
-                source: source.into(),
-            })?,
+            self.instance
+                .load_model_from_file(path, model_params)
+                .map_err(|source| GGMLLlamaEngineError::LoadModel {
+                    model_path: path.to_string(),
+                    source: source.into(),
+                })?,
         );
 
         let engine = LlamaInferenceEngine::start(num_workers, Arc::clone(&model), ctx_params)?;
@@ -219,13 +218,15 @@ impl GGMLLlamaEngine {
     }
 
     fn require_engine(&self) -> Result<LlamaInferenceEngine, engine::EngineError> {
-        let engine_lock =
-            self.engine
-                .lock()
-                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                    operation: "lock llama engine state",
-                })?;
-        let engine = engine_lock.as_ref().ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
+        let engine_lock: std::sync::MutexGuard<'_, Option<LlamaInferenceEngine>> = self
+            .ineference_engine
+            .lock()
+            .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+                operation: "lock llama engine state",
+            })?;
+        let engine = engine_lock
+            .as_ref()
+            .ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
         Ok(engine.clone())
     }
 
@@ -268,10 +269,7 @@ impl GGMLLlamaEngine {
     }
 
     /// Cancel active generation while keeping session KV state.
-    pub async fn cancel_generate(
-        &self,
-        session_id: SessionId,
-    ) -> Result<(), engine::EngineError> {
+    pub async fn cancel_generate(&self, session_id: SessionId) -> Result<(), engine::EngineError> {
         let engine = self.require_engine()?;
         engine.cancel_generate(session_id).await.map_err(Into::into)
     }

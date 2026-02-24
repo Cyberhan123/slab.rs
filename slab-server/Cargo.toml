@@ -58,3 +58,6 @@ anyhow    = { workspace = true }
 # Misc
 base64    = "0.22"
 bytemuck  = "1"
+
+#ffmpeg for video processing
+ffmpeg-sidecar = {version="2.4.0", features=["download_ffmpeg", "named_pipes"]}

@@ -19,6 +19,7 @@ use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::state::AppState;
 use utoipa::OpenApi;
+use slab_core::api::{Backend, Event};
 
 /// Maximum allowed audio body size (50 MiB).
 const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
@@ -91,7 +92,7 @@ pub async fn transcribe(
         .store
         .insert_task(TaskRecord {
             id: task_id.clone(),
-            task_type: "whisper".into(),
+            task_type: Backend::GGMLWhisper.to_string(),
             status: "running".into(),
             input_data: Some(input_data),
             result_data: None,
@@ -108,8 +109,8 @@ pub async fn transcribe(
     // The initial Bytes input is an empty placeholder; the preprocess stage
     // replaces it with the actual PCM f32le data.
     let tmp_for_closure = tmp_path.clone();
-    let core_task_result = slab_core::api::backend("ggml.whisper")
-        .op("inference")
+    let core_task_result = slab_core::api::backend(Backend::GGMLWhisper)
+        .op(Event::Inference)
         .input(slab_core::Payload::Bytes(Arc::from([] as [u8; 0]))) // placeholder; preprocess supplies PCM
         .preprocess("ffmpeg.to_pcm_f32le", move |_| {
             convert_to_pcm_f32le(&tmp_for_closure)

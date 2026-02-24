@@ -20,8 +20,10 @@
 use std::sync::Arc;
 
 use serde::Deserialize;
+use std::str::FromStr;
 use tokio::sync::mpsc;
 
+use crate::api::Event;
 use crate::engine::ggml::whisper::adapter::GGMLWhisperEngine;
 use crate::runtime::backend::protocol::{BackendReply, BackendRequest};
 use crate::runtime::types::Payload;
@@ -53,13 +55,15 @@ impl WhisperWorker {
             reply_tx,
             ..
         } = req;
-
-        match op.name.as_str() {
-            "model.load" => self.handle_load(input, reply_tx).await,
-            "model.unload" => self.handle_unload(reply_tx).await,
-            "inference" => self.handle_inference(input, reply_tx).await,
-            other => {
-                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {other}")));
+        match Event::from_str(&op.name) {
+            Ok(Event::LoadLibrary) => self.handle_load(input, reply_tx).await,
+            Ok(Event::UnloadLibrary) => self.handle_unload(reply_tx).await,
+            Ok(Event::InferenceImage) => self.handle_inference(input, reply_tx).await,
+            Ok(_) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
+            }
+            Err(_) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
             }
         }
     }
@@ -102,7 +106,9 @@ impl WhisperWorker {
 
     async fn handle_unload(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
         self.engine = None;
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(std::sync::Arc::from(&b""[..]))));
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(std::sync::Arc::from(
+            &b""[..],
+        ))));
     }
 
     async fn handle_inference(
