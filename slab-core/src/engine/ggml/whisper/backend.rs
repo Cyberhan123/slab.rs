@@ -1,118 +1,202 @@
 //! Backend worker adapter for `ggml.whisper`.
 //!
-//! Provides [`spawn_backend`] which starts a Tokio task that translates
-//! [`BackendRequest`] messages into `GGMLWhisperEngine` API calls.
+//! Provides [`spawn_backend`] and [`spawn_backend_with_path`] which start a
+//! Tokio task translating [`BackendRequest`] messages into whisper inference calls.
 //!
-//! Supported ops
-//! - `"model.load"` – load the whisper dynamic library and a model.
-//!   Input bytes must be a UTF-8 JSON object:
-//!   ```json
-//!   { "lib_path": "/path/to/libwhisper.so",
-//!     "model_path": "/path/to/model.bin" }
-//!   ```
-//! - `"transcribe"` – speech-to-text; input is raw little-endian `f32` PCM
-//!   samples (16 kHz mono as expected by whisper.cpp).
-//!   Returns the transcript as UTF-8 text bytes.
+//! # Supported ops
 //!
-//! Any op called before `"model.load"` returns
-//! `BackendReply::Error("model not loaded")`.
+//! | Op string          | Event variant    | Description                                        |
+//! |--------------------|------------------|----------------------------------------------------|
+//! | `"lib.load"`       | `LoadLibrary`    | Load (skip if already loaded) the whisper dylib.   |
+//! | `"lib.reload"`     | `ReloadLibrary`  | Replace the library, discarding current model.     |
+//! | `"model.load"`     | `LoadModel`      | Load a model from the pre-loaded library.          |
+//! | `"model.unload"`   | `UnloadModel`    | Drop the model and library handle; call lib.load + model.load to restore. |
+//! | `"inference"`      | `Inference`      | Transcribe audio; input is packed `f32` PCM.       |
+//!
+//! ### `lib.load` / `lib.reload` input JSON
+//! ```json
+//! { "lib_path": "/path/to/libwhisper.so" }
+//! ```
+//!
+//! ### `model.load` input JSON
+//! ```json
+//! { "model_path": "/path/to/model.bin" }
+//! ```
 
+use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use std::str::FromStr;
 use tokio::sync::mpsc;
 
 use crate::api::Event;
 use crate::engine::ggml::whisper::adapter::GGMLWhisperEngine;
 use crate::runtime::backend::protocol::{BackendReply, BackendRequest};
-use crate::runtime::types::Payload;
+use crate::runtime::types::{Payload, RuntimeError};
 
-// ── Load configuration ────────────────────────────────────────────────────────
+// ── Configurations ────────────────────────────────────────────────────────────
 
 #[derive(Deserialize)]
-struct LoadConfig {
+struct LibLoadConfig {
     lib_path: String,
+}
+
+#[derive(Deserialize)]
+struct ModelLoadConfig {
     model_path: String,
 }
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
 struct WhisperWorker {
-    /// Non-None after a successful `model.load`.
+    /// Wraps both the library handle and the optional model context.
+    /// - `None` → library not loaded.
+    /// - `Some(e)` where `e.ctx` is None → lib loaded, no model.
+    /// - `Some(e)` where `e.ctx` is Some → lib + model loaded.
     engine: Option<Arc<GGMLWhisperEngine>>,
 }
 
 impl WhisperWorker {
-    fn new() -> Self {
-        Self { engine: None }
+    fn new(engine: Option<Arc<GGMLWhisperEngine>>) -> Self {
+        Self { engine }
     }
 
     async fn handle(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            op,
-            input,
-            reply_tx,
-            ..
-        } = req;
+        let BackendRequest { op, input, reply_tx, .. } = req;
+
         match Event::from_str(&op.name) {
-            Ok(Event::LoadLibrary) => self.handle_load(input, reply_tx).await,
-            Ok(Event::UnloadLibrary) => self.handle_unload(reply_tx).await,
-            Ok(Event::InferenceImage) => self.handle_inference(input, reply_tx).await,
-            Ok(_) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
-            }
-            Err(_) => {
+            Ok(Event::LoadLibrary) => self.handle_load_library(input, reply_tx).await,
+            Ok(Event::ReloadLibrary) => self.handle_reload_library(input, reply_tx).await,
+            Ok(Event::LoadModel) => self.handle_load_model(input, reply_tx).await,
+            Ok(Event::UnloadModel) => self.handle_unload_model(reply_tx).await,
+            Ok(Event::Inference) => self.handle_inference(input, reply_tx).await,
+            Ok(_) | Err(_) => {
                 let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
             }
         }
     }
 
-    async fn handle_load(
+    // ── lib.load ──────────────────────────────────────────────────────────────
+
+    async fn handle_load_library(
         &mut self,
         input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let config: LoadConfig = match input.to_json() {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "invalid model.load config: {e}"
-                )));
-                return;
-            }
-        };
-
-        let engine = match GGMLWhisperEngine::init(&config.lib_path) {
-            Ok(e) => e,
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("init engine: {e}")));
-                return;
-            }
-        };
-
-        use slab_whisper::WhisperContextParameters;
-        let params = WhisperContextParameters::default();
-        if let Err(e) = engine.new_context(&config.model_path, params) {
-            let _ = reply_tx.send(BackendReply::Error(format!("load model: {e}")));
+        if self.engine.is_some() {
+            let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             return;
         }
 
-        self.engine = Some(engine);
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-            Arc::from([] as [u8; 0]),
-        )));
+        let config: LibLoadConfig = match input.to_json() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("invalid lib.load config: {e}")));
+                return;
+            }
+        };
+
+        match GGMLWhisperEngine::from_path(&config.lib_path) {
+            Ok(engine) => {
+                self.engine = Some(engine);
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+            }
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+            }
+        }
     }
 
-    async fn handle_unload(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
+    // ── lib.reload ────────────────────────────────────────────────────────────
+
+    async fn handle_reload_library(
+        &mut self,
+        input: Payload,
+        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+    ) {
+        let config: LibLoadConfig = match input.to_json() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("invalid lib.reload config: {e}")));
+                return;
+            }
+        };
+
+        // Drop current engine (lib + model context).
         self.engine = None;
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(std::sync::Arc::from(
-            &b""[..],
-        ))));
+
+        match GGMLWhisperEngine::from_path(&config.lib_path) {
+            Ok(engine) => {
+                self.engine = Some(engine);
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+            }
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+            }
+        }
     }
+
+    // ── model.load ────────────────────────────────────────────────────────────
+
+    async fn handle_load_model(
+        &mut self,
+        input: Payload,
+        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+    ) {
+        let engine = match self.engine.as_ref() {
+            Some(e) => Arc::clone(e),
+            None => {
+                let _ = reply_tx.send(BackendReply::Error(
+                    "library not loaded; call lib.load first".into(),
+                ));
+                return;
+            }
+        };
+
+        let config: ModelLoadConfig = match input.to_json() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
+                return;
+            }
+        };
+
+        // Model loading is CPU/I-O bound; use block_in_place on this thread.
+        let result = tokio::task::block_in_place(|| {
+            use slab_whisper::WhisperContextParameters;
+            let params = WhisperContextParameters::default();
+            engine.new_context(&config.model_path, params)
+        });
+
+        match result {
+            Ok(()) => {
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+            }
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+            }
+        }
+    }
+
+    // ── model.unload ──────────────────────────────────────────────────────────
+
+    async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
+        // Drop the current GGMLWhisperEngine instance (model context + library handle)
+        // by clearing our handle to it.  Subsequent inference calls will observe
+        // `self.engine == None` and return "model not loaded" until lib.load +
+        // model.load are called again.
+        //
+        // Note: there is no API in slab_whisper to clear only the model context
+        // while keeping the library alive, so this drops everything.
+        self.engine = None;
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(&b""[..]))));
+    }
+
+    // ── inference ─────────────────────────────────────────────────────────────
 
     async fn handle_inference(
-        &self,
+        &mut self,
         input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
@@ -124,35 +208,26 @@ impl WhisperWorker {
             }
         };
 
-        // Input bytes must be packed little-endian f32 PCM samples.
         let samples = match input.to_f32_arc() {
             Ok(b) => b,
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(format!(
                     "transcribe input must be f32 PCM bytes: {e}"
                 )));
-
                 return;
             }
         };
 
-        // Whisper inference is is CPU/GPU-bound; run in spawn_blocking to avoid blocking
-        // the async runtime.
-        let result = tokio::task::spawn_blocking(move || {
-            // Since inference holds a std::sync::Mutex, it's safe to call here.
-            engine.inference::<std::path::PathBuf>(&samples)
-        })
-        .await;
+        // Whisper inference is CPU/GPU-bound; use block_in_place so the engine
+        // (and its internal Mutex<ctx>) stays on this thread without needing
+        // an additional spawn_blocking call.
+        let result = tokio::task::block_in_place(|| engine.inference::<std::path::PathBuf>(&samples));
 
         match result {
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("spawn_blocking panic: {e}")));
-            }
-            Ok(Err(e)) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
             }
-            Ok(Ok(entries)) => {
-                // Encode each subtitle entry as "start–end: text\n".
+            Ok(entries) => {
                 let mut out = String::new();
                 for entry in entries {
                     if let Some(line) = entry.line {
@@ -173,22 +248,59 @@ impl WhisperWorker {
     }
 }
 
-// ── Public entry point ────────────────────────────────────────────────────────
+// ── Public entry points ───────────────────────────────────────────────────────
 
-/// Spawn the whisper backend worker and return its ingress sender.
-///
-/// The worker task handles [`BackendRequest`] messages sequentially.
-/// It starts with no model loaded; send `op="model.load"` first.
+/// Spawn the whisper backend worker without a pre-loaded library.
 ///
 /// # Panics
 /// Panics if called outside a Tokio runtime.
 pub fn spawn_backend(capacity: usize) -> mpsc::Sender<BackendRequest> {
+    spawn_backend_inner(capacity, None)
+}
+
+/// Spawn the whisper backend worker, optionally pre-loading the shared library.
+///
+/// `lib_path` should point to the directory containing `libwhisper.{so,dylib,dll}`
+/// or directly to the library file.
+///
+/// # Panics
+/// Panics if called outside a Tokio runtime.
+pub fn spawn_backend_with_path(
+    capacity: usize,
+    lib_path: Option<&Path>,
+) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
+    let engine = lib_path
+        .map(|path| {
+            GGMLWhisperEngine::from_path(path).map_err(|e| RuntimeError::LibraryLoadFailed {
+                backend: "ggml.whisper".into(),
+                message: e.to_string(),
+            })
+        })
+        .transpose()?;
+    Ok(spawn_backend_inner(capacity, engine))
+}
+
+fn spawn_backend_inner(
+    capacity: usize,
+    engine: Option<Arc<GGMLWhisperEngine>>,
+) -> mpsc::Sender<BackendRequest> {
     let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
     tokio::spawn(async move {
-        let mut worker = WhisperWorker::new();
+        let mut worker = WhisperWorker::new(engine);
         while let Some(req) = rx.recv().await {
             worker.handle(req).await;
         }
     });
     tx
+}
+
+/// Spawn a whisper backend worker with a pre-loaded engine handle.
+///
+/// Used by `api::init` to separate library loading (phase 1) from worker
+/// spawning (phase 2) so that no tasks are started if any library fails.
+pub(crate) fn spawn_backend_with_engine(
+    capacity: usize,
+    engine: Option<Arc<GGMLWhisperEngine>>,
+) -> mpsc::Sender<BackendRequest> {
+    spawn_backend_inner(capacity, engine)
 }

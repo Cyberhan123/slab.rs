@@ -70,6 +70,16 @@ impl GGMLLlamaEngine {
         })
     }
 
+    /// Create a new engine from the library at `path` **without** registering
+    /// any process-wide singleton.
+    ///
+    /// Call [`load_model_with_workers`] afterwards to load a model.
+    pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
+        let normalized = Self::resolve_lib_path(path)?;
+        let engine = Self::build_engine(&normalized)?;
+        Ok(Arc::new(engine))
+    }
+
     /// Initialize the global `LlamaService` if needed.
     ///
     /// If already initialized with the same canonical library path, returns the
