@@ -277,7 +277,7 @@ pub async fn restart_task(
                         // The preprocess stage provides the real PCM data; the initial
                         // Bytes payload is an empty placeholder that gets replaced by it.
                         let core_result = slab_core::api::backend(slab_core::api::Backend::GGMLWhisper)
-                            .op(slab_core::api::Event::InferenceImage)
+                            .op(slab_core::api::Event::Inference)
                             .input(slab_core::Payload::Bytes(std::sync::Arc::from(
                                 [] as [u8; 0]
                             )))
