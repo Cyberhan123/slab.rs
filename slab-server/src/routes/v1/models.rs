@@ -1,5 +1,6 @@
 //! Model-management routes.
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::extract::State;

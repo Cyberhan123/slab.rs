@@ -313,10 +313,16 @@ pub async fn reload_lib(
 
     let backend = Backend::from_str(bid)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
+
+    // Step 1: reload the dynamic library (drops the current model).
+    slab_core::api::reload_library(backend, &req.lib_path)
+        .await
+        .map_err(ServerError::Runtime)?;
+
+    // Step 2: reload the model into the fresh library.
     slab_core::api::backend(backend)
-        .op(Event::UnloadLibrary)
+        .op(Event::LoadModel)
         .input(slab_core::Payload::Json(serde_json::json!({
-            "lib_path":    req.lib_path,
             "model_path":  req.model_path,
             "num_workers": req.num_workers,
         })))

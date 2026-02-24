@@ -2,12 +2,16 @@ use strum::{Display, EnumString};
 
 #[derive(Debug, Display, EnumString)]
 pub enum Event {
+    /// Load the dynamic library (dylib only, no model).
     #[strum(serialize = "lib.load")]
     LoadLibrary,
+    /// Reload / replace the dynamic library (drops current model and lib first).
     #[strum(serialize = "lib.reload")]
-    UnloadLibrary,
+    ReloadLibrary,
+    /// Load a model into the already-loaded library.
     #[strum(serialize = "model.load")]
     LoadModel,
+    /// Unload the current model (keeps lib loaded).
     #[strum(serialize = "model.unload")]
     UnloadModel,
     #[strum(serialize = "inference")]
@@ -18,7 +22,7 @@ pub enum Event {
     InferenceImage,
 }
 
-#[derive(Debug, Display, EnumString)]
+#[derive(Debug, Clone, Copy, Display, EnumString)]
 pub enum Backend {
     #[strum(serialize = "ggml.llama")]
     GGMLLlama,
