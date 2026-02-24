@@ -70,11 +70,19 @@ struct LlamaWorker {
 
 impl LlamaWorker {
     fn new(engine: Option<Arc<GGMLLlamaEngine>>) -> Self {
-        Self { engine, sessions: HashMap::new() }
+        Self {
+            engine,
+            sessions: HashMap::new(),
+        }
     }
 
     async fn handle(&mut self, req: BackendRequest) {
-        let BackendRequest { op, input, reply_tx, .. } = req;
+        let BackendRequest {
+            op,
+            input,
+            reply_tx,
+            ..
+        } = req;
 
         match Event::from_str(&op.name) {
             Ok(Event::LoadLibrary) => self.handle_load_library(input, reply_tx).await,
@@ -94,7 +102,8 @@ impl LlamaWorker {
                     .get("session_key")
                     .and_then(|s| s.as_str())
                     .map(str::to_owned);
-                self.handle_inference(input, max_tokens, session_key, reply_tx).await;
+                self.handle_inference(input, max_tokens, session_key, reply_tx)
+                    .await;
             }
             Ok(Event::InferenceStream) => {
                 let opts = op.options.to_serde_value();
@@ -107,7 +116,8 @@ impl LlamaWorker {
                     .get("session_key")
                     .and_then(|s| s.as_str())
                     .map(str::to_owned);
-                self.handle_inference_stream(input, max_tokens, session_key, reply_tx).await;
+                self.handle_inference_stream(input, max_tokens, session_key, reply_tx)
+                    .await;
             }
             Ok(_) | Err(_) => {
                 let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
@@ -124,7 +134,9 @@ impl LlamaWorker {
     ) {
         if self.engine.is_some() {
             // Library already loaded; skip silently.
-            let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+            let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                Arc::from([] as [u8; 0]),
+            )));
             return;
         }
 
@@ -139,7 +151,9 @@ impl LlamaWorker {
         match GGMLLlamaEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -157,7 +171,9 @@ impl LlamaWorker {
         let config: LibLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid lib.reload config: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid lib.reload config: {e}"
+                )));
                 return;
             }
         };
@@ -169,7 +185,9 @@ impl LlamaWorker {
         match GGMLLlamaEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -197,7 +215,9 @@ impl LlamaWorker {
         let config: ModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid model.load config: {e}"
+                )));
                 return;
             }
         };
@@ -224,7 +244,9 @@ impl LlamaWorker {
 
         match result {
             Ok(()) => {
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -272,7 +294,10 @@ impl LlamaWorker {
             }
         };
 
-        let llama_sid = session_key.as_ref().and_then(|k| self.sessions.get(k)).copied();
+        let llama_sid = session_key
+            .as_ref()
+            .and_then(|k| self.sessions.get(k))
+            .copied();
 
         match engine.inference(&prompt, max_tokens, llama_sid).await {
             Ok(text) => {
@@ -311,7 +336,10 @@ impl LlamaWorker {
             }
         };
 
-        let llama_sid = session_key.as_ref().and_then(|k| self.sessions.get(k)).copied();
+        let llama_sid = session_key
+            .as_ref()
+            .and_then(|k| self.sessions.get(k))
+            .copied();
 
         let (proto_tx, proto_rx) = mpsc::channel::<StreamChunk>(64);
         let _ = reply_tx.send(BackendReply::Stream(proto_rx));
@@ -321,7 +349,10 @@ impl LlamaWorker {
         tokio::spawn(async move {
             use crate::engine::ggml::llama::StreamChunk as LlamaChunk;
 
-            match engine.inference_stream(&prompt, max_tokens, llama_sid).await {
+            match engine
+                .inference_stream(&prompt, max_tokens, llama_sid)
+                .await
+            {
                 Ok((mut llama_rx, new_sid)) => {
                     while let Some(chunk) = llama_rx.recv().await {
                         let mapped = match chunk {

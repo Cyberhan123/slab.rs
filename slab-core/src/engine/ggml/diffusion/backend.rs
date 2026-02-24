@@ -61,9 +61,15 @@ struct GenImageParams {
     sample_steps: i32,
 }
 
-fn default_width() -> u32 { 512 }
-fn default_height() -> u32 { 512 }
-fn default_steps() -> i32 { 20 }
+fn default_width() -> u32 {
+    512
+}
+fn default_height() -> u32 {
+    512
+}
+fn default_steps() -> i32 {
+    20
+}
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -81,7 +87,12 @@ impl DiffusionWorker {
     }
 
     async fn handle(&mut self, req: BackendRequest) {
-        let BackendRequest { op, input, reply_tx, .. } = req;
+        let BackendRequest {
+            op,
+            input,
+            reply_tx,
+            ..
+        } = req;
 
         match Event::from_str(&op.name) {
             Ok(Event::LoadLibrary) => self.handle_load_library(input, reply_tx).await,
@@ -103,7 +114,9 @@ impl DiffusionWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         if self.engine.is_some() {
-            let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+            let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                Arc::from([] as [u8; 0]),
+            )));
             return;
         }
 
@@ -118,7 +131,9 @@ impl DiffusionWorker {
         match GGMLDiffusionEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -136,7 +151,9 @@ impl DiffusionWorker {
         let config: LibLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid lib.reload config: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid lib.reload config: {e}"
+                )));
                 return;
             }
         };
@@ -147,7 +164,9 @@ impl DiffusionWorker {
         match GGMLDiffusionEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -175,7 +194,9 @@ impl DiffusionWorker {
         let config: ModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid model.load config: {e}"
+                )));
                 return;
             }
         };
@@ -189,7 +210,9 @@ impl DiffusionWorker {
 
         match result {
             Ok(()) => {
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
+                    Arc::from([] as [u8; 0]),
+                )));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));

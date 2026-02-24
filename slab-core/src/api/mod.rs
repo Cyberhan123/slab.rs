@@ -156,9 +156,9 @@ pub fn lib_dirs() -> Option<&'static LibDirs> {
 /// cannot be resolved or opened.
 pub fn init(config: Config) -> Result<(), RuntimeError> {
     use crate::engine::ggml::{
-        diffusion::{GGMLDiffusionEngine, spawn_backend_with_engine as spawn_diffusion},
-        llama::{GGMLLlamaEngine, spawn_backend_with_engine as spawn_llama},
-        whisper::{GGMLWhisperEngine, spawn_backend_with_engine as spawn_whisper},
+        diffusion::{spawn_backend_with_engine as spawn_diffusion, GGMLDiffusionEngine},
+        llama::{spawn_backend_with_engine as spawn_llama, GGMLLlamaEngine},
+        whisper::{spawn_backend_with_engine as spawn_whisper, GGMLWhisperEngine},
     };
     use std::path::Path;
 
@@ -181,9 +181,11 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
         .whisper_lib_dir
         .as_deref()
         .map(|p| {
-            GGMLWhisperEngine::from_path(Path::new(p)).map_err(|e| RuntimeError::LibraryLoadFailed {
-                backend: "ggml.whisper".into(),
-                message: e.to_string(),
+            GGMLWhisperEngine::from_path(Path::new(p)).map_err(|e| {
+                RuntimeError::LibraryLoadFailed {
+                    backend: "ggml.whisper".into(),
+                    message: e.to_string(),
+                }
             })
         })
         .transpose()?;
@@ -192,9 +194,11 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
         .diffusion_lib_dir
         .as_deref()
         .map(|p| {
-            GGMLDiffusionEngine::from_path(Path::new(p)).map_err(|e| RuntimeError::LibraryLoadFailed {
-                backend: "ggml.diffusion".into(),
-                message: e.to_string(),
+            GGMLDiffusionEngine::from_path(Path::new(p)).map_err(|e| {
+                RuntimeError::LibraryLoadFailed {
+                    backend: "ggml.diffusion".into(),
+                    message: e.to_string(),
+                }
             })
         })
         .transpose()?;
@@ -261,7 +265,9 @@ pub async fn reload_library(backend_id: Backend, lib_path: &str) -> Result<(), R
         .backends
         .get(&backend_str)
         .cloned()
-        .ok_or_else(|| RuntimeError::Busy { backend_id: backend_str.clone() })?;
+        .ok_or_else(|| RuntimeError::Busy {
+            backend_id: backend_str.clone(),
+        })?;
 
     let (watch_tx, watch_rx) = tokio::sync::watch::channel(false);
     let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
@@ -292,8 +298,6 @@ pub async fn reload_library(backend_id: Backend, lib_path: &str) -> Result<(), R
         }),
     }
 }
-
-
 
 /// Start building a call to the named backend.
 ///
