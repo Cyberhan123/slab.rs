@@ -97,7 +97,10 @@ impl InferenceWorkerState {
 
     fn handle_command(&mut self, cmd: WorkerCommand) {
         match cmd {
-            WorkerCommand::CreateSession { session_id, reply_tx } => {
+            WorkerCommand::CreateSession {
+                session_id,
+                reply_tx,
+            } => {
                 // Prefer a recycled sequence ID; only mint a new one when the
                 // free-list is empty, to keep the seq_id space bounded.
                 let seq_id = self.free_seq_ids.pop().unwrap_or_else(|| {
@@ -128,7 +131,8 @@ impl InferenceWorkerState {
                 reply_tx,
             } => match self.sessions.get_mut(&session_id) {
                 None => {
-                    let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+                    let _ =
+                        reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                 }
                 Some(session) => {
                     // Tokenize the delta (no BOS, parse special tokens).
@@ -152,7 +156,8 @@ impl InferenceWorkerState {
                 reply_tx,
             } => match self.sessions.get_mut(&session_id) {
                 None => {
-                    let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+                    let _ =
+                        reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                 }
                 Some(session) => {
                     session.stream_tx = Some(stream_tx);
@@ -167,7 +172,8 @@ impl InferenceWorkerState {
                 reply_tx,
             } => match self.sessions.remove(&session_id) {
                 None => {
-                    let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+                    let _ =
+                        reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                 }
                 Some(session) => {
                     // Release KV cache entries for this sequence only.
@@ -184,7 +190,8 @@ impl InferenceWorkerState {
                 reply_tx,
             } => match self.sessions.get_mut(&session_id) {
                 None => {
-                    let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+                    let _ =
+                        reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
                 }
                 Some(session) => {
                     session.cancelled = true;

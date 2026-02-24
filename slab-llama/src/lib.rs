@@ -81,9 +81,7 @@ impl Llama {
     #[allow(clippy::arc_with_non_send_sync)]
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, ::libloading::Error> {
         let lib = unsafe { slab_llama_sys::LlamaLib::new(path.as_ref())? };
-        Ok(Self {
-            lib: Arc::new(lib),
-        })
+        Ok(Self { lib: Arc::new(lib) })
     }
 
     /// Initialise the llama.cpp backend.

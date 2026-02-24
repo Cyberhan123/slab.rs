@@ -83,26 +83,26 @@ impl Config {
     /// Build [`Config`] from environment variables, falling back to defaults.
     pub fn from_env() -> Self {
         Self {
-            bind_address:        env_or("SLAB_BIND", "0.0.0.0:3000"),
-            database_url:        env_or("SLAB_DATABASE_URL", "sqlite://slab.db?mode=rwc"),
-            ipc_socket_path:     env_or("SLAB_IPC_SOCKET", "/tmp/slab-server.sock"),
-            log_level:           env_or("SLAB_LOG", "info"),
+            bind_address: env_or("SLAB_BIND", "0.0.0.0:3000"),
+            database_url: env_or("SLAB_DATABASE_URL", "sqlite://slab.db?mode=rwc"),
+            ipc_socket_path: env_or("SLAB_IPC_SOCKET", "/tmp/slab-server.sock"),
+            log_level: env_or("SLAB_LOG", "info"),
             log_json: std::env::var("SLAB_LOG_JSON")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
-            queue_capacity:   parse_env("SLAB_QUEUE_CAPACITY", 64),
+            queue_capacity: parse_env("SLAB_QUEUE_CAPACITY", 64),
             backend_capacity: parse_env("SLAB_BACKEND_CAPACITY", 4),
             enable_swagger: std::env::var("SLAB_ENABLE_SWAGGER")
                 .map(|v| v != "0" && !v.eq_ignore_ascii_case("false"))
                 .unwrap_or(true),
             cors_allowed_origins: std::env::var("SLAB_CORS_ORIGINS").ok(),
             admin_api_token: std::env::var("SLAB_ADMIN_TOKEN").ok(),
-            transport_mode:       env_or("SLAB_TRANSPORT", "http"),
-            llama_lib_dir:        std::env::var("SLAB_LLAMA_LIB_DIR").ok(),
-            whisper_lib_dir:      std::env::var("SLAB_WHISPER_LIB_DIR").ok(),
-            diffusion_lib_dir:    std::env::var("SLAB_DIFFUSION_LIB_DIR").ok(),
-            model_dir:            std::env::var("SLAB_MODEL_DIR").ok(),
-            session_state_dir:    env_or("SLAB_SESSION_STATE_DIR", "/tmp/slab-sessions"),
+            transport_mode: env_or("SLAB_TRANSPORT", "http"),
+            llama_lib_dir: std::env::var("SLAB_LLAMA_LIB_DIR").ok(),
+            whisper_lib_dir: std::env::var("SLAB_WHISPER_LIB_DIR").ok(),
+            diffusion_lib_dir: std::env::var("SLAB_DIFFUSION_LIB_DIR").ok(),
+            model_dir: std::env::var("SLAB_MODEL_DIR").ok(),
+            session_state_dir: env_or("SLAB_SESSION_STATE_DIR", "/tmp/slab-sessions"),
         }
     }
 }

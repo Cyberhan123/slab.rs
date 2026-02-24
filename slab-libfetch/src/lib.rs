@@ -29,7 +29,10 @@ pub async fn fetch_header(
     let install_dir = target_include_path
         .to_str()
         .ok_or_else(|| FetchError::InvalidPath {
-            message: format!("target_include_path contains invalid UTF-8: {:?}", target_include_path),
+            message: format!(
+                "target_include_path contains invalid UTF-8: {:?}",
+                target_include_path
+            ),
         })?
         .to_string();
 
@@ -54,17 +57,12 @@ mod tests {
 
     #[tokio::test]
     async fn test_extract_include_ggml() {
-        fetch_header(
-            "ggml-org",
-            "ggml",
-            Some("v0.9.7"),
-            Path::new("target/ggml"),
-        )
-        .await
-        .unwrap();
+        fetch_header("ggml-org", "ggml", Some("v0.9.7"), Path::new("target/ggml"))
+            .await
+            .unwrap();
     }
 
-     #[tokio::test]
+    #[tokio::test]
     async fn test_extract_include_whisper() {
         fetch_header(
             "ggml-org",

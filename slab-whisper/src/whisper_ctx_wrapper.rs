@@ -30,7 +30,7 @@ impl Whisper {
         path: &str,
         parameters: WhisperContextParameters,
     ) -> Result<WhisperContext, WhisperError> {
-        let ctx =   self.new_inner_context_with_params(path, parameters)?;
+        let ctx = self.new_inner_context_with_params(path, parameters)?;
         Ok(WhisperContext::wrap(ctx))
     }
 
@@ -45,14 +45,13 @@ impl Whisper {
     /// # C++ equivalent
     /// `struct whisper_context * whisper_init_from_buffer_with_params_no_state(void * buffer, size_t buffer_size, struct whisper_context_params params);`
     pub fn new_context_from_buffer_with_params(
-         &self,
+        &self,
         buffer: &[u8],
         parameters: WhisperContextParameters,
     ) -> Result<WhisperContext, WhisperError> {
         let ctx = self.new_inner_context_from_buffer_with_params(buffer, parameters)?;
         Ok(WhisperContext::wrap(ctx))
     }
-
 }
 
 impl WhisperContext {

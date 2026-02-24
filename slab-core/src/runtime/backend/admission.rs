@@ -52,9 +52,11 @@ impl ResourceManager {
     pub fn try_acquire(&self, backend_id: &str) -> Result<Permit, RuntimeError> {
         let semaphore = {
             let map = self.semaphores.lock().unwrap();
-            map.get(backend_id).cloned().ok_or_else(|| RuntimeError::Busy {
-                backend_id: backend_id.to_owned(),
-            })?
+            map.get(backend_id)
+                .cloned()
+                .ok_or_else(|| RuntimeError::Busy {
+                    backend_id: backend_id.to_owned(),
+                })?
         };
 
         semaphore

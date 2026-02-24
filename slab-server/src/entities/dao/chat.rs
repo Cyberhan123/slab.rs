@@ -1,4 +1,3 @@
-
 use chrono::{DateTime, Utc};
 
 /// A single message row in the `chat_messages` table.

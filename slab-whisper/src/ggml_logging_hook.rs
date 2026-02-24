@@ -2,10 +2,10 @@ use crate::common_logging::{
     generic_debug, generic_error, generic_info, generic_trace, generic_warn, GGMLLogLevel,
 };
 use core::ffi::{c_char, c_void};
+use slab_whisper_sys::ggml_log_level;
 use std::borrow::Cow;
 use std::ffi::CStr;
 use std::sync::Once;
-use slab_whisper_sys::ggml_log_level;
 
 static GGML_LOG_TRAMPOLINE_INSTALL: Once = Once::new();
 
@@ -13,12 +13,12 @@ use crate::Whisper;
 
 impl Whisper {
     pub(crate) fn install_ggml_logging_hook(&self) {
-    GGML_LOG_TRAMPOLINE_INSTALL.call_once(|| unsafe {
-        self.lib.ggml_log_set(Some(ggml_logging_trampoline), std::ptr::null_mut())
-    });
+        GGML_LOG_TRAMPOLINE_INSTALL.call_once(|| unsafe {
+            self.lib
+                .ggml_log_set(Some(ggml_logging_trampoline), std::ptr::null_mut())
+        });
+    }
 }
-}
-
 
 unsafe extern "C" fn ggml_logging_trampoline(
     level: ggml_log_level,

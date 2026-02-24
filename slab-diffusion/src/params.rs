@@ -30,29 +30,29 @@ pub use slab_diffusion_sys::sd_log_level_t as SdLogLevel;
 // ── Well-known enum constants (re-exported for convenience) ──────────────────
 
 pub use slab_diffusion_sys::{
+    // lora_apply_mode_t
+    lora_apply_mode_t_LORA_APPLY_AUTO as LORA_APPLY_AUTO,
+    // prediction_t
+    prediction_t_PREDICTION_COUNT as PREDICTION_COUNT,
+    rng_type_t_CPU_RNG as RNG_CPU,
     // rng_type_t
     rng_type_t_CUDA_RNG as RNG_CUDA,
-    rng_type_t_CPU_RNG as RNG_CPU,
-    rng_type_t_STD_DEFAULT_RNG as RNG_STD_DEFAULT,
     rng_type_t_RNG_TYPE_COUNT as RNG_TYPE_COUNT,
+    rng_type_t_STD_DEFAULT_RNG as RNG_STD_DEFAULT,
+    sample_method_t_EULER_A_SAMPLE_METHOD as SAMPLE_EULER_A,
     // sample_method_t
     sample_method_t_EULER_SAMPLE_METHOD as SAMPLE_EULER,
-    sample_method_t_EULER_A_SAMPLE_METHOD as SAMPLE_EULER_A,
     sample_method_t_LCM_SAMPLE_METHOD as SAMPLE_LCM,
     sample_method_t_SAMPLE_METHOD_COUNT as SAMPLE_METHOD_COUNT,
     // scheduler_t
     scheduler_t_DISCRETE_SCHEDULER as SCHEDULER_DISCRETE,
     scheduler_t_KARRAS_SCHEDULER as SCHEDULER_KARRAS,
     scheduler_t_SCHEDULER_COUNT as SCHEDULER_COUNT,
-    // prediction_t
-    prediction_t_PREDICTION_COUNT as PREDICTION_COUNT,
-    // lora_apply_mode_t
-    lora_apply_mode_t_LORA_APPLY_AUTO as LORA_APPLY_AUTO,
+    // sd_cache_mode_t
+    sd_cache_mode_t_SD_CACHE_DISABLED as CACHE_DISABLED,
     // sd_type_t -- SD_TYPE_COUNT is the sentinel meaning "auto-detect from the
     // model file". Aliased as WEIGHT_TYPE_AUTO for clarity at the call site.
     sd_type_t_SD_TYPE_COUNT as WEIGHT_TYPE_AUTO,
-    // sd_cache_mode_t
-    sd_cache_mode_t_SD_CACHE_DISABLED as CACHE_DISABLED,
 };
 
 // ── Internal helpers ─────────────────────────────────────────────────────────

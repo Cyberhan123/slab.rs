@@ -1,2 +1,2 @@
-pub mod v1;
 pub mod admin;
+pub mod v1;

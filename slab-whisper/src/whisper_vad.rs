@@ -177,7 +177,11 @@ impl WhisperVadContext {
     pub fn detect_speech(&mut self, samples: &[f32]) -> Result<(), WhisperError> {
         let (samples, len) = (samples.as_ptr(), samples.len() as c_int);
 
-        let success = unsafe { self.instance.lib.whisper_vad_detect_speech(self.ptr, samples, len) };
+        let success = unsafe {
+            self.instance
+                .lib
+                .whisper_vad_detect_speech(self.ptr, samples, len)
+        };
 
         if !success {
             Err(WhisperError::GenericError(-1))
@@ -204,7 +208,8 @@ impl WhisperVadContext {
         params: WhisperVadParams,
     ) -> Result<WhisperVadSegments, WhisperError> {
         let ptr = unsafe {
-            self.instance.lib
+            self.instance
+                .lib
                 .whisper_vad_segments_from_probs(self.ptr, params.into_inner())
         };
 
@@ -281,7 +286,11 @@ impl WhisperVadSegments {
     /// Return the start timestamp of this segment in centiseconds (10s of milliseconds).
     pub fn get_segment_start_timestamp(&self, idx: c_int) -> Option<f32> {
         if self.index_in_bounds(idx) {
-            Some(unsafe { self.instance.lib.whisper_vad_segments_get_segment_t0(self.ptr, idx) })
+            Some(unsafe {
+                self.instance
+                    .lib
+                    .whisper_vad_segments_get_segment_t0(self.ptr, idx)
+            })
         } else {
             None
         }
@@ -290,7 +299,11 @@ impl WhisperVadSegments {
     /// Return the end timestamp of this segment in centiseconds (10s of milliseconds).
     pub fn get_segment_end_timestamp(&self, idx: c_int) -> Option<f32> {
         if self.index_in_bounds(idx) {
-            Some(unsafe { self.instance.lib.whisper_vad_segments_get_segment_t1(self.ptr, idx) })
+            Some(unsafe {
+                self.instance
+                    .lib
+                    .whisper_vad_segments_get_segment_t1(self.ptr, idx)
+            })
         } else {
             None
         }

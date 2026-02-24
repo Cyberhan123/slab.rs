@@ -7,22 +7,16 @@ use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
 use tracing::{info, warn};
-use uuid::Uuid;
 use utoipa::OpenApi;
+use uuid::Uuid;
 
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
-use crate::state::AppState;
 use crate::schemas::v1::ffmpeg::{ConvertRequest, ConvertResponse};
+use crate::state::AppState;
 
 #[derive(OpenApi)]
-#[openapi(
-    paths(convert),
-    components(schemas(
-        ConvertRequest, 
-        ConvertResponse, 
-    )),
-)]
+#[openapi(paths(convert), components(schemas(ConvertRequest, ConvertResponse,)))]
 pub struct FfmpegApi;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -32,8 +26,8 @@ pub fn router() -> Router<Arc<AppState>> {
 /// Allowlisted output formats for ffmpeg conversions.
 /// Only these formats are accepted to prevent command injection through format strings.
 const ALLOWED_OUTPUT_FORMATS: &[&str] = &[
-    "mp3", "mp4", "wav", "flac", "ogg", "opus", "webm",
-    "avi", "mkv", "mov", "aac", "m4a", "m4v", "f32le", "pcm",
+    "mp3", "mp4", "wav", "flac", "ogg", "opus", "webm", "avi", "mkv", "mov", "aac", "m4a", "m4v",
+    "f32le", "pcm",
 ];
 
 #[utoipa::path(
@@ -75,7 +69,10 @@ pub async fn convert(
         )));
     }
     // Verify the source file exists and is readable before accepting the task.
-    if !tokio::fs::try_exists(&req.source_path).await.unwrap_or(false) {
+    if !tokio::fs::try_exists(&req.source_path)
+        .await
+        .unwrap_or(false)
+    {
         return Err(ServerError::BadRequest(format!(
             "source_path '{}' does not exist or is not accessible",
             req.source_path
@@ -111,20 +108,31 @@ pub async fn convert(
     let tid = task_id.clone();
 
     let join = tokio::spawn(async move {
-        store.update_task_status(&tid, "running", None, None).await.ok();
+        store
+            .update_task_status(&tid, "running", None, None)
+            .await
+            .ok();
 
         let input: serde_json::Value = match serde_json::from_str(&input_data) {
             Ok(v) => v,
             Err(e) => {
                 warn!(task_id = %tid, error = %e, "invalid stored input_data for ffmpeg task");
-                store.update_task_status(&tid, "failed", None, Some(&format!("invalid stored input_data: {e}"))).await.ok();
+                store
+                    .update_task_status(
+                        &tid,
+                        "failed",
+                        None,
+                        Some(&format!("invalid stored input_data: {e}")),
+                    )
+                    .await
+                    .ok();
                 task_manager.remove(&tid);
                 return;
             }
         };
 
-        let source_path    = input["source_path"].as_str().unwrap_or("").to_owned();
-        let output_format  = input["output_format"].as_str().unwrap_or("out").to_owned();
+        let source_path = input["source_path"].as_str().unwrap_or("").to_owned();
+        let output_format = input["output_format"].as_str().unwrap_or("out").to_owned();
         let output_path = input["output_path"]
             .as_str()
             .map(str::to_owned)
@@ -148,8 +156,7 @@ pub async fn convert(
 
         match result {
             Ok(output) if output.status.success() => {
-                let result_json =
-                    serde_json::json!({ "output_path": output_path }).to_string();
+                let result_json = serde_json::json!({ "output_path": output_path }).to_string();
                 store
                     .update_task_status(&tid, "succeeded", Some(&result_json), None)
                     .await
@@ -175,7 +182,9 @@ pub async fn convert(
         task_manager.remove(&tid);
     });
 
-    state.task_manager.insert(task_id.clone(), join.abort_handle());
+    state
+        .task_manager
+        .insert(task_id.clone(), join.abort_handle());
 
     Ok(Json(ConvertResponse { task_id }))
 }

@@ -7,8 +7,8 @@ use crate::llama_adapter::LlamaLoraAdapter;
 use crate::llama_context::LlamaContext;
 use crate::llama_sampler::SamplerChainBuilder;
 use crate::token::LlamaToken;
-use crate::LlamaSampler;
 use crate::Llama;
+use crate::LlamaSampler;
 
 /// Inner (non-Clone) model data.  Wrapped in Arc so that LlamaContext can keep
 /// the model alive without copying the raw pointer.
@@ -50,8 +50,10 @@ impl Llama {
     ) -> Result<LlamaModel, LlamaError> {
         let c_path = CString::new(path)?;
         let c_params = params.to_c_params(&self.lib);
-        let model =
-            unsafe { self.lib.llama_model_load_from_file(c_path.as_ptr(), c_params) };
+        let model = unsafe {
+            self.lib
+                .llama_model_load_from_file(c_path.as_ptr(), c_params)
+        };
         if model.is_null() {
             Err(LlamaError::ModelLoadFailed)
         } else {
@@ -80,7 +82,11 @@ impl LlamaModel {
     /// Returns [`LlamaError::ContextCreateFailed`] if context creation fails.
     pub fn new_context(&self, params: LlamaContextParams) -> Result<LlamaContext, LlamaError> {
         let c_params = params.to_c_params(&self.inner.lib);
-        let ctx = unsafe { self.inner.lib.llama_init_from_model(self.inner.model, c_params) };
+        let ctx = unsafe {
+            self.inner
+                .lib
+                .llama_init_from_model(self.inner.model, c_params)
+        };
         if ctx.is_null() {
             Err(LlamaError::ContextCreateFailed)
         } else {
@@ -188,14 +194,9 @@ impl LlamaModel {
         let vocab = self.vocab();
         // First call to get required buffer length.
         let len = unsafe {
-            self.inner.lib.llama_token_to_piece(
-                vocab,
-                token,
-                std::ptr::null_mut(),
-                0,
-                0,
-                special,
-            )
+            self.inner
+                .lib
+                .llama_token_to_piece(vocab, token, std::ptr::null_mut(), 0, 0, special)
         };
         if len < 0 {
             return Err(LlamaError::TokenToPieceFailed(len));

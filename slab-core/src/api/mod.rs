@@ -59,6 +59,7 @@
 mod types;
 
 use std::collections::HashMap;
+#[allow(unused)]
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -73,8 +74,8 @@ use crate::runtime::pipeline::PipelineBuilder;
 use crate::runtime::stage::CpuStage;
 use crate::runtime::storage::TaskStatusView;
 use crate::runtime::types::{Payload, RuntimeError, TaskId, TaskStatus};
-pub use types::Event;
 pub use types::Backend;
+pub use types::Event;
 
 // ── Timeout constants ──────────────────────────────────────────────────────────
 
@@ -156,7 +157,7 @@ pub fn lib_dirs() -> Option<&'static LibDirs> {
 /// happen in normal usage).
 pub fn init(config: Config) -> Result<(), RuntimeError> {
     let rm = ResourceManager::new();
-    rm.register_backend(Backend::GGMLLama.to_string(), config.backend_capacity);
+    rm.register_backend(Backend::GGMLLlama.to_string(), config.backend_capacity);
     rm.register_backend(Backend::GGMLWhisper.to_string(), config.backend_capacity);
     rm.register_backend(Backend::GGMLDiffusion.to_string(), config.backend_capacity);
 
@@ -167,7 +168,7 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
     let diffusion_tx = crate::engine::ggml::diffusion::spawn_backend(128);
 
     let mut backends = HashMap::new();
-    backends.insert(Backend::GGMLLama.to_string(), llama_tx);
+    backends.insert(Backend::GGMLLlama.to_string(), llama_tx);
     backends.insert(Backend::GGMLWhisper.to_string(), whisper_tx);
     backends.insert(Backend::GGMLDiffusion.to_string(), diffusion_tx);
 
@@ -519,8 +520,6 @@ fn payload_to_bytes(p: Payload) -> Result<Bytes, RuntimeError> {
 
 #[cfg(test)]
 mod tests {
-    use std::f32::consts::E;
-
     use super::*;
     use crate::runtime::backend::protocol::BackendReply;
     use tokio::sync::mpsc;
@@ -555,19 +554,6 @@ mod tests {
             }
         });
         tx
-    }
-
-    /// Build an isolated orchestrator + backend pair without the global RUNTIME.
-    fn make_orchestrator_with_backend(
-        backend_id: &str,
-        ingress_tx: mpsc::Sender<BackendRequest>,
-    ) -> Orchestrator {
-        let rm = ResourceManager::new();
-        rm.register_backend(backend_id, 4);
-        let orch = Orchestrator::start(rm, 64);
-        // Store ingress_tx in an ApiRuntime-like structure; use directly below.
-        let _ = ingress_tx; // returned to caller; passed into PipelineBuilder
-        orch
     }
 
     // ── Tests: mock unary backend ─────────────────────────────────────────────

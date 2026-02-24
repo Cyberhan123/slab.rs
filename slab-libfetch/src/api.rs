@@ -1,8 +1,8 @@
-use std::env;
-use std::path::{Path, PathBuf};
 use crate::downloader::Downloader;
 use crate::error::FetchError;
 use crate::install::{Install, VersionInfo};
+use std::env;
+use std::path::{Path, PathBuf};
 
 /// Top-level builder for the libfetch API.
 ///
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn test_api_defaults() {
         let api = Api::new();
-        assert_eq!(api.install_dir,PathBuf::from("."));
+        assert_eq!(api.install_dir, PathBuf::from("."));
         assert_eq!(api.retry_count, 3);
         assert_eq!(api.retry_delay_secs, 3);
         assert!(api.show_progress);

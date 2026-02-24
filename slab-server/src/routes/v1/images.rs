@@ -11,8 +11,8 @@ use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
 use tracing::{debug, info, warn};
-use uuid::Uuid;
 use utoipa::OpenApi;
+use uuid::Uuid;
 
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
@@ -29,12 +29,7 @@ const MAX_IMAGES_PER_REQUEST: u32 = 10;
 const VALID_SIZES: &[&str] = &["256x256", "512x512", "1024x1024"];
 
 #[derive(OpenApi)]
-#[openapi(
-    paths(generate_images),
-    components(schemas(
-        ImageGenerationRequest, 
-    )),
-)]
+#[openapi(paths(generate_images), components(schemas(ImageGenerationRequest,)))]
 pub struct ImagesApi;
 
 /// Register image generation routes.
@@ -127,7 +122,9 @@ pub async fn generate_images(
                 .store
                 .set_core_task_id(&task_id, core_task_id as i64)
                 .await
-                .unwrap_or_else(|e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"));
+                .unwrap_or_else(
+                    |e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"),
+                );
             info!(task_id = %task_id, core_task_id, "image generation task submitted to slab-core");
         }
         Err(e) => {
@@ -152,7 +149,10 @@ mod test {
     #[test]
     fn validates_n_zero() {
         let n = 0u32;
-        assert!(n == 0 || n > MAX_IMAGES_PER_REQUEST, "n=0 should be invalid");
+        assert!(
+            n == 0 || n > MAX_IMAGES_PER_REQUEST,
+            "n=0 should be invalid"
+        );
     }
 
     #[test]
@@ -176,7 +176,9 @@ mod test {
 
     #[test]
     fn rejects_invalid_size() {
-        assert!(!VALID_SIZES.contains(&"800x600"), "800x600 is not a valid size");
+        assert!(
+            !VALID_SIZES.contains(&"800x600"),
+            "800x600 is not a valid size"
+        );
     }
 }
-

@@ -57,8 +57,7 @@ impl PipelineBuilder<NoStream> {
         name: impl Into<String>,
         work: impl Fn(Payload) -> Result<Payload, String> + Send + Sync + 'static,
     ) -> Self {
-        self.stages
-            .push(Stage::Cpu(CpuStage::new(name, work)));
+        self.stages.push(Stage::Cpu(CpuStage::new(name, work)));
         self
     }
 

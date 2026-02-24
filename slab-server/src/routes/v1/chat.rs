@@ -132,8 +132,7 @@ pub async fn chat_completions(
     });
 
     if req.stream {
-        let backend_stream = 
-        slab_core::api::backend(slab_core::api::Backend::GGMLLlama)
+        let backend_stream = slab_core::api::backend(slab_core::api::Backend::GGMLLlama)
             .op(slab_core::api::Event::InferenceStream)
             .input(slab_core::Payload::Text(std::sync::Arc::from(
                 prompt.as_str(),
@@ -162,7 +161,7 @@ pub async fn chat_completions(
         return Ok(Sse::new(sse_stream).into_response());
     }
 
-    let result_bytes = slab_core::api::backend(slab_core::api::Backend::GGMLLama)
+    let result_bytes = slab_core::api::backend(slab_core::api::Backend::GGMLLlama)
         .op(slab_core::api::Event::Inference)
         .input(slab_core::Payload::Text(std::sync::Arc::from(
             prompt.as_str(),

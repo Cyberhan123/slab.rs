@@ -79,7 +79,10 @@ impl LlamaContextParams {
         self
     }
 
-    pub(crate) fn to_c_params(&self, lib: &slab_llama_sys::LlamaLib) -> slab_llama_sys::llama_context_params {
+    pub(crate) fn to_c_params(
+        &self,
+        lib: &slab_llama_sys::LlamaLib,
+    ) -> slab_llama_sys::llama_context_params {
         let mut params = unsafe { lib.llama_context_default_params() };
         params.n_ctx = self.n_ctx;
         params.n_batch = self.n_batch;
@@ -92,7 +95,8 @@ impl LlamaContextParams {
         params.no_perf = self.no_perf;
         // flash_attn is controlled via flash_attn_type field
         if self.flash_attn {
-            params.flash_attn_type = slab_llama_sys::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_ENABLED;
+            params.flash_attn_type =
+                slab_llama_sys::llama_flash_attn_type_LLAMA_FLASH_ATTN_TYPE_ENABLED;
         }
         params
     }

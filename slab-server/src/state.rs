@@ -20,13 +20,19 @@ impl std::fmt::Debug for TaskManager {
 
 impl TaskManager {
     pub fn new() -> Self {
-        Self { handles: std::sync::Mutex::new(HashMap::new()) }
+        Self {
+            handles: std::sync::Mutex::new(HashMap::new()),
+        }
     }
 
     pub fn insert(&self, id: impl Into<String>, handle: tokio::task::AbortHandle) {
         match self.handles.lock() {
-            Ok(mut map) => { map.insert(id.into(), handle); }
-            Err(e) => tracing::warn!(error = %e, "TaskManager mutex poisoned on insert; handle leaked"),
+            Ok(mut map) => {
+                map.insert(id.into(), handle);
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "TaskManager mutex poisoned on insert; handle leaked")
+            }
         }
     }
 
@@ -46,7 +52,9 @@ impl TaskManager {
 
     pub fn remove(&self, id: &str) {
         match self.handles.lock() {
-            Ok(mut map) => { map.remove(id); }
+            Ok(mut map) => {
+                map.remove(id);
+            }
             Err(e) => tracing::warn!(error = %e, "TaskManager mutex poisoned on remove"),
         }
     }

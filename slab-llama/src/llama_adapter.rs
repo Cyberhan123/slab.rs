@@ -60,7 +60,11 @@ impl LlamaLoraAdapter {
 
     /// Return the number of metadata key/value pairs in the adapter.
     pub fn meta_count(&self) -> i32 {
-        unsafe { self.model.lib.llama_adapter_meta_count(self.adapter as *const _) }
+        unsafe {
+            self.model
+                .lib
+                .llama_adapter_meta_count(self.adapter as *const _)
+        }
     }
 
     /// Retrieve a metadata key name by its index.

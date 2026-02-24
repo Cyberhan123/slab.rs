@@ -1,11 +1,20 @@
-use crate::entities::{AnyStore, dao::ChatSession};
+use crate::entities::{dao::ChatSession, AnyStore};
 use chrono::{DateTime, Utc};
 use std::future::Future;
 
 pub trait ConfigStore: Send + Sync + 'static {
-    fn get_config_value(&self, key: &str) -> impl Future<Output = Result<Option<String>, sqlx::Error>> + Send;
-    fn set_config_value(&self, key: &str, value: &str) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
-    fn list_config_values(&self) -> impl Future<Output = Result<Vec<(String, String)>, sqlx::Error>> + Send;
+    fn get_config_value(
+        &self,
+        key: &str,
+    ) -> impl Future<Output = Result<Option<String>, sqlx::Error>> + Send;
+    fn set_config_value(
+        &self,
+        key: &str,
+        value: &str,
+    ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
+    fn list_config_values(
+        &self,
+    ) -> impl Future<Output = Result<Vec<(String, String)>, sqlx::Error>> + Send;
 }
 
 impl ConfigStore for AnyStore {

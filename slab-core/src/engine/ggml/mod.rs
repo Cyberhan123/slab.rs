@@ -1,6 +1,6 @@
-pub mod whisper;
-pub mod llama;
 pub mod diffusion;
+pub mod llama;
+pub mod whisper;
 use thiserror::Error;
 
 #[derive(Debug, Error)]

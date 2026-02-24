@@ -32,7 +32,7 @@ use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use crate::state::AppState;
-use slab_core::api::{Event,Backend};
+use slab_core::api::{Backend, Event};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -185,12 +185,15 @@ where
         bytes_read_for_line = line.len();
         if bytes_read_for_line > MAX_LINE_BYTES {
             let resp = IpcResponse {
-                ok:     false,
+                ok: false,
                 result: None,
-                error:  Some(format!("message too large ({bytes_read_for_line} bytes)")),
+                error: Some(format!("message too large ({bytes_read_for_line} bytes)")),
             };
             let _ = write_response(&mut writer, &resp).await;
-            warn!(bytes = bytes_read_for_line, "IPC message too large; closing connection");
+            warn!(
+                bytes = bytes_read_for_line,
+                "IPC message too large; closing connection"
+            );
             break;
         }
 
@@ -198,9 +201,9 @@ where
 
         let resp = match serde_json::from_str::<IpcRequest>(&line) {
             Err(e) => IpcResponse {
-                ok:     false,
+                ok: false,
                 result: None,
-                error:  Some(format!("invalid JSON: {e}")),
+                error: Some(format!("invalid JSON: {e}")),
             },
             Ok(req) => dispatch(req).await,
         };
@@ -231,9 +234,9 @@ async fn dispatch(req: IpcRequest) -> IpcResponse {
     // Reject oversized prompts before they reach the backend.
     if req.prompt.len() > MAX_PROMPT_BYTES {
         return IpcResponse {
-            ok:     false,
+            ok: false,
             result: None,
-            error:  Some(format!(
+            error: Some(format!(
                 "prompt too large ({} bytes); maximum is {MAX_PROMPT_BYTES} bytes",
                 req.prompt.len()
             )),
@@ -241,16 +244,14 @@ async fn dispatch(req: IpcRequest) -> IpcResponse {
     }
 
     let result = match req.op.as_str() {
-        "chat" => {
-            slab_core::api::backend(Backend::GGMLLama)
-                .op(Event::Inference)
-                .input(slab_core::Payload::Text(std::sync::Arc::from(
-                    req.prompt.as_str(),
-                )))
-                .run_wait()
-                .await
-                .map(|b| String::from_utf8_lossy(&b).into_owned())
-        }
+        "chat" => slab_core::api::backend(Backend::GGMLLlama)
+            .op(Event::Inference)
+            .input(slab_core::Payload::Text(std::sync::Arc::from(
+                req.prompt.as_str(),
+            )))
+            .run_wait()
+            .await
+            .map(|b| String::from_utf8_lossy(&b).into_owned()),
         "transcribe" => {
             // For IPC transcription, the `prompt` field carries a file path.
             slab_core::api::backend(Backend::GGMLWhisper)
@@ -262,28 +263,33 @@ async fn dispatch(req: IpcRequest) -> IpcResponse {
                 .await
                 .map(|b| String::from_utf8_lossy(&b).into_owned())
         }
-        "generate_image" => {
-            slab_core::api::backend(Backend::GGMLDiffusion)
-                .op(Event::Inference)
-                .input(slab_core::Payload::Json(serde_json::json!({
-                    "prompt": req.prompt
-                })))
-                .run_wait()
-                .await
-                .map(|b| format!("<{} bytes of image data>", b.len()))
-        }
+        "generate_image" => slab_core::api::backend(Backend::GGMLDiffusion)
+            .op(Event::Inference)
+            .input(slab_core::Payload::Json(serde_json::json!({
+                "prompt": req.prompt
+            })))
+            .run_wait()
+            .await
+            .map(|b| format!("<{} bytes of image data>", b.len())),
         unknown => {
             return IpcResponse {
-                ok:     false,
+                ok: false,
                 result: None,
-                error:  Some(format!("unknown op: {unknown}")),
+                error: Some(format!("unknown op: {unknown}")),
             }
         }
     };
 
     match result {
-        Ok(text) => IpcResponse { ok: true,  result: Some(text), error: None },
-        Err(e)   => IpcResponse { ok: false, result: None,       error: Some(e.to_string()) },
+        Ok(text) => IpcResponse {
+            ok: true,
+            result: Some(text),
+            error: None,
+        },
+        Err(e) => IpcResponse {
+            ok: false,
+            result: None,
+            error: Some(e.to_string()),
+        },
     }
 }
-

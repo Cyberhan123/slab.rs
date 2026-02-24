@@ -1,15 +1,15 @@
-pub mod config;
 pub mod backend;
+pub mod config;
 
-use crate::state::AppState;
 use crate::middleware::auth;
+use crate::state::AppState;
 
+use axum::body::Body;
+use axum::http::Request;
+use axum::middleware;
+use axum::middleware::Next;
 use axum::Router;
 use std::sync::Arc;
-use axum::middleware;
-use axum::http::{Request};
-use axum::middleware::{Next};
-use axum::{body::Body};
 use utoipa::OpenApi;
 
 // Routes nested under `/admin` (models, dylib, backend, config).

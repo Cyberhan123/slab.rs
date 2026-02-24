@@ -4,6 +4,7 @@
 //! `slab_core::api::status/result/cancel` for live status queries.
 //! Server-only tasks (ffmpeg conversions, downloads) track status purely in DB.
 
+use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};
@@ -276,16 +277,18 @@ pub async fn restart_task(
                     tokio::spawn(async move {
                         // The preprocess stage provides the real PCM data; the initial
                         // Bytes payload is an empty placeholder that gets replaced by it.
-                        let core_result = slab_core::api::backend("ggml.whisper")
-                            .op("inference")
-                            .input(slab_core::Payload::Bytes(std::sync::Arc::from(
-                                [] as [u8; 0]
-                            )))
-                            .preprocess("ffmpeg.to_pcm_f32le", move |_| {
-                                crate::routes::v1::audio::convert_to_pcm_f32le(&tmp_path)
-                            })
-                            .run()
-                            .await;
+                        let core_result = slab_core::api::backend(
+                            slab_core::api::Backend::from_str("ggml.whisper").unwrap(),
+                        )
+                        .op(slab_core::api::Event::Inference)
+                        .input(slab_core::Payload::Bytes(std::sync::Arc::from(
+                            [] as [u8; 0]
+                        )))
+                        .preprocess("ffmpeg.to_pcm_f32le", move |_| {
+                            crate::routes::v1::audio::convert_to_pcm_f32le(&tmp_path)
+                        })
+                        .run()
+                        .await;
                         match core_result {
                             Ok(core_task_id) => {
                                 store
@@ -325,11 +328,13 @@ pub async fn restart_task(
                     .update_task_status(&id, "running", None, None)
                     .await?;
                 tokio::spawn(async move {
-                    let core_result = slab_core::api::backend("ggml.diffusion")
-                        .op("inference_image")
-                        .input(slab_core::Payload::Json(input))
-                        .run()
-                        .await;
+                    let core_result = slab_core::api::backend(
+                        slab_core::api::Backend::from_str("ggml.diffusion").unwrap(),
+                    )
+                    .op(slab_core::api::Event::InferenceImage)
+                    .input(slab_core::Payload::Json(input))
+                    .run()
+                    .await;
                     match core_result {
                         Ok(core_task_id) => {
                             store

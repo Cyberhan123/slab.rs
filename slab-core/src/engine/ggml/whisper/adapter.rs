@@ -23,7 +23,10 @@ pub enum GGMLWhisperEngineError {
     #[error(
         "GGMLWhisperEngine already initialized with different library path: {existing} (requested: {requested})"
     )]
-    LibraryPathMismatch { existing: PathBuf, requested: PathBuf },
+    LibraryPathMismatch {
+        existing: PathBuf,
+        requested: PathBuf,
+    },
 
     #[error("GGMLWhisperEngine global storage not initialized")]
     GlobalStorageNotInitialized,
@@ -125,11 +128,12 @@ impl GGMLWhisperEngine {
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
 
         {
-            let read_guard = global_lock
-                .read()
-                .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
-                    operation: "read whisper global state",
-                })?;
+            let read_guard =
+                global_lock
+                    .read()
+                    .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
+                        operation: "read whisper global state",
+                    })?;
             if let Some(global) = read_guard.as_ref() {
                 if global.lib_path != normalized_path {
                     return Err(GGMLWhisperEngineError::LibraryPathMismatch {
@@ -143,11 +147,12 @@ impl GGMLWhisperEngine {
         }
 
         let engine = Arc::new(Self::build_service(&normalized_path)?);
-        let mut write_guard = global_lock
-            .write()
-            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
-                operation: "write whisper global state",
-            })?;
+        let mut write_guard =
+            global_lock
+                .write()
+                .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
+                    operation: "write whisper global state",
+                })?;
 
         if let Some(global) = write_guard.as_ref() {
             if global.lib_path != normalized_path {
@@ -172,11 +177,12 @@ impl GGMLWhisperEngine {
         let normalized_path = Self::resolve_lib_path(path)?;
         let engine = Arc::new(Self::build_service(&normalized_path)?);
         let global_lock = INSTANCE.get_or_init(|| RwLock::new(None));
-        let mut write_guard = global_lock
-            .write()
-            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
-                operation: "write whisper global state",
-            })?;
+        let mut write_guard =
+            global_lock
+                .write()
+                .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
+                    operation: "write whisper global state",
+                })?;
 
         let previous = write_guard
             .as_ref()
@@ -246,7 +252,6 @@ impl GGMLWhisperEngine {
         &self,
         audio_data: &[f32],
     ) -> Result<Vec<SubtitleEntry>, engine::EngineError> {
-
         let ctx_lock = self
             .ctx
             .lock()
@@ -263,16 +268,16 @@ impl GGMLWhisperEngine {
             patience: -1.0,
         });
 
-        let mut state = ctx
-            .create_state()
-            .map_err(|source| GGMLWhisperEngineError::CreateInferenceState {
+        let mut state =
+            ctx.create_state()
+                .map_err(|source| GGMLWhisperEngineError::CreateInferenceState {
+                    source: source.into(),
+                })?;
+        state.full(params, &audio_data[..]).map_err(|source| {
+            GGMLWhisperEngineError::InferenceFailed {
                 source: source.into(),
-            })?;
-        state
-            .full(params, &audio_data[..])
-            .map_err(|source| GGMLWhisperEngineError::InferenceFailed {
-                source: source.into(),
-            })?;
+            }
+        })?;
 
         let srt_entries: Vec<SubtitleEntry> = state
             .as_iter()
@@ -294,11 +299,11 @@ impl GGMLWhisperEngine {
 #[cfg(test)]
 mod test {
 
+    use super::*;
     use hf_hub::api::sync::Api;
     use tokio;
-    use super::*;
 
-     fn ensure_whisper_dir() -> PathBuf {
+    fn ensure_whisper_dir() -> PathBuf {
         let mut test_data_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         test_data_path.push("../testdata");
         test_data_path.join("whisper")
@@ -315,8 +320,8 @@ mod test {
 
         let reloaded = GGMLWhisperEngine::reload(whisper_dir.as_path())
             .expect("failed to reload whisper service");
-        let current_after_reload =
-            GGMLWhisperEngine::current().expect("failed to get current whisper service after reload");
+        let current_after_reload = GGMLWhisperEngine::current()
+            .expect("failed to get current whisper service after reload");
 
         assert!(Arc::ptr_eq(&reloaded, &current_after_reload));
         assert!(!Arc::ptr_eq(&initial, &reloaded));
@@ -330,7 +335,8 @@ mod test {
 
         let path = ensure_whisper_dir();
 
-        let ws = GGMLWhisperEngine::init(path.as_path()).expect("failed to initialize whisper service");
+        let ws =
+            GGMLWhisperEngine::init(path.as_path()).expect("failed to initialize whisper service");
 
         let api = Api::new().expect("fail to init hf-api");
         let model_path = api

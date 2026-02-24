@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{RwLock, mpsc};
+use tokio::sync::{mpsc, RwLock};
 
 use crate::runtime::backend::protocol::StreamHandle;
 use crate::runtime::types::{Payload, StageStatus, TaskId, TaskStatus};
@@ -33,9 +33,7 @@ pub struct ResultStorage {
 
 impl ResultStorage {
     /// Create a new, empty storage instance.
-    pub fn new(
-        submit_tx: mpsc::Sender<crate::runtime::orchestrator::OrchestratorCommand>,
-    ) -> Self {
+    pub fn new(submit_tx: mpsc::Sender<crate::runtime::orchestrator::OrchestratorCommand>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
             next_id: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -72,12 +70,7 @@ impl ResultStorage {
     }
 
     /// Update the status of a specific stage.
-    pub async fn set_stage_status(
-        &self,
-        task_id: TaskId,
-        stage_index: usize,
-        status: StageStatus,
-    ) {
+    pub async fn set_stage_status(&self, task_id: TaskId, stage_index: usize, status: StageStatus) {
         if let Some(record) = self.inner.write().await.get_mut(&task_id) {
             if let Some(s) = record.stage_statuses.get_mut(stage_index) {
                 *s = status;
@@ -144,9 +137,7 @@ impl ResultStorage {
     }
 
     /// Return a clone of the submit sender (used by pipeline builder).
-    pub fn submit_tx(
-        &self,
-    ) -> mpsc::Sender<crate::runtime::orchestrator::OrchestratorCommand> {
+    pub fn submit_tx(&self) -> mpsc::Sender<crate::runtime::orchestrator::OrchestratorCommand> {
         self.submit_tx.clone()
     }
 }

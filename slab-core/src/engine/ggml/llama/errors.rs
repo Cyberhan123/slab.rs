@@ -11,7 +11,10 @@ pub enum GGMLLlamaEngineError {
     #[error(
         "LlamaService already initialized with different library path: {existing} (requested: {requested})"
     )]
-    LibraryPathMismatch { existing: PathBuf, requested: PathBuf },
+    LibraryPathMismatch {
+        existing: PathBuf,
+        requested: PathBuf,
+    },
 
     #[error("LlamaService global storage not initialized")]
     GlobalStorageNotInitialized,
@@ -77,7 +80,7 @@ pub enum GGMLLlamaEngineError {
     },
 
     #[error("Inference stream error: {message}")]
-    InferenceStreamError {   
+    InferenceStreamError {
         #[source]
         source: anyhow::Error,
         message: String,

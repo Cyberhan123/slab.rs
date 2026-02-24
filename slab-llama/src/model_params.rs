@@ -47,7 +47,10 @@ impl LlamaModelParams {
         self
     }
 
-    pub(crate) fn to_c_params(&self, lib: &slab_llama_sys::LlamaLib) -> slab_llama_sys::llama_model_params {
+    pub(crate) fn to_c_params(
+        &self,
+        lib: &slab_llama_sys::LlamaLib,
+    ) -> slab_llama_sys::llama_model_params {
         let mut params = unsafe { lib.llama_model_default_params() };
         params.n_gpu_layers = self.n_gpu_layers;
         params.vocab_only = self.vocab_only;

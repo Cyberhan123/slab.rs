@@ -534,11 +534,17 @@ impl<'a, 'b> FullParams<'a, 'b> {
                 //let user_data = user_data as *mut Box<dyn FnMut(SegmentCallbackData)>;
 
                 for i in s0..n_segments {
-                    let text = user_data.lib.whisper_full_get_segment_text_from_state(state, i);
+                    let text = user_data
+                        .lib
+                        .whisper_full_get_segment_text_from_state(state, i);
                     let text = CStr::from_ptr(text);
 
-                    let t0 = user_data.lib.whisper_full_get_segment_t0_from_state(state, i);
-                    let t1 = user_data.lib.whisper_full_get_segment_t1_from_state(state, i);
+                    let t0 = user_data
+                        .lib
+                        .whisper_full_get_segment_t0_from_state(state, i);
+                    let t1 = user_data
+                        .lib
+                        .whisper_full_get_segment_t1_from_state(state, i);
                     (user_data.handler)(SegmentCallbackData {
                         segment: i,
                         start_timestamp: t0,
@@ -551,7 +557,7 @@ impl<'a, 'b> FullParams<'a, 'b> {
 
         match closure.into() {
             Some(closure) => {
-              // Stable address
+                // Stable address
                 let wrapper = Box::new(CallbackWrapper {
                     handler: Box::new(closure),
                     lib: Arc::clone(&self.instance.lib),

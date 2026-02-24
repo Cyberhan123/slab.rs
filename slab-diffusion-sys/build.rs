@@ -2,9 +2,9 @@
 
 extern crate bindgen;
 
+use slab_libfetch::fetch_header;
 use std::env;
 use std::path::PathBuf;
-use slab_libfetch::fetch_header;
 
 fn main() {
     // 1. 定义你刚才下载头文件的路径
@@ -12,9 +12,14 @@ fn main() {
     // 2. 在 build.rs 中调用 fetch_header 来确保头文件存在
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        fetch_header("leejet", "stable-diffusion.cpp", Some("master-504-636d3cb"), include_path.as_path())
-            .await
-            .expect("Failed to fetch diffusion headers");
+        fetch_header(
+            "leejet",
+            "stable-diffusion.cpp",
+            Some("master-504-636d3cb"),
+            include_path.as_path(),
+        )
+        .await
+        .expect("Failed to fetch diffusion headers");
     });
     // 2. 告诉 Cargo：如果这些头文件变了，就重新运行 build.rs
     println!("cargo:rerun-if-changed={}", include_path.display());
@@ -44,5 +49,4 @@ fn main() {
                 .expect("Unable to copy bindings.rs");
         }
     }
-   
 }
