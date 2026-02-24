@@ -3,7 +3,7 @@ use slab_llama::{Llama, LlamaContextParams, LlamaModelParams};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use tracing::info;
 
 use super::engine::LlamaInferenceEngine;
@@ -12,13 +12,13 @@ use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 #[derive(Debug)]
 pub struct GGMLLlamaEngine {
     instance: Arc<Llama>,
-    inference_engine: Mutex<Option<LlamaInferenceEngine>>,
+    inference_engine: RwLock<Option<LlamaInferenceEngine>>,
 }
 
 // SAFETY: GGMLLlamaEngine is always owned through Arc<GGMLLlamaEngine> by backend workers.
 // The `instance: Arc<Llama>` field wraps a dynamically loaded library handle which is
 // immutable after creation. Mutable lifecycle state (loaded engine handle)
-// is guarded by the `inference_engine: Mutex<...>` field.
+// is guarded by the `inference_engine: RwLock<...>` field.
 unsafe impl Send for GGMLLlamaEngine {}
 unsafe impl Sync for GGMLLlamaEngine {}
 
@@ -57,7 +57,7 @@ impl GGMLLlamaEngine {
 
         Ok(Self {
             instance: Arc::new(llama),
-            inference_engine: Mutex::new(None),
+            inference_engine: RwLock::new(None),
         })
     }
 
@@ -85,13 +85,13 @@ impl GGMLLlamaEngine {
             return Err(GGMLLlamaEngineError::InvalidWorkerCount { num_workers }.into());
         }
 
-        let mut engine_lock =
+        let mut write_lock =
             self.inference_engine
-                .lock()
+                .write()
                 .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                     operation: "lock llama engine state",
                 })?;
-        *engine_lock = None;
+        *write_lock = None;
 
         let path = path_to_model
             .as_ref()
@@ -109,18 +109,18 @@ impl GGMLLlamaEngine {
 
         let engine = LlamaInferenceEngine::start(num_workers, Arc::clone(&model), ctx_params)?;
 
-        *engine_lock = Some(engine);
+        *write_lock = Some(engine);
         Ok(())
     }
 
     fn require_engine(&self) -> Result<LlamaInferenceEngine, engine::EngineError> {
-        let engine_lock: std::sync::MutexGuard<'_, Option<LlamaInferenceEngine>> = self
+        let read_lock: std::sync::RwLockReadGuard<'_, Option<LlamaInferenceEngine>> = self
             .inference_engine
-            .lock()
+            .read()
             .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                 operation: "lock llama engine state",
             })?;
-        let engine = engine_lock
+        let engine = read_lock
             .as_ref()
             .ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
         Ok(engine.clone())
@@ -272,5 +272,17 @@ impl GGMLLlamaEngine {
         };
 
         Ok((stream, sid))
+    }
+
+    /// Unload the current model and stop all inference workers.
+    pub fn unload(&self) -> Result<(), engine::EngineError> {
+        let mut write_lock =
+            self.inference_engine
+                .write()
+                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+                    operation: "lock llama engine state",
+                })?;
+        *write_lock = None;
+        Ok(())
     }
 }

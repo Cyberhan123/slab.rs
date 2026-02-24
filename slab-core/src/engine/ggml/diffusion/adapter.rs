@@ -45,14 +45,14 @@ pub enum GGMLDiffusionEngineError {
 #[derive(Debug)]
 pub struct GGMLDiffusionEngine {
     instance: Arc<Diffusion>,
-    ctx: Arc<Mutex<Option<slab_diffusion::SdContext>>>,
+    // can't use RwLock here because the context is mutated in-place during inference
+    ctx: Mutex<Option<slab_diffusion::SdContext>>,
 }
 
 // SAFETY: GGMLDiffusionEngine is only accessed through Arc<Mutex<...>> for mutable state.
 // The `instance: Arc<Diffusion>` field wraps a dynamically loaded library handle which is
 // immutable after creation (contexts are created from it, not mutated).
-// All mutable inference state is guarded by the `ctx: Arc<Mutex<...>>` field.
-// See: https://github.com/leejet/stable-diffusion.cpp (README / architecture)
+// All mutable inference state is guarded by the `ctx: Mutex<...>` field.
 unsafe impl Send for GGMLDiffusionEngine {}
 unsafe impl Sync for GGMLDiffusionEngine {}
 
@@ -85,7 +85,7 @@ impl GGMLDiffusionEngine {
 
         Ok(Self {
             instance: Arc::new(diffusion),
-            ctx: Arc::new(Mutex::new(None)),
+            ctx: Mutex::new(None),
         })
     }
 
@@ -145,6 +145,18 @@ impl GGMLDiffusionEngine {
             }
             .into()
         })
+    }
+
+    /// Unload the current context and release its resources.
+    pub fn unload(&self) -> Result<(), engine::EngineError> {
+        let mut ctx_lock = self
+            .ctx
+            .lock()
+            .map_err(|_| GGMLDiffusionEngineError::LockPoisoned {
+                operation: "lock diffusion context",
+            })?;
+        *ctx_lock = None;
+        Ok(())
     }
 }
 

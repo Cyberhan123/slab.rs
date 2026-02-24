@@ -59,13 +59,13 @@ pub enum GGMLWhisperEngineError {
 #[derive(Debug)]
 pub struct GGMLWhisperEngine {
     instance: Arc<Whisper>,
-    ctx: Arc<Mutex<Option<WhisperContext>>>,
+    ctx: Mutex<Option<WhisperContext>>,
 }
 
 // SAFETY: GGMLWhisperEngine is only accessed through Arc<Mutex<...>> for mutable state.
 // The `instance: Arc<Whisper>` field wraps a dynamically loaded library handle which is
 // immutable after creation (contexts and params are created from it, not mutated).
-// All mutable inference state is guarded by the `ctx: Arc<Mutex<...>>` field.
+// All mutable inference state is guarded by the `ctx: Mutex<...>` field.
 unsafe impl Send for GGMLWhisperEngine {}
 unsafe impl Sync for GGMLWhisperEngine {}
 
@@ -87,7 +87,7 @@ impl GGMLWhisperEngine {
         })
     }
 
-    fn build_service(normalized_path: &Path) -> Result<Self, engine::EngineError> {
+    fn build_engine(normalized_path: &Path) -> Result<Self, engine::EngineError> {
         info!("current whisper path is: {}", normalized_path.display());
         let whisper = Whisper::new(normalized_path.to_path_buf()).map_err(|source| {
             GGMLWhisperEngineError::InitializeDynamicLibrary {
@@ -98,7 +98,7 @@ impl GGMLWhisperEngine {
 
         Ok(Self {
             instance: Arc::new(whisper),
-            ctx: Arc::new(Mutex::new(None)),
+            ctx: Mutex::new(None),
         })
     }
 
@@ -108,7 +108,7 @@ impl GGMLWhisperEngine {
     /// Call [`new_context`] afterwards to load a model.
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
         let normalized = Self::resolve_lib_path(path)?;
-        let engine = Self::build_service(&normalized)?;
+        let engine = Self::build_engine(&normalized)?;
         Ok(Arc::new(engine))
     }
 
@@ -123,7 +123,6 @@ impl GGMLWhisperEngine {
             .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
                 operation: "lock whisper context",
             })?;
-        *ctx_lock = None;
 
         let path = path_to_model
             .as_ref()
@@ -138,7 +137,6 @@ impl GGMLWhisperEngine {
                 source: source.into(),
             })?;
         *ctx_lock = Some(ctx);
-
         Ok(())
     }
 
@@ -187,5 +185,18 @@ impl GGMLWhisperEngine {
             })
             .collect();
         Ok(srt_entries)
+    }
+
+    // unload the model. free ctx
+    pub fn unload(&self) -> Result<(), engine::EngineError> {
+        let mut ctx_lock = self
+            .ctx
+            .lock()
+            .map_err(|_| GGMLWhisperEngineError::LockPoisoned {
+                operation: "lock whisper context",
+            })?;
+
+        *ctx_lock = None;
+        Ok(())
     }
 }
