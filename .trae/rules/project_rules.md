@@ -1,0 +1,1 @@
+1. slab-app 项目为 tauri 项目 , 你需要使用bun 安装依赖
