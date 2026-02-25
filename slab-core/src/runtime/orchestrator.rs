@@ -6,6 +6,19 @@ use crate::runtime::stage::Stage;
 use crate::runtime::storage::ResultStorage;
 use crate::runtime::types::{Payload, RuntimeError, StageStatus, TaskId, TaskStatus};
 
+/// Maximum time to wait for a GPU admission permit before giving up.
+///
+/// A generous timeout is preferable to an immediate rejection because GPU
+/// tasks are typically short-lived and a slot will usually become available
+/// within a few seconds.
+#[cfg(not(test))]
+const GPU_ACQUIRE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Short timeout used in unit tests so that the "no permits available" scenario
+/// resolves quickly without slowing down the test suite.
+#[cfg(test)]
+const GPU_ACQUIRE_TIMEOUT: std::time::Duration = std::time::Duration::from_millis(200);
+
 /// Commands sent to the orchestrator's internal event loop.
 #[derive(Debug)]
 pub enum OrchestratorCommand {
@@ -161,8 +174,12 @@ impl Orchestrator {
                 },
 
                 Stage::Gpu(gpu_stage) => {
-                    // Acquire admission permit before dispatching.
-                    let permit = match rm.try_acquire(&gpu_stage.backend_id) {
+                    // Acquire admission permit before dispatching, waiting up
+                    // to GPU_ACQUIRE_TIMEOUT for a slot to become available.
+                    let permit = match rm
+                        .acquire_with_timeout(&gpu_stage.backend_id, GPU_ACQUIRE_TIMEOUT)
+                        .await
+                    {
                         Ok(p) => p,
                         Err(err) => {
                             storage
@@ -198,8 +215,11 @@ impl Orchestrator {
                 }
 
                 Stage::GpuStream(stream_stage) => {
-                    // Streaming stage must be last; acquire permit.
-                    let permit = match rm.try_acquire(&stream_stage.backend_id) {
+                    // Streaming stage must be last; acquire permit with timeout.
+                    let permit = match rm
+                        .acquire_with_timeout(&stream_stage.backend_id, GPU_ACQUIRE_TIMEOUT)
+                        .await
+                    {
                         Ok(p) => p,
                         Err(err) => {
                             storage
