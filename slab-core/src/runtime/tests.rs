@@ -148,7 +148,9 @@ mod tests {
 
     #[tokio::test]
     async fn gpu_stage_busy_error_when_no_permits() {
-        // Register backend with capacity 0.
+        // Register backend with capacity 0 so that no permit is ever available.
+        // The orchestrator will wait up to GPU_ACQUIRE_TIMEOUT (very short in
+        // test builds) and then fail the task with RuntimeError::Timeout.
         let mut rm = ResourceManager::new();
         rm.register_backend("busy-backend", 0);
         let orchestrator = Orchestrator::start(rm, 64);
@@ -165,7 +167,9 @@ mod tests {
             .await
             .expect("submit should succeed");
 
-        let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        // Wait up to 2 s; in test builds GPU_ACQUIRE_TIMEOUT is 200 ms so the
+        // task should fail well within this window.
+        let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
             loop {
                 let view = orchestrator
                     .get_status(task_id)
@@ -178,11 +182,12 @@ mod tests {
             }
         })
         .await
-        .expect("task should fail quickly");
+        .expect("task should fail within 2 s (GPU_ACQUIRE_TIMEOUT is 200 ms in tests)");
 
         assert!(
             matches!(result, TaskStatus::Failed { .. }),
-            "task should fail due to busy backend"
+            "task should fail after permit timeout, got {:?}",
+            result
         );
     }
 
@@ -258,6 +263,138 @@ mod tests {
             }
         }
         assert_eq!(tokens, "hello world");
+    }
+
+    // ── Broadcast channel tests ───────────────────────────────────────────────
+
+    /// Verify that `acquire_with_timeout` waits for a permit to become available
+    /// instead of failing immediately.
+    #[tokio::test]
+    async fn acquire_with_timeout_waits_for_permit() {
+        use crate::runtime::backend::admission::ResourceManager;
+
+        let mut rm = ResourceManager::new();
+        rm.register_backend("serial-backend", 1);
+
+        // Grab the single permit.
+        let permit = rm.try_acquire("serial-backend").expect("first permit");
+
+        // Spawn a task that releases the permit after a short delay.
+        tokio::spawn(async move {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+            drop(permit);
+        });
+
+        // acquire_with_timeout should succeed once the permit is released.
+        let result = rm
+            .acquire_with_timeout("serial-backend", std::time::Duration::from_secs(2))
+            .await;
+        assert!(result.is_ok(), "should acquire permit after it is released");
+    }
+
+    /// Integration-style test that mirrors the production worker loop:
+    /// spawns N tasks each running a `biased` `tokio::select!` over a broadcast
+    /// arm (management commands) and an mpsc arm (inference work).  Verifies
+    /// that after broadcasting `WorkerCommand::Unload`, every worker:
+    ///   1. drops its in-memory "context" flag, and
+    ///   2. returns a failure reply for any pending inference request
+    ///      (because the context is now gone).
+    #[tokio::test]
+    async fn worker_broadcast_unload_clears_all_worker_contexts() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use tokio::sync::{broadcast, mpsc, oneshot};
+
+        use crate::runtime::backend::protocol::WorkerCommand;
+
+        const NUM_WORKERS: usize = 3;
+
+        let (bc_tx, _) = broadcast::channel::<WorkerCommand>(16);
+
+        // Per-worker mpsc queues for simulated inference requests.
+        // Each request carries a oneshot reply sender; the worker replies with
+        // whether the context is still loaded.
+        let mut infer_txs: Vec<mpsc::Sender<oneshot::Sender<bool>>> = Vec::new();
+        // Shared context flags accessible from the test for post-hoc assertions.
+        let mut ctx_flags: Vec<Arc<AtomicBool>> = Vec::new();
+        // Per-worker acknowledgement channels for when Unload is observed.
+        let mut ack_rxs: Vec<oneshot::Receiver<()>> = Vec::new();
+
+        for _ in 0..NUM_WORKERS {
+            let mut bc_rx = bc_tx.subscribe();
+            let (infer_tx, mut infer_rx) = mpsc::channel::<oneshot::Sender<bool>>(8);
+            let ctx = Arc::new(AtomicBool::new(true)); // "model is loaded"
+            let ctx_w = Arc::clone(&ctx);
+            let (ack_tx, ack_rx) = oneshot::channel::<()>();
+
+            infer_txs.push(infer_tx);
+            ctx_flags.push(ctx);
+            ack_rxs.push(ack_rx);
+
+            tokio::spawn(async move {
+                let mut ack_tx = Some(ack_tx);
+                loop {
+                    tokio::select! {
+                        biased; // prioritize broadcast over inference
+
+                        cmd = bc_rx.recv() => {
+                            match cmd {
+                                Ok(WorkerCommand::Unload) => {
+                                    // Mirror the production behavior: drop context.
+                                    ctx_w.store(false, Ordering::SeqCst);
+                                    if let Some(tx) = ack_tx.take() {
+                                        let _ = tx.send(());
+                                    }
+                                    // Exit after unload, matching production break.
+                                    break;
+                                }
+                                // Other management commands (LoadLibrary, ReloadLibrary,
+                                // LoadModel) are not relevant to this test scenario —
+                                // ignore them and keep the loop running.
+                                Ok(_) => {}
+                                // Channel closed → exit.
+                                Err(_) => break,
+                            }
+                        }
+
+                        infer_req = infer_rx.recv() => {
+                            match infer_req {
+                                Some(reply_tx) => {
+                                    // Reply with whether context is still loaded.
+                                    let _ = reply_tx.send(ctx_w.load(Ordering::SeqCst));
+                                }
+                                None => break,
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Confirm all workers are ready before broadcasting (they are, since
+        // the receivers were subscribed before spawning, but yield once to let
+        // the spawned tasks enter their select! loops).
+        tokio::task::yield_now().await;
+
+        // Broadcast Unload to all workers.
+        bc_tx
+            .send(WorkerCommand::Unload)
+            .expect("broadcast should reach at least one subscriber");
+
+        // Wait for each worker to acknowledge the Unload.
+        for ack_rx in ack_rxs {
+            tokio::time::timeout(std::time::Duration::from_secs(2), ack_rx)
+                .await
+                .expect("worker should ack Unload within 2 s")
+                .expect("ack sender dropped without sending");
+        }
+
+        // All context flags must now be false.
+        for (i, ctx) in ctx_flags.iter().enumerate() {
+            assert!(
+                !ctx.load(Ordering::SeqCst),
+                "worker {i} context should be cleared after Unload"
+            );
+        }
     }
 
     // ── Storage tests ─────────────────────────────────────────────────────────

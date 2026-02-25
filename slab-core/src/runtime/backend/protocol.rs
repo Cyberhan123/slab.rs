@@ -2,6 +2,43 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::runtime::types::Payload;
 
+/// Management commands broadcast to **all** backend workers so that their
+/// internal state stays consistent.
+///
+/// Unlike [`BackendRequest`] (which is competitive – only one worker
+/// handles each message), these commands are delivered to every worker
+/// simultaneously via a `tokio::sync::broadcast` channel.
+///
+/// All stateful operations that mutate the engine (library + model) are
+/// broadcast so that every worker reaches the same state regardless of which
+/// worker processed the original mpsc request.
+#[derive(Clone, Debug)]
+pub enum WorkerCommand {
+    /// Load the library from `lib_path` if not already loaded.
+    ///
+    /// Sent after a `lib.load` request so that peer workers (which did not
+    /// handle the original mpsc message) also acquire the library handle.
+    LoadLibrary { lib_path: String },
+
+    /// Drop the current library+model and reload from `lib_path`.
+    ///
+    /// Sent after a `lib.reload` request so that all workers switch to the
+    /// new library together.
+    ReloadLibrary { lib_path: String },
+
+    /// Load the model from `model_path` if not already loaded.
+    ///
+    /// Sent after a `model.load` request so that peer workers also have a
+    /// model context ready for inference.
+    LoadModel { model_path: String },
+
+    /// Drop the current model context on every worker.
+    ///
+    /// Sent after a `model.unload` request is processed by one worker so
+    /// that all other workers also clear their (possibly stale) contexts.
+    Unload,
+}
+
 /// A single chunk emitted by a streaming backend.
 #[derive(Debug, Clone)]
 pub enum StreamChunk {
