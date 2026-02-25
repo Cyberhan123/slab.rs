@@ -58,10 +58,10 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::Stream;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::runtime::backend::admission::ResourceManager;
-use crate::runtime::backend::protocol::{BackendOp, BackendRequest, StreamChunk};
+use crate::runtime::backend::protocol::{BackendOp, BackendRequest, StreamChunk, WorkerCommand};
 use crate::runtime::orchestrator::Orchestrator;
 use crate::runtime::pipeline::PipelineBuilder;
 use crate::runtime::stage::CpuStage;
@@ -82,6 +82,9 @@ const STREAM_INIT_TIMEOUT: Duration = Duration::from_secs(30);
 pub(crate) struct ApiRuntime {
     pub(crate) orchestrator: Orchestrator,
     pub(crate) backends: HashMap<String, mpsc::Sender<BackendRequest>>,
+    /// Broadcast senders for backends that support management commands
+    /// (currently `ggml.whisper` and `ggml.diffusion`).
+    pub(crate) broadcast: HashMap<String, broadcast::Sender<WorkerCommand>>,
 }
 
 static RUNTIME: std::sync::OnceLock<ApiRuntime> = std::sync::OnceLock::new();
@@ -205,8 +208,9 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
 
     // ── Phase 2: all loads succeeded; spawn worker tasks ──────────────────────
     let llama_tx = spawn_llama(128, llama_engine);
-    let whisper_tx = spawn_whisper(128, config.backend_capacity, whisper_engine);
-    let diffusion_tx = spawn_diffusion(128, config.backend_capacity, diffusion_engine);
+    let (whisper_tx, whisper_bc_tx) = spawn_whisper(128, config.backend_capacity, whisper_engine);
+    let (diffusion_tx, diffusion_bc_tx) =
+        spawn_diffusion(128, config.backend_capacity, diffusion_engine);
 
     let mut rm = ResourceManager::new();
     rm.register_backend(Backend::GGMLLlama.to_string(), config.backend_capacity);
@@ -220,10 +224,15 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
     backends.insert(Backend::GGMLWhisper.to_string(), whisper_tx);
     backends.insert(Backend::GGMLDiffusion.to_string(), diffusion_tx);
 
+    let mut broadcast_map: HashMap<String, broadcast::Sender<WorkerCommand>> = HashMap::new();
+    broadcast_map.insert(Backend::GGMLWhisper.to_string(), whisper_bc_tx);
+    broadcast_map.insert(Backend::GGMLDiffusion.to_string(), diffusion_bc_tx);
+
     // set() is a no-op if already initialized — idempotent.
     let _ = RUNTIME.set(ApiRuntime {
         orchestrator,
         backends,
+        broadcast: broadcast_map,
     });
 
     let _ = LIB_DIRS.set(LibDirs {

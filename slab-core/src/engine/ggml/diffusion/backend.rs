@@ -27,11 +27,11 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
 use crate::api::Event;
 use crate::engine::ggml::diffusion::adapter::GGMLDiffusionEngine;
-use crate::runtime::backend::protocol::{BackendReply, BackendRequest};
+use crate::runtime::backend::protocol::{BackendReply, BackendRequest, WorkerCommand};
 use crate::runtime::types::Payload;
 
 // ── Configurations ────────────────────────────────────────────────────────────
@@ -75,19 +75,26 @@ fn default_steps() -> i32 {
 ///
 /// Each worker **owns** its engine (library handle + model context).  There is
 /// no shared mutable state between workers, so no `Mutex` is needed on the
-/// context.  When `backend_capacity > 1` multiple workers are spawned; each
+/// context.  When `num_workers > 1` multiple workers are spawned; each
 /// worker owns an independent engine forked from the same library handle and
 /// manages its own model context independently.
+///
+/// Workers listen on both the shared `mpsc` ingress queue (competitive –
+/// only one worker processes each request) and a `broadcast` channel
+/// (fan-out – every worker receives management commands such as `Unload`).
 struct DiffusionWorker {
     /// - `None` → library not loaded.
     /// - `Some(e)` where `e.ctx` is None → lib loaded, no model.
     /// - `Some(e)` where `e.ctx` is Some → lib + model loaded.
     engine: Option<GGMLDiffusionEngine>,
+    /// Broadcast sender shared among all workers so that any worker can
+    /// propagate state-change commands (e.g. `Unload`) to all peers.
+    bc_tx: broadcast::Sender<WorkerCommand>,
 }
 
 impl DiffusionWorker {
-    fn new(engine: Option<GGMLDiffusionEngine>) -> Self {
-        Self { engine }
+    fn new(engine: Option<GGMLDiffusionEngine>, bc_tx: broadcast::Sender<WorkerCommand>) -> Self {
+        Self { engine, bc_tx }
     }
 
     async fn handle(&mut self, req: BackendRequest) {
@@ -135,6 +142,10 @@ impl DiffusionWorker {
         match GGMLDiffusionEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
+                // Broadcast so peer workers also load the same library.
+                let _ = self
+                    .bc_tx
+                    .send(WorkerCommand::LoadLibrary { lib_path: config.lib_path });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -168,6 +179,10 @@ impl DiffusionWorker {
         match GGMLDiffusionEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
+                // Broadcast so peer workers drop their old engine and reload too.
+                let _ = self
+                    .bc_tx
+                    .send(WorkerCommand::ReloadLibrary { lib_path: config.lib_path });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -214,6 +229,10 @@ impl DiffusionWorker {
 
         match result {
             Ok(()) => {
+                // Broadcast so peer workers also load the same model.
+                let _ = self
+                    .bc_tx
+                    .send(WorkerCommand::LoadModel { model_path: config.model_path });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -230,6 +249,9 @@ impl DiffusionWorker {
         match self.engine.as_mut() {
             Some(e) => {
                 e.unload();
+                // Broadcast so every peer worker also drops its context.
+                // Ignore errors: no receivers simply means no other workers.
+                let _ = self.bc_tx.send(WorkerCommand::Unload);
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -303,28 +325,131 @@ impl DiffusionWorker {
 }
 
 // ── Public entry points ───────────────────────────────────────────────────────
-/// Spawn a diffusion backend worker with a pre-loaded engine handle.
+/// Spawn one or more diffusion backend workers sharing a pre-loaded engine handle.
 ///
-/// Used by `api::init` to separate library loading (phase 1) from worker
-/// spawning (phase 2) so that no tasks are started if any library fails.
+/// # Returns
 ///
-/// A single worker is used even when `backend_capacity > 1` because stateful
-/// ops (`lib.load`, `lib.reload`, `model.load`, `model.unload`) must be applied
-/// to one shared engine/context.  Distributing these ops across multiple workers
-/// would leave some workers with stale library handles or unloaded models,
-/// causing nondeterministic inference failures.  The `ResourceManager` semaphore
-/// still guards admission so the worker is never overwhelmed.
+/// A pair of:
+/// - `mpsc::Sender<BackendRequest>` – the ingress queue; inference requests are
+///   dispatched here in *competitive* mode (exactly one worker handles each
+///   message).
+/// - `broadcast::Sender<WorkerCommand>` – the management broadcast channel;
+///   every active worker receives each command (e.g. `Unload`).
+///
+/// # Multi-worker model
+///
+/// `num_workers` tasks share a single `Arc<Mutex<Receiver>>` so that only
+/// one worker processes each inference request.  Every worker also subscribes
+/// to the broadcast channel and reacts to management commands independently,
+/// ensuring consistent state across all workers.
+///
+/// Worker 0 receives the original `engine` handle (library loaded, no model
+/// context).  Workers 1..n each receive a *forked* engine that shares the
+/// same library `Arc` but starts with an empty context.
 pub(crate) fn spawn_backend_with_engine(
     channel_capacity: usize,
-    _num_workers: usize,
+    num_workers: usize,
     engine: Option<GGMLDiffusionEngine>,
-) -> mpsc::Sender<BackendRequest> {
-    let (tx, mut rx) = mpsc::channel::<BackendRequest>(channel_capacity);
-    tokio::spawn(async move {
-        let mut worker = DiffusionWorker::new(engine);
-        while let Some(req) = rx.recv().await {
-            worker.handle(req).await;
-        }
-    });
-    tx
+) -> (mpsc::Sender<BackendRequest>, broadcast::Sender<WorkerCommand>) {
+    let (tx, rx) = mpsc::channel::<BackendRequest>(channel_capacity);
+    // Broadcast capacity of 16 is generous for low-frequency management commands.
+    let (bc_tx, _) = broadcast::channel::<WorkerCommand>(16);
+
+    let num_workers = num_workers.max(1);
+    // Wrap the receiver so multiple workers can compete for messages.
+    let rx = Arc::new(tokio::sync::Mutex::new(rx));
+
+    // Build per-worker engine handles: worker 0 gets the original, the rest
+    // get library-sharing forks with an empty context.
+    let mut worker_engines: Vec<Option<GGMLDiffusionEngine>> = (1..num_workers)
+        .map(|_| engine.as_ref().map(|e| e.fork_library()))
+        .collect();
+    worker_engines.insert(0, engine);
+
+    for worker_engine in worker_engines {
+        let rx = Arc::clone(&rx);
+        let mut bc_rx = bc_tx.subscribe();
+        let mut worker = DiffusionWorker::new(worker_engine, bc_tx.clone());
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    biased; // prioritize management commands over inference
+
+                    // ── Broadcast arm: management commands ────────────────
+                    cmd = bc_rx.recv() => {
+                        match cmd {
+                            Ok(WorkerCommand::LoadLibrary { lib_path }) => {
+                                // Load library only if not already loaded (idempotent
+                                // for the broadcasting worker which already loaded it).
+                                if worker.engine.is_none() {
+                                    if let Ok(engine) = GGMLDiffusionEngine::from_path(&lib_path) {
+                                        worker.engine = Some(engine);
+                                    }
+                                }
+                            }
+                            Ok(WorkerCommand::ReloadLibrary { lib_path }) => {
+                                // Drop existing engine and reload from the new path.
+                                worker.engine = None;
+                                if let Ok(engine) = GGMLDiffusionEngine::from_path(&lib_path) {
+                                    worker.engine = Some(engine);
+                                }
+                            }
+                            Ok(WorkerCommand::LoadModel { model_path }) => {
+                                // Load model only if not already loaded (idempotent
+                                // for the broadcasting worker which already loaded it).
+                                if let Some(engine) = worker.engine.as_mut() {
+                                    if !engine.is_model_loaded() {
+                                        let result = tokio::task::block_in_place(|| {
+                                            use slab_diffusion::SdContextParams;
+                                            let ctx_params =
+                                                SdContextParams::with_model(&model_path);
+                                            engine.new_context(&ctx_params)
+                                        });
+                                        if let Err(e) = result {
+                                            tracing::warn!(
+                                                model_path,
+                                                error = %e,
+                                                "diffusion worker: broadcast LoadModel failed"
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            Ok(WorkerCommand::Unload) => {
+                                if let Some(e) = worker.engine.as_mut() {
+                                    e.unload();
+                                }
+                            }
+                            // Sender dropped → no more commands; exit.
+                            Err(broadcast::error::RecvError::Closed) => break,
+                            // Fell behind; missed one or more messages.  To avoid
+                            // keeping stale context (e.g. if an Unload was missed),
+                            // conservatively unload so the worker returns to a
+                            // known-safe state.
+                            Err(broadcast::error::RecvError::Lagged(_)) => {
+                                if let Some(e) = worker.engine.as_mut() {
+                                    e.unload();
+                                }
+                            }
+                        }
+                    }
+
+                    // ── mpsc arm: competitive inference tasks ─────────────
+                    req = async {
+                        let mut lock = rx.lock().await;
+                        lock.recv().await
+                    } => {
+                        match req {
+                            Some(req) => worker.handle(req).await,
+                            // All senders dropped → shut down this worker.
+                            None => break,
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    (tx, bc_tx)
 }
