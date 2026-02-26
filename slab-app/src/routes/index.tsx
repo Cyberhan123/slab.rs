@@ -1,17 +1,29 @@
 import { useRoutes } from "react-router-dom";
 import Chat from "@/pages/chat";
 import About from "@/pages/about";
+import Settings from "@/pages/settings";
 import { ThemePreview } from "@/components/theme-preview";
-import Layout from "@/layouts/index";
+import Layout from "@/layouts";
+import Hub from "@/pages/hub";
+import Task from "@/pages/task";
+import Audio from "@/pages/audio";
+import Video from "@/pages/video";
+import Image from "@/pages/image";
 
 function AppRoutes() {
   const routes = useRoutes([
     {
       path: '/',
-      element: <Layout />, // 全局外壳
+      element: <Layout />,
       children: [
-        { index: true, element: <Chat /> }, // 默认子路由 (/)
-        { path: 'about', element: <About /> }, // (/about)
+        { index: true, element: <Chat /> },
+        { path: 'image', element: <Image /> },
+        { path: 'audio', element: <Audio /> },
+        { path: 'video', element: <Video /> },
+        { path: 'hub', element: <Hub /> },
+        { path: 'task', element: <Task /> },
+        { path: 'settings', element: <Settings /> },
+        { path: 'about', element: <About /> },
       ],
     },
     { path: "/theme-preview", element: <ThemePreview /> }

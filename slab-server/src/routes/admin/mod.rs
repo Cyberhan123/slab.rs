@@ -16,10 +16,10 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .merge(backend::router())
         .merge(config::router())
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::auth_middleware,
-        ))
+        // .route_layer(middleware::from_fn_with_state(
+        //     state.clone(),
+        //     auth::auth_middleware,
+        // ))
         .with_state(state.clone())
 }
 
