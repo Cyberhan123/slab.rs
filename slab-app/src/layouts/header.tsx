@@ -1,6 +1,6 @@
 export default function Header() {
     return (
-        <header className="sticky top-0 z-10 flex h-20 items-center gap-4 border-b bg-background/95 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <header className="flex h-20 items-center gap-4 border-b bg-background px-4">
            
             <div className="h-6 w-px bg-border md:block hidden" />
             <div className="flex items-center gap-3 py-2">

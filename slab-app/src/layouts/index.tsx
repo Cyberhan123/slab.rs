@@ -14,14 +14,12 @@ export default function Layout() {
                 } as CSSProperties
             }
         >
-            <div className="flex min-h-screen w-full">
+            <div className="flex h-screen w-full overflow-hidden">
                 <AppSidebar />
-                <SidebarInset>
+                <SidebarInset className="flex flex-col h-full">
                     <Header />
-                    <main className="flex-1">
-                        <div>
-                            <Outlet />
-                        </div>
+                    <main className="flex-1 overflow-hidden">
+                        <Outlet />
                     </main>
                 </SidebarInset>
             </div>

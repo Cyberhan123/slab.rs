@@ -1,0 +1,21 @@
+{
+  "chat": {
+    "title": "Chat",
+    "send": "Send",
+    "inputPlaceholder": "Type a message...",
+    "agentName": "Ant Design X Assistant"
+  },
+  "about": {
+    "title": "About",
+    "description": "Slab is a chat application based on Ant Design X"
+  },
+  "header": {
+    "home": "Home",
+    "about": "About",
+    "chat": "Chat"
+  },
+  "sidebar": {
+    "newChat": "New Chat",
+    "history": "History"
+  }
+}
