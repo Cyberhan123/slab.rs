@@ -1,8 +1,8 @@
 import { useContext } from 'react';
 import { Actions } from '@ant-design/x';
 import { SyncOutlined } from '@ant-design/icons';
-import locale from './local';
-import { ChatContext } from './chat-context';
+import locale from '../local';
+import { ChatContext } from '../chat-context';
 
 type FooterProps = {
     id?: string;
