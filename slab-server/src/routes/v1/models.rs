@@ -19,7 +19,7 @@ use crate::state::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(load_model, unload_model, switch_model, download_model),
+    paths(load_model, unload_model, list_available_models, switch_model, download_model),
     components(schemas(
         LoadModelRequest,
         ModelStatusResponse,
@@ -203,9 +203,9 @@ pub async fn list_available_models(
     post,
     path = "/v1/models/switch",
     tag = "v1::models",
-    params(ListAvailableQuery),
+    request_body = SwitchModelRequest,
     responses(
-        (status = 200, description = "List of available files", body = serde_json::Value),
+        (status = 200, description = "Model switched successfully", body = ModelStatusResponse),
         (status = 400, description = "Bad request (invalid parameters)"),
         (status = 500, description = "Backend error"),
     )
@@ -267,10 +267,9 @@ pub async fn switch_model(
     post,
     path = "/v1/models/download",
     tag = "v1::models",
-    params(ListAvailableQuery),
     request_body = DownloadModelRequest,
     responses(
-        (status = 200, description = "List of available files", body = serde_json::Value),
+        (status = 200, description = "Download task created", body = serde_json::Value),
         (status = 400, description = "Bad request (invalid parameters)"),
         (status = 500, description = "Backend error"),
     )

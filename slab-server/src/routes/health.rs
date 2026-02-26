@@ -4,8 +4,13 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{json, Value};
 use std::sync::Arc;
+use utoipa::OpenApi;
 
 use crate::state::AppState;
+
+#[derive(OpenApi)]
+#[openapi(paths(get_health))]
+pub struct HealthApi;
 
 /// Register health-check routes.
 pub fn router() -> Router<Arc<AppState>> {

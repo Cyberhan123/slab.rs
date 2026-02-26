@@ -56,7 +56,7 @@ pub async fn create_session(
 }
 
 #[utoipa::path(
-    post,
+    get,
     path = "/v1/sessions",
     tag = "sessions",
     responses(
