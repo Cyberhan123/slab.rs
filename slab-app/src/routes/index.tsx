@@ -1,12 +1,19 @@
 import { useRoutes } from "react-router-dom";
-import Home from "@/pages/Home";
-import About from "@/pages/About";
+import Chat from "@/pages/chat";
+import About from "@/pages/about";
 import { ThemePreview } from "@/components/theme-preview";
+import Layout from "@/layouts/index";
 
 function AppRoutes() {
   const routes = useRoutes([
-    { path: "/", element: <Home /> },
-    { path: "/about", element: <About /> },
+    {
+      path: '/',
+      element: <Layout />, // 全局外壳
+      children: [
+        { index: true, element: <Chat /> }, // 默认子路由 (/)
+        { path: 'about', element: <About /> }, // (/about)
+      ],
+    },
     { path: "/theme-preview", element: <ThemePreview /> }
   ]);
 
