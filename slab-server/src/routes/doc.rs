@@ -1,4 +1,5 @@
 use crate::routes::admin;
+use crate::routes::health;
 use crate::routes::v1;
 use utoipa::OpenApi;
 
@@ -13,6 +14,7 @@ pub struct ApiDoc;
 
 pub fn get_docs() -> utoipa::openapi::OpenApi {
     let mut root = ApiDoc::openapi();
+    root.merge(health::HealthApi::openapi());
     root.merge(v1::api_docs());
     root.merge(admin::api_docs());
     root

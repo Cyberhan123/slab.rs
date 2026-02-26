@@ -37,7 +37,7 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 #[utoipa::path(
-    post,
+    get,
     path = "/v1/tasks",
     tag = "tasks",
         params(TaskTypeQuery),
@@ -56,7 +56,7 @@ pub async fn list_tasks(
 }
 
 #[utoipa::path(
-    post,
+    get,
     path = "/v1/tasks/{id}",
     tag = "tasks",
     params(
@@ -99,7 +99,7 @@ pub async fn get_task(
 }
 
 #[utoipa::path(
-    post,
+    get,
     path = "/v1/tasks/{id}/result",
     tag = "tasks",
     params(

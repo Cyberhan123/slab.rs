@@ -216,13 +216,15 @@ pub async fn list_backends(
     Ok(Json(serde_json::json!({ "backends": backends })))
 }
 
-/// Download a backend shared library from a GitHub release (`POST /api/models/{type}/download-lib`).
+/// Download a backend shared library from a GitHub release (`POST /admin/backends/download`).
 #[utoipa::path(
-    get,
+    post,
     path = "/admin/backends/download",
     tag = "admin",
+    request_body = DownloadLibRequest,
     responses(
-        (status = 200, description = "List of all registered backends", body = serde_json::Value),
+        (status = 200, description = "Download task created", body = serde_json::Value),
+        (status = 400, description = "Bad request (invalid path)"),
         (status = 401, description = "Unauthorised (management token required)"),
     )
 )]
@@ -284,13 +286,15 @@ pub async fn download_lib(
     Ok(Json(serde_json::json!({ "task_id": task_id })))
 }
 
-/// Reload a backend with a new shared library path (`POST /api/models/{type}/reload-lib`).
+/// Reload a backend with a new shared library path (`POST /admin/backends/reload`).
 #[utoipa::path(
-    get,
-    path = "/admin/backends/download",
+    post,
+    path = "/admin/backends/reload",
     tag = "admin",
+    request_body = ReloadLibRequest,
     responses(
-        (status = 200, description = "List of all registered backends", body = serde_json::Value),
+        (status = 200, description = "Backend reloaded with new library", body = BackendStatusResponse),
+        (status = 400, description = "Bad request (invalid path or unknown backend)"),
         (status = 401, description = "Unauthorised (management token required)"),
     )
 )]

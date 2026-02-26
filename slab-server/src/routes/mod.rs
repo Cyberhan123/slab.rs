@@ -9,7 +9,7 @@
 
 mod admin;
 pub mod doc;
-mod health;
+pub mod health;
 mod v1;
 use axum::{
     middleware::{self},
