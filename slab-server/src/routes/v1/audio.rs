@@ -63,6 +63,16 @@ pub async fn transcribe(
         return Err(ServerError::BadRequest("audio file path is empty".into()));
     }
 
+    match slab_core::api::is_backend_ready(Backend::GGMLWhisper).await {
+        Ok(true) => {}
+        Ok(false) => {
+            return Err(ServerError::BackendNotReady(
+                "Whisper backend is not ready. Configure SLAB_WHISPER_LIB_DIR and load a model before submitting transcription tasks.".into(),
+            ));
+        }
+        Err(e) => return Err(ServerError::Runtime(e)),
+    }
+
     let task_id = Uuid::new_v4().to_string();
     let now = Utc::now();
 

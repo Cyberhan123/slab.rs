@@ -14,6 +14,7 @@ interface Task {
   id: string;
   status: string;
   task_type: string;
+  error_msg?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -264,6 +265,15 @@ export default function Task() {
                                       </div>
                                     </div>
                                   </div>
+
+                                  {selectedTask.status === 'failed' && selectedTask.error_msg && (
+                                    <Alert variant="destructive">
+                                      <AlertTitle>Failure reason</AlertTitle>
+                                      <AlertDescription className="whitespace-pre-wrap break-words">
+                                        {selectedTask.error_msg}
+                                      </AlertDescription>
+                                    </Alert>
+                                  )}
 
                                   {selectedTask.status === 'succeeded' && taskResult && (
                                     <div className="space-y-2">

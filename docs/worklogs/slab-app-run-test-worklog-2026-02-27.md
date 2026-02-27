@@ -14,12 +14,12 @@
 
 ## What Was Executed
 1. Frontend build:
-   - `npm run build` (initial pass to surface current errors)
+   - `bun run build` (initial pass to surface current errors)
 2. Rust checks/tests:
    - `cargo check -p slab-app`
    - `cargo test -p slab-app`
 3. Tauri build validation:
-   - `npm run tauri build -- --no-bundle` (initial)
+   - `bun run tauri build -- --no-bundle` (initial)
 4. Bun-aligned validation after user correction:
    - `bun run build`
    - `bun run tauri build --no-bundle`
