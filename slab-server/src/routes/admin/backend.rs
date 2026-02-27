@@ -19,6 +19,8 @@ use crate::schemas::admin::backend::{
 };
 use crate::state::AppState;
 
+type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
+
 #[derive(OpenApi)]
 #[openapi(
     paths(backend_status, list_backends, download_lib, reload_lib),
@@ -49,6 +51,39 @@ fn backend_id(model_type: &str) -> Option<&'static str> {
     }
 }
 
+fn canonical_backend_id(value: &str) -> Option<&'static str> {
+    match value {
+        "ggml.llama" | "llama" => Some("ggml.llama"),
+        "ggml.whisper" | "whisper" => Some("ggml.whisper"),
+        "ggml.diffusion" | "diffusion" => Some("ggml.diffusion"),
+        _ => None,
+    }
+}
+
+fn windows_download_spec(backend_id: &str) -> Option<(&'static str, &'static str, &'static str, AssetNameResolver)> {
+    match backend_id {
+        "ggml.llama" => Some((
+            "ggml-org",
+            "llama.cpp",
+            "b8069",
+            Box::new(|version: &str| format!("llama-{version}-bin-win-cpu-x64.zip")),
+        )),
+        "ggml.whisper" => Some((
+            "ggml-org",
+            "whisper.cpp",
+            "v1.8.3",
+            Box::new(|_| "whisper-cublas-12.4.0-bin-x64.zip".to_string()),
+        )),
+        "ggml.diffusion" => Some((
+            "leejet",
+            "stable-diffusion.cpp",
+            "master-504-636d3cb",
+            Box::new(|version: &str| format!("stable-diffusion-{version}-bin-win-cpu-x64.zip")),
+        )),
+        _ => None,
+    }
+}
+
 fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
     if path.is_empty() {
         return Err(ServerError::BadRequest(format!(
@@ -73,15 +108,13 @@ fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
 
 /// Shared logic for libfetch-backed download tasks (models and libraries).
 ///
-/// Both `download_model` and `download_lib` follow identical patterns:
-/// validate input, build an asset-name closure specific to the artifact type,
-/// and run `VersionApi::install` in a background task.
+/// Validates queued task input and runs `VersionApi::install` in a background task.
 async fn run_libfetch_download(
     store: Arc<crate::entities::AnyStore>,
     task_manager: Arc<crate::state::TaskManager>,
     tid: String,
     input_data: String,
-    default_asset_fn: Box<dyn Fn(&str) -> String + Send + 'static>,
+    default_asset_fn: AssetNameResolver,
 ) {
     store
         .update_task_status(&tid, "running", None, None)
@@ -108,45 +141,37 @@ async fn run_libfetch_download(
     let owner = input["owner"].as_str().unwrap_or("").to_owned();
     let repo = input["repo"].as_str().unwrap_or("").to_owned();
     let tag = input["tag"].as_str().map(str::to_owned);
-    let target_path = input["target_path"].as_str().unwrap_or("").to_owned();
+    let target_dir = input["target_dir"]
+        .as_str()
+        .or_else(|| input["target_path"].as_str())
+        .unwrap_or("")
+        .to_owned();
     let asset_name = input["asset_name"].as_str().map(str::to_owned);
 
-    if owner.is_empty() || repo.is_empty() {
+    if owner.is_empty() || repo.is_empty() || target_dir.is_empty() {
         store
-            .update_task_status(&tid, "failed", None, Some("owner and repo are required"))
+            .update_task_status(
+                &tid,
+                "failed",
+                None,
+                Some("owner, repo, and target_dir are required"),
+            )
             .await
             .ok();
         task_manager.remove(&tid);
         return;
     }
 
-    let target_dir = match std::path::Path::new(&target_path).parent() {
-        Some(p) => p.to_owned(),
-        None => {
-            store
-                .update_task_status(
-                    &tid,
-                    "failed",
-                    None,
-                    Some("invalid target_path: no parent directory"),
-                )
-                .await
-                .ok();
-            task_manager.remove(&tid);
-            return;
-        }
-    };
-
     let repo_full = format!("{owner}/{repo}");
     let api = slab_libfetch::Api::new()
-        .set_install_dir(&target_dir)
+        .set_install_dir(std::path::Path::new(&target_dir))
         .repo(repo_full);
     let version_api = match tag.as_deref() {
         Some(t) => api.version(t),
         None => api.latest(),
     };
 
-    let asset_resolver: Box<dyn Fn(&str) -> String + Send> = match asset_name {
+    let asset_resolver: AssetNameResolver = match asset_name {
         Some(name) => Box::new(move |_| name.clone()),
         None => default_asset_fn,
     };
@@ -232,17 +257,28 @@ pub async fn download_lib(
     State(state): State<Arc<AppState>>,
     Json(req): Json<DownloadLibRequest>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    validate_path("target_path", &req.target_path)?;
+    validate_path("target_dir", &req.target_dir)?;
+
+    if std::env::consts::OS != "windows" {
+        return Err(ServerError::BadRequest(
+            "download_lib currently supports only Windows hosts".into(),
+        ));
+    }
+
+    let backend_id = canonical_backend_id(&req.backend_id)
+        .ok_or_else(|| ServerError::BadRequest(format!("unknown backend_id: {}", req.backend_id)))?;
+
+    let (owner, repo, tag, asset_resolver) = windows_download_spec(backend_id)
+        .ok_or_else(|| ServerError::BadRequest(format!("unsupported backend_id: {backend_id}")))?;
 
     let task_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now();
     let input_data = serde_json::json!({
-        // "model_type": model_type,
-        "owner": req.owner,
-        "repo":  req.repo,
-        "tag":   req.tag,
-        "target_path": req.target_path,
-        "asset_name": req.asset_name,
+        "backend_id": backend_id,
+        "owner": owner,
+        "repo": repo,
+        "tag": tag,
+        "target_dir": req.target_dir,
     })
     .to_string();
 
@@ -270,14 +306,7 @@ pub async fn download_lib(
         task_manager,
         tid,
         input_data,
-        Box::new(|version: &str| {
-            let ext = match std::env::consts::OS {
-                "macos" => "dylib",
-                "windows" => "dll",
-                _ => "so",
-            };
-            format!("lib-{version}.{ext}")
-        }),
+        asset_resolver,
     ));
 
     state
@@ -376,5 +405,49 @@ mod test {
     #[test]
     fn backend_id_unknown() {
         assert!(backend_id("gpt4").is_none());
+    }
+
+    #[test]
+    fn canonical_backend_id_known() {
+        assert_eq!(canonical_backend_id("llama"), Some("ggml.llama"));
+        assert_eq!(canonical_backend_id("ggml.whisper"), Some("ggml.whisper"));
+        assert_eq!(canonical_backend_id("diffusion"), Some("ggml.diffusion"));
+    }
+
+    #[test]
+    fn canonical_backend_id_unknown() {
+        assert_eq!(canonical_backend_id("gpt4"), None);
+    }
+
+    #[test]
+    fn windows_download_spec_llama() {
+        let (owner, repo, tag, asset) = windows_download_spec("ggml.llama").expect("llama preset");
+        assert_eq!(owner, "ggml-org");
+        assert_eq!(repo, "llama.cpp");
+        assert_eq!(tag, "b8069");
+        assert_eq!(asset(tag), "llama-b8069-bin-win-cpu-x64.zip");
+    }
+
+    #[test]
+    fn windows_download_spec_whisper() {
+        let (owner, repo, tag, asset) =
+            windows_download_spec("ggml.whisper").expect("whisper preset");
+        assert_eq!(owner, "ggml-org");
+        assert_eq!(repo, "whisper.cpp");
+        assert_eq!(tag, "v1.8.3");
+        assert_eq!(asset(tag), "whisper-cublas-12.4.0-bin-x64.zip");
+    }
+
+    #[test]
+    fn windows_download_spec_diffusion() {
+        let (owner, repo, tag, asset) =
+            windows_download_spec("ggml.diffusion").expect("diffusion preset");
+        assert_eq!(owner, "leejet");
+        assert_eq!(repo, "stable-diffusion.cpp");
+        assert_eq!(tag, "master-504-636d3cb");
+        assert_eq!(
+            asset(tag),
+            "stable-diffusion-master-504-636d3cb-bin-win-cpu-x64.zip"
+        );
     }
 }

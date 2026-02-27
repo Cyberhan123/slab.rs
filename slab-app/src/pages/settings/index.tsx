@@ -91,7 +91,7 @@ export default function Settings() {
     setDownloadingBackend(backendId);
     try {
       toast.warning(
-        `Backend ${backendId} download requires owner/repo/tag/target_path. Use /admin/backends/download with full payload.`
+        `Backend ${backendId} download requires backend_id and target_dir. Use /admin/backends/download with payload like {"backend_id":"ggml.llama","target_dir":"C:\\\\slab\\\\llama"}.`
       );
     } catch (error) {
       toast.error(getErrorMessage(error));
