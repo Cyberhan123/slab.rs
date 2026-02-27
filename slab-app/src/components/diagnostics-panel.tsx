@@ -37,13 +37,11 @@ import {
   getLogsByType,
   getLogsByLevel,
   clearLogs,
-  exportLogs,
   createDiagnosticReport,
   testApiConnectivity,
   verifyApiConfig,
   type DiagnosticEntry,
   type LogLevel,
-  initDiagnostics,
 } from '@/lib/api/diagnostics';
 import { RefreshCw, Download, Trash2, CheckCircle, XCircle, AlertCircle } from 'lucide-react';
 

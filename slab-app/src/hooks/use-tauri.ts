@@ -1,8 +1,13 @@
-import { useState } from "react";
+import { useMemo } from "react";
+
+type TauriWindow = Window & {
+  __TAURI_INTERNALS__?: unknown;
+};
+
+export function isTauri(): boolean {
+  return typeof window !== "undefined" && Boolean((window as TauriWindow).__TAURI_INTERNALS__);
+}
 
 export default function useIsTauri() {
-    const [isTauri, _setIsTauri] = useState(() => {
-        return !!(window as any).__TAURI_INTERNALS__;
-    });
-    return isTauri;
+  return useMemo(() => isTauri(), []);
 }

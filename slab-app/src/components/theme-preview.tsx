@@ -30,10 +30,9 @@ import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbP
 import { ScrollArea } from "@/components/ui/scroll-area"
 import {
   Bot, User, Send, Sparkles, Wrench, CheckCircle, Code, MessageSquare,
-  Palette, Settings, Moon, Sun, Bell, Search, Plus, Trash2, Edit3,
-  ChevronDown, Info, AlertTriangle, AlertCircle, Terminal, Bold, Italic,
-  Underline, AlignLeft, AlignCenter, AlignRight, Home, FileText, Image,
-  Heart, Star, MoreHorizontal, Download, Share2, Eye, Copy, Zap,
+  Palette, Settings, Bell, Search, Plus, Trash2, Info, AlertCircle,
+  Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight,
+  MoreHorizontal, Download, Share2, Eye, Copy, Zap,
 } from "lucide-react"
 
 /* ======================================================================

@@ -21,13 +21,36 @@ export interface ApiErrorResponse {
  */
 export class ApiError extends Error {
   code: number;
+  status?: number;
   data: unknown;
 
-  constructor(code: number, message: string, data?: unknown) {
+  constructor(code: number, message: string, data?: unknown, status?: number) {
     super(message);
     this.name = "ApiError";
     this.code = code;
+    this.status = status;
     this.data = data;
+  }
+
+  static fromResponse(response: Response, errorData?: unknown): ApiError {
+    if (
+      typeof errorData === "object" &&
+      errorData !== null &&
+      "code" in errorData &&
+      typeof (errorData as { code?: unknown }).code === "number" &&
+      "message" in errorData &&
+      typeof (errorData as { message?: unknown }).message === "string"
+    ) {
+      const payload = errorData as ApiErrorResponse;
+      return new ApiError(payload.code, payload.message, payload.data, response.status);
+    }
+
+    return new ApiError(
+      response.status * 10,
+      `${response.status} ${response.statusText}`,
+      errorData,
+      response.status
+    );
   }
 
   /**
@@ -85,6 +108,20 @@ export const ErrorCodes = {
   INTERNAL_ERROR: 5002,
 } as const;
 
+export class NetworkError extends ApiError {
+  constructor(message = "Network request failed") {
+    super(5002, message);
+    this.name = "NetworkError";
+  }
+}
+
+export class TimeoutError extends ApiError {
+  constructor(message = "Request timed out") {
+    super(5002, message);
+    this.name = "TimeoutError";
+  }
+}
+
 /**
  * Middleware for handling API errors
  */
@@ -138,7 +175,7 @@ export const errorMiddleware: Middleware = {
       return new ApiError(5002, error.message);
     }
 
-    return error;
+    return new Error(String(error));
   },
 };
 

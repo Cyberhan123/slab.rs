@@ -100,11 +100,6 @@ export default function Hub() {
   const handleDownloadModel = async (values: DownloadFormValues) => {
     try {
       await downloadModelMutation.mutateAsync({
-        params: {
-          path: {
-            repo_id: values.repo_id,
-          },
-        },
         body: values,
       });
       toast.success('Model download initiated');
@@ -131,11 +126,6 @@ export default function Hub() {
   const handleSwitchModel = async (values: SwitchFormValues) => {
     try {
       await switchModelMutation.mutateAsync({
-        params: {
-          path: {
-            repo_id: values.model_path, // Using model_path as repo_id for switch
-          },
-        },
         body: values,
       });
       toast.success('Model switched successfully');

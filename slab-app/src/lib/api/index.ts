@@ -24,6 +24,7 @@ const api = createClient(fetchClient);
 
 // Export default API client
 export default api;
+export const apiFetch = fetchClient;
 
 // Export types
 export type { paths } from './v1.d.ts';
