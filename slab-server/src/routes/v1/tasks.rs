@@ -234,6 +234,7 @@ pub async fn cancel_task(
         (status = 500, description = "Backend error"),
     )
 )]
+
 pub async fn restart_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
@@ -255,114 +256,114 @@ pub async fn restart_task(
     }
 
     // Re-submit to slab-core for tasks that have stored input.
-    if let Some(input_json) = &record.input_data {
-        match record.task_type.as_str() {
-            "whisper" => {
-                let input: serde_json::Value = match serde_json::from_str(input_json) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!(task_id = %id, error = %e, "invalid stored input_data for whisper restart");
-                        return Err(ServerError::Internal(format!(
-                            "invalid stored input_data: {e}"
-                        )));
-                    }
-                };
-                if let Some(tmp_path) = input["tmp_path"].as_str().map(str::to_owned) {
-                    let task_id = id.clone();
-                    let store = Arc::clone(&state.store);
-                    state
-                        .store
-                        .update_task_status(&id, "running", None, None)
-                        .await?;
-                    tokio::spawn(async move {
-                        // The preprocess stage provides the real PCM data; the initial
-                        // Bytes payload is an empty placeholder that gets replaced by it.
-                        let core_result =
-                            slab_core::api::backend(slab_core::api::Backend::GGMLWhisper)
-                                .op(slab_core::api::Event::Inference)
-                                .input(slab_core::Payload::Bytes(std::sync::Arc::from(
-                                    [] as [u8; 0]
-                                )))
-                                .preprocess("ffmpeg.to_pcm_f32le", move |_| {
-                                    crate::routes::v1::audio::convert_to_pcm_f32le(&tmp_path)
-                                })
-                                .run()
-                                .await;
-                        match core_result {
-                            Ok(core_task_id) => {
-                                store
-                                    .set_core_task_id(&task_id, core_task_id as i64)
-                                    .await
-                                    .ok();
-                            }
-                            Err(e) => {
-                                store
-                                    .update_task_status(
-                                        &task_id,
-                                        "failed",
-                                        None,
-                                        Some(&e.to_string()),
-                                    )
-                                    .await
-                                    .ok();
-                            }
-                        }
-                    });
-                }
-            }
-            "image" => {
-                let input: serde_json::Value = match serde_json::from_str(input_json) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        warn!(task_id = %id, error = %e, "invalid stored input_data for image restart");
-                        return Err(ServerError::Internal(format!(
-                            "invalid stored input_data: {e}"
-                        )));
-                    }
-                };
-                let task_id = id.clone();
-                let store = Arc::clone(&state.store);
-                state
-                    .store
-                    .update_task_status(&id, "running", None, None)
-                    .await?;
-                tokio::spawn(async move {
-                    let core_result =
-                        slab_core::api::backend(slab_core::api::Backend::GGMLDiffusion)
-                            .op(slab_core::api::Event::InferenceImage)
-                            .input(slab_core::Payload::Json(input))
-                            .run()
-                            .await;
-                    match core_result {
-                        Ok(core_task_id) => {
-                            store
-                                .set_core_task_id(&task_id, core_task_id as i64)
-                                .await
-                                .ok();
-                        }
-                        Err(e) => {
-                            store
-                                .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
-                                .await
-                                .ok();
-                        }
-                    }
-                });
-            }
-            _ => {
-                // For server-only tasks (ffmpeg, downloads), reset to pending for manual
-                // operator handling.  Future iterations could re-spawn these too.
-                state
-                    .store
-                    .update_task_status(&id, "pending", None, None)
-                    .await?;
-                info!(task_id = %id, task_type = %record.task_type, "task reset to pending for restart");
-                return Ok(Json(
-                    serde_json::json!({ "task_id": id, "status": "pending" }),
-                ));
-            }
-        }
-    }
+    // if let Some(input_json) = &record.input_data {
+    //     match record.task_type.as_str() {
+    //         "whisper" => {
+    //             let input: serde_json::Value = match serde_json::from_str(input_json) {
+    //                 Ok(v) => v,
+    //                 Err(e) => {
+    //                     warn!(task_id = %id, error = %e, "invalid stored input_data for whisper restart");
+    //                     return Err(ServerError::Internal(format!(
+    //                         "invalid stored input_data: {e}"
+    //                     )));
+    //                 }
+    //             };
+    //             if let Some(tmp_path) = input["tmp_path"].as_str().map(str::to_owned) {
+    //                 let task_id = id.clone();
+    //                 let store = Arc::clone(&state.store);
+    //                 state
+    //                     .store
+    //                     .update_task_status(&id, "running", None, None)
+    //                     .await?;
+    //                 tokio::spawn(async move {
+    //                     // The preprocess stage provides the real PCM data; the initial
+    //                     // Bytes payload is an empty placeholder that gets replaced by it.
+    //                     let core_result =
+    //                         slab_core::api::backend(slab_core::api::Backend::GGMLWhisper)
+    //                             .op(slab_core::api::Event::Inference)
+    //                             .input(slab_core::Payload::Bytes(std::sync::Arc::from(
+    //                                 [] as [u8; 0]
+    //                             )))
+    //                             .preprocess("ffmpeg.to_pcm_f32le", move |_| {
+    //                                 crate::routes::v1::audio::convert_to_pcm_f32le(&tmp_path)
+    //                             })
+    //                             .run()
+    //                             .await;
+    //                     match core_result {
+    //                         Ok(core_task_id) => {
+    //                             store
+    //                                 .set_core_task_id(&task_id, core_task_id as i64)
+    //                                 .await
+    //                                 .ok();
+    //                         }
+    //                         Err(e) => {
+    //                             store
+    //                                 .update_task_status(
+    //                                     &task_id,
+    //                                     "failed",
+    //                                     None,
+    //                                     Some(&e.to_string()),
+    //                                 )
+    //                                 .await
+    //                                 .ok();
+    //                         }
+    //                     }
+    //                 });
+    //             }
+    //         }
+    //         "image" => {
+    //             let input: serde_json::Value = match serde_json::from_str(input_json) {
+    //                 Ok(v) => v,
+    //                 Err(e) => {
+    //                     warn!(task_id = %id, error = %e, "invalid stored input_data for image restart");
+    //                     return Err(ServerError::Internal(format!(
+    //                         "invalid stored input_data: {e}"
+    //                     )));
+    //                 }
+    //             };
+    //             let task_id = id.clone();
+    //             let store = Arc::clone(&state.store);
+    //             state
+    //                 .store
+    //                 .update_task_status(&id, "running", None, None)
+    //                 .await?;
+    //             tokio::spawn(async move {
+    //                 let core_result =
+    //                     slab_core::api::backend(slab_core::api::Backend::GGMLDiffusion)
+    //                         .op(slab_core::api::Event::InferenceImage)
+    //                         .input(slab_core::Payload::Json(input))
+    //                         .run()
+    //                         .await;
+    //                 match core_result {
+    //                     Ok(core_task_id) => {
+    //                         store
+    //                             .set_core_task_id(&task_id, core_task_id as i64)
+    //                             .await
+    //                             .ok();
+    //                     }
+    //                     Err(e) => {
+    //                         store
+    //                             .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
+    //                             .await
+    //                             .ok();
+    //                     }
+    //                 }
+    //             });
+    //         }
+    //         _ => {
+    //             // For server-only tasks (ffmpeg, downloads), reset to pending for manual
+    //             // operator handling.  Future iterations could re-spawn these too.
+    //             state
+    //                 .store
+    //                 .update_task_status(&id, "pending", None, None)
+    //                 .await?;
+    //             info!(task_id = %id, task_type = %record.task_type, "task reset to pending for restart");
+    //             return Ok(Json(
+    //                 serde_json::json!({ "task_id": id, "status": "pending" }),
+    //             ));
+    //         }
+    //     }
+    // }
 
     info!(task_id = %id, task_type = %record.task_type, "task restarted");
     Ok(Json(

@@ -23,8 +23,8 @@ export default function Image() {
 
   // API mutations
   const generateImageMutation = api.useMutation('post', '/v1/images/generations');
-  const getTaskMutation = api.useMutation('post', '/v1/tasks/{id}');
-  const getTaskResultMutation = api.useMutation('post', '/v1/tasks/{id}/result');
+  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
+  const getTaskResultMutation = api.useMutation('get', '/v1/tasks/{id}/result');
 
   const handleGenerate = async () => {
     if (!prompt) {
