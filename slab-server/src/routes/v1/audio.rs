@@ -5,8 +5,8 @@
 //! The returned slab-core `TaskId` is persisted so that the generic
 //! `/api/tasks` endpoints can query status and result via `slab_core::api::status/result`.
 
-use std::sync::Arc;
 use std::process::Stdio;
+use std::sync::Arc;
 
 use axum::extract::{Multipart, State};
 use axum::routing::post;
@@ -18,14 +18,17 @@ use uuid::Uuid;
 
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
-use crate::schemas::v1::audio::CompletionRequest;
+use crate::schemas::v1::audio::{CompletionRequest, CompletionRequestUpload};
 use crate::state::AppState;
 use bytemuck::cast_slice;
 use slab_core::api::{Backend, Event};
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
-#[openapi(paths(transcribe_upload, transcribe))]
+#[openapi(
+    paths(transcribe_upload, transcribe),
+    components(schemas(CompletionRequestUpload, CompletionRequest,))
+)]
 pub struct AudioApi;
 
 /// Register audio routes.
@@ -78,18 +81,18 @@ pub async fn transcribe_upload(
     let max_upload_size_bytes = max_upload_size_mb * 1024 * 1024;
 
     let allowed_mime_types = [
-        "audio/mpeg",      // MP3
-        "audio/wav",       // WAV
-        "audio/wave",      // WAV (alternative)
-        "audio/x-wav",     // WAV (alternative)
-        "audio/flac",      // FLAC
-        "audio/x-flac",    // FLAC (alternative)
-        "audio/mp4",       // M4A
-        "audio/x-m4a",     // M4A (alternative)
-        "audio/ogg",       // OGG
-        "video/mp4",       // MP4 video
+        "audio/mpeg",       // MP3
+        "audio/wav",        // WAV
+        "audio/wave",       // WAV (alternative)
+        "audio/x-wav",      // WAV (alternative)
+        "audio/flac",       // FLAC
+        "audio/x-flac",     // FLAC (alternative)
+        "audio/mp4",        // M4A
+        "audio/x-m4a",      // M4A (alternative)
+        "audio/ogg",        // OGG
+        "video/mp4",        // MP4 video
         "video/x-matroska", // MKV video
-        "video/webm",      // WebM video
+        "video/webm",       // WebM video
     ];
 
     // Extract the uploaded file
@@ -97,17 +100,18 @@ pub async fn transcribe_upload(
     let mut file_name = String::new();
     let mut content_type = String::new();
 
-    while let Some(field) = multipart.next_field().await
+    while let Some(field) = multipart
+        .next_field()
+        .await
         .map_err(|e| ServerError::BadRequest(format!("Failed to read multipart field: {e}")))?
     {
         let field_name = field.name().unwrap_or("unknown");
 
         if field_name == "file" {
-            file_name = field.file_name()
-                .unwrap_or("upload")
-                .to_string();
+            file_name = field.file_name().unwrap_or("upload").to_string();
 
-            content_type = field.content_type()
+            content_type = field
+                .content_type()
                 .unwrap_or("application/octet-stream")
                 .to_string();
 
@@ -126,7 +130,9 @@ pub async fn transcribe_upload(
 
             // Stream the file data with size validation
             let mut stream = field;
-            while let Some(chunk) = stream.next_chunk().await
+            while let Some(chunk) = stream
+                .chunk()
+                .await
                 .map_err(|e| ServerError::BadRequest(format!("Failed to read file chunk: {e}")))?
             {
                 file_bytes.extend_from_slice(&chunk);
@@ -148,7 +154,9 @@ pub async fn transcribe_upload(
                 "received file upload"
             );
         } else {
-            return Err(ServerError::BadRequest(format!("Unknown field: {field_name}")));
+            return Err(ServerError::BadRequest(format!(
+                "Unknown field: {field_name}"
+            )));
         }
     }
 
@@ -159,22 +167,22 @@ pub async fn transcribe_upload(
     // Create a secure temporary file with a randomized name
     let task_id = Uuid::new_v4().to_string();
     let temp_dir = std::env::temp_dir();
-    let temp_file_path = temp_dir
-        .join(format!("slab_upload_{}_{}/{}",
-            Uuid::new_v4(),
-            task_id,
-            sanitize_filename(&file_name)
-        ));
+    let temp_file_path = temp_dir.join(format!(
+        "slab_upload_{}_{}/{}",
+        Uuid::new_v4(),
+        task_id,
+        sanitize_filename(&file_name)
+    ));
 
     // Create parent directory if it doesn't exist
     if let Some(parent) = temp_file_path.parent() {
         std::fs::create_dir_all(parent)
-            .map_err(|e| ServerError::InternalServerError(format!("Failed to create temp directory: {e}")))?;
+            .map_err(|e| ServerError::Internal(format!("Failed to create temp directory: {e}")))?;
     }
 
     // Write the uploaded file to disk
     std::fs::write(&temp_file_path, &file_bytes)
-        .map_err(|e| ServerError::InternalServerError(format!("Failed to write uploaded file: {e}")))?;
+        .map_err(|e| ServerError::Internal(format!("Failed to write uploaded file: {e}")))?;
 
     info!(
         task_id = %task_id,
@@ -185,7 +193,9 @@ pub async fn transcribe_upload(
     );
 
     // Check if the Whisper backend is ready before accepting the task
-    let backend_ready = slab_core::api::is_backend_ready(Backend::GGMLWhisper).await.unwrap_or(false);
+    let backend_ready = slab_core::api::is_backend_ready(Backend::GGMLWhisper)
+        .await
+        .unwrap_or(false);
     if !backend_ready {
         warn!(
             task_id = %task_id,
@@ -207,7 +217,11 @@ pub async fn transcribe_upload(
             id: task_id.clone(),
             task_type: Backend::GGMLWhisper.to_string(),
             status: "running".into(),
-            input_data: Some(format!("{} (original: {})", temp_file_path.display(), file_name)),
+            input_data: Some(format!(
+                "{} (original: {})",
+                temp_file_path.display(),
+                file_name
+            )),
             result_data: None,
             error_msg: None,
             core_task_id: None,
@@ -249,8 +263,9 @@ pub async fn transcribe_upload(
             let error_message = format!("Failed to submit transcription task: {e}");
             warn!(task_id = %task_id, error = %error_message);
 
-            let detailed_error = if e.to_string().contains("library not loaded") ||
-                e.to_string().contains("backend not ready") {
+            let detailed_error = if e.to_string().contains("library not loaded")
+                || e.to_string().contains("backend not ready")
+            {
                 format!("{error_message}\n\nThe Whisper backend is not properly initialized. Please ensure:\n1. The whisper library directory is configured (SLAB_WHISPER_LIB_DIR)\n2. A whisper model has been loaded via the backend API")
             } else if e.to_string().contains("FFmpeg") {
                 format!("{error_message}\n\nAudio preprocessing failed. Please check:\n1. FFmpeg is installed and accessible\n2. The audio file format is supported\n3. The file is not corrupted")
@@ -273,7 +288,13 @@ pub async fn transcribe_upload(
 fn sanitize_filename(filename: &str) -> String {
     filename
         .chars()
-        .map(|c| if c.is_alphanumeric() || c == '.' || c == '_' || c == '-' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '.' || c == '_' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -291,8 +312,7 @@ fn sanitize_filename(filename: &str) -> String {
         (status = 202, description = "Task accepted", body = serde_json::Value),
         (status = 400, description = "Bad request"),
         (status = 500, description = "Backend error"),
-    ),
-    deprecated = true
+    )
 )]
 pub async fn transcribe(
     State(state): State<Arc<AppState>>,
@@ -312,15 +332,17 @@ pub async fn transcribe(
     // Validate file exists and is readable
     let path = std::path::Path::new(&req.path);
     if !path.exists() {
-        return Err(ServerError::BadRequest(
-            format!("Audio file does not exist: {}", req.path)
-        ));
+        return Err(ServerError::BadRequest(format!(
+            "Audio file does not exist: {}",
+            req.path
+        )));
     }
 
     if !path.is_file() {
-        return Err(ServerError::BadRequest(
-            format!("Path is not a file: {}", req.path)
-        ));
+        return Err(ServerError::BadRequest(format!(
+            "Path is not a file: {}",
+            req.path
+        )));
     }
 
     // Check file permissions (readable)
@@ -331,21 +353,25 @@ pub async fn transcribe(
                 use std::os::unix::fs::PermissionsExt;
                 let mode = metadata.permissions().mode();
                 if mode & 0o444 == 0 {
-                    return Err(ServerError::BadRequest(
-                        format!("Audio file is not readable: {}", req.path)
-                    ));
+                    return Err(ServerError::BadRequest(format!(
+                        "Audio file is not readable: {}",
+                        req.path
+                    )));
                 }
             }
         }
         Err(e) => {
-            return Err(ServerError::BadRequest(
-                format!("Cannot access audio file: {} - {}", req.path, e)
-            ));
+            return Err(ServerError::BadRequest(format!(
+                "Cannot access audio file: {} - {}",
+                req.path, e
+            )));
         }
     }
 
     // Check if the Whisper backend is ready before accepting the task
-    let backend_ready = slab_core::api::is_backend_ready(Backend::GGMLWhisper).await.unwrap_or(false);
+    let backend_ready = slab_core::api::is_backend_ready(Backend::GGMLWhisper)
+        .await
+        .unwrap_or(false);
     if !backend_ready {
         warn!(
             audio_path = %req.path,
@@ -405,8 +431,9 @@ pub async fn transcribe(
             warn!(task_id = %task_id, error = %error_message, audio_path = %req.path);
 
             // Classify error for better client feedback
-            let detailed_error = if e.to_string().contains("library not loaded") ||
-                e.to_string().contains("backend not ready") {
+            let detailed_error = if e.to_string().contains("library not loaded")
+                || e.to_string().contains("backend not ready")
+            {
                 format!("{error_message}\n\nThe Whisper backend is not properly initialized. Please ensure:\n1. The whisper library directory is configured (SLAB_WHISPER_LIB_DIR)\n2. A whisper model has been loaded via the backend API")
             } else if e.to_string().contains("FFmpeg") {
                 format!("{error_message}\n\nAudio preprocessing failed. Please check:\n1. FFmpeg is installed and accessible\n2. The audio file format is supported\n3. The file is not corrupted")
@@ -439,9 +466,11 @@ pub async fn transcribe(
 /// allowing proper cancellation while maintaining compatibility with the existing
 /// pipeline architecture.
 pub fn convert_to_pcm_f32le(payload: slab_core::Payload) -> Result<slab_core::Payload, String> {
-    let path = payload
-        .to_str()
-        .map_err(|e| format!("Invalid payload for ffmpeg preprocessing: expected file path string, got error: {e}"))?;
+    let path = payload.to_str().map_err(|e| {
+        format!(
+            "Invalid payload for ffmpeg preprocessing: expected file path string, got error: {e}"
+        )
+    })?;
 
     // Validate the file exists before passing to ffmpeg
     let path_obj = std::path::Path::new(path);
@@ -460,9 +489,9 @@ pub fn convert_to_pcm_f32le(payload: slab_core::Payload) -> Result<slab_core::Pa
         .map_err(|e| format!("No tokio runtime available: {e}"))?;
 
     // Run the async FFmpeg conversion on the current runtime
-    let samples = rt_handle.block_on(async {
-        convert_to_pcm_f32le_async(path).await
-    }).map_err(|e| format!("Async FFmpeg conversion failed: {e}"))?;
+    let samples = rt_handle
+        .block_on(async { convert_to_pcm_f32le_async(path).await })
+        .map_err(|e| format!("Async FFmpeg conversion failed: {e}"))?;
 
     info!(
         path = %path,
@@ -501,22 +530,35 @@ async fn convert_to_pcm_f32le_async(path: &str) -> Result<Vec<f32>, String> {
     // -: output to stdout
     let mut cmd = Command::new("ffmpeg");
     cmd.arg("-i")
-       .arg(path)
-       .args(["-vn", "-f", "f32le", "-acodec", "pcm_f32le", "-ar", "16000", "-ac", "1"])
-       .arg("-")
-       .stdout(Stdio::piped())
-       .stderr(Stdio::piped());
+        .arg(path)
+        .args([
+            "-vn",
+            "-f",
+            "f32le",
+            "-acodec",
+            "pcm_f32le",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+        ])
+        .arg("-")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     // Spawn the FFmpeg process
-    let mut child = cmd.spawn()
-        .map_err(|e| {
-            format!("Failed to start FFmpeg process. Is FFmpeg installed and in PATH? Error: {e}")
-        })?;
+    let mut child = cmd.spawn().map_err(|e| {
+        format!("Failed to start FFmpeg process. Is FFmpeg installed and in PATH? Error: {e}")
+    })?;
 
     // Get stdout and stderr handles
-    let stdout = child.stdout.take()
+    let stdout = child
+        .stdout
+        .take()
         .ok_or_else(|| "FFmpeg stdout not available".to_string())?;
-    let stderr = child.stderr.take()
+    let stderr = child
+        .stderr
+        .take()
         .ok_or_else(|| "FFmpeg stderr not available".to_string())?;
 
     // Spawn a background task to log stderr for debugging
@@ -534,7 +576,9 @@ async fn convert_to_pcm_f32le_async(path: &str) -> Result<Vec<f32>, String> {
         let mut buffer = vec![0u8; 8192]; // 8KB buffer for streaming
 
         loop {
-            let n = reader.read(&mut buffer).await
+            let n = reader
+                .read(&mut buffer)
+                .await
                 .map_err(|e| format!("Failed to read FFmpeg stdout: {e}"))?;
 
             if n == 0 {
@@ -554,7 +598,8 @@ async fn convert_to_pcm_f32le_async(path: &str) -> Result<Vec<f32>, String> {
         }
 
         Ok::<Vec<u8>, String>(pcm_bytes)
-    }).await;
+    })
+    .await;
 
     // Wait for stderr logging to complete (ignore errors)
     let _ = stderr_task.await;

@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
-use utoipa::openapi::request_body::RequestBodyBuilder;
 
 /// Audio transcription request using file upload
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
