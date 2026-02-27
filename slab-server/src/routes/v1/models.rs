@@ -67,7 +67,7 @@ fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
 #[utoipa::path(
     post,
     path = "/v1/models/load",
-    tag = "v1::models",
+    tag = "models",
     request_body = LoadModelRequest,
     responses(
         (status = 200, description = "Model load initiated",   body = ModelStatusResponse),
@@ -122,7 +122,7 @@ pub async fn load_model(
 #[utoipa::path(
     post,
     path = "/v1/models/unload",
-    tag = "v1::models",
+    tag = "models",
     request_body = LoadModelRequest,
     responses(
         (status = 202, description = "Task accepted", body = ModelStatusResponse),
@@ -160,7 +160,7 @@ pub async fn unload_model(
 #[utoipa::path(
         get,
         path = "/v1/models/available",
-        tag = "v1::models",
+        tag = "models",
         params(ListAvailableQuery),
         responses(
             (status = 200, description = "List of available files", body = serde_json::Value),
@@ -202,7 +202,7 @@ pub async fn list_available_models(
 #[utoipa::path(
     post,
     path = "/v1/models/switch",
-    tag = "v1::models",
+    tag = "models",
     request_body = SwitchModelRequest,
     responses(
         (status = 200, description = "Model switched successfully", body = ModelStatusResponse),
@@ -266,7 +266,7 @@ pub async fn switch_model(
 #[utoipa::path(
     post,
     path = "/v1/models/download",
-    tag = "v1::models",
+    tag = "models",
     request_body = DownloadModelRequest,
     responses(
         (status = 200, description = "Download task created", body = serde_json::Value),
