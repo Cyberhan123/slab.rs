@@ -28,13 +28,13 @@ export default function Task() {
   const [taskType, setTaskType] = useState<string>('all');
 
   // API queries and mutations
-  const { data: tasks, error: tasksError, isLoading: tasksLoading, refetch: refetchTasks } = api.useQuery('post', '/v1/tasks', {
+  const { data: tasks, error: tasksError, isLoading: tasksLoading, refetch: refetchTasks } = api.useQuery('get', '/v1/tasks', {
     params: {
       query: taskType !== 'all' ? { type: taskType } : undefined
     }
   });
-  const getTaskMutation = api.useMutation('post', '/v1/tasks/{id}');
-  const getTaskResultMutation = api.useMutation('post', '/v1/tasks/{id}/result');
+  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
+  const getTaskResultMutation = api.useMutation('get', '/v1/tasks/{id}/result');
   const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
   const restartTaskMutation = api.useMutation('post', '/v1/tasks/{id}/restart');
 

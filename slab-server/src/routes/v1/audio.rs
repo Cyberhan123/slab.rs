@@ -10,19 +10,20 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
-use bytes::Bytes;
 use chrono::Utc;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
+use crate::schemas::v1::audio::CompletionRequest;
 use crate::state::AppState;
+use bytemuck::cast_slice;
+use ffmpeg_sidecar::{
+    command::FfmpegCommand, event::FfmpegEvent,
+};
 use slab_core::api::{Backend, Event};
 use utoipa::OpenApi;
-
-/// Maximum allowed audio body size (50 MiB).
-const MAX_AUDIO_BYTES: usize = 50 * 1024 * 1024;
 
 #[derive(OpenApi)]
 #[openapi(paths(transcribe))]
@@ -48,7 +49,7 @@ pub fn router() -> Router<Arc<AppState>> {
     post,
     path = "/v1/audio/transcriptions",
     tag = "audio",
-    request_body(content = Vec<u8>, description = "Audio/video file bytes"),
+    request_body(content = CompletionRequest, description = "Audio/video file bytes"),
     responses(
         (status = 202, description = "Task accepted", body = serde_json::Value),
         (status = 400, description = "Bad request"),
@@ -57,33 +58,16 @@ pub fn router() -> Router<Arc<AppState>> {
 )]
 pub async fn transcribe(
     State(state): State<Arc<AppState>>,
-    body: Bytes,
+    Json(req): Json<CompletionRequest>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    debug!(body_len = body.len(), "transcription request");
+    debug!(file_path = %req.path, "transcription request");
 
-    if body.is_empty() {
-        return Err(ServerError::BadRequest("audio body is empty".into()));
-    }
-    if body.len() > MAX_AUDIO_BYTES {
-        return Err(ServerError::BadRequest(format!(
-            "audio body too large ({} bytes); maximum is {MAX_AUDIO_BYTES} bytes",
-            body.len()
-        )));
+    if req.path.is_empty() {
+        return Err(ServerError::BadRequest("audio file path is empty".into()));
     }
 
     let task_id = Uuid::new_v4().to_string();
     let now = Utc::now();
-
-    // Save audio to a temp file so the sync preprocess closure can access it.
-    let tmp_path = std::env::temp_dir()
-        .join(format!("slab-audio-{task_id}.raw"))
-        .to_string_lossy()
-        .into_owned();
-    tokio::fs::write(&tmp_path, &body)
-        .await
-        .map_err(|e| ServerError::Internal(format!("failed to write temp audio: {e}")))?;
-
-    let input_data = serde_json::json!({ "tmp_path": tmp_path }).to_string();
 
     // Insert the server-side task record (core_task_id filled in after submission).
     state
@@ -92,7 +76,7 @@ pub async fn transcribe(
             id: task_id.clone(),
             task_type: Backend::GGMLWhisper.to_string(),
             status: "running".into(),
-            input_data: Some(input_data),
+            input_data: Some(req.path.clone()),
             result_data: None,
             error_msg: None,
             core_task_id: None,
@@ -101,18 +85,10 @@ pub async fn transcribe(
         })
         .await?;
 
-    // Build and submit the slab-core pipeline.
-    // The preprocess closure runs inside `spawn_blocking` (see `CpuStage::run`),
-    // so blocking I/O via `std::process::Command` is safe here.
-    // The initial Bytes input is an empty placeholder; the preprocess stage
-    // replaces it with the actual PCM f32le data.
-    let tmp_for_closure = tmp_path.clone();
     let core_task_result = slab_core::api::backend(Backend::GGMLWhisper)
         .op(Event::Inference)
-        .input(slab_core::Payload::Bytes(Arc::from([] as [u8; 0]))) // placeholder; preprocess supplies PCM
-        .preprocess("ffmpeg.to_pcm_f32le", move |_| {
-            convert_to_pcm_f32le(&tmp_for_closure)
-        })
+        .input(slab_core::Payload::Text(req.path.clone().into())) 
+        .preprocess("ffmpeg.to_pcm_f32le", convert_to_pcm_f32le)
         .run()
         .await;
 
@@ -138,55 +114,53 @@ pub async fn transcribe(
         }
     }
 
-    // Clean up the temp file asynchronously (best effort).
-    let tmp_cleanup = tmp_path.clone();
-
-    tokio::spawn(async move {
-        tokio::fs::remove_file(&tmp_cleanup).await.ok();
-    });
-
     Ok(Json(serde_json::json!({ "task_id": task_id })))
 }
 
-/// Convert the audio/video file at `src_path` to raw PCM f32le samples at 16 kHz mono.
-///
-/// Uses `std::process::Command` so it can be called from within a
-/// `spawn_blocking` / `CpuStage` context.  Returns `Payload::F32` on success.
-///
-/// Also used by `tasks::restart_task` for whisper task restarts.
-pub fn convert_to_pcm_f32le(src_path: &str) -> Result<slab_core::Payload, String> {
-    let pcm_path = std::path::Path::new(src_path)
-        .with_extension("pcm")
-        .to_string_lossy()
-        .into_owned();
-
-    let output = std::process::Command::new("ffmpeg")
+pub fn convert_to_pcm_f32le(payload: slab_core::Payload) -> Result<slab_core::Payload, String> {
+    let path = payload
+        .to_str()
+        .map_err(|e| format!("Invalid payload for preprocess: {e}"))?;
+    let iter = FfmpegCommand::new()
+        .input(path)
         .args([
-            "-y", "-i", src_path, "-f", "f32le", "-ar", "16000", "-ac", "1", &pcm_path,
+            "-vn",
+            "-f",
+            "f32le",
+            "-acodec",
+            "pcm_f32le",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
         ])
-        .output()
-        .map_err(|e| format!("ffmpeg spawn failed: {e}"))?;
+        .output("-")
+        .spawn()
+        .map_err(|e| format!("FFmpeg start failed: {e}"))?
+        .iter()
+        .map_err(|e| format!("FFmpeg start failed: {e}"))?;
 
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!("ffmpeg failed: {stderr}"));
+    let mut pcm_bytes = Vec::new();
+
+    for event in iter {
+        match event {
+            FfmpegEvent::OutputChunk(chunk) => {
+                pcm_bytes.extend_from_slice(&chunk);
+            }
+            FfmpegEvent::Done => break,
+            FfmpegEvent::Error(e) => return Err(format!("FFmpeg fail on run: {e}")),
+            _ => {}
+        }
     }
-
-    let pcm_bytes =
-        std::fs::read(&pcm_path).map_err(|e| format!("failed to read ffmpeg PCM output: {e}"))?;
-
-    // Clean up the PCM file (best effort).
-    std::fs::remove_file(&pcm_path).ok();
 
     let sample_size = std::mem::size_of::<f32>();
+
     if pcm_bytes.len() % sample_size != 0 {
-        return Err(format!(
-            "ffmpeg produced misaligned PCM output ({} bytes, not a multiple of {sample_size})",
-            pcm_bytes.len()
-        ));
+        return Err(format!("PCM not aligned: {} bytes", pcm_bytes.len()));
     }
 
-    let samples: Vec<f32> = bytemuck::cast_slice::<u8, f32>(&pcm_bytes).to_vec();
+    let samples: Vec<f32> = cast_slice::<u8, f32>(&pcm_bytes).to_vec();
+
     Ok(slab_core::Payload::F32(std::sync::Arc::from(
         samples.as_slice(),
     )))
@@ -195,28 +169,4 @@ pub fn convert_to_pcm_f32le(src_path: &str) -> Result<slab_core::Payload, String
 // ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn rejects_empty_body() {
-        let body = Bytes::new();
-        assert!(body.is_empty());
-    }
-
-    #[test]
-    fn rejects_oversized_body() {
-        // Body length > MAX_AUDIO_BYTES should be rejected.
-        assert!(MAX_AUDIO_BYTES + 1 > MAX_AUDIO_BYTES);
-    }
-
-    #[test]
-    fn pcm_alignment_check() {
-        // 8 bytes = 2 f32 samples (aligned).
-        let bytes = vec![0u8; 8];
-        assert_eq!(bytes.len() % std::mem::size_of::<f32>(), 0);
-        // 3 bytes is not aligned.
-        let bytes = vec![0u8; 3];
-        assert_ne!(bytes.len() % std::mem::size_of::<f32>(), 0);
-    }
-}
+mod test {}

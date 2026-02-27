@@ -28,10 +28,27 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** Download a backend shared library from a GitHub release (`POST /api/models/{type}/download-lib`). */
-        get: operations["download_lib"];
+        get?: never;
         put?: never;
-        post?: never;
+        /** Download a backend shared library from a GitHub release (`POST /admin/backends/download`). */
+        post: operations["download_lib"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/backends/reload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reload a backend with a new shared library path (`POST /admin/backends/reload`). */
+        post: operations["reload_lib"];
         delete?: never;
         options?: never;
         head?: never;
@@ -80,6 +97,27 @@ export interface paths {
         };
         get: operations["get_config_value"];
         put: operations["set_config_value"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/health": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Heartbeat endpoint.
+         * @description Returns `{"status": "ok", "version": "..."}` with HTTP 200.
+         *     Load-balancers and monitoring systems should poll this endpoint.
+         */
+        get: operations["get_health"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -175,6 +213,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/models/available": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List the files available in a HuggingFace model repo (`GET /v1/models/available?repo_id=...`).
+         * @description Uses the `hf-hub` sync API (wrapped in `spawn_blocking`) to fetch repo metadata
+         *     and returns a list of filenames in the repo.
+         */
+        get: operations["list_available_models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/models/download": {
         parameters: {
             query?: never;
@@ -255,7 +314,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["list_sessions"];
         put?: never;
         post: operations["create_session"];
         delete?: never;
@@ -303,9 +362,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["list_tasks"];
         put?: never;
-        post: operations["list_tasks"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -319,9 +378,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["get_task"];
         put?: never;
-        post: operations["get_task"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -367,9 +426,9 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["get_task_result"];
         put?: never;
-        post: operations["get_task_result"];
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -447,6 +506,10 @@ export interface components {
             content: string;
             /** @description The role of the message author (`"system"`, `"user"`, `"assistant"`). */
             role: string;
+        };
+        CompletionRequest: {
+            /** @description The audio file path to transcribe. */
+            file_path: string;
         };
         ConfigEntry: {
             key: string;
@@ -612,7 +675,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description List of all registered backends */
+            /** @description Download task created */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -620,6 +683,51 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Bad request (invalid path) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorised (management token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    reload_lib: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ReloadLibRequest"];
+            };
+        };
+        responses: {
+            /** @description Backend reloaded with new library */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BackendStatusResponse"];
+                };
+            };
+            /** @description Bad request (invalid path or unknown backend) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Unauthorised (management token required) */
             401: {
@@ -770,6 +878,26 @@ export interface operations {
             };
         };
     };
+    get_health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server is healthy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     transcribe: {
         parameters: {
             query?: never;
@@ -780,7 +908,7 @@ export interface operations {
         /** @description Audio/video file bytes */
         requestBody: {
             content: {
-                "application/octet-stream": number[];
+                "application/json": components["schemas"]["CompletionRequest"];
             };
         };
         responses: {
@@ -923,14 +1051,48 @@ export interface operations {
             };
         };
     };
+    list_available_models: {
+        parameters: {
+            query: {
+                /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
+                repo_id: string;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of available files */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Bad request (invalid parameters) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     download_model: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
-                repo_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody: {
@@ -939,7 +1101,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description List of available files */
+            /** @description Download task created */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1013,10 +1175,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
-                repo_id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody: {
@@ -1025,13 +1184,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description List of available files */
+            /** @description Model switched successfully */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["ModelStatusResponse"];
                 };
             };
             /** @description Bad request (invalid parameters) */
@@ -1073,6 +1232,40 @@ export interface operations {
                 };
             };
             /** @description Bad request (invalid parameters) */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_sessions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Session list retrieved */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SessionResponse"][];
+                };
+            };
+            /** @description Bad request */
             400: {
                 headers: {
                     [name: string]: unknown;
