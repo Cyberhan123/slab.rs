@@ -7,7 +7,7 @@ import createClient from 'openapi-react-query';
 import type { paths } from './v1.d.ts';
 import { getApiConfig } from './config';
 import { ApiError, NetworkError, TimeoutError } from './errors';
-import { logDebug, logInfo, logWarn, logError as logDiagError } from './diagnostics';
+import { logDebug, logInfo, logError as logDiagError } from './diagnostics';
 
 // Create fetch client with interceptors
 const fetchClient = createFetchClient<paths>({
@@ -17,7 +17,12 @@ const fetchClient = createFetchClient<paths>({
 // Wrap fetch to add interceptors
 const originalFetch = window.fetch;
 window.fetch = async (input, init) => {
-  const url = typeof input === 'string' ? input : input.url;
+  const url =
+    typeof input === 'string'
+      ? input
+      : input instanceof URL
+        ? input.toString()
+        : input.url;
   const method = init?.method || 'GET';
 
   // Log request
@@ -123,7 +128,12 @@ export const queryClient = new QueryClient({
     queries: {
       retry: (failureCount, error) => {
         // Don't retry on client errors (4xx)
-        if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
+        if (
+          error instanceof ApiError &&
+          error.status !== undefined &&
+          error.status >= 400 &&
+          error.status < 500
+        ) {
           return false;
         }
         // Retry up to 3 times on server errors (5xx) or network errors

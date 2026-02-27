@@ -33,6 +33,12 @@ import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
 import { Loader2, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 
+interface BackendListItem {
+  model_type: string;
+  backend: string;
+  status: string;
+}
+
 export default function Settings() {
   const [selectedConfigKey, setSelectedConfigKey] = useState<string | null>(null);
   const [configValue, setConfigValue] = useState<string>('');
@@ -40,15 +46,12 @@ export default function Settings() {
 
   // API calls using react-query
   const { data: configs, error: configsError, isLoading: configsLoading, refetch: refetchConfigs } = api.useQuery('get', '/admin/config');
-  const { data: backends, error: backendsError, isLoading: backendsLoading, refetch: refetchBackends } = api.useQuery('get', '/admin/backends');
+  const { data: backends, error: backendsError, isLoading: backendsLoading } = api.useQuery('get', '/admin/backends');
   // Mutation for updating config
   const updateConfigMutation = api.useMutation('put', '/admin/config/{key}');
   
   // Mutation for getting backend status
   const getBackendStatusMutation = api.useMutation('get', '/admin/backends/status');
-  
-  // Mutation for downloading backend
-  const downloadBackendMutation = api.useMutation('get', '/admin/backends/download');
   
   // Function to update config value
   const updateConfig = async (key: string, value: string) => {
@@ -87,20 +90,22 @@ export default function Settings() {
   const downloadBackend = async (backendId: string) => {
     setDownloadingBackend(backendId);
     try {
-      await downloadBackendMutation.mutateAsync({
-        params: {
-          query: { backend_id: backendId },
-        },
-      });
-      toast.success(`Backend ${backendId} download initiated successfully`);
-      // Refresh backends to update status
-      refetchBackends();
+      toast.warning(
+        `Backend ${backendId} download requires owner/repo/tag/target_path. Use /admin/backends/download with full payload.`
+      );
     } catch (error) {
       toast.error(getErrorMessage(error));
     } finally {
       setDownloadingBackend(null);
     }
   };
+
+  const backendList =
+    typeof backends === 'object' &&
+    backends !== null &&
+    Array.isArray((backends as { backends?: unknown }).backends)
+      ? ((backends as { backends: BackendListItem[] }).backends ?? [])
+      : [];
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-8">
@@ -233,8 +238,8 @@ export default function Settings() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {(backends?.backends?.length??0) > 0 ? (
-                      backends.backends.map((backend: any) => {
+                    {backendList.length > 0 ? (
+                      backendList.map((backend) => {
                         const isDownloading = downloadingBackend === backend.backend;
 
                         // Determine status badge styling and icon

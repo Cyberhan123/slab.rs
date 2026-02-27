@@ -5,7 +5,6 @@
  */
 
 import { getApiConfig } from './config';
-import type { paths } from './v1.d.ts';
 
 // Diagnostic log levels
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
@@ -63,7 +62,7 @@ export function initDiagnostics(userConfig?: Partial<DiagnosticsConfig>) {
     }
   }
 
-  logInfo('Diagnostics initialized', { config });
+  logInfo('health', { message: 'Diagnostics initialized', config });
 }
 
 /**
@@ -71,7 +70,7 @@ export function initDiagnostics(userConfig?: Partial<DiagnosticsConfig>) {
  */
 export function setDiagnosticsConfig(userConfig: Partial<DiagnosticsConfig>) {
   config = { ...config, ...userConfig };
-  logInfo('Diagnostics config updated', { config });
+  logInfo('health', { message: 'Diagnostics config updated', config });
 }
 
 /**

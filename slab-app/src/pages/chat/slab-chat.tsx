@@ -6,7 +6,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Spinner } from '@/components/ui/spinner';
 import { toast } from 'sonner';
 import { Send, Plus, Trash2 } from 'lucide-react';
-import { useSlabChat, type SlabChatMessage, type SlabChatSession } from './hooks/use-slab-chat';
+import { useSlabChat, type SlabChatSession } from './hooks/use-slab-chat';
 
 interface SlabChatProps {
   initialSessionId?: string;
@@ -15,7 +15,6 @@ interface SlabChatProps {
 export default function SlabChat({ initialSessionId }: SlabChatProps) {
   const [input, setInput] = useState('');
   const [sessions, setSessions] = useState<SlabChatSession[]>([]);
-  const [showSessions, setShowSessions] = useState(false);
 
   const {
     messages,

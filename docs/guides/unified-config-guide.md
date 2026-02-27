@@ -1,84 +1,86 @@
-# 统一配置接口使用指南
+﻿# Unified Configuration Interface Guide
 
-## 设计概述
+## Design Overview
 
-slab-core 现在提供了统一的配置接口 (`SlabConfig`)，通过 Builder 模式实现类型安全的流式配置。
+`slab-core` provides a unified configuration interface (`SlabConfig`) using a builder pattern for type-safe, fluent configuration.
 
-### 核心优势
+### Core Advantages
 
-1. **统一初始化**: 所有引擎通过一致的接口配置
-2. **延迟加载**: 动态库在配置时验证路径，模型在首次使用时加载
-3. **类型安全**: Builder 模式提供编译期检查
-4. **可扩展**: 新增引擎只需添加配置结构即可
+1. Unified initialization: all engines are configured through a consistent interface.
+2. Lazy loading: dynamic library paths are validated during configuration, while models are loaded only when needed.
+3. Type safety: the builder pattern provides compile-time checks.
+4. Extensibility: adding a new engine only requires adding a new config structure.
 
-## 基本使用
+## Basic Usage
 
-### 1. 配置引擎
+### 1. Configure Engines
 
 ```rust
 use slab_core::config::SlabConfig;
 use slab_core::engine::ggml::{LlamaEngineConfig, WhisperEngineConfig};
-use slab_llama::{LlamaModelParams, LlamaContextParams};
+use slab_llama::{LlamaContextParams, LlamaModelParams};
 
-// 配置 Llama 引擎
+// Configure Llama engine
 let llama_config = LlamaEngineConfig::builder()
-    .library_path("path/to/llama.dll")  // 动态库路径（必选）
-    .num_workers(2)                     // worker 数量（可选，默认 1）
-    .model_params(LlamaModelParams::default())  // 模型参数（可选）
-    .context_params(LlamaContextParams::default())  // 上下文参数（可选）
+    .library_path("path/to/llama.dll") // required dynamic library path
+    .num_workers(2) // optional, default is 1
+    .model_params(LlamaModelParams::default()) // optional
+    .context_params(LlamaContextParams::default()) // optional
     .build();
 
-// 配置 Whisper 引擎
+// Configure Whisper engine
 let whisper_config = WhisperEngineConfig::builder()
     .library_path("path/to/whisper.dll")
     .build();
 
-// 构建统一配置
+// Build unified config
 let config = SlabConfig::builder()
     .llama(llama_config)
     .whisper(whisper_config)
     .build();
 ```
 
-### 2. 初始化引擎（仅加载动态库）
+### 2. Initialize Engines (Dynamic Library Only)
 
 ```rust
 use slab_core::engine::ggml::llama::LlamaService;
 use slab_core::engine::ggml::whisper::WhisperService;
 
-// 从配置初始化（此时只加载动态库，不加载模型）
+// Initialize from config (loads dynamic libraries, not model files)
 let llama_service = LlamaService::from_config(&config.llama.unwrap())?;
 let whisper_service = WhisperService::from_config(&config.whisper.unwrap())?;
 ```
 
-### 3. 加载模型（按需）
+### 3. Load Models On Demand
 
 ```rust
-use slab_llama::{LlamaModelParams, LlamaContextParams};
+use slab_llama::{LlamaContextParams, LlamaModelParams};
 
-// 在需要时加载具体模型
-llama_service.load_model_with_workers(
-    "models/llama-3-8b.gguf",
-    LlamaModelParams::default(),
-    LlamaContextParams::default(),
-    2  // num_workers
-).await?;
+// Load a concrete model only when needed
+llama_service
+    .load_model_with_workers(
+        "models/llama-3-8b.gguf",
+        LlamaModelParams::default(),
+        LlamaContextParams::default(),
+        2, // num_workers
+    )
+    .await?;
 ```
 
-### 4. 与 Orchestrator 集成
+### 4. Integrate with Orchestrator
 
 ```rust
-use slab_core::runtime::{Orchestrator, PipelineBuilder};
 use slab_core::backend::ResourceManager;
+use slab_core::runtime::{Orchestrator, PipelineBuilder};
 
-// 创建资源管理器
+// Create resource manager
 let resource_manager = ResourceManager::new();
-resource_manager.register_backend("llama", 2);  // 2 个并发槽位
+resource_manager.register_backend("llama", 2); // 2 concurrent slots
 
-// 创建 Orchestrator
+// Create orchestrator
 let orchestrator = Orchestrator::new(resource_manager);
 
-// 创建 pipeline
+// Create pipeline
 let pipeline = PipelineBuilder::new("chat")
     .gpu_stream("llama-generate", move |input| {
         let service = llama_service.clone();
@@ -91,155 +93,157 @@ let pipeline = PipelineBuilder::new("chat")
     })
     .build();
 
-// 提交任务
+// Submit task
 let task_id = orchestrator.submit(pipeline).await?;
 ```
 
-## 配置对象生命周期
+## Configuration Object Lifecycle
 
-### 阶段 1: 配置构建（立即）
+### Phase 1: Build Configuration (Immediate)
 
 ```rust
 let llama_config = LlamaEngineConfig::builder()
     .library_path("path/to/llama.dll")
     .num_workers(4)
     .build();
-// ✅ 此时只是构造配置对象，无 I/O 操作
+// At this stage, only the config object is created. No I/O is performed.
 ```
 
-### 阶段 2: 动态库加载（from_config 时）
+### Phase 2: Load Dynamic Library (`from_config`)
 
 ```rust
 let service = LlamaService::from_config(&llama_config)?;
-// ✅ 加载动态库（dlopen/LoadLibrary）
-// ✅ 调用 backend_init()
-// ❌ 不加载模型文件
+// Loads dynamic library (dlopen/LoadLibrary)
+// Calls backend_init()
+// Does not load model file
 ```
 
-### 阶段 3: 模型加载（显式调用）
+### Phase 3: Load Model (Explicit Call)
 
 ```rust
 service.load_model_with_workers(
     "models/model.gguf",
     LlamaModelParams::default(),
     LlamaContextParams::default(),
-    config.num_workers  // 使用配置中的 worker 数量
+    config.num_workers,
 )?;
-// ✅ 读取模型文件（可能数 GB）
-// ✅ 启动推理引擎和 worker 线程
+// Reads model file (can be several GB)
+// Starts inference engine and worker threads
 ```
 
-## 高级用法
+## Advanced Usage
 
-### 条件化配置
+### Conditional Configuration
 
 ```rust
 let mut builder = SlabConfig::builder();
 
-// 仅在需要时启用 Llama
+// Enable Llama only when needed
 if enable_llm {
     builder = builder.llama(
         LlamaEngineConfig::builder()
             .library_path(llama_lib)
             .num_workers(4)
-            .build()
+            .build(),
     );
 }
 
-// 仅在需要时启用 Whisper
+// Enable Whisper only when needed
 if enable_transcription {
     builder = builder.whisper(
         WhisperEngineConfig::builder()
             .library_path(whisper_lib)
-            .build()
+            .build(),
     );
 }
 
 let config = builder.build();
 ```
 
-### 运行时热重载（未来支持）
+### Runtime Hot Reload (Future Direction)
 
 ```rust
-// 当前: reload 方法会替换全局单例
+// Current behavior: reload replaces the global singleton
 llama_service = LlamaService::reload("new/path/to/llama.dll")?;
 
-// 未来: 使用配置对象管理热重载
+// Future direction: manage reload through config objects
 let new_config = LlamaEngineConfig::builder()
     .library_path("new/path/to/llama.dll")
-    .num_workers(8)  // 可调整参数
+    .num_workers(8) // tunable parameter
     .build();
 
 llama_service = LlamaService::reload_from_config(&new_config)?;
 ```
 
-## 迁移指南
+## Migration Guide
 
-### 从旧代码迁移
+### From Legacy Code
 
-**旧代码:**
+Legacy style:
+
 ```rust
 let llama_service = LlamaService::init("path/to/llama.dll")?;
 llama_service.load_model_with_workers(
     "model.gguf",
     LlamaModelParams::default(),
     LlamaContextParams::default(),
-    2
+    2,
 )?;
 ```
 
-**新代码（推荐）:**
+Recommended style:
+
 ```rust
-// 1. 定义配置
+// 1) Define configuration
 let config = LlamaEngineConfig::builder()
     .library_path("path/to/llama.dll")
     .num_workers(2)
     .build();
 
-// 2. 初始化服务
+// 2) Initialize service
 let llama_service = LlamaService::from_config(&config)?;
 
-// 3. 加载模型（参数可复用配置中的值）
+// 3) Load model (reusing config values)
 llama_service.load_model_with_workers(
     "model.gguf",
     config.model_params.unwrap_or_default(),
     config.context_params.unwrap_or_default(),
-    config.num_workers
+    config.num_workers,
 )?;
 ```
 
-### 与 slab-server 集成
+### Integrate with `slab-server`
 
-在 slab-server 层面，配置可以从文件加载：
+At the `slab-server` layer, configuration can be loaded from files:
 
 ```rust
 // slab-server/src/config.rs
-use slab_core::config::SlabConfig;
 use serde::{Deserialize, Serialize};
+use slab_core::config::SlabConfig;
 
 #[derive(Deserialize)]
 struct ServerConfig {
     #[serde(flatten)]
     core: SlabConfig,
-    
-    // slab-server 特有配置
+
+    // slab-server specific config
     api_keys: ApiKeyConfig,
     preprocessing: PreprocessConfig,
 }
 
-// 从文件加载
+// Load from file
 let config: ServerConfig = toml::from_str(&fs::read_to_string("config.toml")?)?;
 
-// 初始化 core 引擎
+// Initialize core engines
 if let Some(llama_config) = &config.core.llama {
     let service = LlamaService::from_config(llama_config)?;
     // ...
 }
 ```
 
-## 未来扩展方向
+## Future Extensions
 
-### 1. 配置序列化支持（需要 serde）
+### 1. Config Serialization Support (`serde`)
 
 ```rust
 // slab-core/src/config.rs
@@ -255,43 +259,37 @@ pub struct LlamaEngineConfig {
 }
 ```
 
-### 2. 配置验证
+### 2. Config Validation
 
 ```rust
 impl SlabConfig {
     pub fn validate(&self) -> Result<(), ConfigError> {
-        // 验证动态库路径存在
-        // 验证参数合法性
+        // Validate dynamic library paths
+        // Validate parameter ranges
         // ...
     }
 }
 ```
 
-### 3. 配置合并
+### 3. Config Merge
 
 ```rust
-let base_config = SlabConfig::builder()
-    .llama(llama_config)
-    .build();
+let base_config = SlabConfig::builder().llama(llama_config).build();
 
 let override_config = SlabConfig::builder()
-    .llama(
-        LlamaEngineConfig::builder()
-            .num_workers(8)  // 覆盖 worker 数量
-            .build()
-    )
+    .llama(LlamaEngineConfig::builder().num_workers(8).build())
     .build();
 
 let final_config = base_config.merge(override_config);
 ```
 
-## 总结
+## Summary
 
-统一配置接口遵循以下原则：
+The unified configuration interface follows four principles:
 
-1. **配置与执行分离**: 配置对象只包含元数据，不执行加载操作
-2. **延迟初始化**: 动态库按需加载，模型显式加载
-3. **类型安全**: Builder 模式在编译期捕获配置错误
-4. **可组合**: 配置对象可以序列化、合并、验证
+1. Separate configuration from execution: config objects contain metadata only and do not execute loading logic.
+2. Use lazy initialization: dynamic libraries are loaded on demand, and models are loaded explicitly.
+3. Preserve type safety: builder APIs catch config errors early.
+4. Enable composition: config objects can be serialized, merged, and validated.
 
-这种设计使得 slab-core 保持纯粹的执行内核角色，而 slab-server 可以灵活管理配置的生命周期和来源（文件、环境变量、远程配置等）。
+This design keeps `slab-core` focused on runtime execution while allowing `slab-server` to manage configuration lifecycle and sources (files, environment variables, remote config).

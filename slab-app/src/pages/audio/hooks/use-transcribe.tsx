@@ -4,7 +4,7 @@ import { logTaskId } from "@/lib/api";
 
 const useTranscribe = () => {
     const isTauri = useIsTauri();
-    const { isPending, isError, error, mutateAsync } = api.useMutation('post', '/v1/audio/transcriptions');
+    const { isPending, isError, error } = api.useMutation('post', '/v1/audio/transcriptions');
 
     const handleTranscribe = async (value: File | string): Promise<{ task_id: string }> => {
         let response: { task_id: string };
