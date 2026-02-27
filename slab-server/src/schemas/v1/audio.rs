@@ -4,5 +4,7 @@ use utoipa::ToSchema;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct CompletionRequest {
     /// The audio file path to transcribe.
-   pub path: String,
+    #[serde(rename = "path")]
+    #[utoipa(rename = "path")]
+    pub path: String,
 }

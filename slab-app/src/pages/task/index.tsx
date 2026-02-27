@@ -38,6 +38,29 @@ export default function Task() {
   const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
   const restartTaskMutation = api.useMutation('post', '/v1/tasks/{id}/restart');
 
+  // Auto-refresh for running tasks in the list
+  useEffect(() => {
+    const hasRunningTasks = tasks?.some(task => task.status === 'running');
+    if (!hasRunningTasks) return;
+
+    const interval = setInterval(() => {
+      refetchTasks();
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [tasks, refetchTasks]);
+
+  // Auto-refresh for selected running task
+  useEffect(() => {
+    if (!selectedTask || selectedTask.status !== 'running') return;
+
+    const interval = setInterval(() => {
+      fetchTaskDetail(selectedTask.id);
+    }, 3000); // Poll every 3 seconds
+
+    return () => clearInterval(interval);
+  }, [selectedTask?.status, selectedTask?.id]);
+
   // Show error toast when tasksError changes
 
   const fetchTaskDetail = async (id: string) => {
@@ -184,8 +207,11 @@ export default function Task() {
               <TableBody>
                 {tasks?.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center">
-                      没有任务
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      <div className="flex flex-col items-center space-y-2">
+                        <p>暂无任务</p>
+                        <p className="text-sm">前往音频或图像页面创建任务</p>
+                      </div>
                     </TableCell>
                   </TableRow>
                 ) : (
@@ -243,9 +269,25 @@ export default function Task() {
                                     <div className="space-y-2">
                                       <h4 className="font-medium">任务结果</h4>
                                       <div className="p-4 border rounded-md bg-muted/50">
-                                        <pre className="whitespace-pre-wrap text-sm">
-                                          {JSON.stringify(taskResult, null, 2)}
-                                        </pre>
+                                        {taskResult.text ? (
+                                          <div className="space-y-2">
+                                            <p className="whitespace-pre-wrap text-sm">{taskResult.text}</p>
+                                            <Button
+                                              variant="secondary"
+                                              size="sm"
+                                              onClick={() => {
+                                                navigator.clipboard.writeText(taskResult.text);
+                                                toast.success('已复制到剪贴板');
+                                              }}
+                                            >
+                                              复制结果
+                                            </Button>
+                                          </div>
+                                        ) : (
+                                          <pre className="whitespace-pre-wrap text-sm">
+                                            {JSON.stringify(taskResult, null, 2)}
+                                          </pre>
+                                        )}
                                       </div>
                                     </div>
                                   )}

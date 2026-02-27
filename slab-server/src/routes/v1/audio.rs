@@ -66,6 +66,41 @@ pub async fn transcribe(
         return Err(ServerError::BadRequest("audio file path is empty".into()));
     }
 
+    // Validate file exists and is readable
+    let path = std::path::Path::new(&req.path);
+    if !path.exists() {
+        return Err(ServerError::BadRequest(
+            format!("Audio file does not exist: {}", req.path)
+        ));
+    }
+
+    if !path.is_file() {
+        return Err(ServerError::BadRequest(
+            format!("Path is not a file: {}", req.path)
+        ));
+    }
+
+    // Check file permissions (readable)
+    match std::fs::metadata(&req.path) {
+        Ok(metadata) => {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let mode = metadata.permissions().mode();
+                if mode & 0o444 == 0 {
+                    return Err(ServerError::BadRequest(
+                        format!("Audio file is not readable: {}", req.path)
+                    ));
+                }
+            }
+        }
+        Err(e) => {
+            return Err(ServerError::BadRequest(
+                format!("Cannot access audio file: {} - {}", req.path, e)
+            ));
+        }
+    }
+
     let task_id = Uuid::new_v4().to_string();
     let now = Utc::now();
 
