@@ -551,11 +551,10 @@ export interface components {
             name?: string | null;
         };
         DownloadLibRequest: {
-            asset_name?: string | null;
-            owner?: string | null;
-            repo?: string | null;
-            tag?: string | null;
-            target_path: string;
+            /** @description Backend identifier, e.g. `"ggml.llama"`, `"ggml.whisper"`, `"ggml.diffusion"`. */
+            backend_id: string;
+            /** @description Absolute directory where release assets should be installed. */
+            target_dir: string;
         };
         DownloadModelRequest: {
             backend_id: string;

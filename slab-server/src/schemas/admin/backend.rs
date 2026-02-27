@@ -3,11 +3,10 @@ use utoipa::{IntoParams, ToSchema};
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct DownloadLibRequest {
-    pub owner: Option<String>,
-    pub repo: Option<String>,
-    pub tag: Option<String>,
-    pub target_path: String,
-    pub asset_name: Option<String>,
+    /// Backend identifier, e.g. `"ggml.llama"`, `"ggml.whisper"`, `"ggml.diffusion"`.
+    pub backend_id: String,
+    /// Absolute directory where release assets should be installed.
+    pub target_dir: String,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]
