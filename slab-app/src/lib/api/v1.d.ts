@@ -104,6 +104,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/diagnostics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * System diagnostics endpoint.
+         * @description Returns detailed information about backend configuration and readiness.
+         *     Useful for troubleshooting issues with AI backends.
+         */
+        get: operations["get_diagnostics"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/health": {
         parameters: {
             query?: never;
@@ -509,7 +530,7 @@ export interface components {
         };
         CompletionRequest: {
             /** @description The audio file path to transcribe. */
-            file_path: string;
+            path: string;
         };
         ConfigEntry: {
             key: string;
@@ -875,6 +896,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_diagnostics: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Diagnostics information */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
             };
         };
     };
