@@ -1,6 +1,7 @@
 import AppRoutes from "@/routes";
 import './styles/globals.css'
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { Toaster } from "@/components/ui/sonner"
 import {
   QueryClient,
   QueryClientProvider,
@@ -14,6 +15,7 @@ function App() {
     <TooltipProvider>
       <QueryClientProvider client={queryClient}>
         <AppRoutes />
+        <Toaster />
       </QueryClientProvider>
     </TooltipProvider>
   );

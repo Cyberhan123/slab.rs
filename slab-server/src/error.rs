@@ -34,6 +34,10 @@ pub enum ServerError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
+    /// Backend not initialized or ready.
+    #[error("backend not ready: {0}")]
+    BackendNotReady(String),
+
     /// An unclassified internal server error.
     #[error("internal error: {0}")]
     Internal(String),
@@ -45,16 +49,24 @@ impl IntoResponse for ServerError {
             // Client-facing errors: expose the message directly.
             ServerError::NotFound(m) => (StatusCode::NOT_FOUND, m.clone()),
             ServerError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
+            ServerError::BackendNotReady(m) => (StatusCode::SERVICE_UNAVAILABLE, m.clone()),
 
-            // Internal errors: log the full detail, return a generic message
-            // so that file paths, SQL snippets, or stack traces never reach
-            // the caller.
+            // Internal errors: log the full detail, return a helpful message
+            // for common errors while keeping sensitive details private.
             ServerError::Runtime(e) => {
                 error!(error = %e, "AI runtime error");
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "inference backend error".to_owned(),
-                )
+                let message = match e {
+                    slab_core::RuntimeError::NotInitialized => {
+                        "Backend not initialized. Please ensure the Whisper library and model are loaded. \
+                        Set SLAB_WHISPER_LIB_DIR environment variable or use POST /admin/backends/reload".to_owned()
+                    }
+                    slab_core::RuntimeError::LibraryLoadFailed { backend, .. } => {
+                        format!("{} library failed to load. Check SLAB_{}_LIB_DIR environment variable.", \
+                            backend, backend.to_uppercase().replace(".", "_"))
+                    }
+                    _ => "inference backend error".to_owned()
+                };
+                (StatusCode::INTERNAL_SERVER_ERROR, message)
             }
             ServerError::Database(e) => {
                 error!(error = %e, "database error");

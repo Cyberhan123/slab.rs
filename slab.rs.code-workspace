@@ -6,7 +6,10 @@
 	],
 	"settings": {
 		"claudeCode.environmentVariables": [
-			"CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS=1"
+			{
+				"name": "CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS",
+				"value": "true"
+			}
 		]
 	}
 }

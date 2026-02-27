@@ -1,16 +1,19 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Spinner } from '@/components/ui/spinner';
+import { toast } from 'sonner';
 import useFile, { SelectedFile } from '@/hooks/use-file';
 import useTranscribe from './hooks/use-transcribe';
 import useIsTauri from '@/hooks/use-tauri';
 
 
 export default function Audio() {
+  const navigate = useNavigate();
   const isTauri = useIsTauri();
   // file object or string path
   const [file, setFile] = useState<SelectedFile | null>(null);
@@ -30,13 +33,28 @@ export default function Audio() {
 
   const handleTranscribe = async () => {
     if (!file) {
+      toast.error('请先选择一个文件');
       return
     }
-    const result = await transcribe.handleTranscribe(file.file);
-    setTaskId(result.task_id);
-  };
 
-  debugger
+    try {
+      const result = await transcribe.handleTranscribe(file.file);
+      setTaskId(result.task_id);
+
+      // Show success toast with navigation option
+      toast.success('转录任务已创建', {
+        description: `任务 ID: ${result.task_id}`,
+        action: {
+          label: '查看任务',
+          onClick: () => navigate('/task')
+        }
+      });
+    } catch (err: any) {
+      toast.error('创建转录任务失败', {
+        description: err?.message || err?.error || '未知错误'
+      });
+    }
+  };
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-8">
@@ -56,7 +74,9 @@ export default function Audio() {
           {transcribe?.isError && (
             <Alert variant="destructive">
               <AlertTitle>错误</AlertTitle>
-              <AlertDescription>{transcribe?.error?.error}</AlertDescription>
+              <AlertDescription>
+                {(transcribe?.error as any)?.error || '创建转录任务失败，请重试'}
+              </AlertDescription>
             </Alert>
           )}
 
