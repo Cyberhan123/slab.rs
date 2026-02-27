@@ -11,7 +11,7 @@ echo ""
 
 # Configuration
 SERVER_URL="${SLAB_SERVER_URL:-http://localhost:3000}"
-TEST_AUDIO="${SLAB_TEST_AUDIO:-/home/cyberhan/slab.rs/testdata/samples/jfk.wav}"
+TEST_AUDIO="${SLAB_TEST_AUDIO:-./slab.rs/testdata/samples/jfk.wav}"
 
 echo "Server URL: $SERVER_URL"
 echo "Test Audio: $TEST_AUDIO"
