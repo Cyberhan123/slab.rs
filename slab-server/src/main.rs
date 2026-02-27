@@ -98,25 +98,6 @@ async fn main() -> anyhow::Result<()> {
         diffusion_lib_dir: cfg.diffusion_lib_dir.clone(),
     })?;
 
-    if whisper_configured {
-        // Verify Whisper backend is ready after initialization
-        match slab_core::api::is_backend_ready(slab_core::api::Backend::GGMLWhisper).await {
-            Ok(ready) => {
-                if ready {
-                    info!("Whisper backend ready (library loaded)");
-                } else {
-                    warn!(
-                        "Whisper backend library loaded but no model loaded. \
-                         Audio transcription tasks will fail until a model is loaded via the API."
-                    );
-                }
-            }
-            Err(e) => {
-                warn!(error = %e, "Failed to check Whisper backend readiness");
-            }
-        }
-    }
-
     info!("slab-core runtime initialised");
 
     // ── 5. Session state directory ─────────────────────────────────────────────
