@@ -132,8 +132,8 @@ async fn good(name: String) -> String {
     "build": {
         "devUrl": "http://localhost:5173",
         "frontendDist": "../dist",
-        "beforeDevCommand": "npm run dev",
-        "beforeBuildCommand": "npm run build"
+        "beforeDevCommand": "bun run dev",
+        "beforeBuildCommand": "bun run build"
     },
     "app": {
         "windows": [{

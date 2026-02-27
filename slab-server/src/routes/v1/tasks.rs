@@ -83,14 +83,19 @@ pub async fn get_task(
     if let Some(core_tid) = record.core_task_id {
         if let Ok(view) = slab_core::api::status(core_tid as u64).await {
             let live_status = view.status.as_str();
+            let live_error = match &view.status {
+                slab_core::TaskStatus::Failed { error } => Some(error.to_string()),
+                _ => None,
+            };
             // Sync DB if status changed.
-            if live_status != record.status {
+            if live_status != record.status || live_error.as_deref() != record.error_msg.as_deref() {
                 state
                     .store
-                    .update_task_status(&id, live_status, None, None)
+                    .update_task_status(&id, live_status, None, live_error.as_deref())
                     .await
                     .unwrap_or_else(|e| warn!(error = %e, "failed to sync task status"));
                 record.status = live_status.to_owned();
+                record.error_msg = live_error;
             }
         }
     }
@@ -149,6 +154,12 @@ pub async fn get_task_result(
                 )));
             }
             Err(e) => {
+                let err_msg = e.to_string();
+                state
+                    .store
+                    .update_task_status(&id, "failed", None, Some(&err_msg))
+                    .await
+                    .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to sync failed task error"));
                 return Err(ServerError::Runtime(e));
             }
         }

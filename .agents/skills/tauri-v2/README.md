@@ -88,17 +88,17 @@ Common error messages that should trigger this skill:
 
 ```bash
 # Create new Tauri project
-npm create tauri-app@latest
+bun create tauri-app@latest
 
 # Add Tauri to existing project
-npm install -D @tauri-apps/cli@latest
-npx tauri init
+bun install -D @tauri-apps/cli@latest
+bunx tauri init
 
 # Development
-npm run tauri dev
+bun run tauri dev
 
 # Build
-npm run tauri build
+bun run tauri build
 ```
 
 ## Token Efficiency

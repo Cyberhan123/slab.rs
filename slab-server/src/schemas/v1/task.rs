@@ -14,6 +14,7 @@ pub struct TaskResponse {
     pub id: String,
     pub task_type: String,
     pub status: String,
+    pub error_msg: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -24,6 +25,7 @@ impl TaskRecord {
             id: self.id.clone(),
             task_type: self.task_type.clone(),
             status: self.status.clone(),
+            error_msg: self.error_msg.clone(),
             created_at: self.created_at.to_rfc3339(),
             updated_at: self.updated_at.to_rfc3339(),
         }

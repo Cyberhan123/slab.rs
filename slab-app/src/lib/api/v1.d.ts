@@ -639,6 +639,7 @@ export interface components {
         };
         TaskResponse: {
             created_at: string;
+            error_msg?: string | null;
             id: string;
             status: string;
             task_type: string;
