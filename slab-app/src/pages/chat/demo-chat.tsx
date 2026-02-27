@@ -11,28 +11,28 @@ import { ChatMessageList } from './components/chat-message-list';
 import { ChatInput } from './components/chat-input';
 import { useChat } from './hooks/use-chat';
 
-function Chat() {
+function DemoChat() {
   const [className] = useMarkdownTheme();
   const styles = useStyle();
   const [deepThink, setDeepThink] = useState<boolean>(true);
   const [curConversation, setCurConversation] = useState<string>(
     DEFAULT_CONVERSATIONS_ITEMS[0].key,
   );
-  
-  const { 
-    messages, 
-    isRequesting, 
-    abort, 
-    onReload, 
-    activeConversation, 
-    handleSubmit 
+
+  const {
+    messages,
+    isRequesting,
+    abort,
+    onReload,
+    activeConversation,
+    handleSubmit
   } = useChat(curConversation);
 
   return (
     <XProvider locale={locale}>
       <ChatContext.Provider value={{ onReload }}>
         <div className={styles.layout}>
-          <ChatSidebar 
+          <ChatSidebar
             curConversation={curConversation}
             setCurConversation={setCurConversation}
             activeConversation={activeConversation}
@@ -41,7 +41,7 @@ function Chat() {
           <div className={styles.chat}>
             <div className={styles.chatList}>
               {messages?.length !== 0 ? (
-                <ChatMessageList 
+                <ChatMessageList
                   messages={messages}
                   className={className}
                   onReload={onReload}
@@ -49,7 +49,7 @@ function Chat() {
               ) : (
                 <div className={styles.startPage}>
                   <div className={styles.agentName}>{locale.agentName}</div>
-                  <ChatInput 
+                  <ChatInput
                     isRequesting={isRequesting}
                     deepThink={deepThink}
                     setDeepThink={setDeepThink}
@@ -59,9 +59,9 @@ function Chat() {
                   />
                 </div>
               )}
-              
+
               {messages?.length !== 0 && (
-                <ChatInput 
+                <ChatInput
                   isRequesting={isRequesting}
                   deepThink={deepThink}
                   setDeepThink={setDeepThink}
@@ -78,4 +78,4 @@ function Chat() {
   );
 }
 
-export default Chat;
+export default DemoChat;

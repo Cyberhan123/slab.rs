@@ -13,3 +13,5 @@ slab-libfetch/target/
 
 ## SQLite Databases
 *.db
+
+libraries/

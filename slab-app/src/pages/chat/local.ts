@@ -73,7 +73,7 @@ const zhCN = {
   baseOnAntDesign: '基于 Ant Design，AGI 产品界面解决方案，创造更智能的视觉体验~',
   iCanHelp: '我可以帮助：',
 
-  // 历史消息内容
+  // Historical message content
   historyMessages: {
     newSession: {
       user: '新会话',
@@ -172,7 +172,7 @@ const enUS = {
     'Base on Ant Design, AGI product interface solution, create a better intelligent vision~',
   iCanHelp: 'I can help:',
 
-  // 历史消息内容
+  // Historical message content
   historyMessages: {
     newSession: {
       user: 'New session',
