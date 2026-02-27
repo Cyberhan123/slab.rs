@@ -40,7 +40,6 @@ echo ""
 echo "🔨 Step 2: Building slab-server..."
 echo ""
 
-cd /home/cyberhan/slab.rs
 cargo build -p slab-server
 
 echo ""
