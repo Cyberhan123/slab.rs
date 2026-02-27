@@ -72,7 +72,7 @@ export default function Image() {
         }
       }) as { status: string };
       
-      if (task.status === 'completed') {
+      if (task.status === 'succeeded') {
         // 获取生成结果
         const result = await getTaskResultMutation.mutateAsync({
           params: {

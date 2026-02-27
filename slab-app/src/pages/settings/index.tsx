@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import api from "@/lib/api"; 
-import { 
+import api, { getErrorMessage } from "@/lib/api";
+import {
   Card,
   CardContent,
   CardDescription,
@@ -29,16 +29,18 @@ import {
 } from '@/components/ui/form';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Loader2, CheckCircle2, XCircle, AlertCircle } from 'lucide-react';
 
 export default function Settings() {
   const [selectedConfigKey, setSelectedConfigKey] = useState<string | null>(null);
   const [configValue, setConfigValue] = useState<string>('');
+  const [downloadingBackend, setDownloadingBackend] = useState<string | null>(null);
 
   // API calls using react-query
   const { data: configs, error: configsError, isLoading: configsLoading, refetch: refetchConfigs } = api.useQuery('get', '/admin/config');
-  const { data: backends, error: backendsError, isLoading: backendsLoading } = api.useQuery('get', '/admin/backends');
+  const { data: backends, error: backendsError, isLoading: backendsLoading, refetch: refetchBackends } = api.useQuery('get', '/admin/backends');
   // Mutation for updating config
   const updateConfigMutation = api.useMutation('put', '/admin/config/{key}');
   
@@ -63,7 +65,7 @@ export default function Settings() {
       // Refresh configs
       refetchConfigs();
     } catch (error) {
-      toast.error('Failed to update configuration');
+      toast.error(getErrorMessage(error));
     }
   };
 
@@ -77,21 +79,26 @@ export default function Settings() {
       });
       toast.success(`Backend Status: ${status?.status}`);
     } catch (error) {
-      toast.error('Failed to get backend status');
+      toast.error(getErrorMessage(error));
     }
   };
 
   // Function to download backend
-  const downloadBackend = async () => {
+  const downloadBackend = async (backendId: string) => {
+    setDownloadingBackend(backendId);
     try {
       await downloadBackendMutation.mutateAsync({
-        body: {
-          target_path: '', // Provide a default target path
+        params: {
+          query: { backend_id: backendId },
         },
       });
-      toast.success('Backend download initiated');
+      toast.success(`Backend ${backendId} download initiated successfully`);
+      // Refresh backends to update status
+      refetchBackends();
     } catch (error) {
-      toast.error('Failed to download backend');
+      toast.error(getErrorMessage(error));
+    } finally {
+      setDownloadingBackend(null);
     }
   };
 
@@ -227,32 +234,74 @@ export default function Settings() {
                   </TableHeader>
                   <TableBody>
                     {(backends?.backends?.length??0) > 0 ? (
-                      backends.backends.map((backend: any) => (
-                        <TableRow key={backend.backend}>
-                          <TableCell className="font-medium">{backend.backend}</TableCell>
-                          <TableCell>
-                            <span className={`px-2 py-1 text-xs rounded-full ${backend.status === 'running' ? 'bg-green-100 text-green-800' : 'bg-yellow-100 text-yellow-800'}`}>
-                              {backend.status}
-                            </span>
-                          </TableCell>
-                          <TableCell className="flex gap-2">
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => getBackendStatus(backend.backend)}
-                            >
-                              Check Status
-                            </Button>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={downloadBackend}
-                            >
-                              Download
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
+                      backends.backends.map((backend: any) => {
+                        const isDownloading = downloadingBackend === backend.backend;
+
+                        // Determine status badge styling and icon
+                        const getStatusBadge = () => {
+                          switch (backend.status) {
+                            case 'running':
+                            case 'ready':
+                              return (
+                                <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
+                                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                                  Ready
+                                </Badge>
+                              );
+                            case 'stopped':
+                            case 'not_configured':
+                              return (
+                                <Badge variant="outline" className="bg-gray-50 text-gray-700 border-gray-200">
+                                  <XCircle className="w-3 h-3 mr-1" />
+                                  Not Configured
+                                </Badge>
+                              );
+                            default:
+                              return (
+                                <Badge variant="outline" className="bg-yellow-50 text-yellow-700 border-yellow-200">
+                                  <AlertCircle className="w-3 h-3 mr-1" />
+                                  {backend.status}
+                                </Badge>
+                              );
+                          }
+                        };
+
+                        return (
+                          <TableRow key={backend.backend}>
+                            <TableCell className="font-medium">{backend.backend}</TableCell>
+                            <TableCell>
+                              {getStatusBadge()}
+                            </TableCell>
+                            <TableCell className="flex gap-2">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => getBackendStatus(backend.backend)}
+                                disabled={isDownloading}
+                              >
+                                Check Status
+                              </Button>
+                              {backend.status !== 'running' && backend.status !== 'ready' && (
+                                <Button
+                                  variant="default"
+                                  size="sm"
+                                  onClick={() => downloadBackend(backend.backend)}
+                                  disabled={isDownloading}
+                                >
+                                  {isDownloading ? (
+                                    <>
+                                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                                      Downloading...
+                                    </>
+                                  ) : (
+                                    'Download'
+                                  )}
+                                </Button>
+                              )}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })
                     ) : (
                       <TableRow>
                         <TableCell colSpan={3} className="text-center py-4">

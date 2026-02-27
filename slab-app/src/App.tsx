@@ -2,22 +2,20 @@ import AppRoutes from "@/routes";
 import './styles/globals.css'
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
-import {
-  QueryClient,
-  QueryClientProvider,
-} from '@tanstack/react-query'
-
-// Create a client
-const queryClient = new QueryClient()
+import { ErrorBoundary } from "@/components/error-boundary"
+import { QueryClientProvider } from '@tanstack/react-query'
+import { queryClient } from "@/lib/api/client"
 
 function App() {
   return (
-    <TooltipProvider>
-      <QueryClientProvider client={queryClient}>
-        <AppRoutes />
-        <Toaster />
-      </QueryClientProvider>
-    </TooltipProvider>
+    <ErrorBoundary>
+      <TooltipProvider>
+        <QueryClientProvider client={queryClient}>
+          <AppRoutes />
+          <Toaster />
+        </QueryClientProvider>
+      </TooltipProvider>
+    </ErrorBoundary>
   );
 }
 

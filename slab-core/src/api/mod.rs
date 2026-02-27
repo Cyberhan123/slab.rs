@@ -66,9 +66,10 @@ use crate::runtime::orchestrator::Orchestrator;
 use crate::runtime::pipeline::PipelineBuilder;
 use crate::runtime::stage::CpuStage;
 use crate::runtime::storage::TaskStatusView;
-use crate::runtime::types::{Payload, RuntimeError, TaskId, TaskStatus};
+use crate::runtime::types::{Payload, TaskId, TaskStatus};
 pub use types::Backend;
 pub use types::Event;
+pub use crate::runtime::types::RuntimeError;
 
 // ── Timeout constants ──────────────────────────────────────────────────────────
 
@@ -356,6 +357,66 @@ pub fn cancel(task_id: TaskId) -> Result<(), RuntimeError> {
     let rt = CallBuilder::runtime()?;
     rt.orchestrator.cancel(task_id);
     Ok(())
+}
+
+/// Check if a backend is ready to accept inference requests.
+///
+/// Returns `true` if the backend has both its library and model loaded.
+/// This is a lightweight check that can be used before submitting tasks
+/// to provide better error messages to users.
+///
+/// # Errors
+///
+/// - [`RuntimeError::NotInitialized`] – [`init`] was not called first.
+/// - [`RuntimeError::BackendShutdown`] – the backend worker has stopped.
+pub async fn is_backend_ready(backend_id: Backend) -> Result<bool, RuntimeError> {
+    use crate::runtime::backend::protocol::{BackendOp, BackendReply};
+
+    let rt = CallBuilder::runtime()?;
+    let backend_str = backend_id.to_string();
+    let tx = rt
+        .backends
+        .get(&backend_str)
+        .cloned()
+        .ok_or_else(|| RuntimeError::Busy {
+            backend_id: backend_str.clone(),
+        })?;
+
+    // Only Whisper and Diffusion backends support readiness checks
+    match backend_id {
+        Backend::GGMLWhisper | Backend::GGMLDiffusion => {
+            let (watch_tx, watch_rx) = tokio::sync::watch::channel(false);
+            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+            let req = crate::runtime::backend::protocol::BackendRequest {
+                op: BackendOp {
+                    name: "is_ready".to_string(),
+                    options: Payload::default(),
+                },
+                input: Payload::default(),
+                cancel_rx: watch_rx,
+                reply_tx,
+            };
+            drop(watch_tx);
+
+            tx.send(req)
+                .await
+                .map_err(|_| RuntimeError::BackendShutdown)?;
+
+            match reply_rx.await.map_err(|_| RuntimeError::BackendShutdown)? {
+                BackendReply::Value(Payload::Json(v)) => {
+                    Ok(v.get("ready").and_then(|r| r.as_bool()).unwrap_or(false))
+                }
+                BackendReply::Value(_) => Ok(false),
+                BackendReply::Error(_) => Ok(false),
+                BackendReply::Stream(_) => Ok(false),
+            }
+        }
+        Backend::GGMLLlama => {
+            // Llama backend doesn't have a model state separate from library
+            // We consider it ready if the worker is responsive
+            Ok(true)
+        }
+    }
 }
 
 // ── BackendBuilder ─────────────────────────────────────────────────────────────

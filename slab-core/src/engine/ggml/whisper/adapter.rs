@@ -136,10 +136,19 @@ impl GGMLWhisperEngine {
         Ok(())
     }
 
-    pub fn inference<P: AsRef<Path>>(
-        &self,
-        audio_data: &[f32],
-    ) -> Result<Vec<SubtitleEntry>, engine::EngineError> {
+    /// Run Whisper inference on the provided audio samples.
+    ///
+    /// # Arguments
+    /// * `audio_data` - PCM audio samples as f32 values (typically 16 kHz mono)
+    ///
+    /// # Returns
+    /// Vector of subtitle entries with transcribed text and timestamps
+    ///
+    /// # Errors
+    /// Returns `GGMLWhisperEngineError::ContextNotInitialized` if no model is loaded.
+    /// Returns `GGMLWhisperEngineError::CreateInferenceState` if state creation fails.
+    /// Returns `GGMLWhisperEngineError::InferenceFailed` if transcription fails.
+    pub fn inference(&self, audio_data: &[f32]) -> Result<Vec<SubtitleEntry>, engine::EngineError> {
         let ctx = self
             .ctx
             .as_ref()

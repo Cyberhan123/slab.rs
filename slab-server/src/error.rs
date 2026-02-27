@@ -11,9 +11,27 @@
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::Json;
-use serde_json::json;
+use serde::Serialize;
 use thiserror::Error;
 use tracing::error;
+
+/// Standard error response format
+#[derive(Serialize)]
+struct ErrorResponse {
+    code: u16,
+    data: Option<serde_json::Value>,
+    message: String,
+}
+
+/// Error codes for different error types
+mod error_codes {
+    pub const NOT_FOUND: u16 = 4004;
+    pub const BAD_REQUEST: u16 = 4000;
+    pub const BACKEND_NOT_READY: u16 = 5003;
+    pub const RUNTIME_ERROR: u16 = 5000;
+    pub const DATABASE_ERROR: u16 = 5001;
+    pub const INTERNAL_ERROR: u16 = 5002;
+}
 
 /// All errors that can occur in the slab-server request lifecycle.
 #[derive(Debug, Error)]
@@ -45,11 +63,26 @@ pub enum ServerError {
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
-        let (status, client_message) = match &self {
+        let (status, code, data, message) = match &self {
             // Client-facing errors: expose the message directly.
-            ServerError::NotFound(m) => (StatusCode::NOT_FOUND, m.clone()),
-            ServerError::BadRequest(m) => (StatusCode::BAD_REQUEST, m.clone()),
-            ServerError::BackendNotReady(m) => (StatusCode::SERVICE_UNAVAILABLE, m.clone()),
+            ServerError::NotFound(m) => (
+                StatusCode::NOT_FOUND,
+                error_codes::NOT_FOUND,
+                None as Option<serde_json::Value>,
+                m.clone(),
+            ),
+            ServerError::BadRequest(m) => (
+                StatusCode::BAD_REQUEST,
+                error_codes::BAD_REQUEST,
+                None,
+                m.clone(),
+            ),
+            ServerError::BackendNotReady(m) => (
+                StatusCode::SERVICE_UNAVAILABLE,
+                error_codes::BACKEND_NOT_READY,
+                None,
+                m.clone(),
+            ),
 
             // Internal errors: log the full detail, return a helpful message
             // for common errors while keeping sensitive details private.
@@ -61,17 +94,24 @@ impl IntoResponse for ServerError {
                         Set SLAB_WHISPER_LIB_DIR environment variable or use POST /admin/backends/reload".to_owned()
                     }
                     slab_core::RuntimeError::LibraryLoadFailed { backend, .. } => {
-                        format!("{} library failed to load. Check SLAB_{}_LIB_DIR environment variable.", \
+                        format!("{} library failed to load. Check SLAB_{}_LIB_DIR environment variable.",
                             backend, backend.to_uppercase().replace(".", "_"))
                     }
                     _ => "inference backend error".to_owned()
                 };
-                (StatusCode::INTERNAL_SERVER_ERROR, message)
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    error_codes::RUNTIME_ERROR,
+                    None,
+                    message,
+                )
             }
             ServerError::Database(e) => {
                 error!(error = %e, "database error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
+                    error_codes::DATABASE_ERROR,
+                    None,
                     "internal server error".to_owned(),
                 )
             }
@@ -79,11 +119,20 @@ impl IntoResponse for ServerError {
                 error!(message = %m, "internal server error");
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
+                    error_codes::INTERNAL_ERROR,
+                    None,
                     "internal server error".to_owned(),
                 )
             }
         };
-        (status, Json(json!({ "error": client_message }))).into_response()
+
+        let error_response = ErrorResponse {
+            code,
+            data,
+            message,
+        };
+
+        (status, Json(error_response)).into_response()
     }
 }
 

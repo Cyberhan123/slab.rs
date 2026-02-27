@@ -68,6 +68,28 @@ async fn main() -> anyhow::Result<()> {
     info!(database_url = %cfg.database_url, "database ready");
 
     // ── 4. slab-core AI runtime ────────────────────────────────────────────────
+    info!(
+        llama_lib_dir = cfg.llama_lib_dir.as_deref(),
+        whisper_lib_dir = cfg.whisper_lib_dir.as_deref(),
+        diffusion_lib_dir = cfg.diffusion_lib_dir.as_deref(),
+        queue_capacity = cfg.queue_capacity,
+        backend_capacity = cfg.backend_capacity,
+        "initialising slab-core runtime"
+    );
+
+    let whisper_configured = cfg.whisper_lib_dir.is_some();
+    if whisper_configured {
+        info!(
+            path = %cfg.whisper_lib_dir.as_ref().unwrap(),
+            "Whisper library directory configured"
+        );
+    } else {
+        warn!(
+            "SLAB_WHISPER_LIB_DIR not set - Whisper transcription will not be available. \
+             Set this environment variable to enable audio transcription features."
+        );
+    }
+
     slab_core::api::init(slab_core::api::Config {
         queue_capacity: cfg.queue_capacity,
         backend_capacity: cfg.backend_capacity,
@@ -75,6 +97,26 @@ async fn main() -> anyhow::Result<()> {
         whisper_lib_dir: cfg.whisper_lib_dir.clone(),
         diffusion_lib_dir: cfg.diffusion_lib_dir.clone(),
     })?;
+
+    if whisper_configured {
+        // Verify Whisper backend is ready after initialization
+        match slab_core::api::is_backend_ready(slab_core::api::Backend::GGMLWhisper).await {
+            Ok(ready) => {
+                if ready {
+                    info!("Whisper backend ready (library loaded)");
+                } else {
+                    warn!(
+                        "Whisper backend library loaded but no model loaded. \
+                         Audio transcription tasks will fail until a model is loaded via the API."
+                    );
+                }
+            }
+            Err(e) => {
+                warn!(error = %e, "Failed to check Whisper backend readiness");
+            }
+        }
+    }
+
     info!("slab-core runtime initialised");
 
     // ── 5. Session state directory ─────────────────────────────────────────────

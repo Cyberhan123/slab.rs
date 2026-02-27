@@ -89,7 +89,15 @@ impl WhisperWorker {
             Ok(Event::UnloadModel) => self.handle_unload_model(reply_tx).await,
             Ok(Event::Inference) => self.handle_inference(input, reply_tx).await,
             Ok(_) | Err(_) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
+                // Handle the is_ready operation for health checks
+                if op.name == "is_ready" {
+                    let ready = self.engine.as_ref().map_or(false, |e| e.is_model_loaded());
+                    let _ = reply_tx.send(BackendReply::Value(Payload::Json(
+                        serde_json::json!({ "ready": ready }),
+                    )));
+                } else {
+                    let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
+                }
             }
         }
     }
@@ -252,7 +260,7 @@ impl WhisperWorker {
             Some(e) => e,
             None => {
                 let _ = reply_tx.send(BackendReply::Error(
-                    "library not loaded; call lib.load first".into(),
+                    "whisper backend not ready: library or model not loaded. Call lib.load and model.load first".into(),
                 ));
                 return;
             }
@@ -262,22 +270,39 @@ impl WhisperWorker {
             Ok(b) => b,
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(format!(
-                    "transcribe input must be f32 PCM bytes: {e}"
+                    "invalid input for whisper inference: expected f32 PCM audio samples, got: {e}"
                 )));
                 return;
             }
         };
 
+        if samples.is_empty() {
+            let _ = reply_tx.send(BackendReply::Error(
+                "invalid input for whisper inference: audio samples are empty".into(),
+            ));
+            return;
+        }
+
         // Whisper inference is CPU/GPU-bound; use block_in_place so the engine
         // context stays on this thread without needing an additional spawn_blocking.
-        let result =
-            tokio::task::block_in_place(|| engine.inference::<std::path::PathBuf>(&samples));
+        let result = tokio::task::block_in_place(|| {
+            tracing::debug!(
+                sample_count = samples.len(),
+                duration_sec = samples.len() as f64 / 16000.0,
+                "starting whisper inference"
+            );
+            engine.inference(&samples)
+        });
 
         match result {
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+                tracing::error!(error = %e, "whisper inference failed");
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "whisper inference failed: {e}"
+                )));
             }
             Ok(entries) => {
+                tracing::debug!(segment_count = entries.len(), "whisper inference succeeded");
                 let mut out = String::new();
                 for entry in entries {
                     if let Some(line) = entry.line {

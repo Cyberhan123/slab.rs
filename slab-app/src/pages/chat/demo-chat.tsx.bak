@@ -1,0 +1,52 @@
+import { useState } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+// Demo chat with Ant Design X
+import DemoChat from './demo-chat';
+// Real Slab backend chat
+import SlabChat from './slab-chat';
+
+type ChatMode = 'demo' | 'slab';
+
+function Chat() {
+  const [chatMode, setChatMode] = useState<ChatMode>('demo');
+
+  return (
+    <div className="h-screen flex flex-col">
+      {/* Mode Selector */}
+      <Card className="m-4 p-4">
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold">Chat</h1>
+            <p className="text-sm text-muted-foreground">
+              {chatMode === 'demo'
+                ? 'Demo mode using Ant Design X API'
+                : 'Connected to Slab backend'}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <Button
+              variant={chatMode === 'demo' ? 'default' : 'outline'}
+              onClick={() => setChatMode('demo')}
+            >
+              Demo Mode
+            </Button>
+            <Button
+              variant={chatMode === 'slab' ? 'default' : 'outline'}
+              onClick={() => setChatMode('slab')}
+            >
+              Slab Backend
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Chat Interface */}
+      <div className="flex-1 mx-4 mb-4">
+        {chatMode === 'demo' ? <DemoChat /> : <SlabChat />}
+      </div>
+    </div>
+  );
+}
+
+export default Chat;

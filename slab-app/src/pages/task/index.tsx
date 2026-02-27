@@ -72,9 +72,9 @@ export default function Task() {
       });
 
       setSelectedTask(data);
-      
+
       // 获取任务结果
-      if (data.status === 'completed') {
+      if (data.status === 'succeeded') {
         await fetchTaskResult(id);
       }
     } catch (err) {
@@ -140,7 +140,7 @@ export default function Task() {
         return <Badge variant="secondary">待处理</Badge>;
       case 'running':
         return <Badge variant="outline">运行中</Badge>;
-      case 'completed':
+      case 'succeeded':
         return <Badge variant="default">已完成</Badge>;
       case 'failed':
         return <Badge variant="destructive">失败</Badge>;
@@ -265,7 +265,7 @@ export default function Task() {
                                     </div>
                                   </div>
 
-                                  {selectedTask.status === 'completed' && taskResult && (
+                                  {selectedTask.status === 'succeeded' && taskResult && (
                                     <div className="space-y-2">
                                       <h4 className="font-medium">任务结果</h4>
                                       <div className="p-4 border rounded-md bg-muted/50">
@@ -303,7 +303,7 @@ export default function Task() {
                                         {cancelTaskMutation.isPending ? '取消中...' : '取消任务'}
                                       </Button>
                                     )}
-                                    {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled' || selectedTask.status === 'completed') && (
+                                    {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled' || selectedTask.status === 'succeeded') && (
                                       <Button
                                         variant="secondary"
                                         size="sm"
