@@ -66,10 +66,11 @@ use crate::runtime::orchestrator::Orchestrator;
 use crate::runtime::pipeline::PipelineBuilder;
 use crate::runtime::stage::CpuStage;
 use crate::runtime::storage::TaskStatusView;
+pub use crate::runtime::types::RuntimeError;
+use std::path::{Path, PathBuf};
 use crate::runtime::types::{Payload, TaskId, TaskStatus};
 pub use types::Backend;
 pub use types::Event;
-pub use crate::runtime::types::RuntimeError;
 
 // ── Timeout constants ──────────────────────────────────────────────────────────
 
@@ -96,17 +97,17 @@ static RUNTIME: std::sync::OnceLock<ApiRuntime> = std::sync::OnceLock::new();
 ///
 /// All fields have sensible defaults via [`Default`].
 #[derive(Debug, Clone)]
-pub struct Config {
+pub struct Config{
     /// Capacity of the orchestrator submission queue.  Defaults to `64`.
     pub queue_capacity: usize,
     /// Maximum concurrent in-flight requests per backend.  Defaults to `4`.
     pub backend_capacity: usize,
     /// Optional filesystem directory that contains the llama shared library.
-    pub llama_lib_dir: Option<String>,
+    pub llama_lib_dir: Option<PathBuf>,
     /// Optional filesystem directory that contains the whisper shared library.
-    pub whisper_lib_dir: Option<String>,
+    pub whisper_lib_dir: Option<PathBuf>,
     /// Optional filesystem directory that contains the diffusion shared library.
-    pub diffusion_lib_dir: Option<String>,
+    pub diffusion_lib_dir: Option<PathBuf>,
 }
 
 impl Default for Config {
@@ -123,9 +124,9 @@ impl Default for Config {
 
 /// Holds the configured library directories after [`init`].
 pub struct LibDirs {
-    pub llama: Option<String>,
-    pub whisper: Option<String>,
-    pub diffusion: Option<String>,
+    pub llama: Option<PathBuf>,
+    pub whisper: Option<PathBuf>,
+    pub diffusion: Option<PathBuf>,
 }
 
 static LIB_DIRS: std::sync::OnceLock<LibDirs> = std::sync::OnceLock::new();
@@ -266,7 +267,7 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
 /// - [`RuntimeError::NotInitialized`] – [`init`] was not called first.
 /// - [`RuntimeError::BackendShutdown`] – the backend worker has stopped.
 /// - [`RuntimeError::GpuStageFailed`] – the library could not be loaded.
-pub async fn reload_library(backend_id: Backend, lib_path: &str) -> Result<(), RuntimeError> {
+pub async fn reload_library<P: AsRef<Path>>(backend_id: Backend, lib_path: P) -> Result<(), RuntimeError> {
     use crate::runtime::backend::protocol::{BackendOp, BackendReply};
 
     let rt = RUNTIME.get().ok_or(RuntimeError::NotInitialized)?;
@@ -286,7 +287,7 @@ pub async fn reload_library(backend_id: Backend, lib_path: &str) -> Result<(), R
             name: Event::ReloadLibrary.to_string(),
             options: Payload::default(),
         },
-        input: Payload::Json(serde_json::json!({ "lib_path": lib_path })),
+        input: Payload::Json(serde_json::json!({ "lib_path": lib_path.as_ref().to_string_lossy() })),
         cancel_rx: watch_rx,
         reply_tx,
     };
@@ -411,6 +412,7 @@ pub async fn is_backend_ready(backend_id: Backend) -> Result<bool, RuntimeError>
                 BackendReply::Stream(_) => Ok(false),
             }
         }
+        //TODO: fix this when llama has a proper readiness check (e.g. a lightweight "ping" op)
         Backend::GGMLLlama => {
             // Llama backend doesn't have a model state separate from library
             // We consider it ready if the worker is responsive

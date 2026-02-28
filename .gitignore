@@ -13,5 +13,8 @@ slab-libfetch/target/
 
 ## SQLite Databases
 *.db
+*.exe
 
-libraries/
+slab-app/src-tauri/resources/lib/whisper/*.dll
+slab-app/src-tauri/resources/lib/diffusion/*.dll
+slab-app/src-tauri/resources/lib/llama/*.dll

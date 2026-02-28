@@ -4,7 +4,7 @@ import { TooltipProvider } from "@/components/ui/tooltip"
 import { Toaster } from "@/components/ui/sonner"
 import { ErrorBoundary } from "@/components/error-boundary"
 import { QueryClientProvider } from '@tanstack/react-query'
-import { queryClient } from "@/lib/api/client"
+import { queryClient } from "@/lib/api"
 
 function App() {
   return (

@@ -33,7 +33,9 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": [],
+   "resources": [
+      "resources/**/*.dll"
+    ],
     "externalBin": [],
     "copyright": "Copyright (c) 2026 CyberHan",
     "category": "Utility"

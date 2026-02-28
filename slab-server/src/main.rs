@@ -18,6 +18,7 @@ mod schemas;
 mod state;
 
 use std::net::SocketAddr;
+use std::path::Path;
 use std::sync::Arc;
 
 use tracing::{info, warn};
@@ -68,34 +69,24 @@ async fn main() -> anyhow::Result<()> {
     info!(database_url = %cfg.database_url, "database ready");
 
     // ── 4. slab-core AI runtime ────────────────────────────────────────────────
-    info!(
-        llama_lib_dir = cfg.llama_lib_dir.as_deref(),
-        whisper_lib_dir = cfg.whisper_lib_dir.as_deref(),
-        diffusion_lib_dir = cfg.diffusion_lib_dir.as_deref(),
-        queue_capacity = cfg.queue_capacity,
-        backend_capacity = cfg.backend_capacity,
-        "initialising slab-core runtime"
-    );
 
-    let whisper_configured = cfg.whisper_lib_dir.is_some();
-    if whisper_configured {
-        info!(
-            path = %cfg.whisper_lib_dir.as_ref().unwrap(),
-            "Whisper library directory configured"
-        );
-    } else {
-        warn!(
-            "SLAB_WHISPER_LIB_DIR not set - Whisper transcription will not be available. \
-             Set this environment variable to enable audio transcription features."
-        );
-    }
+    let base_lib_path = Path::new(cfg.lib_dir.as_ref().unwrap());
+    let llama_lib_dir = base_lib_path.join("llama");
+    let whisper_lib_dir = base_lib_path.join("whisper");
+    let diffusion_lib_dir = base_lib_path.join("diffusion");
+    info!(
+        llama_lib_dir = %llama_lib_dir.display(),
+        whisper_lib_dir = %whisper_lib_dir.display(),
+        diffusion_lib_dir = %diffusion_lib_dir.display(),
+        "initialising slab-core with library paths"
+    );
 
     slab_core::api::init(slab_core::api::Config {
         queue_capacity: cfg.queue_capacity,
         backend_capacity: cfg.backend_capacity,
-        llama_lib_dir: cfg.llama_lib_dir.clone(),
-        whisper_lib_dir: cfg.whisper_lib_dir.clone(),
-        diffusion_lib_dir: cfg.diffusion_lib_dir.clone(),
+        llama_lib_dir: Some(llama_lib_dir.to_path_buf()),
+        whisper_lib_dir: Some(whisper_lib_dir.to_path_buf()),
+        diffusion_lib_dir: Some(diffusion_lib_dir.to_path_buf()),
     })?;
 
     info!("slab-core runtime initialised");
@@ -181,10 +172,17 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
+    // let stdin_closed = async {
+    //     use tokio::io::AsyncReadExt;
+    //     let mut stdin = tokio::io::stdin();
+    //     let mut buf = [0u8; 1];
+    //     let _ = stdin.read(&mut buf).await;
+    // };
+
     tokio::select! {
         _ = ctrl_c   => {}
         _ = terminate => {}
+        // _ = stdin_closed => {}
     }
-
     info!("shutdown signal received; starting graceful shutdown");
 }

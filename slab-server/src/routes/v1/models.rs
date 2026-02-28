@@ -16,10 +16,18 @@ use crate::schemas::v1::models::{
     SwitchModelRequest,
 };
 use crate::state::AppState;
+use hf_hub::api::sync::{Api, ApiBuilder};
+use hf_hub::Cache;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(load_model, unload_model, list_available_models, switch_model, download_model),
+    paths(
+        load_model,
+        unload_model,
+        list_available_models,
+        switch_model,
+        download_model
+    ),
     components(schemas(
         LoadModelRequest,
         ModelStatusResponse,
@@ -180,7 +188,6 @@ pub async fn list_available_models(
 
     let repo_id = q.repo_id.clone();
     let files: Vec<String> = tokio::task::spawn_blocking(move || {
-        use hf_hub::api::sync::Api;
         let api = Api::new().map_err(|e| format!("hf-hub init failed: {e}"))?;
         let repo = api.model(repo_id);
         let info = repo
@@ -372,7 +379,6 @@ pub async fn download_model(
         }
 
         let result = tokio::task::spawn_blocking(move || {
-            use hf_hub::api::sync::{Api, ApiBuilder};
             // If a custom target_dir was provided, configure hf-hub to use it as cache root.
             let api = if let Some(dir) = target_dir {
                 ApiBuilder::new()

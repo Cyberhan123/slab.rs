@@ -16,8 +16,10 @@ use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::schemas::admin::backend::{
     BackendStatusResponse, BackendTypeQuery, DownloadLibRequest, ReloadLibRequest,
+    BackendListResponse,
 };
 use crate::state::AppState;
+use strum::IntoEnumIterator;
 
 type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
 
@@ -28,7 +30,8 @@ type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
         DownloadLibRequest,
         ReloadLibRequest,
         BackendTypeQuery,
-        BackendStatusResponse
+        BackendStatusResponse,
+        BackendListResponse,
     ))
 )]
 pub struct BackendApi;
@@ -42,39 +45,21 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/backends/reload", post(reload_lib))
 }
 
-fn backend_id(model_type: &str) -> Option<&'static str> {
-    match model_type {
-        "llama" => Some("ggml.llama"),
-        "whisper" => Some("ggml.whisper"),
-        "diffusion" => Some("ggml.diffusion"),
-        _ => None,
-    }
-}
-
-fn canonical_backend_id(value: &str) -> Option<&'static str> {
-    match value {
-        "ggml.llama" | "llama" => Some("ggml.llama"),
-        "ggml.whisper" | "whisper" => Some("ggml.whisper"),
-        "ggml.diffusion" | "diffusion" => Some("ggml.diffusion"),
-        _ => None,
-    }
-}
-
-fn windows_download_spec(backend_id: &str) -> Option<(&'static str, &'static str, &'static str, AssetNameResolver)> {
+fn windows_download_spec(backend_id: Backend) -> Option<(&'static str, &'static str, &'static str, AssetNameResolver)> {
     match backend_id {
-        "ggml.llama" => Some((
+        Backend::GGMLLlama => Some((
             "ggml-org",
             "llama.cpp",
             "b8069",
             Box::new(|version: &str| format!("llama-{version}-bin-win-cpu-x64.zip")),
         )),
-        "ggml.whisper" => Some((
+        Backend::GGMLWhisper => Some((
             "ggml-org",
             "whisper.cpp",
             "v1.8.3",
             Box::new(|_| "whisper-cublas-12.4.0-bin-x64.zip".to_string()),
         )),
-        "ggml.diffusion" => Some((
+        Backend::GGMLDiffusion => Some((
             "leejet",
             "stable-diffusion.cpp",
             "master-504-636d3cb",
@@ -205,7 +190,7 @@ async fn run_libfetch_download(
     responses(
         (status = 200, description = "Backend worker is running", body = BackendStatusResponse),
         (status = 400, description = "Unknown model type"),
-        (status = 401, description = "Unauthorised (management token required)"),
+        (status = 401, description = "Unauthorised (admin token required)"),
     )
 )]
 pub async fn backend_status(
@@ -224,21 +209,23 @@ pub async fn backend_status(
     path = "/admin/backends",
     tag = "admin",
     responses(
-        (status = 200, description = "List of all registered backends", body = serde_json::Value),
-        (status = 401, description = "Unauthorised (management token required)"),
+        (status = 200, description = "List of all registered backends", body = BackendListResponse),
+        (status = 401, description = "Unauthorised (admin token required)"),
     )
 )]
 pub async fn list_backends(
     State(_state): State<Arc<AppState>>,
-) -> Result<Json<serde_json::Value>, ServerError> {
-    let backends = ["llama", "whisper", "diffusion"]
-        .iter()
+) -> Result<Json<BackendListResponse>, ServerError> {
+    let backends = Backend::iter()
         .map(|name| {
-            let bid = backend_id(name).unwrap_or("unknown");
-            serde_json::json!({ "model_type": name, "backend": bid, "status": "ready" })
+            let backend_str = name.to_string();
+            BackendStatusResponse {
+                backend: backend_str.clone(),
+                status: "ready".into(), // In a real implementation, you'd check the actual status of each backend.
+            }
         })
-        .collect::<Vec<_>>();
-    Ok(Json(serde_json::json!({ "backends": backends })))
+        .collect::<Vec<BackendStatusResponse>>();
+    Ok(Json(BackendListResponse{ backends: backends }))
 }
 
 /// Download a backend shared library from a GitHub release (`POST /admin/backends/download`).
@@ -265,8 +252,8 @@ pub async fn download_lib(
         ));
     }
 
-    let backend_id = canonical_backend_id(&req.backend_id)
-        .ok_or_else(|| ServerError::BadRequest(format!("unknown backend_id: {}", req.backend_id)))?;
+    let backend_id = Backend::from_str(&req.backend_id)
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {}", req.backend_id)))?;
 
     let (owner, repo, tag, asset_resolver) = windows_download_spec(backend_id)
         .ok_or_else(|| ServerError::BadRequest(format!("unsupported backend_id: {backend_id}")))?;
@@ -274,7 +261,7 @@ pub async fn download_lib(
     let task_id = uuid::Uuid::new_v4().to_string();
     let now = chrono::Utc::now();
     let input_data = serde_json::json!({
-        "backend_id": backend_id,
+        "backend_id": req.backend_id.to_string(),
         "owner": owner,
         "repo": repo,
         "tag": tag,
@@ -396,32 +383,8 @@ mod test {
     }
 
     #[test]
-    fn backend_id_known() {
-        assert_eq!(backend_id("llama"), Some("ggml.llama"));
-        assert_eq!(backend_id("whisper"), Some("ggml.whisper"));
-        assert_eq!(backend_id("diffusion"), Some("ggml.diffusion"));
-    }
-
-    #[test]
-    fn backend_id_unknown() {
-        assert!(backend_id("gpt4").is_none());
-    }
-
-    #[test]
-    fn canonical_backend_id_known() {
-        assert_eq!(canonical_backend_id("llama"), Some("ggml.llama"));
-        assert_eq!(canonical_backend_id("ggml.whisper"), Some("ggml.whisper"));
-        assert_eq!(canonical_backend_id("diffusion"), Some("ggml.diffusion"));
-    }
-
-    #[test]
-    fn canonical_backend_id_unknown() {
-        assert_eq!(canonical_backend_id("gpt4"), None);
-    }
-
-    #[test]
     fn windows_download_spec_llama() {
-        let (owner, repo, tag, asset) = windows_download_spec("ggml.llama").expect("llama preset");
+        let (owner, repo, tag, asset) = windows_download_spec(Backend::GGMLLlama).expect("llama preset");
         assert_eq!(owner, "ggml-org");
         assert_eq!(repo, "llama.cpp");
         assert_eq!(tag, "b8069");
@@ -431,7 +394,7 @@ mod test {
     #[test]
     fn windows_download_spec_whisper() {
         let (owner, repo, tag, asset) =
-            windows_download_spec("ggml.whisper").expect("whisper preset");
+            windows_download_spec(Backend::GGMLWhisper).expect("whisper preset");
         assert_eq!(owner, "ggml-org");
         assert_eq!(repo, "whisper.cpp");
         assert_eq!(tag, "v1.8.3");
@@ -441,7 +404,7 @@ mod test {
     #[test]
     fn windows_download_spec_diffusion() {
         let (owner, repo, tag, asset) =
-            windows_download_spec("ggml.diffusion").expect("diffusion preset");
+            windows_download_spec(Backend::GGMLDiffusion).expect("diffusion preset");
         assert_eq!(owner, "leejet");
         assert_eq!(repo, "stable-diffusion.cpp");
         assert_eq!(tag, "master-504-636d3cb");
