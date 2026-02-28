@@ -60,3 +60,5 @@ anyhow    = { workspace = true }
 # Misc
 base64    = "0.22"
 bytemuck  = "1"
+strum = "0.28.0"
+clap = "4.5.60"

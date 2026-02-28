@@ -1,6 +1,5 @@
 import api from "@/lib/api";
 import useIsTauri from "@/hooks/use-tauri";
-import { logTaskId } from "@/lib/api";
 
 const useTranscribe = () => {
     const isTauri = useIsTauri();
@@ -17,9 +16,6 @@ const useTranscribe = () => {
         const response = await mutateAsync({
             body: { path: value }
         }) as { task_id: string };
-
-        // Log the task ID for diagnostics
-        logTaskId('audio/transcription', response);
 
         return response;
     }

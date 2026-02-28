@@ -1,4 +1,5 @@
-use strum::{Display, EnumString};
+use strum::{Display, EnumString, IntoEnumIterator};
+use strum_macros::EnumIter;
 
 #[derive(Debug, Display, EnumString)]
 pub enum Event {
@@ -22,7 +23,7 @@ pub enum Event {
     InferenceImage,
 }
 
-#[derive(Debug, Clone, Copy, Display, EnumString)]
+#[derive(Debug, Clone, Copy, Display, EnumString, EnumIter, PartialEq)]
 pub enum Backend {
     #[strum(serialize = "ggml.llama")]
     GGMLLlama,

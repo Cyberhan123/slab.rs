@@ -23,6 +23,7 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-dialog": "~2",
     "@tauri-apps/plugin-opener": "^2",
+    "@tauri-apps/plugin-shell": "~2",
     "antd-style": "^4.1.0",
     "autoprefixer": "^10.4.24",
     "class-variance-authority": "^0.7.1",

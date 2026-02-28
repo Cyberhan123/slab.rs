@@ -9,6 +9,18 @@
     "core:default",
     "opener:default",
     "dialog:default",
-    "dialog:allow-open"
+    "dialog:allow-open",
+    "shell:default",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "args": [],
+          "cmd": "",
+          "name": "binaries/slab-server",
+          "sidecar": true
+        }
+      ]
+    }
   ]
 }

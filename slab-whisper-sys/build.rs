@@ -53,55 +53,55 @@ fn main() {
     let profile = env::var("PROFILE").unwrap();
     if profile == "debug" {
         // 传入文件夹路径和需要匹配的后缀
-        copy_assets_to_out_dir("../testdata/whisper");
+        // copy_assets_to_out_dir("../testdata/whisper");
     }
 }
 
-fn copy_assets_to_out_dir(rel_src_dir: &str) {
-    let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
-    let out_dir = env::var("OUT_DIR").unwrap();
+// fn copy_assets_to_out_dir(rel_src_dir: &str) {
+//     let manifest_dir = env::var("CARGO_MANIFEST_DIR").unwrap();
+//     let out_dir = env::var("OUT_DIR").unwrap();
 
-    // 1. 确定源目录和目标目录
-    let src_dir = Path::new(&manifest_dir).join(rel_src_dir);
-    let dest_dir = PathBuf::from(out_dir).join("../../../");
-    let deps_dir = dest_dir.join("deps");
+//     // 1. 确定源目录和目标目录
+//     let src_dir = Path::new(&manifest_dir).join(rel_src_dir);
+//     let dest_dir = PathBuf::from(out_dir).join("../../../");
+//     let deps_dir = dest_dir.join("deps");
 
-    // 2. 定义动态库后缀
-    let extension = if cfg!(windows) {
-        "dll"
-    } else if cfg!(target_os = "macos") {
-        "dylib"
-    } else {
-        "so"
-    };
+//     // 2. 定义动态库后缀
+//     let extension = if cfg!(windows) {
+//         "dll"
+//     } else if cfg!(target_os = "macos") {
+//         "dylib"
+//     } else {
+//         "so"
+//     };
 
-    // 3. 遍历并拷贝
-    if src_dir.exists() && src_dir.is_dir() {
-        // 读取文件夹内容
-        for entry in fs::read_dir(src_dir).expect("无法读取源目录") {
-            let entry = entry.expect("读取目录项失败");
-            let path = entry.path();
+//     // 3. 遍历并拷贝
+//     if src_dir.exists() && src_dir.is_dir() {
+//         // 读取文件夹内容
+//         for entry in fs::read_dir(src_dir).expect("无法读取源目录") {
+//             let entry = entry.expect("读取目录项失败");
+//             let path = entry.path();
 
-            // 仅处理文件且后缀匹配
-            if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some(extension) {
-                let file_name = path.file_name().unwrap();
+//             // 仅处理文件且后缀匹配
+//             if path.is_file() && path.extension().and_then(|s| s.to_str()) == Some(extension) {
+//                 let file_name = path.file_name().unwrap();
 
-                // 拷贝到 target/debug
-                let dest_file = dest_dir.join(file_name);
-                fs::copy(&path, &dest_file).ok();
+//                 // 拷贝到 target/debug
+//                 let dest_file = dest_dir.join(file_name);
+//                 fs::copy(&path, &dest_file).ok();
 
-                // 拷贝到 target/debug/deps (为了单元测试)
-                let deps_file = deps_dir.join(file_name);
-                fs::copy(&path, &deps_file).ok();
+//                 // 拷贝到 target/debug/deps (为了单元测试)
+//                 let deps_file = deps_dir.join(file_name);
+//                 fs::copy(&path, &deps_file).ok();
 
-                // 告诉 Cargo：如果这个 DLL 变了，重新运行 build.rs
-                println!("cargo:rerun-if-changed={}", path.display());
-            }
-        }
+//                 // 告诉 Cargo：如果这个 DLL 变了，重新运行 build.rs
+//                 println!("cargo:rerun-if-changed={}", path.display());
+//             }
+//         }
 
-        // 将源目录加入搜索路径
-        println!("cargo:rustc-link-search=native={}", rel_src_dir);
-    } else {
-        println!("cargo:warning=源目录不存在: {}", src_dir.display());
-    }
-}
+//         // 将源目录加入搜索路径
+//         println!("cargo:rustc-link-search=native={}", rel_src_dir);
+//     } else {
+//         println!("cargo:warning=源目录不存在: {}", src_dir.display());
+//     }
+// }

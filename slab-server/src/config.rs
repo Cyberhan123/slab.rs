@@ -1,5 +1,7 @@
 //! Server configuration, loaded from environment variables at startup.
 
+use std::path::{ PathBuf};
+
 /// Runtime configuration for slab-server.
 ///
 /// Every field has a sensible default so the server works out-of-the-box
@@ -63,14 +65,8 @@ pub struct Config {
     /// Transport mode: `"http"`, `"ipc"`, or `"both"` (default: `"http"`).
     pub transport_mode: String,
 
-    /// Directory containing the llama shared library.
-    pub llama_lib_dir: Option<String>,
-
-    /// Directory containing the whisper shared library.
-    pub whisper_lib_dir: Option<String>,
-
-    /// Directory containing the stable-diffusion shared library.
-    pub diffusion_lib_dir: Option<String>,
+    /// Directory containing the llama,whisper,diffusion shared library.
+    pub lib_dir: Option<std::path::PathBuf>,
 
     /// Directory where chat session state files are stored.
     pub session_state_dir: String,
@@ -80,7 +76,7 @@ impl Config {
     /// Build [`Config`] from environment variables, falling back to defaults.
     pub fn from_env() -> Self {
         Self {
-            bind_address: env_or("SLAB_BIND", "0.0.0.0:3000"),
+            bind_address: env_or("SLAB_BIND", "localhost:3000"),
             database_url: env_or("SLAB_DATABASE_URL", "sqlite://slab.db?mode=rwc"),
             ipc_socket_path: env_or("SLAB_IPC_SOCKET", "/tmp/slab-server.sock"),
             log_level: env_or("SLAB_LOG", "info"),
@@ -95,10 +91,8 @@ impl Config {
             cors_allowed_origins: std::env::var("SLAB_CORS_ORIGINS").ok(),
             admin_api_token: std::env::var("SLAB_ADMIN_TOKEN").ok(),
             transport_mode: env_or("SLAB_TRANSPORT", "http"),
-            llama_lib_dir: std::env::var("SLAB_LLAMA_LIB_DIR").ok(),
-            whisper_lib_dir: std::env::var("SLAB_WHISPER_LIB_DIR").ok(),
-            diffusion_lib_dir: std::env::var("SLAB_DIFFUSION_LIB_DIR").ok(),
-            session_state_dir: env_or("SLAB_SESSION_STATE_DIR", "/tmp/slab-sessions"),
+            lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(|v| PathBuf::from(v)),
+            session_state_dir: env_or("SLAB_SESSION_STATE_DIR", "./tmp/slab-sessions"),
         }
     }
 }

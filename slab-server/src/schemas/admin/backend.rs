@@ -37,3 +37,8 @@ pub struct BackendStatusResponse {
     /// Human-readable status string.
     pub status: String,
 }
+/// Response body for list backends endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct BackendListResponse {
+    pub backends: Vec<BackendStatusResponse>,
+}

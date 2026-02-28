@@ -1,0 +1,33 @@
+[tasks.dev]
+workspace = false
+dependencies = ["build-server-dev", "run-tauri"]
+
+[tasks.release]
+workspace = false
+dependencies = ["build-server-release", "build-tauri-release"]
+
+[tasks.build-server-dev]
+workspace = false
+command = "cargo"
+args = ["build", "-p", "slab-server"]
+
+[tasks.build-server-release]
+command = "cargo"
+args = ["build", "--release", "-p", "slab-server"]
+
+[tasks.run-tauri]
+workspace = false
+command = "bun"
+args = ["run", "tauri", "dev"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/slab-app"
+
+[tasks.build-tauri]
+workspace = false
+command = "bun"
+args = ["tauri", "build"]
+cwd = "./tauri-app"
+
+
+
+
+
