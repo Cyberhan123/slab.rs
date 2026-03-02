@@ -109,6 +109,10 @@ impl ResultStorage {
     }
 
     /// Consume and return the payload for a completed task.
+    ///
+    /// On success the task transitions to [`TaskStatus::ResultConsumed`] so
+    /// that subsequent status queries still report a terminal (succeeded) state
+    /// rather than reverting to `Pending`.
     pub async fn take_result(&self, task_id: TaskId) -> Option<Payload> {
         let mut guard = self.inner.write().await;
         let record = guard.get_mut(&task_id)?;
@@ -116,9 +120,10 @@ impl ResultStorage {
         if !matches!(record.status, TaskStatus::Succeeded { .. }) {
             return None;
         }
-        // Swap the status to Pending temporarily so the slot is stable and
-        // the guard is released, then return the extracted payload.
-        let old = std::mem::replace(&mut record.status, TaskStatus::Pending);
+        // Swap to ResultConsumed so the task remains in a terminal state after
+        // the payload is taken; callers checking status will still see
+        // "succeeded" rather than the misleading "pending" state.
+        let old = std::mem::replace(&mut record.status, TaskStatus::ResultConsumed);
         if let TaskStatus::Succeeded { result } = old {
             Some(result)
         } else {

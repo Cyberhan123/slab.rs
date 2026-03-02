@@ -148,12 +148,48 @@ pub enum TaskStatus {
     },
     /// Task completed successfully; result is available.
     Succeeded { result: Payload },
+    /// Task completed successfully and its result payload has been consumed
+    /// by a caller via [`Orchestrator::get_result`].  The task is still
+    /// in a terminal (succeeded) state but the inline payload is gone.
+    ResultConsumed,
     /// Task completed with a streaming terminal stage; handle is available.
     SucceededStreaming,
     /// Task failed with an error.
     Failed { error: RuntimeError },
     /// Task was cancelled before completing.
     Cancelled,
+}
+
+impl TaskStatus {
+    /// Returns `true` if the task has reached a terminal state (success,
+    /// streaming-success, result-consumed, failure, or cancellation).
+    ///
+    /// Callers that poll status until the task is done should use this method
+    /// rather than matching individual variants so that new terminal states
+    /// (e.g. [`TaskStatus::ResultConsumed`]) are handled automatically.
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            TaskStatus::Succeeded { .. }
+                | TaskStatus::ResultConsumed
+                | TaskStatus::SucceededStreaming
+                | TaskStatus::Failed { .. }
+                | TaskStatus::Cancelled
+        )
+    }
+
+    /// Returns `true` if the task completed with a success outcome.
+    ///
+    /// This covers [`TaskStatus::Succeeded`], [`TaskStatus::ResultConsumed`]
+    /// (succeeded but payload already taken), and [`TaskStatus::SucceededStreaming`].
+    pub fn is_succeeded(&self) -> bool {
+        matches!(
+            self,
+            TaskStatus::Succeeded { .. }
+                | TaskStatus::ResultConsumed
+                | TaskStatus::SucceededStreaming
+        )
+    }
 }
 
 /// Fine-grained execution status of a single pipeline stage.

@@ -338,7 +338,7 @@ mod tests {
 
                         cmd = bc_rx.recv() => {
                             match cmd {
-                                Ok(WorkerCommand::Unload) => {
+                                Ok(WorkerCommand::Unload { .. }) => {
                                     // Mirror the production behavior: drop context.
                                     ctx_w.store(false, Ordering::SeqCst);
                                     if let Some(tx) = ack_tx.take() {
@@ -375,9 +375,10 @@ mod tests {
         // the spawned tasks enter their select! loops).
         tokio::task::yield_now().await;
 
-        // Broadcast Unload to all workers.
+        // Broadcast Unload to all workers.  Use sender_id=usize::MAX so that
+        // no worker's self-echo guard fires and every worker processes it.
         bc_tx
-            .send(WorkerCommand::Unload)
+            .send(WorkerCommand::Unload { sender_id: usize::MAX })
             .expect("broadcast should reach at least one subscriber");
 
         // Wait for each worker to acknowledge the Unload.
