@@ -148,6 +148,10 @@ pub enum TaskStatus {
     },
     /// Task completed successfully; result is available.
     Succeeded { result: Payload },
+    /// Task completed successfully and its result payload has been consumed
+    /// by a caller via [`Orchestrator::get_result`].  The task is still
+    /// in a terminal (succeeded) state but the inline payload is gone.
+    ResultConsumed,
     /// Task completed with a streaming terminal stage; handle is available.
     SucceededStreaming,
     /// Task failed with an error.

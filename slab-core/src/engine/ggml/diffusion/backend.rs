@@ -90,11 +90,14 @@ struct DiffusionWorker {
     /// Broadcast sender shared among all workers so that any worker can
     /// propagate state-change commands (e.g. `Unload`) to all peers.
     bc_tx: broadcast::Sender<WorkerCommand>,
+    /// Stable index used to populate `sender_id` when broadcasting and to
+    /// filter out self-sent commands in the broadcast receive arm.
+    worker_id: usize,
 }
 
 impl DiffusionWorker {
-    fn new(engine: Option<GGMLDiffusionEngine>, bc_tx: broadcast::Sender<WorkerCommand>) -> Self {
-        Self { engine, bc_tx }
+    fn new(engine: Option<GGMLDiffusionEngine>, bc_tx: broadcast::Sender<WorkerCommand>, worker_id: usize) -> Self {
+        Self { engine, bc_tx, worker_id }
     }
 
     async fn handle(&mut self, req: BackendRequest) {
@@ -145,7 +148,7 @@ impl DiffusionWorker {
                 // Broadcast so peer workers also load the same library.
                 let _ = self
                     .bc_tx
-                    .send(WorkerCommand::LoadLibrary { lib_path: config.lib_path });
+                    .send(WorkerCommand::LoadLibrary { lib_path: config.lib_path, sender_id: self.worker_id });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -182,7 +185,7 @@ impl DiffusionWorker {
                 // Broadcast so peer workers drop their old engine and reload too.
                 let _ = self
                     .bc_tx
-                    .send(WorkerCommand::ReloadLibrary { lib_path: config.lib_path });
+                    .send(WorkerCommand::ReloadLibrary { lib_path: config.lib_path, sender_id: self.worker_id });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -232,7 +235,7 @@ impl DiffusionWorker {
                 // Broadcast so peer workers also load the same model.
                 let _ = self
                     .bc_tx
-                    .send(WorkerCommand::LoadModel { model_path: config.model_path });
+                    .send(WorkerCommand::LoadModel { model_path: config.model_path, sender_id: self.worker_id });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -251,7 +254,7 @@ impl DiffusionWorker {
                 e.unload();
                 // Broadcast so every peer worker also drops its context.
                 // Ignore errors: no receivers simply means no other workers.
-                let _ = self.bc_tx.send(WorkerCommand::Unload);
+                let _ = self.bc_tx.send(WorkerCommand::Unload { sender_id: self.worker_id });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -366,10 +369,10 @@ pub(crate) fn spawn_backend_with_engine(
         .collect();
     worker_engines.insert(0, engine);
 
-    for worker_engine in worker_engines {
+    for (worker_id, worker_engine) in worker_engines.into_iter().enumerate() {
         let rx = Arc::clone(&rx);
         let mut bc_rx = bc_tx.subscribe();
-        let mut worker = DiffusionWorker::new(worker_engine, bc_tx.clone());
+        let mut worker = DiffusionWorker::new(worker_engine, bc_tx.clone(), worker_id);
 
         tokio::spawn(async move {
             loop {
@@ -379,46 +382,58 @@ pub(crate) fn spawn_backend_with_engine(
                     // ── Broadcast arm: management commands ────────────────
                     cmd = bc_rx.recv() => {
                         match cmd {
-                            Ok(WorkerCommand::LoadLibrary { lib_path }) => {
-                                // Load library only if not already loaded (idempotent
-                                // for the broadcasting worker which already loaded it).
-                                if worker.engine.is_none() {
+                            Ok(WorkerCommand::LoadLibrary { lib_path, sender_id }) => {
+                                // Skip commands sent by this worker (self-echo).
+                                // Also skip if library is already loaded (idempotent).
+                                if sender_id != worker.worker_id && worker.engine.is_none() {
                                     if let Ok(engine) = GGMLDiffusionEngine::from_path(&lib_path) {
                                         worker.engine = Some(engine);
                                     }
                                 }
                             }
-                            Ok(WorkerCommand::ReloadLibrary { lib_path }) => {
-                                // Drop existing engine and reload from the new path.
-                                worker.engine = None;
-                                if let Ok(engine) = GGMLDiffusionEngine::from_path(&lib_path) {
-                                    worker.engine = Some(engine);
+                            Ok(WorkerCommand::ReloadLibrary { lib_path, sender_id }) => {
+                                // Skip the self-echo: the broadcasting worker already
+                                // completed the reload while handling the mpsc request.
+                                // Processing it again would drop the freshly-loaded
+                                // engine and trigger an unnecessary second FFI load.
+                                if sender_id != worker.worker_id {
+                                    worker.engine = None;
+                                    if let Ok(engine) = GGMLDiffusionEngine::from_path(&lib_path) {
+                                        worker.engine = Some(engine);
+                                    }
                                 }
                             }
-                            Ok(WorkerCommand::LoadModel { model_path }) => {
-                                // Load model only if not already loaded (idempotent
-                                // for the broadcasting worker which already loaded it).
-                                if let Some(engine) = worker.engine.as_mut() {
-                                    if !engine.is_model_loaded() {
-                                        let result = tokio::task::block_in_place(|| {
-                                            use slab_diffusion::SdContextParams;
-                                            let ctx_params =
-                                                SdContextParams::with_model(&model_path);
-                                            engine.new_context(&ctx_params)
-                                        });
-                                        if let Err(e) = result {
-                                            tracing::warn!(
-                                                model_path,
-                                                error = %e,
-                                                "diffusion worker: broadcast LoadModel failed"
-                                            );
+                            Ok(WorkerCommand::LoadModel { model_path, sender_id }) => {
+                                // Skip commands sent by this worker (self-echo).
+                                // Also skip if model is already loaded (idempotent).
+                                if sender_id != worker.worker_id {
+                                    if let Some(engine) = worker.engine.as_mut() {
+                                        if !engine.is_model_loaded() {
+                                            let result = tokio::task::block_in_place(|| {
+                                                use slab_diffusion::SdContextParams;
+                                                let ctx_params =
+                                                    SdContextParams::with_model(&model_path);
+                                                engine.new_context(&ctx_params)
+                                            });
+                                            if let Err(e) = result {
+                                                tracing::warn!(
+                                                    model_path,
+                                                    error = %e,
+                                                    "diffusion worker: broadcast LoadModel failed"
+                                                );
+                                            }
                                         }
                                     }
                                 }
                             }
-                            Ok(WorkerCommand::Unload) => {
-                                if let Some(e) = worker.engine.as_mut() {
-                                    e.unload();
+                            Ok(WorkerCommand::Unload { sender_id }) => {
+                                // Skip the self-echo: the broadcasting worker already
+                                // called unload() while handling the mpsc request.
+                                // Calling it again on the same context is unsafe.
+                                if sender_id != worker.worker_id {
+                                    if let Some(e) = worker.engine.as_mut() {
+                                        e.unload();
+                                    }
                                 }
                             }
                             // Sender dropped → no more commands; exit.

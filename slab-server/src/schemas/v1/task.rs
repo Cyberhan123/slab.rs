@@ -42,6 +42,8 @@ impl TaskStatusEnumExt for TaskStatus {
             TaskStatus::Pending => "pending",
             TaskStatus::Running { .. } => "running",
             TaskStatus::Succeeded { .. } => "succeeded",
+            // Result was already consumed; task is still considered succeeded.
+            TaskStatus::ResultConsumed => "succeeded",
             TaskStatus::SucceededStreaming => "succeeded",
             TaskStatus::Failed { .. } => "failed",
             TaskStatus::Cancelled => "cancelled",
