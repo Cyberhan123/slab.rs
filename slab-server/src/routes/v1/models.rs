@@ -10,7 +10,7 @@ use axum::{Json, Router};
 use tracing::{info, warn};
 use utoipa::OpenApi;
 
-use crate::entities::{ModelStore, TaskRecord, TaskStore};
+use crate::entities::{ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::schemas::v1::models::{
     DownloadModelRequest, ListAvailableQuery, ListModelsQuery, LoadModelRequest,
@@ -41,6 +41,8 @@ use slab_core::api::Backend;
     ))
 )]
 pub struct ModelsApi;
+
+const MODEL_TARGET_DIR_CONFIG_KEY: &str = "target_dir";
 
 /// Register model-management routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -181,8 +183,8 @@ pub async fn load_model(
         "loading model"
     );
 
-    let backend =
-        Backend::from_str(bid).map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
+    let backend = Backend::from_str(bid)
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
 
     slab_core::api::backend(backend)
         .op(slab_core::api::Event::LoadModel)
@@ -219,8 +221,8 @@ pub async fn unload_model(
 
     info!(backend = %bid, "unloading model");
 
-    let backend =
-        Backend::from_str(bid).map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
+    let backend = Backend::from_str(bid)
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
 
     slab_core::api::backend(backend)
         .op(slab_core::api::Event::UnloadModel)
@@ -303,8 +305,8 @@ pub async fn switch_model(
 
     info!(backend = %bid, model_path = %req.model_path, "switching model");
 
-    let backend =
-        Backend::from_str(bid).map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
+    let backend = Backend::from_str(bid)
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
     slab_core::api::backend(backend)
         .op(slab_core::api::Event::LoadModel)
         .input(slab_core::Payload::Json(serde_json::json!({
@@ -342,11 +344,24 @@ pub async fn download_model(
     if model_id.is_empty() {
         return Err(ServerError::BadRequest("model_id must not be empty".into()));
     }
+
     let backend_id = req.backend_id.trim();
     if backend_id.is_empty() {
-        return Err(ServerError::BadRequest("backend_id must not be empty".into()));
+        return Err(ServerError::BadRequest(
+            "backend_id must not be empty".into(),
+        ));
     }
-    if let Some(dir) = &req.target_dir {
+
+    let configured_target_dir = state
+        .store
+        .get_config_value(MODEL_TARGET_DIR_CONFIG_KEY)
+        .await?
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_owned);
+    let effective_target_dir = configured_target_dir;
+    if let Some(dir) = &effective_target_dir {
         validate_path("target_dir", dir)?;
     }
 
@@ -373,7 +388,7 @@ pub async fn download_model(
         "backend_id": canonical_backend_id,
         "repo_id":    model.repo_id,
         "filename":   model.filename,
-        "target_dir": req.target_dir,
+        "target_dir": effective_target_dir,
     })
     .to_string();
 
@@ -424,7 +439,11 @@ pub async fn download_model(
         let model_id = input["model_id"].as_str().unwrap_or("").to_owned();
         let repo_id = input["repo_id"].as_str().unwrap_or("").to_owned();
         let filename = input["filename"].as_str().unwrap_or("").to_owned();
-        let target_dir = input["target_dir"].as_str().map(str::to_owned);
+        let target_dir = input["target_dir"]
+            .as_str()
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned);
 
         if model_id.is_empty() || repo_id.is_empty() || filename.is_empty() {
             warn!(task_id = %tid, "model_download task is missing model_id, repo_id, or filename");
@@ -439,18 +458,6 @@ pub async fn download_model(
                 .ok();
             task_manager.remove(&tid);
             return;
-        }
-
-        if let Some(dir) = &target_dir {
-            if let Err(e) = validate_path("target_dir", dir) {
-                warn!(task_id = %tid, error = %e, "invalid target_dir in model_download task");
-                store
-                    .update_task_status(&tid, "failed", None, Some(&e.to_string()))
-                    .await
-                    .ok();
-                task_manager.remove(&tid);
-                return;
-            }
         }
 
         let result = tokio::task::spawn_blocking(move || {

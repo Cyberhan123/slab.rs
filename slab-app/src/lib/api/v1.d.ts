@@ -557,6 +557,7 @@ export interface components {
         ConfigEntry: {
             key: string;
             value: string;
+            name: string;
         };
         ConvertRequest: {
             /** @description Desired output format (e.g. `"mp3"`, `"wav"`, `"mp4"`). */
@@ -589,11 +590,6 @@ export interface components {
             backend_id: string;
             /** @description Model catalog entry ID from `/admin/models`. */
             model_id: string;
-            /**
-             * @description Optional directory where the downloaded file will be placed.
-             *     If omitted, the hf-hub default cache (`~/.cache/huggingface/hub`) is used.
-             */
-            target_dir?: string | null;
         };
         /** @description Request body for `POST /v1/images/generations`. */
         ImageGenerationRequest: {
@@ -686,6 +682,7 @@ export interface components {
             updated_at: string;
         };
         SetConfigBody: {
+            name?: string | null;
             value: string;
         };
         SwitchModelRequest: {
