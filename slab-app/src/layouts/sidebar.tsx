@@ -8,7 +8,7 @@ import {
     SidebarMenuButton
 } from "@/components/ui/sidebar"
 import { Link } from "react-router-dom"
-import { BotMessageSquare, Settings } from "lucide-react"
+import { BotMessageSquare, ImageIcon, Mic, Film, Package, ClipboardList, Settings } from "lucide-react"
 
 export function AppSidebar() {
     return (
@@ -31,7 +31,7 @@ export function AppSidebar() {
                     <SidebarMenuItem>
                         <SidebarMenuButton asChild>
                             <Link to="/image">
-                                <BotMessageSquare />
+                                <ImageIcon />
                                 <span>Image</span>
                             </Link>
                         </SidebarMenuButton>
@@ -39,7 +39,7 @@ export function AppSidebar() {
                     <SidebarMenuItem>
                         <SidebarMenuButton asChild>
                             <Link to="/audio">
-                                <BotMessageSquare />
+                                <Mic />
                                 <span>Audio</span>
                             </Link>
                         </SidebarMenuButton>
@@ -47,7 +47,7 @@ export function AppSidebar() {
                     <SidebarMenuItem>
                         <SidebarMenuButton asChild>
                             <Link to="/video">
-                                <BotMessageSquare />
+                                <Film />
                                 <span>Video</span>
                             </Link>
                         </SidebarMenuButton>
@@ -55,7 +55,7 @@ export function AppSidebar() {
                     <SidebarMenuItem>
                         <SidebarMenuButton asChild>
                             <Link to="/hub">
-                                <BotMessageSquare />
+                                <Package />
                                 <span>Hub</span>
                             </Link>
                         </SidebarMenuButton>
@@ -63,8 +63,8 @@ export function AppSidebar() {
                     <SidebarMenuItem>
                         <SidebarMenuButton asChild>
                             <Link to="/task">
-                                <BotMessageSquare />
-                                <span>Task</span>
+                                <ClipboardList />
+                                <span>Tasks</span>
                             </Link>
                         </SidebarMenuButton>
                     </SidebarMenuItem>
@@ -76,6 +76,7 @@ export function AppSidebar() {
                         <SidebarMenuButton asChild>
                             <Link to="/settings">
                                 <Settings />
+                                <span>Settings</span>
                             </Link>
                         </SidebarMenuButton>
                     </SidebarMenuItem>
