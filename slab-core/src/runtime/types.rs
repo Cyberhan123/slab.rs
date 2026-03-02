@@ -160,6 +160,38 @@ pub enum TaskStatus {
     Cancelled,
 }
 
+impl TaskStatus {
+    /// Returns `true` if the task has reached a terminal state (success,
+    /// streaming-success, result-consumed, failure, or cancellation).
+    ///
+    /// Callers that poll status until the task is done should use this method
+    /// rather than matching individual variants so that new terminal states
+    /// (e.g. [`TaskStatus::ResultConsumed`]) are handled automatically.
+    pub fn is_terminal(&self) -> bool {
+        matches!(
+            self,
+            TaskStatus::Succeeded { .. }
+                | TaskStatus::ResultConsumed
+                | TaskStatus::SucceededStreaming
+                | TaskStatus::Failed { .. }
+                | TaskStatus::Cancelled
+        )
+    }
+
+    /// Returns `true` if the task completed with a success outcome.
+    ///
+    /// This covers [`TaskStatus::Succeeded`], [`TaskStatus::ResultConsumed`]
+    /// (succeeded but payload already taken), and [`TaskStatus::SucceededStreaming`].
+    pub fn is_succeeded(&self) -> bool {
+        matches!(
+            self,
+            TaskStatus::Succeeded { .. }
+                | TaskStatus::ResultConsumed
+                | TaskStatus::SucceededStreaming
+        )
+    }
+}
+
 /// Fine-grained execution status of a single pipeline stage.
 #[derive(Debug, Clone)]
 pub enum StageStatus {

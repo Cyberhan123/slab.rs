@@ -327,7 +327,8 @@ pub async fn status(task_id: TaskId) -> Result<TaskStatusView, RuntimeError> {
 
 /// Try to fetch the completed result payload for a non-streaming task.
 ///
-/// Returns `Ok(None)` if the task has not completed yet.
+/// Returns `Ok(None)` if the task has not yet completed, or if its result
+/// payload has already been consumed by a previous call.
 pub async fn result(task_id: TaskId) -> Result<Option<Payload>, RuntimeError> {
     let rt = CallBuilder::runtime()?;
     let view = rt.orchestrator.get_status(task_id).await?;
@@ -339,6 +340,9 @@ pub async fn result(task_id: TaskId) -> Result<Option<Payload>, RuntimeError> {
                 message: "streaming task has no unary result".into(),
             })
         }
+        // Result was already consumed by a previous call; report None rather
+        // than blocking forever on a payload that no longer exists.
+        TaskStatus::ResultConsumed => return Ok(None),
         _ => {}
     }
 
@@ -579,7 +583,9 @@ impl CallBuilder {
                 match rt.orchestrator.get_status(task_id).await {
                     Err(e) => return Err(e),
                     Ok(view) => match view.status {
-                        TaskStatus::Succeeded { .. } => return Ok(()),
+                        TaskStatus::Succeeded { .. } | TaskStatus::ResultConsumed => {
+                            return Ok(())
+                        }
                         TaskStatus::Failed { error } => return Err(error),
                         TaskStatus::Cancelled => return Err(RuntimeError::BackendShutdown),
                         _ => tokio::time::sleep(Duration::from_millis(5)).await,
