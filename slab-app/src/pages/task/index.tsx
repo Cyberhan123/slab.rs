@@ -74,12 +74,11 @@ export default function Task() {
 
       setSelectedTask(data);
 
-      // 获取任务结果
       if (data.status === 'succeeded') {
         await fetchTaskResult(id);
       }
     } catch (err) {
-      toast.error('获取任务详情失败');
+      toast.error('Failed to fetch task details');
     }
   };
 
@@ -93,7 +92,7 @@ export default function Task() {
 
       setTaskResult(data);
     } catch (err) {
-      toast.error('获取任务结果失败: ' + (err instanceof Error ? err.message : '未知错误'));
+      toast.error('Failed to fetch task result: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
   };
 
@@ -105,14 +104,12 @@ export default function Task() {
         }
       });
 
-      // 刷新任务列表
       refetchTasks();
-      // 刷新当前选中的任务
       if (selectedTask?.id === id) {
         await fetchTaskDetail(id);
       }
     } catch (err) {
-      toast.error('取消任务失败: ' + (err instanceof Error ? err.message : '未知错误'));
+      toast.error('Failed to cancel task: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
   };
 
@@ -124,29 +121,27 @@ export default function Task() {
         }
       });
 
-      // 刷新任务列表
       refetchTasks();
-      // 刷新当前选中的任务
       if (selectedTask?.id === id) {
         await fetchTaskDetail(id);
       }
     } catch (err) {
-      toast.error('重启任务失败: ' + (err instanceof Error ? err.message : '未知错误'));
+      toast.error('Failed to restart task: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
   };
 
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'pending':
-        return <Badge variant="secondary">待处理</Badge>;
+        return <Badge variant="secondary">Pending</Badge>;
       case 'running':
-        return <Badge variant="outline">运行中</Badge>;
+        return <Badge variant="outline">Running</Badge>;
       case 'succeeded':
-        return <Badge variant="default">已完成</Badge>;
+        return <Badge variant="default">Succeeded</Badge>;
       case 'failed':
-        return <Badge variant="destructive">失败</Badge>;
+        return <Badge variant="destructive">Failed</Badge>;
       case 'cancelled':
-        return <Badge variant="outline">已取消</Badge>;
+        return <Badge variant="outline">Cancelled</Badge>;
       default:
         return <Badge variant="secondary">{status}</Badge>;
     }
@@ -155,28 +150,28 @@ export default function Task() {
   return (
     <div className="container mx-auto px-4 py-8 space-y-8">
       <div className="text-center space-y-4">
-        <h1 className="text-3xl font-bold text-center">任务管理</h1>
+        <h1 className="text-3xl font-bold text-center">Task Management</h1>
         <p className="text-muted-foreground max-w-2xl mx-auto">
-          查看和管理系统中的任务
+          View and manage system tasks
         </p>
       </div>
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <div>
-            <CardTitle>任务列表</CardTitle>
-            <CardDescription>所有系统任务的状态和详情</CardDescription>
+            <CardTitle>Task List</CardTitle>
+            <CardDescription>Status and details for all system tasks</CardDescription>
           </div>
           <div className="w-48">
             <Select value={taskType} onValueChange={setTaskType}>
               <SelectTrigger>
-                <SelectValue placeholder="任务类型" />
+                <SelectValue placeholder="Task type" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">所有类型</SelectItem>
-                <SelectItem value="transcription">音频转录</SelectItem>
-                <SelectItem value="image_generation">图像生成</SelectItem>
-                <SelectItem value="model_download">模型下载</SelectItem>
+                <SelectItem value="all">All types</SelectItem>
+                <SelectItem value="transcription">Audio transcription</SelectItem>
+                <SelectItem value="image_generation">Image generation</SelectItem>
+                <SelectItem value="model_download">Model download</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -184,8 +179,8 @@ export default function Task() {
         <CardContent>
           {tasksError && (
             <Alert variant="destructive">
-              <AlertTitle>错误</AlertTitle>
-              <AlertDescription>获取任务列表失败</AlertDescription>
+              <AlertTitle>Error</AlertTitle>
+              <AlertDescription>Failed to fetch task list</AlertDescription>
             </Alert>
           )}
 
@@ -197,12 +192,12 @@ export default function Task() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>任务 ID</TableHead>
-                  <TableHead>类型</TableHead>
-                  <TableHead>状态</TableHead>
-                  <TableHead>创建时间</TableHead>
-                  <TableHead>更新时间</TableHead>
-                  <TableHead>操作</TableHead>
+                  <TableHead>Task ID</TableHead>
+                  <TableHead>Type</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Created At</TableHead>
+                  <TableHead>Updated At</TableHead>
+                  <TableHead>Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -210,8 +205,8 @@ export default function Task() {
                   <TableRow>
                     <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
                       <div className="flex flex-col items-center space-y-2">
-                        <p>暂无任务</p>
-                        <p className="text-sm">前往音频或图像页面创建任务</p>
+                        <p>No tasks yet</p>
+                        <p className="text-sm">Go to the Audio or Image page to create a task</p>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -231,36 +226,36 @@ export default function Task() {
                               size="sm"
                               onClick={() => fetchTaskDetail(task.id)}
                             >
-                              详情
+                              Details
                             </Button>
                           </DialogTrigger>
                           <DialogContent className="sm:max-w-[600px]">
                             <DialogHeader>
-                              <DialogTitle>任务详情</DialogTitle>
+                              <DialogTitle>Task Details</DialogTitle>
                               <DialogDescription>
-                                任务 ID: {selectedTask?.id}
+                                Task ID: {selectedTask?.id}
                               </DialogDescription>
                             </DialogHeader>
                             <div className="space-y-4 py-4">
                               {selectedTask ? (
                                 <>
                                   <div className="space-y-2">
-                                    <h4 className="font-medium">基本信息</h4>
+                                    <h4 className="font-medium">Basic Info</h4>
                                     <div className="grid grid-cols-2 gap-4">
                                       <div>
-                                        <p className="text-sm text-muted-foreground">类型</p>
+                                        <p className="text-sm text-muted-foreground">Type</p>
                                         <p>{selectedTask.task_type}</p>
                                       </div>
                                       <div>
-                                        <p className="text-sm text-muted-foreground">状态</p>
+                                        <p className="text-sm text-muted-foreground">Status</p>
                                         <p>{getStatusBadge(selectedTask.status)}</p>
                                       </div>
                                       <div>
-                                        <p className="text-sm text-muted-foreground">创建时间</p>
+                                        <p className="text-sm text-muted-foreground">Created At</p>
                                         <p>{new Date(selectedTask.created_at).toLocaleString()}</p>
                                       </div>
                                       <div>
-                                        <p className="text-sm text-muted-foreground">更新时间</p>
+                                        <p className="text-sm text-muted-foreground">Updated At</p>
                                         <p>{new Date(selectedTask.updated_at).toLocaleString()}</p>
                                       </div>
                                     </div>
@@ -277,7 +272,7 @@ export default function Task() {
 
                                   {selectedTask.status === 'succeeded' && taskResult && (
                                     <div className="space-y-2">
-                                      <h4 className="font-medium">任务结果</h4>
+                                      <h4 className="font-medium">Task Result</h4>
                                       <div className="p-4 border rounded-md bg-muted/50">
                                         {taskResult.text ? (
                                           <div className="space-y-2">
@@ -287,10 +282,10 @@ export default function Task() {
                                               size="sm"
                                               onClick={() => {
                                                 navigator.clipboard.writeText(taskResult.text);
-                                                toast.success('已复制到剪贴板');
+                                                toast.success('Copied to clipboard');
                                               }}
                                             >
-                                              复制结果
+                                              Copy result
                                             </Button>
                                           </div>
                                         ) : (
@@ -310,7 +305,7 @@ export default function Task() {
                                         onClick={() => cancelTask(selectedTask.id)}
                                         disabled={cancelTaskMutation.isPending}
                                       >
-                                        {cancelTaskMutation.isPending ? '取消中...' : '取消任务'}
+                                        {cancelTaskMutation.isPending ? 'Cancelling...' : 'Cancel task'}
                                       </Button>
                                     )}
                                     {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled' || selectedTask.status === 'succeeded') && (
@@ -320,7 +315,7 @@ export default function Task() {
                                         onClick={() => restartTask(selectedTask.id)}
                                         disabled={restartTaskMutation.isPending}
                                       >
-                                        {restartTaskMutation.isPending ? '重启中...' : '重启任务'}
+                                        {restartTaskMutation.isPending ? 'Restarting...' : 'Restart task'}
                                       </Button>
                                     )}
                                   </div>
@@ -348,7 +343,7 @@ export default function Task() {
             }}
             disabled={tasksLoading}
           >
-            {tasksLoading ? '刷新中...' : '刷新列表'}
+            {tasksLoading ? 'Refreshing...' : 'Refresh list'}
           </Button>
         </CardFooter>
       </Card>
