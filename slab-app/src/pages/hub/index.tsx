@@ -471,10 +471,10 @@ export default function Hub() {
               <CardDescription>View recent model operations</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="flex items-center justify-center py-8">
+              <div className="flex items-center justify-center py-12">
                 <div className="text-center space-y-2">
-                  <Loader2 className="h-12 w-12 mx-auto animate-spin text-muted-foreground" />
-                  <p className="text-muted-foreground">Loading recent actions...</p>
+                  <p className="text-muted-foreground text-sm">No recent actions</p>
+                  <p className="text-muted-foreground text-xs">Model operations will appear here once performed</p>
                 </div>
               </div>
             </CardContent>

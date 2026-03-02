@@ -28,12 +28,12 @@ export default function Image() {
 
   const handleGenerate = async () => {
     if (!prompt) {
-      setError('请输入提示词');
+      setError('Please enter a prompt');
       return;
     }
 
     if (!model) {
-      setError('请选择模型');
+      setError('Please select a model');
       return;
     }
 
@@ -55,12 +55,12 @@ export default function Image() {
       setIsGenerating(false);
       setIsProcessing(true);
       
-      // 轮询任务状态
+      // Poll task status
       pollTaskStatus(data.task_id);
     } catch (err) {
-      setError('生成失败: ' + (err instanceof Error ? err.message : '未知错误'));
+      setError('Generation failed: ' + (err instanceof Error ? err.message : 'Unknown error'));
       setIsGenerating(false);
-      toast.error('生成失败');
+      toast.error('Image generation failed');
     }
   };
 
@@ -73,14 +73,13 @@ export default function Image() {
       }) as { status: string };
       
       if (task.status === 'succeeded') {
-        // 获取生成结果
+        // Fetch generated result
         const result = await getTaskResultMutation.mutateAsync({
           params: {
             path: { id }
           }
         }) as any;
 
-        // 假设结果包含图像的 base64 编码
         if (result.images && Array.isArray(result.images)) {
           setImages(result.images);
         } else if (result.image) {
@@ -89,49 +88,49 @@ export default function Image() {
           setImages([result]);
         }
         setIsProcessing(false);
-        toast.success('图像生成成功');
+        toast.success('Image generated successfully');
       } else if (task.status === 'failed') {
-        setError('生成任务失败');
+        setError('Generation task failed');
         setIsProcessing(false);
-        toast.error('生成任务失败');
+        toast.error('Generation task failed');
       } else {
-        // 继续轮询
+        // Continue polling
         setTimeout(() => pollTaskStatus(id), 2000);
       }
     } catch (err) {
-      setError('获取任务状态失败');
+      setError('Failed to get task status');
       setIsProcessing(false);
-      toast.error('获取任务状态失败');
+      toast.error('Failed to get task status');
     }
   };
 
   return (
     <div className="container mx-auto px-4 py-8 space-y-8">
       <div className="text-center space-y-4">
-        <h1 className="text-3xl font-bold text-center">图像生成</h1>
+        <h1 className="text-3xl font-bold text-center">Image Generation</h1>
         <p className="text-muted-foreground max-w-2xl mx-auto">
-          输入提示词，系统将生成相应的图像
+          Enter a prompt and the system will generate corresponding images
         </p>
       </div>
 
       <Card className="max-w-2xl mx-auto">
         <CardHeader>
-          <CardTitle>生成设置</CardTitle>
-          <CardDescription>配置图像生成参数</CardDescription>
+          <CardTitle>Generation Settings</CardTitle>
+          <CardDescription>Configure image generation parameters</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {error && (
             <Alert variant="destructive">
-              <AlertTitle>错误</AlertTitle>
+              <AlertTitle>Error</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
           <div className="space-y-2">
-            <Label htmlFor="prompt">提示词</Label>
+            <Label htmlFor="prompt">Prompt</Label>
             <Textarea
               id="prompt"
-              placeholder="描述你想要生成的图像..."
+              placeholder="Describe the image you want to generate..."
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
               disabled={isGenerating || isProcessing}
@@ -141,24 +140,22 @@ export default function Image() {
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="model">模型</Label>
+              <Label htmlFor="model">Model</Label>
               <Select value={model} onValueChange={setModel} disabled={isGenerating || isProcessing}>
                 <SelectTrigger id="model">
-                  <SelectValue placeholder="选择模型" />
+                  <SelectValue placeholder="Select model" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="stable-diffusion">Stable Diffusion</SelectItem>
-                  <SelectItem value="dall-e">DALL-E</SelectItem>
-                  <SelectItem value="midjourney">Midjourney</SelectItem>
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="numImages">生成数量</Label>
+              <Label htmlFor="numImages">Number of Images</Label>
               <Select value={numImages} onValueChange={setNumImages} disabled={isGenerating || isProcessing}>
                 <SelectTrigger id="numImages">
-                  <SelectValue placeholder="选择数量" />
+                  <SelectValue placeholder="Select count" />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="1">1</SelectItem>
@@ -171,17 +168,17 @@ export default function Image() {
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="size">图像尺寸</Label>
+            <Label htmlFor="size">Image Size</Label>
             <Select value={size} onValueChange={setSize} disabled={isGenerating || isProcessing}>
               <SelectTrigger id="size">
-                <SelectValue placeholder="选择尺寸" />
+                <SelectValue placeholder="Select size" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="256x256">256x256</SelectItem>
-                <SelectItem value="512x512">512x512</SelectItem>
-                <SelectItem value="1024x1024">1024x1024</SelectItem>
-                <SelectItem value="1024x1536">1024x1536</SelectItem>
-                <SelectItem value="1536x1024">1536x1024</SelectItem>
+                <SelectItem value="256x256">256×256</SelectItem>
+                <SelectItem value="512x512">512×512</SelectItem>
+                <SelectItem value="1024x1024">1024×1024</SelectItem>
+                <SelectItem value="1024x1536">1024×1536</SelectItem>
+                <SelectItem value="1536x1024">1536×1024</SelectItem>
               </SelectContent>
             </Select>
           </div>
@@ -189,9 +186,9 @@ export default function Image() {
           {(isGenerating || isProcessing) && (
             <div className="flex flex-col items-center space-y-4">
               <Spinner className="h-8 w-8" />
-              <p>{isGenerating ? '正在提交请求...' : '正在生成图像，请稍候...'}</p>
+              <p>{isGenerating ? 'Submitting request...' : 'Generating image, please wait...'}</p>
               {taskId && (
-                <p className="text-xs text-muted-foreground">任务 ID: {taskId}</p>
+                <p className="text-xs text-muted-foreground">Task ID: {taskId}</p>
               )}
             </div>
           )}
@@ -204,10 +201,10 @@ export default function Image() {
             {(isGenerating || isProcessing) ? (
               <>
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                生成中...
+                Generating...
               </>
             ) : (
-              '生成图像'
+              'Generate Image'
             )}
           </Button>
         </CardFooter>
@@ -216,7 +213,7 @@ export default function Image() {
       {images.length > 0 && (
         <Card className="max-w-4xl mx-auto">
           <CardHeader>
-            <CardTitle>生成结果</CardTitle>
+            <CardTitle>Generated Results</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -227,7 +224,7 @@ export default function Image() {
                       <img src={image} alt={`Generated image ${index + 1}`} className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center bg-muted">
-                        <p>无法显示图像</p>
+                        <p className="text-sm text-muted-foreground">Unable to display image</p>
                       </div>
                     )}
                   </div>
@@ -237,7 +234,6 @@ export default function Image() {
                     className="w-full"
                     onClick={() => {
                       if (typeof image === 'string' && image.startsWith('data:image')) {
-                        // 创建临时链接并下载
                         const link = document.createElement('a');
                         link.href = image;
                         link.download = `generated-image-${index + 1}.png`;
@@ -245,7 +241,7 @@ export default function Image() {
                       }
                     }}
                   >
-                    下载
+                    Download
                   </Button>
                 </div>
               ))}
