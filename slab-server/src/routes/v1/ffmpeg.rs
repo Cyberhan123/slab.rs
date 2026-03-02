@@ -94,6 +94,7 @@ pub async fn convert(
             id: task_id.clone(),
             task_type: "ffmpeg".into(),
             status: "pending".into(),
+            model_id: None,
             input_data: Some(input_data.clone()),
             result_data: None,
             error_msg: None,

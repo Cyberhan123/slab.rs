@@ -83,6 +83,7 @@ pub async fn transcribe(
             id: task_id.clone(),
             task_type: Backend::GGMLWhisper.to_string(),
             status: "running".into(),
+            model_id: None,
             input_data: Some(req.path.clone()),
             result_data: None,
             error_msg: None,

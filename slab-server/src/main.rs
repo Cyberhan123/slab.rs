@@ -70,7 +70,7 @@ async fn main() -> anyhow::Result<()> {
 
     // ── 4. slab-core AI runtime ────────────────────────────────────────────────
 
-    let base_lib_path = Path::new(cfg.lib_dir.as_ref().unwrap());
+    let base_lib_path = cfg.lib_dir.as_deref().unwrap_or(&Path::new("./resources/libs"));
     let llama_lib_dir = base_lib_path.join("llama");
     let whisper_lib_dir = base_lib_path.join("whisper");
     let diffusion_lib_dir = base_lib_path.join("diffusion");
