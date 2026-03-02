@@ -36,12 +36,13 @@ impl TaskStore for AnyStore {
         let created_at = record.created_at.to_rfc3339();
         let updated_at = record.updated_at.to_rfc3339();
         sqlx::query(
-            "INSERT INTO tasks (id, task_type, status, input_data, result_data, error_msg, core_task_id, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO tasks (id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )
         .bind(&record.id)
         .bind(&record.task_type)
         .bind(&record.status)
+        .bind(&record.model_id)
         .bind(&record.input_data)
         .bind(&record.result_data)
         .bind(&record.error_msg)
@@ -86,19 +87,20 @@ impl TaskStore for AnyStore {
     }
 
     async fn get_task(&self, id: &str) -> Result<Option<TaskRecord>, sqlx::Error> {
-        let row: Option<(String, String, String, Option<String>, Option<String>, Option<String>, Option<i64>, String, String)> =
+        let row: Option<(String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<i64>, String, String)> =
             sqlx::query_as(
-                "SELECT id, task_type, status, input_data, result_data, error_msg, core_task_id, created_at, updated_at \
+                "SELECT id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at \
                  FROM tasks WHERE id = ?1",
             )
             .bind(id)
             .fetch_optional(&self.pool)
             .await?;
-        Ok(row.map(|(id, task_type, status, input_data, result_data, error_msg, core_task_id, created_at, updated_at)| {
+        Ok(row.map(|(id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at)| {
             TaskRecord {
                 id,
                 task_type,
                 status,
+                model_id,
                 input_data,
                 result_data,
                 error_msg,
@@ -123,12 +125,13 @@ impl TaskStore for AnyStore {
             Option<String>,
             Option<String>,
             Option<String>,
+            Option<String>,
             Option<i64>,
             String,
             String,
         )> = if let Some(tt) = task_type {
             sqlx::query_as(
-                    "SELECT id, task_type, status, input_data, result_data, error_msg, core_task_id, created_at, updated_at \
+                    "SELECT id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at \
                      FROM tasks WHERE task_type = ?1 ORDER BY created_at DESC",
                 )
                 .bind(tt)
@@ -136,7 +139,7 @@ impl TaskStore for AnyStore {
                 .await?
         } else {
             sqlx::query_as(
-                    "SELECT id, task_type, status, input_data, result_data, error_msg, core_task_id, created_at, updated_at \
+                    "SELECT id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at \
                      FROM tasks ORDER BY created_at DESC",
                 )
                 .fetch_all(&self.pool)
@@ -144,11 +147,12 @@ impl TaskStore for AnyStore {
         };
         Ok(rows
             .into_iter()
-            .map(|(id, task_type, status, input_data, result_data, error_msg, core_task_id, created_at, updated_at)| {
+            .map(|(id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at)| {
                 TaskRecord {
                     id,
                     task_type,
                     status,
+                    model_id,
                     input_data,
                     result_data,
                     error_msg,

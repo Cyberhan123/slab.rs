@@ -11,13 +11,15 @@
 pub mod chat;
 pub mod config;
 pub mod dao;
+pub mod model;
 pub mod session;
 pub mod task;
 
-pub use dao::{ChatMessage, ChatSession, TaskRecord};
+pub use dao::{ChatMessage, ChatSession, ModelCatalogRecord, TaskRecord};
 
 pub use chat::ChatStore;
 pub use config::ConfigStore;
+pub use model::ModelStore;
 pub use session::SessionStore;
 
 pub use task::TaskStore;

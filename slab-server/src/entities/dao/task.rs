@@ -6,6 +6,8 @@ pub struct TaskRecord {
     pub id: String,
     pub task_type: String,
     pub status: String,
+    /// Optional related model_catalog.id for model download tasks.
+    pub model_id: Option<String>,
     pub input_data: Option<String>,
     pub result_data: Option<String>,
     pub error_msg: Option<String>,

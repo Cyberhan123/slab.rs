@@ -104,22 +104,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/diagnostics": {
+    "/admin/models": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
-        /**
-         * System diagnostics endpoint.
-         * @description Returns detailed information about backend configuration and readiness.
-         *     Useful for troubleshooting issues with AI backends.
-         */
-        get: operations["get_diagnostics"];
+        get: operations["list_models"];
         put?: never;
-        post?: never;
+        post: operations["create_model"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/models/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_model"];
+        post?: never;
+        delete: operations["delete_model"];
         options?: never;
         head?: never;
         patch?: never;
@@ -234,6 +245,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/models/available": {
         parameters: {
             query?: never;
@@ -241,11 +268,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /**
-         * List the files available in a HuggingFace model repo (`GET /v1/models/available?repo_id=...`).
-         * @description Uses the `hf-hub` sync API (wrapped in `spawn_blocking`) to fetch repo metadata
-         *     and returns a list of filenames in the repo.
-         */
+        /** List the files available in a HuggingFace model repo (`GET /v1/models/available?repo_id=...`). */
         get: operations["list_available_models"];
         put?: never;
         post?: never;
@@ -264,12 +287,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Download a model weight file from HuggingFace (`POST /api/models/{type}/download`).
-         * @description Uses the `hf-hub` sync API (wrapped in `spawn_blocking`) to fetch the file
-         *     from the given HuggingFace repo.  Returns the local cache path where the
-         *     file was stored.  The download is async; poll `GET /api/tasks/{id}` for status.
-         */
+        /** Download a model file from HuggingFace (`POST /v1/models/download`). */
         post: operations["download_model"];
         delete?: never;
         options?: never;
@@ -286,7 +304,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Load (or hot-reload) a model (`POST /api/models/load`). */
+        /** Load (or hot-reload) a model (`POST /v1/models/load`). */
         post: operations["load_model"];
         delete?: never;
         options?: never;
@@ -460,6 +478,10 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Response body for list backends endpoint. */
+        BackendListResponse: {
+            backends: components["schemas"]["BackendStatusResponse"][];
+        };
         /** @description Response body for load / status endpoints. */
         BackendStatusResponse: {
             /** @description Backend identifier, e.g. `"ggml.llama"`. */
@@ -547,6 +569,12 @@ export interface components {
         ConvertResponse: {
             task_id: string;
         };
+        CreateModelRequest: {
+            backend_ids: string[];
+            display_name: string;
+            filename: string;
+            repo_id: string;
+        };
         CreateSessionRequest: {
             name?: string | null;
         };
@@ -557,11 +585,10 @@ export interface components {
             target_dir: string;
         };
         DownloadModelRequest: {
+            /** @description Backend identifier to use for this download. */
             backend_id: string;
-            /** @description Filename inside the repo to download, e.g. `"Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"`. */
-            filename: string;
-            /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
-            repo_id: string;
+            /** @description Model catalog entry ID from `/admin/models`. */
+            model_id: string;
             /**
              * @description Optional directory where the downloaded file will be placed.
              *     If omitted, the hf-hub default cache (`~/.cache/huggingface/hub`) is used.
@@ -587,7 +614,11 @@ export interface components {
             /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
             repo_id: string;
         };
-        /** @description Request body for `POST /api/models/{type}/load`. */
+        /** @description Query parameters for listing catalog models by computed status. */
+        ListModelsQuery: {
+            status?: components["schemas"]["ModelListStatus"];
+        };
+        /** @description Request body for `POST /v1/models/load`. */
         LoadModelRequest: {
             /** @description Backend identifier, e.g. `"ggml.llama"`. */
             backend_id: string;
@@ -606,6 +637,33 @@ export interface components {
             role: string;
             session_id: string;
         };
+        /** @description Model catalog entry response with computed download status. */
+        ModelCatalogItemResponse: {
+            backend_ids: string[];
+            display_name: string;
+            filename: string;
+            id: string;
+            last_downloaded_at?: string | null;
+            local_path?: string | null;
+            pending_task_id?: string | null;
+            pending_task_status?: string | null;
+            repo_id: string;
+            status: components["schemas"]["ModelListStatus"];
+        };
+        ModelCatalogResponse: {
+            backend_ids: string[];
+            created_at: string;
+            display_name: string;
+            filename: string;
+            id: string;
+            last_download_task_id?: string | null;
+            last_downloaded_at?: string | null;
+            local_path?: string | null;
+            repo_id: string;
+            updated_at: string;
+        };
+        /** @enum {string} */
+        ModelListStatus: "downloaded" | "pending" | "not_downloaded" | "all";
         /** @description Response body for load / status endpoints. */
         ModelStatusResponse: {
             /** @description Backend identifier, e.g. `"ggml.llama"`. */
@@ -647,6 +705,12 @@ export interface components {
         TaskTypeQuery: {
             type?: string | null;
         };
+        UpdateModelRequest: {
+            backend_ids?: string[] | null;
+            display_name?: string | null;
+            filename?: string | null;
+            repo_id?: string | null;
+        };
     };
     responses: never;
     parameters: never;
@@ -671,10 +735,10 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["BackendListResponse"];
                 };
             };
-            /** @description Unauthorised (management token required) */
+            /** @description Unauthorised (admin token required) */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -787,7 +851,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Unauthorised (management token required) */
+            /** @description Unauthorised (admin token required) */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -899,7 +963,7 @@ export interface operations {
             };
         };
     };
-    get_diagnostics: {
+    list_models: {
         parameters: {
             query?: never;
             header?: never;
@@ -908,7 +972,121 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Diagnostics information */
+            /** @description List model catalog entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogResponse"][];
+                };
+            };
+            /** @description Unauthorised (management token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    create_model: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Model catalog entry created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorised (management token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_model: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Model catalog entry updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorised (management token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Model not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_model: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model catalog entry deleted */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -916,6 +1094,20 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Unauthorised (management token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Model not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
@@ -1092,6 +1284,42 @@ export interface operations {
             };
         };
     };
+    list_models: {
+        parameters: {
+            query?: {
+                status?: components["schemas"]["ModelListStatus"];
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List model catalog entries by download status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogItemResponse"][];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_available_models: {
         parameters: {
             query: {
@@ -1158,6 +1386,13 @@ export interface operations {
                 };
                 content?: never;
             };
+            /** @description Model catalog entry not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
             /** @description Backend error */
             500: {
                 headers: {
@@ -1189,7 +1424,7 @@ export interface operations {
                     "application/json": components["schemas"]["ModelStatusResponse"];
                 };
             };
-            /** @description Unknown model type or invalid paths */
+            /** @description Unknown backend or invalid paths */
             400: {
                 headers: {
                     [name: string]: unknown;

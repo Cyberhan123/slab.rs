@@ -275,6 +275,7 @@ pub async fn download_lib(
             id: task_id.clone(),
             task_type: "lib_download".into(),
             status: "pending".into(),
+            model_id: None,
             input_data: Some(input_data.clone()),
             result_data: None,
             error_msg: None,

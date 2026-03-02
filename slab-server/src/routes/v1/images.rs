@@ -100,6 +100,7 @@ pub async fn generate_images(
             id: task_id.clone(),
             task_type: "image".into(),
             status: "running".into(),
+            model_id: None,
             input_data: Some(input_json.to_string()),
             result_data: None,
             error_msg: None,
