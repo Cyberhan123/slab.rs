@@ -93,8 +93,12 @@ export default function Image() {
         setError('Generation task failed');
         setIsProcessing(false);
         toast.error('Generation task failed');
+      } else if (task.status === 'cancelled' || task.status === 'interrupted') {
+        setError(`Generation task ${task.status}`);
+        setIsProcessing(false);
+        toast.error(`Generation task ${task.status}`);
       } else {
-        // Continue polling
+        // Continue polling for pending/running states
         setTimeout(() => pollTaskStatus(id), 2000);
       }
     } catch (err) {

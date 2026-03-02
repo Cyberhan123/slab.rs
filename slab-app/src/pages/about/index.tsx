@@ -2,10 +2,10 @@ function About() {
   return (
     <main className="max-w-4xl mx-auto p-8 bg-background min-h-screen">
       <div className="bg-card rounded-xl shadow-lg p-8">
-        <h1 className="text-3xl font-bold text-center text-text mb-8">About Slab App</h1>
+        <h1 className="text-3xl font-bold text-center text-card-foreground mb-8">About Slab App</h1>
         <div className="space-y-6">
           <div>
-            <h2 className="text-2xl font-bold text-text mb-4">About Page</h2>
+            <h2 className="text-2xl font-bold text-card-foreground mb-4">About Page</h2>
             <p className="text-muted-foreground">This is the about page of the Slab App.</p>
           </div>
           <div className="p-4 bg-primary/5 rounded-lg border border-primary/10">
