@@ -42,9 +42,6 @@ pub struct DownloadModelRequest {
     pub model_id: String,
     /// Backend identifier to use for this download.
     pub backend_id: String,
-    /// Optional directory where the downloaded file will be placed.
-    /// If omitted, the hf-hub default cache (`~/.cache/huggingface/hub`) is used.
-    pub target_dir: Option<String>,
 }
 
 /// Query parameters for listing files in a HuggingFace repo.

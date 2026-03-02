@@ -41,7 +41,7 @@ pub async fn list_config(
     Ok(Json(
         entries
             .into_iter()
-            .map(|(key, value)| ConfigEntry { key, value })
+            .map(|(key, name, value)| ConfigEntry { key, name, value })
             .collect(),
     ))
 }
@@ -60,12 +60,12 @@ pub async fn get_config_value(
     State(state): State<Arc<AppState>>,
     Path(key): Path<String>,
 ) -> Result<Json<ConfigEntry>, ServerError> {
-    let value = state
+    let (name, value) = state
         .store
-        .get_config_value(&key)
+        .get_config_entry(&key)
         .await?
         .ok_or_else(|| ServerError::NotFound(format!("config key '{key}' not found")))?;
-    Ok(Json(ConfigEntry { key, value }))
+    Ok(Json(ConfigEntry { key, name, value }))
 }
 
 #[utoipa::path(
@@ -84,10 +84,19 @@ pub async fn set_config_value(
     Path(key): Path<String>,
     Json(body): Json<SetConfigBody>,
 ) -> Result<Json<ConfigEntry>, ServerError> {
-    state.store.set_config_value(&key, &body.value).await?;
+    state
+        .store
+        .set_config_entry(&key, body.name.as_deref(), &body.value)
+        .await?;
+    let (name, value) = state
+        .store
+        .get_config_entry(&key)
+        .await?
+        .ok_or_else(|| ServerError::NotFound(format!("config key '{key}' not found")))?;
     Ok(Json(ConfigEntry {
         key,
-        value: body.value,
+        name,
+        value,
     }))
 }
 
@@ -99,9 +108,11 @@ mod test {
     fn config_entry_fields() {
         let e = ConfigEntry {
             key: "foo".into(),
+            name: "Foo".into(),
             value: "bar".into(),
         };
         assert_eq!(e.key, "foo");
+        assert_eq!(e.name, "Foo");
         assert_eq!(e.value, "bar");
     }
 }
