@@ -1,4 +1,4 @@
-//! Backend worker adapter for `ggml.diffusion`.
+﻿//! Backend worker adapter for `ggml.diffusion`.
 //!
 //! Provides [`spawn_backend_with_engine`] which starts one or more Tokio tasks
 //! translating [`BackendRequest`] messages into stable-diffusion inference calls.
@@ -215,7 +215,7 @@ impl DiffusionWorker {
         }
     }
 
-    // ── model.load ────────────────────────────────────────────────────────────
+    // 鈹€鈹€ model.load 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     async fn handle_load_model(
         &mut self,
