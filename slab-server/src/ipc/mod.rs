@@ -32,7 +32,7 @@ use tokio::time::Duration;
 use tracing::{debug, error, info, warn};
 
 use crate::state::AppState;
-use slab_core::api::{Backend, Event};
+use slab_core::api::Backend;
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -245,7 +245,7 @@ async fn dispatch(req: IpcRequest) -> IpcResponse {
 
     let result = match req.op.as_str() {
         "chat" => slab_core::api::backend(Backend::GGMLLlama)
-            .op(Event::Inference)
+            .inference()
             .input(slab_core::Payload::Text(std::sync::Arc::from(
                 req.prompt.as_str(),
             )))
@@ -255,7 +255,7 @@ async fn dispatch(req: IpcRequest) -> IpcResponse {
         "transcribe" => {
             // For IPC transcription, the `prompt` field carries a file path.
             slab_core::api::backend(Backend::GGMLWhisper)
-                .op(Event::Inference)
+                .inference()
                 .input(slab_core::Payload::Text(std::sync::Arc::from(
                     req.prompt.as_str(),
                 )))
@@ -264,7 +264,7 @@ async fn dispatch(req: IpcRequest) -> IpcResponse {
                 .map(|b| String::from_utf8_lossy(&b).into_owned())
         }
         "generate_image" => slab_core::api::backend(Backend::GGMLDiffusion)
-            .op(Event::Inference)
+            .inference()
             .input(slab_core::Payload::Json(serde_json::json!({
                 "prompt": req.prompt
             })))

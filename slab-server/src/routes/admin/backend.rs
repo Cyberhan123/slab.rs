@@ -7,7 +7,6 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 
 use slab_core::api::Backend;
-use slab_core::api::Event;
 use std::str::FromStr;
 use tracing::{info, warn};
 use utoipa::OpenApi;
@@ -342,12 +341,12 @@ pub async fn reload_lib(
 
     // Step 2: reload the model into the fresh library.
     slab_core::api::backend(backend)
-        .op(Event::LoadModel)
+        .load_model()
         .input(slab_core::Payload::Json(serde_json::json!({
             "model_path":  req.model_path,
             "num_workers": req.num_workers,
         })))
-        .run_wait()
+        .run()
         .await
         .map_err(ServerError::Runtime)?;
 

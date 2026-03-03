@@ -34,4 +34,4 @@ bytes = { workspace = true }
 futures = { workspace = true }
 strum = { version = "0.28.0", features = ["derive", "strum_macros"] }
 strum_macros = "0.28.0"
-
+async-trait = "0.1.89"

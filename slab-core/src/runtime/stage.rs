@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
-use tokio::sync::mpsc;
-
-use crate::runtime::backend::protocol::{BackendOp, BackendReply, BackendRequest};
+use crate::runtime::backend::admission::ResourceManager;
+use crate::runtime::backend::protocol::{
+    BackendOp, BackendReply, BackendRequest, BackendRequestKind,
+};
 use crate::runtime::types::{Payload, RuntimeError};
 
 /// Type alias for the boxed synchronous CPU work closure.
@@ -98,8 +99,6 @@ pub struct GpuStage {
     pub backend_id: String,
     /// The logical operation forwarded to the backend.
     pub op: BackendOp,
-    /// Ingress queue for sending requests to the backend worker.
-    pub ingress_tx: mpsc::Sender<BackendRequest>,
 }
 
 impl GpuStage {
@@ -111,23 +110,27 @@ impl GpuStage {
         &self,
         input: Payload,
         cancel_rx: tokio::sync::watch::Receiver<bool>,
+        rm: &ResourceManager,
     ) -> Result<Payload, RuntimeError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let ingress_tx = rm.ingress_tx(&self.backend_id)?;
         let req = BackendRequest {
+            kind: BackendRequestKind::Inference,
             op: self.op.clone(),
             input,
             cancel_rx,
+            broadcast_seq: None,
             reply_tx,
         };
 
-        self.ingress_tx.try_send(req).map_err(|e| {
-            let cap = self.ingress_tx.max_capacity();
+        ingress_tx.try_send(req).map_err(|e| {
+            let cap = ingress_tx.max_capacity();
             match e {
-                mpsc::error::TrySendError::Full(_) => RuntimeError::QueueFull {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => RuntimeError::QueueFull {
                     queue: self.backend_id.clone(),
                     capacity: cap,
                 },
-                mpsc::error::TrySendError::Closed(_) => RuntimeError::BackendShutdown,
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => RuntimeError::BackendShutdown,
             }
         })?;
 
@@ -161,8 +164,6 @@ pub struct GpuStreamStage {
     pub backend_id: String,
     /// The logical operation forwarded to the backend.
     pub op: BackendOp,
-    /// Ingress queue for sending requests to the backend worker.
-    pub ingress_tx: mpsc::Sender<BackendRequest>,
 }
 
 impl GpuStreamStage {
@@ -174,23 +175,27 @@ impl GpuStreamStage {
         &self,
         input: Payload,
         cancel_rx: tokio::sync::watch::Receiver<bool>,
+        rm: &ResourceManager,
     ) -> Result<crate::runtime::backend::protocol::StreamHandle, RuntimeError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        let ingress_tx = rm.ingress_tx(&self.backend_id)?;
         let req = BackendRequest {
+            kind: BackendRequestKind::Inference,
             op: self.op.clone(),
             input,
             cancel_rx,
+            broadcast_seq: None,
             reply_tx,
         };
 
-        self.ingress_tx.try_send(req).map_err(|e| {
-            let cap = self.ingress_tx.max_capacity();
+        ingress_tx.try_send(req).map_err(|e| {
+            let cap = ingress_tx.max_capacity();
             match e {
-                mpsc::error::TrySendError::Full(_) => RuntimeError::QueueFull {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => RuntimeError::QueueFull {
                     queue: self.backend_id.clone(),
                     capacity: cap,
                 },
-                mpsc::error::TrySendError::Closed(_) => RuntimeError::BackendShutdown,
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => RuntimeError::BackendShutdown,
             }
         })?;
 

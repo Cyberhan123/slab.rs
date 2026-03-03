@@ -1,10 +1,18 @@
+use std::collections::HashMap;
+
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use crate::runtime::backend::admission::ResourceManager;
+use crate::runtime::backend::protocol::{
+    BackendOp, BackendReply, BackendRequest, BackendRequestKind, ManagementEvent,
+};
 use crate::runtime::stage::Stage;
 use crate::runtime::storage::ResultStorage;
-use crate::runtime::types::{Payload, RuntimeError, StageStatus, TaskId, TaskStatus};
+use crate::runtime::types::{
+    BackendLifecycleState, FailedGlobalOperation, GlobalConsistencyState, GlobalOperationKind,
+    Payload, RuntimeError, StageStatus, TaskId, TaskStatus,
+};
 
 /// Maximum time to wait for a GPU admission permit before giving up.
 ///
@@ -51,6 +59,82 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
+    fn global_kind_to_event(kind: GlobalOperationKind) -> (ManagementEvent, &'static str) {
+        match kind {
+            GlobalOperationKind::InitializeAll => (ManagementEvent::Initialize, "lib.load"),
+            GlobalOperationKind::LoadModelsAll => (ManagementEvent::LoadModel, "model.load"),
+            GlobalOperationKind::UnloadModelsAll => (ManagementEvent::UnloadModel, "model.unload"),
+        }
+    }
+
+    async fn call_backend_management_inner(
+        &self,
+        backend_id: &str,
+        event: ManagementEvent,
+        op_name: &str,
+        input: Payload,
+    ) -> Result<Payload, RuntimeError> {
+        let _mgmt_lease = self.resource_manager.acquire_management_lease(backend_id).await?;
+        self.resource_manager
+            .set_backend_state(backend_id, BackendLifecycleState::Transitioning)
+            .await?;
+
+        let seq = self.resource_manager.next_seq(backend_id)?;
+        let (watch_tx, watch_rx) = tokio::sync::watch::channel(false);
+        let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
+        drop(watch_tx);
+
+        let req = BackendRequest {
+            kind: BackendRequestKind::Management(event),
+            op: BackendOp {
+                name: op_name.to_owned(),
+                options: Payload::default(),
+            },
+            input,
+            cancel_rx: watch_rx,
+            broadcast_seq: Some(seq),
+            reply_tx,
+        };
+
+        let ingress_tx = self.resource_manager.ingress_tx(backend_id)?;
+        ingress_tx.try_send(req).map_err(|e| {
+            let cap = ingress_tx.max_capacity();
+            match e {
+                mpsc::error::TrySendError::Full(_) => RuntimeError::QueueFull {
+                    queue: backend_id.to_owned(),
+                    capacity: cap,
+                },
+                mpsc::error::TrySendError::Closed(_) => RuntimeError::BackendShutdown,
+            }
+        })?;
+
+        let reply = reply_rx.await.map_err(|_| RuntimeError::BackendShutdown)?;
+        match reply {
+            BackendReply::Value(payload) => {
+                let state = match event {
+                    ManagementEvent::Initialize => BackendLifecycleState::Initialized,
+                    ManagementEvent::LoadModel => BackendLifecycleState::ModelLoaded,
+                    ManagementEvent::UnloadModel => BackendLifecycleState::Initialized,
+                };
+                self.resource_manager.set_backend_state(backend_id, state).await?;
+                Ok(payload)
+            }
+            BackendReply::Error(msg) => {
+                self.resource_manager
+                    .set_backend_state(backend_id, BackendLifecycleState::Error)
+                    .await?;
+                Err(RuntimeError::GpuStageFailed {
+                    stage_name: op_name.to_owned(),
+                    message: msg,
+                })
+            }
+            BackendReply::Stream(_) => Err(RuntimeError::GpuStageFailed {
+                stage_name: op_name.to_owned(),
+                message: "unexpected stream reply on management call".into(),
+            }),
+        }
+    }
+
     /// Start the orchestrator.
     ///
     /// Spawns the internal command-dispatch loop and returns an
@@ -174,13 +258,11 @@ impl Orchestrator {
                 },
 
                 Stage::Gpu(gpu_stage) => {
-                    // Acquire admission permit before dispatching, waiting up
-                    // to GPU_ACQUIRE_TIMEOUT for a slot to become available.
-                    let permit = match rm
-                        .acquire_with_timeout(&gpu_stage.backend_id, GPU_ACQUIRE_TIMEOUT)
+                    let lease = match rm
+                        .acquire_inference_lease(&gpu_stage.backend_id, GPU_ACQUIRE_TIMEOUT)
                         .await
                     {
-                        Ok(p) => p,
+                        Ok(lease) => lease,
                         Err(err) => {
                             storage
                                 .set_stage_status(task_id, idx, StageStatus::StageFailed)
@@ -192,8 +274,8 @@ impl Orchestrator {
                         }
                     };
 
-                    let result = gpu_stage.run(payload, cancel_rx.clone()).await;
-                    drop(permit); // release permit ASAP
+                    let result = gpu_stage.run(payload, cancel_rx.clone(), &rm).await;
+                    drop(lease);
 
                     match result {
                         Ok(next_payload) => {
@@ -216,11 +298,11 @@ impl Orchestrator {
 
                 Stage::GpuStream(stream_stage) => {
                     // Streaming stage must be last; acquire permit with timeout.
-                    let permit = match rm
-                        .acquire_with_timeout(&stream_stage.backend_id, GPU_ACQUIRE_TIMEOUT)
+                    let lease = match rm
+                        .acquire_inference_lease(&stream_stage.backend_id, GPU_ACQUIRE_TIMEOUT)
                         .await
                     {
-                        Ok(p) => p,
+                        Ok(lease) => lease,
                         Err(err) => {
                             storage
                                 .set_stage_status(task_id, idx, StageStatus::StageFailed)
@@ -232,8 +314,8 @@ impl Orchestrator {
                         }
                     };
 
-                    let result = stream_stage.run(payload, cancel_rx.clone()).await;
-                    drop(permit);
+                    let result = stream_stage.run(payload, cancel_rx.clone(), &rm).await;
+                    drop(lease);
 
                     match result {
                         Ok(handle) => {
@@ -280,6 +362,15 @@ impl Orchestrator {
         stages: Vec<Stage>,
         initial_payload: Payload,
     ) -> Result<TaskId, RuntimeError> {
+        // Gate GPU-bearing submissions early when global state is inconsistent.
+        // This prevents queueing work that is guaranteed to be rejected later.
+        if stages
+            .iter()
+            .any(|stage| matches!(stage, Stage::Gpu(_) | Stage::GpuStream(_)))
+        {
+            self.resource_manager.ensure_inference_allowed().await?;
+        }
+
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.storage
             .submit_tx()
@@ -308,6 +399,177 @@ impl Orchestrator {
             .storage
             .submit_tx()
             .try_send(OrchestratorCommand::Cancel { task_id });
+    }
+
+    /// Run backend initialization (`lib.load`) under backend-scoped management lock.
+    pub async fn initialize_backend(
+        &self,
+        backend_id: &str,
+        input: Payload,
+    ) -> Result<(), RuntimeError> {
+        self.call_backend_management_inner(
+            backend_id,
+            ManagementEvent::Initialize,
+            "lib.load",
+            input,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Reload backend dynamic library (`lib.reload`) under backend-scoped management lock.
+    pub async fn reload_library_backend(
+        &self,
+        backend_id: &str,
+        input: Payload,
+    ) -> Result<(), RuntimeError> {
+        self.call_backend_management_inner(
+            backend_id,
+            ManagementEvent::Initialize,
+            "lib.reload",
+            input,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Load model for a backend under backend-scoped management lock.
+    pub async fn load_model_backend(
+        &self,
+        backend_id: &str,
+        input: Payload,
+    ) -> Result<(), RuntimeError> {
+        self.call_backend_management_inner(
+            backend_id,
+            ManagementEvent::LoadModel,
+            "model.load",
+            input,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Unload model for a backend under backend-scoped management lock.
+    pub async fn unload_model_backend(&self, backend_id: &str) -> Result<(), RuntimeError> {
+        self.call_backend_management_inner(
+            backend_id,
+            ManagementEvent::UnloadModel,
+            "model.unload",
+            Payload::default(),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Execute a global management operation with all-or-fail semantics.
+    pub async fn run_global_management(
+        &self,
+        kind: GlobalOperationKind,
+        payloads: HashMap<String, Payload>,
+    ) -> Result<(), RuntimeError> {
+        let _global_guard = self.resource_manager.lock_global_management().await;
+        let op_id = self.resource_manager.begin_global_reconcile().await;
+
+        let (event, op_name) = Self::global_kind_to_event(kind);
+        let backend_ids = self.resource_manager.backend_ids();
+        let mut succeeded: Vec<String> = Vec::new();
+        let mut failed: Vec<(String, RuntimeError)> = Vec::new();
+
+        for backend_id in &backend_ids {
+            let payload = payloads.get(backend_id).cloned().unwrap_or_default();
+            match self
+                .call_backend_management_inner(backend_id, event, op_name, payload)
+                .await
+            {
+                Ok(_) => succeeded.push(backend_id.clone()),
+                Err(err) => {
+                    failed.push((backend_id.clone(), err));
+                    break;
+                }
+            }
+        }
+
+        if failed.is_empty() {
+            self.resource_manager.mark_global_consistent().await;
+            return Ok(());
+        }
+
+        let mut cleanup_report = Vec::new();
+        match kind {
+            GlobalOperationKind::LoadModelsAll => {
+                for backend_id in succeeded.iter().rev() {
+                    if let Err(err) = self.unload_model_backend(backend_id).await {
+                        cleanup_report.push(format!(
+                            "cleanup unload failed for backend '{}': {}",
+                            backend_id, err
+                        ));
+                    }
+                }
+            }
+            GlobalOperationKind::UnloadModelsAll => {
+                for (backend_id, _) in &failed {
+                    if let Err(err) = self.unload_model_backend(backend_id).await {
+                        cleanup_report.push(format!(
+                            "unload retry failed for backend '{}': {}",
+                            backend_id, err
+                        ));
+                    }
+                }
+            }
+            GlobalOperationKind::InitializeAll => {
+                for backend_id in succeeded.iter().rev() {
+                    if let Err(err) = self.unload_model_backend(backend_id).await {
+                        cleanup_report.push(format!(
+                            "best-effort initialize cleanup failed for backend '{}': {}",
+                            backend_id, err
+                        ));
+                    }
+                }
+            }
+        }
+
+        let failed_backends: Vec<String> = failed.iter().map(|(id, _)| id.clone()).collect();
+        self.resource_manager
+            .mark_global_inconsistent(
+                op_id,
+                failed_backends,
+                cleanup_report,
+                FailedGlobalOperation {
+                    op_id,
+                    kind,
+                    payloads,
+                },
+            )
+            .await;
+        Err(RuntimeError::GlobalStateInconsistent { op_id })
+    }
+
+    /// Retry the most recent failed global operation.
+    pub async fn retry_last_failed_global(&self) -> Result<(), RuntimeError> {
+        let failed = self
+            .resource_manager
+            .failed_global_operation()
+            .await
+            .ok_or(RuntimeError::NoFailedGlobalOperation)?;
+        self.run_global_management(failed.kind, failed.payloads).await
+    }
+
+    /// Read current global consistency state.
+    pub async fn consistency_status(&self) -> GlobalConsistencyState {
+        self.resource_manager.global_state().await
+    }
+
+    /// Read backend lifecycle state from the resource manager.
+    pub async fn backend_state(
+        &self,
+        backend_id: &str,
+    ) -> Result<BackendLifecycleState, RuntimeError> {
+        self.resource_manager.backend_state(backend_id).await
+    }
+
+    /// Manual operator override for inconsistency gate.
+    pub async fn manual_mark_consistent(&self, reason: &str) {
+        self.resource_manager.manual_mark_consistent(reason).await;
     }
 
     /// Return a snapshot of the task's current status.

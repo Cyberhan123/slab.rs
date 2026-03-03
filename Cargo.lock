@@ -4901,6 +4901,7 @@ name = "slab-core"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "axum",
  "bytemuck",
  "bytes",

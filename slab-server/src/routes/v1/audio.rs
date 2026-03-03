@@ -19,7 +19,7 @@ use crate::error::ServerError;
 use crate::schemas::v1::audio::CompletionRequest;
 use crate::state::AppState;
 use bytemuck::cast_slice;
-use slab_core::api::{Backend, Event};
+use slab_core::api::Backend;
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -94,7 +94,7 @@ pub async fn transcribe(
         .await?;
 
     let core_task_result = slab_core::api::backend(Backend::GGMLWhisper)
-        .op(Event::Inference)
+        .inference()
         .input(slab_core::Payload::Text(req.path.clone().into())) 
         .preprocess("ffmpeg.to_pcm_f32le", convert_to_pcm_f32le)
         .run()

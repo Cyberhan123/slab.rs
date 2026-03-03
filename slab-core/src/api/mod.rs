@@ -1,4 +1,4 @@
-//! Public-facing API facade for slab-core.
+﻿//! Public-facing API facade for slab-core.
 //!
 //! All user code should only `use slab_core::api;` – the underlying
 //! [`Orchestrator`], [`ResourceManager`] and channel types remain private.
@@ -58,17 +58,16 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use futures::Stream;
-use tokio::sync::{broadcast, mpsc};
 
 use crate::runtime::backend::admission::ResourceManager;
-use crate::runtime::backend::protocol::{BackendOp, BackendRequest, StreamChunk, WorkerCommand};
+use crate::runtime::backend::protocol::{BackendOp, StreamChunk};
 use crate::runtime::orchestrator::Orchestrator;
 use crate::runtime::pipeline::PipelineBuilder;
 use crate::runtime::stage::CpuStage;
 use crate::runtime::storage::TaskStatusView;
-pub use crate::runtime::types::RuntimeError;
+pub use crate::runtime::types::{GlobalConsistencyState, RuntimeError};
 use std::path::{Path, PathBuf};
-use crate::runtime::types::{Payload, TaskId, TaskStatus};
+use crate::runtime::types::{GlobalOperationKind, Payload, TaskId, TaskStatus};
 pub use types::Backend;
 pub use types::Event;
 
@@ -83,10 +82,6 @@ const STREAM_INIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Holds the live runtime state after [`init`] is called.
 pub(crate) struct ApiRuntime {
     pub(crate) orchestrator: Orchestrator,
-    pub(crate) backends: HashMap<String, mpsc::Sender<BackendRequest>>,
-    /// Broadcast senders for backends that support management commands
-    /// (currently `ggml.whisper` and `ggml.diffusion`).
-    pub(crate) broadcast: HashMap<String, broadcast::Sender<WorkerCommand>>,
 }
 
 static RUNTIME: std::sync::OnceLock<ApiRuntime> = std::sync::OnceLock::new();
@@ -215,27 +210,29 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
         spawn_diffusion(128, config.backend_capacity, diffusion_engine);
 
     let mut rm = ResourceManager::new();
-    rm.register_backend(Backend::GGMLLlama.to_string(), config.backend_capacity);
-    rm.register_backend(Backend::GGMLWhisper.to_string(), config.backend_capacity);
-    rm.register_backend(Backend::GGMLDiffusion.to_string(), config.backend_capacity);
+    rm.register_backend_runtime(
+        Backend::GGMLLlama.to_string(),
+        config.backend_capacity,
+        llama_tx,
+        None,
+    );
+    rm.register_backend_runtime(
+        Backend::GGMLWhisper.to_string(),
+        config.backend_capacity,
+        whisper_tx,
+        Some(whisper_bc_tx),
+    );
+    rm.register_backend_runtime(
+        Backend::GGMLDiffusion.to_string(),
+        config.backend_capacity,
+        diffusion_tx,
+        Some(diffusion_bc_tx),
+    );
 
     let orchestrator = Orchestrator::start(rm, config.queue_capacity);
 
-    let mut backends = HashMap::new();
-    backends.insert(Backend::GGMLLlama.to_string(), llama_tx);
-    backends.insert(Backend::GGMLWhisper.to_string(), whisper_tx);
-    backends.insert(Backend::GGMLDiffusion.to_string(), diffusion_tx);
-
-    let mut broadcast_map: HashMap<String, broadcast::Sender<WorkerCommand>> = HashMap::new();
-    broadcast_map.insert(Backend::GGMLWhisper.to_string(), whisper_bc_tx);
-    broadcast_map.insert(Backend::GGMLDiffusion.to_string(), diffusion_bc_tx);
-
-    // set() is a no-op if already initialized — idempotent.
-    let _ = RUNTIME.set(ApiRuntime {
-        orchestrator,
-        backends,
-        broadcast: broadcast_map,
-    });
+    // set() is a no-op if already initialized - idempotent.
+    let _ = RUNTIME.set(ApiRuntime { orchestrator });
 
     let _ = LIB_DIRS.set(LibDirs {
         llama: config.llama_lib_dir.clone(),
@@ -268,46 +265,13 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
 /// - [`RuntimeError::BackendShutdown`] – the backend worker has stopped.
 /// - [`RuntimeError::GpuStageFailed`] – the library could not be loaded.
 pub async fn reload_library<P: AsRef<Path>>(backend_id: Backend, lib_path: P) -> Result<(), RuntimeError> {
-    use crate::runtime::backend::protocol::{BackendOp, BackendReply};
-
     let rt = RUNTIME.get().ok_or(RuntimeError::NotInitialized)?;
-    let backend_str = backend_id.to_string();
-    let tx = rt
-        .backends
-        .get(&backend_str)
-        .cloned()
-        .ok_or_else(|| RuntimeError::Busy {
-            backend_id: backend_str.clone(),
-        })?;
-
-    let (watch_tx, watch_rx) = tokio::sync::watch::channel(false);
-    let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-    let req = BackendRequest {
-        op: BackendOp {
-            name: Event::ReloadLibrary.to_string(),
-            options: Payload::default(),
-        },
-        input: Payload::Json(serde_json::json!({ "lib_path": lib_path.as_ref().to_string_lossy() })),
-        cancel_rx: watch_rx,
-        reply_tx,
-    };
-    drop(watch_tx);
-
-    tx.send(req)
+    rt.orchestrator
+        .reload_library_backend(
+            &backend_id.to_string(),
+            Payload::Json(serde_json::json!({ "lib_path": lib_path.as_ref().to_string_lossy() })),
+        )
         .await
-        .map_err(|_| RuntimeError::BackendShutdown)?;
-
-    match reply_rx.await.map_err(|_| RuntimeError::BackendShutdown)? {
-        BackendReply::Value(_) => Ok(()),
-        BackendReply::Error(e) => Err(RuntimeError::GpuStageFailed {
-            stage_name: "lib.reload".into(),
-            message: e,
-        }),
-        BackendReply::Stream(_) => Err(RuntimeError::GpuStageFailed {
-            stage_name: "lib.reload".into(),
-            message: "unexpected stream reply".into(),
-        }),
-    }
 }
 
 /// Start building a call to the named backend.
@@ -375,53 +339,74 @@ pub fn cancel(task_id: TaskId) -> Result<(), RuntimeError> {
 /// - [`RuntimeError::NotInitialized`] – [`init`] was not called first.
 /// - [`RuntimeError::BackendShutdown`] – the backend worker has stopped.
 pub async fn is_backend_ready(backend_id: Backend) -> Result<bool, RuntimeError> {
-    use crate::runtime::backend::protocol::{BackendOp, BackendReply};
-
     let rt = CallBuilder::runtime()?;
-    let backend_str = backend_id.to_string();
-    let tx = rt
-        .backends
-        .get(&backend_str)
-        .cloned()
-        .ok_or_else(|| RuntimeError::Busy {
-            backend_id: backend_str.clone(),
-        })?;
+    let state = rt
+        .orchestrator
+        .backend_state(&backend_id.to_string())
+        .await?;
+    Ok(matches!(
+        state,
+        crate::runtime::types::BackendLifecycleState::ModelLoaded
+    ))
+}
 
-    // Only Whisper and Diffusion backends support readiness checks
-    match backend_id {
-        Backend::GGMLWhisper | Backend::GGMLDiffusion => {
-            let (watch_tx, watch_rx) = tokio::sync::watch::channel(false);
-            let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-            let req = crate::runtime::backend::protocol::BackendRequest {
-                op: BackendOp {
-                    name: "is_ready".to_string(),
-                    options: Payload::default(),
-                },
-                input: Payload::default(),
-                cancel_rx: watch_rx,
-                reply_tx,
-            };
-            drop(watch_tx);
+/// Global runtime management entrypoint.
+pub struct GlobalBuilder;
 
-            tx.send(req)
-                .await
-                .map_err(|_| RuntimeError::BackendShutdown)?;
+/// Access global runtime management APIs.
+pub fn global() -> GlobalBuilder {
+    GlobalBuilder
+}
 
-            match reply_rx.await.map_err(|_| RuntimeError::BackendShutdown)? {
-                BackendReply::Value(Payload::Json(v)) => {
-                    Ok(v.get("ready").and_then(|r| r.as_bool()).unwrap_or(false))
-                }
-                BackendReply::Value(_) => Ok(false),
-                BackendReply::Error(_) => Ok(false),
-                BackendReply::Stream(_) => Ok(false),
-            }
-        }
-        //TODO: fix this when llama has a proper readiness check (e.g. a lightweight "ping" op)
-        Backend::GGMLLlama => {
-            // Llama backend doesn't have a model state separate from library
-            // We consider it ready if the worker is responsive
-            Ok(true)
-        }
+impl GlobalBuilder {
+    fn runtime() -> Result<&'static ApiRuntime, RuntimeError> {
+        RUNTIME.get().ok_or(RuntimeError::NotInitialized)
+    }
+
+    fn payload_map(input: HashMap<Backend, Payload>) -> HashMap<String, Payload> {
+        input
+            .into_iter()
+            .map(|(backend, payload)| (backend.to_string(), payload))
+            .collect()
+    }
+
+    pub async fn initialize_all(self, payloads: HashMap<Backend, Payload>) -> Result<(), RuntimeError> {
+        let rt = Self::runtime()?;
+        rt.orchestrator
+            .run_global_management(GlobalOperationKind::InitializeAll, Self::payload_map(payloads))
+            .await
+    }
+
+    pub async fn load_models_all(self, payloads: HashMap<Backend, Payload>) -> Result<(), RuntimeError> {
+        let rt = Self::runtime()?;
+        rt.orchestrator
+            .run_global_management(GlobalOperationKind::LoadModelsAll, Self::payload_map(payloads))
+            .await
+    }
+
+    pub async fn unload_models_all(self) -> Result<(), RuntimeError> {
+        let rt = Self::runtime()?;
+        rt.orchestrator
+            .run_global_management(GlobalOperationKind::UnloadModelsAll, HashMap::new())
+            .await
+    }
+
+    pub async fn retry_last_failed_global(self) -> Result<(), RuntimeError> {
+        let rt = Self::runtime()?;
+        rt.orchestrator.retry_last_failed_global().await
+    }
+
+    pub async fn consistency_status(self) -> Result<GlobalConsistencyState, RuntimeError> {
+        let rt = Self::runtime()?;
+        Ok(rt.orchestrator.consistency_status().await)
+    }
+
+    pub async fn manual_mark_consistent(self, reason: impl AsRef<str>) -> Result<(), RuntimeError> {
+        let rt = Self::runtime()?;
+        rt.orchestrator
+            .manual_mark_consistent(reason.as_ref())
+            .await;
+        Ok(())
     }
 }
 
@@ -433,14 +418,7 @@ pub struct BackendBuilder {
 }
 
 impl BackendBuilder {
-    /// Select the operation to invoke on the backend.
-    ///
-    /// Standard op names:
-    /// - `"model.load"` – load (or reload) a model; params in `input: Bytes`
-    /// - `"inference"` – unary text generation (llama)
-    /// - `"inference.stream"` – streaming text generation (llama)
-    /// - `"inference"` – speech-to-text (whisper); input is raw PCM `f32` bytes
-    /// - `"inference_image"` – image generation (diffusion); input is JSON bytes
+    #[deprecated(note = "use initialize/load_model/unload_model/inference/inference_stream")]
     pub fn op(self, event: Event) -> CallBuilder {
         CallBuilder {
             backend_id: self.id.to_string(),
@@ -451,10 +429,105 @@ impl BackendBuilder {
             postprocess_stages: Vec::new(),
         }
     }
+
+    /// Build backend initialization (`lib.load`) call.
+    pub fn initialize(self) -> ManagementCallBuilder {
+        ManagementCallBuilder {
+            backend_id: self.id.to_string(),
+            kind: ManagementCallKind::Initialize,
+            input: Payload::default(),
+        }
+    }
+
+    /// Build backend model-load (`model.load`) call.
+    pub fn load_model(self) -> ManagementCallBuilder {
+        ManagementCallBuilder {
+            backend_id: self.id.to_string(),
+            kind: ManagementCallKind::LoadModel,
+            input: Payload::default(),
+        }
+    }
+
+    /// Build backend model-unload (`model.unload`) call.
+    pub fn unload_model(self) -> ManagementCallBuilder {
+        ManagementCallBuilder {
+            backend_id: self.id.to_string(),
+            kind: ManagementCallKind::UnloadModel,
+            input: Payload::default(),
+        }
+    }
+
+    /// Build a unary inference pipeline.
+    pub fn inference(self) -> CallBuilder {
+        let event = match self.id {
+            Backend::GGMLDiffusion => Event::InferenceImage,
+            _ => Event::Inference,
+        };
+        CallBuilder {
+            backend_id: self.id.to_string(),
+            op_name: event.to_string(),
+            op_options: Payload::default(),
+            input: Payload::default(),
+            preprocess_stages: Vec::new(),
+            postprocess_stages: Vec::new(),
+        }
+    }
+
+    /// Build a streaming inference pipeline.
+    pub fn inference_stream(self) -> CallBuilder {
+        CallBuilder {
+            backend_id: self.id.to_string(),
+            op_name: Event::InferenceStream.to_string(),
+            op_options: Payload::default(),
+            input: Payload::default(),
+            preprocess_stages: Vec::new(),
+            postprocess_stages: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum ManagementCallKind {
+    Initialize,
+    LoadModel,
+    UnloadModel,
+}
+
+/// Configures and executes backend lifecycle operations.
+pub struct ManagementCallBuilder {
+    backend_id: String,
+    kind: ManagementCallKind,
+    input: Payload,
+}
+
+impl ManagementCallBuilder {
+    pub fn input(mut self, input: Payload) -> Self {
+        self.input = input;
+        self
+    }
+
+    pub async fn run(self) -> Result<(), RuntimeError> {
+        let rt = CallBuilder::runtime()?;
+        match self.kind {
+            ManagementCallKind::Initialize => {
+                rt.orchestrator
+                    .initialize_backend(&self.backend_id, self.input)
+                    .await
+            }
+            ManagementCallKind::LoadModel => {
+                rt.orchestrator
+                    .load_model_backend(&self.backend_id, self.input)
+                    .await
+            }
+            ManagementCallKind::UnloadModel => {
+                let _ = self.input;
+                rt.orchestrator.unload_model_backend(&self.backend_id).await
+            }
+        }
+    }
 }
 
 // ── CallBuilder ────────────────────────────────────────────────────────────────
-
 /// Configures and submits a single-stage backend call.
 ///
 /// Produced by [`BackendBuilder::op`].  All terminal methods consume `self`.
@@ -511,23 +584,7 @@ impl CallBuilder {
         RUNTIME.get().ok_or(RuntimeError::NotInitialized)
     }
 
-    fn ingress_tx(
-        rt: &ApiRuntime,
-        backend_id: &str,
-    ) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
-        rt.backends
-            .get(backend_id)
-            .cloned()
-            .ok_or_else(|| RuntimeError::Busy {
-                backend_id: backend_id.to_owned(),
-            })
-    }
-
-    fn build_unary_pipeline(
-        self,
-        rt: &ApiRuntime,
-        ingress_tx: mpsc::Sender<BackendRequest>,
-    ) -> PipelineBuilder {
+    fn build_unary_pipeline(self, rt: &ApiRuntime) -> PipelineBuilder {
         let payload = self.input.clone();
         let op = BackendOp {
             name: self.op_name.clone(),
@@ -539,7 +596,7 @@ impl CallBuilder {
             builder = builder.cpu_stage(stage);
         }
 
-        let mut builder = builder.gpu(self.op_name, self.backend_id, op, ingress_tx);
+        let mut builder = builder.gpu(self.op_name, self.backend_id, op);
         for stage in self.postprocess_stages {
             builder = builder.cpu_stage(stage);
         }
@@ -554,8 +611,7 @@ impl CallBuilder {
     /// Use the orchestrator or [`run_wait`](Self::run_wait) to obtain the result.
     pub async fn run(self) -> Result<TaskId, RuntimeError> {
         let rt = Self::runtime()?;
-        let ingress_tx = Self::ingress_tx(rt, &self.backend_id)?;
-        let builder = self.build_unary_pipeline(rt, ingress_tx);
+        let builder = self.build_unary_pipeline(rt);
         builder.run().await
     }
 
@@ -573,8 +629,7 @@ impl CallBuilder {
     /// Returns [`RuntimeError::Timeout`] on deadline expiry.
     pub async fn run_wait_timeout(self, timeout: Duration) -> Result<Bytes, RuntimeError> {
         let rt = Self::runtime()?;
-        let ingress_tx = Self::ingress_tx(rt, &self.backend_id)?;
-        let builder = self.build_unary_pipeline(rt, ingress_tx);
+        let builder = self.build_unary_pipeline(rt);
         let task_id = builder.run().await?;
 
         // Poll until the task reaches a terminal state.
@@ -625,7 +680,6 @@ impl CallBuilder {
         }
 
         let rt = Self::runtime()?;
-        let ingress_tx = Self::ingress_tx(rt, &self.backend_id)?;
 
         let op = BackendOp {
             name: self.op_name.clone(),
@@ -638,7 +692,7 @@ impl CallBuilder {
         }
 
         let task_id = builder
-            .gpu_stream(self.op_name, self.backend_id, op, ingress_tx)
+            .gpu_stream(self.op_name, self.backend_id, op)
             .run_stream()
             .await?;
 
@@ -709,7 +763,7 @@ fn payload_to_bytes(p: Payload) -> Result<Bytes, RuntimeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::backend::protocol::BackendReply;
+    use crate::runtime::backend::protocol::{BackendReply, BackendRequest};
     use tokio::sync::mpsc;
 
     // ── helpers ───────────────────────────────────────────────────────────────
@@ -750,10 +804,9 @@ mod tests {
     /// input bytes through the orchestrator pipeline.
     #[tokio::test]
     async fn mock_unary_backend_echo() {
-        let echo_tx = spawn_echo_backend(16);
-
         let mut rm = ResourceManager::new();
-        rm.register_backend("test.echo", 4);
+        let echo_tx = spawn_echo_backend(16);
+        rm.register_backend_runtime("test.echo", 4, echo_tx, None);
         let orchestrator = Orchestrator::start(rm, 64);
 
         let op = BackendOp {
@@ -765,7 +818,7 @@ mod tests {
             orchestrator.clone(),
             Payload::Bytes(Arc::from(b"hello" as &[u8])),
         )
-        .gpu("echo", "test.echo", op, echo_tx)
+        .gpu("echo", "test.echo", op)
         .run()
         .await
         .expect("submit should succeed");
@@ -805,10 +858,9 @@ mod tests {
     /// the orchestrator, and that collecting them yields the full string.
     #[tokio::test]
     async fn mock_stream_backend_collects_tokens() {
-        let stream_tx = spawn_stream_backend(16, vec!["foo", " ", "bar"]);
-
         let mut rm = ResourceManager::new();
-        rm.register_backend("test.stream", 4);
+        let stream_tx = spawn_stream_backend(16, vec!["foo", " ", "bar"]);
+        rm.register_backend_runtime("test.stream", 4, stream_tx, None);
         let orchestrator = Orchestrator::start(rm, 64);
 
         let op = BackendOp {
@@ -820,7 +872,7 @@ mod tests {
             orchestrator.clone(),
             Payload::Bytes(Arc::from(b"prompt" as &[u8])),
         )
-        .gpu_stream("gen", "test.stream", op, stream_tx)
+        .gpu_stream("gen", "test.stream", op)
         .run_stream()
         .await
         .expect("submit should succeed");
@@ -867,7 +919,7 @@ mod tests {
         });
 
         let mut rm = ResourceManager::new();
-        rm.register_backend("test.notloaded", 4);
+        rm.register_backend_runtime("test.notloaded", 4, ingress_tx.clone(), None);
         let orchestrator = Orchestrator::start(rm, 64);
 
         let op = BackendOp {
@@ -879,7 +931,7 @@ mod tests {
             orchestrator.clone(),
             Payload::Bytes(Arc::from(b"test" as &[u8])),
         )
-        .gpu("generate", "test.notloaded", op, ingress_tx)
+        .gpu("generate", "test.notloaded", op)
         .run()
         .await
         .expect("submit ok");
@@ -957,3 +1009,4 @@ mod tests {
         }
     }
 }
+

@@ -187,12 +187,12 @@ pub async fn load_model(
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
 
     slab_core::api::backend(backend)
-        .op(slab_core::api::Event::LoadModel)
+        .load_model()
         .input(slab_core::Payload::Json(serde_json::json!({
             "model_path":  req.model_path,
             "num_workers": req.num_workers,
         })))
-        .run_wait()
+        .run()
         .await
         .map_err(ServerError::Runtime)?;
 
@@ -225,9 +225,9 @@ pub async fn unload_model(
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
 
     slab_core::api::backend(backend)
-        .op(slab_core::api::Event::UnloadModel)
+        .unload_model()
         .input(slab_core::Payload::default())
-        .run_wait()
+        .run()
         .await
         .map_err(ServerError::Runtime)?;
 
@@ -308,12 +308,12 @@ pub async fn switch_model(
     let backend = Backend::from_str(bid)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
     slab_core::api::backend(backend)
-        .op(slab_core::api::Event::LoadModel)
+        .load_model()
         .input(slab_core::Payload::Json(serde_json::json!({
             "model_path":  req.model_path,
             "num_workers": req.num_workers,
         })))
-        .run_wait()
+        .run()
         .await
         .map_err(ServerError::Runtime)?;
 
