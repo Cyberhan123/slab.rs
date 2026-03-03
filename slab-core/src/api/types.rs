@@ -1,4 +1,4 @@
-use strum::{Display, EnumString, IntoEnumIterator};
+use strum::{Display, EnumString};
 use strum_macros::EnumIter;
 
 #[derive(Debug, Display, EnumString)]

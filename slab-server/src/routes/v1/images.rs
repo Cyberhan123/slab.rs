@@ -112,7 +112,7 @@ pub async fn generate_images(
 
     // Submit the pipeline to slab-core and get the core TaskId immediately.
     let core_task_result = slab_core::api::backend(slab_core::api::Backend::GGMLDiffusion)
-        .op(slab_core::api::Event::InferenceImage)
+        .inference()
         .input(slab_core::Payload::Json(input_json))
         .run()
         .await;

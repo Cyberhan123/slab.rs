@@ -1,5 +1,6 @@
 use std::any::Any;
 use std::sync::Arc;
+use std::time::SystemTime;
 use thiserror::Error;
 
 /// Unique identifier for a submitted pipeline task.
@@ -202,6 +203,45 @@ pub enum StageStatus {
     StageCancelled,
 }
 
+/// Backend lifecycle state tracked centrally by the resource manager.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BackendLifecycleState {
+    Uninitialized,
+    Initialized,
+    ModelLoaded,
+    Transitioning,
+    Error,
+}
+
+/// Cluster-wide consistency state used to gate inference after failed global operations.
+#[derive(Debug, Clone)]
+pub enum GlobalConsistencyState {
+    Consistent { generation: u64 },
+    Reconciling { op_id: u64, started_at: SystemTime },
+    Inconsistent {
+        op_id: u64,
+        failed_backends: Vec<String>,
+        cleanup_report: Vec<String>,
+        since: SystemTime,
+    },
+}
+
+/// Global management operation kind stored for retry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GlobalOperationKind {
+    InitializeAll,
+    LoadModelsAll,
+    UnloadModelsAll,
+}
+
+/// Snapshot of a failed global operation used for retry.
+#[derive(Debug, Clone)]
+pub struct FailedGlobalOperation {
+    pub op_id: u64,
+    pub kind: GlobalOperationKind,
+    pub payloads: std::collections::HashMap<String, Payload>,
+}
+
 /// Errors produced by the runtime layer.
 #[derive(Debug, Clone, Error)]
 pub enum RuntimeError {
@@ -244,4 +284,24 @@ pub enum RuntimeError {
     /// Failed to load a shared library for a backend.
     #[error("library load failed for backend '{backend}': {message}")]
     LibraryLoadFailed { backend: String, message: String },
+
+    /// The runtime detected split-brain risk after a failed global operation.
+    #[error("global state is inconsistent (failed operation {op_id})")]
+    GlobalStateInconsistent { op_id: u64 },
+
+    /// Broadcast scope and event combination is invalid.
+    #[error("invalid broadcast scope for event")]
+    InvalidBroadcastScope,
+
+    /// Timed out waiting for backend broadcast acknowledgement.
+    #[error("broadcast acknowledgement timed out")]
+    BroadcastAckTimeout,
+
+    /// Requested operation is not implemented for a backend.
+    #[error("unsupported operation '{op}' for backend '{backend}'")]
+    UnsupportedOperation { backend: String, op: String },
+
+    /// No failed global operation is available for retry.
+    #[error("no failed global operation to retry")]
+    NoFailedGlobalOperation,
 }

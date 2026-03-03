@@ -1,5 +1,4 @@
 use std::marker::PhantomData;
-use tokio::sync::mpsc;
 
 use crate::runtime::backend::protocol::BackendOp;
 use crate::runtime::orchestrator::Orchestrator;
@@ -61,13 +60,11 @@ impl PipelineBuilder<NoStream> {
         name: impl Into<String>,
         backend_id: impl Into<String>,
         op: BackendOp,
-        ingress_tx: mpsc::Sender<crate::runtime::backend::protocol::BackendRequest>,
     ) -> Self {
         let stage = GpuStage {
             name: name.into(),
             backend_id: backend_id.into(),
             op,
-            ingress_tx,
         };
         self.stages.push(Stage::Gpu(stage));
         self
@@ -82,13 +79,11 @@ impl PipelineBuilder<NoStream> {
         name: impl Into<String>,
         backend_id: impl Into<String>,
         op: BackendOp,
-        ingress_tx: mpsc::Sender<crate::runtime::backend::protocol::BackendRequest>,
     ) -> PipelineBuilder<HasStream> {
         let stage = GpuStreamStage {
             name: name.into(),
             backend_id: backend_id.into(),
             op,
-            ingress_tx,
         };
         self.stages.push(Stage::GpuStream(stage));
         PipelineBuilder {

@@ -93,26 +93,35 @@ struct DiffusionWorker {
     /// Stable index used to populate `sender_id` when broadcasting and to
     /// filter out self-sent commands in the broadcast receive arm.
     worker_id: usize,
+    /// Last applied broadcast sequence id.
+    last_applied_seq: u64,
 }
 
 impl DiffusionWorker {
     fn new(engine: Option<GGMLDiffusionEngine>, bc_tx: broadcast::Sender<WorkerCommand>, worker_id: usize) -> Self {
-        Self { engine, bc_tx, worker_id }
+        Self {
+            engine,
+            bc_tx,
+            worker_id,
+            last_applied_seq: 0,
+        }
     }
 
     async fn handle(&mut self, req: BackendRequest) {
         let BackendRequest {
             op,
             input,
+            broadcast_seq,
             reply_tx,
             ..
         } = req;
+        let seq_id = broadcast_seq.unwrap_or(0);
 
         match Event::from_str(&op.name) {
-            Ok(Event::LoadLibrary) => self.handle_load_library(input, reply_tx).await,
-            Ok(Event::ReloadLibrary) => self.handle_reload_library(input, reply_tx).await,
-            Ok(Event::LoadModel) => self.handle_load_model(input, reply_tx).await,
-            Ok(Event::UnloadModel) => self.handle_unload_model(reply_tx).await,
+            Ok(Event::LoadLibrary) => self.handle_load_library(input, reply_tx, seq_id).await,
+            Ok(Event::ReloadLibrary) => self.handle_reload_library(input, reply_tx, seq_id).await,
+            Ok(Event::LoadModel) => self.handle_load_model(input, reply_tx, seq_id).await,
+            Ok(Event::UnloadModel) => self.handle_unload_model(reply_tx, seq_id).await,
             Ok(Event::InferenceImage) => self.handle_inference_image(input, reply_tx).await,
             Ok(_) | Err(_) => {
                 let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
@@ -126,6 +135,7 @@ impl DiffusionWorker {
         &mut self,
         input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+        seq_id: u64,
     ) {
         if self.engine.is_some() {
             let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
@@ -148,7 +158,11 @@ impl DiffusionWorker {
                 // Broadcast so peer workers also load the same library.
                 let _ = self
                     .bc_tx
-                    .send(WorkerCommand::LoadLibrary { lib_path: config.lib_path, sender_id: self.worker_id });
+                    .send(WorkerCommand::LoadLibrary {
+                        lib_path: config.lib_path,
+                        sender_id: self.worker_id,
+                        seq_id,
+                    });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -165,6 +179,7 @@ impl DiffusionWorker {
         &mut self,
         input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+        seq_id: u64,
     ) {
         let config: LibLoadConfig = match input.to_json() {
             Ok(c) => c,
@@ -185,7 +200,11 @@ impl DiffusionWorker {
                 // Broadcast so peer workers drop their old engine and reload too.
                 let _ = self
                     .bc_tx
-                    .send(WorkerCommand::ReloadLibrary { lib_path: config.lib_path, sender_id: self.worker_id });
+                    .send(WorkerCommand::ReloadLibrary {
+                        lib_path: config.lib_path,
+                        sender_id: self.worker_id,
+                        seq_id,
+                    });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -202,6 +221,7 @@ impl DiffusionWorker {
         &mut self,
         input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+        seq_id: u64,
     ) {
         let engine = match self.engine.as_mut() {
             Some(e) => e,
@@ -235,7 +255,11 @@ impl DiffusionWorker {
                 // Broadcast so peer workers also load the same model.
                 let _ = self
                     .bc_tx
-                    .send(WorkerCommand::LoadModel { model_path: config.model_path, sender_id: self.worker_id });
+                    .send(WorkerCommand::LoadModel {
+                        model_path: config.model_path,
+                        sender_id: self.worker_id,
+                        seq_id,
+                    });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -248,13 +272,20 @@ impl DiffusionWorker {
 
     // ── model.unload ──────────────────────────────────────────────────────────
 
-    async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
+    async fn handle_unload_model(
+        &mut self,
+        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+        seq_id: u64,
+    ) {
         match self.engine.as_mut() {
             Some(e) => {
                 e.unload();
                 // Broadcast so every peer worker also drops its context.
                 // Ignore errors: no receivers simply means no other workers.
-                let _ = self.bc_tx.send(WorkerCommand::Unload { sender_id: self.worker_id });
+                let _ = self.bc_tx.send(WorkerCommand::Unload {
+                    sender_id: self.worker_id,
+                    seq_id,
+                });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -382,7 +413,11 @@ pub(crate) fn spawn_backend_with_engine(
                     // ── Broadcast arm: management commands ────────────────
                     cmd = bc_rx.recv() => {
                         match cmd {
-                            Ok(WorkerCommand::LoadLibrary { lib_path, sender_id }) => {
+                            Ok(WorkerCommand::LoadLibrary { lib_path, sender_id, seq_id }) => {
+                                if seq_id <= worker.last_applied_seq {
+                                    continue;
+                                }
+                                worker.last_applied_seq = seq_id;
                                 // Skip commands sent by this worker (self-echo).
                                 // Also skip if library is already loaded (idempotent).
                                 if sender_id != worker.worker_id && worker.engine.is_none() {
@@ -391,7 +426,11 @@ pub(crate) fn spawn_backend_with_engine(
                                     }
                                 }
                             }
-                            Ok(WorkerCommand::ReloadLibrary { lib_path, sender_id }) => {
+                            Ok(WorkerCommand::ReloadLibrary { lib_path, sender_id, seq_id }) => {
+                                if seq_id <= worker.last_applied_seq {
+                                    continue;
+                                }
+                                worker.last_applied_seq = seq_id;
                                 // Skip the self-echo: the broadcasting worker already
                                 // completed the reload while handling the mpsc request.
                                 // Processing it again would drop the freshly-loaded
@@ -403,7 +442,11 @@ pub(crate) fn spawn_backend_with_engine(
                                     }
                                 }
                             }
-                            Ok(WorkerCommand::LoadModel { model_path, sender_id }) => {
+                            Ok(WorkerCommand::LoadModel { model_path, sender_id, seq_id }) => {
+                                if seq_id <= worker.last_applied_seq {
+                                    continue;
+                                }
+                                worker.last_applied_seq = seq_id;
                                 // Skip commands sent by this worker (self-echo).
                                 // Also skip if model is already loaded (idempotent).
                                 if sender_id != worker.worker_id {
@@ -426,7 +469,11 @@ pub(crate) fn spawn_backend_with_engine(
                                     }
                                 }
                             }
-                            Ok(WorkerCommand::Unload { sender_id }) => {
+                            Ok(WorkerCommand::Unload { sender_id, seq_id }) => {
+                                if seq_id <= worker.last_applied_seq {
+                                    continue;
+                                }
+                                worker.last_applied_seq = seq_id;
                                 // Skip the self-echo: the broadcasting worker already
                                 // called unload() while handling the mpsc request.
                                 // Calling it again on the same context is unsafe.

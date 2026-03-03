@@ -1,5 +1,6 @@
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
@@ -7,13 +8,15 @@ mod tests {
     use crate::runtime::backend::protocol::{BackendOp, BackendReply, BackendRequest};
     use crate::runtime::orchestrator::Orchestrator;
     use crate::runtime::pipeline::PipelineBuilder;
-    use crate::runtime::types::{Payload, TaskStatus};
+    use crate::runtime::types::{
+        FailedGlobalOperation, GlobalOperationKind, Payload, RuntimeError, TaskStatus,
+    };
 
     fn text_payload(s: &str) -> Payload {
         Payload::Text(Arc::from(s))
     }
 
-    // ── Types tests ───────────────────────────────────────────────────────────
+    // 鈹€鈹€ Types tests 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     #[test]
     fn payload_clone_does_not_copy_bytes() {
@@ -28,7 +31,7 @@ mod tests {
         }
     }
 
-    // ── Admission control tests ───────────────────────────────────────────────
+    // 鈹€鈹€ Admission control tests 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     #[test]
     fn permit_acquired_and_released() {
@@ -51,7 +54,7 @@ mod tests {
 
     #[test]
     fn permit_unknown_backend_returns_busy() {
-        let mut rm = ResourceManager::new();
+        let rm = ResourceManager::new();
         let err = rm.try_acquire("nonexistent").unwrap_err();
         assert!(
             matches!(err, crate::runtime::types::RuntimeError::Busy { .. }),
@@ -59,7 +62,7 @@ mod tests {
         );
     }
 
-    // ── CPU stage tests ───────────────────────────────────────────────────────
+    // 鈹€鈹€ CPU stage tests 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     #[tokio::test]
     async fn cpu_stage_transforms_payload() {
@@ -88,26 +91,23 @@ mod tests {
         assert!(result.is_err(), "stage should propagate work fn error");
     }
 
-    // ── Orchestrator / pipeline integration tests ─────────────────────────────
+    // 鈹€鈹€ Orchestrator / pipeline integration tests 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     #[tokio::test]
     async fn gpu_stage_dispatches_and_receives_reply() {
         let orchestrator = {
             let mut rm = ResourceManager::new();
-            rm.register_backend("echo-backend", 4);
+            let (ingress_tx, ingress_rx) = mpsc::channel::<BackendRequest>(16);
+            rm.register_backend_runtime("echo-backend", 4, ingress_tx.clone(), None);
+            // Spawn a minimal echo backend worker.
+            tokio::spawn(async move {
+                let mut rx = ingress_rx;
+                while let Some(req) = rx.recv().await {
+                    let _ = req.reply_tx.send(BackendReply::Value(req.input));
+                }
+            });
             Orchestrator::start(rm, 64)
         };
-
-        let (ingress_tx, ingress_rx) = mpsc::channel::<BackendRequest>(16);
-        let ingress_tx_clone = ingress_tx.clone();
-
-        // Spawn a minimal echo backend worker.
-        tokio::spawn(async move {
-            let mut rx = ingress_rx;
-            while let Some(req) = rx.recv().await {
-                let _ = req.reply_tx.send(BackendReply::Value(req.input));
-            }
-        });
 
         let op = BackendOp {
             name: "echo".to_owned(),
@@ -115,7 +115,7 @@ mod tests {
         };
 
         let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("ping"))
-            .gpu("echo-stage", "echo-backend", op, ingress_tx_clone)
+            .gpu("echo-stage", "echo-backend", op)
             .run()
             .await
             .expect("submit should succeed");
@@ -155,14 +155,13 @@ mod tests {
         rm.register_backend("busy-backend", 0);
         let orchestrator = Orchestrator::start(rm, 64);
 
-        let (ingress_tx, _ingress_rx) = mpsc::channel::<BackendRequest>(4);
         let op = BackendOp {
             name: "noop".to_owned(),
             options: Payload::default(),
         };
 
         let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("x"))
-            .gpu("noop-stage", "busy-backend", op, ingress_tx)
+            .gpu("noop-stage", "busy-backend", op)
             .run()
             .await
             .expect("submit should succeed");
@@ -194,10 +193,9 @@ mod tests {
     #[tokio::test]
     async fn streaming_pipeline_returns_stream_handle() {
         let mut rm = ResourceManager::new();
-        rm.register_backend("stream-backend", 4);
-        let orchestrator = Orchestrator::start(rm, 64);
-
         let (ingress_tx, mut ingress_rx) = mpsc::channel::<BackendRequest>(16);
+        rm.register_backend_runtime("stream-backend", 4, ingress_tx.clone(), None);
+        let orchestrator = Orchestrator::start(rm, 64);
         let op = BackendOp {
             name: "stream-gen".to_owned(),
             options: Payload::default(),
@@ -223,7 +221,7 @@ mod tests {
         });
 
         let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("prompt"))
-            .gpu_stream("stream-stage", "stream-backend", op, ingress_tx)
+            .gpu_stream("stream-stage", "stream-backend", op)
             .run_stream()
             .await
             .expect("submit should succeed");
@@ -265,7 +263,7 @@ mod tests {
         assert_eq!(tokens, "hello world");
     }
 
-    // ── Broadcast channel tests ───────────────────────────────────────────────
+    // 鈹€鈹€ Broadcast channel tests 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
     /// Verify that `acquire_with_timeout` waits for a permit to become available
     /// instead of failing immediately.
@@ -348,10 +346,10 @@ mod tests {
                                     break;
                                 }
                                 // Other management commands (LoadLibrary, ReloadLibrary,
-                                // LoadModel) are not relevant to this test scenario —
+                                // LoadModel) are not relevant to this test scenario 鈥?
                                 // ignore them and keep the loop running.
                                 Ok(_) => {}
-                                // Channel closed → exit.
+                                // Channel closed 鈫?exit.
                                 Err(_) => break,
                             }
                         }
@@ -378,7 +376,10 @@ mod tests {
         // Broadcast Unload to all workers.  Use sender_id=usize::MAX so that
         // no worker's self-echo guard fires and every worker processes it.
         bc_tx
-            .send(WorkerCommand::Unload { sender_id: usize::MAX })
+            .send(WorkerCommand::Unload {
+                sender_id: usize::MAX,
+                seq_id: 1,
+            })
             .expect("broadcast should reach at least one subscriber");
 
         // Wait for each worker to acknowledge the Unload.
@@ -398,5 +399,188 @@ mod tests {
         }
     }
 
-    // ── Storage tests ─────────────────────────────────────────────────────────
+    // 鈹€鈹€ Storage tests 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+
+    #[tokio::test]
+    async fn stale_broadcast_sequence_is_ignored() {
+        use tokio::sync::broadcast;
+
+        use crate::runtime::backend::protocol::WorkerCommand;
+
+        let (bc_tx, mut bc_rx) = broadcast::channel::<WorkerCommand>(16);
+        let applied = Arc::new(tokio::sync::Mutex::new(Vec::<u64>::new()));
+        let applied_w = Arc::clone(&applied);
+
+        let worker = tokio::spawn(async move {
+            let mut last_applied_seq = 0u64;
+            loop {
+                match bc_rx.recv().await {
+                    Ok(WorkerCommand::Unload { seq_id, .. }) => {
+                        if seq_id <= last_applied_seq {
+                            continue;
+                        }
+                        last_applied_seq = seq_id;
+                        applied_w.lock().await.push(seq_id);
+                    }
+                    Ok(_) => {}
+                    Err(broadcast::error::RecvError::Lagged(_)) => {}
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+        });
+
+        for seq_id in [1u64, 1, 0, 2, 2, 3, 1] {
+            let _ = bc_tx.send(WorkerCommand::Unload {
+                sender_id: usize::MAX,
+                seq_id,
+            });
+        }
+        drop(bc_tx);
+
+        worker
+            .await
+            .expect("broadcast worker should stop after sender is dropped");
+
+        let observed = applied.lock().await.clone();
+        assert_eq!(
+            observed,
+            vec![1, 2, 3],
+            "worker should apply only strictly increasing sequence ids"
+        );
+    }
+
+    #[tokio::test]
+    async fn inconsistent_global_state_blocks_inference_submission() {
+        let mut rm = ResourceManager::new();
+        let (ingress_tx, mut ingress_rx) = mpsc::channel::<BackendRequest>(8);
+        rm.register_backend_runtime("gate-backend", 2, ingress_tx, None);
+
+        tokio::spawn(async move {
+            while let Some(req) = ingress_rx.recv().await {
+                let _ = req.reply_tx.send(BackendReply::Value(req.input));
+            }
+        });
+
+        let rm_state = rm.clone();
+        let orchestrator = Orchestrator::start(rm, 64);
+
+        let op_id = 42;
+        rm_state
+            .mark_global_inconsistent(
+                op_id,
+                vec!["gate-backend".to_owned()],
+                vec!["forced inconsistent state for test".to_owned()],
+                FailedGlobalOperation {
+                    op_id,
+                    kind: GlobalOperationKind::LoadModelsAll,
+                    payloads: HashMap::new(),
+                },
+            )
+            .await;
+
+        let op = BackendOp {
+            name: "echo".to_owned(),
+            options: Payload::default(),
+        };
+
+        let result = PipelineBuilder::new(orchestrator, text_payload("blocked"))
+            .gpu("echo-stage", "gate-backend", op)
+            .run()
+            .await;
+
+        assert!(
+            matches!(result, Err(RuntimeError::GlobalStateInconsistent { op_id: seen }) if seen == op_id),
+            "inference submission should be rejected while global state is inconsistent, got {result:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn manual_override_clears_inference_gate() {
+        let mut rm = ResourceManager::new();
+        let (ingress_tx, mut ingress_rx) = mpsc::channel::<BackendRequest>(8);
+        rm.register_backend_runtime("gate-backend", 2, ingress_tx, None);
+
+        tokio::spawn(async move {
+            while let Some(req) = ingress_rx.recv().await {
+                let _ = req.reply_tx.send(BackendReply::Value(req.input));
+            }
+        });
+
+        let rm_state = rm.clone();
+        let orchestrator = Orchestrator::start(rm, 64);
+
+        let op_id = 99;
+        rm_state
+            .mark_global_inconsistent(
+                op_id,
+                vec!["gate-backend".to_owned()],
+                vec!["forced inconsistent state for test".to_owned()],
+                FailedGlobalOperation {
+                    op_id,
+                    kind: GlobalOperationKind::LoadModelsAll,
+                    payloads: HashMap::new(),
+                },
+            )
+            .await;
+
+        let blocked = PipelineBuilder::new(
+            orchestrator.clone(),
+            text_payload("first blocked submission"),
+        )
+        .gpu(
+            "echo-stage",
+            "gate-backend",
+            BackendOp {
+                name: "echo".to_owned(),
+                options: Payload::default(),
+            },
+        )
+        .run()
+        .await;
+        assert!(
+            matches!(blocked, Err(RuntimeError::GlobalStateInconsistent { .. })),
+            "submission should be blocked before manual override"
+        );
+
+        rm_state
+            .manual_mark_consistent("operator override in test")
+            .await;
+
+        let task_id = PipelineBuilder::new(
+            orchestrator.clone(),
+            text_payload("submission after override"),
+        )
+        .gpu(
+            "echo-stage",
+            "gate-backend",
+            BackendOp {
+                name: "echo".to_owned(),
+                options: Payload::default(),
+            },
+        )
+        .run()
+        .await
+        .expect("submission should be accepted after manual override");
+
+        let status = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                let view = orchestrator
+                    .get_status(task_id)
+                    .await
+                    .expect("task should exist");
+                match view.status {
+                    TaskStatus::Succeeded { .. } | TaskStatus::Failed { .. } => break view.status,
+                    _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+                }
+            }
+        })
+        .await
+        .expect("task should complete");
+
+        assert!(
+            matches!(status, TaskStatus::Succeeded { .. }),
+            "task should succeed after manual override, got {status:?}"
+        );
+    }
 }
+
