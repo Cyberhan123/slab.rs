@@ -11,19 +11,13 @@ use uuid::Uuid;
 
 use crate::entities::{ModelCatalogRecord, ModelStore};
 use crate::error::ServerError;
-use crate::schemas::admin::models::{
-    CreateModelRequest, ModelCatalogResponse, UpdateModelRequest,
-};
+use crate::schemas::admin::models::{CreateModelRequest, ModelCatalogResponse, UpdateModelRequest};
 use crate::state::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
     paths(create_model, list_models, update_model, delete_model),
-    components(schemas(
-        CreateModelRequest,
-        UpdateModelRequest,
-        ModelCatalogResponse
-    ))
+    components(schemas(CreateModelRequest, UpdateModelRequest, ModelCatalogResponse))
 )]
 pub struct ModelsAdminApi;
 
@@ -57,7 +51,11 @@ fn normalize_backend_ids(raw: &[String]) -> Result<Vec<String>, ServerError> {
     Ok(out)
 }
 
-fn validate_catalog_fields(display_name: &str, repo_id: &str, filename: &str) -> Result<(), ServerError> {
+fn validate_catalog_fields(
+    display_name: &str,
+    repo_id: &str,
+    filename: &str,
+) -> Result<(), ServerError> {
     if display_name.trim().is_empty() {
         return Err(ServerError::BadRequest(
             "display_name must not be empty".into(),

@@ -1,4 +1,4 @@
-﻿//! Public-facing API facade for slab-core.
+//! Public-facing API facade for slab-core.
 //!
 //! All user code should only `use slab_core::api;` – the underlying
 //! [`Orchestrator`], [`ResourceManager`] and channel types remain private.
@@ -59,15 +59,15 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::Stream;
 
-use crate::runtime::backend::admission::ResourceManager;
+use crate::runtime::backend::admission::{ResourceManager, ResourceManagerConfig};
 use crate::runtime::backend::protocol::{BackendOp, StreamChunk};
 use crate::runtime::orchestrator::Orchestrator;
 use crate::runtime::pipeline::PipelineBuilder;
 use crate::runtime::stage::CpuStage;
 use crate::runtime::storage::TaskStatusView;
 pub use crate::runtime::types::{GlobalConsistencyState, RuntimeError};
-use std::path::{Path, PathBuf};
 use crate::runtime::types::{GlobalOperationKind, Payload, TaskId, TaskStatus};
+use std::path::{Path, PathBuf};
 pub use types::Backend;
 pub use types::Event;
 
@@ -92,7 +92,7 @@ static RUNTIME: std::sync::OnceLock<ApiRuntime> = std::sync::OnceLock::new();
 ///
 /// All fields have sensible defaults via [`Default`].
 #[derive(Debug, Clone)]
-pub struct Config{
+pub struct Config {
     /// Capacity of the orchestrator submission queue.  Defaults to `64`.
     pub queue_capacity: usize,
     /// Maximum concurrent in-flight requests per backend.  Defaults to `4`.
@@ -156,10 +156,11 @@ pub fn lib_dirs() -> Option<&'static LibDirs> {
 /// cannot be resolved or opened.
 pub fn init(config: Config) -> Result<(), RuntimeError> {
     use crate::engine::ggml::{
-        diffusion::{spawn_backend_with_engine as spawn_diffusion, GGMLDiffusionEngine},
+        diffusion::{DiffusionWorker, GGMLDiffusionEngine},
         llama::{spawn_backend_with_engine as spawn_llama, GGMLLlamaEngine},
-        whisper::{spawn_backend_with_engine as spawn_whisper, GGMLWhisperEngine},
+        whisper::{GGMLWhisperEngine, WhisperWorker},
     };
+    use crate::runtime::backend::runner::spawn_workers;
     use std::path::Path;
 
     // ── Phase 1: load all library handles synchronously ───────────────────────
@@ -204,29 +205,49 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
         .transpose()?;
 
     // ── Phase 2: all loads succeeded; spawn worker tasks ──────────────────────
-    let llama_tx = spawn_llama(128, llama_engine);
-    let (whisper_tx, whisper_bc_tx) = spawn_whisper(128, config.backend_capacity, whisper_engine);
-    let (diffusion_tx, diffusion_bc_tx) =
-        spawn_diffusion(128, config.backend_capacity, diffusion_engine);
+    let worker_count = config.backend_capacity;
+    let mut rm = ResourceManager::with_config(ResourceManagerConfig {
+        backend_capacity: worker_count,
+        ..ResourceManagerConfig::default()
+    });
 
-    let mut rm = ResourceManager::new();
-    rm.register_backend_runtime(
+    rm.register_backend(
         Backend::GGMLLlama.to_string(),
-        config.backend_capacity,
-        llama_tx,
-        None,
+        move |shared_rx, control_tx| {
+            spawn_llama(shared_rx, control_tx, llama_engine);
+        },
     );
-    rm.register_backend_runtime(
+
+    rm.register_backend(
         Backend::GGMLWhisper.to_string(),
-        config.backend_capacity,
-        whisper_tx,
-        Some(whisper_bc_tx),
+        move |shared_rx, control_tx| {
+            let count = worker_count.max(1);
+            let mut worker_engines: Vec<Option<GGMLWhisperEngine>> = (1..count)
+                .map(|_| whisper_engine.as_ref().map(|e| e.fork_library()))
+                .collect();
+            worker_engines.insert(0, whisper_engine);
+            let mut worker_engines = worker_engines.into_iter();
+            spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+                let worker_engine = worker_engines.next().unwrap_or(None);
+                WhisperWorker::new(worker_engine, bc_tx, worker_id)
+            });
+        },
     );
-    rm.register_backend_runtime(
+
+    rm.register_backend(
         Backend::GGMLDiffusion.to_string(),
-        config.backend_capacity,
-        diffusion_tx,
-        Some(diffusion_bc_tx),
+        move |shared_rx, control_tx| {
+            let count = worker_count.max(1);
+            let mut worker_engines: Vec<Option<GGMLDiffusionEngine>> = (1..count)
+                .map(|_| diffusion_engine.as_ref().map(|e| e.fork_library()))
+                .collect();
+            worker_engines.insert(0, diffusion_engine);
+            let mut worker_engines = worker_engines.into_iter();
+            spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+                let worker_engine = worker_engines.next().unwrap_or(None);
+                DiffusionWorker::new(worker_engine, bc_tx, worker_id)
+            });
+        },
     );
 
     let orchestrator = Orchestrator::start(rm, config.queue_capacity);
@@ -264,7 +285,10 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
 /// - [`RuntimeError::NotInitialized`] – [`init`] was not called first.
 /// - [`RuntimeError::BackendShutdown`] – the backend worker has stopped.
 /// - [`RuntimeError::GpuStageFailed`] – the library could not be loaded.
-pub async fn reload_library<P: AsRef<Path>>(backend_id: Backend, lib_path: P) -> Result<(), RuntimeError> {
+pub async fn reload_library<P: AsRef<Path>>(
+    backend_id: Backend,
+    lib_path: P,
+) -> Result<(), RuntimeError> {
     let rt = RUNTIME.get().ok_or(RuntimeError::NotInitialized)?;
     rt.orchestrator
         .reload_library_backend(
@@ -370,17 +394,29 @@ impl GlobalBuilder {
             .collect()
     }
 
-    pub async fn initialize_all(self, payloads: HashMap<Backend, Payload>) -> Result<(), RuntimeError> {
+    pub async fn initialize_all(
+        self,
+        payloads: HashMap<Backend, Payload>,
+    ) -> Result<(), RuntimeError> {
         let rt = Self::runtime()?;
         rt.orchestrator
-            .run_global_management(GlobalOperationKind::InitializeAll, Self::payload_map(payloads))
+            .run_global_management(
+                GlobalOperationKind::InitializeAll,
+                Self::payload_map(payloads),
+            )
             .await
     }
 
-    pub async fn load_models_all(self, payloads: HashMap<Backend, Payload>) -> Result<(), RuntimeError> {
+    pub async fn load_models_all(
+        self,
+        payloads: HashMap<Backend, Payload>,
+    ) -> Result<(), RuntimeError> {
         let rt = Self::runtime()?;
         rt.orchestrator
-            .run_global_management(GlobalOperationKind::LoadModelsAll, Self::payload_map(payloads))
+            .run_global_management(
+                GlobalOperationKind::LoadModelsAll,
+                Self::payload_map(payloads),
+            )
             .await
     }
 
@@ -638,9 +674,7 @@ impl CallBuilder {
                 match rt.orchestrator.get_status(task_id).await {
                     Err(e) => return Err(e),
                     Ok(view) => match view.status {
-                        TaskStatus::Succeeded { .. } | TaskStatus::ResultConsumed => {
-                            return Ok(())
-                        }
+                        TaskStatus::Succeeded { .. } | TaskStatus::ResultConsumed => return Ok(()),
                         TaskStatus::Failed { error } => return Err(error),
                         TaskStatus::Cancelled => return Err(RuntimeError::BackendShutdown),
                         _ => tokio::time::sleep(Duration::from_millis(5)).await,
@@ -763,39 +797,51 @@ fn payload_to_bytes(p: Payload) -> Result<Bytes, RuntimeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::backend::protocol::{BackendReply, BackendRequest};
+    use crate::runtime::backend::protocol::BackendReply;
+    use crate::runtime::backend::runner::SharedIngressRx;
     use tokio::sync::mpsc;
 
     // ── helpers ───────────────────────────────────────────────────────────────
 
     /// Spawn a simple echo backend: returns the input payload unchanged.
-    fn spawn_echo_backend(capacity: usize) -> mpsc::Sender<BackendRequest> {
-        let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
+    fn spawn_echo_backend(shared_rx: SharedIngressRx) {
         tokio::spawn(async move {
-            while let Some(req) = rx.recv().await {
-                let _ = req.reply_tx.send(BackendReply::Value(req.input));
+            loop {
+                let req = {
+                    let mut lock = shared_rx.lock().await;
+                    lock.recv().await
+                };
+                match req {
+                    Some(req) => {
+                        let _ = req.reply_tx.send(BackendReply::Value(req.input));
+                    }
+                    None => break,
+                }
             }
         });
-        tx
     }
 
     /// Spawn a mock streaming backend that emits the given token strings then Done.
-    fn spawn_stream_backend(
-        capacity: usize,
-        tokens: Vec<&'static str>,
-    ) -> mpsc::Sender<BackendRequest> {
-        let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
+    fn spawn_stream_backend(shared_rx: SharedIngressRx, tokens: Vec<&'static str>) {
         tokio::spawn(async move {
-            while let Some(req) = rx.recv().await {
-                let (stream_tx, stream_rx) = mpsc::channel::<StreamChunk>(16);
-                let _ = req.reply_tx.send(BackendReply::Stream(stream_rx));
-                for t in &tokens {
-                    let _ = stream_tx.send(StreamChunk::Token(t.to_string())).await;
+            loop {
+                let req = {
+                    let mut lock = shared_rx.lock().await;
+                    lock.recv().await
+                };
+                match req {
+                    Some(req) => {
+                        let (stream_tx, stream_rx) = mpsc::channel::<StreamChunk>(16);
+                        let _ = req.reply_tx.send(BackendReply::Stream(stream_rx));
+                        for t in &tokens {
+                            let _ = stream_tx.send(StreamChunk::Token(t.to_string())).await;
+                        }
+                        let _ = stream_tx.send(StreamChunk::Done).await;
+                    }
+                    None => break,
                 }
-                let _ = stream_tx.send(StreamChunk::Done).await;
             }
         });
-        tx
     }
 
     // ── Tests: mock unary backend ─────────────────────────────────────────────
@@ -805,8 +851,9 @@ mod tests {
     #[tokio::test]
     async fn mock_unary_backend_echo() {
         let mut rm = ResourceManager::new();
-        let echo_tx = spawn_echo_backend(16);
-        rm.register_backend_runtime("test.echo", 4, echo_tx, None);
+        rm.register_backend("test.echo", |shared_rx, _control_tx| {
+            spawn_echo_backend(shared_rx);
+        });
         let orchestrator = Orchestrator::start(rm, 64);
 
         let op = BackendOp {
@@ -859,8 +906,9 @@ mod tests {
     #[tokio::test]
     async fn mock_stream_backend_collects_tokens() {
         let mut rm = ResourceManager::new();
-        let stream_tx = spawn_stream_backend(16, vec!["foo", " ", "bar"]);
-        rm.register_backend_runtime("test.stream", 4, stream_tx, None);
+        rm.register_backend("test.stream", |shared_rx, _control_tx| {
+            spawn_stream_backend(shared_rx, vec!["foo", " ", "bar"]);
+        });
         let orchestrator = Orchestrator::start(rm, 64);
 
         let op = BackendOp {
@@ -909,17 +957,26 @@ mod tests {
     /// task to transition to Failed.
     #[tokio::test]
     async fn backend_error_model_not_loaded() {
-        let (ingress_tx, mut rx) = mpsc::channel::<BackendRequest>(16);
-        tokio::spawn(async move {
-            while let Some(req) = rx.recv().await {
-                let _ = req
-                    .reply_tx
-                    .send(BackendReply::Error("model not loaded".to_owned()));
-            }
+        let mut rm = ResourceManager::new();
+        rm.register_backend("test.notloaded", |shared_rx, _control_tx| {
+            tokio::spawn(async move {
+                loop {
+                    let req = {
+                        let mut lock = shared_rx.lock().await;
+                        lock.recv().await
+                    };
+                    match req {
+                        Some(req) => {
+                            let _ = req
+                                .reply_tx
+                                .send(BackendReply::Error("model not loaded".to_owned()));
+                        }
+                        None => break,
+                    }
+                }
+            });
         });
 
-        let mut rm = ResourceManager::new();
-        rm.register_backend_runtime("test.notloaded", 4, ingress_tx.clone(), None);
         let orchestrator = Orchestrator::start(rm, 64);
 
         let op = BackendOp {
@@ -1009,4 +1066,3 @@ mod tests {
         }
     }
 }
-

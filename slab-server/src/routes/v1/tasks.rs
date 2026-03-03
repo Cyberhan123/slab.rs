@@ -88,7 +88,8 @@ pub async fn get_task(
                 _ => None,
             };
             // Sync DB if status changed.
-            if live_status != record.status || live_error.as_deref() != record.error_msg.as_deref() {
+            if live_status != record.status || live_error.as_deref() != record.error_msg.as_deref()
+            {
                 state
                     .store
                     .update_task_status(&id, live_status, None, live_error.as_deref())
@@ -159,7 +160,9 @@ pub async fn get_task_result(
                     .store
                     .update_task_status(&id, "failed", None, Some(&err_msg))
                     .await
-                    .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to sync failed task error"));
+                    .unwrap_or_else(
+                        |db_e| warn!(error = %db_e, "failed to sync failed task error"),
+                    );
                 return Err(ServerError::Runtime(e));
             }
         }

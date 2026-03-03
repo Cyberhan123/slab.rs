@@ -1,7 +1,6 @@
 //! Backend worker adapter for `ggml.whisper`.
 //!
-//! Provides [`spawn_backend_with_engine`] which starts one or more Tokio tasks
-//! translating [`BackendRequest`] messages into whisper inference calls.
+//! Defines [`WhisperWorker`] logic for runtime-managed worker loops.
 //!
 //! # Supported ops
 //!
@@ -23,15 +22,16 @@
 //! { "model_path": "/path/to/model.bin" }
 //! ```
 
-use std::str::FromStr;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::broadcast;
 
-use crate::api::Event;
 use crate::engine::ggml::whisper::adapter::GGMLWhisperEngine;
-use crate::runtime::backend::protocol::{BackendReply, BackendRequest, WorkerCommand};
+use crate::runtime::backend::backend_handler;
+use crate::runtime::backend::protocol::{
+    BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
+};
 use crate::runtime::types::Payload;
 
 // ── Configurations ────────────────────────────────────────────────────────────
@@ -56,62 +56,87 @@ struct ModelLoadConfig {
 /// owns an independent engine forked from the same library handle and manages
 /// its own model context independently.
 ///
-/// Workers listen on both the shared `mpsc` ingress queue (competitive –
-/// only one worker processes each request) and a `broadcast` channel
-/// (fan-out – every worker receives management commands such as `Unload`).
-struct WhisperWorker {
-    /// - `None` → library not loaded.
-    /// - `Some(e)` where `e.ctx` is None → lib loaded, no model.
-    /// - `Some(e)` where `e.ctx` is Some → lib + model loaded.
+/// Workers listen on both the shared `mpsc` ingress queue (competitive 鈥?/// only one worker processes each request) and a `broadcast` channel
+/// (fan-out 鈥?every worker receives management commands such as `Unload`).
+pub(crate) struct WhisperWorker {
+    /// - `None` 鈫?library not loaded.
+    /// - `Some(e)` where `e.ctx` is None 鈫?lib loaded, no model.
+    /// - `Some(e)` where `e.ctx` is Some 鈫?lib + model loaded.
     engine: Option<GGMLWhisperEngine>,
     /// Broadcast sender shared among all workers so that any worker can
     /// propagate state-change commands (e.g. `Unload`) to all peers.
     bc_tx: broadcast::Sender<WorkerCommand>,
-    /// Stable index used to populate `sender_id` when broadcasting and to
-    /// filter out self-sent commands in the broadcast receive arm.
+    /// Stable index used to populate `sender_id` when broadcasting.
     worker_id: usize,
-    /// Last applied broadcast sequence id.
-    last_applied_seq: u64,
 }
 
+#[backend_handler]
 impl WhisperWorker {
-    fn new(engine: Option<GGMLWhisperEngine>, bc_tx: broadcast::Sender<WorkerCommand>, worker_id: usize) -> Self {
+    pub(crate) fn new(
+        engine: Option<GGMLWhisperEngine>,
+        bc_tx: broadcast::Sender<WorkerCommand>,
+        worker_id: usize,
+    ) -> Self {
         Self {
             engine,
             bc_tx,
             worker_id,
-            last_applied_seq: 0,
         }
     }
 
-    async fn handle(&mut self, req: BackendRequest) {
+    #[on_event(LoadLibrary)]
+    async fn on_load_library(&mut self, req: BackendRequest) {
         let BackendRequest {
-            op,
             input,
             broadcast_seq,
             reply_tx,
             ..
         } = req;
         let seq_id = broadcast_seq.unwrap_or(0);
+        self.handle_load_library(input, reply_tx, seq_id).await;
+    }
 
-        match Event::from_str(&op.name) {
-            Ok(Event::LoadLibrary) => self.handle_load_library(input, reply_tx, seq_id).await,
-            Ok(Event::ReloadLibrary) => self.handle_reload_library(input, reply_tx, seq_id).await,
-            Ok(Event::LoadModel) => self.handle_load_model(input, reply_tx, seq_id).await,
-            Ok(Event::UnloadModel) => self.handle_unload_model(reply_tx, seq_id).await,
-            Ok(Event::Inference) => self.handle_inference(input, reply_tx).await,
-            Ok(_) | Err(_) => {
-                // Handle the is_ready operation for health checks
-                if op.name == "is_ready" {
-                    let ready = self.engine.as_ref().map_or(false, |e| e.is_model_loaded());
-                    let _ = reply_tx.send(BackendReply::Value(Payload::Json(
-                        serde_json::json!({ "ready": ready }),
-                    )));
-                } else {
-                    let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
-                }
-            }
-        }
+    #[on_event(ReloadLibrary)]
+    async fn on_reload_library(&mut self, req: BackendRequest) {
+        let BackendRequest {
+            input,
+            broadcast_seq,
+            reply_tx,
+            ..
+        } = req;
+        let seq_id = broadcast_seq.unwrap_or(0);
+        self.handle_reload_library(input, reply_tx, seq_id).await;
+    }
+
+    #[on_event(LoadModel)]
+    async fn on_load_model(&mut self, req: BackendRequest) {
+        let BackendRequest {
+            input,
+            broadcast_seq,
+            reply_tx,
+            ..
+        } = req;
+        let seq_id = broadcast_seq.unwrap_or(0);
+        self.handle_load_model(input, reply_tx, seq_id).await;
+    }
+
+    #[on_event(UnloadModel)]
+    async fn on_unload_model(&mut self, req: BackendRequest) {
+        let BackendRequest {
+            broadcast_seq,
+            reply_tx,
+            ..
+        } = req;
+        let seq_id = broadcast_seq.unwrap_or(0);
+        self.handle_unload_model(reply_tx, seq_id).await;
+    }
+
+    #[on_event(Inference)]
+    async fn on_inference(&mut self, req: BackendRequest) {
+        let BackendRequest {
+            input, reply_tx, ..
+        } = req;
+        self.handle_inference(input, reply_tx).await;
     }
 
     // ── lib.load ──────────────────────────────────────────────────────────────
@@ -143,11 +168,11 @@ impl WhisperWorker {
                 // Broadcast so peer workers also load the same library.
                 let _ = self
                     .bc_tx
-                    .send(WorkerCommand::LoadLibrary {
+                    .send(WorkerCommand::Peer(PeerWorkerCommand::LoadLibrary {
                         lib_path: config.lib_path,
                         sender_id: self.worker_id,
                         seq_id,
-                    });
+                    }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -185,11 +210,11 @@ impl WhisperWorker {
                 // Broadcast so peer workers drop their old engine and reload too.
                 let _ = self
                     .bc_tx
-                    .send(WorkerCommand::ReloadLibrary {
+                    .send(WorkerCommand::Peer(PeerWorkerCommand::ReloadLibrary {
                         lib_path: config.lib_path,
                         sender_id: self.worker_id,
                         seq_id,
-                    });
+                    }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -240,11 +265,11 @@ impl WhisperWorker {
                 // Broadcast so peer workers also load the same model.
                 let _ = self
                     .bc_tx
-                    .send(WorkerCommand::LoadModel {
+                    .send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
                         model_path: config.model_path,
                         sender_id: self.worker_id,
                         seq_id,
-                    });
+                    }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -267,10 +292,12 @@ impl WhisperWorker {
                 e.unload();
                 // Broadcast so every peer worker also drops its context.
                 // Ignore errors: no receivers simply means no other workers.
-                let _ = self.bc_tx.send(WorkerCommand::Unload {
-                    sender_id: self.worker_id,
-                    seq_id,
-                });
+                let _ = self
+                    .bc_tx
+                    .send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+                        sender_id: self.worker_id,
+                        seq_id,
+                    }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -355,161 +382,84 @@ impl WhisperWorker {
             }
         }
     }
-}
 
-// ── Public entry points ───────────────────────────────────────────────────────
-/// Spawn one or more whisper backend workers sharing a pre-loaded engine handle.
-///
-/// # Returns
-///
-/// A pair of:
-/// - `mpsc::Sender<BackendRequest>` – the ingress queue; inference requests are
-///   dispatched here in *competitive* mode (exactly one worker handles each
-///   message).
-/// - `broadcast::Sender<WorkerCommand>` – the management broadcast channel;
-///   every active worker receives each command (e.g. `Unload`).
-///
-/// # Multi-worker model
-///
-/// `num_workers` tasks share a single `Arc<Mutex<Receiver>>` so that only
-/// one worker processes each inference request.  Every worker also subscribes
-/// to the broadcast channel and reacts to management commands independently,
-/// ensuring consistent state across all workers.
-///
-/// Worker 0 receives the original `engine` handle (library loaded, no model
-/// context).  Workers 1..n each receive a *forked* engine that shares the
-/// same library `Arc` but starts with an empty context.
-pub(crate) fn spawn_backend_with_engine(
-    channel_capacity: usize,
-    num_workers: usize,
-    engine: Option<GGMLWhisperEngine>,
-) -> (mpsc::Sender<BackendRequest>, broadcast::Sender<WorkerCommand>) {
-    let (tx, rx) = mpsc::channel::<BackendRequest>(channel_capacity);
-    // Broadcast capacity of 16 is generous for low-frequency management commands.
-    let (bc_tx, _) = broadcast::channel::<WorkerCommand>(16);
-
-    let num_workers = num_workers.max(1);
-    // Wrap the receiver so multiple workers can compete for messages.
-    let rx = Arc::new(tokio::sync::Mutex::new(rx));
-
-    // Build per-worker engine handles: worker 0 gets the original, the rest
-    // get library-sharing forks with an empty context.
-    let mut worker_engines: Vec<Option<GGMLWhisperEngine>> = (1..num_workers)
-        .map(|_| engine.as_ref().map(|e| e.fork_library()))
-        .collect();
-    worker_engines.insert(0, engine);
-
-    for (worker_id, worker_engine) in worker_engines.into_iter().enumerate() {
-        let rx = Arc::clone(&rx);
-        let mut bc_rx = bc_tx.subscribe();
-        let mut worker = WhisperWorker::new(worker_engine, bc_tx.clone(), worker_id);
-
-        tokio::spawn(async move {
-            loop {
-                tokio::select! {
-                    biased; // prioritize management commands over inference
-
-                    // ── Broadcast arm: management commands ────────────────
-                    cmd = bc_rx.recv() => {
-                        match cmd {
-                            Ok(WorkerCommand::LoadLibrary { lib_path, sender_id, seq_id }) => {
-                                if seq_id <= worker.last_applied_seq {
-                                    continue;
-                                }
-                                worker.last_applied_seq = seq_id;
-                                // Skip commands sent by this worker (self-echo).
-                                // Also skip if library is already loaded (idempotent).
-                                if sender_id != worker.worker_id && worker.engine.is_none() {
-                                    if let Ok(engine) = GGMLWhisperEngine::from_path(&lib_path) {
-                                        worker.engine = Some(engine);
-                                    }
-                                }
-                            }
-                            Ok(WorkerCommand::ReloadLibrary { lib_path, sender_id, seq_id }) => {
-                                if seq_id <= worker.last_applied_seq {
-                                    continue;
-                                }
-                                worker.last_applied_seq = seq_id;
-                                // Skip the self-echo: the broadcasting worker already
-                                // completed the reload while handling the mpsc request.
-                                // Processing it again would drop the freshly-loaded
-                                // engine and trigger an unnecessary second FFI load.
-                                if sender_id != worker.worker_id {
-                                    worker.engine = None;
-                                    if let Ok(engine) = GGMLWhisperEngine::from_path(&lib_path) {
-                                        worker.engine = Some(engine);
-                                    }
-                                }
-                            }
-                            Ok(WorkerCommand::LoadModel { model_path, sender_id, seq_id }) => {
-                                if seq_id <= worker.last_applied_seq {
-                                    continue;
-                                }
-                                worker.last_applied_seq = seq_id;
-                                // Skip commands sent by this worker (self-echo).
-                                // Also skip if model is already loaded (idempotent).
-                                if sender_id != worker.worker_id {
-                                    if let Some(engine) = worker.engine.as_mut() {
-                                        if !engine.is_model_loaded() {
-                                            let result = tokio::task::block_in_place(|| {
-                                                use slab_whisper::WhisperContextParameters;
-                                                let params = WhisperContextParameters::default();
-                                                engine.new_context(&model_path, params)
-                                            });
-                                            if let Err(e) = result {
-                                                tracing::warn!(
-                                                    model_path,
-                                                    error = %e,
-                                                    "whisper worker: broadcast LoadModel failed"
-                                                );
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            Ok(WorkerCommand::Unload { sender_id, seq_id }) => {
-                                if seq_id <= worker.last_applied_seq {
-                                    continue;
-                                }
-                                worker.last_applied_seq = seq_id;
-                                // Skip the self-echo: the broadcasting worker already
-                                // called unload() while handling the mpsc request.
-                                // Calling it again on the same context is unsafe.
-                                if sender_id != worker.worker_id {
-                                    if let Some(e) = worker.engine.as_mut() {
-                                        e.unload();
-                                    }
-                                }
-                            }
-                            // Sender dropped → no more commands; exit.
-                            Err(broadcast::error::RecvError::Closed) => break,
-                            // Fell behind; missed one or more messages.  To avoid
-                            // keeping stale context (e.g. if an Unload was missed),
-                            // conservatively unload so the worker returns to a
-                            // known-safe state.
-                            Err(broadcast::error::RecvError::Lagged(_)) => {
-                                if let Some(e) = worker.engine.as_mut() {
-                                    e.unload();
-                                }
-                            }
-                        }
-                    }
-
-                    // ── mpsc arm: competitive inference tasks ─────────────
-                    req = async {
-                        let mut lock = rx.lock().await;
-                        lock.recv().await
-                    } => {
-                        match req {
-                            Some(req) => worker.handle(req).await,
-                            // All senders dropped → shut down this worker.
-                            None => break,
-                        }
-                    }
-                }
+    #[on_peer_control(LoadLibrary)]
+    async fn on_peer_load_library(&mut self, cmd: PeerWorkerCommand) {
+        let PeerWorkerCommand::LoadLibrary { lib_path, .. } = cmd else {
+            return;
+        };
+        if self.engine.is_none() {
+            if let Ok(engine) = GGMLWhisperEngine::from_path(&lib_path) {
+                self.engine = Some(engine);
             }
-        });
+        }
     }
 
-    (tx, bc_tx)
+    #[on_peer_control(ReloadLibrary)]
+    async fn on_peer_reload_library(&mut self, cmd: PeerWorkerCommand) {
+        let PeerWorkerCommand::ReloadLibrary { lib_path, .. } = cmd else {
+            return;
+        };
+        self.engine = None;
+        if let Ok(engine) = GGMLWhisperEngine::from_path(&lib_path) {
+            self.engine = Some(engine);
+        }
+    }
+
+    #[on_peer_control(LoadModel)]
+    async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
+        let PeerWorkerCommand::LoadModel { model_path, .. } = cmd else {
+            return;
+        };
+        if let Some(engine) = self.engine.as_mut() {
+            if !engine.is_model_loaded() {
+                let result = tokio::task::block_in_place(|| {
+                    use slab_whisper::WhisperContextParameters;
+                    let params = WhisperContextParameters::default();
+                    engine.new_context(&model_path, params)
+                });
+                if let Err(e) = result {
+                    tracing::warn!(
+                        model_path,
+                        error = %e,
+                        "whisper worker: broadcast LoadModel failed"
+                    );
+                }
+            }
+        }
+    }
+
+    #[on_peer_control(Unload)]
+    async fn on_peer_unload(&mut self) {
+        if let Some(e) = self.engine.as_mut() {
+            e.unload();
+        }
+    }
+
+    #[on_runtime_control(GlobalUnload)]
+    #[on_runtime_control(GlobalLoad)]
+    async fn apply_runtime_control(&mut self, signal: RuntimeControlSignal) {
+        match signal {
+            RuntimeControlSignal::GlobalUnload { op_id } => {
+                tracing::debug!(op_id, "whisper runtime global unload");
+                if let Some(engine) = self.engine.as_mut() {
+                    engine.unload();
+                }
+            }
+            RuntimeControlSignal::GlobalLoad { op_id, payload } => {
+                let _ = payload;
+                tracing::debug!(op_id, "whisper runtime global load pre-cleanup");
+                if let Some(engine) = self.engine.as_mut() {
+                    engine.unload();
+                }
+            }
+        }
+    }
+
+    #[on_control_lagged]
+    async fn on_control_lagged(&mut self) {
+        if let Some(e) = self.engine.as_mut() {
+            e.unload();
+        }
+    }
 }

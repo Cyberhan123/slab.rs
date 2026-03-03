@@ -9,6 +9,7 @@ members = [
     "slab-llama-sys",
     "slab-whisper",
     "slab-whisper-sys",
+    "slab-core-macros",
     "slab-core",
     "slab-server",
 ]

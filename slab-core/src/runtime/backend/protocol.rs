@@ -2,15 +2,6 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::runtime::types::Payload;
 
-/// Broadcast routing scope.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub enum BroadcastScope {
-    /// Broadcast targets workers of a single backend.
-    Backend(String),
-    /// Broadcast targets all registered backends.
-    Global,
-}
-
 /// Canonical management events supported by the runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ManagementEvent {
@@ -19,36 +10,19 @@ pub enum ManagementEvent {
     UnloadModel,
 }
 
-/// Management envelope sent over control channels.
-#[derive(Clone, Debug)]
-pub struct ManagementEnvelope {
-    pub seq_id: u64,
-    pub scope: BroadcastScope,
-    pub target_backend: Option<String>,
-    pub event: ManagementEvent,
-    pub payload: Payload,
-    pub origin_worker_id: usize,
-    pub issued_at: std::time::SystemTime,
-}
-
-/// Management commands broadcast to **all** backend workers so that their
-/// internal state stays consistent.
+/// Peer-synchronization commands broadcast between workers of the same backend.
 ///
 /// Unlike [`BackendRequest`] (which is competitive – only one worker
 /// handles each message), these commands are delivered to every worker
 /// simultaneously via a `tokio::sync::broadcast` channel.
 ///
-/// All stateful operations that mutate the engine (library + model) are
-/// broadcast so that every worker reaches the same state regardless of which
-/// worker processed the original mpsc request.
-///
 /// Each variant carries a `sender_id` field identifying the worker that sent
-/// the command.  Every worker **skips** commands whose `sender_id` matches its
+/// the command. Every worker **skips** commands whose `sender_id` matches its
 /// own ID because it already performed the operation while handling the
-/// original mpsc request — re-processing the command would cause a double
-/// library reload or a redundant unload on the sending worker.
+/// original mpsc request — re-processing the command would cause duplicate
+/// operations on the sender.
 #[derive(Clone, Debug)]
-pub enum WorkerCommand {
+pub enum PeerWorkerCommand {
     /// Load the library from `lib_path` if not already loaded.
     ///
     /// Sent after a `lib.load` request so that peer workers (which did not
@@ -86,6 +60,49 @@ pub enum WorkerCommand {
     Unload { sender_id: usize, seq_id: u64 },
 }
 
+impl PeerWorkerCommand {
+    /// Worker id that originally emitted this peer command.
+    pub fn sender_id(&self) -> usize {
+        match self {
+            Self::LoadLibrary { sender_id, .. }
+            | Self::ReloadLibrary { sender_id, .. }
+            | Self::LoadModel { sender_id, .. }
+            | Self::Unload { sender_id, .. } => *sender_id,
+        }
+    }
+
+    /// Monotonic sequence number assigned by runtime management path.
+    pub fn seq_id(&self) -> u64 {
+        match self {
+            Self::LoadLibrary { seq_id, .. }
+            | Self::ReloadLibrary { seq_id, .. }
+            | Self::LoadModel { seq_id, .. }
+            | Self::Unload { seq_id, .. } => *seq_id,
+        }
+    }
+}
+
+/// Runtime-issued control signals sharing the same backend control bus.
+///
+/// These are emitted by orchestrator-level global operations, not by peer
+/// workers.
+#[derive(Clone, Debug)]
+pub enum RuntimeControlSignal {
+    /// Runtime asks the backend to (re)load state using the provided payload.
+    ///
+    /// The payload follows backend-specific `model.load`/`lib.load` shape.
+    GlobalLoad { op_id: u64, payload: Payload },
+    /// Runtime asks the backend to unload all runtime-managed model state.
+    GlobalUnload { op_id: u64 },
+}
+
+/// Unified control-bus command type for backend worker control channels.
+#[derive(Clone, Debug)]
+pub enum WorkerCommand {
+    Peer(PeerWorkerCommand),
+    Runtime(RuntimeControlSignal),
+}
+
 /// A single chunk emitted by a streaming backend.
 #[derive(Debug, Clone)]
 pub enum StreamChunk {
@@ -96,6 +113,7 @@ pub enum StreamChunk {
     /// Generation terminated due to a backend error.
     Error(String),
     /// A generated image (placeholder for now).
+    #[allow(dead_code)]
     Image(bytes::Bytes), //TODO: A generated image.
 }
 

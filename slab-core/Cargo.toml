@@ -13,6 +13,7 @@ slab-libfetch = { workspace = true }
 
 
 [dependencies]
+slab-core-macros = { path = "../slab-core-macros", version = "0.0.1" }
 libloading = { workspace = true }
 slab-whisper = { workspace = true }
 slab-llama = { workspace = true }

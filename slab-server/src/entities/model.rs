@@ -12,7 +12,9 @@ pub trait ModelStore: Send + Sync + 'static {
         &self,
         id: &str,
     ) -> impl Future<Output = Result<Option<ModelCatalogRecord>, sqlx::Error>> + Send;
-    fn list_models(&self) -> impl Future<Output = Result<Vec<ModelCatalogRecord>, sqlx::Error>> + Send;
+    fn list_models(
+        &self,
+    ) -> impl Future<Output = Result<Vec<ModelCatalogRecord>, sqlx::Error>> + Send;
     fn update_model_metadata(
         &self,
         id: &str,
@@ -83,13 +85,11 @@ impl ModelStore for AnyStore {
         .await?;
 
         for backend_id in backend_ids {
-            sqlx::query(
-                "INSERT INTO model_catalog_backend (model_id, backend_id) VALUES (?1, ?2)",
-            )
-            .bind(&record.id)
-            .bind(backend_id)
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query("INSERT INTO model_catalog_backend (model_id, backend_id) VALUES (?1, ?2)")
+                .bind(&record.id)
+                .bind(backend_id)
+                .execute(&mut *tx)
+                .await?;
         }
 
         tx.commit().await?;
@@ -247,13 +247,11 @@ impl ModelStore for AnyStore {
             .await?;
 
         for backend_id in backend_ids {
-            sqlx::query(
-                "INSERT INTO model_catalog_backend (model_id, backend_id) VALUES (?1, ?2)",
-            )
-            .bind(id)
-            .bind(backend_id)
-            .execute(&mut *tx)
-            .await?;
+            sqlx::query("INSERT INTO model_catalog_backend (model_id, backend_id) VALUES (?1, ?2)")
+                .bind(id)
+                .bind(backend_id)
+                .execute(&mut *tx)
+                .await?;
         }
 
         tx.commit().await?;

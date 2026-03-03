@@ -11,12 +11,12 @@ mod admin;
 pub mod doc;
 pub mod health;
 mod v1;
+use crate::middleware::{cors, trace};
+use crate::state::AppState;
 use axum::{
     middleware::{self},
     Router,
 };
-use crate::middleware::{cors,trace};
-use crate::state::AppState;
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use utoipa_swagger_ui::SwaggerUi;

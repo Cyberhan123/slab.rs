@@ -216,8 +216,13 @@ pub enum BackendLifecycleState {
 /// Cluster-wide consistency state used to gate inference after failed global operations.
 #[derive(Debug, Clone)]
 pub enum GlobalConsistencyState {
-    Consistent { generation: u64 },
-    Reconciling { op_id: u64, started_at: SystemTime },
+    Consistent {
+        generation: u64,
+    },
+    Reconciling {
+        op_id: u64,
+        started_at: SystemTime,
+    },
     Inconsistent {
         op_id: u64,
         failed_backends: Vec<String>,
@@ -237,7 +242,6 @@ pub enum GlobalOperationKind {
 /// Snapshot of a failed global operation used for retry.
 #[derive(Debug, Clone)]
 pub struct FailedGlobalOperation {
-    pub op_id: u64,
     pub kind: GlobalOperationKind,
     pub payloads: std::collections::HashMap<String, Payload>,
 }
@@ -288,10 +292,6 @@ pub enum RuntimeError {
     /// The runtime detected split-brain risk after a failed global operation.
     #[error("global state is inconsistent (failed operation {op_id})")]
     GlobalStateInconsistent { op_id: u64 },
-
-    /// Broadcast scope and event combination is invalid.
-    #[error("invalid broadcast scope for event")]
-    InvalidBroadcastScope,
 
     /// Timed out waiting for backend broadcast acknowledgement.
     #[error("broadcast acknowledgement timed out")]

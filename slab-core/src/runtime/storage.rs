@@ -8,11 +8,8 @@ use crate::runtime::types::{Payload, StageStatus, TaskId, TaskStatus};
 /// The complete in-memory record for a single submitted task.
 #[derive(Debug)]
 pub struct TaskRecord {
-    pub task_id: TaskId,
     pub status: TaskStatus,
     pub stage_statuses: Vec<StageStatus>,
-    /// Number of pipeline stages for this task.
-    pub num_stages: usize,
     /// Streaming handle; `Some` only after a `SucceededStreaming` transition.
     pub stream_handle: Option<StreamHandle>,
     /// Cancellation sender: dropping the orchestrator side signals cancellation.
@@ -50,10 +47,8 @@ impl ResultStorage {
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(false);
 
         let record = TaskRecord {
-            task_id,
             status: TaskStatus::Pending,
             stage_statuses: vec![StageStatus::StagePending; num_stages],
-            num_stages,
             stream_handle: None,
             cancel_tx: Arc::new(cancel_tx),
         };

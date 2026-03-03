@@ -10,7 +10,9 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
 
     let mut sidecar_command = app_handle.shell().sidecar("slab-server")?;
 
-    let lib_path = app.path().resolve("resources/lib", BaseDirectory::Resource)?;
+    let lib_path = app
+        .path()
+        .resolve("resources/lib", BaseDirectory::Resource)?;
     sidecar_command = sidecar_command
         .env("SLAB_BIND", "127.0.0.1:3000")
         .env("SLAB_LIB_DIR", lib_path.to_str().unwrap());

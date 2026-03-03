@@ -448,6 +448,4 @@ impl LlamaInferenceEngine {
             .await
             .map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?
     }
-
-    
 }

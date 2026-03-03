@@ -31,8 +31,8 @@ async fn make_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
     let llama_dir = ensure_llama_dir().await;
     let model_path = download_test_model();
 
-    let service =
-        GGMLLlamaEngine::from_path(llama_dir.as_path()).expect("failed to initialize llama service");
+    let service = GGMLLlamaEngine::from_path(llama_dir.as_path())
+        .expect("failed to initialize llama service");
     service
         .load_model_with_workers(
             model_path.as_path(),
@@ -44,7 +44,6 @@ async fn make_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
 
     service
 }
-
 
 #[tokio::test]
 async fn test_llama_inference() {

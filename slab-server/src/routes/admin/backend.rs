@@ -14,8 +14,8 @@ use utoipa::OpenApi;
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::schemas::admin::backend::{
-    BackendStatusResponse, BackendTypeQuery, DownloadLibRequest, ReloadLibRequest,
-    BackendListResponse,
+    BackendListResponse, BackendStatusResponse, BackendTypeQuery, DownloadLibRequest,
+    ReloadLibRequest,
 };
 use crate::state::AppState;
 use strum::IntoEnumIterator;
@@ -44,7 +44,9 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/backends/reload", post(reload_lib))
 }
 
-fn windows_download_spec(backend_id: Backend) -> Option<(&'static str, &'static str, &'static str, AssetNameResolver)> {
+fn windows_download_spec(
+    backend_id: Backend,
+) -> Option<(&'static str, &'static str, &'static str, AssetNameResolver)> {
     match backend_id {
         Backend::GGMLLlama => Some((
             "ggml-org",
@@ -224,7 +226,7 @@ pub async fn list_backends(
             }
         })
         .collect::<Vec<BackendStatusResponse>>();
-    Ok(Json(BackendListResponse{ backends: backends }))
+    Ok(Json(BackendListResponse { backends: backends }))
 }
 
 /// Download a backend shared library from a GitHub release (`POST /admin/backends/download`).
@@ -384,7 +386,8 @@ mod test {
 
     #[test]
     fn windows_download_spec_llama() {
-        let (owner, repo, tag, asset) = windows_download_spec(Backend::GGMLLlama).expect("llama preset");
+        let (owner, repo, tag, asset) =
+            windows_download_spec(Backend::GGMLLlama).expect("llama preset");
         assert_eq!(owner, "ggml-org");
         assert_eq!(repo, "llama.cpp");
         assert_eq!(tag, "b8069");

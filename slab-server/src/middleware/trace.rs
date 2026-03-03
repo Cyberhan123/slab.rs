@@ -44,8 +44,9 @@ pub async fn trace_middleware(
     async move {
         info!("→ request started");
         let (parts, body) = req.into_parts();
-        
-        let req_bytes = buffer_and_log("request", &trace_id.to_string(), &parts.headers, body).await;
+
+        let req_bytes =
+            buffer_and_log("request", &trace_id.to_string(), &parts.headers, body).await;
         let mut req = Request::from_parts(parts, Body::from(req_bytes));
 
         req.headers_mut()
@@ -55,7 +56,8 @@ pub async fn trace_middleware(
 
         let (parts, body) = response.into_parts();
 
-        let res_bytes = buffer_and_log("response", &trace_id.to_string(), &parts.headers, body).await;
+        let res_bytes =
+            buffer_and_log("response", &trace_id.to_string(), &parts.headers, body).await;
 
         let mut response = Response::from_parts(parts, Body::from(res_bytes));
 
