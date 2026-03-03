@@ -6,12 +6,12 @@ UPDATE config_store
 SET name = key
 WHERE TRIM(COALESCE(name, '')) = '';
 
--- Seed a model download target-dir config entry.
+-- Seed a model cache directory config entry.
 -- Empty value means "not configured", so model downloads fall back to hf-hub defaults.
 INSERT INTO config_store (key, name, value, updated_at)
 VALUES (
-    'target_dir',
-    'Model Target Directory',
+    'model_cache_dir',
+    'Model Cache Directory',
     '',
     strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
 )
