@@ -5,8 +5,8 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use utoipa::OpenApi;
 use tracing::{debug, warn};
+use utoipa::OpenApi;
 
 use crate::state::AppState;
 
@@ -16,8 +16,7 @@ pub struct HealthApi;
 
 /// Register health-check routes.
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/health", get(get_health))
+    Router::new().route("/health", get(get_health))
 }
 
 /// Heartbeat endpoint.

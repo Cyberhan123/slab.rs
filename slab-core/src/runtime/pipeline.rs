@@ -47,7 +47,6 @@ impl PipelineBuilder<NoStream> {
         }
     }
 
-
     /// Append a CPU stage from a pre-built [`CpuStage`].
     pub fn cpu_stage(mut self, stage: CpuStage) -> Self {
         self.stages.push(Stage::Cpu(stage));
@@ -69,7 +68,7 @@ impl PipelineBuilder<NoStream> {
         self.stages.push(Stage::Gpu(stage));
         self
     }
-    
+
     /// Append a streaming terminal GPU stage.
     ///
     /// Transitions the builder to `PipelineBuilder<HasStream>`, preventing

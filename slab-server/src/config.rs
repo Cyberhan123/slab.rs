@@ -1,6 +1,6 @@
 //! Server configuration, loaded from environment variables at startup.
 
-use std::path::{ PathBuf};
+use std::path::PathBuf;
 
 /// Runtime configuration for slab-server.
 ///

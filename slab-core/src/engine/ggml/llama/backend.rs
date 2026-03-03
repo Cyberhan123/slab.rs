@@ -25,16 +25,18 @@
 //! ```
 
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use serde::Deserialize;
-use tokio::sync::mpsc;
+use tokio::sync::{broadcast, mpsc};
 
-use crate::api::Event;
 use crate::engine::ggml::llama::adapter::GGMLLlamaEngine;
 use crate::engine::ggml::llama::errors::SessionId;
-use crate::runtime::backend::protocol::{BackendReply, BackendRequest, StreamChunk};
+use crate::runtime::backend::backend_handler;
+use crate::runtime::backend::protocol::{
+    BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
+};
+use crate::runtime::backend::runner::{spawn_runtime_worker, SharedIngressRx};
 use crate::runtime::types::Payload;
 
 // ── Configurations ────────────────────────────────────────────────────────────
@@ -67,6 +69,7 @@ struct LlamaWorker {
     sessions: HashMap<String, SessionId>,
 }
 
+#[backend_handler]
 impl LlamaWorker {
     fn new(engine: Option<Arc<GGMLLlamaEngine>>) -> Self {
         Self {
@@ -75,53 +78,108 @@ impl LlamaWorker {
         }
     }
 
-    async fn handle(&mut self, req: BackendRequest) {
+    #[on_event(LoadLibrary)]
+    async fn on_load_library(&mut self, req: BackendRequest) {
+        let BackendRequest {
+            input, reply_tx, ..
+        } = req;
+        self.handle_load_library(input, reply_tx).await;
+    }
+
+    #[on_event(ReloadLibrary)]
+    async fn on_reload_library(&mut self, req: BackendRequest) {
+        let BackendRequest {
+            input, reply_tx, ..
+        } = req;
+        self.handle_reload_library(input, reply_tx).await;
+    }
+
+    #[on_event(LoadModel)]
+    async fn on_load_model(&mut self, req: BackendRequest) {
+        let BackendRequest {
+            input, reply_tx, ..
+        } = req;
+        self.handle_load_model(input, reply_tx).await;
+    }
+
+    #[on_event(UnloadModel)]
+    async fn on_unload_model(&mut self, req: BackendRequest) {
+        let BackendRequest { reply_tx, .. } = req;
+        self.handle_unload_model(reply_tx).await;
+    }
+
+    #[on_event(Inference)]
+    async fn on_inference(&mut self, req: BackendRequest) {
         let BackendRequest {
             op,
             input,
             reply_tx,
             ..
         } = req;
+        let opts = op.options.to_serde_value();
+        let max_tokens = opts
+            .get("max_tokens")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(256);
+        let session_key = opts
+            .get("session_key")
+            .and_then(|s| s.as_str())
+            .map(str::to_owned);
+        self.handle_inference(input, max_tokens, session_key, reply_tx)
+            .await;
+    }
 
-        match Event::from_str(&op.name) {
-            Ok(Event::LoadLibrary) => self.handle_load_library(input, reply_tx).await,
-            Ok(Event::ReloadLibrary) => self.handle_reload_library(input, reply_tx).await,
-            Ok(Event::LoadModel) => {
-                self.handle_load_model(input, reply_tx).await;
+    #[on_event(InferenceStream)]
+    async fn on_inference_stream(&mut self, req: BackendRequest) {
+        let BackendRequest {
+            op,
+            input,
+            reply_tx,
+            ..
+        } = req;
+        let opts = op.options.to_serde_value();
+        let max_tokens = opts
+            .get("max_tokens")
+            .and_then(|v| v.as_u64())
+            .map(|v| v as usize)
+            .unwrap_or(256);
+        let session_key = opts
+            .get("session_key")
+            .and_then(|s| s.as_str())
+            .map(str::to_owned);
+        self.handle_inference_stream(input, max_tokens, session_key, reply_tx)
+            .await;
+    }
+
+    fn cleanup_runtime_state(&mut self) {
+        if let Some(engine) = self.engine.as_ref() {
+            let _ = engine.unload();
+        }
+        self.sessions.clear();
+    }
+
+    #[on_runtime_control(GlobalUnload)]
+    #[on_runtime_control(GlobalLoad)]
+    async fn apply_runtime_control(&mut self, signal: RuntimeControlSignal) {
+        match signal {
+            RuntimeControlSignal::GlobalUnload { op_id } => {
+                tracing::debug!(op_id, "llama runtime global unload");
+                self.cleanup_runtime_state();
             }
-            Ok(Event::UnloadModel) => self.handle_unload_model(reply_tx).await,
-            Ok(Event::Inference) => {
-                let opts = op.options.to_serde_value();
-                let max_tokens = opts
-                    .get("max_tokens")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as usize)
-                    .unwrap_or(256);
-                let session_key = opts
-                    .get("session_key")
-                    .and_then(|s| s.as_str())
-                    .map(str::to_owned);
-                self.handle_inference(input, max_tokens, session_key, reply_tx)
-                    .await;
-            }
-            Ok(Event::InferenceStream) => {
-                let opts = op.options.to_serde_value();
-                let max_tokens = opts
-                    .get("max_tokens")
-                    .and_then(|v| v.as_u64())
-                    .map(|v| v as usize)
-                    .unwrap_or(256);
-                let session_key = opts
-                    .get("session_key")
-                    .and_then(|s| s.as_str())
-                    .map(str::to_owned);
-                self.handle_inference_stream(input, max_tokens, session_key, reply_tx)
-                    .await;
-            }
-            Ok(_) | Err(_) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("unknown op: {}", op.name)));
+            RuntimeControlSignal::GlobalLoad { op_id, payload } => {
+                let _ = payload;
+                tracing::debug!(op_id, "llama runtime global load pre-cleanup");
+                // Runtime-level GlobalLoad is treated as a pre-load cleanup signal.
+                // The actual model.load request is still driven by the management path.
+                self.cleanup_runtime_state();
             }
         }
+    }
+
+    #[on_control_lagged]
+    async fn on_control_lagged_cleanup(&mut self) {
+        self.cleanup_runtime_state();
     }
 
     // ── lib.load ──────────────────────────────────────────────────────────────
@@ -256,7 +314,6 @@ impl LlamaWorker {
     // ── model.unload ──────────────────────────────────────────────────────────
 
     async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
-        
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
@@ -403,15 +460,55 @@ impl LlamaWorker {
 /// Used by `api::init` to separate library loading (phase 1) from worker
 /// spawning (phase 2) so that no tasks are started if any library fails.
 pub(crate) fn spawn_backend_with_engine(
-    capacity: usize,
+    shared_ingress_rx: SharedIngressRx,
+    control_tx: broadcast::Sender<WorkerCommand>,
     engine: Option<Arc<GGMLLlamaEngine>>,
-) -> mpsc::Sender<BackendRequest> {
-    let (tx, mut rx) = mpsc::channel::<BackendRequest>(capacity);
-    tokio::spawn(async move {
-        let mut worker = LlamaWorker::new(engine);
-        while let Some(req) = rx.recv().await {
-            worker.handle(req).await;
-        }
-    });
-    tx
+) {
+    let worker = LlamaWorker::new(engine);
+    spawn_runtime_worker(shared_ingress_rx, control_tx.subscribe(), 0, worker);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LlamaWorker;
+    use crate::runtime::backend::protocol::RuntimeControlSignal;
+    use crate::runtime::types::Payload;
+
+    #[tokio::test]
+    async fn runtime_global_unload_clears_sessions() {
+        let mut worker = LlamaWorker::new(None);
+        worker.sessions.insert("s1".to_owned(), 7);
+        assert_eq!(worker.sessions.len(), 1);
+
+        worker
+            .apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 })
+            .await;
+
+        assert!(
+            worker.sessions.is_empty(),
+            "global unload should clear llama session mappings"
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_global_load_clears_sessions_before_load_attempt() {
+        let mut worker = LlamaWorker::new(None);
+        worker.sessions.insert("s1".to_owned(), 9);
+        assert_eq!(worker.sessions.len(), 1);
+
+        worker
+            .apply_runtime_control(RuntimeControlSignal::GlobalLoad {
+                op_id: 2,
+                payload: Payload::Json(serde_json::json!({
+                    "model_path": "/tmp/model.gguf",
+                    "num_workers": 1
+                })),
+            })
+            .await;
+
+        assert!(
+            worker.sessions.is_empty(),
+            "global load should clear stale llama session mappings before model load"
+        );
+    }
 }

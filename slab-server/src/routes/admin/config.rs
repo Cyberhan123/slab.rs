@@ -93,11 +93,7 @@ pub async fn set_config_value(
         .get_config_entry(&key)
         .await?
         .ok_or_else(|| ServerError::NotFound(format!("config key '{key}' not found")))?;
-    Ok(Json(ConfigEntry {
-        key,
-        name,
-        value,
-    }))
+    Ok(Json(ConfigEntry { key, name, value }))
 }
 
 #[cfg(test)]

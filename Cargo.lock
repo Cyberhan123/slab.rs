@@ -4910,6 +4910,7 @@ dependencies = [
  "libloading 0.8.9",
  "serde",
  "serde_json",
+ "slab-core-macros",
  "slab-diffusion",
  "slab-libfetch",
  "slab-llama",
@@ -4922,6 +4923,15 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "tracing-test",
+]
+
+[[package]]
+name = "slab-core-macros"
+version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.116",
 ]
 
 [[package]]

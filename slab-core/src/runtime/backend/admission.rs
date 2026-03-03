@@ -10,24 +10,10 @@ use tokio::sync::{
 use tracing::warn;
 
 use crate::runtime::backend::protocol::{BackendRequest, WorkerCommand};
+use crate::runtime::backend::runner::{shared_ingress, SharedIngressRx};
 use crate::runtime::types::{
     BackendLifecycleState, FailedGlobalOperation, GlobalConsistencyState, RuntimeError,
 };
-
-/// RAII guard that releases a semaphore slot when dropped.
-///
-/// Callers must hold this until the corresponding backend request completes.
-pub struct Permit {
-    /// Owned permit; dropping this struct releases it back to the semaphore.
-    #[allow(dead_code)]
-    permit: OwnedSemaphorePermit,
-}
-
-impl std::fmt::Debug for Permit {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Permit").finish()
-    }
-}
 
 /// Inference lease: blocks management mutations and holds compute quota.
 pub struct InferenceLease {
@@ -76,7 +62,9 @@ impl BackendHandle {
             ingress_tx,
             control_tx,
             management_lock: Arc::new(tokio::sync::RwLock::new(())),
-            lifecycle: Arc::new(tokio::sync::RwLock::new(BackendLifecycleState::Uninitialized)),
+            lifecycle: Arc::new(tokio::sync::RwLock::new(
+                BackendLifecycleState::Uninitialized,
+            )),
             next_seq: Arc::new(AtomicU64::new(1)),
         }
     }
@@ -85,6 +73,7 @@ impl BackendHandle {
 /// Manages backend admission, queue handles, management locks and consistency state.
 #[derive(Debug, Clone)]
 pub struct ResourceManager {
+    config: ResourceManagerConfig,
     backends: Arc<RwLock<HashMap<String, BackendHandle>>>,
     global_state: Arc<tokio::sync::RwLock<GlobalConsistencyState>>,
     failed_global: Arc<tokio::sync::RwLock<Option<FailedGlobalOperation>>>,
@@ -93,14 +82,36 @@ pub struct ResourceManager {
     next_global_op_id: Arc<AtomicU64>,
 }
 
+#[derive(Debug, Clone)]
+pub struct ResourceManagerConfig {
+    pub backend_capacity: usize,
+    pub ingress_channel_capacity: usize,
+    pub control_channel_capacity: usize,
+}
+
+impl Default for ResourceManagerConfig {
+    fn default() -> Self {
+        Self {
+            backend_capacity: 4,
+            ingress_channel_capacity: 128,
+            control_channel_capacity: 16,
+        }
+    }
+}
+
 impl ResourceManager {
     /// Create an empty `ResourceManager`.
     pub fn new() -> Self {
+        Self::with_config(ResourceManagerConfig::default())
+    }
+
+    pub fn with_config(config: ResourceManagerConfig) -> Self {
         Self {
+            config,
             backends: Arc::new(RwLock::new(HashMap::new())),
-            global_state: Arc::new(tokio::sync::RwLock::new(GlobalConsistencyState::Consistent {
-                generation: 0,
-            })),
+            global_state: Arc::new(tokio::sync::RwLock::new(
+                GlobalConsistencyState::Consistent { generation: 0 },
+            )),
             failed_global: Arc::new(tokio::sync::RwLock::new(None)),
             global_management: Arc::new(Mutex::new(())),
             generation: Arc::new(AtomicU64::new(0)),
@@ -108,33 +119,27 @@ impl ResourceManager {
         }
     }
 
-    /// Register backend compute resources only.
-    ///
-    /// This keeps compatibility with existing tests that only assert semaphore behavior.
-    pub fn register_backend(&mut self, backend_id: impl Into<String>, capacity: usize) {
-        let key = backend_id.into();
-        self.backends
-            .write()
-            .expect("backend map poisoned")
-            .insert(key, BackendHandle::new(capacity, None, None));
-    }
+    /// Register a backend using runtime-owned channels and bootstrap callback.
+    pub fn register_backend<F>(&mut self, backend_id: impl Into<String>, spawn_backend: F)
+    where
+        F: FnOnce(SharedIngressRx, broadcast::Sender<WorkerCommand>),
+    {
+        let (ingress_tx, ingress_rx) =
+            mpsc::channel::<BackendRequest>(self.config.ingress_channel_capacity);
+        let (control_tx, _) =
+            broadcast::channel::<WorkerCommand>(self.config.control_channel_capacity);
+        let shared_ingress_rx = shared_ingress(ingress_rx);
+        spawn_backend(Arc::clone(&shared_ingress_rx), control_tx.clone());
 
-    /// Register backend resources and queue/control channels managed by runtime.
-    pub fn register_backend_runtime(
-        &mut self,
-        backend_id: impl Into<String>,
-        capacity: usize,
-        ingress_tx: mpsc::Sender<BackendRequest>,
-        control_tx: Option<broadcast::Sender<WorkerCommand>>,
-    ) {
         let key = backend_id.into();
-        self.backends
-            .write()
-            .expect("backend map poisoned")
-            .insert(
-                key,
-                BackendHandle::new(capacity, Some(ingress_tx), control_tx),
-            );
+        self.backends.write().expect("backend map poisoned").insert(
+            key,
+            BackendHandle::new(
+                self.config.backend_capacity,
+                Some(ingress_tx),
+                Some(control_tx),
+            ),
+        );
     }
 
     fn handle(&self, backend_id: &str) -> Result<BackendHandle, RuntimeError> {
@@ -162,7 +167,10 @@ impl ResourceManager {
     }
 
     /// Clone backend ingress sender.
-    pub fn ingress_tx(&self, backend_id: &str) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
+    pub fn ingress_tx(
+        &self,
+        backend_id: &str,
+    ) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
         let handle = self.handle(backend_id)?;
         handle.ingress_tx.ok_or_else(|| RuntimeError::Busy {
             backend_id: backend_id.to_owned(),
@@ -186,29 +194,15 @@ impl ResourceManager {
         Ok(handle.next_seq.fetch_add(1, Ordering::Relaxed))
     }
 
-    /// Try to acquire compute permit for `backend_id`.
-    pub fn try_acquire(&self, backend_id: &str) -> Result<Permit, RuntimeError> {
-        let handle = self.handle(backend_id)?;
-        handle
-            .semaphore
-            .try_acquire_owned()
-            .map(|permit| Permit { permit })
-            .map_err(|_| RuntimeError::Busy {
-                backend_id: backend_id.to_owned(),
-            })
-    }
-
-    /// Acquire compute permit with timeout.
-    pub async fn acquire_with_timeout(
+    async fn acquire_compute_permit(
         &self,
+        handle: &BackendHandle,
         backend_id: &str,
         timeout: Duration,
-    ) -> Result<Permit, RuntimeError> {
-        let handle = self.handle(backend_id)?;
-        tokio::time::timeout(timeout, handle.semaphore.acquire_owned())
+    ) -> Result<OwnedSemaphorePermit, RuntimeError> {
+        tokio::time::timeout(timeout, Arc::clone(&handle.semaphore).acquire_owned())
             .await
             .map_err(|_| RuntimeError::Timeout)?
-            .map(|permit| Permit { permit })
             .map_err(|_| RuntimeError::Busy {
                 backend_id: backend_id.to_owned(),
             })
@@ -222,13 +216,9 @@ impl ResourceManager {
     ) -> Result<InferenceLease, RuntimeError> {
         self.ensure_inference_allowed().await?;
         let handle = self.handle(backend_id)?;
-
-        let compute_permit = tokio::time::timeout(timeout, handle.semaphore.acquire_owned())
-            .await
-            .map_err(|_| RuntimeError::Timeout)?
-            .map_err(|_| RuntimeError::Busy {
-                backend_id: backend_id.to_owned(),
-            })?;
+        let compute_permit = self
+            .acquire_compute_permit(&handle, backend_id, timeout)
+            .await?;
         let mgmt_guard = Arc::clone(&handle.management_lock).read_owned().await;
 
         Ok(InferenceLease {
@@ -238,7 +228,10 @@ impl ResourceManager {
     }
 
     /// Acquire exclusive management lease for initialize/load/unload operations.
-    pub async fn acquire_management_lease(&self, backend_id: &str) -> Result<ManagementLease, RuntimeError> {
+    pub async fn acquire_management_lease(
+        &self,
+        backend_id: &str,
+    ) -> Result<ManagementLease, RuntimeError> {
         let handle = self.handle(backend_id)?;
         let mgmt_guard = Arc::clone(&handle.management_lock).write_owned().await;
         Ok(ManagementLease { mgmt_guard })
@@ -250,7 +243,10 @@ impl ResourceManager {
     }
 
     /// Return backend lifecycle state.
-    pub async fn backend_state(&self, backend_id: &str) -> Result<BackendLifecycleState, RuntimeError> {
+    pub async fn backend_state(
+        &self,
+        backend_id: &str,
+    ) -> Result<BackendLifecycleState, RuntimeError> {
         let handle = self.handle(backend_id)?;
         let state = handle.lifecycle.read().await.clone();
         Ok(state)

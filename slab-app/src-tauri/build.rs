@@ -28,27 +28,27 @@ fn get_workspace_target_dir(manifest_dir: &Path, profile: &str) -> PathBuf {
 
 /// sync_sidercar takes the compiled binary from the workspace target directory and copies it to the Tauri sidecar directory with a target-specific name.
 fn sync_sidecar(bin_name: &str, target: &str, src_dir: &Path, tauri_dir: &Path) {
-    let extension = if target.contains("windows") { ".exe" } else { "" };
-    
-    
+    let extension = if target.contains("windows") {
+        ".exe"
+    } else {
+        ""
+    };
+
     let src_path = src_dir.join(format!("{}{}", bin_name, extension));
-    
-    
+
     let sidecar_dir = tauri_dir.join("binaries");
     let dst_path = sidecar_dir.join(format!("{}-{}{}", bin_name, target, extension));
-
 
     if !sidecar_dir.exists() {
         fs::create_dir_all(&sidecar_dir).expect("Failed to create binaries directory");
     }
 
-    
     if src_path.exists() {
         fs::copy(&src_path, &dst_path).expect("Failed to copy sidecar binary");
         println!("cargo:rerun-if-changed={}", src_path.to_str().unwrap());
     } else {
         println!(
-            "cargo:warning=Sidecar [{}] not found at {:?}. It's normal for the first build.", 
+            "cargo:warning=Sidecar [{}] not found at {:?}. It's normal for the first build.",
             bin_name, src_path
         );
     }

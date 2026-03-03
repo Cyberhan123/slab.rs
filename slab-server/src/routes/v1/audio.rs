@@ -95,7 +95,7 @@ pub async fn transcribe(
 
     let core_task_result = slab_core::api::backend(Backend::GGMLWhisper)
         .inference()
-        .input(slab_core::Payload::Text(req.path.clone().into())) 
+        .input(slab_core::Payload::Text(req.path.clone().into()))
         .preprocess("ffmpeg.to_pcm_f32le", convert_to_pcm_f32le)
         .run()
         .await;
@@ -132,7 +132,18 @@ pub fn convert_to_pcm_f32le(payload: slab_core::Payload) -> Result<slab_core::Pa
     let output = std::process::Command::new("ffmpeg")
         .arg("-i")
         .arg(path)
-        .args(["-vn", "-f", "f32le", "-acodec", "pcm_f32le", "-ar", "16000", "-ac", "1", "-"])
+        .args([
+            "-vn",
+            "-f",
+            "f32le",
+            "-acodec",
+            "pcm_f32le",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
+            "-",
+        ])
         .output()
         .map_err(|e| format!("FFmpeg start failed: {e}"))?;
 

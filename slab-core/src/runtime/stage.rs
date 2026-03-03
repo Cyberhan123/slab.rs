@@ -104,7 +104,7 @@ pub struct GpuStage {
 impl GpuStage {
     /// Dispatch this stage to the backend and await a single reply.
     ///
-    /// The caller is responsible for holding an admission `Permit` for the
+    /// The caller is responsible for holding a runtime-managed inference lease for the
     /// duration of this call.
     pub async fn run(
         &self,
@@ -169,7 +169,7 @@ pub struct GpuStreamStage {
 impl GpuStreamStage {
     /// Dispatch this stage to the backend and return the streaming handle.
     ///
-    /// The caller is responsible for holding an admission `Permit` for the
+    /// The caller is responsible for holding a runtime-managed inference lease for the
     /// duration of this call.
     pub async fn run(
         &self,

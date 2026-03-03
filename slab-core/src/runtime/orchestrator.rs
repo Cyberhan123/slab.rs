@@ -6,6 +6,7 @@ use tracing::{info, warn};
 use crate::runtime::backend::admission::ResourceManager;
 use crate::runtime::backend::protocol::{
     BackendOp, BackendReply, BackendRequest, BackendRequestKind, ManagementEvent,
+    RuntimeControlSignal, WorkerCommand,
 };
 use crate::runtime::stage::Stage;
 use crate::runtime::storage::ResultStorage;
@@ -59,6 +60,13 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
+    fn emit_runtime_control_signal(&self, backend_id: &str, signal: RuntimeControlSignal) {
+        let Ok(control_tx) = self.resource_manager.control_tx(backend_id) else {
+            return;
+        };
+        let _ = control_tx.send(WorkerCommand::Runtime(signal));
+    }
+
     fn global_kind_to_event(kind: GlobalOperationKind) -> (ManagementEvent, &'static str) {
         match kind {
             GlobalOperationKind::InitializeAll => (ManagementEvent::Initialize, "lib.load"),
@@ -74,7 +82,10 @@ impl Orchestrator {
         op_name: &str,
         input: Payload,
     ) -> Result<Payload, RuntimeError> {
-        let _mgmt_lease = self.resource_manager.acquire_management_lease(backend_id).await?;
+        let _mgmt_lease = self
+            .resource_manager
+            .acquire_management_lease(backend_id)
+            .await?;
         self.resource_manager
             .set_backend_state(backend_id, BackendLifecycleState::Transitioning)
             .await?;
@@ -116,7 +127,9 @@ impl Orchestrator {
                     ManagementEvent::LoadModel => BackendLifecycleState::ModelLoaded,
                     ManagementEvent::UnloadModel => BackendLifecycleState::Initialized,
                 };
-                self.resource_manager.set_backend_state(backend_id, state).await?;
+                self.resource_manager
+                    .set_backend_state(backend_id, state)
+                    .await?;
                 Ok(payload)
             }
             BackendReply::Error(msg) => {
@@ -477,6 +490,24 @@ impl Orchestrator {
 
         for backend_id in &backend_ids {
             let payload = payloads.get(backend_id).cloned().unwrap_or_default();
+            match kind {
+                GlobalOperationKind::LoadModelsAll => {
+                    self.emit_runtime_control_signal(
+                        backend_id,
+                        RuntimeControlSignal::GlobalLoad {
+                            op_id,
+                            payload: payload.clone(),
+                        },
+                    );
+                }
+                GlobalOperationKind::UnloadModelsAll => {
+                    self.emit_runtime_control_signal(
+                        backend_id,
+                        RuntimeControlSignal::GlobalUnload { op_id },
+                    );
+                }
+                GlobalOperationKind::InitializeAll => {}
+            }
             match self
                 .call_backend_management_inner(backend_id, event, op_name, payload)
                 .await
@@ -534,11 +565,7 @@ impl Orchestrator {
                 op_id,
                 failed_backends,
                 cleanup_report,
-                FailedGlobalOperation {
-                    op_id,
-                    kind,
-                    payloads,
-                },
+                FailedGlobalOperation { kind, payloads },
             )
             .await;
         Err(RuntimeError::GlobalStateInconsistent { op_id })
@@ -551,7 +578,8 @@ impl Orchestrator {
             .failed_global_operation()
             .await
             .ok_or(RuntimeError::NoFailedGlobalOperation)?;
-        self.run_global_management(failed.kind, failed.payloads).await
+        self.run_global_management(failed.kind, failed.payloads)
+            .await
     }
 
     /// Read current global consistency state.
