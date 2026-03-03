@@ -42,7 +42,7 @@ use slab_core::api::Backend;
 )]
 pub struct ModelsApi;
 
-const MODEL_TARGET_DIR_CONFIG_KEY: &str = "target_dir";
+const MODEL_TARGET_DIR_CONFIG_KEY: &str = "model_cache_dir";
 
 /// Register model-management routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -362,7 +362,7 @@ pub async fn download_model(
         .map(str::to_owned);
     let effective_target_dir = configured_target_dir;
     if let Some(dir) = &effective_target_dir {
-        validate_path("target_dir", dir)?;
+        validate_path("model_cache_dir", dir)?;
     }
 
     let backend = Backend::from_str(backend_id)
@@ -388,7 +388,7 @@ pub async fn download_model(
         "backend_id": canonical_backend_id,
         "repo_id":    model.repo_id,
         "filename":   model.filename,
-        "target_dir": effective_target_dir,
+        "model_cache_dir": effective_target_dir,
     })
     .to_string();
 
@@ -439,7 +439,7 @@ pub async fn download_model(
         let model_id = input["model_id"].as_str().unwrap_or("").to_owned();
         let repo_id = input["repo_id"].as_str().unwrap_or("").to_owned();
         let filename = input["filename"].as_str().unwrap_or("").to_owned();
-        let target_dir = input["target_dir"]
+        let target_dir = input["model_cache_dir"]
             .as_str()
             .map(str::trim)
             .filter(|v| !v.is_empty())
