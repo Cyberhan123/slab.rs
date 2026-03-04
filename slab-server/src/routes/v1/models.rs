@@ -42,7 +42,7 @@ use slab_core::api::Backend;
 )]
 pub struct ModelsApi;
 
-const MODEL_TARGET_DIR_CONFIG_KEY: &str = "target_dir";
+const MODEL_CACHE_DIR_CONFIG_KEY: &str = "model_cache_dir";
 
 /// Register model-management routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -352,17 +352,17 @@ pub async fn download_model(
         ));
     }
 
-    let configured_target_dir = state
+    let configured_model_cache_dir = state
         .store
-        .get_config_value(MODEL_TARGET_DIR_CONFIG_KEY)
+        .get_config_value(MODEL_CACHE_DIR_CONFIG_KEY)
         .await?
         .as_deref()
         .map(str::trim)
         .filter(|v| !v.is_empty())
         .map(str::to_owned);
-    let effective_target_dir = configured_target_dir;
-    if let Some(dir) = &effective_target_dir {
-        validate_path("target_dir", dir)?;
+    let effective_model_cache_dir = configured_model_cache_dir;
+    if let Some(dir) = &effective_model_cache_dir {
+        validate_path("model_cache_dir", dir)?;
     }
 
     let backend = Backend::from_str(backend_id)
@@ -388,7 +388,7 @@ pub async fn download_model(
         "backend_id": canonical_backend_id,
         "repo_id":    model.repo_id,
         "filename":   model.filename,
-        "target_dir": effective_target_dir,
+        "model_cache_dir": effective_model_cache_dir,
     })
     .to_string();
 
@@ -439,7 +439,7 @@ pub async fn download_model(
         let model_id = input["model_id"].as_str().unwrap_or("").to_owned();
         let repo_id = input["repo_id"].as_str().unwrap_or("").to_owned();
         let filename = input["filename"].as_str().unwrap_or("").to_owned();
-        let target_dir = input["target_dir"]
+        let model_cache_dir = input["model_cache_dir"]
             .as_str()
             .map(str::trim)
             .filter(|v| !v.is_empty())
@@ -461,7 +461,7 @@ pub async fn download_model(
         }
 
         let result = tokio::task::spawn_blocking(move || {
-            let api = if let Some(dir) = target_dir {
+            let api = if let Some(dir) = model_cache_dir {
                 ApiBuilder::new()
                     .with_cache_dir(std::path::PathBuf::from(dir))
                     .build()
