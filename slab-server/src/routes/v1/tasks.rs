@@ -10,6 +10,7 @@ use std::sync::Arc;
 use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use base64::Engine as _;
 
 use tracing::{info, warn};
 use utoipa::OpenApi;
@@ -134,8 +135,16 @@ pub async fn get_task_result(
             Ok(Some(payload)) => {
                 let result_json = match &payload {
                     slab_core::Payload::Bytes(b) => {
-                        let text = String::from_utf8_lossy(b).to_string();
-                        serde_json::json!({ "text": text })
+                        // Image tasks return raw PNG bytes; encode them as a data URI.
+                        if record.task_type == "image" {
+                            let encoded =
+                                base64::engine::general_purpose::STANDARD.encode(b.as_ref());
+                            let data_uri = format!("data:image/png;base64,{encoded}");
+                            serde_json::json!({ "image": data_uri })
+                        } else {
+                            let text = String::from_utf8_lossy(b).to_string();
+                            serde_json::json!({ "text": text })
+                        }
                     }
                     slab_core::Payload::Text(t) => serde_json::json!({ "text": t.to_string() }),
                     slab_core::Payload::Json(v) => v.clone(),
