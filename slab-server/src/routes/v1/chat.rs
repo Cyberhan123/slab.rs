@@ -48,6 +48,22 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new().route("/chat/completions", post(chat_completions))
 }
 
+/// Build an OpenAI-compatible `chat.completion.chunk` SSE data payload.
+fn build_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
+    serde_json::json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": { "content": token },
+            "finish_reason": null
+        }]
+    })
+    .to_string()
+}
+
 // ── Request / response types for sessions ─────────────────────────────────────
 
 // ── Chat completions ──────────────────────────────────────────────────────────
@@ -146,26 +162,19 @@ pub async fn chat_completions(
         let created_ts = Utc::now().timestamp();
         let model_name = req.model.clone();
 
-        let token_stream = backend_stream.map(move |chunk| {
-            let data = match chunk {
+        let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
+            match chunk {
                 Ok(bytes) => {
                     let token = String::from_utf8_lossy(&bytes).to_string();
-                    serde_json::json!({
-                        "id": &completion_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_ts,
-                        "model": &model_name,
-                        "choices": [{
-                            "index": 0,
-                            "delta": { "content": token },
-                            "finish_reason": null
-                        }]
-                    })
-                    .to_string()
+                    let data = build_chunk(&completion_id, created_ts, &model_name, &token);
+                    Ok(Event::default().data(data))
                 }
-                Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
-            };
-            Ok::<Event, Infallible>(Event::default().data(data))
+                Err(e) => {
+                    // Emit an SSE comment to signal the error without poisoning
+                    // the assistant content, then let the stream end naturally.
+                    Ok(Event::default().comment(e.to_string()))
+                }
+            }
         });
 
         let sse_stream = token_stream.chain(stream::once(async {
@@ -323,5 +332,19 @@ mod test {
         let req = make_request("system", "you are a bot");
         let found = req.messages.iter().rev().find(|m| m.role == "user");
         assert!(found.is_none());
+    }
+
+    #[test]
+    fn build_chunk_produces_openai_format() {
+        let json_str = build_chunk("chatcmpl-test", 1_700_000_000, "slab-llama", "Hello");
+        let v: serde_json::Value = serde_json::from_str(&json_str).expect("valid JSON");
+        assert_eq!(v["id"], "chatcmpl-test");
+        assert_eq!(v["object"], "chat.completion.chunk");
+        assert_eq!(v["created"], 1_700_000_000_i64);
+        assert_eq!(v["model"], "slab-llama");
+        let choice = &v["choices"][0];
+        assert_eq!(choice["index"], 0);
+        assert_eq!(choice["delta"]["content"], "Hello");
+        assert!(choice["finish_reason"].is_null());
     }
 }

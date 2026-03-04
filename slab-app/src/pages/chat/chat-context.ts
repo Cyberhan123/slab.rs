@@ -5,6 +5,8 @@ export const ChatContext = createContext<{
     onReload?: ReturnType<typeof useXChat>['onReload'];
 }>({});
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
+
 export const providerCaches = new Map<string, OpenAIChatProvider>();
 
 export const providerFactory = (conversationKey: string) => {
@@ -13,7 +15,7 @@ export const providerFactory = (conversationKey: string) => {
             conversationKey,
             new OpenAIChatProvider({
                 request: XRequest<XModelParams, Partial<Record<SSEFields, XModelResponse>>>(
-                    'http://localhost:3000/v1/chat/completions',
+                    `${API_BASE_URL}/v1/chat/completions`,
                     {
                         manual: true,
                         params: {
@@ -32,8 +34,16 @@ export const historyMessageFactory = (_conversationKey: string): DefaultMessageI
   return [];
 };
 
+export const DEFAULT_CONVERSATION_KEY = 'default-conversation';
+
 export const DEFAULT_CONVERSATIONS_ITEMS: {
     key: string;
     label: string;
     group: string;
-}[] = [];
+}[] = [
+    {
+        key: DEFAULT_CONVERSATION_KEY,
+        label: 'New chat',
+        group: 'default',
+    },
+];
