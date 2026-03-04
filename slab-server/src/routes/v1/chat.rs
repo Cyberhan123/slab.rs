@@ -15,7 +15,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
-use futures::StreamExt;
+use futures::{StreamExt, stream};
 
 use tracing::{debug, info};
 use utoipa::OpenApi;
@@ -142,16 +142,35 @@ pub async fn chat_completions(
             .await
             .map_err(ServerError::Runtime)?;
 
-        let sse_stream = backend_stream.map(|chunk| {
+        let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
+        let created_ts = Utc::now().timestamp();
+        let model_name = req.model.clone();
+
+        let token_stream = backend_stream.map(move |chunk| {
             let data = match chunk {
                 Ok(bytes) => {
                     let token = String::from_utf8_lossy(&bytes).to_string();
-                    serde_json::json!({ "delta": token }).to_string()
+                    serde_json::json!({
+                        "id": &completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_ts,
+                        "model": &model_name,
+                        "choices": [{
+                            "index": 0,
+                            "delta": { "content": token },
+                            "finish_reason": null
+                        }]
+                    })
+                    .to_string()
                 }
                 Err(e) => serde_json::json!({ "error": e.to_string() }).to_string(),
             };
             Ok::<Event, Infallible>(Event::default().data(data))
         });
+
+        let sse_stream = token_stream.chain(stream::once(async {
+            Ok::<Event, Infallible>(Event::default().data("[DONE]"))
+        }));
 
         // Persisting the assistant reply for streaming sessions would require
         // collecting the full stream before returning.  Streaming callers can

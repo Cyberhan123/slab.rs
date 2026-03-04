@@ -16,7 +16,7 @@ function Chat() {
   const styles = useStyle();
   const [deepThink, setDeepThink] = useState<boolean>(true);
   const [curConversation, setCurConversation] = useState<string>(
-    DEFAULT_CONVERSATIONS_ITEMS[0].key,
+    DEFAULT_CONVERSATIONS_ITEMS[0]?.key ?? '',
   );
   
   const { 
