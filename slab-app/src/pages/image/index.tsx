@@ -1,258 +1,358 @@
-import { useState } from 'react';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Spinner } from '@/components/ui/spinner';
 import { toast } from 'sonner';
-import { Loader2 } from 'lucide-react';
+import { Download, ImageIcon, Loader2, Sparkles, X, ZoomIn } from 'lucide-react';
 import api from '@/lib/api';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface GeneratedImage {
+  src: string;
+  prompt: string;
+  size: string;
+}
+
+interface TaskStatusResponse {
+  status: string;
+}
+
+interface TaskImageResult {
+  image?: string;
+  images?: string[];
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+const SIZES = [
+  { value: '256x256', label: '256 × 256' },
+  { value: '512x512', label: '512 × 512' },
+  { value: '1024x1024', label: '1024 × 1024' },
+] as const;
+
+const COUNTS = ['1', '2', '4'] as const;
+
+const POLL_INTERVAL_MS = 2_000;
+const MAX_POLL_ATTEMPTS = 150; // 5 minutes
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Image() {
   const [prompt, setPrompt] = useState('');
-  const [model, setModel] = useState('');
-  const [numImages, setNumImages] = useState('1');
-  const [size, setSize] = useState('512x512');
+  const [numImages, setNumImages] = useState<string>('1');
+  const [size, setSize] = useState<string>('512x512');
   const [taskId, setTaskId] = useState<string | null>(null);
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [images, setImages] = useState<string[]>([]);
-  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPolling, setIsPolling] = useState(false);
+  const [images, setImages] = useState<GeneratedImage[]>([]);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
+  const abortRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // API mutations
-  const generateImageMutation = api.useMutation('post', '/v1/images/generations');
+  const generateMutation = api.useMutation('post', '/v1/images/generations');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
-  const getTaskResultMutation = api.useMutation('get', '/v1/tasks/{id}/result');
+  const getResultMutation = api.useMutation('get', '/v1/tasks/{id}/result');
+  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
+
+  const isBusy = isSubmitting || isPolling;
+
+  // Clear any pending poll timer when the component unmounts.
+  useEffect(() => {
+    return () => {
+      abortRef.current = true;
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
+
+  const pollTaskStatus = useCallback(async (id: string, capturedPrompt: string, capturedSize: string) => {
+    setIsPolling(true);
+    abortRef.current = false;
+    let attempts = 0;
+
+    const tick = async () => {
+      if (abortRef.current) {
+        setIsPolling(false);
+        return;
+      }
+      if (++attempts > MAX_POLL_ATTEMPTS) {
+        setIsPolling(false);
+        toast.error('Timed out waiting for image generation.');
+        return;
+      }
+
+      try {
+        const task = await getTaskMutation.mutateAsync({ params: { path: { id } } }) as TaskStatusResponse;
+
+        if (task.status === 'succeeded') {
+          const result = await getResultMutation.mutateAsync({ params: { path: { id } } }) as TaskImageResult;
+
+          // Server returns { image: "data:image/png;base64,..." }
+          const src: string | null =
+            result?.image ?? result?.images?.[0] ?? null;
+
+          if (src) {
+            setImages(prev => [{ src, prompt: capturedPrompt, size: capturedSize }, ...prev]);
+            toast.success('Image generated!');
+          } else {
+            toast.error('Generation succeeded but image data was empty.');
+          }
+          setIsPolling(false);
+        } else if (task.status === 'failed' || task.status === 'cancelled') {
+          toast.error(`Generation ${task.status}.`);
+          setIsPolling(false);
+        } else {
+          timerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
+        }
+      } catch (err: any) {
+        toast.error('Error while checking task status.', {
+          description: err?.message ?? err?.error ?? String(err),
+        });
+        setIsPolling(false);
+      }
+    };
+
+    timerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
+  }, [getTaskMutation, getResultMutation]);
 
   const handleGenerate = async () => {
-    if (!prompt) {
-      setError('Please enter a prompt');
+    const trimmed = prompt.trim();
+    if (!trimmed) {
+      toast.error('Please enter a prompt.');
       return;
     }
 
-    if (!model) {
-      setError('Please select a model');
-      return;
-    }
-
-    setError(null);
-    setImages([]);
-    setIsGenerating(true);
-
+    setIsSubmitting(true);
     try {
-      const data = await generateImageMutation.mutateAsync({
+      const resp = await generateMutation.mutateAsync({
         body: {
-          model,
-          prompt,
-          n: parseInt(numImages),
-          size
-        }
+          model: 'stable-diffusion',
+          prompt: trimmed,
+          n: parseInt(numImages, 10),
+          size,
+        },
       }) as { task_id: string };
 
-      setTaskId(data.task_id);
-      setIsGenerating(false);
-      setIsProcessing(true);
-      
-      // Poll task status
-      pollTaskStatus(data.task_id);
-    } catch (err) {
-      setError('Generation failed: ' + (err instanceof Error ? err.message : 'Unknown error'));
-      setIsGenerating(false);
-      toast.error('Image generation failed');
+      setTaskId(resp.task_id);
+      setIsSubmitting(false);
+      pollTaskStatus(resp.task_id, trimmed, size);
+    } catch (err: any) {
+      setIsSubmitting(false);
+      toast.error('Failed to submit generation request.', {
+        description: err?.message ?? err?.error ?? 'Unknown error',
+      });
     }
   };
 
-  const pollTaskStatus = async (id: string) => {
-    try {
-      const task = await getTaskMutation.mutateAsync({
-        params: {
-          path: { id }
-        }
-      }) as { status: string };
-      
-      if (task.status === 'succeeded') {
-        // Fetch generated result
-        const result = await getTaskResultMutation.mutateAsync({
-          params: {
-            path: { id }
-          }
-        }) as any;
+  const handleDownload = (src: string, index: number) => {
+    const a = document.createElement('a');
+    a.href = src;
+    a.download = `slab-image-${index + 1}.png`;
+    a.click();
+  };
 
-        if (result.images && Array.isArray(result.images)) {
-          setImages(result.images);
-        } else if (result.image) {
-          setImages([result.image]);
-        } else {
-          setImages([result]);
-        }
-        setIsProcessing(false);
-        toast.success('Image generated successfully');
-      } else if (task.status === 'failed') {
-        setError('Generation task failed');
-        setIsProcessing(false);
-        toast.error('Generation task failed');
-      } else if (task.status === 'cancelled' || task.status === 'interrupted') {
-        setError(`Generation task ${task.status}`);
-        setIsProcessing(false);
-        toast.error(`Generation task ${task.status}`);
-      } else {
-        // Continue polling for pending/running states
-        setTimeout(() => pollTaskStatus(id), 2000);
+  const handleCancel = async () => {
+    // Stop client-side polling immediately.
+    abortRef.current = true;
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    setIsPolling(false);
+
+    // Also cancel the server-side task if we have an ID.
+    if (taskId) {
+      try {
+        await cancelTaskMutation.mutateAsync({ params: { path: { id: taskId } } });
+        toast.info('Generation cancelled.');
+      } catch (err: any) {
+        // Task may have already completed — that's fine.
+        toast.info('Stopped polling (server task may have already finished).', {
+          description: err?.message ?? err?.error ?? undefined,
+        });
       }
-    } catch (err) {
-      setError('Failed to get task status');
-      setIsProcessing(false);
-      toast.error('Failed to get task status');
+    } else {
+      toast.info('Generation cancelled.');
     }
   };
 
   return (
-    <div className="container mx-auto px-4 py-8 space-y-8">
-      <div className="text-center space-y-4">
-        <h1 className="text-3xl font-bold text-center">Image Generation</h1>
-        <p className="text-muted-foreground max-w-2xl mx-auto">
-          Enter a prompt and the system will generate corresponding images
-        </p>
-      </div>
-
-      <Card className="max-w-2xl mx-auto">
-        <CardHeader>
-          <CardTitle>Generation Settings</CardTitle>
-          <CardDescription>Configure image generation parameters</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {error && (
-            <Alert variant="destructive">
-              <AlertTitle>Error</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-
-          <div className="space-y-2">
-            <Label htmlFor="prompt">Prompt</Label>
-            <Textarea
-              id="prompt"
-              placeholder="Describe the image you want to generate..."
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              disabled={isGenerating || isProcessing}
-              rows={4}
+    <>
+      {/* ── Lightbox ─────────────────────────────────────────────────────── */}
+      <Dialog open={!!lightboxSrc} onOpenChange={() => setLightboxSrc(null)}>
+        <DialogContent className="max-w-5xl p-2 bg-black border-neutral-800">
+          {lightboxSrc && (
+            <img
+              src={lightboxSrc}
+              alt="Full size"
+              className="w-full h-full object-contain rounded"
+              style={{ maxHeight: '85vh' }}
             />
-          </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
-          <div className="grid grid-cols-2 gap-4">
+      {/* ── Page ─────────────────────────────────────────────────────────── */}
+      <div className="min-h-full bg-background">
+        {/* Header */}
+        <div className="border-b border-border px-6 py-5 flex items-center gap-3">
+          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 border border-primary/20">
+            <Sparkles className="w-4 h-4 text-primary" />
+          </div>
+          <div>
+            <h1 className="text-lg font-semibold text-foreground leading-tight">Image Generation</h1>
+            <p className="text-xs text-muted-foreground">Stable Diffusion · Async task pipeline</p>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-0 h-[calc(100%-69px)]">
+          {/* ── Left Panel: Controls ────────────────────────────────────── */}
+          <div className="border-r border-border flex flex-col p-5 gap-5 overflow-y-auto">
+            {/* Prompt */}
             <div className="space-y-2">
-              <Label htmlFor="model">Model</Label>
-              <Select value={model} onValueChange={setModel} disabled={isGenerating || isProcessing}>
-                <SelectTrigger id="model">
-                  <SelectValue placeholder="Select model" />
+              <Label htmlFor="prompt" className="text-sm font-medium">
+                Prompt
+              </Label>
+              <Textarea
+                id="prompt"
+                placeholder="A photorealistic landscape at golden hour, dramatic lighting, 8k…"
+                value={prompt}
+                onChange={e => setPrompt(e.target.value)}
+                disabled={isBusy}
+                rows={5}
+                className="resize-none text-sm"
+              />
+              <p className="text-xs text-muted-foreground text-right">{prompt.length} chars</p>
+            </div>
+
+            {/* Size */}
+            <div className="space-y-2">
+              <Label htmlFor="size" className="text-sm font-medium">Size</Label>
+              <Select value={size} onValueChange={setSize} disabled={isBusy}>
+                <SelectTrigger id="size" className="text-sm">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="stable-diffusion">Stable Diffusion</SelectItem>
+                  {SIZES.map(s => (
+                    <SelectItem key={s.value} value={s.value} className="text-sm">
+                      {s.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
 
+            {/* Count */}
             <div className="space-y-2">
-              <Label htmlFor="numImages">Number of Images</Label>
-              <Select value={numImages} onValueChange={setNumImages} disabled={isGenerating || isProcessing}>
-                <SelectTrigger id="numImages">
-                  <SelectValue placeholder="Select count" />
+              <Label htmlFor="count" className="text-sm font-medium">Number of Images</Label>
+              <Select value={numImages} onValueChange={setNumImages} disabled={isBusy}>
+                <SelectTrigger id="count" className="text-sm">
+                  <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">1</SelectItem>
-                  <SelectItem value="2">2</SelectItem>
-                  <SelectItem value="4">4</SelectItem>
-                  <SelectItem value="8">8</SelectItem>
+                  {COUNTS.map(c => (
+                    <SelectItem key={c} value={c} className="text-sm">{c}</SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-          </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="size">Image Size</Label>
-            <Select value={size} onValueChange={setSize} disabled={isGenerating || isProcessing}>
-              <SelectTrigger id="size">
-                <SelectValue placeholder="Select size" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="256x256">256×256</SelectItem>
-                <SelectItem value="512x512">512×512</SelectItem>
-                <SelectItem value="1024x1024">1024×1024</SelectItem>
-                <SelectItem value="1024x1536">1024×1536</SelectItem>
-                <SelectItem value="1536x1024">1536×1024</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+            {/* Status info */}
+            {isPolling && taskId && (
+              <div className="rounded-lg border border-border bg-muted/40 p-3 space-y-1">
+                <p className="text-xs font-medium text-foreground flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Generating…
+                </p>
+                <p className="text-xs text-muted-foreground font-mono truncate">
+                  Task {taskId}
+                </p>
+              </div>
+            )}
 
-          {(isGenerating || isProcessing) && (
-            <div className="flex flex-col items-center space-y-4">
-              <Spinner className="h-8 w-8" />
-              <p>{isGenerating ? 'Submitting request...' : 'Generating image, please wait...'}</p>
-              {taskId && (
-                <p className="text-xs text-muted-foreground">Task ID: {taskId}</p>
+            <div className="flex gap-2 mt-auto pt-2">
+              <Button
+                onClick={handleGenerate}
+                disabled={!prompt.trim() || isBusy}
+                className="flex-1"
+              >
+                {isSubmitting ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Submitting…</>
+                ) : isPolling ? (
+                  <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Generating…</>
+                ) : (
+                  <><Sparkles className="w-4 h-4 mr-2" />Generate</>
+                )}
+              </Button>
+              {isPolling && (
+                <Button variant="outline" size="icon" onClick={handleCancel} title="Cancel">
+                  <X className="w-4 h-4" />
+                </Button>
               )}
             </div>
-          )}
-        </CardContent>
-        <CardFooter className="flex justify-end">
-          <Button
-            onClick={handleGenerate}
-            disabled={!prompt || !model || isGenerating || isProcessing}
-          >
-            {(isGenerating || isProcessing) ? (
-              <>
-                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                Generating...
-              </>
-            ) : (
-              'Generate Image'
-            )}
-          </Button>
-        </CardFooter>
-      </Card>
+          </div>
 
-      {images.length > 0 && (
-        <Card className="max-w-4xl mx-auto">
-          <CardHeader>
-            <CardTitle>Generated Results</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-              {images.map((image, index) => (
-                <div key={index} className="space-y-2">
-                  <div className="aspect-square rounded-md overflow-hidden border">
-                    {typeof image === 'string' && image.startsWith('data:image') ? (
-                      <img src={image} alt={`Generated image ${index + 1}`} className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-muted">
-                        <p className="text-sm text-muted-foreground">Unable to display image</p>
-                      </div>
-                    )}
-                  </div>
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    className="w-full"
-                    onClick={() => {
-                      if (typeof image === 'string' && image.startsWith('data:image')) {
-                        const link = document.createElement('a');
-                        link.href = image;
-                        link.download = `generated-image-${index + 1}.png`;
-                        link.click();
-                      }
-                    }}
-                  >
-                    Download
-                  </Button>
+          {/* ── Right Panel: Gallery ────────────────────────────────────── */}
+          <div className="overflow-y-auto p-5">
+            {images.length === 0 ? (
+              <div className="h-full flex flex-col items-center justify-center gap-3 text-muted-foreground select-none">
+                <div className="rounded-2xl border border-dashed border-border p-10 flex flex-col items-center gap-3">
+                  <ImageIcon className="w-10 h-10 opacity-20" />
+                  <p className="text-sm font-medium opacity-50">Generated images will appear here</p>
                 </div>
-              ))}
-            </div>
-          </CardContent>
-        </Card>
-      )}
-    </div>
+              </div>
+            ) : (
+              <div className="columns-1 sm:columns-2 xl:columns-3 gap-3 space-y-3">
+                {images.map((img, i) => (
+                  <div
+                    key={img.src}
+                    className="break-inside-avoid rounded-xl overflow-hidden border border-border group relative bg-muted/20"
+                  >
+                    <img
+                      src={img.src}
+                      alt={`Generated image ${i + 1}`}
+                      className="w-full h-auto block"
+                      loading="lazy"
+                    />
+                    {/* Overlay actions */}
+                    <div className="absolute inset-0 bg-black/0 group-hover:bg-black/50 transition-colors flex items-center justify-center gap-2 opacity-0 group-hover:opacity-100">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-8 text-xs"
+                        onClick={() => setLightboxSrc(img.src)}
+                      >
+                        <ZoomIn className="w-3.5 h-3.5 mr-1" />
+                        View
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        className="h-8 text-xs"
+                        onClick={() => handleDownload(img.src, i)}
+                      >
+                        <Download className="w-3.5 h-3.5 mr-1" />
+                        Save
+                      </Button>
+                    </div>
+                    {/* Caption */}
+                    <div className="px-3 py-2 border-t border-border bg-background/80">
+                      <p className="text-xs text-muted-foreground truncate" title={img.prompt}>
+                        {img.prompt}
+                      </p>
+                      <p className="text-xs text-muted-foreground/50 mt-0.5">{img.size}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </>
   );
 }
