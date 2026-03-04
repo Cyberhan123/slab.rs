@@ -4,7 +4,7 @@ import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
 import { useMarkdownTheme } from './hooks/use-markdowm-theme';
 import locale from './local';
-import { ChatContext, DEFAULT_CONVERSATIONS_ITEMS } from './chat-context';
+import { ChatContext, DEFAULT_CONVERSATIONS_ITEMS, DEFAULT_CONVERSATION_KEY } from './chat-context';
 import { useStyle } from './hooks/use-style';
 import { ChatSidebar } from './components/chat-sidebar';
 import { ChatMessageList } from './components/chat-message-list';
@@ -16,7 +16,7 @@ function Chat() {
   const styles = useStyle();
   const [deepThink, setDeepThink] = useState<boolean>(true);
   const [curConversation, setCurConversation] = useState<string>(
-    DEFAULT_CONVERSATIONS_ITEMS[0].key,
+    DEFAULT_CONVERSATIONS_ITEMS[0]?.key ?? DEFAULT_CONVERSATION_KEY,
   );
   
   const { 

@@ -5,19 +5,6 @@ import { useRef } from 'react';
 import locale from '../local';
 import { useStyle } from '../hooks/use-style';
 
-const slotConfig: SenderProps['slotConfig'] = [
-  { type: 'text', value: locale.slotTextStart },
-  {
-    type: 'select',
-    key: 'destination',
-    props: {
-      defaultValue: 'X SDK',
-      options: ['X SDK', 'X Markdown', 'Bubble'],
-    },
-  },
-  { type: 'text', value: locale.slotTextEnd },
-];
-
 interface ChatInputProps {
   isRequesting: boolean;
   deepThink: boolean;
@@ -45,7 +32,6 @@ export const ChatInput = ({
           suffix={false}
           ref={senderRef}
           key={curConversation}
-          slotConfig={slotConfig}
           loading={isRequesting}
           onSubmit={(val) => {
             if (!val) return;
