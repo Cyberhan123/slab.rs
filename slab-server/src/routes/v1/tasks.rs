@@ -18,13 +18,13 @@ use utoipa::OpenApi;
 use crate::entities::TaskStore;
 use crate::error::ServerError;
 use crate::schemas::v1::task::TaskStatusEnumExt;
-use crate::schemas::v1::task::{TaskResponse, TaskTypeQuery};
+use crate::schemas::v1::task::{TaskResponse, TaskResultPayload, TaskTypeQuery};
 use crate::state::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
     paths(list_tasks, get_task, get_task_result, cancel_task, restart_task),
-    components(schemas(TaskResponse, TaskTypeQuery))
+    components(schemas(TaskResponse, TaskResultPayload, TaskTypeQuery))
 )]
 pub struct TasksApi;
 
@@ -113,7 +113,7 @@ pub async fn get_task(
         ("id" = String, Path, description = "ID of the task to retrieve result for")
     ),
     responses(
-        (status = 200, description = "Task result retrieved", body = TaskResponse),
+        (status = 200, description = "Task result retrieved", body = TaskResultPayload),
         (status = 400, description = "Bad request"),
         (status = 404, description = "Task not found"),
         (status = 500, description = "Backend error"),
@@ -159,6 +159,18 @@ pub async fn get_task_result(
                 return Ok(Json(result_json));
             }
             Ok(None) => {
+                // `api::result()` returns None when the task is still in
+                // progress *or* when the payload was already consumed
+                // (ResultConsumed).  Fall back to the persisted result in DB
+                // if it was written by a prior call.
+                if let Some(data) = record.result_data {
+                    let result = serde_json::from_str::<serde_json::Value>(&data)
+                        .unwrap_or_else(|e| {
+                            warn!(task_id = %id, error = %e, "persisted result_data is not valid JSON; returning as plain string");
+                            serde_json::Value::String(data)
+                        });
+                    return Ok(Json(result));
+                }
                 return Err(ServerError::BadRequest(format!(
                     "task {id} is not completed yet"
                 )));
@@ -392,4 +404,56 @@ pub async fn restart_task(
     Ok(Json(
         serde_json::json!({ "task_id": id, "status": "running" }),
     ))
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod test {
+    use base64::Engine as _;
+
+    /// Helper that replicates the image-vs-text branching used in `get_task_result`.
+    fn bytes_to_result_json(task_type: &str, bytes: &[u8]) -> serde_json::Value {
+        if task_type == "image" {
+            let encoded =
+                base64::engine::general_purpose::STANDARD.encode(bytes);
+            let data_uri = format!("data:image/png;base64,{encoded}");
+            serde_json::json!({ "image": data_uri })
+        } else {
+            let text = String::from_utf8_lossy(bytes).to_string();
+            serde_json::json!({ "text": text })
+        }
+    }
+
+    #[test]
+    fn image_bytes_become_data_uri() {
+        let png_bytes = b"\x89PNG\r\n\x1a\nfakedata";
+        let result = bytes_to_result_json("image", png_bytes);
+        let image_field = result["image"].as_str().expect("image field must be a string");
+        assert!(
+            image_field.starts_with("data:image/png;base64,"),
+            "image field should start with PNG data URI prefix"
+        );
+        // Decode and verify round-trip.
+        let b64_part = image_field.trim_start_matches("data:image/png;base64,");
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(b64_part)
+            .expect("base64 should decode cleanly");
+        assert_eq!(decoded, png_bytes);
+    }
+
+    #[test]
+    fn non_image_bytes_become_text() {
+        let text_bytes = b"hello transcription";
+        let result = bytes_to_result_json("whisper", text_bytes);
+        assert_eq!(result["text"].as_str(), Some("hello transcription"));
+        assert!(result.get("image").is_none(), "image field must be absent");
+    }
+
+    #[test]
+    fn image_task_has_no_text_field() {
+        let result = bytes_to_result_json("image", b"\x00\x01\x02");
+        assert!(result.get("text").is_none(), "text field must be absent for image tasks");
+        assert!(result["image"].is_string());
+    }
 }

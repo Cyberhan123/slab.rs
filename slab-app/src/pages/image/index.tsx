@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -50,12 +50,24 @@ export default function Image() {
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
   const abortRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const generateMutation = api.useMutation('post', '/v1/images/generations');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
   const getResultMutation = api.useMutation('get', '/v1/tasks/{id}/result');
+  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
 
   const isBusy = isSubmitting || isPolling;
+
+  // Clear any pending poll timer when the component unmounts.
+  useEffect(() => {
+    return () => {
+      abortRef.current = true;
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+      }
+    };
+  }, []);
 
   const pollTaskStatus = useCallback(async (id: string, capturedPrompt: string, capturedSize: string) => {
     setIsPolling(true);
@@ -94,7 +106,7 @@ export default function Image() {
           toast.error(`Generation ${task.status}.`);
           setIsPolling(false);
         } else {
-          setTimeout(tick, POLL_INTERVAL_MS);
+          timerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
         }
       } catch (err: any) {
         toast.error('Error while checking task status.', {
@@ -104,7 +116,7 @@ export default function Image() {
       }
     };
 
-    setTimeout(tick, POLL_INTERVAL_MS);
+    timerRef.current = setTimeout(tick, POLL_INTERVAL_MS);
   }, [getTaskMutation, getResultMutation]);
 
   const handleGenerate = async () => {
@@ -143,10 +155,29 @@ export default function Image() {
     a.click();
   };
 
-  const handleCancel = () => {
+  const handleCancel = async () => {
+    // Stop client-side polling immediately.
     abortRef.current = true;
+    if (timerRef.current !== null) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
     setIsPolling(false);
-    toast.info('Generation cancelled.');
+
+    // Also cancel the server-side task if we have an ID.
+    if (taskId) {
+      try {
+        await cancelTaskMutation.mutateAsync({ params: { path: { id: taskId } } });
+        toast.info('Generation cancelled.');
+      } catch (err: any) {
+        // Task may have already completed — that's fine.
+        toast.info('Stopped polling (server task may have already finished).', {
+          description: err?.message ?? err?.error ?? undefined,
+        });
+      }
+    } else {
+      toast.info('Generation cancelled.');
+    }
   };
 
   return (
@@ -278,7 +309,7 @@ export default function Image() {
               <div className="columns-1 sm:columns-2 xl:columns-3 gap-3 space-y-3">
                 {images.map((img, i) => (
                   <div
-                    key={i}
+                    key={img.src}
                     className="break-inside-avoid rounded-xl overflow-hidden border border-border group relative bg-muted/20"
                   >
                     <img
