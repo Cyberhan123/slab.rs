@@ -415,8 +415,7 @@ mod test {
     /// Helper that replicates the image-vs-text branching used in `get_task_result`.
     fn bytes_to_result_json(task_type: &str, bytes: &[u8]) -> serde_json::Value {
         if task_type == "image" {
-            let encoded =
-                base64::engine::general_purpose::STANDARD.encode(bytes);
+            let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
             let data_uri = format!("data:image/png;base64,{encoded}");
             serde_json::json!({ "image": data_uri })
         } else {
@@ -429,7 +428,9 @@ mod test {
     fn image_bytes_become_data_uri() {
         let png_bytes = b"\x89PNG\r\n\x1a\nfakedata";
         let result = bytes_to_result_json("image", png_bytes);
-        let image_field = result["image"].as_str().expect("image field must be a string");
+        let image_field = result["image"]
+            .as_str()
+            .expect("image field must be a string");
         assert!(
             image_field.starts_with("data:image/png;base64,"),
             "image field should start with PNG data URI prefix"
@@ -453,7 +454,10 @@ mod test {
     #[test]
     fn image_task_has_no_text_field() {
         let result = bytes_to_result_json("image", b"\x00\x01\x02");
-        assert!(result.get("text").is_none(), "text field must be absent for image tasks");
+        assert!(
+            result.get("text").is_none(),
+            "text field must be absent for image tasks"
+        );
         assert!(result["image"].is_string());
     }
 }

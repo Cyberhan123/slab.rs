@@ -62,11 +62,30 @@ pub struct Config {
     /// When `None`, admin endpoints are unauthenticated.
     pub admin_api_token: Option<String>,
 
-    /// Transport mode: `"http"`, `"ipc"`, or `"both"` (default: `"http"`).
+    /// Transport mode: `"http"`, `"grpc"`, or `"both"` (default: `"http"`).
     pub transport_mode: String,
+
+    /// gRPC bind address when transport mode includes `"grpc"`.
+    pub grpc_bind_address: String,
+
+    /// Optional llama backend gRPC endpoint used by HTTP gateway mode.
+    pub llama_grpc_endpoint: Option<String>,
+
+    /// Optional whisper backend gRPC endpoint used by HTTP gateway mode.
+    pub whisper_grpc_endpoint: Option<String>,
+
+    /// Optional diffusion backend gRPC endpoint used by HTTP gateway mode.
+    pub diffusion_grpc_endpoint: Option<String>,
 
     /// Directory containing the llama,whisper,diffusion shared library.
     pub lib_dir: Option<std::path::PathBuf>,
+
+    /// Optional comma-separated list of enabled backends.
+    ///
+    /// Accepted values: `llama`, `whisper`, `diffusion` (also supports
+    /// `ggml.llama`, `ggml.whisper`, `ggml.diffusion`).
+    /// When unset, all backends are enabled.
+    pub enabled_backends: Option<String>,
 
     /// Directory where chat session state files are stored.
     pub session_state_dir: String,
@@ -91,9 +110,20 @@ impl Config {
             cors_allowed_origins: std::env::var("SLAB_CORS_ORIGINS").ok(),
             admin_api_token: std::env::var("SLAB_ADMIN_TOKEN").ok(),
             transport_mode: env_or("SLAB_TRANSPORT", "http"),
+            grpc_bind_address: env_or("SLAB_GRPC_BIND", "127.0.0.1:50051"),
+            llama_grpc_endpoint: std::env::var("SLAB_LLAMA_GRPC_ENDPOINT").ok(),
+            whisper_grpc_endpoint: std::env::var("SLAB_WHISPER_GRPC_ENDPOINT").ok(),
+            diffusion_grpc_endpoint: std::env::var("SLAB_DIFFUSION_GRPC_ENDPOINT").ok(),
             lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(|v| PathBuf::from(v)),
+            enabled_backends: std::env::var("SLAB_ENABLED_BACKENDS").ok(),
             session_state_dir: env_or("SLAB_SESSION_STATE_DIR", "./tmp/slab-sessions"),
         }
+    }
+
+    pub fn uses_remote_backends(&self) -> bool {
+        self.llama_grpc_endpoint.is_some()
+            || self.whisper_grpc_endpoint.is_some()
+            || self.diffusion_grpc_endpoint.is_some()
     }
 }
 

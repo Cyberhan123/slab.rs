@@ -41,8 +41,28 @@ impl Diffusion {
     /// Returns a [`libloading::Error`] when the library cannot be opened or a
     /// required symbol is missing.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, ::libloading::Error> {
-        let lib = unsafe { slab_diffusion_sys::DiffusionLib::new(path.as_ref())? };
-        Ok(Self { lib: Arc::new(lib) })
+        #[cfg(windows)]
+        {
+            use libloading::os::windows::{
+                Library, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+            };
+            let lib = unsafe {
+                Library::load_with_flags(
+                    path.as_ref(),
+                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+                )?
+            };
+            let diffusion_lib = unsafe { slab_diffusion_sys::DiffusionLib::from_library(lib)? };
+            Ok(Self {
+                lib: Arc::new(diffusion_lib),
+            })
+        }
+
+        #[cfg(not(windows))]
+        {
+            let lib = unsafe { slab_diffusion_sys::DiffusionLib::new(path.as_ref())? };
+            Ok(Self { lib: Arc::new(lib) })
+        }
     }
 
     /// Return a string describing the capabilities of the loaded build

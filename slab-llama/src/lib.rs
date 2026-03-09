@@ -80,8 +80,28 @@ impl Llama {
     /// a required symbol is missing.
     #[allow(clippy::arc_with_non_send_sync)]
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, ::libloading::Error> {
-        let lib = unsafe { slab_llama_sys::LlamaLib::new(path.as_ref())? };
-        Ok(Self { lib: Arc::new(lib) })
+        #[cfg(windows)]
+        {
+            use libloading::os::windows::{
+                Library, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+            };
+            let lib = unsafe {
+                Library::load_with_flags(
+                    path.as_ref(),
+                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+                )?
+            };
+            let llama_lib = unsafe { slab_llama_sys::LlamaLib::from_library(lib)? };
+            Ok(Self {
+                lib: Arc::new(llama_lib),
+            })
+        }
+
+        #[cfg(not(windows))]
+        {
+            let lib = unsafe { slab_llama_sys::LlamaLib::new(path.as_ref())? };
+            Ok(Self { lib: Arc::new(lib) })
+        }
     }
 
     /// Initialise the llama.cpp backend.

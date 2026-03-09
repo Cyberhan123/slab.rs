@@ -10,7 +10,7 @@
 mod admin;
 pub mod doc;
 pub mod health;
-mod v1;
+pub(crate) mod v1;
 use crate::middleware::{cors, trace};
 use crate::state::AppState;
 use axum::{
@@ -43,6 +43,27 @@ pub fn build(state: Arc<AppState>) -> Router {
     app
         // Outermost layers execute first on the way in.
         .layer(ServiceBuilder::new().layer(cors::cors_layer(state.clone())))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            trace::trace_middleware,
+        ))
+        .with_state(state)
+}
+
+/// Build the HTTP gateway router used by supervisor mode.
+pub fn build_gateway(state: Arc<AppState>) -> Router {
+    let api_router = Router::new()
+        .merge(health::router())
+        .nest("/v1", v1::gateway_router());
+
+    let mut app = Router::new().merge(api_router);
+    let api_doc = doc::get_gateway_docs();
+
+    if state.config.enable_swagger {
+        app = app.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api_doc));
+    }
+
+    app.layer(ServiceBuilder::new().layer(cors::cors_layer(state.clone())))
         .layer(middleware::from_fn_with_state(
             state.clone(),
             trace::trace_middleware,

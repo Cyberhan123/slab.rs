@@ -1,0 +1,47 @@
+syntax = "proto3";
+
+package slab.ipc.v1;
+
+service BackendService {
+  rpc Chat(ChatRequest) returns (ChatResponse);
+  rpc ChatStream(ChatRequest) returns (stream ChatStreamChunk);
+  rpc Transcribe(TranscribeRequest) returns (TranscribeResponse);
+  rpc GenerateImage(ImageRequest) returns (ImageResponse);
+}
+
+message ChatRequest {
+  string prompt = 1;
+  string model = 2;
+  uint32 max_tokens = 3;
+  float temperature = 4;
+  string session_key = 5;
+}
+
+message ChatResponse {
+  string text = 1;
+}
+
+message ChatStreamChunk {
+  string token = 1;
+  string error = 2;
+  bool done = 3;
+}
+
+message TranscribeRequest {
+  string path = 1;
+}
+
+message TranscribeResponse {
+  string text = 1;
+}
+
+message ImageRequest {
+  string model = 1;
+  string prompt = 2;
+  uint32 n = 3;
+  string size = 4;
+}
+
+message ImageResponse {
+  bytes image = 1;
+}
