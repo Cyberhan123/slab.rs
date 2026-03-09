@@ -15,7 +15,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
-use futures::{StreamExt, stream};
+use futures::{stream, StreamExt};
 
 use tracing::{debug, info};
 use utoipa::OpenApi;
@@ -23,6 +23,7 @@ use uuid::Uuid;
 
 use crate::entities::{ChatMessage, ChatStore};
 use crate::error::ServerError;
+use crate::grpc;
 use crate::schemas::v1::chat::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
 };
@@ -147,7 +148,48 @@ pub async fn chat_completions(
         "session_key": req.id,   // null → no KV-cache pinning
     });
 
+    let grpc_req = grpc::pb::ChatRequest {
+        prompt: prompt.clone(),
+        model: req.model.clone(),
+        max_tokens,
+        temperature,
+        session_key: req.id.clone().unwrap_or_default(),
+    };
+    let llama_endpoint = state.config.llama_grpc_endpoint.clone();
+    if state.config.uses_remote_backends() && llama_endpoint.is_none() {
+        return Err(ServerError::BackendNotReady(
+            "llama gRPC endpoint is not configured".into(),
+        ));
+    }
+
     if req.stream {
+        if let Some(endpoint) = llama_endpoint.as_deref() {
+            let backend_stream = grpc::client::chat_stream(endpoint, grpc_req.clone())
+                .await
+                .map_err(|e| ServerError::Internal(format!("grpc chat stream failed: {e}")))?;
+            let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
+            let created_ts = Utc::now().timestamp();
+            let model_name = req.model.clone();
+
+            let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
+                match chunk {
+                    Ok(msg) if !msg.error.is_empty() => Ok(Event::default().comment(msg.error)),
+                    Ok(msg) if msg.done => Ok(Event::default().comment("done")),
+                    Ok(msg) => {
+                        let data = build_chunk(&completion_id, created_ts, &model_name, &msg.token);
+                        Ok(Event::default().data(data))
+                    }
+                    Err(e) => Ok(Event::default().comment(e.to_string())),
+                }
+            });
+
+            let sse_stream = token_stream.chain(stream::once(async {
+                Ok::<Event, Infallible>(Event::default().data("[DONE]"))
+            }));
+
+            return Ok(Sse::new(sse_stream).into_response());
+        }
+
         let backend_stream = slab_core::api::backend(slab_core::api::Backend::GGMLLlama)
             .inference_stream()
             .input(slab_core::Payload::Text(std::sync::Arc::from(
@@ -189,18 +231,23 @@ pub async fn chat_completions(
         return Ok(Sse::new(sse_stream).into_response());
     }
 
-    let result_bytes = slab_core::api::backend(slab_core::api::Backend::GGMLLlama)
-        .inference()
-        .input(slab_core::Payload::Text(std::sync::Arc::from(
-            prompt.as_str(),
-        )))
-        .options(slab_core::Payload::Json(options))
-        .run_wait()
-        .await
-        .map_err(ServerError::Runtime)?;
-
-    let generated = String::from_utf8(result_bytes.to_vec())
-        .map_err(|e| ServerError::Internal(format!("backend returned invalid UTF-8: {e}")))?;
+    let generated = if let Some(endpoint) = llama_endpoint.as_deref() {
+        grpc::client::chat(endpoint, grpc_req)
+            .await
+            .map_err(|e| ServerError::Internal(format!("grpc chat failed: {e}")))?
+    } else {
+        let result_bytes = slab_core::api::backend(slab_core::api::Backend::GGMLLlama)
+            .inference()
+            .input(slab_core::Payload::Text(std::sync::Arc::from(
+                prompt.as_str(),
+            )))
+            .options(slab_core::Payload::Json(options))
+            .run_wait()
+            .await
+            .map_err(ServerError::Runtime)?;
+        String::from_utf8(result_bytes.to_vec())
+            .map_err(|e| ServerError::Internal(format!("backend returned invalid UTF-8: {e}")))?
+    };
 
     info!(model = %req.model, output_len = generated.len(), "chat completion done");
 

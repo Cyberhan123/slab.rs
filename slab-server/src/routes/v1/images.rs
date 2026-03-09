@@ -9,6 +9,7 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
+use base64::Engine as _;
 use chrono::Utc;
 use tracing::{debug, info, warn};
 use utoipa::OpenApi;
@@ -16,6 +17,7 @@ use uuid::Uuid;
 
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
+use crate::grpc;
 use crate::schemas::v1::images::ImageGenerationRequest;
 use crate::state::AppState;
 
@@ -84,6 +86,12 @@ pub async fn generate_images(
     }
 
     debug!(model = %req.model, prompt_len = req.prompt.len(), n = req.n, %size, "image generation request");
+    let diffusion_endpoint = state.config.diffusion_grpc_endpoint.clone();
+    if state.config.uses_remote_backends() && diffusion_endpoint.is_none() {
+        return Err(ServerError::BackendNotReady(
+            "diffusion gRPC endpoint is not configured".into(),
+        ));
+    }
 
     let task_id = Uuid::new_v4().to_string();
     let now = Utc::now();
@@ -110,31 +118,75 @@ pub async fn generate_images(
         })
         .await?;
 
-    // Submit the pipeline to slab-core and get the core TaskId immediately.
-    let core_task_result = slab_core::api::backend(slab_core::api::Backend::GGMLDiffusion)
-        .inference()
-        .input(slab_core::Payload::Json(input_json))
-        .run()
-        .await;
+    if let Some(endpoint) = diffusion_endpoint {
+        let store = Arc::clone(&state.store);
+        let task_manager = Arc::clone(&state.task_manager);
+        let task_id_for_spawn = task_id.clone();
+        let request_for_spawn = grpc::pb::ImageRequest {
+            model: req.model.clone(),
+            prompt: req.prompt.clone(),
+            n: req.n,
+            size: size.to_string(),
+        };
+        let join = tokio::spawn(async move {
+            let rpc_result = grpc::client::generate_image(&endpoint, request_for_spawn).await;
+            if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {
+                if record.status == "cancelled" {
+                    task_manager.remove(&task_id_for_spawn);
+                    return;
+                }
+            }
 
-    match core_task_result {
-        Ok(core_task_id) => {
-            state
-                .store
-                .set_core_task_id(&task_id, core_task_id as i64)
-                .await
-                .unwrap_or_else(
-                    |e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"),
-                );
-            info!(task_id = %task_id, core_task_id, "image generation task submitted to slab-core");
-        }
-        Err(e) => {
-            warn!(task_id = %task_id, error = %e, "failed to submit image generation to slab-core");
-            state
-                .store
-                .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
-                .await
-                .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to update task status"));
+            match rpc_result {
+                Ok(image_bytes) => {
+                    let encoded = base64::engine::general_purpose::STANDARD.encode(&image_bytes);
+                    let data_uri = format!("data:image/png;base64,{encoded}");
+                    let payload = serde_json::json!({ "image": data_uri }).to_string();
+                    store
+                        .update_task_status(&task_id_for_spawn, "succeeded", Some(&payload), None)
+                        .await
+                        .unwrap_or_else(|e| warn!(task_id = %task_id_for_spawn, error = %e, "failed to update remote image result"));
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    store
+                        .update_task_status(&task_id_for_spawn, "failed", None, Some(&msg))
+                        .await
+                        .unwrap_or_else(|db_e| warn!(task_id = %task_id_for_spawn, error = %db_e, "failed to update remote image failure"));
+                }
+            }
+            task_manager.remove(&task_id_for_spawn);
+        });
+        state
+            .task_manager
+            .insert(task_id.clone(), join.abort_handle());
+    } else {
+        // Submit the pipeline to slab-core and get the core TaskId immediately.
+        let core_task_result = slab_core::api::backend(slab_core::api::Backend::GGMLDiffusion)
+            .inference()
+            .input(slab_core::Payload::Json(input_json))
+            .run()
+            .await;
+
+        match core_task_result {
+            Ok(core_task_id) => {
+                state
+                    .store
+                    .set_core_task_id(&task_id, core_task_id as i64)
+                    .await
+                    .unwrap_or_else(
+                        |e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"),
+                    );
+                info!(task_id = %task_id, core_task_id, "image generation task submitted to slab-core");
+            }
+            Err(e) => {
+                warn!(task_id = %task_id, error = %e, "failed to submit image generation to slab-core");
+                state
+                    .store
+                    .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
+                    .await
+                    .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to update task status"));
+            }
         }
     }
 

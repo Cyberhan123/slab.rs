@@ -7,6 +7,7 @@ use std::str::Utf8Error;
 /// so you can check there for more information upon receiving a `WhisperError`.
 #[derive(Debug, Clone)]
 pub enum WhisperError {
+    InitBackendError(String),
     /// Failed to create a new context.
     InitError,
     /// User didn't initialize spectrogram
@@ -33,7 +34,9 @@ pub enum WhisperError {
         valid_up_to: usize,
     },
     /// A null byte was detected in a user-provided string.
-    NullByteInString { idx: usize },
+    NullByteInString {
+        idx: usize,
+    },
     /// Whisper returned a null pointer.
     NullPointer,
     /// Generic whisper error. Varies depending on the function.
@@ -45,7 +48,10 @@ pub enum WhisperError {
     /// No samples were provided.
     NoSamples,
     /// Input and output slices were not the same length.
-    InputOutputLengthMismatch { input_len: usize, output_len: usize },
+    InputOutputLengthMismatch {
+        input_len: usize,
+        output_len: usize,
+    },
     /// Input slice was not an even number of samples.
     HalfSampleMissing(usize),
     /// Failed to load the whisper dynamic library.
@@ -79,6 +85,7 @@ impl std::fmt::Display for WhisperError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         use WhisperError::*;
         match self {
+            InitBackendError(msg) => write!(f, "Failed to initialize backend: {}", msg),
             InitError => write!(f, "Failed to create a new whisper context."),
             SpectrogramNotInitialized => write!(f, "User didn't initialize spectrogram."),
             EncodeNotComplete => write!(f, "Encode was not called."),

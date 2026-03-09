@@ -16,6 +16,7 @@ use uuid::Uuid;
 
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
+use crate::grpc;
 use crate::schemas::v1::audio::CompletionRequest;
 use crate::state::AppState;
 use bytemuck::cast_slice;
@@ -63,14 +64,22 @@ pub async fn transcribe(
         return Err(ServerError::BadRequest("audio file path is empty".into()));
     }
 
-    match slab_core::api::is_backend_ready(Backend::GGMLWhisper).await {
-        Ok(true) => {}
-        Ok(false) => {
-            return Err(ServerError::BackendNotReady(
-                "Whisper backend is not ready. Configure SLAB_WHISPER_LIB_DIR and load a model before submitting transcription tasks.".into(),
-            ));
+    let whisper_endpoint = state.config.whisper_grpc_endpoint.clone();
+    if state.config.uses_remote_backends() && whisper_endpoint.is_none() {
+        return Err(ServerError::BackendNotReady(
+            "whisper gRPC endpoint is not configured".into(),
+        ));
+    }
+    if whisper_endpoint.is_none() {
+        match slab_core::api::is_backend_ready(Backend::GGMLWhisper).await {
+            Ok(true) => {}
+            Ok(false) => {
+                return Err(ServerError::BackendNotReady(
+                    "Whisper backend is not ready. Configure SLAB_WHISPER_LIB_DIR and load a model before submitting transcription tasks.".into(),
+                ));
+            }
+            Err(e) => return Err(ServerError::Runtime(e)),
         }
-        Err(e) => return Err(ServerError::Runtime(e)),
     }
 
     let task_id = Uuid::new_v4().to_string();
@@ -93,32 +102,70 @@ pub async fn transcribe(
         })
         .await?;
 
-    let core_task_result = slab_core::api::backend(Backend::GGMLWhisper)
-        .inference()
-        .input(slab_core::Payload::Text(req.path.clone().into()))
-        .preprocess("ffmpeg.to_pcm_f32le", convert_to_pcm_f32le)
-        .run()
-        .await;
+    if let Some(endpoint) = whisper_endpoint {
+        let store = Arc::clone(&state.store);
+        let task_manager = Arc::clone(&state.task_manager);
+        let task_id_for_spawn = task_id.clone();
+        let path_for_spawn = req.path.clone();
+        let join = tokio::spawn(async move {
+            let rpc_result = grpc::client::transcribe(&endpoint, path_for_spawn).await;
+            if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {
+                if record.status == "cancelled" {
+                    task_manager.remove(&task_id_for_spawn);
+                    return;
+                }
+            }
 
-    match core_task_result {
-        Ok(core_task_id) => {
-            // Persist the slab-core TaskId so status/result queries can use it.
-            state
-                .store
-                .set_core_task_id(&task_id, core_task_id as i64)
-                .await
-                .unwrap_or_else(
-                    |e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"),
-                );
-            info!(task_id = %task_id, core_task_id, "transcription task submitted to slab-core");
-        }
-        Err(e) => {
-            warn!(task_id = %task_id, error = %e, "failed to submit transcription to slab-core");
-            state
-                .store
-                .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
-                .await
-                .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to update task status"));
+            match rpc_result {
+                Ok(text) => {
+                    let payload = serde_json::json!({ "text": text }).to_string();
+                    store
+                        .update_task_status(&task_id_for_spawn, "succeeded", Some(&payload), None)
+                        .await
+                        .unwrap_or_else(|e| warn!(task_id = %task_id_for_spawn, error = %e, "failed to update remote transcription result"));
+                }
+                Err(e) => {
+                    let msg = e.to_string();
+                    store
+                        .update_task_status(&task_id_for_spawn, "failed", None, Some(&msg))
+                        .await
+                        .unwrap_or_else(|db_e| warn!(task_id = %task_id_for_spawn, error = %db_e, "failed to update remote transcription failure"));
+                }
+            }
+
+            task_manager.remove(&task_id_for_spawn);
+        });
+        state
+            .task_manager
+            .insert(task_id.clone(), join.abort_handle());
+    } else {
+        let core_task_result = slab_core::api::backend(Backend::GGMLWhisper)
+            .inference()
+            .input(slab_core::Payload::Text(req.path.clone().into()))
+            .preprocess("ffmpeg.to_pcm_f32le", convert_to_pcm_f32le)
+            .run()
+            .await;
+
+        match core_task_result {
+            Ok(core_task_id) => {
+                // Persist the slab-core TaskId so status/result queries can use it.
+                state
+                    .store
+                    .set_core_task_id(&task_id, core_task_id as i64)
+                    .await
+                    .unwrap_or_else(
+                        |e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"),
+                    );
+                info!(task_id = %task_id, core_task_id, "transcription task submitted to slab-core");
+            }
+            Err(e) => {
+                warn!(task_id = %task_id, error = %e, "failed to submit transcription to slab-core");
+                state
+                    .store
+                    .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
+                    .await
+                    .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to update task status"));
+            }
         }
     }
 

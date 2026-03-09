@@ -16,7 +16,6 @@ mod tests {
         Payload::Text(Arc::from(s))
     }
 
-
     #[test]
     fn payload_clone_does_not_copy_bytes() {
         let data: Arc<[u8]> = Arc::from(vec![1u8, 2, 3]);
@@ -29,7 +28,6 @@ mod tests {
             panic!("unexpected payload variant");
         }
     }
-
 
     #[tokio::test]
     async fn inference_lease_acquired_and_released() {
@@ -76,7 +74,6 @@ mod tests {
             "expected Busy error"
         );
     }
-
 
     #[tokio::test]
     async fn cpu_stage_transforms_payload() {
