@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+﻿import { useCallback, useEffect, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
@@ -197,19 +197,8 @@ export default function Image() {
       </Dialog>
 
       {/* ── Page ─────────────────────────────────────────────────────────── */}
-      <div className="min-h-full bg-background">
-        {/* Header */}
-        <div className="border-b border-border px-6 py-5 flex items-center gap-3">
-          <div className="flex items-center justify-center w-9 h-9 rounded-lg bg-primary/10 border border-primary/20">
-            <Sparkles className="w-4 h-4 text-primary" />
-          </div>
-          <div>
-            <h1 className="text-lg font-semibold text-foreground leading-tight">Image Generation</h1>
-            <p className="text-xs text-muted-foreground">Stable Diffusion · Async task pipeline</p>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-[380px_1fr] gap-0 h-[calc(100%-69px)]">
+      <div className="h-full bg-background">
+        <div className="grid h-full grid-cols-1 gap-0 lg:grid-cols-[380px_1fr]">
           {/* ── Left Panel: Controls ────────────────────────────────────── */}
           <div className="border-r border-border flex flex-col p-5 gap-5 overflow-y-auto">
             {/* Prompt */}

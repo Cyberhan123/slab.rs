@@ -23,37 +23,36 @@ export function BackendStatus() {
     return () => clearInterval(interval);
   }, []);
 
+  const statusBadge = (
+    label: string,
+    dotClassName: string,
+    variant: React.ComponentProps<typeof Badge>['variant'] = 'outline',
+    busy = false,
+  ) => (
+    <Badge
+      variant={variant}
+      className="gap-1"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      aria-busy={busy || undefined}
+    >
+      <div className={dotClassName} />
+      {label}
+    </Badge>
+  );
+
   if (isChecking) {
-    return (
-      <Badge variant="outline" className="gap-1">
-        <div className="h-2 w-2 rounded-full bg-yellow-500 animate-pulse" />
-        Checking...
-      </Badge>
-    );
+    return statusBadge('Checking...', 'h-2 w-2 rounded-full bg-yellow-500 animate-pulse', 'outline', true);
   }
 
   if (isOnline === null) {
-    return (
-      <Badge variant="outline" className="gap-1">
-        <div className="h-2 w-2 rounded-full bg-gray-500" />
-        Unknown
-      </Badge>
-    );
+    return statusBadge('Unknown', 'h-2 w-2 rounded-full bg-gray-500');
   }
 
   if (isOnline) {
-    return (
-      <Badge variant="default" className="gap-1">
-        <div className="h-2 w-2 rounded-full bg-green-500" />
-        Online
-      </Badge>
-    );
+    return statusBadge('Online', 'h-2 w-2 rounded-full bg-green-500', 'default');
   }
 
-  return (
-    <Badge variant="destructive" className="gap-1">
-      <div className="h-2 w-2 rounded-full bg-red-500" />
-      Offline
-    </Badge>
-  );
+  return statusBadge('Offline', 'h-2 w-2 rounded-full bg-red-500', 'destructive');
 }
