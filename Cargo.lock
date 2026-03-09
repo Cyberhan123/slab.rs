@@ -3545,6 +3545,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "parity-tokio-ipc"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9981e32fb75e004cc148f5fb70342f393830e0a4aa62e3cc93b50976218d42b6"
+dependencies = [
+ "futures",
+ "libc",
+ "log 0.4.29",
+ "rand 0.7.3",
+ "tokio",
+ "winapi",
+]
+
+[[package]]
 name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5270,6 +5284,7 @@ dependencies = [
  "bytemuck",
  "clap",
  "futures",
+ "parity-tokio-ipc",
  "serde_json",
  "slab-core",
  "slab-proto",
@@ -5295,6 +5310,8 @@ dependencies = [
  "hf-hub",
  "http",
  "http-body-util",
+ "hyper-util",
+ "parity-tokio-ipc",
  "serde",
  "serde_json",
  "slab-core",

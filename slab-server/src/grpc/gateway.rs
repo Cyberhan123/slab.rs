@@ -2,7 +2,9 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use anyhow::Context;
+use hyper_util::rt::TokioIo;
 use tonic::transport::{Channel, Endpoint};
+use tower::service_fn;
 
 use crate::config::Config;
 
@@ -12,6 +14,12 @@ const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 const BACKEND_LLAMA: &str = "ggml.llama";
 const BACKEND_WHISPER: &str = "ggml.whisper";
 const BACKEND_DIFFUSION: &str = "ggml.diffusion";
+
+#[derive(Debug, Clone)]
+enum GrpcEndpoint {
+    Http(String),
+    Ipc(String),
+}
 
 #[derive(Clone, Default)]
 pub struct GrpcGateway {
@@ -90,13 +98,16 @@ async fn connect_optional(endpoint: Option<&str>) -> anyhow::Result<Option<Chann
 }
 
 async fn connect_channel(endpoint: &str) -> anyhow::Result<Channel> {
-    let url = format!("http://{endpoint}");
-    let transport = Endpoint::from_shared(url.clone())
-        .with_context(|| format!("invalid gRPC endpoint URL: {url}"))?;
+    let endpoint = parse_grpc_endpoint(endpoint)?;
 
     let mut last_error = None;
     for _ in 0..CONNECT_ATTEMPTS {
-        match transport.clone().connect().await {
+        let connect_result = match &endpoint {
+            GrpcEndpoint::Http(url) => connect_http_channel(url).await,
+            GrpcEndpoint::Ipc(path) => connect_ipc_channel(path).await,
+        };
+
+        match connect_result {
             Ok(channel) => return Ok(channel),
             Err(err) => {
                 last_error = Some(err);
@@ -108,7 +119,10 @@ async fn connect_channel(endpoint: &str) -> anyhow::Result<Channel> {
     let err = last_error
         .map(|e| e.to_string())
         .unwrap_or_else(|| "unknown connection error".to_string());
-    anyhow::bail!("failed to connect to gRPC endpoint {endpoint}: {err}");
+    anyhow::bail!(
+        "failed to connect to gRPC endpoint {}: {err}",
+        endpoint.as_display()
+    );
 }
 
 fn canonical_backend_id(backend_id: &str) -> Option<&'static str> {
@@ -118,4 +132,63 @@ fn canonical_backend_id(backend_id: &str) -> Option<&'static str> {
         "ggml.diffusion" | "diffusion" => Some(BACKEND_DIFFUSION),
         _ => None,
     }
+}
+
+impl GrpcEndpoint {
+    fn as_display(&self) -> &str {
+        match self {
+            Self::Http(url) => url.as_str(),
+            Self::Ipc(path) => path.as_str(),
+        }
+    }
+}
+
+fn parse_grpc_endpoint(raw: &str) -> anyhow::Result<GrpcEndpoint> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        anyhow::bail!("gRPC endpoint is empty");
+    }
+
+    if let Some(path) = raw.strip_prefix("ipc://") {
+        let path = path.trim();
+        if path.is_empty() {
+            anyhow::bail!("invalid IPC endpoint '{}': missing socket/pipe path", raw);
+        }
+        return Ok(GrpcEndpoint::Ipc(path.to_owned()));
+    }
+
+    let url = if raw.starts_with("http://") || raw.starts_with("https://") {
+        raw.to_owned()
+    } else {
+        format!("http://{raw}")
+    };
+
+    Ok(GrpcEndpoint::Http(url))
+}
+
+async fn connect_http_channel(url: &str) -> anyhow::Result<Channel> {
+    let transport =
+        Endpoint::from_shared(url.to_owned()).with_context(|| format!("invalid gRPC URL: {url}"))?;
+    let channel = transport
+        .connect()
+        .await
+        .with_context(|| format!("failed to connect to HTTP gRPC endpoint '{url}'"))?;
+    Ok(channel)
+}
+
+async fn connect_ipc_channel(path: &str) -> anyhow::Result<Channel> {
+    let path_display = path.to_owned();
+    let path_for_connector = path_display.clone();
+
+    let channel = Endpoint::from_static("http://[::]:50051")
+        .connect_with_connector(service_fn(move |_| {
+            let path = path_for_connector.clone();
+            async move {
+                let conn = parity_tokio_ipc::Endpoint::connect(path).await?;
+                Ok::<_, std::io::Error>(TokioIo::new(conn))
+            }
+        }))
+        .await
+        .with_context(|| format!("failed to connect to IPC gRPC endpoint '{path_display}'"))?;
+    Ok(channel)
 }

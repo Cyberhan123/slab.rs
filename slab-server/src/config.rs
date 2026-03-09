@@ -62,7 +62,8 @@ pub struct Config {
     /// When `None`, admin endpoints are unauthenticated.
     pub admin_api_token: Option<String>,
 
-    /// Transport mode: `"http"` or `"both"` (default: `"http"`).
+    /// Runtime transport mode between slab-server and slab-runtime:
+    /// `"http"` or `"ipc"` (default: `"http"`).
     pub transport_mode: String,
 
     /// Optional llama backend gRPC endpoint used by HTTP gateway mode.
