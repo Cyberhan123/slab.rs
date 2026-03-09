@@ -7,7 +7,6 @@ use axum::routing::post;
 use axum::{Json, Router};
 use base64::Engine as _;
 use chrono::Utc;
-use tower::ServiceExt;
 use tracing::{debug, warn};
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -34,14 +33,6 @@ pub struct ImagesApi;
 /// Register image generation routes.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new().route("/images/generations", post(generate_images))
-}
-
-#[derive(serde::Serialize)]
-struct ImageGrpcRequest<'a> {
-    model: &'a str,
-    prompt: &'a str,
-    n: u32,
-    size: &'a str,
 }
 
 /// Image generation (`POST /v1/images/generations`).
@@ -93,13 +84,9 @@ pub async fn generate_images(
         "image generation request"
     );
 
-    let diffusion_endpoint = state
-        .config
-        .diffusion_grpc_endpoint
-        .clone()
-        .ok_or_else(|| {
-            ServerError::BackendNotReady("diffusion gRPC endpoint is not configured".into())
-        })?;
+    let generate_image_channel = state.grpc.generate_image_channel().ok_or_else(|| {
+        ServerError::BackendNotReady("diffusion gRPC endpoint is not configured".into())
+    })?;
 
     let task_id = Uuid::new_v4().to_string();
     let now = Utc::now();
@@ -126,22 +113,20 @@ pub async fn generate_images(
         })
         .await?;
 
-    let request_for_spawn: grpc::pb::ImageRequest =
-        grpc::gateway::map_via_serde(&ImageGrpcRequest {
-            model: &req.model,
-            prompt: &req.prompt,
-            n: req.n,
-            size,
-        })
-        .map_err(|e| ServerError::BadRequest(format!("invalid image payload: {e}")))?;
+    let request_for_spawn = grpc::pb::ImageRequest {
+        model: req.model.clone(),
+        prompt: req.prompt.clone(),
+        n: req.n,
+        size: size.to_string(),
+    };
 
     let store = Arc::clone(&state.store);
     let task_manager = Arc::clone(&state.task_manager);
     let task_id_for_spawn = task_id.clone();
+    let generate_image_channel_for_spawn = generate_image_channel;
     let join = tokio::spawn(async move {
-        let rpc_result = grpc::gateway::generate_image(diffusion_endpoint)
-            .oneshot(request_for_spawn)
-            .await;
+        let rpc_result =
+            grpc::client::generate_image(generate_image_channel_for_spawn, request_for_spawn).await;
         if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {
             if record.status == "cancelled" {
                 task_manager.remove(&task_id_for_spawn);
@@ -150,8 +135,8 @@ pub async fn generate_images(
         }
 
         match rpc_result {
-            Ok(response) => {
-                let encoded = base64::engine::general_purpose::STANDARD.encode(&response.image);
+            Ok(image) => {
+                let encoded = base64::engine::general_purpose::STANDARD.encode(&image);
                 let data_uri = format!("data:image/png;base64,{encoded}");
                 let payload = serde_json::json!({ "image": data_uri }).to_string();
                 store

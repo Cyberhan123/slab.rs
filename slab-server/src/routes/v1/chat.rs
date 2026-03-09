@@ -10,7 +10,6 @@ use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
 use futures::{stream, StreamExt};
-use tower::ServiceExt;
 use tracing::{debug, info};
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -137,13 +136,12 @@ pub async fn chat_completions(
         session_key: req.id.clone().unwrap_or_default(),
     };
 
-    let llama_endpoint = state.config.llama_grpc_endpoint.clone().ok_or_else(|| {
+    let llama_channel = state.grpc.chat_channel().ok_or_else(|| {
         ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
     })?;
 
     if req.stream {
-        let backend_stream = grpc::gateway::chat_stream(llama_endpoint.clone())
-            .oneshot(grpc_req.clone())
+        let backend_stream = grpc::client::chat_stream(llama_channel.clone(), grpc_req.clone())
             .await
             .map_err(|e| ServerError::Internal(format!("grpc chat stream failed: {e}")))?;
 
@@ -170,11 +168,9 @@ pub async fn chat_completions(
         return Ok(Sse::new(sse_stream).into_response());
     }
 
-    let generated = grpc::gateway::chat(llama_endpoint)
-        .oneshot(grpc_req)
+    let generated = grpc::client::chat(llama_channel, grpc_req)
         .await
-        .map_err(|e| ServerError::Internal(format!("grpc chat failed: {e}")))?
-        .text;
+        .map_err(|e| ServerError::Internal(format!("grpc chat failed: {e}")))?;
 
     info!(
         model = %req.model,

@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package slab.ipc.v1;
+
+import "slab/ipc/v1/common.proto";
+
+service WhisperService {
+  rpc Transcribe(TranscribeRequest) returns (TranscribeResponse);
+  rpc LoadModel(ModelLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
+  rpc ReloadLibrary(ReloadLibraryRequest) returns (ModelStatusResponse);
+}
+
+message TranscribeRequest {
+  string path = 1;
+}
+
+message TranscribeResponse {
+  string text = 1;
+}

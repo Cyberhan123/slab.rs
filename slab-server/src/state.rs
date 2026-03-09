@@ -65,6 +65,8 @@ impl TaskManager {
 pub struct AppState {
     /// Server configuration (env-derived).
     pub config: Arc<Config>,
+    /// Shared gRPC gateway services (channel-backed).
+    pub grpc: Arc<crate::grpc::gateway::GrpcGateway>,
     /// Persistent request / response audit store.
     pub store: Arc<AnyStore>,
     /// Tracks abort handles for running async tasks.

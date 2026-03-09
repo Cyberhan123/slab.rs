@@ -1,7 +1,60 @@
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::time::Duration;
+
 use tauri::path::BaseDirectory;
 use tauri::Manager;
-use tauri_plugin_shell::process::CommandEvent;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 use tauri_plugin_shell::ShellExt;
+
+pub struct SidecarState {
+    child: Mutex<Option<CommandChild>>,
+    terminated: Arc<AtomicBool>,
+    shutdown_started: AtomicBool,
+}
+
+impl SidecarState {
+    fn new(child: CommandChild, terminated: Arc<AtomicBool>) -> Self {
+        Self {
+            child: Mutex::new(Some(child)),
+            terminated,
+            shutdown_started: AtomicBool::new(false),
+        }
+    }
+
+    fn trigger_shutdown(&self) {
+        if self.shutdown_started.swap(true, Ordering::SeqCst) {
+            return;
+        }
+
+        let Some(mut child) = self.child.lock().ok().and_then(|mut guard| guard.take()) else {
+            return;
+        };
+
+        if let Err(e) = child.write(b"shutdown\n") {
+            eprintln!("[Sidecar] failed to send shutdown command: {e}");
+        }
+
+        let terminated = Arc::clone(&self.terminated);
+        tauri::async_runtime::spawn(async move {
+            tokio::time::sleep(Duration::from_secs(8)).await;
+            if terminated.load(Ordering::SeqCst) {
+                return;
+            }
+            if let Err(e) = child.kill() {
+                eprintln!("[Sidecar] failed to force-kill sidecar after timeout: {e}");
+            }
+        });
+    }
+}
+
+pub fn shutdown_server_sidecar<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
+    if let Some(state) = app_handle.try_state::<SidecarState>() {
+        state.trigger_shutdown();
+    }
+}
 
 pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle();
@@ -19,9 +72,13 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
         "127.0.0.1:3002",
         "--lib-dir",
         lib_path_str,
+        "--shutdown-on-stdin-close",
     ]);
 
-    let (mut rx, mut _child) = sidecar_command.spawn().expect("failed to spawn sidecar");
+    let (mut rx, child) = sidecar_command.spawn()?;
+    let terminated = Arc::new(AtomicBool::new(false));
+    let terminated_for_events = Arc::clone(&terminated);
+    let _ = app.manage(SidecarState::new(child, terminated));
 
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
@@ -38,6 +95,7 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
                     eprintln!("[Sidecar ERROR] {}", err);
                 }
                 CommandEvent::Terminated(payload) => {
+                    terminated_for_events.store(true, Ordering::SeqCst);
                     println!(
                         "[Sidecar TERMINATED] signal {:?} code {:?}",
                         payload.signal, payload.code

@@ -1,105 +1,121 @@
+use std::collections::HashMap;
+use std::time::Duration;
+
 use anyhow::Context;
-use tonic::Streaming;
-use tower::service_fn;
-use tower::util::BoxCloneService;
+use tonic::transport::{Channel, Endpoint};
 
 use crate::config::Config;
 
-use super::{client, pb};
+const CONNECT_ATTEMPTS: usize = 30;
+const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
 
-pub type ChatService = BoxCloneService<pb::ChatRequest, pb::ChatResponse, anyhow::Error>;
-pub type ChatStreamService =
-    BoxCloneService<pb::ChatRequest, Streaming<pb::ChatStreamChunk>, anyhow::Error>;
-pub type TranscribeService =
-    BoxCloneService<pb::TranscribeRequest, pb::TranscribeResponse, anyhow::Error>;
-pub type GenerateImageService = BoxCloneService<pb::ImageRequest, pb::ImageResponse, anyhow::Error>;
-pub type LoadModelService =
-    BoxCloneService<pb::ModelLoadRequest, pb::ModelStatusResponse, anyhow::Error>;
-pub type UnloadModelService =
-    BoxCloneService<pb::ModelUnloadRequest, pb::ModelStatusResponse, anyhow::Error>;
-pub type ReloadLibraryService =
-    BoxCloneService<pb::ReloadLibraryRequest, pb::ModelStatusResponse, anyhow::Error>;
+const BACKEND_LLAMA: &str = "ggml.llama";
+const BACKEND_WHISPER: &str = "ggml.whisper";
+const BACKEND_DIFFUSION: &str = "ggml.diffusion";
 
-pub fn chat(endpoint: impl Into<String>) -> ChatService {
-    let endpoint = endpoint.into();
-    BoxCloneService::new(service_fn(move |request: pb::ChatRequest| {
-        let endpoint = endpoint.clone();
-        async move {
-            let text = client::chat(&endpoint, request).await?;
-            Ok(pb::ChatResponse { text })
+#[derive(Clone, Default)]
+pub struct GrpcGateway {
+    backend_channels: HashMap<String, Channel>,
+}
+
+impl std::fmt::Debug for GrpcGateway {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut backends: Vec<&str> = self.backend_channels.keys().map(String::as_str).collect();
+        backends.sort_unstable();
+        f.debug_struct("GrpcGateway")
+            .field("chat", &self.backend_channels.contains_key(BACKEND_LLAMA))
+            .field(
+                "chat_stream",
+                &self.backend_channels.contains_key(BACKEND_LLAMA),
+            )
+            .field(
+                "transcribe",
+                &self.backend_channels.contains_key(BACKEND_WHISPER),
+            )
+            .field(
+                "generate_image",
+                &self.backend_channels.contains_key(BACKEND_DIFFUSION),
+            )
+            .field("backends", &backends)
+            .finish()
+    }
+}
+
+impl GrpcGateway {
+    pub async fn connect_from_config(config: &Config) -> anyhow::Result<Self> {
+        let mut gateway = Self::default();
+
+        for (backend_id, endpoint) in [
+            (BACKEND_LLAMA, config.llama_grpc_endpoint.as_deref()),
+            (BACKEND_WHISPER, config.whisper_grpc_endpoint.as_deref()),
+            (BACKEND_DIFFUSION, config.diffusion_grpc_endpoint.as_deref()),
+        ] {
+            if let Some(channel) = connect_optional(endpoint).await? {
+                gateway
+                    .backend_channels
+                    .insert(backend_id.to_string(), channel);
+            }
         }
-    }))
+
+        Ok(gateway)
+    }
+
+    pub fn chat_channel(&self) -> Option<Channel> {
+        self.backend_channel(BACKEND_LLAMA)
+    }
+
+    pub fn transcribe_channel(&self) -> Option<Channel> {
+        self.backend_channel(BACKEND_WHISPER)
+    }
+
+    pub fn generate_image_channel(&self) -> Option<Channel> {
+        self.backend_channel(BACKEND_DIFFUSION)
+    }
+
+    pub fn backend_channel(&self, backend_id: &str) -> Option<Channel> {
+        let key = canonical_backend_id(backend_id)?;
+        self.backend_channels.get(key).cloned()
+    }
+
+    pub fn has_backend(&self, backend_id: &str) -> bool {
+        canonical_backend_id(backend_id).is_some_and(|key| self.backend_channels.contains_key(key))
+    }
 }
 
-pub fn chat_stream(endpoint: impl Into<String>) -> ChatStreamService {
-    let endpoint = endpoint.into();
-    BoxCloneService::new(service_fn(move |request: pb::ChatRequest| {
-        let endpoint = endpoint.clone();
-        async move { client::chat_stream(&endpoint, request).await }
-    }))
+async fn connect_optional(endpoint: Option<&str>) -> anyhow::Result<Option<Channel>> {
+    match endpoint {
+        Some(endpoint) if !endpoint.trim().is_empty() => Ok(Some(connect_channel(endpoint).await?)),
+        _ => Ok(None),
+    }
 }
 
-pub fn transcribe(endpoint: impl Into<String>) -> TranscribeService {
-    let endpoint = endpoint.into();
-    BoxCloneService::new(service_fn(move |request: pb::TranscribeRequest| {
-        let endpoint = endpoint.clone();
-        async move {
-            let text = client::transcribe(&endpoint, request.path).await?;
-            Ok(pb::TranscribeResponse { text })
+async fn connect_channel(endpoint: &str) -> anyhow::Result<Channel> {
+    let url = format!("http://{endpoint}");
+    let transport = Endpoint::from_shared(url.clone())
+        .with_context(|| format!("invalid gRPC endpoint URL: {url}"))?;
+
+    let mut last_error = None;
+    for _ in 0..CONNECT_ATTEMPTS {
+        match transport.clone().connect().await {
+            Ok(channel) => return Ok(channel),
+            Err(err) => {
+                last_error = Some(err);
+                tokio::time::sleep(CONNECT_RETRY_DELAY).await;
+            }
         }
-    }))
+    }
+
+    let err = last_error
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| "unknown connection error".to_string());
+    anyhow::bail!("failed to connect to gRPC endpoint {endpoint}: {err}");
 }
 
-pub fn generate_image(endpoint: impl Into<String>) -> GenerateImageService {
-    let endpoint = endpoint.into();
-    BoxCloneService::new(service_fn(move |request: pb::ImageRequest| {
-        let endpoint = endpoint.clone();
-        async move {
-            let image = client::generate_image(&endpoint, request).await?;
-            Ok(pb::ImageResponse { image })
-        }
-    }))
-}
-
-pub fn load_model(endpoint: impl Into<String>) -> LoadModelService {
-    let endpoint = endpoint.into();
-    BoxCloneService::new(service_fn(move |request: pb::ModelLoadRequest| {
-        let endpoint = endpoint.clone();
-        async move { client::load_model(&endpoint, request).await }
-    }))
-}
-
-pub fn unload_model(endpoint: impl Into<String>) -> UnloadModelService {
-    let endpoint = endpoint.into();
-    BoxCloneService::new(service_fn(move |request: pb::ModelUnloadRequest| {
-        let endpoint = endpoint.clone();
-        async move { client::unload_model(&endpoint, request).await }
-    }))
-}
-
-pub fn reload_library(endpoint: impl Into<String>) -> ReloadLibraryService {
-    let endpoint = endpoint.into();
-    BoxCloneService::new(service_fn(move |request: pb::ReloadLibraryRequest| {
-        let endpoint = endpoint.clone();
-        async move { client::reload_library(&endpoint, request).await }
-    }))
-}
-
-pub fn map_via_serde<TSrc, TDst>(value: &TSrc) -> anyhow::Result<TDst>
-where
-    TSrc: serde::Serialize,
-    TDst: for<'de> serde::Deserialize<'de>,
-{
-    let json =
-        serde_json::to_value(value).context("failed to serialize request mapping payload")?;
-    serde_json::from_value(json).context("failed to deserialize mapped request payload")
-}
-
-pub fn endpoint_for_backend(config: &Config, backend_id: &str) -> Option<String> {
+fn canonical_backend_id(backend_id: &str) -> Option<&'static str> {
     match backend_id.trim().to_ascii_lowercase().as_str() {
-        "ggml.llama" | "llama" => config.llama_grpc_endpoint.clone(),
-        "ggml.whisper" | "whisper" => config.whisper_grpc_endpoint.clone(),
-        "ggml.diffusion" | "diffusion" => config.diffusion_grpc_endpoint.clone(),
+        "ggml.llama" | "llama" => Some(BACKEND_LLAMA),
+        "ggml.whisper" | "whisper" => Some(BACKEND_WHISPER),
+        "ggml.diffusion" | "diffusion" => Some(BACKEND_DIFFUSION),
         _ => None,
     }
 }

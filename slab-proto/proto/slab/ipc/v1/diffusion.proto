@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package slab.ipc.v1;
+
+import "slab/ipc/v1/common.proto";
+
+service DiffusionService {
+  rpc GenerateImage(ImageRequest) returns (ImageResponse);
+  rpc LoadModel(ModelLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
+  rpc ReloadLibrary(ReloadLibraryRequest) returns (ModelStatusResponse);
+}
+
+message ImageRequest {
+  string model = 1;
+  string prompt = 2;
+  uint32 n = 3;
+  string size = 4;
+}
+
+message ImageResponse {
+  bytes image = 1;
+}
