@@ -1,5 +1,5 @@
 import { OpenAIOutlined } from '@ant-design/icons';
-import { Sender, SenderProps } from '@ant-design/x';
+import { Sender } from '@ant-design/x';
 import { GetRef } from 'antd';
 import { useRef } from 'react';
 import locale from '../local';

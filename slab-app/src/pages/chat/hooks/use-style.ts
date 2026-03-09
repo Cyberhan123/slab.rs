@@ -6,12 +6,12 @@ export const useStyle = () => {
     logoText: "font-bold text-foreground text-base",
     conversations: "overflow-y-auto mt-3 p-0 flex-1",
     sideFooter: "border-t border-border h-10 flex items-center justify-between px-4",
-    chat: "h-full flex-1 flex flex-col py-6 px-6 gap-4",
-    startPage: "flex w-full max-w-4xl flex-col items-center h-full",
-    agentName: "mt-[25%] text-2xl mb-9 font-semibold text-foreground",
-    chatList: "flex w-full h-full flex-col justify-between",
+    chat: "h-full min-h-0 flex-1 flex flex-col gap-4 px-4 py-4 md:px-6 md:py-6",
+    startPage: "flex w-full max-w-4xl flex-1 min-h-0 flex-col items-center justify-center gap-8 overflow-y-auto py-4",
+    agentName: "text-center text-2xl font-semibold text-foreground md:text-4xl",
+    chatList: "flex w-full h-full min-h-0 flex-col",
     messageList: "w-full max-w-4xl flex-1 overflow-y-auto",
-    inputArea: "w-full max-w-4xl",
+    inputArea: "w-full max-w-4xl shrink-0",
 
     bubbleUpdating: "bg-gradient-to-r from-accent via-purple-500 to-primary bg-[length:100%_2px] bg-no-repeat bg-bottom",
   };

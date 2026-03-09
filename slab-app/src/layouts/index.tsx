@@ -16,7 +16,7 @@ export default function Layout() {
         >
             <div className="flex h-screen w-full overflow-hidden">
                 <AppSidebar />
-                <SidebarInset className="flex flex-col h-full">
+                <SidebarInset className="flex h-full min-w-0 w-auto flex-col">
                     <Header />
                     <main className="flex-1 overflow-hidden">
                         <Outlet />
