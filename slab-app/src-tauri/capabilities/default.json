@@ -11,6 +11,7 @@
     "dialog:default",
     "dialog:allow-open",
     "shell:default",
+    "mcp-bridge:default",
     {
       "identifier": "shell:allow-execute",
       "allow": [
