@@ -6,7 +6,6 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
-use tower::ServiceExt;
 use tracing::{debug, warn};
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -48,7 +47,7 @@ pub async fn transcribe(
         return Err(ServerError::BadRequest("audio file path is empty".into()));
     }
 
-    let whisper_endpoint = state.config.whisper_grpc_endpoint.clone().ok_or_else(|| {
+    let transcribe_channel = state.grpc.transcribe_channel().ok_or_else(|| {
         ServerError::BackendNotReady("whisper gRPC endpoint is not configured".into())
     })?;
 
@@ -71,16 +70,17 @@ pub async fn transcribe(
         })
         .await?;
 
-    let grpc_req: grpc::pb::TranscribeRequest = grpc::gateway::map_via_serde(&req)
-        .map_err(|e| ServerError::BadRequest(format!("invalid transcription payload: {e}")))?;
+    let grpc_req = grpc::pb::TranscribeRequest {
+        path: req.path.clone(),
+    };
 
     let store = Arc::clone(&state.store);
     let task_manager = Arc::clone(&state.task_manager);
     let task_id_for_spawn = task_id.clone();
+    let transcribe_channel_for_spawn = transcribe_channel;
     let join = tokio::spawn(async move {
-        let rpc_result = grpc::gateway::transcribe(whisper_endpoint)
-            .oneshot(grpc_req)
-            .await;
+        let rpc_result =
+            grpc::client::transcribe(transcribe_channel_for_spawn, grpc_req.path).await;
         if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {
             if record.status == "cancelled" {
                 task_manager.remove(&task_id_for_spawn);
@@ -89,11 +89,8 @@ pub async fn transcribe(
         }
 
         match rpc_result {
-            Ok(response) => {
-                let payload = serde_json::to_string(&response).unwrap_or_else(|e| {
-                    warn!(task_id = %task_id_for_spawn, error = %e, "failed to encode transcription result as json");
-                    serde_json::json!({ "text": response.text }).to_string()
-                });
+            Ok(text) => {
+                let payload = serde_json::json!({ "text": text }).to_string();
                 store
                     .update_task_status(&task_id_for_spawn, "succeeded", Some(&payload), None)
                     .await

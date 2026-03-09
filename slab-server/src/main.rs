@@ -15,10 +15,12 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{future::Future, io::ErrorKind};
 
 use anyhow::{anyhow, Context};
 use clap::Parser;
-use tokio::process::{Child, Command as TokioCommand};
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{Child, ChildStdin, Command as TokioCommand};
 use tracing::{info, warn};
 
 use crate::config::Config;
@@ -54,6 +56,8 @@ struct SupervisorArgs {
     backend_capacity: Option<usize>,
     #[arg(long = "lib-dir")]
     lib_dir: Option<PathBuf>,
+    #[arg(long, default_value_t = false)]
+    shutdown_on_stdin_close: bool,
 }
 
 impl Default for SupervisorArgs {
@@ -70,6 +74,7 @@ impl Default for SupervisorArgs {
             queue_capacity: None,
             backend_capacity: None,
             lib_dir: None,
+            shutdown_on_stdin_close: false,
         }
     }
 }
@@ -135,7 +140,10 @@ fn init_tracing(log_level: &str, log_json: bool) {
     }
 }
 
-async fn run_gateway(cfg: Config) -> anyhow::Result<()> {
+async fn run_gateway<F>(cfg: Config, shutdown: F) -> anyhow::Result<()>
+where
+    F: Future<Output = ()> + Send + 'static,
+{
     info!(
         version = env!("CARGO_PKG_VERSION"),
         "slab-server gateway starting"
@@ -151,19 +159,23 @@ async fn run_gateway(cfg: Config) -> anyhow::Result<()> {
 
     let store = AnyStore::connect(&cfg.database_url).await?;
     info!(database_url = %cfg.database_url, "database ready");
+    let grpc = grpc::gateway::GrpcGateway::connect_from_config(&cfg)
+        .await
+        .context("failed to initialize shared gRPC gateway services")?;
 
     let state = Arc::new(AppState {
         config: Arc::new(cfg.clone()),
+        grpc: Arc::new(grpc),
         store: Arc::new(store.clone()),
         task_manager: Arc::new(TaskManager::new()),
     });
 
-    let app = routes::build_gateway(Arc::clone(&state));
+    let app = routes::build(Arc::clone(&state));
     let addr: SocketAddr = cfg.bind_address.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!(%addr, "HTTP gateway listening");
     axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
+        .with_graceful_shutdown(shutdown)
         .await?;
 
     if let Err(e) = store.interrupt_running_tasks().await {
@@ -182,6 +194,7 @@ struct ManagedChild {
     backend: String,
     bind_address: String,
     child: Child,
+    stdin: Option<ChildStdin>,
 }
 
 fn spawn_backend_child(
@@ -195,9 +208,10 @@ fn spawn_backend_child(
         .arg(backend)
         .arg("--grpc-bind")
         .arg(grpc_bind_address)
+        .arg("--shutdown-on-stdin-close")
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
-        .stdin(Stdio::null());
+        .stdin(Stdio::piped());
 
     if let Some(v) = &args.lib_dir {
         cmd.arg("--lib-dir").arg(v);
@@ -215,13 +229,14 @@ fn spawn_backend_child(
         cmd.arg("--log-json");
     }
 
-    let child = cmd.spawn().with_context(|| {
+    let mut child = cmd.spawn().with_context(|| {
         format!(
             "failed to spawn slab-runtime child '{}' from {}",
             backend,
             runtime_exe.display()
         )
     })?;
+    let stdin = child.stdin.take();
     info!(
         backend = backend,
         bind_address = grpc_bind_address,
@@ -232,33 +247,13 @@ fn spawn_backend_child(
         backend: backend.to_string(),
         bind_address: grpc_bind_address.to_string(),
         child,
+        stdin,
     })
 }
 
 async fn shutdown_children(children: &mut [ManagedChild]) {
-    for managed in children.iter_mut() {
-        match managed.child.try_wait() {
-            Ok(Some(_)) => {}
-            Ok(None) => {
-                if let Err(e) = managed.child.start_kill() {
-                    warn!(
-                        backend = %managed.backend,
-                        bind_address = %managed.bind_address,
-                        error = %e,
-                        "failed to signal child kill"
-                    );
-                }
-            }
-            Err(e) => {
-                warn!(
-                    backend = %managed.backend,
-                    bind_address = %managed.bind_address,
-                    error = %e,
-                    "failed to query child status before shutdown"
-                );
-            }
-        }
-    }
+    const GRACEFUL_WAIT: Duration = Duration::from_secs(5);
+    const FORCE_WAIT: Duration = Duration::from_secs(5);
 
     for managed in children.iter_mut() {
         match managed.child.try_wait() {
@@ -267,42 +262,94 @@ async fn shutdown_children(children: &mut [ManagedChild]) {
                     backend = %managed.backend,
                     bind_address = %managed.bind_address,
                     status = %status,
-                    "child process exited"
+                    "child process already exited"
                 );
+                continue;
             }
-            Ok(None) => {
-                match tokio::time::timeout(Duration::from_secs(5), managed.child.wait()).await {
-                    Ok(Ok(status)) => {
-                        info!(
-                            backend = %managed.backend,
-                            bind_address = %managed.bind_address,
-                            status = %status,
-                            "child process exited after kill"
-                        );
-                    }
-                    Ok(Err(e)) => {
-                        warn!(
-                            backend = %managed.backend,
-                            bind_address = %managed.bind_address,
-                            error = %e,
-                            "failed while waiting child exit"
-                        );
-                    }
-                    Err(_) => {
-                        warn!(
-                            backend = %managed.backend,
-                            bind_address = %managed.bind_address,
-                            "timed out waiting for child exit"
-                        );
-                    }
-                }
-            }
+            Ok(None) => {}
             Err(e) => {
                 warn!(
                     backend = %managed.backend,
                     bind_address = %managed.bind_address,
                     error = %e,
-                    "failed to query child status"
+                    "failed to query child status before graceful shutdown"
+                );
+            }
+        }
+
+        if managed.stdin.take().is_some() {
+            info!(
+                backend = %managed.backend,
+                bind_address = %managed.bind_address,
+                "requested child graceful shutdown via stdin close"
+            );
+        } else {
+            warn!(
+                backend = %managed.backend,
+                bind_address = %managed.bind_address,
+                "child stdin handle missing; will fall back to force kill if needed"
+            );
+        }
+
+        match tokio::time::timeout(GRACEFUL_WAIT, managed.child.wait()).await {
+            Ok(Ok(status)) => {
+                info!(
+                    backend = %managed.backend,
+                    bind_address = %managed.bind_address,
+                    status = %status,
+                    "child process exited gracefully"
+                );
+                continue;
+            }
+            Ok(Err(e)) => {
+                warn!(
+                    backend = %managed.backend,
+                    bind_address = %managed.bind_address,
+                    error = %e,
+                    "failed while waiting child graceful exit"
+                );
+            }
+            Err(_) => {
+                warn!(
+                    backend = %managed.backend,
+                    bind_address = %managed.bind_address,
+                    "timed out waiting for child graceful exit"
+                );
+            }
+        }
+
+        if let Err(e) = managed.child.start_kill() {
+            warn!(
+                backend = %managed.backend,
+                bind_address = %managed.bind_address,
+                error = %e,
+                "failed to signal child force kill"
+            );
+            continue;
+        }
+
+        match tokio::time::timeout(FORCE_WAIT, managed.child.wait()).await {
+            Ok(Ok(status)) => {
+                info!(
+                    backend = %managed.backend,
+                    bind_address = %managed.bind_address,
+                    status = %status,
+                    "child process exited after force kill"
+                );
+            }
+            Ok(Err(e)) => {
+                warn!(
+                    backend = %managed.backend,
+                    bind_address = %managed.bind_address,
+                    error = %e,
+                    "failed while waiting child exit after force kill"
+                );
+            }
+            Err(_) => {
+                warn!(
+                    backend = %managed.backend,
+                    bind_address = %managed.bind_address,
+                    "timed out waiting for child exit after force kill"
                 );
             }
         }
@@ -407,21 +454,28 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
         None
     };
 
-    let mut gateway_join = tokio::spawn(async move { run_gateway(gateway_cfg).await });
+    let (gateway_shutdown_tx, gateway_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
+    let mut gateway_shutdown_tx = Some(gateway_shutdown_tx);
+    let mut gateway_join = tokio::spawn(async move {
+        run_gateway(gateway_cfg, async move {
+            let _ = gateway_shutdown_rx.await;
+        })
+        .await
+    });
+    let mut gateway_result_observed = false;
+    let shutdown = shutdown_signal(args.shutdown_on_stdin_close);
+    tokio::pin!(shutdown);
 
     let mut result = Ok(());
     loop {
         tokio::select! {
-            _ = shutdown_signal() => {
+            _ = &mut shutdown => {
                 info!("supervisor received shutdown signal");
                 break;
             }
             gateway_res = &mut gateway_join => {
-                result = match gateway_res {
-                    Ok(Ok(())) => Ok(()),
-                    Ok(Err(e)) => Err(e),
-                    Err(e) => Err(anyhow!("gateway task join error: {e}")),
-                };
+                gateway_result_observed = true;
+                result = map_gateway_join_result(gateway_res);
                 break;
             }
             _ = tokio::time::sleep(Duration::from_millis(500)) => {
@@ -455,9 +509,26 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
         }
     }
 
-    if !gateway_join.is_finished() {
-        gateway_join.abort();
-        let _ = gateway_join.await;
+    if let Some(tx) = gateway_shutdown_tx.take() {
+        let _ = tx.send(());
+    }
+
+    if !gateway_result_observed {
+        match tokio::time::timeout(Duration::from_secs(5), &mut gateway_join).await {
+            Ok(gateway_res) => {
+                let gateway_outcome = map_gateway_join_result(gateway_res);
+                if result.is_ok() {
+                    result = gateway_outcome;
+                } else if let Err(e) = gateway_outcome {
+                    warn!(error = %e, "gateway shutdown also failed");
+                }
+            }
+            Err(_) => {
+                warn!("timed out waiting for gateway graceful shutdown; aborting gateway task");
+                gateway_join.abort();
+                let _ = gateway_join.await;
+            }
+        }
     }
 
     shutdown_children(&mut children).await;
@@ -465,8 +536,52 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
     result
 }
 
-/// Returns a future that resolves when SIGINT (Ctrl-C) or SIGTERM is received.
-async fn shutdown_signal() {
+fn map_gateway_join_result(
+    gateway_res: Result<anyhow::Result<()>, tokio::task::JoinError>,
+) -> anyhow::Result<()> {
+    match gateway_res {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(e)) => Err(e),
+        Err(e) => Err(anyhow!("gateway task join error: {e}")),
+    }
+}
+
+async fn wait_for_stdin_shutdown_signal() {
+    let mut reader = BufReader::new(tokio::io::stdin());
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        match reader.read_line(&mut line).await {
+            Ok(0) => {
+                info!("stdin closed; starting graceful shutdown");
+                break;
+            }
+            Ok(_) => {
+                let cmd = line.trim();
+                if cmd.eq_ignore_ascii_case("shutdown")
+                    || cmd.eq_ignore_ascii_case("exit")
+                    || cmd.eq_ignore_ascii_case("quit")
+                {
+                    info!(command = %cmd, "received shutdown command from stdin");
+                    break;
+                }
+            }
+            Err(e) => {
+                if e.kind() != ErrorKind::Interrupted {
+                    warn!(
+                        error = %e,
+                        "failed reading stdin for shutdown command; starting shutdown"
+                    );
+                    break;
+                }
+            }
+        }
+    }
+}
+
+/// Returns a future that resolves when SIGINT, SIGTERM or optional stdin shutdown signal is received.
+async fn shutdown_signal(listen_stdin: bool) {
     let ctrl_c = async {
         if let Err(e) = tokio::signal::ctrl_c().await {
             warn!(error = %e, "failed to install CTRL+C signal handler");
@@ -487,9 +602,18 @@ async fn shutdown_signal() {
     #[cfg(not(unix))]
     let terminate = std::future::pending::<()>();
 
+    let stdin_signal = async {
+        if listen_stdin {
+            wait_for_stdin_shutdown_signal().await;
+        } else {
+            std::future::pending::<()>().await;
+        }
+    };
+
     tokio::select! {
         _ = ctrl_c   => {}
         _ = terminate => {}
+        _ = stdin_signal => {}
     }
     info!("shutdown signal received; starting graceful shutdown");
 }

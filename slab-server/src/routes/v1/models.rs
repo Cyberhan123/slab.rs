@@ -7,7 +7,7 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use tower::ServiceExt;
+use tonic::transport::Channel;
 use tracing::{info, warn};
 use utoipa::OpenApi;
 
@@ -77,6 +77,24 @@ fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
         )));
     }
     Ok(())
+}
+
+fn resolve_backend_channel(
+    state: &AppState,
+    backend_id: &str,
+) -> Result<(String, Channel), ServerError> {
+    let backend = Backend::from_str(backend_id)
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
+    let canonical_backend = backend.to_string();
+    let channel = state
+        .grpc
+        .backend_channel(&canonical_backend)
+        .ok_or_else(|| {
+            ServerError::BackendNotReady(format!(
+                "{canonical_backend} gRPC endpoint is not configured"
+            ))
+        })?;
+    Ok((canonical_backend, channel))
 }
 
 #[utoipa::path(
@@ -185,22 +203,12 @@ pub async fn load_model(
         "loading model"
     );
 
-    let backend = Backend::from_str(bid)
-        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
-    let canonical_backend = backend.to_string();
-    let endpoint = grpc::gateway::endpoint_for_backend(&state.config, &canonical_backend)
-        .ok_or_else(|| {
-            ServerError::BackendNotReady(format!(
-                "{canonical_backend} gRPC endpoint is not configured"
-            ))
-        })?;
+    let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
     let grpc_req = grpc::pb::ModelLoadRequest {
-        backend_id: canonical_backend,
         model_path: req.model_path,
         num_workers: req.num_workers,
     };
-    let response = grpc::gateway::load_model(endpoint)
-        .oneshot(grpc_req)
+    let response = grpc::client::load_model(channel, &canonical_backend, grpc_req)
         .await
         .map_err(|e| ServerError::Internal(format!("grpc load_model failed: {e}")))?;
 
@@ -230,21 +238,11 @@ pub async fn unload_model(
 
     info!(backend = %bid, "unloading model");
 
-    let backend = Backend::from_str(bid)
-        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
-    let canonical_backend = backend.to_string();
-    let endpoint = grpc::gateway::endpoint_for_backend(&state.config, &canonical_backend)
-        .ok_or_else(|| {
-            ServerError::BackendNotReady(format!(
-                "{canonical_backend} gRPC endpoint is not configured"
-            ))
-        })?;
-    let response = grpc::gateway::unload_model(endpoint)
-        .oneshot(grpc::pb::ModelUnloadRequest {
-            backend_id: canonical_backend,
-        })
-        .await
-        .map_err(|e| ServerError::Internal(format!("grpc unload_model failed: {e}")))?;
+    let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
+    let response =
+        grpc::client::unload_model(channel, &canonical_backend, grpc::pb::ModelUnloadRequest {})
+            .await
+            .map_err(|e| ServerError::Internal(format!("grpc unload_model failed: {e}")))?;
 
     Ok(Json(ModelStatusResponse {
         backend: response.backend,
@@ -320,23 +318,17 @@ pub async fn switch_model(
 
     info!(backend = %bid, model_path = %req.model_path, "switching model");
 
-    let backend = Backend::from_str(bid)
-        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
-    let canonical_backend = backend.to_string();
-    let endpoint = grpc::gateway::endpoint_for_backend(&state.config, &canonical_backend)
-        .ok_or_else(|| {
-            ServerError::BackendNotReady(format!(
-                "{canonical_backend} gRPC endpoint is not configured"
-            ))
-        })?;
-    let response = grpc::gateway::load_model(endpoint)
-        .oneshot(grpc::pb::ModelLoadRequest {
-            backend_id: canonical_backend,
+    let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
+    let response = grpc::client::load_model(
+        channel,
+        &canonical_backend,
+        grpc::pb::ModelLoadRequest {
             model_path: req.model_path,
             num_workers: req.num_workers,
-        })
-        .await
-        .map_err(|e| ServerError::Internal(format!("grpc switch_model failed: {e}")))?;
+        },
+    )
+    .await
+    .map_err(|e| ServerError::Internal(format!("grpc switch_model failed: {e}")))?;
 
     Ok(Json(ModelStatusResponse {
         backend: response.backend,

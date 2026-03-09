@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package slab.ipc.v1;
+
+message ModelLoadRequest {
+  string model_path = 1;
+  uint32 num_workers = 2;
+}
+
+message ModelUnloadRequest {}
+
+message ReloadLibraryRequest {
+  string lib_path = 1;
+  string model_path = 2;
+  uint32 num_workers = 3;
+}
+
+message ModelStatusResponse {
+  string backend = 1;
+  string status = 2;
+}

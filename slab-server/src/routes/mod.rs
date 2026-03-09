@@ -22,36 +22,8 @@ use tower::ServiceBuilder;
 use utoipa_swagger_ui::SwaggerUi;
 // ── Router builder ────────────────────────────────────────────────────────────
 
-/// Build the complete Axum [`Router`] for the application.
-pub fn build(state: Arc<AppState>) -> Router {
-    let api_router = Router::new()
-        .merge(health::router())
-        .nest("/v1", v1::router())
-        .nest("/admin", admin::router(state.clone()));
-
-    let mut app = Router::new().merge(api_router);
-
-    // ── Swagger UI ────────────────────────────────────────────────────────────
-    // Enabled by default; disable with SLAB_ENABLE_SWAGGER=false in production
-    // to avoid exposing the API structure to potential attackers.
-    let api_doc = doc::get_docs();
-
-    if state.config.enable_swagger {
-        app = app.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api_doc));
-    }
-
-    app
-        // Outermost layers execute first on the way in.
-        .layer(ServiceBuilder::new().layer(cors::cors_layer(state.clone())))
-        .layer(middleware::from_fn_with_state(
-            state.clone(),
-            trace::trace_middleware,
-        ))
-        .with_state(state)
-}
-
 /// Build the HTTP gateway router used by supervisor mode.
-pub fn build_gateway(state: Arc<AppState>) -> Router {
+pub fn build(state: Arc<AppState>) -> Router {
     let api_router = Router::new()
         .merge(health::router())
         .nest("/v1", v1::gateway_router())

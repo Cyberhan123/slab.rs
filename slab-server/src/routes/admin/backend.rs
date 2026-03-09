@@ -5,7 +5,6 @@ use std::sync::Arc;
 use axum::extract::{Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use tower::ServiceExt;
 
 use slab_core::api::Backend;
 use std::str::FromStr;
@@ -202,8 +201,7 @@ pub async fn backend_status(
     let backend = Backend::from_str(&backend_id)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {backend_id}")))?;
     let canonical_backend = backend.to_string();
-    let status = if grpc::gateway::endpoint_for_backend(&state.config, &canonical_backend).is_some()
-    {
+    let status = if state.grpc.has_backend(&canonical_backend) {
         "ready"
     } else {
         "disabled"
@@ -230,12 +228,11 @@ pub async fn list_backends(
     let backends = Backend::iter()
         .map(|name| {
             let backend_str = name.to_string();
-            let status =
-                if grpc::gateway::endpoint_for_backend(&state.config, &backend_str).is_some() {
-                    "ready"
-                } else {
-                    "disabled"
-                };
+            let status = if state.grpc.has_backend(&backend_str) {
+                "ready"
+            } else {
+                "disabled"
+            };
             BackendStatusResponse {
                 backend: backend_str.clone(),
                 status: status.into(),
@@ -352,20 +349,20 @@ pub async fn reload_lib(
     let backend = Backend::from_str(bid)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
     let canonical_backend = backend.to_string();
-    let endpoint = grpc::gateway::endpoint_for_backend(&state.config, &canonical_backend)
+    let channel = state
+        .grpc
+        .backend_channel(&canonical_backend)
         .ok_or_else(|| {
             ServerError::BackendNotReady(format!(
                 "{canonical_backend} gRPC endpoint is not configured"
             ))
         })?;
     let grpc_req = grpc::pb::ReloadLibraryRequest {
-        backend_id: canonical_backend,
         lib_path: req.lib_path,
         model_path: req.model_path,
         num_workers: req.num_workers,
     };
-    let response = grpc::gateway::reload_library(endpoint)
-        .oneshot(grpc_req)
+    let response = grpc::client::reload_library(channel, &canonical_backend, grpc_req)
         .await
         .map_err(|e| ServerError::Internal(format!("grpc reload_library failed: {e}")))?;
 
