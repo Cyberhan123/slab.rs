@@ -5252,6 +5252,35 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-proto"
+version = "0.0.1"
+dependencies = [
+ "prost",
+ "protoc-bin-vendored",
+ "serde",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
+name = "slab-runtime"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "bytemuck",
+ "clap",
+ "futures",
+ "serde_json",
+ "slab-core",
+ "slab-proto",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "slab-server"
 version = "0.0.1"
 dependencies = [
@@ -5266,19 +5295,16 @@ dependencies = [
  "hf-hub",
  "http",
  "http-body-util",
- "prost",
- "protoc-bin-vendored",
  "serde",
  "serde_json",
  "slab-core",
  "slab-libfetch",
+ "slab-proto",
  "sqlx",
  "strum",
  "thiserror 2.0.18",
  "tokio",
- "tokio-stream",
  "tonic",
- "tonic-build",
  "tower 0.5.3",
  "tower-http",
  "tracing",

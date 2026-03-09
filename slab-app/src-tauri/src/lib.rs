@@ -18,7 +18,7 @@ fn get_api_url() -> String {
 #[tauri::command]
 async fn check_backend_status() -> Result<bool, String> {
     let api_url = get_api_url();
-    let health_url = format!("{}health", api_url.trim_end_matches('/'));
+    let health_url = format!("{}/health", api_url.trim_end_matches('/'));
 
     match reqwest::get(&health_url).await {
         Ok(response) => Ok(response.status().is_success()),

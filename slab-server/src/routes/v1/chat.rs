@@ -1,10 +1,4 @@
-//! OpenAI-compatible chat-completion routes.
-//!
-//! Delegates to the `ggml.llama` backend in slab-core.
-//! When a `session_id` is provided in the request, the conversation history
-//! is loaded from the database and prepended to the prompt.  The session's
-//! llama KV-cache is preserved between turns via a `session_key` option
-//! passed to the backend.
+//! OpenAI-compatible chat completion routes.
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -16,7 +10,7 @@ use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
 use futures::{stream, StreamExt};
-
+use tower::ServiceExt;
 use tracing::{debug, info};
 use utoipa::OpenApi;
 use uuid::Uuid;
@@ -29,7 +23,7 @@ use crate::schemas::v1::chat::{
 };
 use crate::state::AppState;
 
-/// Maximum allowed prompt length in bytes to prevent memory exhaustion.
+/// Maximum allowed prompt length in bytes.
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
 
 #[derive(OpenApi)]
@@ -65,15 +59,7 @@ fn build_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
     .to_string()
 }
 
-// ── Request / response types for sessions ─────────────────────────────────────
-
-// ── Chat completions ──────────────────────────────────────────────────────────
-
 /// OpenAI chat completions (`POST /v1/chat/completions`).
-///
-/// When `stream: true`, the response is streamed token-by-token using SSE.
-/// When `session_id` is provided, conversation history is loaded from the DB
-/// and the llama KV-cache is preserved between turns.
 #[utoipa::path(
     post,
     path = "/v1/chat/completions",
@@ -89,7 +75,6 @@ pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
-    // Use the last user-role message as the current prompt.
     let user_content = req
         .messages
         .iter()
@@ -120,12 +105,16 @@ pub async fn chat_completions(
         )));
     }
 
-    debug!(model = %req.model, prompt_len = user_content.len(), stream = req.stream, session_id = ?req.id, "chat completion request");
+    debug!(
+        model = %req.model,
+        prompt_len = user_content.len(),
+        stream = req.stream,
+        session_id = ?req.id,
+        "chat completion request"
+    );
 
-    // Build the full prompt from session history + current message.
     let prompt = build_prompt(&state, req.id.as_deref(), &req.messages).await?;
 
-    // Persist the user message if a session is active.
     if let Some(sid) = req.id.as_deref() {
         state
             .store
@@ -140,14 +129,6 @@ pub async fn chat_completions(
             .unwrap_or_else(|e| tracing::warn!(error = %e, "failed to persist user message"));
     }
 
-    // Build the options payload; include session_key so the backend can reuse
-    // the llama KV-cache across turns in the same session.
-    let options = serde_json::json!({
-        "max_tokens":  max_tokens,
-        "temperature": temperature,
-        "session_key": req.id,   // null → no KV-cache pinning
-    });
-
     let grpc_req = grpc::pb::ChatRequest {
         prompt: prompt.clone(),
         model: req.model.clone(),
@@ -155,50 +136,16 @@ pub async fn chat_completions(
         temperature,
         session_key: req.id.clone().unwrap_or_default(),
     };
-    let llama_endpoint = state.config.llama_grpc_endpoint.clone();
-    if state.config.uses_remote_backends() && llama_endpoint.is_none() {
-        return Err(ServerError::BackendNotReady(
-            "llama gRPC endpoint is not configured".into(),
-        ));
-    }
+
+    let llama_endpoint = state.config.llama_grpc_endpoint.clone().ok_or_else(|| {
+        ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
+    })?;
 
     if req.stream {
-        if let Some(endpoint) = llama_endpoint.as_deref() {
-            let backend_stream = grpc::client::chat_stream(endpoint, grpc_req.clone())
-                .await
-                .map_err(|e| ServerError::Internal(format!("grpc chat stream failed: {e}")))?;
-            let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
-            let created_ts = Utc::now().timestamp();
-            let model_name = req.model.clone();
-
-            let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
-                match chunk {
-                    Ok(msg) if !msg.error.is_empty() => Ok(Event::default().comment(msg.error)),
-                    Ok(msg) if msg.done => Ok(Event::default().comment("done")),
-                    Ok(msg) => {
-                        let data = build_chunk(&completion_id, created_ts, &model_name, &msg.token);
-                        Ok(Event::default().data(data))
-                    }
-                    Err(e) => Ok(Event::default().comment(e.to_string())),
-                }
-            });
-
-            let sse_stream = token_stream.chain(stream::once(async {
-                Ok::<Event, Infallible>(Event::default().data("[DONE]"))
-            }));
-
-            return Ok(Sse::new(sse_stream).into_response());
-        }
-
-        let backend_stream = slab_core::api::backend(slab_core::api::Backend::GGMLLlama)
-            .inference_stream()
-            .input(slab_core::Payload::Text(std::sync::Arc::from(
-                prompt.as_str(),
-            )))
-            .options(slab_core::Payload::Json(options))
-            .stream()
+        let backend_stream = grpc::gateway::chat_stream(llama_endpoint.clone())
+            .oneshot(grpc_req.clone())
             .await
-            .map_err(ServerError::Runtime)?;
+            .map_err(|e| ServerError::Internal(format!("grpc chat stream failed: {e}")))?;
 
         let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
         let created_ts = Utc::now().timestamp();
@@ -206,16 +153,13 @@ pub async fn chat_completions(
 
         let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
             match chunk {
-                Ok(bytes) => {
-                    let token = String::from_utf8_lossy(&bytes).to_string();
-                    let data = build_chunk(&completion_id, created_ts, &model_name, &token);
+                Ok(msg) if !msg.error.is_empty() => Ok(Event::default().comment(msg.error)),
+                Ok(msg) if msg.done => Ok(Event::default().comment("done")),
+                Ok(msg) => {
+                    let data = build_chunk(&completion_id, created_ts, &model_name, &msg.token);
                     Ok(Event::default().data(data))
                 }
-                Err(e) => {
-                    // Emit an SSE comment to signal the error without poisoning
-                    // the assistant content, then let the stream end naturally.
-                    Ok(Event::default().comment(e.to_string()))
-                }
+                Err(e) => Ok(Event::default().comment(e.to_string())),
             }
         });
 
@@ -223,35 +167,21 @@ pub async fn chat_completions(
             Ok::<Event, Infallible>(Event::default().data("[DONE]"))
         }));
 
-        // Persisting the assistant reply for streaming sessions would require
-        // collecting the full stream before returning.  Streaming callers can
-        // use `GET /v1/chat/sessions/{id}/messages` to view history from
-        // non-streaming turns.
-
         return Ok(Sse::new(sse_stream).into_response());
     }
 
-    let generated = if let Some(endpoint) = llama_endpoint.as_deref() {
-        grpc::client::chat(endpoint, grpc_req)
-            .await
-            .map_err(|e| ServerError::Internal(format!("grpc chat failed: {e}")))?
-    } else {
-        let result_bytes = slab_core::api::backend(slab_core::api::Backend::GGMLLlama)
-            .inference()
-            .input(slab_core::Payload::Text(std::sync::Arc::from(
-                prompt.as_str(),
-            )))
-            .options(slab_core::Payload::Json(options))
-            .run_wait()
-            .await
-            .map_err(ServerError::Runtime)?;
-        String::from_utf8(result_bytes.to_vec())
-            .map_err(|e| ServerError::Internal(format!("backend returned invalid UTF-8: {e}")))?
-    };
+    let generated = grpc::gateway::chat(llama_endpoint)
+        .oneshot(grpc_req)
+        .await
+        .map_err(|e| ServerError::Internal(format!("grpc chat failed: {e}")))?
+        .text;
 
-    info!(model = %req.model, output_len = generated.len(), "chat completion done");
+    info!(
+        model = %req.model,
+        output_len = generated.len(),
+        "chat completion done"
+    );
 
-    // Persist the assistant reply.
     if let Some(sid) = req.id.as_deref() {
         state
             .store
@@ -284,11 +214,7 @@ pub async fn chat_completions(
     Ok(Json(resp).into_response())
 }
 
-/// Build the full prompt string from session history and the current messages.
-///
-/// If `session_id` is provided, loads all previous messages from DB and
-/// prepends them.  The format is a simple `Role: content\n` concatenation,
-/// consistent with how many chat models expect multi-turn context.
+/// Build the full prompt string from session history and current messages.
 async fn build_prompt(
     state: &AppState,
     session_id: Option<&str>,
@@ -319,8 +245,6 @@ fn capitalize_role(role: &str) -> &str {
         other => other,
     }
 }
-
-// ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod test {

@@ -245,7 +245,7 @@ export default function Hub() {
     try {
       await unloadModelMutation.mutateAsync({
         body: {
-          backend_id: 'ggml.llama',
+          backend_id: 'ggml.whisper',
           model_path: '',
         },
       });

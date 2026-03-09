@@ -62,11 +62,8 @@ pub struct Config {
     /// When `None`, admin endpoints are unauthenticated.
     pub admin_api_token: Option<String>,
 
-    /// Transport mode: `"http"`, `"grpc"`, or `"both"` (default: `"http"`).
+    /// Transport mode: `"http"` or `"both"` (default: `"http"`).
     pub transport_mode: String,
-
-    /// gRPC bind address when transport mode includes `"grpc"`.
-    pub grpc_bind_address: String,
 
     /// Optional llama backend gRPC endpoint used by HTTP gateway mode.
     pub llama_grpc_endpoint: Option<String>,
@@ -110,7 +107,6 @@ impl Config {
             cors_allowed_origins: std::env::var("SLAB_CORS_ORIGINS").ok(),
             admin_api_token: std::env::var("SLAB_ADMIN_TOKEN").ok(),
             transport_mode: env_or("SLAB_TRANSPORT", "http"),
-            grpc_bind_address: env_or("SLAB_GRPC_BIND", "127.0.0.1:50051"),
             llama_grpc_endpoint: std::env::var("SLAB_LLAMA_GRPC_ENDPOINT").ok(),
             whisper_grpc_endpoint: std::env::var("SLAB_WHISPER_GRPC_ENDPOINT").ok(),
             diffusion_grpc_endpoint: std::env::var("SLAB_DIFFUSION_GRPC_ENDPOINT").ok(),

@@ -12,14 +12,10 @@ license.workspace = true
 name = "slab-server"
 path = "src/main.rs"
 
-[build-dependencies]
-slab-libfetch = { workspace = true }
-tonic-build = "0.12"
-protoc-bin-vendored = "3"
-
 [dependencies]
 # Core AI runtime
 slab-core     = { workspace = true }
+slab-proto    = { workspace = true }
 slab-libfetch = { workspace = true }
 hf-hub        = { workspace = true }
 
@@ -27,16 +23,14 @@ hf-hub        = { workspace = true }
 tokio   = { workspace = true }
 futures = { workspace = true }
 bytes   = { workspace = true }
-tokio-stream = "0.1"
 
 # Web framework + middleware
 axum       = { version = "0.8", features = ["macros", "multipart"] }
-tower      = "0.5"
+tower      = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "set-header","util"] }
 http = "1.4.0"
 http-body-util = "0.1.3"
 tonic = { version = "0.12", features = ["transport"] }
-prost = "0.13"
 
 # Serialization
 serde      = { workspace = true }

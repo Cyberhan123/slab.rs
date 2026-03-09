@@ -1,9 +1,4 @@
-//! Audio transcription routes (Whisper) – async task pattern.
-//!
-//! Accepts an audio/video body, saves it to a temp file, then submits a
-//! slab-core pipeline (ffmpeg → whisper) via `api::backend(...).preprocess(...).run()`.
-//! The returned slab-core `TaskId` is persisted so that the generic
-//! `/api/tasks` endpoints can query status and result via `slab_core::api::status/result`.
+//! Audio transcription routes.
 
 use std::sync::Arc;
 
@@ -11,7 +6,9 @@ use axum::extract::State;
 use axum::routing::post;
 use axum::{Json, Router};
 use chrono::Utc;
-use tracing::{debug, info, warn};
+use tower::ServiceExt;
+use tracing::{debug, warn};
+use utoipa::OpenApi;
 use uuid::Uuid;
 
 use crate::entities::{TaskRecord, TaskStore};
@@ -19,9 +16,6 @@ use crate::error::ServerError;
 use crate::grpc;
 use crate::schemas::v1::audio::CompletionRequest;
 use crate::state::AppState;
-use bytemuck::cast_slice;
-use slab_core::api::Backend;
-use utoipa::OpenApi;
 
 #[derive(OpenApi)]
 #[openapi(paths(transcribe))]
@@ -33,21 +27,11 @@ pub fn router() -> Router<Arc<AppState>> {
 }
 
 /// Speech-to-text transcription (`POST /v1/audio/transcriptions`).
-///
-/// Accepts raw audio/video bytes.  The body is saved to a temporary file,
-/// then a slab-core pipeline is submitted:
-///
-/// 1. **ffmpeg** (CPU preprocess stage via `std::process::Command`) converts
-///    the file to raw PCM f32le at 16 kHz mono.
-/// 2. **whisper** (GPU stage) transcribes the PCM samples.
-///
-/// Returns `{"task_id": "..."}` immediately; poll status via
-/// `GET /api/tasks/{id}` and result via `GET /api/tasks/{id}/result`.
 #[utoipa::path(
     post,
     path = "/v1/audio/transcriptions",
     tag = "audio",
-    request_body(content = CompletionRequest, description = "Audio/video file bytes"),
+    request_body(content = CompletionRequest, description = "Audio file path"),
     responses(
         (status = 202, description = "Task accepted", body = serde_json::Value),
         (status = 400, description = "Bad request"),
@@ -64,33 +48,18 @@ pub async fn transcribe(
         return Err(ServerError::BadRequest("audio file path is empty".into()));
     }
 
-    let whisper_endpoint = state.config.whisper_grpc_endpoint.clone();
-    if state.config.uses_remote_backends() && whisper_endpoint.is_none() {
-        return Err(ServerError::BackendNotReady(
-            "whisper gRPC endpoint is not configured".into(),
-        ));
-    }
-    if whisper_endpoint.is_none() {
-        match slab_core::api::is_backend_ready(Backend::GGMLWhisper).await {
-            Ok(true) => {}
-            Ok(false) => {
-                return Err(ServerError::BackendNotReady(
-                    "Whisper backend is not ready. Configure SLAB_WHISPER_LIB_DIR and load a model before submitting transcription tasks.".into(),
-                ));
-            }
-            Err(e) => return Err(ServerError::Runtime(e)),
-        }
-    }
+    let whisper_endpoint = state.config.whisper_grpc_endpoint.clone().ok_or_else(|| {
+        ServerError::BackendNotReady("whisper gRPC endpoint is not configured".into())
+    })?;
 
     let task_id = Uuid::new_v4().to_string();
     let now = Utc::now();
 
-    // Insert the server-side task record (core_task_id filled in after submission).
     state
         .store
         .insert_task(TaskRecord {
             id: task_id.clone(),
-            task_type: Backend::GGMLWhisper.to_string(),
+            task_type: "ggml.whisper".into(),
             status: "running".into(),
             model_id: None,
             input_data: Some(req.path.clone()),
@@ -102,123 +71,55 @@ pub async fn transcribe(
         })
         .await?;
 
-    if let Some(endpoint) = whisper_endpoint {
-        let store = Arc::clone(&state.store);
-        let task_manager = Arc::clone(&state.task_manager);
-        let task_id_for_spawn = task_id.clone();
-        let path_for_spawn = req.path.clone();
-        let join = tokio::spawn(async move {
-            let rpc_result = grpc::client::transcribe(&endpoint, path_for_spawn).await;
-            if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {
-                if record.status == "cancelled" {
-                    task_manager.remove(&task_id_for_spawn);
-                    return;
-                }
-            }
+    let grpc_req: grpc::pb::TranscribeRequest = grpc::gateway::map_via_serde(&req)
+        .map_err(|e| ServerError::BadRequest(format!("invalid transcription payload: {e}")))?;
 
-            match rpc_result {
-                Ok(text) => {
-                    let payload = serde_json::json!({ "text": text }).to_string();
-                    store
-                        .update_task_status(&task_id_for_spawn, "succeeded", Some(&payload), None)
-                        .await
-                        .unwrap_or_else(|e| warn!(task_id = %task_id_for_spawn, error = %e, "failed to update remote transcription result"));
-                }
-                Err(e) => {
-                    let msg = e.to_string();
-                    store
-                        .update_task_status(&task_id_for_spawn, "failed", None, Some(&msg))
-                        .await
-                        .unwrap_or_else(|db_e| warn!(task_id = %task_id_for_spawn, error = %db_e, "failed to update remote transcription failure"));
-                }
-            }
-
-            task_manager.remove(&task_id_for_spawn);
-        });
-        state
-            .task_manager
-            .insert(task_id.clone(), join.abort_handle());
-    } else {
-        let core_task_result = slab_core::api::backend(Backend::GGMLWhisper)
-            .inference()
-            .input(slab_core::Payload::Text(req.path.clone().into()))
-            .preprocess("ffmpeg.to_pcm_f32le", convert_to_pcm_f32le)
-            .run()
+    let store = Arc::clone(&state.store);
+    let task_manager = Arc::clone(&state.task_manager);
+    let task_id_for_spawn = task_id.clone();
+    let join = tokio::spawn(async move {
+        let rpc_result = grpc::gateway::transcribe(whisper_endpoint)
+            .oneshot(grpc_req)
             .await;
-
-        match core_task_result {
-            Ok(core_task_id) => {
-                // Persist the slab-core TaskId so status/result queries can use it.
-                state
-                    .store
-                    .set_core_task_id(&task_id, core_task_id as i64)
-                    .await
-                    .unwrap_or_else(
-                        |e| warn!(task_id = %task_id, error = %e, "failed to store core_task_id"),
-                    );
-                info!(task_id = %task_id, core_task_id, "transcription task submitted to slab-core");
-            }
-            Err(e) => {
-                warn!(task_id = %task_id, error = %e, "failed to submit transcription to slab-core");
-                state
-                    .store
-                    .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
-                    .await
-                    .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to update task status"));
+        if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {
+            if record.status == "cancelled" {
+                task_manager.remove(&task_id_for_spawn);
+                return;
             }
         }
-    }
+
+        match rpc_result {
+            Ok(response) => {
+                let payload = serde_json::to_string(&response).unwrap_or_else(|e| {
+                    warn!(task_id = %task_id_for_spawn, error = %e, "failed to encode transcription result as json");
+                    serde_json::json!({ "text": response.text }).to_string()
+                });
+                store
+                    .update_task_status(&task_id_for_spawn, "succeeded", Some(&payload), None)
+                    .await
+                    .unwrap_or_else(|e| {
+                        warn!(task_id = %task_id_for_spawn, error = %e, "failed to update remote transcription result")
+                    });
+            }
+            Err(e) => {
+                let msg = e.to_string();
+                store
+                    .update_task_status(&task_id_for_spawn, "failed", None, Some(&msg))
+                    .await
+                    .unwrap_or_else(|db_e| {
+                        warn!(task_id = %task_id_for_spawn, error = %db_e, "failed to update remote transcription failure")
+                    });
+            }
+        }
+
+        task_manager.remove(&task_id_for_spawn);
+    });
+    state
+        .task_manager
+        .insert(task_id.clone(), join.abort_handle());
 
     Ok(Json(serde_json::json!({ "task_id": task_id })))
 }
-
-pub fn convert_to_pcm_f32le(payload: slab_core::Payload) -> Result<slab_core::Payload, String> {
-    let path = payload
-        .to_str()
-        .map_err(|e| format!("Invalid payload for preprocess: {e}"))?;
-    let output = std::process::Command::new("ffmpeg")
-        .arg("-i")
-        .arg(path)
-        .args([
-            "-vn",
-            "-f",
-            "f32le",
-            "-acodec",
-            "pcm_f32le",
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-",
-        ])
-        .output()
-        .map_err(|e| format!("FFmpeg start failed: {e}"))?;
-
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(format!(
-            "FFmpeg failed with status {}: {}",
-            output.status.code().unwrap_or(-1),
-            stderr.trim()
-        ));
-    }
-
-    let pcm_bytes = output.stdout;
-
-    let sample_size = std::mem::size_of::<f32>();
-
-    if pcm_bytes.len() % sample_size != 0 {
-        return Err(format!("PCM not aligned: {} bytes", pcm_bytes.len()));
-    }
-
-    let samples: Vec<f32> = cast_slice::<u8, f32>(&pcm_bytes).to_vec();
-
-    Ok(slab_core::Payload::F32(std::sync::Arc::from(
-        samples.as_slice(),
-    )))
-}
-
-// ── Tests ──────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
 mod test {}

@@ -54,7 +54,8 @@ pub fn build(state: Arc<AppState>) -> Router {
 pub fn build_gateway(state: Arc<AppState>) -> Router {
     let api_router = Router::new()
         .merge(health::router())
-        .nest("/v1", v1::gateway_router());
+        .nest("/v1", v1::gateway_router())
+        .nest("/admin", admin::router(state.clone()));
 
     let mut app = Router::new().merge(api_router);
     let api_doc = doc::get_gateway_docs();

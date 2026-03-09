@@ -15,7 +15,7 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "args": [],
+          "args": true,
           "cmd": "",
           "name": "binaries/slab-server",
           "sidecar": true

@@ -2,6 +2,8 @@
 resolver = "2"
 members = [
     "slab-app/src-tauri",
+    "slab-proto",
+    "slab-runtime",
     "slab-diffusion", 
     "slab-diffusion-sys",
     "slab-libfetch",
@@ -29,6 +31,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 slab-core = { path = "./slab-core", package = "slab-core", version = "0.0.1" }
+slab-proto = { path = "./slab-proto", package = "slab-proto", version = "0.0.1" }
 slab-diffusion-sys = { path = "./slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.0.1" }
 slab-diffusion = { path = "./slab-diffusion", package = "slab-diffusion", version = "0.0.1" }
 slab-llama = { path = "./slab-llama", package = "slab-llama", version = "0.0.1" }

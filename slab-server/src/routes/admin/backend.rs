@@ -5,6 +5,7 @@ use std::sync::Arc;
 use axum::extract::{Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use tower::ServiceExt;
 
 use slab_core::api::Backend;
 use std::str::FromStr;
@@ -13,6 +14,7 @@ use utoipa::OpenApi;
 
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
+use crate::grpc;
 use crate::schemas::admin::backend::{
     BackendListResponse, BackendStatusResponse, BackendTypeQuery, DownloadLibRequest,
     ReloadLibRequest,
@@ -66,7 +68,6 @@ fn windows_download_spec(
             "master-504-636d3cb",
             Box::new(|version: &str| format!("stable-diffusion-{version}-bin-win-cpu-x64.zip")),
         )),
-        _ => None,
     }
 }
 
@@ -195,12 +196,21 @@ async fn run_libfetch_download(
     )
 )]
 pub async fn backend_status(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Query(BackendTypeQuery { backend_id }): Query<BackendTypeQuery>,
 ) -> Result<Json<BackendStatusResponse>, ServerError> {
+    let backend = Backend::from_str(&backend_id)
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {backend_id}")))?;
+    let canonical_backend = backend.to_string();
+    let status = if grpc::gateway::endpoint_for_backend(&state.config, &canonical_backend).is_some()
+    {
+        "ready"
+    } else {
+        "disabled"
+    };
     Ok(Json(BackendStatusResponse {
-        backend: backend_id.to_owned(),
-        status: "ready".into(),
+        backend: canonical_backend,
+        status: status.into(),
     }))
 }
 
@@ -215,14 +225,20 @@ pub async fn backend_status(
     )
 )]
 pub async fn list_backends(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
 ) -> Result<Json<BackendListResponse>, ServerError> {
     let backends = Backend::iter()
         .map(|name| {
             let backend_str = name.to_string();
+            let status =
+                if grpc::gateway::endpoint_for_backend(&state.config, &backend_str).is_some() {
+                    "ready"
+                } else {
+                    "disabled"
+                };
             BackendStatusResponse {
                 backend: backend_str.clone(),
-                status: "ready".into(), // In a real implementation, you'd check the actual status of each backend.
+                status: status.into(),
             }
         })
         .collect::<Vec<BackendStatusResponse>>();
@@ -317,7 +333,7 @@ pub async fn download_lib(
     )
 )]
 pub async fn reload_lib(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(req): Json<ReloadLibRequest>,
 ) -> Result<Json<BackendStatusResponse>, ServerError> {
     let bid = &req.backend_id;
@@ -335,26 +351,27 @@ pub async fn reload_lib(
 
     let backend = Backend::from_str(bid)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
-
-    // Step 1: reload the dynamic library (drops the current model).
-    slab_core::api::reload_library(backend, &req.lib_path)
+    let canonical_backend = backend.to_string();
+    let endpoint = grpc::gateway::endpoint_for_backend(&state.config, &canonical_backend)
+        .ok_or_else(|| {
+            ServerError::BackendNotReady(format!(
+                "{canonical_backend} gRPC endpoint is not configured"
+            ))
+        })?;
+    let grpc_req = grpc::pb::ReloadLibraryRequest {
+        backend_id: canonical_backend,
+        lib_path: req.lib_path,
+        model_path: req.model_path,
+        num_workers: req.num_workers,
+    };
+    let response = grpc::gateway::reload_library(endpoint)
+        .oneshot(grpc_req)
         .await
-        .map_err(ServerError::Runtime)?;
-
-    // Step 2: reload the model into the fresh library.
-    slab_core::api::backend(backend)
-        .load_model()
-        .input(slab_core::Payload::Json(serde_json::json!({
-            "model_path":  req.model_path,
-            "num_workers": req.num_workers,
-        })))
-        .run()
-        .await
-        .map_err(ServerError::Runtime)?;
+        .map_err(|e| ServerError::Internal(format!("grpc reload_library failed: {e}")))?;
 
     Ok(Json(BackendStatusResponse {
-        backend: bid.to_owned(),
-        status: "loaded".into(),
+        backend: response.backend,
+        status: response.status,
     }))
 }
 
