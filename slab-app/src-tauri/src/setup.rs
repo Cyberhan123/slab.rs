@@ -70,6 +70,8 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
         "127.0.0.1:3001",
         "--llama-bind",
         "127.0.0.1:3002",
+        "--runtime-transport",
+        "ipc",
         "--lib-dir",
         lib_path_str,
         "--shutdown-on-stdin-close",

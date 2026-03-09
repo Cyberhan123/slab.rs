@@ -44,6 +44,10 @@ struct SupervisorArgs {
     diffusion_bind: String,
     #[arg(long, default_value_t = false)]
     include_diffusion: bool,
+    #[arg(long = "runtime-transport")]
+    runtime_transport: Option<String>,
+    #[arg(long = "runtime-ipc-dir")]
+    runtime_ipc_dir: Option<PathBuf>,
     #[arg(long = "database-url")]
     database_url: Option<String>,
     #[arg(long = "log")]
@@ -60,6 +64,40 @@ struct SupervisorArgs {
     shutdown_on_stdin_close: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RuntimeTransportMode {
+    Http,
+    Ipc,
+}
+
+impl RuntimeTransportMode {
+    fn parse(raw: &str) -> anyhow::Result<Self> {
+        match raw.trim().to_ascii_lowercase().as_str() {
+            "http" => Ok(Self::Http),
+            "both" => Ok(Self::Http),
+            "ipc" => Ok(Self::Ipc),
+            other => anyhow::bail!(
+                "invalid runtime transport '{}'; expected 'http' or 'ipc' ('both' is accepted as an alias of 'http')",
+                other
+            ),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Http => "http",
+            Self::Ipc => "ipc",
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+struct RuntimeBackendEndpoints {
+    whisper: String,
+    llama: String,
+    diffusion: Option<String>,
+}
+
 impl Default for SupervisorArgs {
     fn default() -> Self {
         Self {
@@ -68,6 +106,8 @@ impl Default for SupervisorArgs {
             llama_bind: "127.0.0.1:3002".to_owned(),
             diffusion_bind: "127.0.0.1:3003".to_owned(),
             include_diffusion: false,
+            runtime_transport: None,
+            runtime_ipc_dir: None,
             database_url: None,
             log_level: None,
             log_json: false,
@@ -107,6 +147,9 @@ async fn main() -> anyhow::Result<()> {
     }
     if args.lib_dir.is_none() {
         args.lib_dir = cfg.lib_dir.clone();
+    }
+    if args.runtime_transport.is_none() {
+        args.runtime_transport = Some(cfg.transport_mode.clone());
     }
 
     init_tracing(&cfg.log_level, cfg.log_json);
@@ -400,30 +443,99 @@ fn resolve_runtime_exe(server_exe: &Path) -> anyhow::Result<PathBuf> {
     );
 }
 
+fn build_runtime_backend_endpoints(
+    args: &SupervisorArgs,
+    mode: RuntimeTransportMode,
+) -> anyhow::Result<RuntimeBackendEndpoints> {
+    match mode {
+        RuntimeTransportMode::Http => Ok(RuntimeBackendEndpoints {
+            whisper: args.whisper_bind.clone(),
+            llama: args.llama_bind.clone(),
+            diffusion: args.include_diffusion.then(|| args.diffusion_bind.clone()),
+        }),
+        RuntimeTransportMode::Ipc => build_ipc_runtime_backend_endpoints(args),
+    }
+}
+
+#[cfg(windows)]
+fn build_ipc_runtime_backend_endpoints(
+    args: &SupervisorArgs,
+) -> anyhow::Result<RuntimeBackendEndpoints> {
+    let pid = std::process::id();
+    let whisper = format!(r"ipc://\\.\pipe\slab-runtime-{}-whisper", pid);
+    let llama = format!(r"ipc://\\.\pipe\slab-runtime-{}-llama", pid);
+    let diffusion = args
+        .include_diffusion
+        .then(|| format!(r"ipc://\\.\pipe\slab-runtime-{}-diffusion", pid));
+    Ok(RuntimeBackendEndpoints {
+        whisper,
+        llama,
+        diffusion,
+    })
+}
+
+#[cfg(not(windows))]
+fn build_ipc_runtime_backend_endpoints(
+    args: &SupervisorArgs,
+) -> anyhow::Result<RuntimeBackendEndpoints> {
+    let base_dir = args
+        .runtime_ipc_dir
+        .clone()
+        .unwrap_or_else(std::env::temp_dir);
+    std::fs::create_dir_all(&base_dir).with_context(|| {
+        format!(
+            "failed to create runtime IPC socket directory '{}'",
+            base_dir.display()
+        )
+    })?;
+
+    let pid = std::process::id();
+    let endpoint_for = |backend: &str| -> String {
+        let path = base_dir.join(format!("slab-runtime-{}-{}.sock", pid, backend));
+        format!("ipc://{}", path.to_string_lossy())
+    };
+
+    Ok(RuntimeBackendEndpoints {
+        whisper: endpoint_for("whisper"),
+        llama: endpoint_for("llama"),
+        diffusion: args.include_diffusion.then(|| endpoint_for("diffusion")),
+    })
+}
+
 async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
     info!("slab-server supervisor starting");
     let server_exe =
         std::env::current_exe().context("failed to resolve current executable path")?;
     let runtime_exe = resolve_runtime_exe(&server_exe)?;
+    let runtime_transport = RuntimeTransportMode::parse(
+        args.runtime_transport
+            .as_deref()
+            .unwrap_or("http"),
+    )?;
+    let backend_endpoints = build_runtime_backend_endpoints(&args, runtime_transport)?;
     let mut children = Vec::new();
 
     children.push(spawn_backend_child(
         &runtime_exe,
         "whisper",
-        &args.whisper_bind,
+        &backend_endpoints.whisper,
         &args,
     )?);
     children.push(spawn_backend_child(
         &runtime_exe,
         "llama",
-        &args.llama_bind,
+        &backend_endpoints.llama,
         &args,
     )?);
     if args.include_diffusion {
+        let diffusion_endpoint = backend_endpoints
+            .diffusion
+            .as_deref()
+            .ok_or_else(|| anyhow!("diffusion endpoint is missing while diffusion backend is enabled"))?;
         children.push(spawn_backend_child(
             &runtime_exe,
             "diffusion",
-            &args.diffusion_bind,
+            diffusion_endpoint,
             &args,
         )?);
     }
@@ -431,6 +543,7 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
     info!(
         child_count = children.len(),
         gateway_bind = %args.gateway_bind,
+        runtime_transport = %runtime_transport.as_str(),
         "supervisor started backend children and is booting HTTP gateway"
     );
 
@@ -445,14 +558,10 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
         gateway_cfg.log_json = true;
     }
     gateway_cfg.bind_address = args.gateway_bind.clone();
-    gateway_cfg.transport_mode = "http".to_string();
-    gateway_cfg.whisper_grpc_endpoint = Some(args.whisper_bind.clone());
-    gateway_cfg.llama_grpc_endpoint = Some(args.llama_bind.clone());
-    gateway_cfg.diffusion_grpc_endpoint = if args.include_diffusion {
-        Some(args.diffusion_bind.clone())
-    } else {
-        None
-    };
+    gateway_cfg.transport_mode = runtime_transport.as_str().to_string();
+    gateway_cfg.whisper_grpc_endpoint = Some(backend_endpoints.whisper.clone());
+    gateway_cfg.llama_grpc_endpoint = Some(backend_endpoints.llama.clone());
+    gateway_cfg.diffusion_grpc_endpoint = backend_endpoints.diffusion.clone();
 
     let (gateway_shutdown_tx, gateway_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let mut gateway_shutdown_tx = Some(gateway_shutdown_tx);
