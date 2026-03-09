@@ -1,0 +1,28 @@
+[package]
+name = "slab-runtime"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "slab-runtime"
+path = "src/main.rs"
+
+[dependencies]
+slab-core = { workspace = true }
+slab-proto = { workspace = true }
+tokio = { workspace = true }
+futures = { workspace = true }
+serde_json = { workspace = true }
+anyhow = { workspace = true }
+
+tonic = { version = "0.12", features = ["transport"] }
+tokio-stream = "0.1"
+bytemuck = "1"
+clap = { version = "4.5.60", features = ["derive"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }

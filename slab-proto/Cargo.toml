@@ -1,0 +1,21 @@
+[package]
+name = "slab-proto"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[build-dependencies]
+tonic-build = "0.12"
+protoc-bin-vendored = "3"
+
+[dependencies]
+tonic = { version = "0.12", features = ["transport"] }
+prost = "0.13"
+serde = { workspace = true }

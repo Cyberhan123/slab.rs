@@ -53,3 +53,39 @@ pub async fn generate_image(endpoint: &str, req: pb::ImageRequest) -> anyhow::Re
         .with_context(|| format!("generate_image RPC failed on endpoint: {endpoint}"))?;
     Ok(response.into_inner().image)
 }
+
+pub async fn load_model(
+    endpoint: &str,
+    req: pb::ModelLoadRequest,
+) -> anyhow::Result<pb::ModelStatusResponse> {
+    let mut client = connect(endpoint).await?;
+    let response = client
+        .load_model(req)
+        .await
+        .with_context(|| format!("load_model RPC failed on endpoint: {endpoint}"))?;
+    Ok(response.into_inner())
+}
+
+pub async fn unload_model(
+    endpoint: &str,
+    req: pb::ModelUnloadRequest,
+) -> anyhow::Result<pb::ModelStatusResponse> {
+    let mut client = connect(endpoint).await?;
+    let response = client
+        .unload_model(req)
+        .await
+        .with_context(|| format!("unload_model RPC failed on endpoint: {endpoint}"))?;
+    Ok(response.into_inner())
+}
+
+pub async fn reload_library(
+    endpoint: &str,
+    req: pb::ReloadLibraryRequest,
+) -> anyhow::Result<pb::ModelStatusResponse> {
+    let mut client = connect(endpoint).await?;
+    let response = client
+        .reload_library(req)
+        .await
+        .with_context(|| format!("reload_library RPC failed on endpoint: {endpoint}"))?;
+    Ok(response.into_inner())
+}

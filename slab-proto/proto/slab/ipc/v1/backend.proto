@@ -7,6 +7,9 @@ service BackendService {
   rpc ChatStream(ChatRequest) returns (stream ChatStreamChunk);
   rpc Transcribe(TranscribeRequest) returns (TranscribeResponse);
   rpc GenerateImage(ImageRequest) returns (ImageResponse);
+  rpc LoadModel(ModelLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
+  rpc ReloadLibrary(ReloadLibraryRequest) returns (ModelStatusResponse);
 }
 
 message ChatRequest {
@@ -44,4 +47,26 @@ message ImageRequest {
 
 message ImageResponse {
   bytes image = 1;
+}
+
+message ModelLoadRequest {
+  string backend_id = 1;
+  string model_path = 2;
+  uint32 num_workers = 3;
+}
+
+message ModelUnloadRequest {
+  string backend_id = 1;
+}
+
+message ReloadLibraryRequest {
+  string backend_id = 1;
+  string lib_path = 2;
+  string model_path = 3;
+  uint32 num_workers = 4;
+}
+
+message ModelStatusResponse {
+  string backend = 1;
+  string status = 2;
 }

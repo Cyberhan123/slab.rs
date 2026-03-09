@@ -24,12 +24,13 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(tasks::router())
 }
 
-/// Routes used by supervisor HTTP gateway mode (no local model-management routes).
+/// Routes used by supervisor HTTP gateway mode.
 pub fn gateway_router() -> Router<Arc<AppState>> {
     Router::new()
         .merge(chat::router())
         .merge(audio::router())
         .merge(images::router())
+        .merge(models::router())
         .merge(session::router())
         .merge(tasks::router())
 }
@@ -56,6 +57,7 @@ pub fn gateway_api_docs() -> utoipa::openapi::OpenApi {
     spec.merge(audio::AudioApi::openapi());
     spec.merge(chat::ChatApi::openapi());
     spec.merge(images::ImagesApi::openapi());
+    spec.merge(models::ModelsApi::openapi());
     spec.merge(session::SessionApi::openapi());
     spec.merge(tasks::TasksApi::openapi());
     spec
