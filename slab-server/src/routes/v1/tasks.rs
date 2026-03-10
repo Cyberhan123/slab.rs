@@ -155,7 +155,14 @@ pub async fn get_task_result(
                         text: Some(t.to_string()),
                     },
                     slab_core::Payload::Json(v) => {
-                        // Extract known fields; fall back to serialized JSON string in `text`.
+                        // `Payload::Json` is rare for inference results (it is mainly used
+                        // for control payloads such as model-load parameters).  When it
+                        // does appear we try to map well-known keys:
+                        //   • "image" → TaskResultPayload.image
+                        //   • "text"  → TaskResultPayload.text
+                        // If neither key is present the entire JSON value is serialised to
+                        // a compact string and stored in `text` so callers can still
+                        // inspect the raw payload rather than receiving an empty response.
                         let image =
                             v.get("image").and_then(|s| s.as_str()).map(str::to_owned);
                         let text = v
@@ -177,12 +184,17 @@ pub async fn get_task_result(
                     },
                 };
                 // Persist result in DB for future queries.
-                if let Ok(result_json) = serde_json::to_string(&result_payload) {
-                    state
-                        .store
-                        .update_task_status(&id, "succeeded", Some(&result_json), None)
-                        .await
-                        .unwrap_or_else(|e| warn!(error = %e, "failed to persist result"));
+                match serde_json::to_string(&result_payload) {
+                    Ok(result_json) => {
+                        state
+                            .store
+                            .update_task_status(&id, "succeeded", Some(&result_json), None)
+                            .await
+                            .unwrap_or_else(|e| warn!(error = %e, "failed to persist result"));
+                    }
+                    Err(e) => {
+                        warn!(task_id = %id, error = %e, "failed to serialize result_payload; result will not be persisted to DB");
+                    }
                 }
                 return Ok(Json(result_payload));
             }
