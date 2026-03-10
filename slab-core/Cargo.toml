@@ -6,7 +6,7 @@ description.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-license.workspace = true
+license = "AGPL-3.0-only"
 
 [build-dependencies]
 slab-libfetch = { workspace = true }
@@ -23,8 +23,8 @@ slab-libfetch = { workspace = true }
 hf-hub = { workspace = true }
 thiserror = { workspace = true }
 serde_json = { workspace = true }
-serde = {version="1.0.228",features=["derive"]}
-axum = {version="0.8.8", features=["macros"]}
+serde = { version = "1.0.228", features = ["derive"] }
+axum = { version = "0.8.8", features = ["macros"] }
 tracing-subscriber = "0.3.22"
 tracing = "0.1"
 anyhow = "1.0.101"

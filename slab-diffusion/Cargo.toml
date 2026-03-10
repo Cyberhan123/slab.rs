@@ -6,7 +6,7 @@ description.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-license.workspace = true
+license = "AGPL-3.0-only"
 
 [build-dependencies]
 slab-libfetch = { workspace = true }
