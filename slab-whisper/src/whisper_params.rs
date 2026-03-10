@@ -846,14 +846,16 @@ impl<'a, 'b> FullParams<'a, 'b> {
 
     /// Enable or disable VAD.
     ///
-    /// # Panics
-    /// This method will panic if `vad_model_path` is not set prior to enabling VAD.
-    pub fn enable_vad(&mut self, vad: bool) {
+    /// # Errors
+    /// Returns [`WhisperError::VadModelPathNotSet`] if `vad` is `true` and
+    /// `set_vad_model_path` has not been called with a non-`None` path.
+    pub fn enable_vad(&mut self, vad: bool) -> Result<(), crate::WhisperError> {
         if vad && self.fp.vad_model_path.is_null() {
-            panic!("Set a VAD model path before calling enable_vad");
+            return Err(crate::WhisperError::VadModelPathNotSet);
         }
 
         self.fp.vad = vad;
+        Ok(())
     }
 
     /// Set the path where a VAD model can be found. Passing `None` will clear it and disable VAD.
