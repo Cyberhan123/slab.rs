@@ -16,7 +16,22 @@ fn main() {
         &manifest_dir,
     );
 
-    tauri_build::build();
+    let attributes = tauri_build::Attributes::new().app_manifest(
+        tauri_build::AppManifest::new().commands(&[
+            "greet",
+            "get_api_url",
+            "check_backend_status",
+            "get_system_info",
+            "plugin_list",
+            "plugin_mount_view",
+            "plugin_update_view_bounds",
+            "plugin_unmount_view",
+            "plugin_call",
+            "plugin_api_request",
+        ]),
+    );
+
+    tauri_build::try_build(attributes).expect("failed to run tauri build script");
 }
 
 fn get_workspace_target_dir(manifest_dir: &Path, profile: &str) -> PathBuf {

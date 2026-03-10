@@ -7,6 +7,7 @@ import {
   Mic,
   Package,
   Palette,
+  Puzzle,
   Sparkles,
   Settings,
   type LucideIcon,
@@ -69,6 +70,14 @@ const HEADER_META_BY_ROUTE: Array<{
       title: "Hub",
       description: "Model and backend operations center",
       icon: Package,
+    },
+  },
+  {
+    path: "/plugins",
+    meta: {
+      title: "Plugins",
+      description: "Run workspace plugins with Extism runtime",
+      icon: Puzzle,
     },
   },
   {

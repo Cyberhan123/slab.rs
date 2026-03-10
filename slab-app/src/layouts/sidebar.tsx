@@ -8,7 +8,7 @@ import {
     SidebarMenuButton
 } from "@/components/ui/sidebar"
 import { Link, useLocation } from "react-router-dom"
-import { BotMessageSquare, ImageIcon, Mic, Film, Package, ClipboardList, Settings, type LucideIcon } from "lucide-react"
+import { BotMessageSquare, ImageIcon, Mic, Film, Package, ClipboardList, Settings, Puzzle, type LucideIcon } from "lucide-react"
 
 type SidebarItem = {
     to: string;
@@ -23,6 +23,7 @@ const primaryItems: SidebarItem[] = [
     { to: "/audio", label: "Audio", icon: Mic },
     { to: "/video", label: "Video", icon: Film },
     { to: "/hub", label: "Hub", icon: Package },
+    { to: "/plugins", label: "Plugins", icon: Puzzle },
     { to: "/task", label: "Tasks", icon: ClipboardList },
 ];
 
