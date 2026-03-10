@@ -9,6 +9,7 @@ import Task from "@/pages/task";
 import Audio from "@/pages/audio";
 import Video from "@/pages/video";
 import Image from "@/pages/image";
+import Plugins from "@/pages/plugins";
 
 function AppRoutes() {
   const routes = useRoutes([
@@ -21,6 +22,7 @@ function AppRoutes() {
         { path: 'audio', element: <Audio /> },
         { path: 'video', element: <Video /> },
         { path: 'hub', element: <Hub /> },
+        { path: 'plugins', element: <Plugins /> },
         { path: 'task', element: <Task /> },
         { path: 'settings', element: <Settings /> },
         { path: 'about', element: <About /> },

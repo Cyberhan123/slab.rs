@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-plugin-update-view-bounds"
+description = "Enables the plugin_update_view_bounds command without any pre-configured scope."
+commands.allow = ["plugin_update_view_bounds"]
+
+[[permission]]
+identifier = "deny-plugin-update-view-bounds"
+description = "Denies the plugin_update_view_bounds command without any pre-configured scope."
+commands.deny = ["plugin_update_view_bounds"]
