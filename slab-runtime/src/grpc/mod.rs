@@ -52,43 +52,6 @@ pub(super) fn runtime_to_status(err: slab_core::RuntimeError) -> Status {
     }
 }
 
-/// Convert an [`anyhow::Error`] to a gRPC [`Status`], joining the full
-/// `error.chain()` into a colon-separated message string.
-///
-/// If the anyhow error wraps a [`slab_core::RuntimeError`] the most
-/// appropriate status code for that variant is used; otherwise
-/// [`tonic::Code::Internal`] is returned.
-///
-/// The full error (including any backtrace captured by anyhow) is logged via
-/// [`tracing::error!`] before the conversion so that the complete diagnostic
-/// detail is preserved in the server logs even though clients only see the
-/// chain string.
-pub(super) fn anyhow_to_status(err: anyhow::Error) -> Status {
-    // Record the full error with backtrace for server-side diagnostics.
-    error!(error = ?err, "converting anyhow error to gRPC status");
-
-    // Build the colon-separated error chain from anyhow's chain iterator
-    // using fold to avoid an intermediate Vec allocation.
-    let chain_msg = err.chain().fold(String::new(), |mut s, e| {
-        if !s.is_empty() {
-            s.push_str(": ");
-        }
-        s.push_str(&e.to_string());
-        s
-    });
-
-    // Prefer the typed RuntimeError code when it wraps a RuntimeError anywhere in
-    // the chain. Scanning via downcast_ref first preserves the full chain_msg even
-    // when the RuntimeError is buried under one or more anyhow::context layers.
-    let code = err
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<slab_core::RuntimeError>())
-        .map(|re| runtime_to_status(re.clone()).code())
-        .unwrap_or(tonic::Code::Internal);
-
-    Status::new(code, chain_msg)
-}
-
 // ---------------------------------------------------------------------------
 // Metadata helpers
 // ---------------------------------------------------------------------------

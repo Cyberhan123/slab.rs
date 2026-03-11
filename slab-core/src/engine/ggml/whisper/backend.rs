@@ -24,27 +24,15 @@
 
 use std::sync::Arc;
 
-use serde::Deserialize;
 use tokio::sync::broadcast;
 
+use crate::engine::ggml::config::{LibLoadConfig, ModelLoadConfig};
 use crate::engine::ggml::whisper::adapter::GGMLWhisperEngine;
 use crate::runtime::backend::backend_handler;
 use crate::runtime::backend::protocol::{
     BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
 };
 use crate::runtime::types::Payload;
-
-// ── Configurations ────────────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-struct LibLoadConfig {
-    lib_path: String,
-}
-
-#[derive(Deserialize)]
-struct ModelLoadConfig {
-    model_path: String,
-}
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 

@@ -31,6 +31,7 @@ use serde::Deserialize;
 use slab_llama::ChatMessage as LlamaChatMessage;
 use tokio::sync::{broadcast, mpsc};
 
+use crate::engine::ggml::config::LibLoadConfig;
 use crate::engine::ggml::llama::adapter::GGMLLlamaEngine;
 use crate::engine::ggml::llama::errors::SessionId;
 use crate::runtime::backend::backend_handler;
@@ -42,13 +43,9 @@ use crate::runtime::types::Payload;
 
 // ── Configurations ────────────────────────────────────────────────────────────
 
+/// Extended model-load config for llama; includes workers and context length.
 #[derive(Deserialize)]
-struct LibLoadConfig {
-    lib_path: String,
-}
-
-#[derive(Deserialize)]
-struct ModelLoadConfig {
+struct LlamaModelLoadConfig {
     model_path: String,
     #[serde(default = "default_workers")]
     num_workers: usize,
@@ -324,7 +321,7 @@ impl LlamaWorker {
             }
         };
 
-        let config: ModelLoadConfig = match input.to_json() {
+        let config: LlamaModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(format!(

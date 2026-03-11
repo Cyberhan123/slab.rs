@@ -15,11 +15,6 @@ pub trait TaskStore: Send + Sync + 'static {
         result_data: Option<&str>,
         error_msg: Option<&str>,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
-    fn set_core_task_id(
-        &self,
-        id: &str,
-        core_task_id: i64,
-    ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
     fn get_task(
         &self,
         id: &str,
@@ -72,17 +67,6 @@ impl TaskStore for AnyStore {
         .bind(id)
         .execute(&self.pool)
         .await?;
-        Ok(())
-    }
-
-    async fn set_core_task_id(&self, id: &str, core_task_id: i64) -> Result<(), sqlx::Error> {
-        let updated_at = chrono::Utc::now().to_rfc3339();
-        sqlx::query("UPDATE tasks SET core_task_id = ?1, updated_at = ?2 WHERE id = ?3")
-            .bind(core_task_id)
-            .bind(&updated_at)
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
         Ok(())
     }
 
