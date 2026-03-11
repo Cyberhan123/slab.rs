@@ -77,16 +77,16 @@ pub(super) fn anyhow_to_status(err: anyhow::Error) -> Status {
         s
     });
 
-    // Prefer the typed RuntimeError code when it is the root cause.
-    match err.downcast::<slab_core::RuntimeError>() {
-        Ok(runtime_err) => {
-            let base = runtime_to_status(runtime_err);
-            // Keep the specific status code but replace the message with the
-            // full chain so the gateway receives actionable context.
-            Status::new(base.code(), chain_msg)
-        }
-        Err(_) => Status::internal(chain_msg),
-    }
+    // Prefer the typed RuntimeError code when it wraps a RuntimeError anywhere in
+    // the chain. Scanning via downcast_ref first preserves the full chain_msg even
+    // when the RuntimeError is buried under one or more anyhow::context layers.
+    let code = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<slab_core::RuntimeError>())
+        .map(|re| runtime_to_status(re.clone()).code())
+        .unwrap_or(tonic::Code::Internal);
+
+    Status::new(code, chain_msg)
 }
 
 // ---------------------------------------------------------------------------
