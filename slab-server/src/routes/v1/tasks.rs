@@ -323,7 +323,6 @@ pub async fn cancel_task(
         ("id" = String, Path, description = "ID of the task to restart")
     ),
     responses(
-        (status = 200, description = "Task restarted", body = TaskResponse),
         (status = 400, description = "Bad request"),
         (status = 404, description = "Task not found"),
         (status = 501, description = "Not implemented"),
@@ -361,25 +360,38 @@ pub async fn restart_task(
 mod test {
     use base64::Engine as _;
 
-    /// Helper that replicates the image-vs-text branching used in `get_task_result`.
-    fn bytes_to_result_json(task_type: &str, bytes: &[u8]) -> serde_json::Value {
+    use crate::schemas::v1::task::TaskResultPayload;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    /// Replicates the `Payload::Bytes` → `TaskResultPayload` mapping from
+    /// `get_task_result` so we can exercise the conversion logic without
+    /// standing up the full HTTP stack.
+    fn bytes_to_result_payload(task_type: &str, bytes: &[u8]) -> TaskResultPayload {
         if task_type == "image" {
             let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-            let data_uri = format!("data:image/png;base64,{encoded}");
-            serde_json::json!({ "image": data_uri })
+            TaskResultPayload {
+                image: Some(format!("data:image/png;base64,{encoded}")),
+                text: None,
+            }
         } else {
-            let text = String::from_utf8_lossy(bytes).to_string();
-            serde_json::json!({ "text": text })
+            TaskResultPayload {
+                image: None,
+                text: Some(String::from_utf8_lossy(bytes).to_string()),
+            }
         }
     }
+
+    // ── Payload::Bytes (image) ────────────────────────────────────────────────
 
     #[test]
     fn image_bytes_become_data_uri() {
         let png_bytes = b"\x89PNG\r\n\x1a\nfakedata";
-        let result = bytes_to_result_json("image", png_bytes);
-        let image_field = result["image"]
-            .as_str()
-            .expect("image field must be a string");
+        let result = bytes_to_result_payload("image", png_bytes);
+
+        assert!(result.text.is_none(), "text field must be absent for image tasks");
+
+        let image_field = result.image.expect("image field must be present");
         assert!(
             image_field.starts_with("data:image/png;base64,"),
             "image field should start with PNG data URI prefix"
@@ -393,20 +405,93 @@ mod test {
     }
 
     #[test]
+    fn image_task_has_no_text_field() {
+        let result = bytes_to_result_payload("image", b"\x00\x01\x02");
+        assert!(result.text.is_none(), "text field must be absent for image tasks");
+        assert!(result.image.is_some(), "image field must be present for image tasks");
+    }
+
+    // ── Payload::Bytes (non-image) ────────────────────────────────────────────
+
+    #[test]
     fn non_image_bytes_become_text() {
-        let text_bytes = b"hello transcription";
-        let result = bytes_to_result_json("whisper", text_bytes);
-        assert_eq!(result["text"].as_str(), Some("hello transcription"));
-        assert!(result.get("image").is_none(), "image field must be absent");
+        let result = bytes_to_result_payload("whisper", b"hello transcription");
+        assert_eq!(result.text.as_deref(), Some("hello transcription"));
+        assert!(result.image.is_none(), "image field must be absent for non-image tasks");
+    }
+
+    // ── Payload::Json mapping ────────────────────────────────────────────────
+
+    /// Helper that replicates the `Payload::Json` → `TaskResultPayload` mapping.
+    fn json_to_result_payload(v: &serde_json::Value) -> TaskResultPayload {
+        let image = v.get("image").and_then(|s| s.as_str()).map(str::to_owned);
+        let text = v
+            .get("text")
+            .and_then(|s| s.as_str())
+            .map(str::to_owned)
+            .or_else(|| {
+                if image.is_none() {
+                    Some(v.to_string())
+                } else {
+                    None
+                }
+            });
+        TaskResultPayload { image, text }
     }
 
     #[test]
-    fn image_task_has_no_text_field() {
-        let result = bytes_to_result_json("image", b"\x00\x01\x02");
+    fn json_payload_with_text_key() {
+        let v = serde_json::json!({ "text": "hello from json" });
+        let result = json_to_result_payload(&v);
+        assert_eq!(result.text.as_deref(), Some("hello from json"));
+        assert!(result.image.is_none());
+    }
+
+    #[test]
+    fn json_payload_with_image_key() {
+        let v = serde_json::json!({ "image": "data:image/png;base64,abc=" });
+        let result = json_to_result_payload(&v);
+        assert_eq!(result.image.as_deref(), Some("data:image/png;base64,abc="));
+        assert!(result.text.is_none());
+    }
+
+    #[test]
+    fn json_payload_unknown_keys_fall_back_to_text() {
+        let v = serde_json::json!({ "some_key": 42 });
+        let result = json_to_result_payload(&v);
+        // Unknown JSON is serialised as a compact string into the `text` field.
+        assert!(result.image.is_none());
         assert!(
-            result.get("text").is_none(),
-            "text field must be absent for image tasks"
+            result.text.as_deref().unwrap_or("").contains("some_key"),
+            "full JSON should be in text when no known keys present"
         );
-        assert!(result["image"].is_string());
+    }
+
+    // ── DB round-trip ────────────────────────────────────────────────────────
+
+    #[test]
+    fn task_result_payload_roundtrips_through_json() {
+        let original = TaskResultPayload {
+            image: Some("data:image/png;base64,abc=".to_owned()),
+            text: None,
+        };
+        let serialized = serde_json::to_string(&original).expect("serialize");
+        let deserialized: TaskResultPayload =
+            serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(deserialized.image, original.image);
+        assert_eq!(deserialized.text, original.text);
+    }
+
+    #[test]
+    fn task_result_payload_text_roundtrips_through_json() {
+        let original = TaskResultPayload {
+            image: None,
+            text: Some("hello world".to_owned()),
+        };
+        let serialized = serde_json::to_string(&original).expect("serialize");
+        let deserialized: TaskResultPayload =
+            serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(deserialized.image, original.image);
+        assert_eq!(deserialized.text, original.text);
     }
 }
