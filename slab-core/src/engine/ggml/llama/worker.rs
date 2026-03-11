@@ -143,7 +143,7 @@ impl InferenceWorkerState {
                             session.pending_tokens.extend(tokens);
                         })
                         .map_err(|source| GGMLLlamaEngineError::TokenizeFailed {
-                            source: source.into(),
+                            source,
                         });
                     let _ = reply_tx.send(result);
                 }
