@@ -121,7 +121,8 @@ function Chat() {
   };
 
   const ensureDownloadedModelPath = async (
-    modelId: string
+    modelId: string,
+    forceDownload = false
   ): Promise<{ modelPath: string; downloadedNow: boolean }> => {
     let model = llamaModels.find((item) => item.id === modelId);
     if (!model) {
@@ -136,7 +137,7 @@ function Chat() {
       throw new Error(`Selected model does not support ${LLAMA_BACKEND_ID}`);
     }
 
-    if (model.local_path) {
+    if (model.local_path && !forceDownload) {
       return { modelPath: model.local_path, downloadedNow: false };
     }
 
@@ -165,6 +166,26 @@ function Chat() {
     return { modelPath: refreshedModel.local_path, downloadedNow: true };
   };
 
+  const loadOrSwitchSelectedModel = async (modelPath: string) => {
+    const shouldSwitch = Boolean(loadedModelId && loadedModelId !== selectedModelId);
+    if (shouldSwitch) {
+      await switchModelMutation.mutateAsync({
+        body: {
+          backend_id: LLAMA_BACKEND_ID,
+          model_path: modelPath,
+        },
+      });
+      return;
+    }
+
+    await loadModelMutation.mutateAsync({
+      body: {
+        backend_id: LLAMA_BACKEND_ID,
+        model_path: modelPath,
+      },
+    });
+  };
+
   const prepareSelectedModel = async () => {
     if (!selectedModelId) {
       throw new Error('Please select a chat model first.');
@@ -174,28 +195,29 @@ function Chat() {
       return;
     }
 
+    const selected = llamaModels.find((item) => item.id === selectedModelId);
     const { modelPath, downloadedNow } = await ensureDownloadedModelPath(selectedModelId);
 
     if (downloadedNow) {
-      const selected = llamaModels.find((item) => item.id === selectedModelId);
       toast.success(`Downloaded ${selected?.display_name ?? selectedModelId}`);
     }
 
-    const shouldSwitch = Boolean(loadedModelId && loadedModelId !== selectedModelId);
-    if (shouldSwitch) {
-      await switchModelMutation.mutateAsync({
-        body: {
-          backend_id: LLAMA_BACKEND_ID,
-          model_path: modelPath,
-        },
-      });
-    } else {
-      await loadModelMutation.mutateAsync({
-        body: {
-          backend_id: LLAMA_BACKEND_ID,
-          model_path: modelPath,
-        },
-      });
+    try {
+      await loadOrSwitchSelectedModel(modelPath);
+    } catch (firstLoadError) {
+      // If catalog says "downloaded" but loading fails, local cache may be stale/corrupted.
+      if (downloadedNow) {
+        throw firstLoadError;
+      }
+
+      toast.message('Model load failed, re-downloading and retrying once...');
+
+      const retry = await ensureDownloadedModelPath(selectedModelId, true);
+      if (retry.downloadedNow) {
+        toast.success(`Downloaded ${selected?.display_name ?? selectedModelId}`);
+      }
+
+      await loadOrSwitchSelectedModel(retry.modelPath);
     }
 
     setLoadedModelId(selectedModelId);
