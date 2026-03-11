@@ -71,4 +71,6 @@ pub struct AppState {
     pub store: Arc<AnyStore>,
     /// Tracks abort handles for running async tasks.
     pub task_manager: Arc<TaskManager>,
+    /// Tracks backend in-flight usage and performs optional idle-time auto-unload.
+    pub model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
 }

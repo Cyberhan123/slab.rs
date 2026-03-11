@@ -76,9 +76,11 @@ pub async fn transcribe(
 
     let store = Arc::clone(&state.store);
     let task_manager = Arc::clone(&state.task_manager);
+    let model_auto_unload = Arc::clone(&state.model_auto_unload);
     let task_id_for_spawn = task_id.clone();
     let transcribe_channel_for_spawn = transcribe_channel;
     let join = tokio::spawn(async move {
+        let _usage_guard = model_auto_unload.acquire("ggml.whisper").await;
         let rpc_result =
             grpc::client::transcribe(transcribe_channel_for_spawn, grpc_req.path).await;
         if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {

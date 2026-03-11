@@ -141,6 +141,7 @@ pub async fn chat_completions(
     })?;
 
     if req.stream {
+        let usage_guard = state.model_auto_unload.acquire("ggml.llama").await;
         let backend_stream = grpc::client::chat_stream(llama_channel.clone(), grpc_req.clone())
             .await
             .map_err(|e| ServerError::Internal(format!("grpc chat stream failed: {e}")))?;
@@ -161,13 +162,20 @@ pub async fn chat_completions(
             }
         });
 
-        let sse_stream = token_stream.chain(stream::once(async {
-            Ok::<Event, Infallible>(Event::default().data("[DONE]"))
-        }));
+        let sse_stream = token_stream
+            .chain(stream::once(async {
+                Ok::<Event, Infallible>(Event::default().data("[DONE]"))
+            }))
+            .map(move |item| {
+                // Keep the usage guard alive for the whole SSE stream lifetime.
+                let _keep_alive = &usage_guard;
+                item
+            });
 
         return Ok(Sse::new(sse_stream).into_response());
     }
 
+    let _usage_guard = state.model_auto_unload.acquire("ggml.llama").await;
     let generated = grpc::client::chat(llama_channel, grpc_req)
         .await
         .map_err(|e| ServerError::Internal(format!("grpc chat failed: {e}")))?;

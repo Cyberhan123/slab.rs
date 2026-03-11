@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import api, { getErrorMessage } from "@/lib/api";
 import type { paths } from "@/lib/api";
 import {
@@ -83,6 +83,14 @@ const EMPTY_MODEL_DRAFT: ModelDraft = {
   backend_ids: [],
 };
 
+const MODEL_AUTO_UNLOAD_ENABLED_KEY = 'model_auto_unload_enabled';
+const MODEL_AUTO_UNLOAD_IDLE_MINUTES_KEY = 'model_auto_unload_idle_minutes';
+
+function parseConfigBool(value?: string | null) {
+  if (!value) return false;
+  return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
+}
+
 function formatDate(value?: string | null) {
   if (!value) return 'Never';
   const parsed = new Date(value);
@@ -95,6 +103,9 @@ export default function Settings() {
   const [configName, setConfigName] = useState<string>('');
   const [configValue, setConfigValue] = useState<string>('');
   const [downloadingBackend, setDownloadingBackend] = useState<string | null>(null);
+  const [autoUnloadEnabled, setAutoUnloadEnabled] = useState(false);
+  const [autoUnloadMinutes, setAutoUnloadMinutes] = useState('10');
+  const [isSavingAutoUnload, setIsSavingAutoUnload] = useState(false);
 
   const [isModelDialogOpen, setIsModelDialogOpen] = useState(false);
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
@@ -129,8 +140,18 @@ export default function Settings() {
 
   const modelList: ModelCatalogItem[] = Array.isArray(models) ? models : [];
   const installedModelCount = modelList.filter((model) => Boolean(model.local_path)).length;
+  const configEntries = Array.isArray(configs) ? configs : [];
+  const configValueByKey = useMemo(
+    () => new Map(configEntries.map((entry) => [entry.key, entry.value])),
+    [configEntries]
+  );
 
   const isSavingModel = createModelMutation.isPending || updateModelMutation.isPending;
+
+  useEffect(() => {
+    setAutoUnloadEnabled(parseConfigBool(configValueByKey.get(MODEL_AUTO_UNLOAD_ENABLED_KEY)));
+    setAutoUnloadMinutes(configValueByKey.get(MODEL_AUTO_UNLOAD_IDLE_MINUTES_KEY)?.trim() || '10');
+  }, [configValueByKey]);
 
   const resetModelDialog = () => {
     setIsModelDialogOpen(false);
@@ -289,6 +310,46 @@ export default function Settings() {
       toast.error(getErrorMessage(error));
     } finally {
       setDeletingModelId(null);
+    }
+  };
+
+  const saveModelAutoUnload = async () => {
+    if (autoUnloadEnabled) {
+      const parsed = Number.parseInt(autoUnloadMinutes, 10);
+      if (!Number.isFinite(parsed) || parsed < 1) {
+        toast.error('Idle minutes must be an integer greater than or equal to 1.');
+        return;
+      }
+    }
+
+    setIsSavingAutoUnload(true);
+    try {
+      await updateConfigMutation.mutateAsync({
+        params: {
+          path: { key: MODEL_AUTO_UNLOAD_ENABLED_KEY },
+        },
+        body: {
+          name: 'Model Auto Unload Enabled',
+          value: autoUnloadEnabled ? 'true' : 'false',
+        },
+      });
+
+      await updateConfigMutation.mutateAsync({
+        params: {
+          path: { key: MODEL_AUTO_UNLOAD_IDLE_MINUTES_KEY },
+        },
+        body: {
+          name: 'Model Auto Unload Idle Minutes',
+          value: autoUnloadMinutes.trim() || '10',
+        },
+      });
+
+      toast.success('Model auto-unload configuration saved');
+      await refetchConfigs();
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsSavingAutoUnload(false);
     }
   };
 
@@ -465,7 +526,7 @@ export default function Settings() {
             <CardHeader>
               <CardTitle>Configuration Management</CardTitle>
               <CardDescription>
-                View and update configuration settings. Global backend keys: `llama_num_workers`, `whisper_num_workers`, `diffusion_num_workers`, `llama_context_length`.
+                View and update configuration settings. Global backend keys: `llama_num_workers`, `whisper_num_workers`, `diffusion_num_workers`, `llama_context_length`, `model_auto_unload_enabled`, `model_auto_unload_idle_minutes`.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -477,47 +538,93 @@ export default function Settings() {
               ) : configsError ? (
                 <div className="text-red-500">Error loading configurations</div>
               ) : (
-                <Table>
-                      <TableCaption>List of configuration entries</TableCaption>
-                      <TableHeader>
+                <div className="space-y-6">
+                  <Card className="border-dashed">
+                    <CardHeader>
+                      <CardTitle className="text-base">Model Auto Unload</CardTitle>
+                      <CardDescription>
+                        Track active model references and unload when idle for the configured minutes.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="flex items-center justify-between rounded-md border p-3">
+                        <div>
+                          <Label htmlFor="auto-unload-enabled">Enable auto unload</Label>
+                          <p className="text-xs text-muted-foreground">
+                            When enabled, idle models will be unloaded to free memory.
+                          </p>
+                        </div>
+                        <Checkbox
+                          id="auto-unload-enabled"
+                          checked={autoUnloadEnabled}
+                          onCheckedChange={(checked) => setAutoUnloadEnabled(Boolean(checked))}
+                        />
+                      </div>
+
+                      <div className="grid gap-2 sm:max-w-[240px]">
+                        <Label htmlFor="auto-unload-minutes">Idle timeout (minutes)</Label>
+                        <Input
+                          id="auto-unload-minutes"
+                          type="number"
+                          min={1}
+                          step={1}
+                          value={autoUnloadMinutes}
+                          onChange={(e) => setAutoUnloadMinutes(e.target.value)}
+                          placeholder="10"
+                        />
+                      </div>
+
+                      <div>
+                        <Button onClick={() => void saveModelAutoUnload()} disabled={isSavingAutoUnload}>
+                          {isSavingAutoUnload && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          Save Auto Unload
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Table>
+                    <TableCaption>List of configuration entries</TableCaption>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Key</TableHead>
+                        <TableHead>Value</TableHead>
+                        <TableHead>Name</TableHead>
+                        <TableHead>Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {configEntries.length > 0 ? (
+                        configEntries.map((config) => (
+                          <TableRow key={config.key}>
+                            <TableCell className="font-medium">{config.key}</TableCell>
+                            <TableCell>{config.value}</TableCell>
+                            <TableCell>{config.name}</TableCell>
+                            <TableCell>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setSelectedConfigKey(config.key);
+                                  setConfigName(config.name);
+                                  setConfigValue(config.value);
+                                }}
+                              >
+                                Edit
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        ))
+                      ) : (
                         <TableRow>
-                          <TableHead>Key</TableHead>
-                          <TableHead>Value</TableHead>
-                          <TableHead>Name</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                    {(configs?.length ?? 0) > 0 ? (
-                      configs?.map((config) => (
-                        <TableRow key={config.key}>
-                          <TableCell className="font-medium">{config.key}</TableCell>
-                          <TableCell>{config.value}</TableCell>
-                          <TableCell>{config.name}</TableCell>
-                          <TableCell>
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={() => {
-                                setSelectedConfigKey(config.key);
-                                setConfigName(config.name);
-                                setConfigValue(config.value);
-                              }}
-                            >
-                              Edit
-                            </Button>
+                          <TableCell colSpan={4} className="text-center py-4">
+                            No configuration entries found
                           </TableCell>
                         </TableRow>
-                      ))
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={4} className="text-center py-4">
-                          No configuration entries found
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
 
               {selectedConfigKey && (
