@@ -1,5 +1,5 @@
 use crate::engine;
-use slab_whisper::{SamplingStrategy, Whisper, WhisperContext, WhisperContextParameters};
+use slab_whisper::{SamplingStrategy, Whisper, WhisperContext, WhisperContextParameters, WhisperError};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -22,7 +22,7 @@ pub enum GGMLWhisperEngineError {
     #[error("Failed to run GGMLWhisperEngine model inference")]
     InferenceFailed {
         #[source]
-        source: anyhow::Error,
+        source: WhisperError,
     },
 
     #[error("Failed to canonicalize GGMLWhisperEngine library path: {path}")]
@@ -36,20 +36,20 @@ pub enum GGMLWhisperEngineError {
     InitializeDynamicLibrary {
         path: PathBuf,
         #[source]
-        source: anyhow::Error,
+        source: WhisperError,
     },
 
     #[error("Failed to create GGMLWhisperEngine context with model: {model_path}")]
     CreateContext {
         model_path: String,
         #[source]
-        source: anyhow::Error,
+        source: WhisperError,
     },
 
     #[error("Failed to create GGMLWhisperEngine inference state")]
     CreateInferenceState {
         #[source]
-        source: anyhow::Error,
+        source: WhisperError,
     },
 }
 
@@ -96,7 +96,7 @@ impl GGMLWhisperEngine {
         let whisper = Whisper::new(normalized_path.to_path_buf()).map_err(|source| {
             GGMLWhisperEngineError::InitializeDynamicLibrary {
                 path: normalized_path.to_path_buf(),
-                source: source.into(),
+                source,
             }
         })?;
 
@@ -130,7 +130,7 @@ impl GGMLWhisperEngine {
             .new_context_with_params(path, params)
             .map_err(|source| GGMLWhisperEngineError::CreateContext {
                 model_path: path.to_string(),
-                source: source.into(),
+                source,
             })?;
         self.ctx = Some(ctx);
         Ok(())
@@ -162,11 +162,11 @@ impl GGMLWhisperEngine {
         let mut state =
             ctx.create_state()
                 .map_err(|source| GGMLWhisperEngineError::CreateInferenceState {
-                    source: source.into(),
+                    source,
                 })?;
         state.full(params, &audio_data[..]).map_err(|source| {
             GGMLWhisperEngineError::InferenceFailed {
-                source: source.into(),
+                source,
             }
         })?;
 

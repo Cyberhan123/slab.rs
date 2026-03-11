@@ -291,7 +291,7 @@ impl LlamaInferenceEngine {
 
             let ctx = model.new_context(ctx_params.clone()).map_err(|source| {
                 GGMLLlamaEngineError::CreateContext {
-                    source: source.into(),
+                    source,
                 }
             })?;
 
