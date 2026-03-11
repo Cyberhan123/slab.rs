@@ -7,6 +7,8 @@ pub struct LlamaContextParams {
     pub n_batch: u32,
     /// Physical batch size (must be <= n_batch, 0 = use n_batch).
     pub n_ubatch: u32,
+    /// Maximum number of concurrent sequence IDs allowed in this context.
+    pub n_seq_max: u32,
     /// Number of threads for generation.
     pub n_threads: i32,
     /// Number of threads for batch processing.
@@ -25,6 +27,7 @@ impl Default for LlamaContextParams {
             n_ctx: 512,
             n_batch: 512,
             n_ubatch: 0,
+            n_seq_max: 64,
             n_threads: 4,
             n_threads_batch: 4,
             offload_kqv: true,
@@ -51,6 +54,11 @@ impl LlamaContextParams {
 
     pub fn n_ubatch(mut self, v: u32) -> Self {
         self.n_ubatch = v;
+        self
+    }
+
+    pub fn n_seq_max(mut self, v: u32) -> Self {
+        self.n_seq_max = v.max(1);
         self
     }
 
@@ -89,6 +97,7 @@ impl LlamaContextParams {
         if self.n_ubatch > 0 {
             params.n_ubatch = self.n_ubatch;
         }
+        params.n_seq_max = self.n_seq_max.max(1);
         params.n_threads = self.n_threads;
         params.n_threads_batch = self.n_threads_batch;
         params.offload_kqv = self.offload_kqv;
