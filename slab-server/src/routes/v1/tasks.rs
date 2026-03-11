@@ -122,7 +122,7 @@ pub async fn get_task(
 pub async fn get_task_result(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, ServerError> {
+) -> Result<Json<TaskResultPayload>, ServerError> {
     let record = state
         .store
         .get_task(&id)
@@ -133,30 +133,70 @@ pub async fn get_task_result(
     if let Some(core_tid) = record.core_task_id {
         match slab_core::api::result(core_tid as u64).await {
             Ok(Some(payload)) => {
-                let result_json = match &payload {
+                let result_payload = match &payload {
                     slab_core::Payload::Bytes(b) => {
                         // Image tasks return raw PNG bytes; encode them as a data URI.
                         if record.task_type == "image" {
                             let encoded =
                                 base64::engine::general_purpose::STANDARD.encode(b.as_ref());
-                            let data_uri = format!("data:image/png;base64,{encoded}");
-                            serde_json::json!({ "image": data_uri })
+                            TaskResultPayload {
+                                image: Some(format!("data:image/png;base64,{encoded}")),
+                                text: None,
+                            }
                         } else {
-                            let text = String::from_utf8_lossy(b).to_string();
-                            serde_json::json!({ "text": text })
+                            TaskResultPayload {
+                                image: None,
+                                text: Some(String::from_utf8_lossy(b).to_string()),
+                            }
                         }
                     }
-                    slab_core::Payload::Text(t) => serde_json::json!({ "text": t.to_string() }),
-                    slab_core::Payload::Json(v) => v.clone(),
-                    _ => serde_json::Value::Null,
+                    slab_core::Payload::Text(t) => TaskResultPayload {
+                        image: None,
+                        text: Some(t.to_string()),
+                    },
+                    slab_core::Payload::Json(v) => {
+                        // `Payload::Json` is rare for inference results (it is mainly used
+                        // for control payloads such as model-load parameters).  When it
+                        // does appear we try to map well-known keys:
+                        //   • "image" → TaskResultPayload.image
+                        //   • "text"  → TaskResultPayload.text
+                        // If neither key is present the entire JSON value is serialised to
+                        // a compact string and stored in `text` so callers can still
+                        // inspect the raw payload rather than receiving an empty response.
+                        let image =
+                            v.get("image").and_then(|s| s.as_str()).map(str::to_owned);
+                        let text = v
+                            .get("text")
+                            .and_then(|s| s.as_str())
+                            .map(str::to_owned)
+                            .or_else(|| {
+                                if image.is_none() {
+                                    Some(v.to_string())
+                                } else {
+                                    None
+                                }
+                            });
+                        TaskResultPayload { image, text }
+                    }
+                    _ => TaskResultPayload {
+                        image: None,
+                        text: None,
+                    },
                 };
                 // Persist result in DB for future queries.
-                state
-                    .store
-                    .update_task_status(&id, "succeeded", Some(&result_json.to_string()), None)
-                    .await
-                    .unwrap_or_else(|e| warn!(error = %e, "failed to persist result"));
-                return Ok(Json(result_json));
+                match serde_json::to_string(&result_payload) {
+                    Ok(result_json) => {
+                        state
+                            .store
+                            .update_task_status(&id, "succeeded", Some(&result_json), None)
+                            .await
+                            .unwrap_or_else(|e| warn!(error = %e, "failed to persist result"));
+                    }
+                    Err(e) => {
+                        warn!(task_id = %id, error = %e, "failed to serialize result_payload; result will not be persisted to DB");
+                    }
+                }
+                return Ok(Json(result_payload));
             }
             Ok(None) => {
                 // `api::result()` returns None when the task is still in
@@ -164,12 +204,15 @@ pub async fn get_task_result(
                 // (ResultConsumed).  Fall back to the persisted result in DB
                 // if it was written by a prior call.
                 if let Some(data) = record.result_data {
-                    let result = serde_json::from_str::<serde_json::Value>(&data)
-                        .unwrap_or_else(|e| {
-                            warn!(task_id = %id, error = %e, "persisted result_data is not valid JSON; returning as plain string");
-                            serde_json::Value::String(data)
+                    let result_payload =
+                        serde_json::from_str::<TaskResultPayload>(&data).unwrap_or_else(|e| {
+                            warn!(task_id = %id, error = %e, "persisted result_data is not a TaskResultPayload; returning as text");
+                            TaskResultPayload {
+                                image: None,
+                                text: Some(data),
+                            }
                         });
-                    return Ok(Json(result));
+                    return Ok(Json(result_payload));
                 }
                 return Err(ServerError::BadRequest(format!(
                     "task {id} is not completed yet"
@@ -192,11 +235,22 @@ pub async fn get_task_result(
     // Server-only tasks: read from DB.
     match record.status.as_str() {
         "succeeded" => {
-            let result = record
+            let result_payload = record
                 .result_data
-                .map(|s| serde_json::from_str(&s).unwrap_or(serde_json::Value::String(s)))
-                .unwrap_or(serde_json::Value::Null);
-            Ok(Json(result))
+                .map(|data| {
+                    serde_json::from_str::<TaskResultPayload>(&data).unwrap_or_else(|e| {
+                        warn!(task_id = %id, error = %e, "persisted result_data is not a TaskResultPayload; returning as text");
+                        TaskResultPayload {
+                            image: None,
+                            text: Some(data),
+                        }
+                    })
+                })
+                .unwrap_or(TaskResultPayload {
+                    image: None,
+                    text: None,
+                });
+            Ok(Json(result_payload))
         }
         status => Err(ServerError::BadRequest(format!(
             "task is not succeeded (status: {status})"
@@ -221,7 +275,7 @@ pub async fn get_task_result(
 pub async fn cancel_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, ServerError> {
+) -> Result<Json<TaskResponse>, ServerError> {
     let record = state
         .store
         .get_task(&id)
@@ -252,7 +306,13 @@ pub async fn cancel_task(
     state.task_manager.cancel(&id);
 
     info!(task_id = %id, "task cancelled");
-    Ok(Json(serde_json::json!({ "status": "cancelled" })))
+    // Re-fetch the updated record so the response reflects the persisted state.
+    let updated = state
+        .store
+        .get_task(&id)
+        .await?
+        .ok_or_else(|| ServerError::NotFound(format!("task {id} not found after cancel")))?;
+    Ok(Json(updated.to_response()))
 }
 
 #[utoipa::path(
@@ -263,17 +323,16 @@ pub async fn cancel_task(
         ("id" = String, Path, description = "ID of the task to restart")
     ),
     responses(
-        (status = 200, description = "Task restarted", body = TaskResponse),
         (status = 400, description = "Bad request"),
         (status = 404, description = "Task not found"),
+        (status = 501, description = "Not implemented"),
         (status = 500, description = "Backend error"),
     )
 )]
-
 pub async fn restart_task(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, ServerError> {
+) -> Result<Json<TaskResponse>, ServerError> {
     let record = state
         .store
         .get_task(&id)
@@ -290,119 +349,8 @@ pub async fn restart_task(
         )));
     }
 
-    // Re-submit to slab-core for tasks that have stored input.
-    // if let Some(input_json) = &record.input_data {
-    //     match record.task_type.as_str() {
-    //         "whisper" => {
-    //             let input: serde_json::Value = match serde_json::from_str(input_json) {
-    //                 Ok(v) => v,
-    //                 Err(e) => {
-    //                     warn!(task_id = %id, error = %e, "invalid stored input_data for whisper restart");
-    //                     return Err(ServerError::Internal(format!(
-    //                         "invalid stored input_data: {e}"
-    //                     )));
-    //                 }
-    //             };
-    //             if let Some(tmp_path) = input["tmp_path"].as_str().map(str::to_owned) {
-    //                 let task_id = id.clone();
-    //                 let store = Arc::clone(&state.store);
-    //                 state
-    //                     .store
-    //                     .update_task_status(&id, "running", None, None)
-    //                     .await?;
-    //                 tokio::spawn(async move {
-    //                     // The preprocess stage provides the real PCM data; the initial
-    //                     // Bytes payload is an empty placeholder that gets replaced by it.
-    //                     let core_result =
-    //                         slab_core::api::backend(slab_core::api::Backend::GGMLWhisper)
-    //                             .op(slab_core::api::Event::Inference)
-    //                             .input(slab_core::Payload::Bytes(std::sync::Arc::from(
-    //                                 [] as [u8; 0]
-    //                             )))
-    //                             .preprocess("ffmpeg.to_pcm_f32le", move |_| {
-    //                                 crate::routes::v1::audio::convert_to_pcm_f32le(&tmp_path)
-    //                             })
-    //                             .run()
-    //                             .await;
-    //                     match core_result {
-    //                         Ok(core_task_id) => {
-    //                             store
-    //                                 .set_core_task_id(&task_id, core_task_id as i64)
-    //                                 .await
-    //                                 .ok();
-    //                         }
-    //                         Err(e) => {
-    //                             store
-    //                                 .update_task_status(
-    //                                     &task_id,
-    //                                     "failed",
-    //                                     None,
-    //                                     Some(&e.to_string()),
-    //                                 )
-    //                                 .await
-    //                                 .ok();
-    //                         }
-    //                     }
-    //                 });
-    //             }
-    //         }
-    //         "image" => {
-    //             let input: serde_json::Value = match serde_json::from_str(input_json) {
-    //                 Ok(v) => v,
-    //                 Err(e) => {
-    //                     warn!(task_id = %id, error = %e, "invalid stored input_data for image restart");
-    //                     return Err(ServerError::Internal(format!(
-    //                         "invalid stored input_data: {e}"
-    //                     )));
-    //                 }
-    //             };
-    //             let task_id = id.clone();
-    //             let store = Arc::clone(&state.store);
-    //             state
-    //                 .store
-    //                 .update_task_status(&id, "running", None, None)
-    //                 .await?;
-    //             tokio::spawn(async move {
-    //                 let core_result =
-    //                     slab_core::api::backend(slab_core::api::Backend::GGMLDiffusion)
-    //                         .op(slab_core::api::Event::InferenceImage)
-    //                         .input(slab_core::Payload::Json(input))
-    //                         .run()
-    //                         .await;
-    //                 match core_result {
-    //                     Ok(core_task_id) => {
-    //                         store
-    //                             .set_core_task_id(&task_id, core_task_id as i64)
-    //                             .await
-    //                             .ok();
-    //                     }
-    //                     Err(e) => {
-    //                         store
-    //                             .update_task_status(&task_id, "failed", None, Some(&e.to_string()))
-    //                             .await
-    //                             .ok();
-    //                     }
-    //                 }
-    //             });
-    //         }
-    //         _ => {
-    //             // For server-only tasks (ffmpeg, downloads), reset to pending for manual
-    //             // operator handling.  Future iterations could re-spawn these too.
-    //             state
-    //                 .store
-    //                 .update_task_status(&id, "pending", None, None)
-    //                 .await?;
-    //             info!(task_id = %id, task_type = %record.task_type, "task reset to pending for restart");
-    //             return Ok(Json(
-    //                 serde_json::json!({ "task_id": id, "status": "pending" }),
-    //             ));
-    //         }
-    //     }
-    // }
-
-    info!(task_id = %id, task_type = %record.task_type, "task restarted");
-    Ok(Json(
-        serde_json::json!({ "task_id": id, "status": "running" }),
+    Err(ServerError::NotImplemented(
+        "task restart is not yet implemented".to_owned(),
     ))
 }
 
@@ -412,25 +360,38 @@ pub async fn restart_task(
 mod test {
     use base64::Engine as _;
 
-    /// Helper that replicates the image-vs-text branching used in `get_task_result`.
-    fn bytes_to_result_json(task_type: &str, bytes: &[u8]) -> serde_json::Value {
+    use crate::schemas::v1::task::TaskResultPayload;
+
+    // ── helpers ──────────────────────────────────────────────────────────────
+
+    /// Replicates the `Payload::Bytes` → `TaskResultPayload` mapping from
+    /// `get_task_result` so we can exercise the conversion logic without
+    /// standing up the full HTTP stack.
+    fn bytes_to_result_payload(task_type: &str, bytes: &[u8]) -> TaskResultPayload {
         if task_type == "image" {
             let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
-            let data_uri = format!("data:image/png;base64,{encoded}");
-            serde_json::json!({ "image": data_uri })
+            TaskResultPayload {
+                image: Some(format!("data:image/png;base64,{encoded}")),
+                text: None,
+            }
         } else {
-            let text = String::from_utf8_lossy(bytes).to_string();
-            serde_json::json!({ "text": text })
+            TaskResultPayload {
+                image: None,
+                text: Some(String::from_utf8_lossy(bytes).to_string()),
+            }
         }
     }
+
+    // ── Payload::Bytes (image) ────────────────────────────────────────────────
 
     #[test]
     fn image_bytes_become_data_uri() {
         let png_bytes = b"\x89PNG\r\n\x1a\nfakedata";
-        let result = bytes_to_result_json("image", png_bytes);
-        let image_field = result["image"]
-            .as_str()
-            .expect("image field must be a string");
+        let result = bytes_to_result_payload("image", png_bytes);
+
+        assert!(result.text.is_none(), "text field must be absent for image tasks");
+
+        let image_field = result.image.expect("image field must be present");
         assert!(
             image_field.starts_with("data:image/png;base64,"),
             "image field should start with PNG data URI prefix"
@@ -444,20 +405,93 @@ mod test {
     }
 
     #[test]
+    fn image_task_has_no_text_field() {
+        let result = bytes_to_result_payload("image", b"\x00\x01\x02");
+        assert!(result.text.is_none(), "text field must be absent for image tasks");
+        assert!(result.image.is_some(), "image field must be present for image tasks");
+    }
+
+    // ── Payload::Bytes (non-image) ────────────────────────────────────────────
+
+    #[test]
     fn non_image_bytes_become_text() {
-        let text_bytes = b"hello transcription";
-        let result = bytes_to_result_json("whisper", text_bytes);
-        assert_eq!(result["text"].as_str(), Some("hello transcription"));
-        assert!(result.get("image").is_none(), "image field must be absent");
+        let result = bytes_to_result_payload("whisper", b"hello transcription");
+        assert_eq!(result.text.as_deref(), Some("hello transcription"));
+        assert!(result.image.is_none(), "image field must be absent for non-image tasks");
+    }
+
+    // ── Payload::Json mapping ────────────────────────────────────────────────
+
+    /// Helper that replicates the `Payload::Json` → `TaskResultPayload` mapping.
+    fn json_to_result_payload(v: &serde_json::Value) -> TaskResultPayload {
+        let image = v.get("image").and_then(|s| s.as_str()).map(str::to_owned);
+        let text = v
+            .get("text")
+            .and_then(|s| s.as_str())
+            .map(str::to_owned)
+            .or_else(|| {
+                if image.is_none() {
+                    Some(v.to_string())
+                } else {
+                    None
+                }
+            });
+        TaskResultPayload { image, text }
     }
 
     #[test]
-    fn image_task_has_no_text_field() {
-        let result = bytes_to_result_json("image", b"\x00\x01\x02");
+    fn json_payload_with_text_key() {
+        let v = serde_json::json!({ "text": "hello from json" });
+        let result = json_to_result_payload(&v);
+        assert_eq!(result.text.as_deref(), Some("hello from json"));
+        assert!(result.image.is_none());
+    }
+
+    #[test]
+    fn json_payload_with_image_key() {
+        let v = serde_json::json!({ "image": "data:image/png;base64,abc=" });
+        let result = json_to_result_payload(&v);
+        assert_eq!(result.image.as_deref(), Some("data:image/png;base64,abc="));
+        assert!(result.text.is_none());
+    }
+
+    #[test]
+    fn json_payload_unknown_keys_fall_back_to_text() {
+        let v = serde_json::json!({ "some_key": 42 });
+        let result = json_to_result_payload(&v);
+        // Unknown JSON is serialised as a compact string into the `text` field.
+        assert!(result.image.is_none());
         assert!(
-            result.get("text").is_none(),
-            "text field must be absent for image tasks"
+            result.text.as_deref().unwrap_or("").contains("some_key"),
+            "full JSON should be in text when no known keys present"
         );
-        assert!(result["image"].is_string());
+    }
+
+    // ── DB round-trip ────────────────────────────────────────────────────────
+
+    #[test]
+    fn task_result_payload_roundtrips_through_json() {
+        let original = TaskResultPayload {
+            image: Some("data:image/png;base64,abc=".to_owned()),
+            text: None,
+        };
+        let serialized = serde_json::to_string(&original).expect("serialize");
+        let deserialized: TaskResultPayload =
+            serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(deserialized.image, original.image);
+        assert_eq!(deserialized.text, original.text);
+    }
+
+    #[test]
+    fn task_result_payload_text_roundtrips_through_json() {
+        let original = TaskResultPayload {
+            image: None,
+            text: Some("hello world".to_owned()),
+        };
+        let serialized = serde_json::to_string(&original).expect("serialize");
+        let deserialized: TaskResultPayload =
+            serde_json::from_str(&serialized).expect("deserialize");
+        assert_eq!(deserialized.image, original.image);
+        assert_eq!(deserialized.text, original.text);
     }
 }

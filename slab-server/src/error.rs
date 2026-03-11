@@ -31,6 +31,7 @@ mod error_codes {
     pub const RUNTIME_ERROR: u16 = 5000;
     pub const DATABASE_ERROR: u16 = 5001;
     pub const INTERNAL_ERROR: u16 = 5002;
+    pub const NOT_IMPLEMENTED: u16 = 5010;
 }
 
 /// All errors that can occur in the slab-server request lifecycle.
@@ -56,6 +57,10 @@ pub enum ServerError {
     #[error("backend not ready: {0}")]
     BackendNotReady(String),
 
+    /// The requested operation is not yet implemented.
+    #[error("not implemented: {0}")]
+    NotImplemented(String),
+
     /// An unclassified internal server error.
     #[error("internal error: {0}")]
     Internal(String),
@@ -80,6 +85,13 @@ impl IntoResponse for ServerError {
             ServerError::BackendNotReady(m) => (
                 StatusCode::SERVICE_UNAVAILABLE,
                 error_codes::BACKEND_NOT_READY,
+                None,
+                m.clone(),
+            ),
+
+            ServerError::NotImplemented(m) => (
+                StatusCode::NOT_IMPLEMENTED,
+                error_codes::NOT_IMPLEMENTED,
                 None,
                 m.clone(),
             ),
