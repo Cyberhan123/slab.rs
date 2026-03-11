@@ -189,7 +189,8 @@ impl Whisper {
 
         #[cfg(not(windows))]
         {
-            let lib = unsafe { slab_whisper_sys::WhisperLib::from_library(path.as_ref())? };
+            let raw_lib = unsafe { libloading::Library::new(path.as_ref())? };
+            let lib = unsafe { slab_whisper_sys::WhisperLib::from_library(raw_lib)? };
             let ggml_lib = load_ggml_backend(path.as_ref(), &lib)?;
             Ok(Self {
                 lib: Arc::new(lib),

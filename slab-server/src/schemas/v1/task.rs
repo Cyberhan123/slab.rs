@@ -8,8 +8,7 @@ use utoipa::{IntoParams, ToSchema};
 /// Exactly one field is populated depending on the task type:
 /// - `image` tasks: `image` contains a `data:image/png;base64,…` data URI.
 /// - Text-producing tasks (whisper, etc.): `text` contains the UTF-8 result.
-/// - JSON-returning tasks: both fields may be absent; the body is a JSON object.
-#[derive(Serialize, ToSchema)]
+#[derive(Serialize, Deserialize, ToSchema)]
 pub struct TaskResultPayload {
     /// Base64-encoded PNG data URI, present for `image` task results.
     #[serde(skip_serializing_if = "Option::is_none")]
