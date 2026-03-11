@@ -11,23 +11,7 @@ export type SelectedFile = {
 export default function useFile() {
     const isTauri = useIsTauri();
 
-    const handleFile = async (e: ChangeEvent<HTMLInputElement>): Promise<SelectedFile | null> => {
-        if (!isTauri) {
-            // Web mode: use File object from input
-            return new Promise(async (resolve) => {
-                if (e.target.files && e.target.files[0]) {
-                    const file = e.target.files?.[0];
-                    if (file) {
-                        resolve({ file, name: file.name });
-                    } else {
-                        resolve(null);
-                    }
-                } else {
-                    resolve(null);
-                }
-            });
-        }
-
+    const handleFile = async (e?: ChangeEvent<HTMLInputElement>): Promise<SelectedFile | null> => {
         if (isTauri) {
             // Tauri mode: open file dialog
             const selected = await open({
@@ -39,12 +23,18 @@ export default function useFile() {
             });
 
             if (selected && typeof selected === 'string') {
-                return { file: selected, name: selected.split('/').pop() };
+                const name = selected.split(/[/\\]/).pop() ?? selected;
+                return { file: selected, name };
             }
             return null;
         }
 
-        return null;
+        // Web mode: use File object from input
+        const file = e?.target.files?.[0];
+        if (!file) {
+            return null;
+        }
+        return { file, name: file.name };
     };
 
     return { handleFile };

@@ -9,10 +9,11 @@ const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?
 
 export const providerCaches = new Map<string, OpenAIChatProvider>();
 
-export const providerFactory = (conversationKey: string) => {
-    if (!providerCaches.get(conversationKey)) {
+export const providerFactory = (conversationKey: string, model: string) => {
+    const cacheKey = `${conversationKey}::${model}`;
+    if (!providerCaches.get(cacheKey)) {
         providerCaches.set(
-            conversationKey,
+            cacheKey,
             new OpenAIChatProvider({
                 request: XRequest<XModelParams, Partial<Record<SSEFields, XModelResponse>>>(
                     `${API_BASE_URL}/v1/chat/completions`,
@@ -20,14 +21,15 @@ export const providerFactory = (conversationKey: string) => {
                         manual: true,
                         params: {
                             stream: true,
-                            model: 'slab-llama',
+                            model,
+                            id: conversationKey,
                         },
                     },
                 ),
             }),
         );
     }
-    return providerCaches.get(conversationKey);
+    return providerCaches.get(cacheKey);
 };
 
 export const historyMessageFactory = (_conversationKey: string): DefaultMessageInfo<XModelMessage>[] => {

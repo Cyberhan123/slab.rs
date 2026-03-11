@@ -20,7 +20,6 @@ type ModelStatus = 'downloaded' | 'pending' | 'not_downloaded';
 export default function Hub() {
   const [selectedModelId, setSelectedModelId] = useState('');
   const [selectedBackendId, setSelectedBackendId] = useState('');
-  const [numWorkers, setNumWorkers] = useState(1);
 
   const [searchKeyword, setSearchKeyword] = useState('');
   const [backendFilter, setBackendFilter] = useState('all');
@@ -45,6 +44,7 @@ export default function Hub() {
   const isBusy = busyAction !== null;
 
   const pendingTaskIdOf = (model: unknown): string | null => {
+    if (typeof model !== 'object' || model === null) return null;
     const pendingTaskId = (model as { pending_task_id?: string | null }).pending_task_id;
     if (typeof pendingTaskId !== 'string') return null;
     const trimmed = pendingTaskId.trim();
@@ -221,11 +221,6 @@ export default function Hub() {
       toast.error('Selected backend is not supported by this model');
       return;
     }
-    if (!Number.isFinite(numWorkers) || numWorkers < 1) {
-      toast.error('Number of workers must be at least 1');
-      return;
-    }
-
     setBusyAction('prepare');
     setBusyModelId(modelId);
     try {
@@ -239,7 +234,6 @@ export default function Hub() {
         body: {
           backend_id: backendId,
           model_path: modelPath,
-          num_workers: numWorkers,
         },
       });
 
@@ -370,11 +364,11 @@ export default function Hub() {
         <CardHeader>
           <CardTitle>One-Click Activation</CardTitle>
           <CardDescription>
-            Pick a model and backend, then click Prepare & Load. Missing files will be downloaded automatically.
+            Pick a model and backend, then click Prepare & Load. Missing files will be downloaded automatically. Worker count is read from global Settings config.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <p className="text-sm font-medium">Model</p>
@@ -445,23 +439,6 @@ export default function Hub() {
               </Select>
             </div>
 
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Workers</p>
-              <Input
-                type="number"
-                min="1"
-                value={numWorkers}
-                onChange={(event) => {
-                  const parsed = Number(event.target.value);
-                  if (!Number.isFinite(parsed) || parsed < 1) {
-                    setNumWorkers(1);
-                    return;
-                  }
-                  setNumWorkers(Math.floor(parsed));
-                }}
-                disabled={isBusy}
-              />
-            </div>
           </div>
 
           <div className="flex flex-wrap gap-3">
