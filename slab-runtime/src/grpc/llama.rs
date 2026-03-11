@@ -2,7 +2,7 @@ use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn, Instrument};
 
 use slab_core::api::Backend;
 use slab_proto::slab::ipc::v1 as pb;
@@ -92,42 +92,45 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         info!("llama chat_stream started; spawning token relay task");
 
         let (tx, rx) = mpsc::channel(32);
-        tokio::spawn(async move {
-            tokio::pin!(backend_stream);
-            let mut token_count = 0usize;
-            while let Some(chunk) = backend_stream.next().await {
-                let msg = match chunk {
-                    Ok(bytes) => {
-                        token_count += 1;
-                        pb::ChatStreamChunk {
-                            token: String::from_utf8_lossy(&bytes).into_owned(),
-                            error: String::new(),
-                            done: false,
+        tokio::spawn(
+            async move {
+                tokio::pin!(backend_stream);
+                let mut token_count = 0usize;
+                while let Some(chunk) = backend_stream.next().await {
+                    let msg = match chunk {
+                        Ok(bytes) => {
+                            token_count += 1;
+                            pb::ChatStreamChunk {
+                                token: String::from_utf8_lossy(&bytes).into_owned(),
+                                error: String::new(),
+                                done: false,
+                            }
                         }
-                    }
-                    Err(e) => {
-                        warn!(error = %e, "error in llama stream chunk");
-                        pb::ChatStreamChunk {
-                            token: String::new(),
-                            error: e.to_string(),
-                            done: false,
+                        Err(e) => {
+                            warn!(error = %e, "error in llama stream chunk");
+                            pb::ChatStreamChunk {
+                                token: String::new(),
+                                error: e.to_string(),
+                                done: false,
+                            }
                         }
+                    };
+                    if tx.send(Ok(msg)).await.is_err() {
+                        debug!("llama stream receiver dropped; stopping relay");
+                        return;
                     }
-                };
-                if tx.send(Ok(msg)).await.is_err() {
-                    debug!("llama stream receiver dropped; stopping relay");
-                    return;
                 }
+                debug!(token_count, "llama chat_stream relay finished");
+                let _ = tx
+                    .send(Ok(pb::ChatStreamChunk {
+                        token: String::new(),
+                        error: String::new(),
+                        done: true,
+                    }))
+                    .await;
             }
-            debug!(token_count, "llama chat_stream relay finished");
-            let _ = tx
-                .send(Ok(pb::ChatStreamChunk {
-                    token: String::new(),
-                    error: String::new(),
-                    done: true,
-                }))
-                .await;
-        });
+            .instrument(tracing::Span::current()),
+        );
 
         Ok(Response::new(ReceiverStream::new(rx)))
     }

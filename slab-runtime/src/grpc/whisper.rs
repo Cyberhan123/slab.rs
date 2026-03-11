@@ -28,10 +28,17 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
 
         debug!(audio_path = %req.path, "whisper transcribe request received");
 
+        // Capture the current span so it can be entered inside the
+        // spawn_blocking closure used by the CpuStage; without this the
+        // preprocess logs would lose the per-request request_id/backend fields.
+        let preprocess_span = tracing::Span::current();
         let output = slab_core::api::backend(Backend::GGMLWhisper)
             .inference()
             .input(slab_core::Payload::Text(req.path.into()))
-            .preprocess("ffmpeg.to_pcm_f32le", convert_to_pcm_f32le)
+            .preprocess("ffmpeg.to_pcm_f32le", move |payload| {
+                let _guard = preprocess_span.enter();
+                convert_to_pcm_f32le(payload)
+            })
             .run_wait()
             .await
             .map_err(|e| {
