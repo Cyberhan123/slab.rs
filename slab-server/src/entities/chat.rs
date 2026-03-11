@@ -1,5 +1,5 @@
 use crate::entities::{dao::ChatMessage, AnyStore};
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use std::future::Future;
 
 pub trait ChatStore: Send + Sync + 'static {
@@ -16,6 +16,18 @@ pub trait ChatStore: Send + Sync + 'static {
 impl ChatStore for AnyStore {
     async fn append_message(&self, msg: ChatMessage) -> Result<(), sqlx::Error> {
         let created_at = msg.created_at.to_rfc3339();
+        // Ensure FK target exists for clients that send chat completions directly
+        // without creating a session via `/v1/sessions` first.
+        sqlx::query(
+            "INSERT INTO chat_sessions (id, name, state_path, created_at, updated_at) \
+             VALUES (?1, '', NULL, ?2, ?2) \
+             ON CONFLICT(id) DO NOTHING",
+        )
+        .bind(&msg.session_id)
+        .bind(&created_at)
+        .execute(&self.pool)
+        .await?;
+
         sqlx::query(
             "INSERT INTO chat_messages (id, session_id, role, content, created_at) \
              VALUES (?1, ?2, ?3, ?4, ?5)",

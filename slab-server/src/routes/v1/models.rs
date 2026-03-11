@@ -83,6 +83,21 @@ fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
     Ok(())
 }
 
+fn validate_existing_model_file(path: &str) -> Result<(), ServerError> {
+    let model_path = std::path::Path::new(path);
+    if !model_path.exists() {
+        return Err(ServerError::BadRequest(format!(
+            "model_path does not exist: {path}"
+        )));
+    }
+    if !model_path.is_file() {
+        return Err(ServerError::BadRequest(format!(
+            "model_path is not a file: {path}"
+        )));
+    }
+    Ok(())
+}
+
 fn resolve_backend_channel(
     state: &AppState,
     backend_id: &str,
@@ -156,6 +171,34 @@ async fn resolve_model_workers(
 
     let workers = parse_num_workers(&raw, config_key)?;
     Ok((workers, "config"))
+}
+
+fn grpc_status_message(status: &tonic::Status) -> String {
+    let msg = status.message().trim();
+    if !msg.is_empty() {
+        return msg.to_owned();
+    }
+    status.to_string()
+}
+
+fn map_grpc_model_error(action: &str, err: anyhow::Error) -> ServerError {
+    let grpc_status = err
+        .chain()
+        .find_map(|cause| cause.downcast_ref::<tonic::Status>());
+
+    if let Some(status) = grpc_status {
+        let detail = grpc_status_message(status);
+        return match status.code() {
+            tonic::Code::InvalidArgument
+            | tonic::Code::FailedPrecondition
+            | tonic::Code::ResourceExhausted => ServerError::BadRequest(detail),
+            tonic::Code::NotFound => ServerError::NotFound(detail),
+            tonic::Code::Unavailable => ServerError::BackendNotReady(detail),
+            _ => ServerError::Internal(format!("grpc {action} failed: {err:#}")),
+        };
+    }
+
+    ServerError::Internal(format!("grpc {action} failed: {err:#}"))
 }
 
 #[utoipa::path(
@@ -250,6 +293,7 @@ pub async fn load_model(
     let bid = &req.backend_id;
 
     validate_path("model_path", &req.model_path)?;
+    validate_existing_model_file(&req.model_path)?;
 
     let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
     let (num_workers, worker_source) =
@@ -269,7 +313,7 @@ pub async fn load_model(
     };
     let response = grpc::client::load_model(channel, &canonical_backend, grpc_req)
         .await
-        .map_err(|e| ServerError::Internal(format!("grpc load_model failed: {e}")))?;
+        .map_err(|e| map_grpc_model_error("load_model", e))?;
 
     Ok(Json(ModelStatusResponse {
         backend: response.backend,
@@ -368,6 +412,7 @@ pub async fn switch_model(
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     let bid = &req.backend_id;
     validate_path("model_path", &req.model_path)?;
+    validate_existing_model_file(&req.model_path)?;
 
     let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
     let (num_workers, worker_source) =
@@ -390,7 +435,7 @@ pub async fn switch_model(
         },
     )
     .await
-    .map_err(|e| ServerError::Internal(format!("grpc switch_model failed: {e}")))?;
+    .map_err(|e| map_grpc_model_error("switch_model", e))?;
 
     Ok(Json(ModelStatusResponse {
         backend: response.backend,

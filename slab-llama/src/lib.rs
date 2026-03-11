@@ -34,8 +34,10 @@
 //! ```
 
 use std::fmt;
+use std::ffi::CString;
 use std::path::Path;
 use std::sync::Arc;
+use libloading::Library;
 
 mod context_params;
 mod error;
@@ -70,6 +72,63 @@ pub const LLAMA_DEFAULT_SEED: u32 = slab_llama_sys::LLAMA_DEFAULT_SEED;
 #[derive(Clone)]
 pub struct Llama {
     pub(crate) lib: Arc<slab_llama_sys::LlamaLib>,
+    // Keep ggml.dll loaded when backend symbols are resolved from it.
+    _ggml_lib: Option<Arc<Library>>,
+}
+
+fn load_ggml_backend(
+    path: &Path,
+    llama_lib: &slab_llama_sys::LlamaLib,
+) -> Result<Option<Arc<Library>>, ::libloading::Error> {
+    let Some(llama_dir_path) = path.parent() else {
+        return Ok(None);
+    };
+    if !llama_dir_path.is_dir() {
+        return Ok(None);
+    }
+
+    let c_dir = CString::new(
+        llama_dir_path
+            .to_str()
+            .unwrap_or_default(),
+    )
+    .map_err(|source| ::libloading::Error::CreateCString { source })?;
+
+    if let Ok(ggml_backend_load_all_from_path) = llama_lib.ggml_backend_load_all_from_path.as_ref()
+    {
+        unsafe { ggml_backend_load_all_from_path(c_dir.as_ptr()) };
+        return Ok(None);
+    }
+
+    #[cfg(windows)]
+    {
+        use libloading::os::windows::{
+            Library as WinLibrary, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+        };
+        use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
+
+        let ggml_path = llama_dir_path.join(format!("{}ggml{}", DLL_PREFIX, DLL_SUFFIX));
+        let ggml_lib: libloading::Library = unsafe {
+            WinLibrary::load_with_flags(
+                ggml_path.as_path(),
+                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+            )?
+            .into()
+        };
+
+        let ggml_backend_load_all_from_path: unsafe extern "C" fn(
+            dir_path: *const ::std::os::raw::c_char,
+        ) = unsafe { *ggml_lib.get(b"ggml_backend_load_all_from_path\0")? };
+
+        unsafe { ggml_backend_load_all_from_path(c_dir.as_ptr()) };
+        return Ok(Some(Arc::new(ggml_lib)));
+    }
+
+    #[cfg(not(windows))]
+    {
+        Ok(None)
+    }
 }
 
 impl Llama {
@@ -92,15 +151,21 @@ impl Llama {
                 )?
             };
             let llama_lib = unsafe { slab_llama_sys::LlamaLib::from_library(lib)? };
+            let ggml_lib = load_ggml_backend(path.as_ref(), &llama_lib)?;
             Ok(Self {
                 lib: Arc::new(llama_lib),
+                _ggml_lib: ggml_lib,
             })
         }
 
         #[cfg(not(windows))]
         {
             let lib = unsafe { slab_llama_sys::LlamaLib::new(path.as_ref())? };
-            Ok(Self { lib: Arc::new(lib) })
+            let ggml_lib = load_ggml_backend(path.as_ref(), &lib)?;
+            Ok(Self {
+                lib: Arc::new(lib),
+                _ggml_lib: ggml_lib,
+            })
         }
     }
 

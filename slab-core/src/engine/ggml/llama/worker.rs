@@ -225,8 +225,9 @@ impl InferenceWorkerState {
     fn run_inference_step(&mut self) {
         let batch_capacity = self.ctx.n_batch() as usize;
         let mut batch = LlamaBatch::new(batch_capacity);
-        // Ordered list of session_ids that requested logits in this batch.
-        let mut logit_owners: Vec<SessionId> = Vec::new();
+        // Ordered list of (session_id, batch_token_index) that requested logits.
+        // llama sampler expects token index in the decoded batch, not a dense output index.
+        let mut logit_owners: Vec<(SessionId, i32)> = Vec::new();
         // Sessions that were prefilled in this step: session_id → token count.
         let mut prefill_counts: HashMap<SessionId, usize> = HashMap::new();
         // Sessions that advanced via a generation decode in this step.
@@ -253,13 +254,21 @@ impl InferenceWorkerState {
 
             if !session.pending_tokens.is_empty() {
                 // ── Prefill phase ────────────────────────────────────────────
-                let n = session.pending_tokens.len();
-                // Skip if there is no room in the current batch.
-                if (batch.n_tokens() as usize) + n > batch_capacity {
+                let pending_len = session.pending_tokens.len();
+                let available = batch_capacity.saturating_sub(batch.n_tokens() as usize);
+                if available == 0 {
                     continue;
                 }
-                for (i, &token) in session.pending_tokens.iter().enumerate() {
-                    let is_last = i == n - 1;
+
+                // Decode pending prompt tokens incrementally, bounded by current
+                // batch capacity. This avoids stalling when pending_len > n_batch.
+                let take_n = pending_len.min(available);
+                let finishes_prefill = take_n == pending_len;
+
+                for i in 0..take_n {
+                    let token = session.pending_tokens[i];
+                    let is_last = finishes_prefill && i + 1 == take_n;
+                    let batch_token_index = batch.n_tokens();
                     // Request logits only for the final prefill token so we can
                     // sample the first generated token immediately.
                     // INVARIANT: capacity is verified above; `add` cannot return
@@ -268,18 +277,19 @@ impl InferenceWorkerState {
                         .add(token, session.n_past + i as i32, &[session.seq_id], is_last)
                         .expect("batch capacity verified; add cannot fail");
                     if is_last {
-                        logit_owners.push(session_id);
+                        logit_owners.push((session_id, batch_token_index));
                     }
                 }
-                prefill_counts.insert(session_id, n);
+                prefill_counts.insert(session_id, take_n);
             } else if let Some(last_token) = session.last_token {
                 // ── Generation step ──────────────────────────────────────────
                 if (batch.n_tokens() as usize) < batch_capacity {
+                    let batch_token_index = batch.n_tokens();
                     // INVARIANT: capacity is verified by the condition above.
                     batch
                         .add(last_token, session.n_past, &[session.seq_id], true)
                         .expect("batch capacity verified; add cannot fail");
-                    logit_owners.push(session_id);
+                    logit_owners.push((session_id, batch_token_index));
                     gen_sessions.push(session_id);
                 }
             }
@@ -305,7 +315,11 @@ impl InferenceWorkerState {
         for (&session_id, &count) in &prefill_counts {
             let s = self.sessions.get_mut(&session_id).unwrap();
             s.n_past += count as i32;
-            s.pending_tokens.clear();
+            if count >= s.pending_tokens.len() {
+                s.pending_tokens.clear();
+            } else {
+                s.pending_tokens.drain(0..count);
+            }
         }
         for &session_id in &gen_sessions {
             let s = self.sessions.get_mut(&session_id).unwrap();
@@ -314,7 +328,7 @@ impl InferenceWorkerState {
         }
 
         // ── Sampling ─────────────────────────────────────────────────────────
-        for (logit_idx, &session_id) in logit_owners.iter().enumerate() {
+        for &(session_id, batch_token_index) in &logit_owners {
             // Temporarily take the sampler out to avoid a simultaneous mutable
             // borrow of `self.sessions` and `self.ctx`.
             let mut sampler = self
@@ -325,7 +339,7 @@ impl InferenceWorkerState {
                 .take()
                 .unwrap();
 
-            let token = sampler.sample(&mut self.ctx, logit_idx as i32);
+            let token = sampler.sample(&mut self.ctx, batch_token_index);
             sampler.accept(token);
 
             // Restore the sampler before any further session mutation.
