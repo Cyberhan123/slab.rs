@@ -43,7 +43,7 @@ struct SupervisorArgs {
     llama_bind: String,
     #[arg(long, default_value = "127.0.0.1:3003")]
     diffusion_bind: String,
-    #[arg(long, default_value_t = false)]
+    #[arg(long, default_value_t = true)]
     include_diffusion: bool,
     #[arg(long = "runtime-transport")]
     runtime_transport: Option<String>,
@@ -106,7 +106,7 @@ impl Default for SupervisorArgs {
             whisper_bind: "127.0.0.1:3001".to_owned(),
             llama_bind: "127.0.0.1:3002".to_owned(),
             diffusion_bind: "127.0.0.1:3003".to_owned(),
-            include_diffusion: false,
+            include_diffusion: true,
             runtime_transport: None,
             runtime_ipc_dir: None,
             database_url: None,
