@@ -141,7 +141,11 @@ pub async fn chat_completions(
     })?;
 
     if req.stream {
-        let usage_guard = state.model_auto_unload.acquire("ggml.llama").await;
+        let usage_guard = state
+            .model_auto_unload
+            .acquire_for_inference("ggml.llama")
+            .await
+            .map_err(|e| ServerError::BackendNotReady(format!("llama backend not ready: {e}")))?;
         let backend_stream = grpc::client::chat_stream(llama_channel.clone(), grpc_req.clone())
             .await
             .map_err(|e| ServerError::Internal(format!("grpc chat stream failed: {e}")))?;
@@ -175,7 +179,11 @@ pub async fn chat_completions(
         return Ok(Sse::new(sse_stream).into_response());
     }
 
-    let _usage_guard = state.model_auto_unload.acquire("ggml.llama").await;
+    let _usage_guard = state
+        .model_auto_unload
+        .acquire_for_inference("ggml.llama")
+        .await
+        .map_err(|e| ServerError::BackendNotReady(format!("llama backend not ready: {e}")))?;
     let generated = grpc::client::chat(llama_channel, grpc_req)
         .await
         .map_err(|e| ServerError::Internal(format!("grpc chat failed: {e}")))?;
