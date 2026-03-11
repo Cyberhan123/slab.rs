@@ -10,13 +10,9 @@ pub struct LoadModelRequest {
     pub backend_id: String,
     /// Path to the model weights file.
     pub model_path: String,
-    /// Number of worker threads to allocate (default `1`).
-    #[serde(default = "default_workers")]
-    pub num_workers: u32,
-}
-
-fn default_workers() -> u32 {
-    1
+    /// Optional worker override. If omitted, server uses global config by backend.
+    #[serde(default)]
+    pub num_workers: Option<u32>,
 }
 
 /// Response body for load / status endpoints.
@@ -32,8 +28,9 @@ pub struct ModelStatusResponse {
 pub struct SwitchModelRequest {
     pub model_path: String,
     pub backend_id: String,
-    #[serde(default = "default_workers")]
-    pub num_workers: u32,
+    /// Optional worker override. If omitted, server uses global config by backend.
+    #[serde(default)]
+    pub num_workers: Option<u32>,
 }
 
 #[derive(Debug, Deserialize, ToSchema)]

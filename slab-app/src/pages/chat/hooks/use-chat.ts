@@ -3,11 +3,15 @@ import { useState } from 'react';
 import locale from '../local';
 import { providerFactory, historyMessageFactory } from '../chat-context';
 
-export const useChat = (conversationKey: string) => {
+export const useChat = (
+  conversationKey: string,
+  model: string,
+  beforeRequest?: () => Promise<void> | void
+) => {
   const [activeConversation, setActiveConversation] = useState<string>();
 
-  const { onRequest, messages, isRequesting, abort, onReload } = useXChat({
-    provider: providerFactory(conversationKey),
+  const { onRequest, messages, isRequesting, abort, onReload: rawOnReload } = useXChat({
+    provider: providerFactory(conversationKey, model),
     conversationKey: conversationKey,
     defaultMessages: historyMessageFactory(conversationKey),
     requestPlaceholder: () => {
@@ -30,15 +34,30 @@ export const useChat = (conversationKey: string) => {
     },
   });
 
-  const handleSubmit = (val: string) => {
+  const handleSubmit = async (val: string) => {
     if (!val) return;
-    onRequest({
-      messages: [{ role: 'user', content: val }],
-      thinking: {
-        type: 'disabled',
-      },
-    });
-    setActiveConversation(conversationKey);
+    try {
+      await beforeRequest?.();
+      onRequest({
+        messages: [{ role: 'user', content: val }],
+        thinking: {
+          type: 'disabled',
+        },
+      });
+      setActiveConversation(conversationKey);
+    } catch (_e) {
+      // beforeRequest should handle its own user-facing errors.
+    }
+  };
+
+  const onReload = (id: string | number, requestParams: any, opts?: any) => {
+    Promise.resolve(beforeRequest?.())
+      .then(() => {
+        rawOnReload(id, requestParams, opts);
+      })
+      .catch(() => {
+        // beforeRequest should handle its own user-facing errors.
+      });
   };
 
   return {

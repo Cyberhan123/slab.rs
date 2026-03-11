@@ -45,6 +45,10 @@ use slab_core::api::Backend;
 pub struct ModelsApi;
 
 const MODEL_CACHE_DIR_CONFIG_KEY: &str = "model_cache_dir";
+const LLAMA_NUM_WORKERS_CONFIG_KEY: &str = "llama_num_workers";
+const WHISPER_NUM_WORKERS_CONFIG_KEY: &str = "whisper_num_workers";
+const DIFFUSION_NUM_WORKERS_CONFIG_KEY: &str = "diffusion_num_workers";
+const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 
 /// Register model-management routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -95,6 +99,63 @@ fn resolve_backend_channel(
             ))
         })?;
     Ok((canonical_backend, channel))
+}
+
+fn workers_config_key_for_backend(backend_id: &str) -> Option<&'static str> {
+    match backend_id {
+        "ggml.llama" => Some(LLAMA_NUM_WORKERS_CONFIG_KEY),
+        "ggml.whisper" => Some(WHISPER_NUM_WORKERS_CONFIG_KEY),
+        "ggml.diffusion" => Some(DIFFUSION_NUM_WORKERS_CONFIG_KEY),
+        _ => None,
+    }
+}
+
+fn parse_num_workers(raw: &str, key: &str) -> Result<u32, ServerError> {
+    let trimmed = raw.trim();
+    let parsed = trimmed.parse::<u32>().map_err(|_| {
+        ServerError::BadRequest(format!(
+            "config key '{key}' must be a positive integer"
+        ))
+    })?;
+
+    if parsed == 0 {
+        return Err(ServerError::BadRequest(format!(
+            "config key '{key}' must be at least 1"
+        )));
+    }
+
+    Ok(parsed)
+}
+
+async fn resolve_model_workers(
+    state: &AppState,
+    canonical_backend: &str,
+    requested_workers: Option<u32>,
+) -> Result<(u32, &'static str), ServerError> {
+    if let Some(workers) = requested_workers {
+        if workers == 0 {
+            return Err(ServerError::BadRequest(
+                "num_workers must be at least 1".into(),
+            ));
+        }
+        return Ok((workers, "request"));
+    }
+
+    let Some(config_key) = workers_config_key_for_backend(canonical_backend) else {
+        return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
+    };
+
+    let configured = state.store.get_config_value(config_key).await?;
+    let Some(raw) = configured else {
+        return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
+    };
+
+    if raw.trim().is_empty() {
+        return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
+    }
+
+    let workers = parse_num_workers(&raw, config_key)?;
+    Ok((workers, "config"))
 }
 
 #[utoipa::path(
@@ -190,23 +251,21 @@ pub async fn load_model(
 
     validate_path("model_path", &req.model_path)?;
 
-    if req.num_workers == 0 {
-        return Err(ServerError::BadRequest(
-            "num_workers must be at least 1".into(),
-        ));
-    }
+    let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
+    let (num_workers, worker_source) =
+        resolve_model_workers(&state, &canonical_backend, req.num_workers).await?;
 
     info!(
         backend = %bid,
         model_path = %req.model_path,
-        workers = req.num_workers,
+        workers = num_workers,
+        worker_source = worker_source,
         "loading model"
     );
 
-    let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
     let grpc_req = grpc::pb::ModelLoadRequest {
         model_path: req.model_path,
-        num_workers: req.num_workers,
+        num_workers,
     };
     let response = grpc::client::load_model(channel, &canonical_backend, grpc_req)
         .await
@@ -310,21 +369,24 @@ pub async fn switch_model(
     let bid = &req.backend_id;
     validate_path("model_path", &req.model_path)?;
 
-    if req.num_workers == 0 {
-        return Err(ServerError::BadRequest(
-            "num_workers must be at least 1".into(),
-        ));
-    }
-
-    info!(backend = %bid, model_path = %req.model_path, "switching model");
-
     let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
+    let (num_workers, worker_source) =
+        resolve_model_workers(&state, &canonical_backend, req.num_workers).await?;
+
+    info!(
+        backend = %bid,
+        model_path = %req.model_path,
+        workers = num_workers,
+        worker_source = worker_source,
+        "switching model"
+    );
+
     let response = grpc::client::load_model(
         channel,
         &canonical_backend,
         grpc::pb::ModelLoadRequest {
             model_path: req.model_path,
-            num_workers: req.num_workers,
+            num_workers,
         },
     )
     .await

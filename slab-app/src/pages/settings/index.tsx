@@ -464,7 +464,9 @@ export default function Settings() {
           <Card>
             <CardHeader>
               <CardTitle>Configuration Management</CardTitle>
-              <CardDescription>View and update configuration settings</CardDescription>
+              <CardDescription>
+                View and update configuration settings. Global backend worker keys: `llama_num_workers`, `whisper_num_workers`, `diffusion_num_workers`.
+              </CardDescription>
             </CardHeader>
             <CardContent>
               {configsLoading ? (
