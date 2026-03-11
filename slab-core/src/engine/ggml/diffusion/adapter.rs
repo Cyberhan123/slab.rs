@@ -1,5 +1,5 @@
 use crate::engine;
-use slab_diffusion::{Diffusion, SdContextParams, SdImage, SdImgGenParams};
+use slab_diffusion::{Diffusion, DiffusionError, SdContextParams, SdImage, SdImgGenParams};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -23,19 +23,19 @@ pub enum GGMLDiffusionEngineError {
     InitializeDynamicLibrary {
         path: PathBuf,
         #[source]
-        source: anyhow::Error,
+        source: libloading::Error,
     },
 
     #[error("Failed to create GGMLDiffusionEngine context")]
     CreateContext {
         #[source]
-        source: anyhow::Error,
+        source: DiffusionError,
     },
 
     #[error("Failed to run GGMLDiffusionEngine image generation")]
     InferenceFailed {
         #[source]
-        source: anyhow::Error,
+        source: DiffusionError,
     },
 }
 
@@ -82,7 +82,7 @@ impl GGMLDiffusionEngine {
         let diffusion = Diffusion::new(normalized_path).map_err(|source| {
             GGMLDiffusionEngineError::InitializeDynamicLibrary {
                 path: normalized_path.to_path_buf(),
-                source: source.into(),
+                source,
             }
         })?;
 
@@ -109,7 +109,7 @@ impl GGMLDiffusionEngine {
 
         let ctx = self.instance.new_context(params).map_err(|source| {
             GGMLDiffusionEngineError::CreateContext {
-                source: source.into(),
+                source,
             }
         })?;
         self.ctx = Some(ctx);
@@ -131,7 +131,7 @@ impl GGMLDiffusionEngine {
 
         ctx.generate_image(params).map_err(|source| {
             GGMLDiffusionEngineError::InferenceFailed {
-                source: source.into(),
+                source,
             }
             .into()
         })

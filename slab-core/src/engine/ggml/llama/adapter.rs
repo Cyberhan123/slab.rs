@@ -49,7 +49,7 @@ impl GGMLLlamaEngine {
         let llama = Llama::new(normalized_path).map_err(|source| {
             GGMLLlamaEngineError::InitializeDynamicLibrary {
                 path: normalized_path.to_path_buf(),
-                source: source.into(),
+                source,
             }
         })?;
 
@@ -103,7 +103,7 @@ impl GGMLLlamaEngine {
                 .load_model_from_file(path, model_params)
                 .map_err(|source| GGMLLlamaEngineError::LoadModel {
                     model_path: path.to_string(),
-                    source: source.into(),
+                    source,
                 })?,
         );
 
@@ -214,7 +214,6 @@ impl GGMLLlamaEngine {
                 StreamChunk::Done => break,
                 StreamChunk::Error(message) => {
                     stream_error = Some(GGMLLlamaEngineError::InferenceStreamError {
-                        source: anyhow::anyhow!("stream error in session {sid}: {message}"),
                         message,
                     });
                     break;
