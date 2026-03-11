@@ -9,10 +9,42 @@ mod whisper;
 #[derive(Default)]
 pub struct GrpcServiceImpl;
 
+/// Format a full error-cause chain as a single string.
+///
+/// Example: `"top-level: cause: root cause"`
+fn format_error_chain(err: &dyn std::error::Error) -> String {
+    let mut msg = err.to_string();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        msg.push_str(": ");
+        msg.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    msg
+}
+
+/// Map a [`slab_core::RuntimeError`] to the most appropriate gRPC [`Status`].
+///
+/// Each variant is mapped to the standard gRPC status code that best reflects
+/// the failure category so that callers can take meaningful action on the code
+/// without having to parse the description string.
 pub(super) fn runtime_to_status(err: slab_core::RuntimeError) -> Status {
+    let msg = format_error_chain(&err);
     match err {
-        slab_core::RuntimeError::NotInitialized => Status::failed_precondition(err.to_string()),
-        other => Status::internal(other.to_string()),
+        slab_core::RuntimeError::NotInitialized => Status::failed_precondition(msg),
+        slab_core::RuntimeError::QueueFull { .. } => Status::resource_exhausted(msg),
+        slab_core::RuntimeError::OrchestratorQueueFull { .. } => Status::resource_exhausted(msg),
+        slab_core::RuntimeError::Busy { .. } => Status::resource_exhausted(msg),
+        slab_core::RuntimeError::TaskNotFound { .. } => Status::not_found(msg),
+        slab_core::RuntimeError::Timeout => Status::deadline_exceeded(msg),
+        slab_core::RuntimeError::BroadcastAckTimeout => Status::deadline_exceeded(msg),
+        slab_core::RuntimeError::BackendShutdown => Status::unavailable(msg),
+        slab_core::RuntimeError::LibraryLoadFailed { .. } => Status::unavailable(msg),
+        slab_core::RuntimeError::UnsupportedOperation { .. } => Status::unimplemented(msg),
+        slab_core::RuntimeError::NoFailedGlobalOperation => Status::not_found(msg),
+        slab_core::RuntimeError::GlobalStateInconsistent { .. } => Status::internal(msg),
+        slab_core::RuntimeError::CpuStageFailed { .. } => Status::internal(msg),
+        slab_core::RuntimeError::GpuStageFailed { .. } => Status::internal(msg),
     }
 }
 

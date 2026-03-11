@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 
+use slab_llama::LlamaError;
 use thiserror::Error;
 use tokio::sync::mpsc;
 
@@ -31,26 +32,26 @@ pub enum GGMLLlamaEngineError {
     InitializeDynamicLibrary {
         path: PathBuf,
         #[source]
-        source: anyhow::Error,
+        source: libloading::Error,
     },
 
     #[error("Failed to load llama model from: {model_path}")]
     LoadModel {
         model_path: String,
         #[source]
-        source: anyhow::Error,
+        source: LlamaError,
     },
 
     #[error("Failed to create llama context")]
     CreateContext {
         #[source]
-        source: anyhow::Error,
+        source: LlamaError,
     },
 
     #[error("Failed to tokenize prompt")]
     TokenizeFailed {
         #[source]
-        source: anyhow::Error,
+        source: LlamaError,
     },
 
     #[error("Session {session_id} not found")]
@@ -66,11 +67,7 @@ pub enum GGMLLlamaEngineError {
     },
 
     #[error("Inference stream error: {message}")]
-    InferenceStreamError {
-        #[source]
-        source: anyhow::Error,
-        message: String,
-    },
+    InferenceStreamError { message: String },
 }
 
 /// A chunk of streaming output from the inference engine.
