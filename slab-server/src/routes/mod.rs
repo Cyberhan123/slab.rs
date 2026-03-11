@@ -26,11 +26,11 @@ use utoipa_swagger_ui::SwaggerUi;
 pub fn build(state: Arc<AppState>) -> Router {
     let api_router = Router::new()
         .merge(health::router())
-        .nest("/v1", v1::gateway_router())
+        .nest("/v1", v1::router())
         .nest("/admin", admin::router(state.clone()));
 
     let mut app = Router::new().merge(api_router);
-    let api_doc = doc::get_gateway_docs();
+    let api_doc = doc::get_docs();
 
     if state.config.enable_swagger {
         app = app.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api_doc));

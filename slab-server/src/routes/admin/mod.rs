@@ -2,9 +2,10 @@ pub mod backend;
 pub mod config;
 pub mod models;
 
+use crate::middleware::auth;
 use crate::state::AppState;
 
-use axum::Router;
+use axum::{middleware, Router};
 use std::sync::Arc;
 use utoipa::OpenApi;
 
@@ -14,10 +15,10 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .merge(backend::router())
         .merge(config::router())
         .merge(models::router())
-        // .route_layer(middleware::from_fn_with_state(
-        //     state.clone(),
-        //     auth::auth_middleware,
-        // ))
+        .route_layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth::auth_middleware,
+        ))
         .with_state(state.clone())
 }
 

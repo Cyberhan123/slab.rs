@@ -4,8 +4,7 @@ extern crate bindgen;
 
 use slab_libfetch::fetch_header;
 use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 fn main() {
     // 1. 定义你刚才下载头文件的路径
