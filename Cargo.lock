@@ -6303,7 +6303,6 @@ dependencies = [
 name = "slab-whisper"
 version = "0.0.1"
 dependencies = [
- "anyhow",
  "libloading 0.8.9",
  "log 0.4.29",
  "rand 0.10.0",
