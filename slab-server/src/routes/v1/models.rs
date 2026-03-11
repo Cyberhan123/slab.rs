@@ -347,6 +347,10 @@ pub async fn load_model(
     let response = grpc::client::load_model(channel, &canonical_backend, grpc_req)
         .await
         .map_err(|e| map_grpc_model_error("load_model", e))?;
+    state
+        .model_auto_unload
+        .notify_model_loaded(&canonical_backend)
+        .await;
 
     Ok(Json(ModelStatusResponse {
         backend: response.backend,
@@ -379,6 +383,10 @@ pub async fn unload_model(
         grpc::client::unload_model(channel, &canonical_backend, grpc::pb::ModelUnloadRequest {})
             .await
             .map_err(|e| ServerError::Internal(format!("grpc unload_model failed: {e}")))?;
+    state
+        .model_auto_unload
+        .notify_model_unloaded(&canonical_backend)
+        .await;
 
     Ok(Json(ModelStatusResponse {
         backend: response.backend,
@@ -474,6 +482,10 @@ pub async fn switch_model(
     )
     .await
     .map_err(|e| map_grpc_model_error("switch_model", e))?;
+    state
+        .model_auto_unload
+        .notify_model_loaded(&canonical_backend)
+        .await;
 
     Ok(Json(ModelStatusResponse {
         backend: response.backend,

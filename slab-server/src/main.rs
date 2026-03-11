@@ -6,6 +6,7 @@ mod entities;
 mod error;
 mod grpc;
 mod middleware;
+mod model_auto_unload;
 mod routes;
 mod schemas;
 mod state;
@@ -206,11 +207,18 @@ where
         .await
         .context("failed to initialize shared gRPC gateway services")?;
 
+    let grpc = Arc::new(grpc);
+    let store = Arc::new(store.clone());
+    let model_auto_unload = Arc::new(model_auto_unload::ModelAutoUnloadManager::new(
+        Arc::clone(&store),
+        Arc::clone(&grpc),
+    ));
     let state = Arc::new(AppState {
         config: Arc::new(cfg.clone()),
-        grpc: Arc::new(grpc),
-        store: Arc::new(store.clone()),
+        grpc,
+        store: Arc::clone(&store),
         task_manager: Arc::new(TaskManager::new()),
+        model_auto_unload,
     });
 
     let app = routes::build(Arc::clone(&state));
