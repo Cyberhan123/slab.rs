@@ -4,7 +4,6 @@
 //! `slab_core::api::status/result/cancel` for live status queries.
 //! Server-only tasks (ffmpeg conversions, downloads) track status purely in DB.
 
-use std::str::FromStr;
 use std::sync::Arc;
 
 use axum::extract::{Path, Query, State};

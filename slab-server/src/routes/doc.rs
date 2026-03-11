@@ -19,11 +19,3 @@ pub fn get_docs() -> utoipa::openapi::OpenApi {
     root.merge(admin::api_docs());
     root
 }
-
-pub fn get_gateway_docs() -> utoipa::openapi::OpenApi {
-    let mut root = ApiDoc::openapi();
-    root.merge(health::HealthApi::openapi());
-    root.merge(v1::gateway_api_docs());
-    root.merge(admin::api_docs());
-    root
-}

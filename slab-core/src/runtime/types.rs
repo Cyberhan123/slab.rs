@@ -71,7 +71,7 @@ impl Payload {
         }
     }
 
-    pub fn to_string(&self) -> Result<String, String> {
+    pub fn to_text_string(&self) -> Result<String, String> {
         match self {
             Payload::Text(t) => Ok(t.to_string()),
             _ => Err(format!("Type error: expected Text variant, got {:?}", self)),

@@ -200,7 +200,10 @@ impl GGMLLlamaEngine {
     }
 
     /// Cancel active generation while keeping session KV state.
-    pub async fn cancel_generate(&self, session_id: SessionId) -> Result<(), engine::EngineError> {
+    ///
+    /// Called from tests and available for future API callers via the backend dispatch path.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub(crate) async fn cancel_generate(&self, session_id: SessionId) -> Result<(), engine::EngineError> {
         let engine = self.require_engine()?;
         engine.cancel_generate(session_id).await.map_err(Into::into)
     }
