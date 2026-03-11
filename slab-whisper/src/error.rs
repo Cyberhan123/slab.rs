@@ -56,6 +56,8 @@ pub enum WhisperError {
     HalfSampleMissing(usize),
     /// Failed to load the whisper dynamic library.
     LoadLibraryError(String),
+    /// `enable_vad(true)` was called before a VAD model path was set.
+    VadModelPathNotSet,
 }
 
 impl From<Utf8Error> for WhisperError {
@@ -152,6 +154,10 @@ impl std::fmt::Display for WhisperError {
             LoadLibraryError(msg) => {
                 write!(f, "Failed to load the whisper dynamic library: {}", msg)
             }
+            VadModelPathNotSet => write!(
+                f,
+                "VAD model path must be set via set_vad_model_path before enabling VAD"
+            ),
         }
     }
 }
