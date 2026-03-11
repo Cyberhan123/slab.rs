@@ -156,6 +156,24 @@ impl LlamaContext {
         unsafe { self.model.lib.llama_memory_seq_rm(mem, seq_id, p0, p1) }
     }
 
+    /// Add `delta` to token positions in `[p0, p1)` for `seq_id`.
+    pub fn kv_cache_seq_add(&mut self, seq_id: i32, p0: i32, p1: i32, delta: i32) {
+        let mem = unsafe { self.model.lib.llama_get_memory(self.ctx) };
+        if mem.is_null() {
+            return;
+        }
+        unsafe { self.model.lib.llama_memory_seq_add(mem, seq_id, p0, p1, delta) };
+    }
+
+    /// Returns whether the KV cache implementation supports position shifting.
+    pub fn kv_cache_can_shift(&self) -> bool {
+        let mem = unsafe { self.model.lib.llama_get_memory(self.ctx) };
+        if mem.is_null() {
+            return false;
+        }
+        unsafe { self.model.lib.llama_memory_can_shift(mem) }
+    }
+
     // ── LoRA adapters ────────────────────────────────────────────────────────
 
     /// Apply LoRA adapters to this context.

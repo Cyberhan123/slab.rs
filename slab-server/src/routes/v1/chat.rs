@@ -217,15 +217,26 @@ async fn build_prompt(
     current_messages: &[OpenAiMessage],
 ) -> Result<String, ServerError> {
     let mut parts: Vec<String> = Vec::new();
+    let current: Vec<&OpenAiMessage> = current_messages
+        .iter()
+        .filter(|m| !m.content.trim().is_empty())
+        .collect();
+    let client_sent_history = current.len() > 1;
 
-    if let Some(sid) = session_id {
-        let history = state.store.list_messages(sid).await?;
-        for msg in history {
-            parts.push(format!("{}: {}", capitalize_role(&msg.role), msg.content));
+    // Avoid duplicating turns: if client already sends history, do not merge DB history again.
+    if !client_sent_history {
+        if let Some(sid) = session_id {
+            let history = state.store.list_messages(sid).await?;
+            for msg in history {
+                if msg.content.trim().is_empty() {
+                    continue;
+                }
+                parts.push(format!("{}: {}", capitalize_role(&msg.role), msg.content));
+            }
         }
     }
 
-    for msg in current_messages {
+    for msg in current {
         parts.push(format!("{}: {}", capitalize_role(&msg.role), msg.content));
     }
     parts.push("Assistant:".into());

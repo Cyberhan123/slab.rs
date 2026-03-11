@@ -58,12 +58,12 @@ pub(super) async fn load_model_for_backend(
     if req.num_workers == 0 {
         return Err(Status::invalid_argument("num_workers must be at least 1"));
     }
-
     slab_core::api::backend(backend)
         .load_model()
         .input(slab_core::Payload::Json(serde_json::json!({
             "model_path": req.model_path,
             "num_workers": req.num_workers,
+            "context_length": req.context_length,
         })))
         .run()
         .await
@@ -114,6 +114,7 @@ pub(super) async fn reload_library_for_backend(
         .input(slab_core::Payload::Json(serde_json::json!({
             "model_path": req.model_path,
             "num_workers": req.num_workers,
+            "context_length": req.context_length,
         })))
         .run()
         .await

@@ -361,6 +361,7 @@ pub async fn reload_lib(
         lib_path: req.lib_path,
         model_path: req.model_path,
         num_workers: req.num_workers,
+        context_length: 0,
     };
     let response = grpc::client::reload_library(channel, &canonical_backend, grpc_req)
         .await

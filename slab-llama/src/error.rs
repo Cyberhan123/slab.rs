@@ -36,6 +36,10 @@ pub enum LlamaError {
     #[error("token to piece conversion failed with code {0}")]
     TokenToPieceFailed(i32),
 
+    /// Chat template application failed.
+    #[error("chat template application failed with code {0}")]
+    ChatTemplateApplyFailed(i32),
+
     /// Batch is full - cannot add more tokens.
     #[error("batch is full, cannot add more tokens")]
     BatchFull,

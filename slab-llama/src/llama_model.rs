@@ -1,4 +1,5 @@
 use std::ffi::{CStr, CString};
+use std::os::raw::c_char;
 use std::sync::Arc;
 
 use crate::context_params::LlamaContextParams;
@@ -32,6 +33,13 @@ impl Drop for LlamaModelInner {
 #[derive(Clone)]
 pub struct LlamaModel {
     pub(crate) inner: Arc<LlamaModelInner>,
+}
+
+/// A single chat message used by `llama_chat_apply_template`.
+#[derive(Debug, Clone)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
 }
 
 impl Llama {
@@ -193,24 +201,29 @@ impl LlamaModel {
     pub fn token_to_piece(&self, token: LlamaToken, special: bool) -> Result<String, LlamaError> {
         let vocab = self.vocab();
         // First call to get required buffer length.
-        let len = unsafe {
+        let n = unsafe {
             self.inner
                 .lib
                 .llama_token_to_piece(vocab, token, std::ptr::null_mut(), 0, 0, special)
         };
-        if len < 0 {
-            return Err(LlamaError::TokenToPieceFailed(len));
-        }
-        if len == 0 {
+        // Like llama_tokenize/llama_detokenize, negative means the buffer was too
+        // small and abs(n) is the required byte length.
+        let required = if n < 0 {
+            n.checked_abs()
+                .ok_or(LlamaError::TokenToPieceFailed(n))? as usize
+        } else {
+            n as usize
+        };
+        if required == 0 {
             return Ok(String::new());
         }
-        let mut buf: Vec<u8> = vec![0u8; len as usize];
+        let mut buf: Vec<u8> = vec![0u8; required];
         let len2 = unsafe {
             self.inner.lib.llama_token_to_piece(
                 vocab,
                 token,
                 buf.as_mut_ptr() as *mut std::os::raw::c_char,
-                len,
+                required as i32,
                 0,
                 special,
             )
@@ -239,7 +252,7 @@ impl LlamaModel {
     ) -> Result<String, LlamaError> {
         let vocab = self.vocab();
         // Determine required buffer size.
-        let len = unsafe {
+        let n = unsafe {
             self.inner.lib.llama_detokenize(
                 vocab,
                 tokens.as_ptr(),
@@ -250,20 +263,25 @@ impl LlamaModel {
                 unparse_special,
             )
         };
-        if len < 0 {
-            return Err(LlamaError::TokenToPieceFailed(len));
-        }
-        if len == 0 {
+        // Negative means the destination buffer was too small; abs(n) is the
+        // required number of bytes.
+        let required = if n < 0 {
+            n.checked_abs()
+                .ok_or(LlamaError::TokenToPieceFailed(n))? as usize
+        } else {
+            n as usize
+        };
+        if required == 0 {
             return Ok(String::new());
         }
-        let mut buf: Vec<u8> = vec![0u8; len as usize];
+        let mut buf: Vec<u8> = vec![0u8; required];
         let len2 = unsafe {
             self.inner.lib.llama_detokenize(
                 vocab,
                 tokens.as_ptr(),
                 tokens.len() as i32,
                 buf.as_mut_ptr() as *mut std::os::raw::c_char,
-                len,
+                required as i32,
                 remove_special,
                 unparse_special,
             )
@@ -431,6 +449,69 @@ impl LlamaModel {
         }
         let cstr = unsafe { CStr::from_ptr(ptr) };
         cstr.to_str().map_err(LlamaError::from)
+    }
+
+    /// Apply the model chat template to a message list.
+    ///
+    /// `llama.cpp` returns the required byte length; this helper retries with a
+    /// larger output buffer when needed.
+    pub fn apply_chat_template(
+        &self,
+        name: Option<&str>,
+        messages: &[ChatMessage],
+        add_assistant_prompt: bool,
+    ) -> Result<String, LlamaError> {
+        let template = self.chat_template(name)?;
+        let c_template = CString::new(template)?;
+
+        let mut roles: Vec<CString> = Vec::with_capacity(messages.len());
+        let mut contents: Vec<CString> = Vec::with_capacity(messages.len());
+        for msg in messages {
+            roles.push(CString::new(msg.role.as_str())?);
+            contents.push(CString::new(msg.content.as_str())?);
+        }
+
+        let mut c_messages: Vec<slab_llama_sys::llama_chat_message> =
+            Vec::with_capacity(messages.len());
+        for idx in 0..messages.len() {
+            c_messages.push(slab_llama_sys::llama_chat_message {
+                role: roles[idx].as_ptr(),
+                content: contents[idx].as_ptr(),
+            });
+        }
+
+        let total_chars = messages
+            .iter()
+            .map(|m| m.role.len() + m.content.len())
+            .sum::<usize>();
+        let mut capacity = (total_chars.saturating_mul(2)).max(256);
+
+        loop {
+            let mut buf = vec![0u8; capacity];
+            let written = unsafe {
+                self.inner.lib.llama_chat_apply_template(
+                    c_template.as_ptr(),
+                    c_messages.as_ptr(),
+                    c_messages.len(),
+                    add_assistant_prompt,
+                    buf.as_mut_ptr() as *mut c_char,
+                    capacity as i32,
+                )
+            };
+
+            if written < 0 {
+                return Err(LlamaError::ChatTemplateApplyFailed(written));
+            }
+
+            let written = written as usize;
+            if written > capacity {
+                capacity = written.saturating_add(1);
+                continue;
+            }
+
+            buf.truncate(written);
+            return String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()));
+        }
     }
 }
 

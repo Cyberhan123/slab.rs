@@ -54,6 +54,12 @@ pub enum GGMLLlamaEngineError {
         source: LlamaError,
     },
 
+    #[error("Failed to apply chat template")]
+    ApplyChatTemplate {
+        #[source]
+        source: LlamaError,
+    },
+
     #[error("Session {session_id} not found")]
     SessionNotFound { session_id: SessionId },
 

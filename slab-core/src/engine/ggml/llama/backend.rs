@@ -21,13 +21,14 @@
 //!
 //! ### `model.load` input JSON
 //! ```json
-//! { "model_path": "/path/to/model.gguf", "num_workers": 1 }
+//! { "model_path": "/path/to/model.gguf", "num_workers": 1, "context_length": 4096 }
 //! ```
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
 use serde::Deserialize;
+use slab_llama::ChatMessage as LlamaChatMessage;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::engine::ggml::llama::adapter::GGMLLlamaEngine;
@@ -51,10 +52,64 @@ struct ModelLoadConfig {
     model_path: String,
     #[serde(default = "default_workers")]
     num_workers: usize,
+    #[serde(default)]
+    context_length: u32,
 }
 
 fn default_workers() -> usize {
     1
+}
+
+struct ParsedChatPrompt {
+    messages: Vec<LlamaChatMessage>,
+    add_assistant_prompt: bool,
+}
+
+fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
+    // Only attempt template application for the legacy "Role: content" prompt shape.
+    if !(prompt.contains("User:") || prompt.contains("Assistant:") || prompt.contains("System:")) {
+        return None;
+    }
+
+    let mut messages: Vec<LlamaChatMessage> = Vec::new();
+    for raw_line in prompt.lines() {
+        let line = raw_line.trim_end();
+        if line.is_empty() {
+            continue;
+        }
+        let (raw_role, raw_content) = line.split_once(':')?;
+        let role = raw_role.trim().to_ascii_lowercase();
+        if !matches!(role.as_str(), "system" | "user" | "assistant") {
+            return None;
+        }
+        messages.push(LlamaChatMessage {
+            role,
+            content: raw_content.trim_start().to_owned(),
+        });
+    }
+
+    if messages.is_empty() {
+        return None;
+    }
+
+    let mut add_assistant_prompt = false;
+    if let Some(last) = messages.last() {
+        if last.role == "assistant" && last.content.is_empty() {
+            let _ = messages.pop();
+            add_assistant_prompt = true;
+        } else if last.role != "assistant" {
+            add_assistant_prompt = true;
+        }
+    }
+
+    if messages.is_empty() && !add_assistant_prompt {
+        return None;
+    }
+
+    Some(ParsedChatPrompt {
+        messages,
+        add_assistant_prompt,
+    })
 }
 
 // ── Worker ────────────────────────────────────────────────────────────────────
@@ -291,10 +346,22 @@ impl LlamaWorker {
         // the async runtime without the Send constraint of spawn_blocking.
         let result = tokio::task::block_in_place(|| {
             use slab_llama::{LlamaContextParams, LlamaModelParams};
+            let mut ctx_params = LlamaContextParams::default();
+            if config.context_length > 0 {
+                let context_length = config.context_length;
+                ctx_params.n_ctx = context_length;
+                if ctx_params.n_batch > context_length {
+                    ctx_params.n_batch = context_length;
+                }
+                if ctx_params.n_ubatch > context_length {
+                    ctx_params.n_ubatch = context_length;
+                }
+            }
+
             engine.load_model_with_workers(
                 &config.model_path,
                 LlamaModelParams::default(),
-                LlamaContextParams::default(),
+                ctx_params,
                 config.num_workers,
             )
         });
@@ -338,6 +405,23 @@ impl LlamaWorker {
         self.sessions.clear();
     }
 
+    fn apply_chat_template_if_possible(engine: &GGMLLlamaEngine, prompt: &str) -> String {
+        let Some(parsed) = parse_role_prefixed_chat_prompt(prompt) else {
+            return prompt.to_owned();
+        };
+
+        match engine.apply_chat_template(&parsed.messages, parsed.add_assistant_prompt) {
+            Ok(applied) => applied,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e,
+                    "failed to apply llama chat template; falling back to raw prompt"
+                );
+                prompt.to_owned()
+            }
+        }
+    }
+
     // ── inference ─────────────────────────────────────────────────────────────
 
     async fn handle_inference(
@@ -362,6 +446,7 @@ impl LlamaWorker {
                 return;
             }
         };
+        let prompt = Self::apply_chat_template_if_possible(engine.as_ref(), &prompt);
 
         let llama_sid = session_key
             .as_ref()
@@ -404,6 +489,7 @@ impl LlamaWorker {
                 return;
             }
         };
+        let prompt = Self::apply_chat_template_if_possible(engine.as_ref(), prompt.as_ref());
 
         let llama_sid = session_key
             .as_ref()

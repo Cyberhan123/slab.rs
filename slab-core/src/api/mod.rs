@@ -24,7 +24,8 @@
 //!     .op(Event::LoadModel)
 //!     .input(Payload::Json(serde_json::json!({
 //!         "model_path": "/models/qwen.gguf",
-//!         "num_workers": 1
+//!         "num_workers": 1,
+//!         "context_length": 4096
 //!     })))
 //!     .run_wait()
 //!     .await
