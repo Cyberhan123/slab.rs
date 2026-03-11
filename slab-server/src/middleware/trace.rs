@@ -59,11 +59,24 @@ pub async fn trace_middleware(
         let response = next.run(req).await;
 
         let (parts, body) = response.into_parts();
+        let content_type = parts
+            .headers
+            .get(header::CONTENT_TYPE)
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
 
-        let res_bytes =
-            buffer_and_log("response", &trace_id.to_string(), &parts.headers, body).await;
-
-        let mut response = Response::from_parts(parts, Body::from(res_bytes));
+        // Do not buffer SSE responses; preserve streaming semantics.
+        let mut response = if content_type.contains("text/event-stream") {
+            info!(
+                id = %trace_id,
+                "response Body: [Skipped: Type=text/event-stream, streaming passthrough]"
+            );
+            Response::from_parts(parts, body)
+        } else {
+            let res_bytes =
+                buffer_and_log("response", &trace_id.to_string(), &parts.headers, body).await;
+            Response::from_parts(parts, Body::from(res_bytes))
+        };
 
         let latency = start_time.elapsed();
 

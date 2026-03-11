@@ -183,7 +183,7 @@ pub struct SamplerChainBuilder {
     pub top_p: f32,
     /// Min-P (default 0.05, 0.0 = disabled).
     pub min_p: f32,
-    /// Repetition penalty (default 1.0 = disabled).
+    /// Repetition penalty (default 1.05).
     pub repeat_penalty: f32,
     /// Number of tokens to consider for repetition penalty (default 64).
     pub repeat_last_n: i32,
@@ -200,7 +200,7 @@ impl SamplerChainBuilder {
             top_k: 40,
             top_p: 0.9,
             min_p: 0.05,
-            repeat_penalty: 1.0,
+            repeat_penalty: 1.05,
             repeat_last_n: 64,
             seed: slab_llama_sys::LLAMA_DEFAULT_SEED,
         }

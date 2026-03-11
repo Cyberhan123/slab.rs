@@ -48,6 +48,7 @@ const MODEL_CACHE_DIR_CONFIG_KEY: &str = "model_cache_dir";
 const LLAMA_NUM_WORKERS_CONFIG_KEY: &str = "llama_num_workers";
 const WHISPER_NUM_WORKERS_CONFIG_KEY: &str = "whisper_num_workers";
 const DIFFUSION_NUM_WORKERS_CONFIG_KEY: &str = "diffusion_num_workers";
+const LLAMA_CONTEXT_LENGTH_CONFIG_KEY: &str = "llama_context_length";
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 
 /// Register model-management routes.
@@ -125,7 +126,7 @@ fn workers_config_key_for_backend(backend_id: &str) -> Option<&'static str> {
     }
 }
 
-fn parse_num_workers(raw: &str, key: &str) -> Result<u32, ServerError> {
+fn parse_positive_u32(raw: &str, key: &str) -> Result<u32, ServerError> {
     let trimmed = raw.trim();
     let parsed = trimmed.parse::<u32>().map_err(|_| {
         ServerError::BadRequest(format!(
@@ -140,6 +141,10 @@ fn parse_num_workers(raw: &str, key: &str) -> Result<u32, ServerError> {
     }
 
     Ok(parsed)
+}
+
+fn parse_num_workers(raw: &str, key: &str) -> Result<u32, ServerError> {
+    parse_positive_u32(raw, key)
 }
 
 async fn resolve_model_workers(
@@ -171,6 +176,29 @@ async fn resolve_model_workers(
 
     let workers = parse_num_workers(&raw, config_key)?;
     Ok((workers, "config"))
+}
+
+async fn resolve_llama_context_length(
+    state: &AppState,
+    canonical_backend: &str,
+) -> Result<(u32, &'static str), ServerError> {
+    if canonical_backend != "ggml.llama" {
+        return Ok((0, "not_applicable"));
+    }
+
+    let configured = state
+        .store
+        .get_config_value(LLAMA_CONTEXT_LENGTH_CONFIG_KEY)
+        .await?;
+    let Some(raw) = configured else {
+        return Ok((0, "default"));
+    };
+    if raw.trim().is_empty() {
+        return Ok((0, "default"));
+    }
+
+    let context_length = parse_positive_u32(&raw, LLAMA_CONTEXT_LENGTH_CONFIG_KEY)?;
+    Ok((context_length, "config"))
 }
 
 fn grpc_status_message(status: &tonic::Status) -> String {
@@ -298,18 +326,23 @@ pub async fn load_model(
     let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
     let (num_workers, worker_source) =
         resolve_model_workers(&state, &canonical_backend, req.num_workers).await?;
+    let (context_length, context_source) =
+        resolve_llama_context_length(&state, &canonical_backend).await?;
 
     info!(
         backend = %bid,
         model_path = %req.model_path,
         workers = num_workers,
         worker_source = worker_source,
+        context_length = context_length,
+        context_source = context_source,
         "loading model"
     );
 
     let grpc_req = grpc::pb::ModelLoadRequest {
         model_path: req.model_path,
         num_workers,
+        context_length,
     };
     let response = grpc::client::load_model(channel, &canonical_backend, grpc_req)
         .await
@@ -417,12 +450,16 @@ pub async fn switch_model(
     let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
     let (num_workers, worker_source) =
         resolve_model_workers(&state, &canonical_backend, req.num_workers).await?;
+    let (context_length, context_source) =
+        resolve_llama_context_length(&state, &canonical_backend).await?;
 
     info!(
         backend = %bid,
         model_path = %req.model_path,
         workers = num_workers,
         worker_source = worker_source,
+        context_length = context_length,
+        context_source = context_source,
         "switching model"
     );
 
@@ -432,6 +469,7 @@ pub async fn switch_model(
         grpc::pb::ModelLoadRequest {
             model_path: req.model_path,
             num_workers,
+            context_length,
         },
     )
     .await

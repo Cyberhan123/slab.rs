@@ -1,5 +1,5 @@
 use crate::engine;
-use slab_llama::{Llama, LlamaContextParams, LlamaModelParams};
+use slab_llama::{ChatMessage, Llama, LlamaContextParams, LlamaModel, LlamaModelParams};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -13,6 +13,7 @@ use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 pub struct GGMLLlamaEngine {
     instance: Arc<Llama>,
     inference_engine: RwLock<Option<LlamaInferenceEngine>>,
+    loaded_model: RwLock<Option<Arc<LlamaModel>>>,
 }
 
 // SAFETY: GGMLLlamaEngine is always owned through Arc<GGMLLlamaEngine> by backend workers.
@@ -58,6 +59,7 @@ impl GGMLLlamaEngine {
         Ok(Self {
             instance: Arc::new(llama),
             inference_engine: RwLock::new(None),
+            loaded_model: RwLock::new(None),
         })
     }
 
@@ -92,6 +94,13 @@ impl GGMLLlamaEngine {
                     operation: "lock llama engine state",
                 })?;
         *write_lock = None;
+        let mut model_write_lock =
+            self.loaded_model
+                .write()
+                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+                    operation: "lock loaded llama model state",
+                })?;
+        *model_write_lock = None;
 
         let path = path_to_model
             .as_ref()
@@ -110,6 +119,7 @@ impl GGMLLlamaEngine {
         let engine = LlamaInferenceEngine::start(num_workers, Arc::clone(&model), ctx_params)?;
 
         *write_lock = Some(engine);
+        *model_write_lock = Some(model);
         Ok(())
     }
 
@@ -124,6 +134,31 @@ impl GGMLLlamaEngine {
             .as_ref()
             .ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
         Ok(engine.clone())
+    }
+
+    fn require_model(&self) -> Result<Arc<LlamaModel>, engine::EngineError> {
+        let read_lock = self
+            .loaded_model
+            .read()
+            .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+                operation: "read loaded llama model state",
+            })?;
+        let model = read_lock
+            .as_ref()
+            .ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
+        Ok(Arc::clone(model))
+    }
+
+    /// Apply the current model chat template to structured chat messages.
+    pub fn apply_chat_template(
+        &self,
+        messages: &[ChatMessage],
+        add_assistant_prompt: bool,
+    ) -> Result<String, engine::EngineError> {
+        let model = self.require_model()?;
+        model
+            .apply_chat_template(None, messages, add_assistant_prompt)
+            .map_err(|source| GGMLLlamaEngineError::ApplyChatTemplate { source }.into())
     }
 
     /// Create a new session on the underlying inference engine.
@@ -282,6 +317,13 @@ impl GGMLLlamaEngine {
                     operation: "lock llama engine state",
                 })?;
         *write_lock = None;
+        let mut model_write_lock =
+            self.loaded_model
+                .write()
+                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+                    operation: "lock loaded llama model state",
+                })?;
+        *model_write_lock = None;
         Ok(())
     }
 }

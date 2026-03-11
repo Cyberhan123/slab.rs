@@ -2,6 +2,7 @@ use slab_llama::{LlamaBatch, LlamaContext, LlamaModel, LlamaSeqId, LlamaToken};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
+use tracing::warn;
 
 use super::{GGMLLlamaEngineError, SessionId, StreamChunk};
 
@@ -74,6 +75,12 @@ pub(super) struct InferenceWorkerState {
     /// Reusing freed IDs keeps the seq_id space bounded even when many sessions
     /// are created and destroyed over the worker's lifetime.
     free_seq_ids: Vec<LlamaSeqId>,
+    /// Effective context length for this worker context.
+    context_length: usize,
+    /// Whether the backend KV implementation supports in-place position shifting.
+    kv_cache_can_shift: bool,
+    /// Minimum number of oldest tokens to evict on each rollover.
+    window_drop_chunk: usize,
     cmd_rx: mpsc::Receiver<WorkerCommand>,
 }
 
@@ -84,6 +91,9 @@ impl InferenceWorkerState {
         ctx: LlamaContext,
         cmd_rx: mpsc::Receiver<WorkerCommand>,
     ) -> Self {
+        let context_length = ctx.n_ctx() as usize;
+        let kv_cache_can_shift = ctx.kv_cache_can_shift();
+        let window_drop_chunk = (context_length / 4).max(1);
         Self {
             worker_id,
             model,
@@ -91,8 +101,82 @@ impl InferenceWorkerState {
             sessions: HashMap::new(),
             next_seq_id: 0,
             free_seq_ids: Vec::new(),
+            context_length,
+            kv_cache_can_shift,
+            window_drop_chunk,
             cmd_rx,
         }
+    }
+
+    fn fail_session_stream(session: &mut SessionState, message: impl Into<String>) {
+        if let Some(tx) = session.stream_tx.take() {
+            let _ = tx.blocking_send(StreamChunk::Error(message.into()));
+        }
+        session.remaining_tokens = 0;
+        session.last_token = None;
+    }
+
+    fn ensure_window_capacity(
+        ctx: &mut LlamaContext,
+        can_shift: bool,
+        context_length: usize,
+        window_drop_chunk: usize,
+        session: &mut SessionState,
+        needed_tokens: usize,
+    ) -> Result<(), String> {
+        if context_length == 0 || needed_tokens == 0 {
+            return Ok(());
+        }
+
+        if needed_tokens > context_length {
+            return Err(format!(
+                "requested token chunk ({needed_tokens}) exceeds context length ({context_length})"
+            ));
+        }
+
+        let n_past = session.n_past.max(0) as usize;
+        if n_past + needed_tokens <= context_length {
+            return Ok(());
+        }
+
+        let overflow = n_past + needed_tokens - context_length;
+
+        // Fallback for backends that cannot shift KV positions.
+        if !can_shift {
+            warn!(
+                seq_id = session.seq_id,
+                context_length,
+                "KV cache shift unsupported; clearing session cache to continue"
+            );
+            let _ = ctx.kv_cache_seq_rm(session.seq_id, 0, i32::MAX);
+            session.n_past = 0;
+            session.last_token = None;
+            return Ok(());
+        }
+
+        // Evict in chunks to avoid tiny per-token shifts once context is full.
+        let mut drop = overflow.max(window_drop_chunk).min(n_past);
+        if n_past.saturating_sub(drop) + needed_tokens > context_length {
+            drop = n_past + needed_tokens - context_length;
+        }
+        if drop == 0 {
+            return Ok(());
+        }
+
+        let drop_i32 = i32::try_from(drop).map_err(|_| {
+            format!("window shift overflow: drop count {drop} does not fit into i32")
+        })?;
+
+        if !ctx.kv_cache_seq_rm(session.seq_id, 0, drop_i32) {
+            return Err(format!(
+                "failed to evict KV range [0, {drop_i32}) for seq_id={}",
+                session.seq_id
+            ));
+        }
+        ctx.kv_cache_seq_add(session.seq_id, drop_i32, -1, -drop_i32);
+        session.n_past = session.n_past.saturating_sub(drop_i32);
+
+        Ok(())
     }
 
     fn handle_command(&mut self, cmd: WorkerCommand) {
@@ -225,6 +309,9 @@ impl InferenceWorkerState {
     fn run_inference_step(&mut self) {
         let batch_capacity = self.ctx.n_batch() as usize;
         let mut batch = LlamaBatch::new(batch_capacity);
+        let context_length = self.context_length;
+        let kv_cache_can_shift = self.kv_cache_can_shift;
+        let window_drop_chunk = self.window_drop_chunk;
         // Ordered list of (session_id, batch_token_index) that requested logits.
         // llama sampler expects token index in the decoded batch, not a dense output index.
         let mut logit_owners: Vec<(SessionId, i32)> = Vec::new();
@@ -262,7 +349,26 @@ impl InferenceWorkerState {
 
                 // Decode pending prompt tokens incrementally, bounded by current
                 // batch capacity. This avoids stalling when pending_len > n_batch.
-                let take_n = pending_len.min(available);
+                let mut take_n = pending_len.min(available);
+                if context_length > 0 {
+                    take_n = take_n.min(context_length);
+                }
+                if take_n == 0 {
+                    continue;
+                }
+
+                if let Err(e) = Self::ensure_window_capacity(
+                    &mut self.ctx,
+                    kv_cache_can_shift,
+                    context_length,
+                    window_drop_chunk,
+                    session,
+                    take_n,
+                ) {
+                    Self::fail_session_stream(session, e);
+                    continue;
+                }
+
                 let finishes_prefill = take_n == pending_len;
 
                 for i in 0..take_n {
@@ -284,6 +390,18 @@ impl InferenceWorkerState {
             } else if let Some(last_token) = session.last_token {
                 // ── Generation step ──────────────────────────────────────────
                 if (batch.n_tokens() as usize) < batch_capacity {
+                    if let Err(e) = Self::ensure_window_capacity(
+                        &mut self.ctx,
+                        kv_cache_can_shift,
+                        context_length,
+                        window_drop_chunk,
+                        session,
+                        1,
+                    ) {
+                        Self::fail_session_stream(session, e);
+                        continue;
+                    }
+
                     let batch_token_index = batch.n_tokens();
                     // INVARIANT: capacity is verified by the condition above.
                     batch

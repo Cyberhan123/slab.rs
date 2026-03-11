@@ -5,6 +5,7 @@ package slab.ipc.v1;
 message ModelLoadRequest {
   string model_path = 1;
   uint32 num_workers = 2;
+  uint32 context_length = 3;
 }
 
 message ModelUnloadRequest {}
@@ -13,6 +14,7 @@ message ReloadLibraryRequest {
   string lib_path = 1;
   string model_path = 2;
   uint32 num_workers = 3;
+  uint32 context_length = 4;
 }
 
 message ModelStatusResponse {

@@ -54,7 +54,7 @@ pub use error::LlamaError;
 pub use llama_adapter::LlamaLoraAdapter;
 pub use llama_batch::LlamaBatch;
 pub use llama_context::LlamaContext;
-pub use llama_model::LlamaModel;
+pub use llama_model::{ChatMessage, LlamaModel};
 pub use llama_sampler::{LlamaSampler, SamplerChainBuilder};
 pub use model_params::LlamaModelParams;
 pub use token::{LlamaPos, LlamaSeqId, LlamaToken};
