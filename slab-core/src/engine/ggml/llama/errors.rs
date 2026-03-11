@@ -63,6 +63,9 @@ pub enum GGMLLlamaEngineError {
     #[error("Session {session_id} not found")]
     SessionNotFound { session_id: SessionId },
 
+    #[error("Session capacity exceeded: max concurrent sessions per worker is {max_sessions}")]
+    SessionCapacityExceeded { max_sessions: usize },
+
     #[error("Inference worker shut down unexpectedly")]
     WorkerShutdown,
 

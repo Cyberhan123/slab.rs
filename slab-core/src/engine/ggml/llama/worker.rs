@@ -75,6 +75,8 @@ pub(super) struct InferenceWorkerState {
     /// Reusing freed IDs keeps the seq_id space bounded even when many sessions
     /// are created and destroyed over the worker's lifetime.
     free_seq_ids: Vec<LlamaSeqId>,
+    /// Upper bound (exclusive) for valid sequence IDs in this context.
+    max_seq_id_exclusive: LlamaSeqId,
     /// Effective context length for this worker context.
     context_length: usize,
     /// Whether the backend KV implementation supports in-place position shifting.
@@ -92,6 +94,7 @@ impl InferenceWorkerState {
         cmd_rx: mpsc::Receiver<WorkerCommand>,
     ) -> Self {
         let context_length = ctx.n_ctx() as usize;
+        let max_seq_id_exclusive = i32::try_from(ctx.n_seq_max()).unwrap_or(i32::MAX);
         let kv_cache_can_shift = ctx.kv_cache_can_shift();
         let window_drop_chunk = (context_length / 4).max(1);
         Self {
@@ -101,6 +104,7 @@ impl InferenceWorkerState {
             sessions: HashMap::new(),
             next_seq_id: 0,
             free_seq_ids: Vec::new(),
+            max_seq_id_exclusive,
             context_length,
             kv_cache_can_shift,
             window_drop_chunk,
@@ -187,11 +191,19 @@ impl InferenceWorkerState {
             } => {
                 // Prefer a recycled sequence ID; only mint a new one when the
                 // free-list is empty, to keep the seq_id space bounded.
-                let seq_id = self.free_seq_ids.pop().unwrap_or_else(|| {
+                let seq_id = if let Some(reused) = self.free_seq_ids.pop() {
+                    reused
+                } else if self.next_seq_id < self.max_seq_id_exclusive {
                     let id = self.next_seq_id;
                     self.next_seq_id += 1;
                     id
-                });
+                } else {
+                    let _ =
+                        reply_tx.send(Err(GGMLLlamaEngineError::SessionCapacityExceeded {
+                            max_sessions: self.max_seq_id_exclusive.max(0) as usize,
+                        }));
+                    return;
+                };
                 let sampler = self.model.new_sampler();
                 self.sessions.insert(
                     session_id,
