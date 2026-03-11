@@ -1,11 +1,9 @@
 //! Health / heartbeat endpoint.
 
-use axum::extract::State;
 use axum::routing::get;
 use axum::{Json, Router};
 use serde_json::{json, Value};
 use std::sync::Arc;
-use tracing::{debug, warn};
 use utoipa::OpenApi;
 
 use crate::state::AppState;

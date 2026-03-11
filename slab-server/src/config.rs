@@ -22,15 +22,6 @@ pub struct Config {
     /// migrate to Postgres (`postgres://…`) or MySQL (`mysql://…`).
     pub database_url: String,
 
-    /// Filesystem path for the IPC Unix-domain socket.
-    ///
-    /// **Security note:** The default `/tmp/slab-server.sock` is world-
-    /// readable on most systems.  In production, set this to a path inside a
-    /// directory with restricted permissions (e.g. `/var/run/slab/server.sock`
-    /// owned by the service user) so that only authorised local processes can
-    /// connect.
-    pub ipc_socket_path: String,
-
     /// `tracing` filter string, e.g. `"info"` or `"debug,tower_http=warn"`.
     pub log_level: String,
 
@@ -56,9 +47,10 @@ pub struct Config {
     /// but should be restricted to trusted origins in production.
     pub cors_allowed_origins: Option<String>,
 
-    /// Optional bearer token required for admin endpoints
-    /// (`/api/models/…`).  Set `SLAB_ADMIN_TOKEN=<secret>` to require
-    /// an `Authorization: Bearer <secret>` header on those routes.
+    /// Optional bearer token required for admin endpoints (`/admin/*`).
+    ///
+    /// Set `SLAB_ADMIN_TOKEN=<secret>` to require an
+    /// `Authorization: Bearer <secret>` header on those routes.
     /// When `None`, admin endpoints are unauthenticated.
     pub admin_api_token: Option<String>,
 
@@ -75,15 +67,8 @@ pub struct Config {
     /// Optional diffusion backend gRPC endpoint used by HTTP gateway mode.
     pub diffusion_grpc_endpoint: Option<String>,
 
-    /// Directory containing the llama,whisper,diffusion shared library.
+    /// Directory containing the llama, whisper, and diffusion shared libraries.
     pub lib_dir: Option<std::path::PathBuf>,
-
-    /// Optional comma-separated list of enabled backends.
-    ///
-    /// Accepted values: `llama`, `whisper`, `diffusion` (also supports
-    /// `ggml.llama`, `ggml.whisper`, `ggml.diffusion`).
-    /// When unset, all backends are enabled.
-    pub enabled_backends: Option<String>,
 
     /// Directory where chat session state files are stored.
     pub session_state_dir: String,
@@ -95,7 +80,6 @@ impl Config {
         Self {
             bind_address: env_or("SLAB_BIND", "localhost:3000"),
             database_url: env_or("SLAB_DATABASE_URL", "sqlite://slab.db?mode=rwc"),
-            ipc_socket_path: env_or("SLAB_IPC_SOCKET", "/tmp/slab-server.sock"),
             log_level: env_or("SLAB_LOG", "info"),
             log_json: std::env::var("SLAB_LOG_JSON")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -111,16 +95,9 @@ impl Config {
             llama_grpc_endpoint: std::env::var("SLAB_LLAMA_GRPC_ENDPOINT").ok(),
             whisper_grpc_endpoint: std::env::var("SLAB_WHISPER_GRPC_ENDPOINT").ok(),
             diffusion_grpc_endpoint: std::env::var("SLAB_DIFFUSION_GRPC_ENDPOINT").ok(),
-            lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(|v| PathBuf::from(v)),
-            enabled_backends: std::env::var("SLAB_ENABLED_BACKENDS").ok(),
+            lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(PathBuf::from),
             session_state_dir: env_or("SLAB_SESSION_STATE_DIR", "./tmp/slab-sessions"),
         }
-    }
-
-    pub fn uses_remote_backends(&self) -> bool {
-        self.llama_grpc_endpoint.is_some()
-            || self.whisper_grpc_endpoint.is_some()
-            || self.diffusion_grpc_endpoint.is_some()
     }
 }
 

@@ -28,6 +28,7 @@ enum GlobalCommand {
         session_id: SessionId,
         reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
+    #[allow(dead_code)]
     Cancel {
         session_id: SessionId,
         reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
@@ -432,6 +433,7 @@ impl LlamaInferenceEngine {
     /// to the caller. To continue a conversation from the exact emitted text,
     /// re-append that final text delta with [`Self::append_input`] before
     /// calling [`Self::generate_stream`] again.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) async fn cancel_generate(
         &self,
         session_id: SessionId,
