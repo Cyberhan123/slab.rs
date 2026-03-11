@@ -166,18 +166,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Speech-to-text transcription (`POST /v1/audio/transcriptions`).
-         * @description Accepts raw audio/video bytes.  The body is saved to a temporary file,
-         *     then a slab-core pipeline is submitted:
-         *
-         *     1. **ffmpeg** (CPU preprocess stage via `std::process::Command`) converts
-         *        the file to raw PCM f32le at 16 kHz mono.
-         *     2. **whisper** (GPU stage) transcribes the PCM samples.
-         *
-         *     Returns `{"task_id": "..."}` immediately; poll status via
-         *     `GET /api/tasks/{id}` and result via `GET /api/tasks/{id}/result`.
-         */
+        /** Speech-to-text transcription (`POST /v1/audio/transcriptions`). */
         post: operations["transcribe"];
         delete?: never;
         options?: never;
@@ -194,12 +183,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * OpenAI chat completions (`POST /v1/chat/completions`).
-         * @description When `stream: true`, the response is streamed token-by-token using SSE.
-         *     When `session_id` is provided, conversation history is loaded from the DB
-         *     and the llama KV-cache is preserved between turns.
-         */
+        /** OpenAI chat completions (`POST /v1/chat/completions`). */
         post: operations["chat_completions"];
         delete?: never;
         options?: never;
@@ -232,12 +216,7 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Image generation (`POST /v1/images/generations`).
-         * @description Submits the generation request as a slab-core task and returns a `task_id`.
-         *     The caller should poll `GET /api/tasks/{task_id}` for status and
-         *     `GET /api/tasks/{task_id}/result` for the base64-encoded image.
-         */
+        /** Image generation (`POST /v1/images/generations`). */
         post: operations["generate_images"];
         delete?: never;
         options?: never;
@@ -386,6 +365,22 @@ export interface paths {
             cookie?: never;
         };
         get: operations["list_session_messages"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/system/gpu": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["gpu_status"];
         put?: never;
         post?: never;
         delete?: never;
@@ -556,8 +551,8 @@ export interface components {
         };
         ConfigEntry: {
             key: string;
-            value: string;
             name: string;
+            value: string;
         };
         ConvertRequest: {
             /** @description Desired output format (e.g. `"mp3"`, `"wav"`, `"mp4"`). */
@@ -591,6 +586,61 @@ export interface components {
             /** @description Model catalog entry ID from `/admin/models`. */
             model_id: string;
         };
+        /** @description Per-GPU snapshot from `all-smi`. */
+        GpuDeviceStatus: {
+            /** @description Device class from all-smi, e.g. GPU / NPU. */
+            device_type: string;
+            /**
+             * Format: int32
+             * @description Stable GPU index in current snapshot.
+             */
+            id: number;
+            /**
+             * Format: double
+             * @description Derived VRAM usage percentage (0-100).
+             */
+            memory_usage_percent: number;
+            /** @description Human-readable GPU model name. */
+            name: string;
+            /**
+             * Format: double
+             * @description Current power draw in watts.
+             */
+            power_draw_watts: number;
+            /**
+             * Format: int32
+             * @description Reported temperature in Celsius.
+             */
+            temperature_celsius: number;
+            /**
+             * Format: int64
+             * @description Total VRAM bytes.
+             */
+            total_memory_bytes: number;
+            /**
+             * Format: int64
+             * @description Current used VRAM bytes.
+             */
+            used_memory_bytes: number;
+            /**
+             * Format: double
+             * @description Core utilization in percentage (0-100).
+             */
+            utilization_percent: number;
+        };
+        /** @description Aggregated GPU monitor payload for the status bar. */
+        GpuStatusResponse: {
+            /** @description Whether GPU telemetry is available for this host. */
+            available: boolean;
+            /** @description Telemetry backend identifier. */
+            backend: string;
+            /** @description Current GPU list snapshot. */
+            devices: components["schemas"]["GpuDeviceStatus"][];
+            /** @description Optional reason when telemetry is unavailable. */
+            error?: string | null;
+            /** @description RFC3339 timestamp generated by server. */
+            updated_at: string;
+        };
         /** @description Request body for `POST /v1/images/generations`. */
         ImageGenerationRequest: {
             /** @description The model identifier to use. */
@@ -622,9 +672,9 @@ export interface components {
             model_path: string;
             /**
              * Format: int32
-             * @description Number of worker threads to allocate (default `1`).
+             * @description Optional worker override. If omitted, server uses global config by backend.
              */
-            num_workers?: number;
+            num_workers?: number | null;
         };
         MessageResponse: {
             content: string;
@@ -688,8 +738,11 @@ export interface components {
         SwitchModelRequest: {
             backend_id: string;
             model_path: string;
-            /** Format: int32 */
-            num_workers?: number;
+            /**
+             * Format: int32
+             * @description Optional worker override. If omitted, server uses global config by backend.
+             */
+            num_workers?: number | null;
         };
         TaskResponse: {
             created_at: string;
@@ -698,6 +751,19 @@ export interface components {
             status: string;
             task_type: string;
             updated_at: string;
+        };
+        /**
+         * @description Result payload returned by `GET /v1/tasks/{id}/result`.
+         *
+         *     Exactly one field is populated depending on the task type:
+         *     - `image` tasks: `image` contains a `data:image/png;base64,…` data URI.
+         *     - Text-producing tasks (whisper, etc.): `text` contains the UTF-8 result.
+         */
+        TaskResultPayload: {
+            /** @description Base64-encoded PNG data URI, present for `image` task results. */
+            image?: string | null;
+            /** @description Text content, present for `whisper` and other text-producing task results. */
+            text?: string | null;
         };
         TaskTypeQuery: {
             type?: string | null;
@@ -1135,7 +1201,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description Audio/video file bytes */
+        /** @description Audio file path */
         requestBody: {
             content: {
                 "application/json": components["schemas"]["CompletionRequest"];
@@ -1664,6 +1730,26 @@ export interface operations {
             };
         };
     };
+    gpu_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current GPU telemetry snapshot */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GpuStatusResponse"];
+                };
+            };
+        };
+    };
     list_tasks: {
         parameters: {
             query?: {
@@ -1800,15 +1886,6 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Task restarted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["TaskResponse"];
-                };
-            };
             /** @description Bad request */
             400: {
                 headers: {
@@ -1825,6 +1902,13 @@ export interface operations {
             };
             /** @description Backend error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not implemented */
+            501: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1850,7 +1934,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["TaskResponse"];
+                    "application/json": components["schemas"]["TaskResultPayload"];
                 };
             };
             /** @description Bad request */
