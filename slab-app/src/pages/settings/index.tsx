@@ -46,6 +46,7 @@ import {
   Label,
 } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
@@ -85,6 +86,7 @@ const EMPTY_MODEL_DRAFT: ModelDraft = {
 
 const MODEL_AUTO_UNLOAD_ENABLED_KEY = 'model_auto_unload_enabled';
 const MODEL_AUTO_UNLOAD_IDLE_MINUTES_KEY = 'model_auto_unload_idle_minutes';
+const CHAT_MODEL_PROVIDERS_KEY = 'chat_model_providers';
 
 function parseConfigBool(value?: string | null) {
   if (!value) return false;
@@ -106,6 +108,8 @@ export default function Settings() {
   const [autoUnloadEnabled, setAutoUnloadEnabled] = useState(false);
   const [autoUnloadMinutes, setAutoUnloadMinutes] = useState('10');
   const [isSavingAutoUnload, setIsSavingAutoUnload] = useState(false);
+  const [chatProvidersRaw, setChatProvidersRaw] = useState('[]');
+  const [isSavingChatProviders, setIsSavingChatProviders] = useState(false);
 
   const [isModelDialogOpen, setIsModelDialogOpen] = useState(false);
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
@@ -151,6 +155,7 @@ export default function Settings() {
   useEffect(() => {
     setAutoUnloadEnabled(parseConfigBool(configValueByKey.get(MODEL_AUTO_UNLOAD_ENABLED_KEY)));
     setAutoUnloadMinutes(configValueByKey.get(MODEL_AUTO_UNLOAD_IDLE_MINUTES_KEY)?.trim() || '10');
+    setChatProvidersRaw(configValueByKey.get(CHAT_MODEL_PROVIDERS_KEY)?.trim() || '[]');
   }, [configValueByKey]);
 
   const resetModelDialog = () => {
@@ -353,8 +358,45 @@ export default function Settings() {
     }
   };
 
+  const saveChatProviders = async () => {
+    const raw = chatProvidersRaw.trim() || '[]';
+
+    try {
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) {
+        toast.error('Chat model providers must be a JSON array.');
+        return;
+      }
+    } catch (error: any) {
+      toast.error('Invalid JSON for chat model providers.', {
+        description: error?.message || 'Unknown parse error',
+      });
+      return;
+    }
+
+    setIsSavingChatProviders(true);
+    try {
+      await updateConfigMutation.mutateAsync({
+        params: {
+          path: { key: CHAT_MODEL_PROVIDERS_KEY },
+        },
+        body: {
+          name: 'Chat Model Providers',
+          value: raw,
+        },
+      });
+      toast.success('Chat model providers saved');
+      await refetchConfigs();
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsSavingChatProviders(false);
+    }
+  };
+
   return (
-    <div className="container mx-auto px-4 py-8 space-y-8">
+    <div className="h-full overflow-y-auto">
+      <div className="container mx-auto space-y-8 px-4 py-8">
       <h1 className="text-3xl font-bold">Settings</h1>
 
       <Tabs defaultValue="models">
@@ -578,6 +620,55 @@ export default function Settings() {
                         <Button onClick={() => void saveModelAutoUnload()} disabled={isSavingAutoUnload}>
                           {isSavingAutoUnload && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                           Save Auto Unload
+                        </Button>
+                      </div>
+                    </CardContent>
+                  </Card>
+
+                  <Card className="border-dashed">
+                    <CardHeader>
+                      <CardTitle className="text-base">Chat Model Providers</CardTitle>
+                      <CardDescription>
+                        Configure cloud providers used by Chat model selection. Chat reads this value from
+                        <code className="mx-1">chat_model_providers</code>. Use
+                        <code className="mx-1">api_key</code> for a literal key, or
+                        <code className="mx-1">api_key_env</code> for an environment variable name.
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                      <div className="grid gap-2">
+                        <Label htmlFor="chat-model-providers-json">Providers JSON</Label>
+                        <Textarea
+                          id="chat-model-providers-json"
+                          className="min-h-[220px] font-mono text-xs"
+                          value={chatProvidersRaw}
+                          onChange={(e) => setChatProvidersRaw(e.target.value)}
+                          placeholder='[]'
+                        />
+                      </div>
+
+                      <div className="rounded-md border bg-muted/40 p-3">
+                        <p className="mb-2 text-xs font-medium">Example</p>
+                        <pre className="overflow-auto text-[11px] leading-relaxed text-muted-foreground">
+{`[
+  {
+    "id": "openai-main",
+    "name": "OpenAI",
+    "api_base": "https://api.openai.com/v1",
+    "api_key": "sk-your-api-key",
+    "models": [
+      { "id": "gpt-4.1-mini", "display_name": "GPT-4.1 Mini" },
+      { "id": "gpt-4.1", "display_name": "GPT-4.1" }
+    ]
+  }
+]`}
+                        </pre>
+                      </div>
+
+                      <div>
+                        <Button onClick={() => void saveChatProviders()} disabled={isSavingChatProviders}>
+                          {isSavingChatProviders && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                          Save Chat Providers
                         </Button>
                       </div>
                     </CardContent>
@@ -866,6 +957,7 @@ export default function Settings() {
           </form>
         </DialogContent>
       </Dialog>
+      </div>
     </div>
   );
 }

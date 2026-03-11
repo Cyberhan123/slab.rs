@@ -1,12 +1,17 @@
 import { XProvider } from '@ant-design/x';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import api from '@/lib/api';
 import '@ant-design/x-markdown/themes/light.css';
 import '@ant-design/x-markdown/themes/dark.css';
 import { useMarkdownTheme } from './hooks/use-markdowm-theme';
 import locale from './local';
-import { ChatContext, DEFAULT_CONVERSATIONS_ITEMS, DEFAULT_CONVERSATION_KEY } from './chat-context';
+import {
+  API_BASE_URL,
+  ChatContext,
+  DEFAULT_CONVERSATIONS_ITEMS,
+  DEFAULT_CONVERSATION_KEY,
+} from './chat-context';
 import { useStyle } from './hooks/use-style';
 import { ChatSidebar } from './components/chat-sidebar';
 import { ChatMessageList } from './components/chat-message-list';
@@ -17,12 +22,36 @@ const LLAMA_BACKEND_ID = 'ggml.llama';
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
 const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
 
+type ModelOptionSource = 'local' | 'cloud';
+
 type ModelOption = {
   id: string;
   label: string;
   downloaded: boolean;
   pending: boolean;
+  source: ModelOptionSource;
 };
+
+type ChatModelApiItem = {
+  id: string;
+  display_name: string;
+  source: ModelOptionSource;
+  downloaded: boolean;
+  pending: boolean;
+  provider_name?: string | null;
+};
+
+function isChatModelApiItem(value: unknown): value is ChatModelApiItem {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  return (
+    typeof obj.id === 'string' &&
+    typeof obj.display_name === 'string' &&
+    (obj.source === 'local' || obj.source === 'cloud') &&
+    typeof obj.downloaded === 'boolean' &&
+    typeof obj.pending === 'boolean'
+  );
+}
 
 function Chat() {
   const [className] = useMarkdownTheme();
@@ -34,6 +63,8 @@ function Chat() {
 
   const [selectedModelId, setSelectedModelId] = useState('');
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
+  const [cloudModelOptions, setCloudModelOptions] = useState<ModelOption[]>([]);
+  const [cloudModelsLoading, setCloudModelsLoading] = useState(false);
 
   const {
     data: catalogModels,
@@ -46,9 +77,53 @@ function Chat() {
   const switchModelMutation = api.useMutation('post', '/v1/models/switch');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
+  const loadCloudModels = useCallback(async () => {
+    setCloudModelsLoading(true);
+    try {
+      const response = await fetch(`${API_BASE_URL}/v1/chat/models`, {
+        method: 'GET',
+      });
+      if (!response.ok) {
+        const detail = await response.text();
+        throw new Error(`HTTP ${response.status}: ${detail || 'failed to load models'}`);
+      }
+
+      const payload: unknown = await response.json();
+      if (!Array.isArray(payload)) {
+        throw new Error('Invalid chat model payload');
+      }
+
+      const cloudOnly = payload
+        .filter((item): item is ChatModelApiItem => isChatModelApiItem(item))
+        .filter((item) => item.source === 'cloud')
+        .map<ModelOption>((item) => ({
+          id: item.id,
+          label: item.provider_name
+            ? `${item.provider_name} / ${item.display_name}`
+            : item.display_name,
+          downloaded: true,
+          pending: false,
+          source: 'cloud',
+        }));
+
+      setCloudModelOptions(cloudOnly);
+    } catch (error: any) {
+      setCloudModelOptions([]);
+      toast.error('Failed to load cloud model options', {
+        description: error?.message || 'Unknown error',
+      });
+    } finally {
+      setCloudModelsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadCloudModels();
+  }, [loadCloudModels]);
+
   const llamaModels = useMemo(
     () => (catalogModels ?? []).filter((model) => model.backend_ids.includes(LLAMA_BACKEND_ID)),
-    [catalogModels]
+    [catalogModels],
   );
 
   const pendingTaskIdOf = (model: unknown): string | null => {
@@ -59,28 +134,34 @@ function Chat() {
     return trimmed.length > 0 ? trimmed : null;
   };
 
-  const modelOptions = useMemo<ModelOption[]>(
+  const localModelOptions = useMemo<ModelOption[]>(
     () =>
       llamaModels.map((model) => ({
         id: model.id,
         label: model.display_name,
         downloaded: Boolean(model.local_path),
         pending: Boolean(pendingTaskIdOf(model)),
+        source: 'local',
       })),
-    [llamaModels]
+    [llamaModels],
+  );
+
+  const modelOptions = useMemo<ModelOption[]>(
+    () => [...localModelOptions, ...cloudModelOptions],
+    [localModelOptions, cloudModelOptions],
   );
 
   useEffect(() => {
-    if (llamaModels.length === 0) {
+    if (modelOptions.length === 0) {
       setSelectedModelId('');
       return;
     }
 
-    const exists = llamaModels.some((model) => model.id === selectedModelId);
+    const exists = modelOptions.some((model) => model.id === selectedModelId);
     if (!selectedModelId || !exists) {
-      setSelectedModelId(llamaModels[0].id);
+      setSelectedModelId(modelOptions[0].id);
     }
-  }, [llamaModels, selectedModelId]);
+  }, [modelOptions, selectedModelId]);
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -122,7 +203,7 @@ function Chat() {
 
   const ensureDownloadedModelPath = async (
     modelId: string,
-    forceDownload = false
+    forceDownload = false,
   ): Promise<{ modelPath: string; downloadedNow: boolean }> => {
     let model = llamaModels.find((item) => item.id === modelId);
     if (!model) {
@@ -195,11 +276,21 @@ function Chat() {
       return;
     }
 
-    const selected = llamaModels.find((item) => item.id === selectedModelId);
+    const selectedOption = modelOptions.find((item) => item.id === selectedModelId);
+    if (!selectedOption) {
+      throw new Error('Selected model is not available');
+    }
+
+    if (selectedOption.source === 'cloud') {
+      setLoadedModelId(selectedModelId);
+      return;
+    }
+
+    const selectedLocal = llamaModels.find((item) => item.id === selectedModelId);
     const { modelPath, downloadedNow } = await ensureDownloadedModelPath(selectedModelId);
 
     if (downloadedNow) {
-      toast.success(`Downloaded ${selected?.display_name ?? selectedModelId}`);
+      toast.success(`Downloaded ${selectedLocal?.display_name ?? selectedModelId}`);
     }
 
     try {
@@ -214,7 +305,7 @@ function Chat() {
 
       const retry = await ensureDownloadedModelPath(selectedModelId, true);
       if (retry.downloadedNow) {
-        toast.success(`Downloaded ${selected?.display_name ?? selectedModelId}`);
+        toast.success(`Downloaded ${selectedLocal?.display_name ?? selectedModelId}`);
       }
 
       await loadOrSwitchSelectedModel(retry.modelPath);
@@ -247,6 +338,7 @@ function Chat() {
     loadModelMutation.isPending ||
     switchModelMutation.isPending ||
     downloadModelMutation.isPending;
+  const modelLoading = catalogModelsLoading || cloudModelsLoading;
 
   return (
     <XProvider locale={locale}>
@@ -279,7 +371,7 @@ function Chat() {
                     modelOptions={modelOptions}
                     selectedModelId={selectedModelId}
                     onModelChange={setSelectedModelId}
-                    modelLoading={catalogModelsLoading}
+                    modelLoading={modelLoading}
                     modelDisabled={isRequesting || isPreparingModel || modelOptions.length === 0}
                   />
                 </div>
@@ -296,7 +388,7 @@ function Chat() {
                   modelOptions={modelOptions}
                   selectedModelId={selectedModelId}
                   onModelChange={setSelectedModelId}
-                  modelLoading={catalogModelsLoading}
+                  modelLoading={modelLoading}
                   modelDisabled={isRequesting || isPreparingModel || modelOptions.length === 0}
                 />
               )}

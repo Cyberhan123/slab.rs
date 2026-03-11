@@ -39,6 +39,7 @@ export const useChat = (
     try {
       await beforeRequest?.();
       onRequest({
+        model,
         messages: [{ role: 'user', content: val }],
         thinking: {
           type: 'disabled',
@@ -53,7 +54,14 @@ export const useChat = (
   const onReload = (id: string | number, requestParams: any, opts?: any) => {
     Promise.resolve(beforeRequest?.())
       .then(() => {
-        rawOnReload(id, requestParams, opts);
+        rawOnReload(
+          id,
+          {
+            ...(requestParams ?? {}),
+            model,
+          },
+          opts,
+        );
       })
       .catch(() => {
         // beforeRequest should handle its own user-facing errors.
