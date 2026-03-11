@@ -60,7 +60,9 @@ fn sync_sidecar(bin_name: &str, target: &str, src_dir: &Path, tauri_dir: &Path) 
     }
 
     if src_path.exists() {
-        fs::copy(&src_path, &dst_path).expect("failed to copy sidecar binary");
+        if should_copy_sidecar(&src_path, &dst_path) {
+            fs::copy(&src_path, &dst_path).expect("failed to copy sidecar binary");
+        }
         println!("cargo:rerun-if-changed={}", src_path.to_string_lossy());
     } else {
         println!(
@@ -68,5 +70,33 @@ fn sync_sidecar(bin_name: &str, target: &str, src_dir: &Path, tauri_dir: &Path) 
             bin_name,
             src_path.to_string_lossy()
         );
+    }
+}
+
+fn should_copy_sidecar(src_path: &Path, dst_path: &Path) -> bool {
+    if !dst_path.exists() {
+        return true;
+    }
+
+    let src_meta = match fs::metadata(src_path) {
+        Ok(meta) => meta,
+        Err(_) => return true,
+    };
+    let dst_meta = match fs::metadata(dst_path) {
+        Ok(meta) => meta,
+        Err(_) => return true,
+    };
+
+    if src_meta.len() != dst_meta.len() {
+        return true;
+    }
+
+    // If both files have the same size and source mtime is not newer,
+    // skip copying to avoid touching sidecar timestamps and retriggering tauri dev rebuilds.
+    let src_mtime = src_meta.modified().ok();
+    let dst_mtime = dst_meta.modified().ok();
+    match (src_mtime, dst_mtime) {
+        (Some(src), Some(dst)) => src > dst,
+        _ => true,
     }
 }

@@ -197,3 +197,59 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Chat model selector (antd) */
+.chat-model-select.ant-select {
+  min-width: 220px;
+}
+
+.chat-model-select.ant-select .ant-select-selector {
+  height: 32px !important;
+  border-radius: 9999px !important;
+  border-color: var(--border) !important;
+  background: var(--background) !important;
+  box-shadow: none !important;
+}
+
+.chat-model-select.ant-select .ant-select-selection-item,
+.chat-model-select.ant-select .ant-select-selection-placeholder {
+  line-height: 30px !important;
+  color: var(--foreground) !important;
+  font-size: 12px;
+}
+
+.chat-model-select.ant-select .ant-select-arrow {
+  color: var(--muted-foreground) !important;
+}
+
+.chat-model-select.ant-select.ant-select-focused .ant-select-selector,
+.chat-model-select.ant-select:not(.ant-select-disabled):hover .ant-select-selector {
+  border-color: var(--ring) !important;
+}
+
+.chat-model-select.ant-select.ant-select-focused .ant-select-selector {
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 22%, transparent) !important;
+}
+
+.chat-model-select-dropdown.ant-select-dropdown {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--popover);
+  box-shadow: 0 14px 30px color-mix(in oklab, var(--foreground) 12%, transparent);
+  padding: 6px;
+}
+
+.chat-model-select-dropdown .ant-select-item {
+  border-radius: 8px;
+  color: var(--foreground);
+}
+
+.chat-model-select-dropdown .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+  background: color-mix(in oklab, var(--primary) 14%, var(--popover));
+}
+
+.chat-model-select-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
+  background: color-mix(in oklab, var(--primary) 22%, var(--popover));
+  color: var(--foreground);
+  font-weight: 600;
+}

@@ -1,45 +1,97 @@
 //! OpenAI-compatible chat completion routes.
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 
 use axum::extract::State;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use chrono::Utc;
 use futures::{stream, StreamExt};
-use tracing::{debug, info};
+use genai::adapter::AdapterKind;
+use genai::chat::{
+    ChatMessage as GenaiChatMessage, ChatOptions as GenaiChatOptions,
+    ChatRequest as GenaiChatRequest, ChatStreamEvent as GenaiChatStreamEvent,
+};
+use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
+use genai::{Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget};
+use serde::Deserialize;
+use tracing::{debug, info, warn};
 use utoipa::OpenApi;
 use uuid::Uuid;
 
-use crate::entities::{ChatMessage, ChatStore};
+use crate::entities::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
 use crate::schemas::v1::chat::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
+    ChatModelOption, ChatModelSource,
 };
 use crate::state::AppState;
 
 /// Maximum allowed prompt length in bytes.
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
+const LLAMA_BACKEND_ID: &str = "ggml.llama";
+const CHAT_MODEL_PROVIDERS_CONFIG_KEY: &str = "chat_model_providers";
+const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(chat_completions),
+    paths(chat_completions, list_chat_models),
     components(schemas(
         ChatCompletionRequest,
         ChatCompletionResponse,
         OpenAiMessage,
-        ChatChoice
+        ChatChoice,
+        ChatModelOption,
+        ChatModelSource
     ))
 )]
 pub struct ChatApi;
 
-/// Register chat-completion routes.
+/// Register chat routes.
 pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route("/chat/completions", post(chat_completions))
+    Router::new()
+        .route("/chat/completions", post(chat_completions))
+        .route("/chat/models", get(list_chat_models))
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CloudProviderConfig {
+    #[serde(alias = "provider_id", alias = "providerId")]
+    id: String,
+    #[serde(default, alias = "displayName", alias = "provider_name")]
+    name: String,
+    #[serde(alias = "apiBase", alias = "base_url", alias = "baseUrl")]
+    api_base: String,
+    #[serde(default, alias = "apiKey")]
+    api_key: Option<String>,
+    #[serde(default, alias = "apiKeyEnv")]
+    api_key_env: Option<String>,
+    #[serde(default)]
+    models: Vec<CloudProviderModelConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct CloudProviderModelConfig {
+    #[serde(alias = "model", alias = "model_id", alias = "modelId")]
+    id: String,
+    #[serde(default, alias = "displayName")]
+    display_name: Option<String>,
+    #[serde(default, alias = "remoteModel")]
+    remote_model: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedCloudModel {
+    provider_id: String,
+    provider_name: String,
+    api_base: String,
+    api_key: String,
+    remote_model: String,
 }
 
 /// Build an OpenAI-compatible `chat.completion.chunk` SSE data payload.
@@ -56,6 +108,438 @@ fn build_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
         }]
     })
     .to_string()
+}
+
+/// Build an OpenAI-compatible reasoning SSE chunk payload.
+fn build_reasoning_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
+    serde_json::json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": { "reasoning_content": token },
+            "finish_reason": null
+        }]
+    })
+    .to_string()
+}
+
+fn cloud_option_id(provider_id: &str, model_id: &str) -> String {
+    format!("{CLOUD_MODEL_ID_PREFIX}/{provider_id}/{model_id}")
+}
+
+fn is_cloud_model_option_id(model_id: &str) -> bool {
+    model_id.starts_with("cloud/")
+}
+
+fn trim_to_option(raw: Option<String>) -> Option<String> {
+    raw.and_then(|v| {
+        let trimmed = v.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    })
+}
+
+fn looks_like_env_var_name(value: &str) -> bool {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(ch) if ch == '_' || ch.is_ascii_alphabetic() => {}
+        _ => return false,
+    }
+    chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
+}
+
+fn canonicalize_cloud_provider(
+    mut provider: CloudProviderConfig,
+) -> Result<CloudProviderConfig, ServerError> {
+    provider.id = provider.id.trim().to_owned();
+    provider.name = provider.name.trim().to_owned();
+    provider.api_base = provider.api_base.trim().trim_end_matches('/').to_owned();
+    provider.api_key = trim_to_option(provider.api_key.take());
+    provider.api_key_env = trim_to_option(provider.api_key_env.take());
+
+    if provider.id.is_empty() {
+        return Err(ServerError::BadRequest(
+            "cloud provider id must not be empty".into(),
+        ));
+    }
+    if provider.name.is_empty() {
+        provider.name = provider.id.clone();
+    }
+    if provider.api_base.is_empty() {
+        return Err(ServerError::BadRequest(format!(
+            "cloud provider '{}' has empty api_base",
+            provider.id
+        )));
+    }
+    if provider.models.is_empty() {
+        return Err(ServerError::BadRequest(format!(
+            "cloud provider '{}' must define at least one model",
+            provider.id
+        )));
+    }
+
+    let mut model_ids = std::collections::HashSet::new();
+    for model in &mut provider.models {
+        model.id = model.id.trim().to_owned();
+        model.display_name = Some(
+            trim_to_option(model.display_name.take()).unwrap_or_else(|| model.id.clone()),
+        );
+        model.remote_model = trim_to_option(model.remote_model.take());
+
+        if model.id.is_empty() {
+            return Err(ServerError::BadRequest(format!(
+                "cloud provider '{}' contains model with empty id",
+                provider.id
+            )));
+        }
+        if !model_ids.insert(model.id.clone()) {
+            return Err(ServerError::BadRequest(format!(
+                "cloud provider '{}' contains duplicate model id '{}'",
+                provider.id, model.id
+            )));
+        }
+    }
+
+    Ok(provider)
+}
+
+async fn load_cloud_providers_strict(state: &AppState) -> Result<Vec<CloudProviderConfig>, ServerError> {
+    let raw = state
+        .store
+        .get_config_value(CHAT_MODEL_PROVIDERS_CONFIG_KEY)
+        .await?;
+
+    let Some(raw) = raw else {
+        return Ok(Vec::new());
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let parsed: Vec<CloudProviderConfig> = serde_json::from_str(trimmed).map_err(|e| {
+        ServerError::BadRequest(format!(
+            "invalid JSON in config '{}': {e}",
+            CHAT_MODEL_PROVIDERS_CONFIG_KEY
+        ))
+    })?;
+
+    if parsed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut out = Vec::with_capacity(parsed.len());
+    let mut provider_ids = std::collections::HashSet::new();
+    for provider in parsed {
+        let normalized = canonicalize_cloud_provider(provider)?;
+        if !provider_ids.insert(normalized.id.clone()) {
+            return Err(ServerError::BadRequest(format!(
+                "duplicate cloud provider id '{}'",
+                normalized.id
+            )));
+        }
+        out.push(normalized);
+    }
+
+    Ok(out)
+}
+
+async fn load_cloud_providers_lenient(state: &AppState) -> Vec<CloudProviderConfig> {
+    match load_cloud_providers_strict(state).await {
+        Ok(v) => v,
+        Err(err) => {
+            warn!(
+                error = %err,
+                config_key = CHAT_MODEL_PROVIDERS_CONFIG_KEY,
+                "invalid chat cloud provider config; cloud models disabled"
+            );
+            Vec::new()
+        }
+    }
+}
+
+fn resolve_provider_api_key(provider: &CloudProviderConfig) -> Result<String, ServerError> {
+    if let Some(key) = provider.api_key.as_deref() {
+        return Ok(key.to_owned());
+    }
+
+    if let Some(env_key) = provider.api_key_env.as_deref() {
+        let env_key = env_key.trim();
+        if let Ok(value) = std::env::var(env_key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Ok(trimmed.to_owned());
+            }
+        }
+        // Be tolerant to common misconfiguration: users paste a literal API key into `api_key_env`.
+        if !env_key.is_empty() && !looks_like_env_var_name(env_key) {
+            warn!(
+                provider_id = %provider.id,
+                "api_key_env does not look like an env var name; treating it as a literal api key"
+            );
+            return Ok(env_key.to_owned());
+        }
+    }
+
+    Err(ServerError::BackendNotReady(format!(
+        "cloud provider '{}' is missing api key (set config api_key or api_key_env)",
+        provider.id
+    )))
+}
+
+async fn resolve_cloud_model(
+    state: &AppState,
+    requested_model: &str,
+) -> Result<ResolvedCloudModel, ServerError> {
+    let providers = load_cloud_providers_strict(state).await?;
+
+    for provider in providers {
+        for model in &provider.models {
+            if cloud_option_id(&provider.id, &model.id) != requested_model {
+                continue;
+            }
+            let api_key = resolve_provider_api_key(&provider)?;
+            let remote_model = model
+                .remote_model
+                .as_deref()
+                .unwrap_or(model.id.as_str())
+                .to_owned();
+
+            return Ok(ResolvedCloudModel {
+                provider_id: provider.id.clone(),
+                provider_name: provider.name.clone(),
+                api_base: provider.api_base.clone(),
+                api_key,
+                remote_model,
+            });
+        }
+    }
+
+    Err(ServerError::BadRequest(format!(
+        "unknown cloud model option '{}'",
+        requested_model
+    )))
+}
+
+fn pending_download_map(tasks: Vec<TaskRecord>) -> HashMap<String, TaskRecord> {
+    let mut pending_by_model: HashMap<String, TaskRecord> = HashMap::new();
+    for task in tasks {
+        if !matches!(task.status.as_str(), "pending" | "running") {
+            continue;
+        }
+        let Some(model_id) = task.model_id.clone() else {
+            continue;
+        };
+        let replace = pending_by_model
+            .get(&model_id)
+            .map(|current| task.updated_at > current.updated_at)
+            .unwrap_or(true);
+        if replace {
+            pending_by_model.insert(model_id, task);
+        }
+    }
+    pending_by_model
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/chat/models",
+    tag = "chat",
+    responses(
+        (status = 200, description = "Selectable chat models (local + cloud providers)", body = [ChatModelOption]),
+        (status = 500, description = "Backend error"),
+    )
+)]
+pub async fn list_chat_models(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<Vec<ChatModelOption>>, ServerError> {
+    let local_models = state.store.list_models().await?;
+    let download_tasks = state.store.list_tasks(Some("model_download")).await?;
+    let pending_by_model = pending_download_map(download_tasks);
+
+    let mut items: Vec<ChatModelOption> = local_models
+        .into_iter()
+        .filter(|m| m.backend_ids.iter().any(|b| b == LLAMA_BACKEND_ID))
+        .map(|m| ChatModelOption {
+            id: m.id.clone(),
+            display_name: m.display_name,
+            source: ChatModelSource::Local,
+            provider_id: None,
+            provider_name: None,
+            backend_id: Some(LLAMA_BACKEND_ID.to_owned()),
+            downloaded: m.local_path.is_some(),
+            pending: pending_by_model.contains_key(&m.id),
+        })
+        .collect();
+
+    let mut cloud_items = Vec::new();
+    for provider in load_cloud_providers_lenient(&state).await {
+        for model in provider.models {
+            cloud_items.push(ChatModelOption {
+                id: cloud_option_id(&provider.id, &model.id),
+                display_name: model
+                    .display_name
+                    .unwrap_or_else(|| model.id.clone()),
+                source: ChatModelSource::Cloud,
+                provider_id: Some(provider.id.clone()),
+                provider_name: Some(provider.name.clone()),
+                backend_id: None,
+                downloaded: true,
+                pending: false,
+            });
+        }
+    }
+    cloud_items.sort_by(|a, b| a.display_name.cmp(&b.display_name));
+    items.extend(cloud_items);
+
+    Ok(Json(items))
+}
+
+enum CloudDelta {
+    Content(String),
+    Reasoning(String),
+}
+
+type CloudTokenStream =
+    std::pin::Pin<Box<dyn futures::Stream<Item = Result<CloudDelta, ServerError>> + Send>>;
+
+fn map_genai_error(action: &str, err: genai::Error) -> ServerError {
+    let detail = err.to_string();
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("400")
+        || lower.contains("bad request")
+        || lower.contains("invalid")
+        || lower.contains("not found")
+    {
+        return ServerError::BadRequest(format!("cloud {action} failed: {detail}"));
+    }
+    ServerError::BackendNotReady(format!("cloud {action} failed: {detail}"))
+}
+
+fn build_genai_client_for_target(target: &ResolvedCloudModel) -> GenaiClient {
+    let endpoint = target.api_base.clone();
+    let api_key = target.api_key.clone();
+    let remote_model = target.remote_model.clone();
+
+    let resolver = ServiceTargetResolver::from_resolver_fn(
+        move |_service_target: GenaiServiceTarget| -> Result<GenaiServiceTarget, genai::resolver::Error> {
+            Ok(GenaiServiceTarget {
+                endpoint: Endpoint::from_owned(endpoint.clone()),
+                auth: AuthData::from_single(api_key.clone()),
+                model: GenaiModelIden::new(AdapterKind::OpenAI, remote_model.clone()),
+            })
+        },
+    );
+
+    GenaiClient::builder()
+        .with_service_target_resolver(resolver)
+        .build()
+}
+
+fn to_genai_chat_message(message: &OpenAiMessage) -> GenaiChatMessage {
+    match message.role.as_str() {
+        "system" => GenaiChatMessage::system(message.content.clone()),
+        "assistant" => GenaiChatMessage::assistant(message.content.clone()),
+        _ => GenaiChatMessage::user(message.content.clone()),
+    }
+}
+
+fn build_genai_chat_request(messages: &[OpenAiMessage]) -> GenaiChatRequest {
+    let mapped: Vec<GenaiChatMessage> = messages.iter().map(to_genai_chat_message).collect();
+    GenaiChatRequest::new(mapped)
+}
+
+fn build_genai_chat_options(max_tokens: u32, temperature: f32) -> GenaiChatOptions {
+    GenaiChatOptions::default()
+        .with_max_tokens(max_tokens)
+        .with_temperature(f64::from(temperature))
+}
+
+async fn cloud_chat_completion(
+    target: &ResolvedCloudModel,
+    messages: &[OpenAiMessage],
+    max_tokens: u32,
+    temperature: f32,
+) -> Result<String, ServerError> {
+    debug!(
+        provider_id = %target.provider_id,
+        provider_name = %target.provider_name,
+        remote_model = %target.remote_model,
+        api_base = %target.api_base,
+        "sending cloud chat completion request via genai"
+    );
+
+    let client = build_genai_client_for_target(target);
+    let request = build_genai_chat_request(messages);
+    let options = build_genai_chat_options(max_tokens, temperature);
+
+    let response = client
+        .exec_chat(&target.remote_model, request, Some(&options))
+        .await
+        .map_err(|e| map_genai_error("chat", e))?;
+
+    response
+        .first_text()
+        .map(str::to_owned)
+        .ok_or_else(|| ServerError::Internal("cloud response has empty assistant content".to_owned()))
+}
+
+async fn cloud_chat_stream(
+    target: &ResolvedCloudModel,
+    messages: &[OpenAiMessage],
+    max_tokens: u32,
+    temperature: f32,
+) -> Result<CloudTokenStream, ServerError> {
+    debug!(
+        provider_id = %target.provider_id,
+        provider_name = %target.provider_name,
+        remote_model = %target.remote_model,
+        api_base = %target.api_base,
+        "opening cloud chat stream via genai"
+    );
+
+    let client = build_genai_client_for_target(target);
+    let request = build_genai_chat_request(messages);
+    let options = build_genai_chat_options(max_tokens, temperature);
+    let response = client
+        .exec_chat_stream(&target.remote_model, request, Some(&options))
+        .await
+        .map_err(|e| map_genai_error("chat_stream", e))?;
+
+    let stream = response.stream.filter_map(|item| {
+        let mapped = match item {
+            Ok(GenaiChatStreamEvent::Chunk(chunk)) => {
+                let token = chunk.content;
+                if token.is_empty() {
+                    None
+                } else {
+                    Some(Ok(CloudDelta::Content(token)))
+                }
+            }
+            Ok(GenaiChatStreamEvent::ReasoningChunk(chunk)) => {
+                let token = chunk.content;
+                if token.is_empty() {
+                    None
+                } else {
+                    Some(Ok(CloudDelta::Reasoning(token)))
+                }
+            }
+            Ok(GenaiChatStreamEvent::ToolCallChunk(_))
+            | Ok(GenaiChatStreamEvent::ThoughtSignatureChunk(_))
+            | Ok(GenaiChatStreamEvent::Start)
+            | Ok(GenaiChatStreamEvent::End(_)) => None,
+            Err(err) => Some(Err(map_genai_error("chat_stream", err))),
+        };
+        futures::future::ready(mapped)
+    });
+
+    Ok(Box::pin(stream))
 }
 
 /// OpenAI chat completions (`POST /v1/chat/completions`).
@@ -112,7 +596,7 @@ pub async fn chat_completions(
         "chat completion request"
     );
 
-    let prompt = build_prompt(&state, req.id.as_deref(), &req.messages).await?;
+    let resolved_messages = build_messages(&state, req.id.as_deref(), &req.messages).await?;
 
     if let Some(sid) = req.id.as_deref() {
         state
@@ -128,65 +612,108 @@ pub async fn chat_completions(
             .unwrap_or_else(|e| tracing::warn!(error = %e, "failed to persist user message"));
     }
 
-    let grpc_req = grpc::pb::ChatRequest {
-        prompt: prompt.clone(),
-        model: req.model.clone(),
-        max_tokens,
-        temperature,
-        session_key: req.id.clone().unwrap_or_default(),
-    };
+    let generated = if is_cloud_model_option_id(&req.model) {
+        let target = resolve_cloud_model(&state, &req.model).await?;
+        if req.stream {
+            let backend_stream =
+                cloud_chat_stream(&target, &resolved_messages, max_tokens, temperature).await?;
 
-    let llama_channel = state.grpc.chat_channel().ok_or_else(|| {
-        ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
-    })?;
+            let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
+            let created_ts = Utc::now().timestamp();
+            let model_name = req.model.clone();
 
-    if req.stream {
-        let usage_guard = state
-            .model_auto_unload
-            .acquire_for_inference("ggml.llama")
-            .await
-            .map_err(|e| ServerError::BackendNotReady(format!("llama backend not ready: {e}")))?;
-        let backend_stream = grpc::client::chat_stream(llama_channel.clone(), grpc_req.clone())
-            .await
-            .map_err(|e| ServerError::Internal(format!("grpc chat stream failed: {e}")))?;
-
-        let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
-        let created_ts = Utc::now().timestamp();
-        let model_name = req.model.clone();
-
-        let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
-            match chunk {
-                Ok(msg) if !msg.error.is_empty() => Ok(Event::default().comment(msg.error)),
-                Ok(msg) if msg.done => Ok(Event::default().comment("done")),
-                Ok(msg) => {
-                    let data = build_chunk(&completion_id, created_ts, &model_name, &msg.token);
-                    Ok(Event::default().data(data))
+            let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
+                match chunk {
+                    Ok(CloudDelta::Content(token)) => Ok(
+                        Event::default()
+                            .data(build_chunk(&completion_id, created_ts, &model_name, &token)),
+                    ),
+                    Ok(CloudDelta::Reasoning(token)) => Ok(
+                        Event::default().data(build_reasoning_chunk(
+                            &completion_id,
+                            created_ts,
+                            &model_name,
+                            &token,
+                        )),
+                    ),
+                    Err(e) => Ok(Event::default().comment(e.to_string())),
                 }
-                Err(e) => Ok(Event::default().comment(e.to_string())),
-            }
-        });
-
-        let sse_stream = token_stream
-            .chain(stream::once(async {
-                Ok::<Event, Infallible>(Event::default().data("[DONE]"))
-            }))
-            .map(move |item| {
-                // Keep the usage guard alive for the whole SSE stream lifetime.
-                let _keep_alive = &usage_guard;
-                item
             });
 
-        return Ok(Sse::new(sse_stream).into_response());
-    }
+            let sse_stream = token_stream.chain(stream::once(async {
+                Ok::<Event, Infallible>(Event::default().data("[DONE]"))
+            }));
 
-    let _usage_guard = state
-        .model_auto_unload
-        .acquire_for_inference("ggml.llama")
-        .await
-        .map_err(|e| ServerError::BackendNotReady(format!("llama backend not ready: {e}")))?;
-    let generated = grpc::client::chat(llama_channel, grpc_req)
-        .await
-        .map_err(|e| ServerError::Internal(format!("grpc chat failed: {e}")))?;
+            return Ok(Sse::new(sse_stream).into_response());
+        }
+
+        cloud_chat_completion(&target, &resolved_messages, max_tokens, temperature).await?
+    } else {
+        let prompt = build_prompt(&resolved_messages);
+        let grpc_req = grpc::pb::ChatRequest {
+            prompt: prompt.clone(),
+            model: req.model.clone(),
+            max_tokens,
+            temperature,
+            session_key: req.id.clone().unwrap_or_default(),
+        };
+
+        let llama_channel = state.grpc.chat_channel().ok_or_else(|| {
+            ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
+        })?;
+
+        if req.stream {
+            let usage_guard = state
+                .model_auto_unload
+                .acquire_for_inference(LLAMA_BACKEND_ID)
+                .await
+                .map_err(|e| {
+                    ServerError::BackendNotReady(format!("llama backend not ready: {e}"))
+                })?;
+
+            let backend_stream = grpc::client::chat_stream(llama_channel.clone(), grpc_req.clone())
+                .await
+                .map_err(|e| ServerError::Internal(format!("grpc chat stream failed: {e}")))?;
+
+            let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
+            let created_ts = Utc::now().timestamp();
+            let model_name = req.model.clone();
+
+            let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
+                match chunk {
+                    Ok(msg) if !msg.error.is_empty() => Ok(Event::default().comment(msg.error)),
+                    Ok(msg) if msg.done => Ok(Event::default().comment("done")),
+                    Ok(msg) => {
+                        let data = build_chunk(&completion_id, created_ts, &model_name, &msg.token);
+                        Ok(Event::default().data(data))
+                    }
+                    Err(e) => Ok(Event::default().comment(e.to_string())),
+                }
+            });
+
+            let sse_stream = token_stream
+                .chain(stream::once(async {
+                    Ok::<Event, Infallible>(Event::default().data("[DONE]"))
+                }))
+                .map(move |item| {
+                    // Keep the usage guard alive for the whole SSE stream lifetime.
+                    let _keep_alive = &usage_guard;
+                    item
+                });
+
+            return Ok(Sse::new(sse_stream).into_response());
+        }
+
+        let _usage_guard = state
+            .model_auto_unload
+            .acquire_for_inference(LLAMA_BACKEND_ID)
+            .await
+            .map_err(|e| ServerError::BackendNotReady(format!("llama backend not ready: {e}")))?;
+
+        grpc::client::chat(llama_channel, grpc_req)
+            .await
+            .map_err(|e| ServerError::Internal(format!("grpc chat failed: {e}")))?
+    };
 
     info!(
         model = %req.model,
@@ -226,19 +753,20 @@ pub async fn chat_completions(
     Ok(Json(resp).into_response())
 }
 
-/// Build the full prompt string from session history and current messages.
-async fn build_prompt(
+/// Merge history from DB and current request messages while avoiding duplicates.
+async fn build_messages(
     state: &AppState,
     session_id: Option<&str>,
     current_messages: &[OpenAiMessage],
-) -> Result<String, ServerError> {
-    let mut parts: Vec<String> = Vec::new();
-    let current: Vec<&OpenAiMessage> = current_messages
+) -> Result<Vec<OpenAiMessage>, ServerError> {
+    let current: Vec<OpenAiMessage> = current_messages
         .iter()
         .filter(|m| !m.content.trim().is_empty())
+        .cloned()
         .collect();
     let client_sent_history = current.len() > 1;
 
+    let mut merged: Vec<OpenAiMessage> = Vec::new();
     // Avoid duplicating turns: if client already sends history, do not merge DB history again.
     if !client_sent_history {
         if let Some(sid) = session_id {
@@ -247,17 +775,25 @@ async fn build_prompt(
                 if msg.content.trim().is_empty() {
                     continue;
                 }
-                parts.push(format!("{}: {}", capitalize_role(&msg.role), msg.content));
+                merged.push(OpenAiMessage {
+                    role: msg.role,
+                    content: msg.content,
+                });
             }
         }
     }
+    merged.extend(current);
+    Ok(merged)
+}
 
-    for msg in current {
-        parts.push(format!("{}: {}", capitalize_role(&msg.role), msg.content));
-    }
+/// Build the local llama prompt from merged message history.
+fn build_prompt(messages: &[OpenAiMessage]) -> String {
+    let mut parts: Vec<String> = messages
+        .iter()
+        .map(|msg| format!("{}: {}", capitalize_role(&msg.role), msg.content))
+        .collect();
     parts.push("Assistant:".into());
-
-    Ok(parts.join("\n"))
+    parts.join("\n")
 }
 
 fn capitalize_role(role: &str) -> &str {
@@ -340,5 +876,13 @@ mod test {
         assert_eq!(choice["index"], 0);
         assert_eq!(choice["delta"]["content"], "Hello");
         assert!(choice["finish_reason"].is_null());
+    }
+
+    #[test]
+    fn cloud_option_id_has_prefix() {
+        assert_eq!(
+            cloud_option_id("openai", "gpt-4.1"),
+            "cloud/openai/gpt-4.1"
+        );
     }
 }

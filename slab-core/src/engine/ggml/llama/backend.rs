@@ -117,8 +117,36 @@ struct LlamaWorker {
     /// - `Some(e)` where `e.inference_engine` is None → lib loaded, no model.
     /// - `Some(e)` where `e.inference_engine` is Some → lib + model loaded.
     engine: Option<Arc<GGMLLlamaEngine>>,
-    /// Maps caller-provided session keys to engine-internal session IDs.
-    sessions: HashMap<String, SessionId>,
+    /// Maps caller-provided session keys to engine-internal session state.
+    sessions: HashMap<String, SessionBinding>,
+}
+
+#[derive(Debug, Clone)]
+struct SessionBinding {
+    sid: SessionId,
+    /// Prefix already committed in KV for this session (prompt + generated text).
+    cached_prompt: String,
+}
+
+#[derive(Debug)]
+struct PreparedSession {
+    key: Option<String>,
+    sid: Option<SessionId>,
+    delta_prompt: String,
+    full_prompt: String,
+}
+
+#[derive(Debug)]
+enum SessionUpdate {
+    Keep {
+        key: String,
+        sid: SessionId,
+        cached_prompt: String,
+    },
+    Drop {
+        key: String,
+        sid: SessionId,
+    },
 }
 
 #[backend_handler]
@@ -209,6 +237,77 @@ impl LlamaWorker {
             let _ = engine.unload();
         }
         self.sessions.clear();
+    }
+
+    async fn prepare_session(
+        &mut self,
+        engine: &GGMLLlamaEngine,
+        session_key: Option<&str>,
+        full_prompt: String,
+    ) -> Result<PreparedSession, String> {
+        let Some(raw_key) = session_key else {
+            return Ok(PreparedSession {
+                key: None,
+                sid: None,
+                delta_prompt: full_prompt.clone(),
+                full_prompt,
+            });
+        };
+
+        let key = raw_key.to_owned();
+        let mut sid: Option<SessionId> = None;
+        let mut delta_prompt = full_prompt.clone();
+        let mut stale_sid: Option<SessionId> = None;
+
+        if let Some(binding) = self.sessions.get(&key) {
+            if let Some(delta) = full_prompt.strip_prefix(&binding.cached_prompt) {
+                if delta.is_empty() {
+                    // No incremental input was added; reset session so regenerate-style
+                    // requests still work instead of stalling on an empty append.
+                    stale_sid = Some(binding.sid);
+                } else {
+                    sid = Some(binding.sid);
+                    delta_prompt = delta.to_owned();
+                }
+            } else {
+                // Caller-supplied history diverged from cached prefix; reset session.
+                stale_sid = Some(binding.sid);
+            }
+        }
+
+        if let Some(old_sid) = stale_sid {
+            self.sessions.remove(&key);
+            let _ = engine.end_session(old_sid).await;
+        }
+
+        if sid.is_none() {
+            sid = Some(engine.create_session().await.map_err(|e| e.to_string())?);
+            delta_prompt = full_prompt.clone();
+        }
+
+        Ok(PreparedSession {
+            key: Some(key),
+            sid,
+            delta_prompt,
+            full_prompt,
+        })
+    }
+
+    fn commit_session_success(
+        &mut self,
+        key: Option<String>,
+        sid: Option<SessionId>,
+        full_prompt: &str,
+        generated: &str,
+    ) {
+        let (Some(key), Some(sid)) = (key, sid) else {
+            return;
+        };
+
+        let mut cached_prompt = String::with_capacity(full_prompt.len() + generated.len());
+        cached_prompt.push_str(full_prompt);
+        cached_prompt.push_str(generated);
+        self.sessions.insert(key, SessionBinding { sid, cached_prompt });
     }
 
     #[on_runtime_control(GlobalUnload)]
@@ -444,19 +543,32 @@ impl LlamaWorker {
             }
         };
         let prompt = Self::apply_chat_template_if_possible(engine.as_ref(), &prompt);
+        let prepared = match self
+            .prepare_session(engine.as_ref(), session_key.as_deref(), prompt)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e));
+                return;
+            }
+        };
 
-        let llama_sid = session_key
-            .as_ref()
-            .and_then(|k| self.sessions.get(k))
-            .copied();
-
-        match engine.inference(&prompt, max_tokens, llama_sid).await {
+        match engine
+            .inference(&prepared.delta_prompt, max_tokens, prepared.sid)
+            .await
+        {
             Ok(text) => {
+                self.commit_session_success(prepared.key, prepared.sid, &prepared.full_prompt, &text);
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(
                     text.as_bytes(),
                 ))));
             }
             Err(e) => {
+                if let (Some(key), Some(sid)) = (prepared.key, prepared.sid) {
+                    self.sessions.remove(&key);
+                    let _ = engine.end_session(sid).await;
+                }
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
             }
         }
@@ -487,51 +599,110 @@ impl LlamaWorker {
             }
         };
         let prompt = Self::apply_chat_template_if_possible(engine.as_ref(), prompt.as_ref());
-
-        let llama_sid = session_key
-            .as_ref()
-            .and_then(|k| self.sessions.get(k))
-            .copied();
+        let prepared = match self
+            .prepare_session(engine.as_ref(), session_key.as_deref(), prompt)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e));
+                return;
+            }
+        };
 
         let (proto_tx, proto_rx) = mpsc::channel::<StreamChunk>(64);
         let _ = reply_tx.send(BackendReply::Stream(proto_rx));
 
-        let (sid_tx, sid_rx) = tokio::sync::oneshot::channel::<(String, SessionId)>();
+        let (update_tx, update_rx) = tokio::sync::oneshot::channel::<Option<SessionUpdate>>();
+        let engine_for_spawn = Arc::clone(&engine);
 
         tokio::spawn(async move {
             use crate::engine::ggml::llama::StreamChunk as LlamaChunk;
+            let PreparedSession {
+                key,
+                sid,
+                delta_prompt,
+                full_prompt,
+            } = prepared;
 
-            match engine
-                .inference_stream(&prompt, max_tokens, llama_sid)
+            match engine_for_spawn
+                .inference_stream(&delta_prompt, max_tokens, sid)
                 .await
             {
                 Ok((mut llama_rx, new_sid)) => {
+                    let mut generated = String::new();
+                    let mut completed = false;
+                    let mut forward_failed = false;
+                    let mut stream_error = false;
                     while let Some(chunk) = llama_rx.recv().await {
                         let mapped = match chunk {
-                            LlamaChunk::Token(t) => StreamChunk::Token(t),
-                            LlamaChunk::Done => StreamChunk::Done,
-                            LlamaChunk::Error(e) => StreamChunk::Error(e),
+                            LlamaChunk::Token(t) => {
+                                generated.push_str(&t);
+                                StreamChunk::Token(t)
+                            }
+                            LlamaChunk::Done => {
+                                completed = true;
+                                StreamChunk::Done
+                            }
+                            LlamaChunk::Error(e) => {
+                                stream_error = true;
+                                StreamChunk::Error(e)
+                            }
                         };
-                        let is_done = matches!(mapped, StreamChunk::Done);
-                        let is_err = matches!(mapped, StreamChunk::Error(_));
-                        if proto_tx.send(mapped).await.is_err() || is_done || is_err {
+
+                        if proto_tx.send(mapped).await.is_err() {
+                            forward_failed = true;
+                            break;
+                        }
+                        if completed || stream_error {
                             break;
                         }
                     }
-                    if let Some(key) = session_key {
-                        let _ = sid_tx.send((key, new_sid));
-                        return;
-                    }
-                    let _ = engine.end_session(new_sid).await;
+                    let update = if let Some(key) = key {
+                        if completed && !forward_failed && !stream_error {
+                            let mut cached_prompt =
+                                String::with_capacity(full_prompt.len() + generated.len());
+                            cached_prompt.push_str(&full_prompt);
+                            cached_prompt.push_str(&generated);
+                            Some(SessionUpdate::Keep {
+                                key,
+                                sid: new_sid,
+                                cached_prompt,
+                            })
+                        } else {
+                            Some(SessionUpdate::Drop { key, sid: new_sid })
+                        }
+                    } else {
+                        let _ = engine_for_spawn.end_session(new_sid).await;
+                        None
+                    };
+                    let _ = update_tx.send(update);
                 }
                 Err(e) => {
                     let _ = proto_tx.send(StreamChunk::Error(e.to_string())).await;
+                    let update = match (key, sid) {
+                        (Some(key), Some(sid)) => Some(SessionUpdate::Drop { key, sid }),
+                        _ => None,
+                    };
+                    let _ = update_tx.send(update);
                 }
             }
         });
 
-        if let Ok((key, new_sid)) = sid_rx.await {
-            self.sessions.insert(key, new_sid);
+        if let Ok(Some(update)) = update_rx.await {
+            match update {
+                SessionUpdate::Keep {
+                    key,
+                    sid,
+                    cached_prompt,
+                } => {
+                    self.sessions.insert(key, SessionBinding { sid, cached_prompt });
+                }
+                SessionUpdate::Drop { key, sid } => {
+                    self.sessions.remove(&key);
+                    let _ = engine.end_session(sid).await;
+                }
+            }
         }
     }
 }
@@ -553,14 +724,20 @@ pub(crate) fn spawn_backend_with_engine(
 
 #[cfg(test)]
 mod tests {
-    use super::LlamaWorker;
+    use super::{LlamaWorker, SessionBinding};
     use crate::runtime::backend::protocol::RuntimeControlSignal;
     use crate::runtime::types::Payload;
 
     #[tokio::test]
     async fn runtime_global_unload_clears_sessions() {
         let mut worker = LlamaWorker::new(None);
-        worker.sessions.insert("s1".to_owned(), 7);
+        worker.sessions.insert(
+            "s1".to_owned(),
+            SessionBinding {
+                sid: 7,
+                cached_prompt: String::new(),
+            },
+        );
         assert_eq!(worker.sessions.len(), 1);
 
         worker
@@ -576,7 +753,13 @@ mod tests {
     #[tokio::test]
     async fn runtime_global_load_clears_sessions_before_load_attempt() {
         let mut worker = LlamaWorker::new(None);
-        worker.sessions.insert("s1".to_owned(), 9);
+        worker.sessions.insert(
+            "s1".to_owned(),
+            SessionBinding {
+                sid: 9,
+                cached_prompt: String::new(),
+            },
+        );
         assert_eq!(worker.sessions.len(), 1);
 
         worker

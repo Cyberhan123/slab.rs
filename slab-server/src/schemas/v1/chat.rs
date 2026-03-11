@@ -24,7 +24,9 @@ pub struct ChatCompletionRequest {
     /// Optional chat session ID for stateful conversations.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub id: Option<String>,
-    /// The model identifier to use (maps to a loaded slab-core backend).
+    /// The model identifier to use. It can be:
+    /// - local model id from `/v1/models`
+    /// - cloud model option id from `GET /v1/chat/models`
     pub model: String,
     /// Conversation history; the last user message is used as the prompt.
     pub messages: Vec<ChatMessage>,
@@ -63,4 +65,36 @@ pub struct ChatCompletionResponse {
     pub model: String,
     /// Generated choices.
     pub choices: Vec<ChatChoice>,
+}
+
+/// Chat model source type.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatModelSource {
+    Local,
+    Cloud,
+}
+
+/// A selectable chat model option from `GET /v1/chat/models`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatModelOption {
+    /// Stable option id used in `POST /v1/chat/completions`.
+    pub id: String,
+    /// User-facing display label.
+    pub display_name: String,
+    /// Whether this option is local or cloud.
+    pub source: ChatModelSource,
+    /// Cloud provider id when `source = cloud`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub provider_id: Option<String>,
+    /// Cloud provider name when `source = cloud`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub provider_name: Option<String>,
+    /// Backend id when `source = local`, e.g. `ggml.llama`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub backend_id: Option<String>,
+    /// Whether model artifacts are already downloaded locally.
+    pub downloaded: bool,
+    /// Whether a model download task is running.
+    pub pending: bool,
 }

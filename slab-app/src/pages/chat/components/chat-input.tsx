@@ -1,9 +1,8 @@
 import { OpenAIOutlined } from '@ant-design/icons';
 import { Sender } from '@ant-design/x';
-import { GetRef } from 'antd';
+import { GetRef, Select } from 'antd';
 import { useRef } from 'react';
 import { CheckCircle2, CloudDownload, Loader2 } from 'lucide-react';
-import { Select, SelectContent, SelectItem, SelectTrigger } from '@/components/ui/select';
 import locale from '../local';
 import { useStyle } from '../hooks/use-style';
 
@@ -44,8 +43,6 @@ export const ChatInput = ({
   const senderRef = useRef<GetRef<typeof Sender>>(null);
   const styles = useStyle();
 
-  const selectedModel = modelOptions.find((option) => option.id === selectedModelId);
-
   const renderModelStatusIcon = (option: ModelOption) => {
     if (option.pending) {
       return <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />;
@@ -55,6 +52,16 @@ export const ChatInput = ({
     }
     return <CloudDownload className="h-3.5 w-3.5 text-muted-foreground" />;
   };
+
+  const selectOptions = modelOptions.map((option) => ({
+    value: option.id,
+    label: (
+      <span className="flex min-w-0 items-center gap-2">
+        {renderModelStatusIcon(option)}
+        <span className="truncate">{option.label}</span>
+      </span>
+    ),
+  }));
 
   return (
     <div className={styles.inputArea}>
@@ -78,37 +85,18 @@ export const ChatInput = ({
               <div className="flex justify-between items-center">
                 <div className="flex gap-2 items-center">
                   <Select
-                    value={selectedModelId}
-                    onValueChange={onModelChange}
+                    value={selectedModelId || undefined}
+                    onChange={onModelChange}
                     disabled={modelDisabled || modelLoading}
-                  >
-                    <SelectTrigger className="h-8 min-w-[220px] rounded-full text-xs">
-                      <span className="flex min-w-0 items-center gap-2">
-                        {selectedModel ? (
-                          renderModelStatusIcon(selectedModel)
-                        ) : (
-                          <CloudDownload className="h-3.5 w-3.5 text-muted-foreground" />
-                        )}
-                        <span className="truncate">
-                          {selectedModel?.label ?? (modelLoading ? 'Loading models...' : 'Select model')}
-                        </span>
-                      </span>
-                    </SelectTrigger>
-                    <SelectContent>
-                      {modelOptions.length === 0 ? (
-                        <div className="px-2 py-1.5 text-sm text-muted-foreground">No chat models</div>
-                      ) : (
-                        modelOptions.map((option) => (
-                          <SelectItem key={option.id} value={option.id}>
-                            <span className="flex min-w-0 items-center gap-2">
-                              {renderModelStatusIcon(option)}
-                              <span className="truncate">{option.label}</span>
-                            </span>
-                          </SelectItem>
-                        ))
-                      )}
-                    </SelectContent>
-                  </Select>
+                    options={selectOptions}
+                    optionLabelProp="label"
+                    placeholder={modelLoading ? 'Loading models...' : 'Select model'}
+                    notFoundContent="No chat models"
+                    size="small"
+                    popupMatchSelectWidth={false}
+                    className="chat-model-select min-w-[220px]"
+                    popupClassName="chat-model-select-dropdown"
+                  />
                   <Sender.Switch
                     value={deepThink}
                     onChange={(checked: boolean) => {
