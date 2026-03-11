@@ -2,7 +2,7 @@ use crate::state::AppState;
 use axum::{
     body::{Body, Bytes},
     extract::{Request, State},
-    http::header,
+    http::{header, HeaderValue},
     middleware::Next,
     response::Response,
 };
@@ -49,8 +49,12 @@ pub async fn trace_middleware(
             buffer_and_log("request", &trace_id.to_string(), &parts.headers, body).await;
         let mut req = Request::from_parts(parts, Body::from(req_bytes));
 
+        // SAFETY: UUID strings consist only of ASCII hex digits and hyphens,
+        // which are always valid HTTP header value bytes.
+        let trace_id_value = HeaderValue::from_str(&trace_id.to_string())
+            .expect("UUID is always a valid HTTP header value");
         req.headers_mut()
-            .insert(X_TRACE_ID, trace_id.to_string().parse().unwrap());
+            .insert(X_TRACE_ID, trace_id_value.clone());
 
         let response = next.run(req).await;
 
@@ -65,7 +69,7 @@ pub async fn trace_middleware(
 
         response
             .headers_mut()
-            .insert(X_TRACE_ID, trace_id.to_string().parse().unwrap());
+            .insert(X_TRACE_ID, trace_id_value);
 
         info!(
             status = response.status().as_u16(),
