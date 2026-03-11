@@ -14,6 +14,7 @@ use utoipa::OpenApi;
 use crate::entities::{ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
+use crate::model_auto_unload::LoadedModelSpec;
 use crate::schemas::v1::models::{
     DownloadModelRequest, ListAvailableQuery, ListModelsQuery, LoadModelRequest,
     ModelCatalogItemResponse, ModelListStatus, ModelStatusResponse, SwitchModelRequest,
@@ -340,7 +341,7 @@ pub async fn load_model(
     );
 
     let grpc_req = grpc::pb::ModelLoadRequest {
-        model_path: req.model_path,
+        model_path: req.model_path.clone(),
         num_workers,
         context_length,
     };
@@ -349,7 +350,14 @@ pub async fn load_model(
         .map_err(|e| map_grpc_model_error("load_model", e))?;
     state
         .model_auto_unload
-        .notify_model_loaded(&canonical_backend)
+        .notify_model_loaded(
+            &canonical_backend,
+            LoadedModelSpec {
+                model_path: req.model_path,
+                num_workers,
+                context_length,
+            },
+        )
         .await;
 
     Ok(Json(ModelStatusResponse {
@@ -475,7 +483,7 @@ pub async fn switch_model(
         channel,
         &canonical_backend,
         grpc::pb::ModelLoadRequest {
-            model_path: req.model_path,
+            model_path: req.model_path.clone(),
             num_workers,
             context_length,
         },
@@ -484,7 +492,14 @@ pub async fn switch_model(
     .map_err(|e| map_grpc_model_error("switch_model", e))?;
     state
         .model_auto_unload
-        .notify_model_loaded(&canonical_backend)
+        .notify_model_loaded(
+            &canonical_backend,
+            LoadedModelSpec {
+                model_path: req.model_path,
+                num_workers,
+                context_length,
+            },
+        )
         .await;
 
     Ok(Json(ModelStatusResponse {

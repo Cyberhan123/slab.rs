@@ -126,7 +126,24 @@ pub async fn generate_images(
     let task_id_for_spawn = task_id.clone();
     let generate_image_channel_for_spawn = generate_image_channel;
     let join = tokio::spawn(async move {
-        let _usage_guard = model_auto_unload.acquire("ggml.diffusion").await;
+        let _usage_guard = match model_auto_unload.acquire_for_inference("ggml.diffusion").await {
+            Ok(guard) => guard,
+            Err(error) => {
+                store
+                    .update_task_status(
+                        &task_id_for_spawn,
+                        "failed",
+                        None,
+                        Some(&format!("diffusion backend not ready: {error}")),
+                    )
+                    .await
+                    .unwrap_or_else(|db_e| {
+                        warn!(task_id = %task_id_for_spawn, error = %db_e, "failed to update auto-reload failure")
+                    });
+                task_manager.remove(&task_id_for_spawn);
+                return;
+            }
+        };
         let rpc_result =
             grpc::client::generate_image(generate_image_channel_for_spawn, request_for_spawn).await;
         if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {
