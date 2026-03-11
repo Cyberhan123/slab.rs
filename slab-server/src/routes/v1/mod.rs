@@ -4,6 +4,7 @@ pub mod ffmpeg;
 pub mod images;
 pub mod models;
 pub mod session;
+pub mod system;
 pub mod tasks;
 
 use crate::state::AppState;
@@ -21,6 +22,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(ffmpeg::router())
         .merge(session::router())
         .merge(models::router())
+        .merge(system::router())
         .merge(tasks::router())
 }
 
@@ -31,6 +33,7 @@ pub fn gateway_router() -> Router<Arc<AppState>> {
         .merge(audio::router())
         .merge(images::router())
         .merge(models::router())
+        .merge(system::router())
         .merge(session::router())
         .merge(tasks::router())
 }
@@ -47,6 +50,7 @@ pub fn api_docs() -> utoipa::openapi::OpenApi {
     spec.merge(images::ImagesApi::openapi());
     spec.merge(models::ModelsApi::openapi());
     spec.merge(session::SessionApi::openapi());
+    spec.merge(system::SystemApi::openapi());
     spec.merge(tasks::TasksApi::openapi());
 
     spec
@@ -58,6 +62,7 @@ pub fn gateway_api_docs() -> utoipa::openapi::OpenApi {
     spec.merge(chat::ChatApi::openapi());
     spec.merge(images::ImagesApi::openapi());
     spec.merge(models::ModelsApi::openapi());
+    spec.merge(system::SystemApi::openapi());
     spec.merge(session::SessionApi::openapi());
     spec.merge(tasks::TasksApi::openapi());
     spec
