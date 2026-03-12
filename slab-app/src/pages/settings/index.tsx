@@ -52,10 +52,12 @@ import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Checkbox } from '@/components/ui/checkbox';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import {
   AlertCircle,
   CheckCircle2,
+  Download,
   Loader2,
   Pencil,
   Plus,
@@ -70,7 +72,11 @@ interface BackendListItem {
 }
 
 type ModelCatalogItem =
-  paths["/admin/models"]["get"]["responses"][200]["content"]["application/json"][number];
+  paths["/v1/models"]["get"]["responses"][200]["content"]["application/json"][number];
+
+type BusyAction = 'download' | null;
+type StatusFilter = 'all' | 'downloaded' | 'pending' | 'not_downloaded';
+type ModelStatus = 'downloaded' | 'pending' | 'not_downloaded';
 
 type ModelDraft = {
   display_name: string;
@@ -100,6 +106,8 @@ const DIFFUSION_FLASH_ATTN_KEY = 'diffusion_flash_attn';
 const DIFFUSION_KEEP_VAE_ON_CPU_KEY = 'diffusion_keep_vae_on_cpu';
 const DIFFUSION_KEEP_CLIP_ON_CPU_KEY = 'diffusion_keep_clip_on_cpu';
 const DIFFUSION_OFFLOAD_PARAMS_KEY = 'diffusion_offload_params_to_cpu';
+const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
+const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
 
 
 function parseConfigBool(value?: string | null) {
@@ -142,18 +150,27 @@ export default function Settings() {
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
   const [modelDraft, setModelDraft] = useState<ModelDraft>(EMPTY_MODEL_DRAFT);
   const [deletingModelId, setDeletingModelId] = useState<string | null>(null);
+  const [searchKeyword, setSearchKeyword] = useState('');
+  const [backendFilter, setBackendFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [selectedModelId, setSelectedModelId] = useState('');
+  const [selectedBackendId, setSelectedBackendId] = useState('');
+  const [busyAction, setBusyAction] = useState<BusyAction>(null);
+  const [busyModelId, setBusyModelId] = useState<string | null>(null);
 
   // API calls using react-query
   const { data: configs, error: configsError, isLoading: configsLoading, refetch: refetchConfigs } = api.useQuery('get', '/admin/config');
   const { data: backends, error: backendsError, isLoading: backendsLoading } = api.useQuery('get', '/admin/backends');
-  const { data: models, error: modelsError, isLoading: modelsLoading, refetch: refetchModels } = api.useQuery('get', '/admin/models');
+  const { data: models, error: modelsError, isLoading: modelsLoading, refetch: refetchModels } = api.useQuery('get', '/v1/models');
 
   // Mutations
   const updateConfigMutation = api.useMutation('put', '/admin/config/{key}');
   const getBackendStatusMutation = api.useMutation('get', '/admin/backends/status');
-  const createModelMutation = api.useMutation('post', '/admin/models');
-  const updateModelMutation = api.useMutation('put', '/admin/models/{id}');
-  const deleteModelMutation = api.useMutation('delete', '/admin/models/{id}');
+  const createModelMutation = api.useMutation('post', '/v1/models');
+  const updateModelMutation = api.useMutation('put', '/v1/models/{id}');
+  const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
+  const downloadModelMutation = api.useMutation('post', '/v1/models/download');
+  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
   const backendList =
     typeof backends === 'object' &&
@@ -178,6 +195,87 @@ export default function Settings() {
   );
 
   const isSavingModel = createModelMutation.isPending || updateModelMutation.isPending;
+  const isBusy = busyAction !== null;
+
+  const pendingTaskIdOf = (model: ModelCatalogItem): string | null => {
+    const pendingTaskId = model.pending_task_id;
+    if (typeof pendingTaskId !== 'string') return null;
+    const trimmed = pendingTaskId.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  const statusOfModel = (model: ModelCatalogItem): ModelStatus => {
+    if (model.local_path) return 'downloaded';
+    if (pendingTaskIdOf(model)) return 'pending';
+    return 'not_downloaded';
+  };
+
+  const selectedModel = useMemo(
+    () => modelList.find((model) => model.id === selectedModelId),
+    [modelList, selectedModelId]
+  );
+
+  const modelBackendOptions = useMemo(() => {
+    const unique = new Set<string>();
+    for (const model of modelList) {
+      for (const backend of model.backend_ids) {
+        unique.add(backend);
+      }
+    }
+    return Array.from(unique).sort();
+  }, [modelList]);
+
+  const filteredModels = useMemo(() => {
+    const keyword = searchKeyword.trim().toLowerCase();
+    return modelList.filter((model) => {
+      if (backendFilter !== 'all' && !model.backend_ids.includes(backendFilter)) {
+        return false;
+      }
+
+      const status = statusOfModel(model);
+      if (statusFilter !== 'all' && status !== statusFilter) {
+        return false;
+      }
+
+      if (!keyword) {
+        return true;
+      }
+
+      const haystack = [
+        model.id,
+        model.display_name,
+        model.repo_id,
+        model.filename,
+        model.local_path ?? '',
+      ]
+        .join(' ')
+        .toLowerCase();
+
+      return haystack.includes(keyword);
+    });
+  }, [backendFilter, modelList, searchKeyword, statusFilter]);
+
+  useEffect(() => {
+    if (modelList.length === 0) {
+      setSelectedModelId('');
+      return;
+    }
+    const exists = modelList.some((model) => model.id === selectedModelId);
+    if (!selectedModelId || !exists) {
+      setSelectedModelId(modelList[0].id);
+    }
+  }, [modelList, selectedModelId]);
+
+  useEffect(() => {
+    if (!selectedModel) {
+      setSelectedBackendId('');
+      return;
+    }
+    const compatible = selectedModel.backend_ids.includes(selectedBackendId);
+    if (!selectedBackendId || !compatible) {
+      setSelectedBackendId(selectedModel.backend_ids[0] ?? '');
+    }
+  }, [selectedModel, selectedBackendId]);
 
   useEffect(() => {
     setAutoUnloadEnabled(parseConfigBool(configValueByKey.get(MODEL_AUTO_UNLOAD_ENABLED_KEY)));
@@ -287,6 +385,139 @@ export default function Settings() {
     } catch (error) {
       toast.error(getErrorMessage(error));
     }
+  };
+
+  const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+  const extractTaskId = (payload: unknown): string | null => {
+    if (typeof payload !== 'object' || payload === null) return null;
+    const taskId = (payload as { task_id?: unknown }).task_id;
+    if (typeof taskId !== 'string') return null;
+    const trimmed = taskId.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  };
+
+  const waitForTaskToFinish = async (taskId: string) => {
+    const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      const task = await getTaskMutation.mutateAsync({
+        params: {
+          path: { id: taskId },
+        },
+      });
+
+      if (task.status === 'succeeded') {
+        return;
+      }
+
+      if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted') {
+        throw new Error(task.error_msg ?? `Task ${taskId} ended with status: ${task.status}`);
+      }
+
+      await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
+    }
+
+    throw new Error('Model download timed out');
+  };
+
+  const refreshCatalogAndFindModel = async (modelId: string) => {
+    const refreshed = await refetchModels();
+    const entries = refreshed.data ?? [];
+    return entries.find((model) => model.id === modelId);
+  };
+
+  const ensureDownloadedModelPath = async (modelId: string, backendId: string): Promise<string> => {
+    let model = modelList.find((item) => item.id === modelId);
+    if (!model) {
+      model = await refreshCatalogAndFindModel(modelId);
+    }
+    if (!model) {
+      throw new Error('Selected model does not exist in catalog');
+    }
+
+    if (model.local_path) {
+      return model.local_path;
+    }
+
+    let taskId = pendingTaskIdOf(model);
+    if (!taskId) {
+      const downloadResponse = await downloadModelMutation.mutateAsync({
+        body: {
+          backend_id: backendId,
+          model_id: modelId,
+        },
+      });
+      taskId = extractTaskId(downloadResponse);
+    }
+
+    if (!taskId) {
+      throw new Error('Failed to start model download task');
+    }
+
+    await waitForTaskToFinish(taskId);
+
+    const refreshedModel = await refreshCatalogAndFindModel(modelId);
+    if (!refreshedModel?.local_path) {
+      throw new Error('Model download completed, but local_path is empty');
+    }
+    return refreshedModel.local_path;
+  };
+
+  const chooseBackendForModel = (model: { backend_ids: string[] }): string => {
+    if (selectedBackendId && model.backend_ids.includes(selectedBackendId)) {
+      return selectedBackendId;
+    }
+    return model.backend_ids[0] ?? '';
+  };
+
+  const runDownloadOnly = async (modelId: string, backendId: string) => {
+    const model = modelList.find((item) => item.id === modelId);
+    if (!model) {
+      toast.error('Model no longer exists');
+      return;
+    }
+    if (!backendId) {
+      toast.error('No available backend for this model');
+      return;
+    }
+    if (!model.backend_ids.includes(backendId)) {
+      toast.error('Selected backend is not supported by this model');
+      return;
+    }
+
+    setBusyAction('download');
+    setBusyModelId(modelId);
+    try {
+      if (model.local_path) {
+        toast.success(`${model.display_name} is already downloaded`);
+        return;
+      }
+
+      await ensureDownloadedModelPath(modelId, backendId);
+      toast.success(`Downloaded ${model.display_name}`);
+      await refetchModels();
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setBusyAction(null);
+      setBusyModelId(null);
+    }
+  };
+
+  const handleRowDownload = async (modelId: string) => {
+    const model = modelList.find((item) => item.id === modelId);
+    if (!model) return;
+
+    const backendId = chooseBackendForModel(model);
+    setSelectedModelId(modelId);
+    setSelectedBackendId(backendId);
+    await runDownloadOnly(modelId, backendId);
+  };
+
+  const statusBadge = (status: ModelStatus) => {
+    if (status === 'downloaded') return <Badge className="bg-green-100 text-green-800 hover:bg-green-100 border border-green-200">Downloaded</Badge>;
+    if (status === 'pending') return <Badge variant="secondary">Downloading</Badge>;
+    return <Badge variant="outline">Not Downloaded</Badge>;
   };
 
   // Function to update config value
@@ -467,9 +698,8 @@ export default function Settings() {
       <div className="container mx-auto space-y-8 px-4 py-8">
       <h1 className="text-3xl font-bold">Settings</h1>
 
-      <Tabs defaultValue="models">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="models">Models</TabsTrigger>
+      <Tabs defaultValue="config">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="config">Configuration</TabsTrigger>
           <TabsTrigger value="diffusion">Diffusion</TabsTrigger>
           <TabsTrigger value="backends">Backends</TabsTrigger>
@@ -481,19 +711,19 @@ export default function Settings() {
               <div>
                 <CardTitle>Model Catalog</CardTitle>
                 <CardDescription>
-                  Add models here to make them available in Hub download/load/switch flows.
+                  Manage model catalog entries and downloads in one place.
                 </CardDescription>
               </div>
               <div className="flex gap-2">
                 <Button
                   variant="outline"
                   onClick={() => refetchModels()}
-                  disabled={modelsLoading}
+                  disabled={modelsLoading || isBusy}
                 >
                   {modelsLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                   Refresh
                 </Button>
-                <Button onClick={openCreateModelDialog}>
+                <Button onClick={openCreateModelDialog} disabled={isBusy}>
                   <Plus className="h-4 w-4 mr-2" />
                   Add Model
                 </Button>
@@ -515,6 +745,41 @@ export default function Settings() {
                 </div>
               </div>
 
+              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <Input
+                  value={searchKeyword}
+                  onChange={(event) => setSearchKeyword(event.target.value)}
+                  placeholder="Search model / repo / file"
+                  disabled={isBusy}
+                />
+
+                <Select value={backendFilter} onValueChange={setBackendFilter} disabled={isBusy}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Filter by backend" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All backends</SelectItem>
+                    {modelBackendOptions.map((backendId) => (
+                      <SelectItem key={backendId} value={backendId}>
+                        {backendId}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)} disabled={isBusy}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All status</SelectItem>
+                    <SelectItem value="downloaded">Downloaded</SelectItem>
+                    <SelectItem value="pending">Downloading</SelectItem>
+                    <SelectItem value="not_downloaded">Not downloaded</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
               {modelsLoading ? (
                 <div className="flex items-center justify-center py-8">
                   <Loader2 className="h-6 w-6 animate-spin" />
@@ -523,110 +788,159 @@ export default function Settings() {
               ) : modelsError ? (
                 <div className="text-red-500">Error loading model catalog</div>
               ) : (
-                <Table>
-                  <TableCaption>Catalog entries available to the Hub page</TableCaption>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>Repository</TableHead>
-                      <TableHead>Filename</TableHead>
-                      <TableHead>Backends</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Last Download</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {modelList.length > 0 ? (
-                      modelList.map((model) => (
-                        <TableRow key={model.id}>
-                          <TableCell className="font-medium">{model.display_name}</TableCell>
-                          <TableCell className="max-w-[240px] break-all">{model.repo_id}</TableCell>
-                          <TableCell className="max-w-[260px] break-all">{model.filename}</TableCell>
-                          <TableCell>
-                            <div className="flex flex-wrap gap-1">
-                              {model.backend_ids.map((backendId) => (
-                                <Badge key={backendId} variant="outline">
-                                  {backendId}
-                                </Badge>
-                              ))}
-                            </div>
-                          </TableCell>
-                          <TableCell>
-                            {model.local_path ? (
-                              <Badge className="bg-green-100 text-green-800 hover:bg-green-100 border border-green-200">
-                                Installed
-                              </Badge>
+                <div className="rounded-md border">
+                  <Table>
+                    <TableCaption>Catalog entries and download status</TableCaption>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="w-[220px]">Model</TableHead>
+                        <TableHead className="w-[320px]">Repo / File</TableHead>
+                        <TableHead className="w-[220px]">Backends</TableHead>
+                        <TableHead className="w-[140px]">Status</TableHead>
+                        <TableHead>Local Path</TableHead>
+                        <TableHead className="w-[180px]">Last Download</TableHead>
+                        <TableHead className="sticky right-0 z-20 w-[320px] border-l bg-background text-right">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredModels.length > 0 ? (
+                        filteredModels.map((model) => {
+                          const rowBackend = chooseBackendForModel(model);
+                          const rowBusy = busyModelId === model.id;
+                          const isSelected = selectedModelId === model.id;
+
+                          return (
+                            <TableRow
+                              key={model.id}
+                              className={isSelected ? 'group bg-muted/40' : 'group'}
+                              onClick={() => {
+                                setSelectedModelId(model.id);
+                                setSelectedBackendId(rowBackend);
+                              }}
+                            >
+                              <TableCell>
+                                <div className="space-y-1">
+                                  <p className="font-medium">{model.display_name}</p>
+                                  <p className="truncate font-mono text-xs text-muted-foreground">{model.id}</p>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="space-y-1 text-xs text-muted-foreground">
+                                  <p className="truncate">{model.repo_id}</p>
+                                  <p className="truncate">{model.filename}</p>
+                                </div>
+                              </TableCell>
+                              <TableCell>
+                                <div className="flex flex-wrap gap-1">
+                                  {model.backend_ids.map((backendId) => (
+                                    <Badge key={backendId} variant={backendId === rowBackend ? 'default' : 'outline'}>
+                                      {backendId}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </TableCell>
+                              <TableCell>{statusBadge(statusOfModel(model))}</TableCell>
+                              <TableCell className="max-w-[320px] truncate text-xs text-muted-foreground">
+                                {model.local_path ?? '-'}
+                              </TableCell>
+                              <TableCell>{formatDate(model.last_downloaded_at)}</TableCell>
+                              <TableCell className={`sticky right-0 z-10 border-l group-hover:bg-muted/50 ${isSelected ? 'bg-muted/40' : 'bg-background'}`}>
+                                <div className="flex items-center justify-end gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleRowDownload(model.id);
+                                    }}
+                                    disabled={isBusy || deletingModelId === model.id}
+                                  >
+                                    {rowBusy && busyAction === 'download' ? (
+                                      <>
+                                        <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                        Downloading...
+                                      </>
+                                    ) : (
+                                      <>
+                                        <Download className="h-3.5 w-3.5 mr-1" />
+                                        Download
+                                      </>
+                                    )}
+                                  </Button>
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      openEditModelDialog(model);
+                                    }}
+                                    disabled={isBusy}
+                                  >
+                                    <Pencil className="h-3.5 w-3.5 mr-1" />
+                                    Edit
+                                  </Button>
+                                  <AlertDialog>
+                                    <AlertDialogTrigger asChild>
+                                      <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        disabled={deletingModelId === model.id || isBusy}
+                                        onClick={(event) => event.stopPropagation()}
+                                      >
+                                        {deletingModelId === model.id ? (
+                                          <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
+                                        ) : (
+                                          <Trash2 className="h-3.5 w-3.5 mr-1" />
+                                        )}
+                                        Delete
+                                      </Button>
+                                    </AlertDialogTrigger>
+                                    <AlertDialogContent size="sm">
+                                      <AlertDialogHeader>
+                                        <AlertDialogTitle>Delete model entry?</AlertDialogTitle>
+                                        <AlertDialogDescription>
+                                          This will remove <strong>{model.display_name}</strong> from the model catalog.
+                                        </AlertDialogDescription>
+                                      </AlertDialogHeader>
+                                      <AlertDialogFooter>
+                                        <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                        <AlertDialogAction
+                                          variant="destructive"
+                                          onClick={() => void deleteModel(model.id)}
+                                        >
+                                          Delete
+                                        </AlertDialogAction>
+                                      </AlertDialogFooter>
+                                    </AlertDialogContent>
+                                  </AlertDialog>
+                                </div>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })
+                      ) : (
+                        <TableRow>
+                          <TableCell colSpan={7} className="py-8 text-center">
+                            {modelList.length === 0 ? (
+                              <div className="space-y-2">
+                                <p className="font-medium">No model entries yet</p>
+                                <p className="text-sm text-muted-foreground">
+                                  Add your first model to make it available for downloads and workflows.
+                                </p>
+                                <Button onClick={openCreateModelDialog} size="sm" disabled={isBusy}>
+                                  <Plus className="h-4 w-4 mr-2" />
+                                  Add First Model
+                                </Button>
+                              </div>
                             ) : (
-                              <Badge variant="outline">Not Downloaded</Badge>
+                              <p className="text-muted-foreground">No models matched the filters</p>
                             )}
                           </TableCell>
-                          <TableCell>{formatDate(model.last_downloaded_at)}</TableCell>
-                          <TableCell>
-                            <div className="flex items-center gap-2">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => openEditModelDialog(model)}
-                              >
-                                <Pencil className="h-3.5 w-3.5 mr-1" />
-                                Edit
-                              </Button>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
-                                  <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    disabled={deletingModelId === model.id}
-                                  >
-                                    {deletingModelId === model.id ? (
-                                      <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
-                                    ) : (
-                                      <Trash2 className="h-3.5 w-3.5 mr-1" />
-                                    )}
-                                    Delete
-                                  </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent size="sm">
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Delete model entry?</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      This will remove <strong>{model.display_name}</strong> from the catalog list used by Hub.
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Cancel</AlertDialogCancel>
-                                    <AlertDialogAction
-                                      variant="destructive"
-                                      onClick={() => void deleteModel(model.id)}
-                                    >
-                                      Delete
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </div>
-                          </TableCell>
                         </TableRow>
-                      ))
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={7} className="py-8 text-center">
-                          <div className="space-y-2">
-                            <p className="font-medium">No model entries yet</p>
-                            <p className="text-sm text-muted-foreground">
-                              Add your first model to make it selectable in Hub.
-                            </p>
-                            <Button onClick={openCreateModelDialog} size="sm">
-                              <Plus className="h-4 w-4 mr-2" />
-                              Add First Model
-                            </Button>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
+                      )}
+                    </TableBody>
+                  </Table>
+                </div>
               )}
             </CardContent>
           </Card>
@@ -1088,8 +1402,8 @@ export default function Settings() {
             <DialogTitle>{editingModelId ? 'Edit Model' : 'Add Model'}</DialogTitle>
             <DialogDescription>
               {editingModelId
-                ? 'Update this catalog entry used by Hub.'
-                : 'Create a catalog entry so users can download and select it from Hub.'}
+                ? 'Update this model catalog entry.'
+                : 'Create a model catalog entry for download and workflow selection.'}
             </DialogDescription>
           </DialogHeader>
           <form

@@ -3,6 +3,24 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
+/// Request body for `POST /v1/models`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct CreateModelRequest {
+    pub display_name: String,
+    pub repo_id: String,
+    pub filename: String,
+    pub backend_ids: Vec<String>,
+}
+
+/// Request body for `PUT /v1/models/{id}`.
+#[derive(Debug, Clone, Deserialize, ToSchema)]
+pub struct UpdateModelRequest {
+    pub display_name: Option<String>,
+    pub repo_id: Option<String>,
+    pub filename: Option<String>,
+    pub backend_ids: Option<Vec<String>>,
+}
+
 /// Request body for `POST /v1/models/load`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct LoadModelRequest {
@@ -35,7 +53,7 @@ pub struct SwitchModelRequest {
 
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct DownloadModelRequest {
-    /// Model catalog entry ID from `/admin/models`.
+    /// Model catalog entry ID from `/v1/models`.
     pub model_id: String,
     /// Backend identifier to use for this download.
     pub backend_id: String,

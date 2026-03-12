@@ -104,38 +104,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/admin/models": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_models"];
-        put?: never;
-        post: operations["create_model"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/models/{id}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put: operations["update_model"];
-        post?: never;
-        delete: operations["delete_model"];
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/health": {
         parameters: {
             query?: never;
@@ -232,7 +200,11 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Image generation (`POST /v1/images/generations`). */
+        /**
+         * Image generation (`POST /v1/images/generations`).
+         * @description Accepts both text-to-image and image-to-image generation requests.
+         *     The `mode` field selects the generation mode (default: `txt2img`).
+         */
         post: operations["generate_images"];
         delete?: never;
         options?: never;
@@ -249,7 +221,7 @@ export interface paths {
         };
         get: operations["list_models"];
         put?: never;
-        post?: never;
+        post: operations["create_model"];
         delete?: never;
         options?: never;
         head?: never;
@@ -336,6 +308,22 @@ export interface paths {
         /** Unload the currently loaded model (`POST /v1/models/unload`). */
         post: operations["unload_model"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_model"];
+        post?: never;
+        delete: operations["delete_model"];
         options?: never;
         head?: never;
         patch?: never;
@@ -485,6 +473,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/video/generations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Video generation (`POST /v1/video/generations`).
+         * @description Generates `video_frames` images via the diffusion backend, then assembles
+         *     them into an MP4 video using FFmpeg.  Returns a `task_id` immediately;
+         *     poll `GET /v1/tasks/{id}` until `status == "succeeded"`, then retrieve
+         *     the output video path from `GET /v1/tasks/{id}/result`.
+         */
+        post: operations["generate_video"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -611,6 +622,7 @@ export interface components {
         ConvertResponse: {
             task_id: string;
         };
+        /** @description Request body for `POST /v1/models`. */
         CreateModelRequest: {
             backend_ids: string[];
             display_name: string;
@@ -629,7 +641,7 @@ export interface components {
         DownloadModelRequest: {
             /** @description Backend identifier to use for this download. */
             backend_id: string;
-            /** @description Model catalog entry ID from `/admin/models`. */
+            /** @description Model catalog entry ID from `/v1/models`. */
             model_id: string;
         };
         /** @description Per-GPU snapshot from `all-smi`. */
@@ -689,6 +701,38 @@ export interface components {
         };
         /** @description Request body for `POST /v1/images/generations`. */
         ImageGenerationRequest: {
+            /**
+             * Format: float
+             * @description Classifier-Free Guidance scale (default `7.0`).
+             */
+            cfg_scale?: number | null;
+            /**
+             * Format: int32
+             * @description CLIP skip layers (default `0` = auto).
+             */
+            clip_skip?: number | null;
+            /**
+             * Format: float
+             * @description DDIM eta (default `0.0`).
+             */
+            eta?: number | null;
+            /**
+             * Format: float
+             * @description Distilled guidance (Flux/SD3 models, default `3.5`).
+             */
+            guidance?: number | null;
+            /**
+             * Format: int32
+             * @description Output image height in pixels (default `512`).
+             */
+            height?: number;
+            /**
+             * @description Init image as a base64-encoded data URI (`data:image/png;base64,...`).
+             *     Required when `mode` is `img2img`.
+             */
+            init_image?: string | null;
+            /** @description Generation mode (default `txt2img`). */
+            mode?: components["schemas"]["ImageMode"];
             /** @description The model identifier to use. */
             model: string;
             /**
@@ -696,11 +740,40 @@ export interface components {
              * @description Number of images to generate (default `1`).
              */
             n?: number;
+            /** @description Negative text prompt (things to avoid in the generated image). */
+            negative_prompt?: string | null;
             /** @description Text description of the desired image. */
             prompt: string;
-            /** @description Desired image size, e.g. `"512x512"`. */
-            size?: string | null;
+            /** @description Sampling method (`"euler"`, `"euler_a"`, `"lcm"`, etc., `"auto"`). */
+            sample_method?: string | null;
+            /** @description Sigma schedule (`"discrete"`, `"karras"`, etc., `"auto"`). */
+            scheduler?: string | null;
+            /**
+             * Format: int64
+             * @description RNG seed (`-1` = random, default `42`).
+             */
+            seed?: number | null;
+            /**
+             * Format: int32
+             * @description Number of denoising steps (default `20`).
+             */
+            steps?: number | null;
+            /**
+             * Format: float
+             * @description Init-image influence strength for img2img (0–1, default `0.75`).
+             */
+            strength?: number | null;
+            /**
+             * Format: int32
+             * @description Output image width in pixels (default `512`).
+             */
+            width?: number;
         };
+        /**
+         * @description Generation mode.
+         * @enum {string}
+         */
+        ImageMode: "txt2_img" | "img2_img";
         /** @description Query parameters for listing files in a HuggingFace repo. */
         ListAvailableQuery: {
             /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
@@ -743,18 +816,6 @@ export interface components {
             pending_task_status?: string | null;
             repo_id: string;
             status: components["schemas"]["ModelListStatus"];
-        };
-        ModelCatalogResponse: {
-            backend_ids: string[];
-            created_at: string;
-            display_name: string;
-            filename: string;
-            id: string;
-            last_download_task_id?: string | null;
-            last_downloaded_at?: string | null;
-            local_path?: string | null;
-            repo_id: string;
-            updated_at: string;
         };
         /** @enum {string} */
         ModelListStatus: "downloaded" | "pending" | "not_downloaded" | "all";
@@ -803,15 +864,25 @@ export interface components {
         /**
          * @description Result payload returned by `GET /v1/tasks/{id}/result`.
          *
-         *     Exactly one field is populated depending on the task type:
-         *     - `image` tasks: `image` contains a `data:image/png;base64,…` data URI.
+         *     Fields are populated depending on the task type:
+         *     - Single-image tasks: `image` contains a `data:image/png;base64,…` data URI.
+         *     - Multi-image diffusion tasks: `images` contains an array of data URIs; `image`
+         *       also holds the first one for backward compatibility.
+         *     - Video tasks: `video_path` holds the path of the assembled MP4 file.
          *     - Text-producing tasks (whisper, etc.): `text` contains the UTF-8 result.
          */
         TaskResultPayload: {
-            /** @description Base64-encoded PNG data URI, present for `image` task results. */
+            /**
+             * @description Base64-encoded PNG data URI, present for single-image and as the first
+             *     image for multi-image task results.
+             */
             image?: string | null;
+            /** @description Array of base64-encoded PNG data URIs for multi-image task results. */
+            images?: string[] | null;
             /** @description Text content, present for `whisper` and other text-producing task results. */
             text?: string | null;
+            /** @description Absolute path to the assembled MP4 video file for video task results. */
+            video_path?: string | null;
         };
         TaskTypeQuery: {
             type?: string | null;
@@ -916,11 +987,72 @@ export interface components {
              */
             threshold?: number | null;
         };
+        /** @description Request body for `PUT /v1/models/{id}`. */
         UpdateModelRequest: {
             backend_ids?: string[] | null;
             display_name?: string | null;
             filename?: string | null;
             repo_id?: string | null;
+        };
+        /** @description Request body for `POST /v1/video/generations`. */
+        VideoGenerationRequest: {
+            /**
+             * Format: float
+             * @description Classifier-Free Guidance scale (default `7.0`).
+             */
+            cfg_scale?: number | null;
+            /**
+             * Format: float
+             * @description Output frames per second (default `8`).
+             */
+            fps?: number;
+            /**
+             * Format: float
+             * @description Distilled guidance (default `3.5`).
+             */
+            guidance?: number | null;
+            /**
+             * Format: int32
+             * @description Frame height in pixels (default `512`).
+             */
+            height?: number;
+            /** @description Init-image for video2video (base64 data URI). */
+            init_image?: string | null;
+            /** @description The model identifier to use. */
+            model: string;
+            /** @description Negative text prompt. */
+            negative_prompt?: string | null;
+            /** @description Text description of the desired video content. */
+            prompt: string;
+            /** @description Sampling method. */
+            sample_method?: string | null;
+            /** @description Sigma schedule. */
+            scheduler?: string | null;
+            /**
+             * Format: int64
+             * @description RNG seed (default `42`).
+             */
+            seed?: number | null;
+            /**
+             * Format: int32
+             * @description Number of denoising steps (default `20`).
+             */
+            steps?: number | null;
+            /**
+             * Format: float
+             * @description Strength for init-image influence (default `0.75`).
+             */
+            strength?: number | null;
+            /**
+             * Format: int32
+             * @description Number of video frames to generate (default `16`).
+             */
+            video_frames?: number;
+            /**
+             * Format: int32
+             * @description Frame width in pixels (default `512`).
+             */
+            width?: number;
         };
     };
     responses: never;
@@ -1174,154 +1306,6 @@ export interface operations {
             };
         };
     };
-    list_models: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List model catalog entries */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelCatalogResponse"][];
-                };
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    create_model: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CreateModelRequest"];
-            };
-        };
-        responses: {
-            /** @description Model catalog entry created */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelCatalogResponse"];
-                };
-            };
-            /** @description Bad request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    update_model: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateModelRequest"];
-            };
-        };
-        responses: {
-            /** @description Model catalog entry updated */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ModelCatalogResponse"];
-                };
-            };
-            /** @description Bad request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Model not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    delete_model: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Model catalog entry deleted */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Model not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     get_health: {
         parameters: {
             query?: never;
@@ -1558,6 +1542,44 @@ export interface operations {
             };
         };
     };
+    create_model: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Model catalog entry created */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogItemResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_available_models: {
         parameters: {
             query: {
@@ -1747,6 +1769,91 @@ export interface operations {
             };
             /** @description Bad request (invalid parameters) */
             400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_model: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Model catalog entry ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateModelRequest"];
+            };
+        };
+        responses: {
+            /** @description Model catalog entry updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelCatalogItemResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Model not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_model: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Model catalog entry ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model catalog entry deleted */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Model not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -2121,6 +2228,44 @@ export interface operations {
             };
             /** @description Task not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    generate_video: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VideoGenerationRequest"];
+            };
+        };
+        responses: {
+            /** @description Task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Bad request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -1,21 +1,56 @@
 import { useEffect, useMemo, useState } from 'react';
-import api from '@/lib/api';
+import api, { getErrorMessage } from '@/lib/api';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
+import { Label } from '@/components/ui/label';
+import { Checkbox } from '@/components/ui/checkbox';
 import { toast } from 'sonner';
-import { Loader2, RefreshCw, Download, Upload, X } from 'lucide-react';
+import { Loader2, Pencil, Plus, Trash2 } from 'lucide-react';
 
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
 const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
 
-type BusyAction = 'prepare' | 'download' | 'unload' | null;
+type BusyAction = 'download' | null;
 type StatusFilter = 'all' | 'downloaded' | 'pending' | 'not_downloaded';
 
 type ModelStatus = 'downloaded' | 'pending' | 'not_downloaded';
+
+type ModelDraft = {
+  display_name: string;
+  repo_id: string;
+  filename: string;
+  backend_ids: string[];
+};
+
+const EMPTY_MODEL_DRAFT: ModelDraft = {
+  display_name: '',
+  repo_id: '',
+  filename: '',
+  backend_ids: [],
+};
 
 export default function Hub() {
   const [selectedModelId, setSelectedModelId] = useState('');
@@ -27,6 +62,10 @@ export default function Hub() {
 
   const [busyAction, setBusyAction] = useState<BusyAction>(null);
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
+  const [isModelDialogOpen, setIsModelDialogOpen] = useState(false);
+  const [editingModelId, setEditingModelId] = useState<string | null>(null);
+  const [modelDraft, setModelDraft] = useState<ModelDraft>(EMPTY_MODEL_DRAFT);
+  const [deletingModelId, setDeletingModelId] = useState<string | null>(null);
 
   const {
     data: catalogModels,
@@ -36,12 +75,15 @@ export default function Hub() {
   } = api.useQuery('get', '/v1/models');
 
   const downloadModelMutation = api.useMutation('post', '/v1/models/download');
-  const loadModelMutation = api.useMutation('post', '/v1/models/load');
-  const unloadModelMutation = api.useMutation('post', '/v1/models/unload');
+  const createModelMutation = api.useMutation('post', '/v1/models');
+  const updateModelMutation = api.useMutation('put', '/v1/models/{id}');
+  const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
   const modelList = catalogModels ?? [];
   const isBusy = busyAction !== null;
+  const isSavingModel = createModelMutation.isPending || updateModelMutation.isPending;
+  const isCatalogMutating = isSavingModel || deletingModelId !== null;
 
   const pendingTaskIdOf = (model: unknown): string | null => {
     if (typeof model !== 'object' || model === null) return null;
@@ -71,6 +113,12 @@ export default function Hub() {
     }
     return Array.from(unique).sort();
   }, [modelList]);
+
+  const availableBackendIds = useMemo(() => {
+    const defaults = ['ggml.llama', 'ggml.whisper', 'ggml.diffusion'];
+    const extras = backendOptions.filter((backendId) => !defaults.includes(backendId));
+    return [...defaults, ...extras];
+  }, [backendOptions]);
 
   useEffect(() => {
     if (modelList.length === 0) {
@@ -123,6 +171,125 @@ export default function Hub() {
       return haystack.includes(keyword);
     });
   }, [backendFilter, modelList, searchKeyword, statusFilter]);
+
+  const resetModelDialog = () => {
+    setIsModelDialogOpen(false);
+    setEditingModelId(null);
+    setModelDraft(EMPTY_MODEL_DRAFT);
+  };
+
+  const openCreateModelDialog = () => {
+    setEditingModelId(null);
+    setModelDraft({
+      ...EMPTY_MODEL_DRAFT,
+      backend_ids: availableBackendIds.length > 0 ? [availableBackendIds[0]] : [],
+    });
+    setIsModelDialogOpen(true);
+  };
+
+  const openEditModelDialog = (model: {
+    id: string;
+    display_name: string;
+    repo_id: string;
+    filename: string;
+    backend_ids: string[];
+  }) => {
+    setEditingModelId(model.id);
+    setModelDraft({
+      display_name: model.display_name,
+      repo_id: model.repo_id,
+      filename: model.filename,
+      backend_ids: model.backend_ids,
+    });
+    setIsModelDialogOpen(true);
+  };
+
+  const setModelField = (field: keyof ModelDraft, value: string) => {
+    setModelDraft((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const toggleBackendId = (backendId: string, checked: boolean) => {
+    setModelDraft((prev) => {
+      if (checked) {
+        if (prev.backend_ids.includes(backendId)) return prev;
+        return { ...prev, backend_ids: [...prev.backend_ids, backendId] };
+      }
+      return {
+        ...prev,
+        backend_ids: prev.backend_ids.filter((id) => id !== backendId),
+      };
+    });
+  };
+
+  const saveModel = async () => {
+    const display_name = modelDraft.display_name.trim();
+    const repo_id = modelDraft.repo_id.trim();
+    const filename = modelDraft.filename.trim();
+    const backend_ids = modelDraft.backend_ids;
+
+    if (!display_name || !repo_id || !filename) {
+      toast.error('Display name, repository ID, and filename are required.');
+      return;
+    }
+    if (backend_ids.length === 0) {
+      toast.error('Select at least one backend.');
+      return;
+    }
+
+    try {
+      if (editingModelId) {
+        await updateModelMutation.mutateAsync({
+          params: {
+            path: { id: editingModelId },
+          },
+          body: {
+            display_name,
+            repo_id,
+            filename,
+            backend_ids,
+          },
+        });
+        toast.success('Model updated');
+      } else {
+        await createModelMutation.mutateAsync({
+          body: {
+            display_name,
+            repo_id,
+            filename,
+            backend_ids,
+          },
+        });
+        toast.success('Model added to catalog');
+      }
+      await refetchCatalogModels();
+      resetModelDialog();
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    }
+  };
+
+  const deleteModel = async (id: string) => {
+    setDeletingModelId(id);
+    try {
+      await deleteModelMutation.mutateAsync({
+        params: {
+          path: { id },
+        },
+      });
+      toast.success('Model removed from catalog');
+      await refetchCatalogModels();
+      if (editingModelId === id) {
+        resetModelDialog();
+      }
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setDeletingModelId(null);
+    }
+  };
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -207,47 +374,6 @@ export default function Hub() {
     return model.backend_ids[0] ?? '';
   };
 
-  const runPrepareAndLoad = async (modelId: string, backendId: string) => {
-    const model = modelList.find((item) => item.id === modelId);
-    if (!model) {
-      toast.error('Model no longer exists');
-      return;
-    }
-    if (!backendId) {
-      toast.error('No available backend for this model');
-      return;
-    }
-    if (!model.backend_ids.includes(backendId)) {
-      toast.error('Selected backend is not supported by this model');
-      return;
-    }
-    setBusyAction('prepare');
-    setBusyModelId(modelId);
-    try {
-      const wasDownloaded = Boolean(model.local_path);
-      const modelPath = await ensureDownloadedModelPath(modelId, backendId);
-      if (!wasDownloaded) {
-        toast.success(`Downloaded ${model.display_name}`);
-      }
-
-      await loadModelMutation.mutateAsync({
-        body: {
-          backend_id: backendId,
-          model_path: modelPath,
-        },
-      });
-
-      toast.success(`${model.display_name} is ready on ${backendId}`);
-      await refetchCatalogModels();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      toast.error(`Failed to prepare model: ${message}`);
-    } finally {
-      setBusyAction(null);
-      setBusyModelId(null);
-    }
-  };
-
   const runDownloadOnly = async (modelId: string, backendId: string) => {
     const model = modelList.find((item) => item.id === modelId);
     if (!model) {
@@ -283,40 +409,6 @@ export default function Hub() {
     }
   };
 
-  const handleTopPrepare = async () => {
-    if (!selectedModel) {
-      toast.error('Please select a model');
-      return;
-    }
-    if (!selectedBackendId) {
-      toast.error('Please select a backend');
-      return;
-    }
-    await runPrepareAndLoad(selectedModel.id, selectedBackendId);
-  };
-
-  const handleTopDownload = async () => {
-    if (!selectedModel) {
-      toast.error('Please select a model');
-      return;
-    }
-    if (!selectedBackendId) {
-      toast.error('Please select a backend');
-      return;
-    }
-    await runDownloadOnly(selectedModel.id, selectedBackendId);
-  };
-
-  const handleRowPrepare = async (modelId: string) => {
-    const model = modelList.find((item) => item.id === modelId);
-    if (!model) return;
-
-    const backendId = chooseBackendForModel(model);
-    setSelectedModelId(modelId);
-    setSelectedBackendId(backendId);
-    await runPrepareAndLoad(modelId, backendId);
-  };
-
   const handleRowDownload = async (modelId: string) => {
     const model = modelList.find((item) => item.id === modelId);
     if (!model) return;
@@ -325,31 +417,6 @@ export default function Hub() {
     setSelectedModelId(modelId);
     setSelectedBackendId(backendId);
     await runDownloadOnly(modelId, backendId);
-  };
-
-  const handleUnloadBackend = async () => {
-    if (!selectedBackendId) {
-      toast.error('Please select a backend first');
-      return;
-    }
-
-    setBusyAction('unload');
-    setBusyModelId(null);
-    try {
-      await unloadModelMutation.mutateAsync({
-        body: {
-          backend_id: selectedBackendId,
-          model_path: '',
-        },
-      });
-      toast.success(`Unloaded backend ${selectedBackendId}`);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unknown error';
-      toast.error(`Failed to unload backend: ${message}`);
-    } finally {
-      setBusyAction(null);
-      setBusyModelId(null);
-    }
   };
 
   const statusBadge = (status: ModelStatus) => {
@@ -361,138 +428,23 @@ export default function Hub() {
   return (
     <div className="container mx-auto max-w-6xl space-y-6 px-4 py-8">
       <Card>
-        <CardHeader>
-          <CardTitle>One-Click Activation</CardTitle>
-          <CardDescription>
-            Pick a model and backend, then click Prepare & Load. Missing files will be downloaded automatically. Worker count is read from global Settings config.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Model</p>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  onClick={() => refetchCatalogModels()}
-                  disabled={catalogModelsLoading || isBusy}
-                >
-                  {catalogModelsLoading ? (
-                    <>
-                      <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                      Refreshing
-                    </>
-                  ) : (
-                    <>
-                      <RefreshCw className="mr-1 h-3 w-3" />
-                      Refresh
-                    </>
-                  )}
-                </Button>
-              </div>
-              <Select
-                value={selectedModelId}
-                onValueChange={setSelectedModelId}
-                disabled={catalogModelsLoading || isBusy || modelList.length === 0}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select model" />
-                </SelectTrigger>
-                <SelectContent>
-                  {modelList.length === 0 ? (
-                    <div className="px-2 py-1.5 text-sm text-muted-foreground">No models in catalog</div>
-                  ) : (
-                    modelList.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
-                        {model.display_name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-2">
-              <p className="text-sm font-medium">Backend</p>
-              <Select
-                value={selectedBackendId}
-                onValueChange={setSelectedBackendId}
-                disabled={isBusy || !selectedModel}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select backend" />
-                </SelectTrigger>
-                <SelectContent>
-                  {selectedModel ? (
-                    selectedModel.backend_ids.map((backendId) => (
-                      <SelectItem key={backendId} value={backendId}>
-                        {backendId}
-                      </SelectItem>
-                    ))
-                  ) : (
-                    <div className="px-2 py-1.5 text-sm text-muted-foreground">Select model first</div>
-                  )}
-                </SelectContent>
-              </Select>
-            </div>
-
+        <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <CardTitle>Model Table</CardTitle>
+            <CardDescription>
+              Manage model catalog entries and downloads in one place.
+            </CardDescription>
           </div>
-
-          <div className="flex flex-wrap gap-3">
-            <Button type="button" onClick={() => void handleTopPrepare()} disabled={isBusy || !selectedModel || !selectedBackendId}>
-              {busyAction === 'prepare' ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Preparing...
-                </>
-              ) : (
-                <>
-                  <Upload className="mr-2 h-4 w-4" />
-                  Prepare & Load
-                </>
-              )}
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => refetchCatalogModels()} disabled={catalogModelsLoading || isBusy || isCatalogMutating}>
+              {catalogModelsLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Refresh
             </Button>
-
-            <Button type="button" variant="outline" onClick={() => void handleTopDownload()} disabled={isBusy || !selectedModel || !selectedBackendId}>
-              {busyAction === 'download' ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Downloading...
-                </>
-              ) : (
-                <>
-                  <Download className="mr-2 h-4 w-4" />
-                  Download Only
-                </>
-              )}
-            </Button>
-
-            <Button type="button" variant="destructive" onClick={() => void handleUnloadBackend()} disabled={isBusy || !selectedBackendId}>
-              {busyAction === 'unload' ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Unloading...
-                </>
-              ) : (
-                <>
-                  <X className="mr-2 h-4 w-4" />
-                  Unload Backend
-                </>
-              )}
+            <Button onClick={openCreateModelDialog} disabled={isBusy || isCatalogMutating}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Model
             </Button>
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Model Table</CardTitle>
-          <CardDescription>
-            Use filters to find models quickly. Row actions are integrated with the same one-click workflow.
-          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
@@ -500,10 +452,10 @@ export default function Hub() {
               value={searchKeyword}
               onChange={(event) => setSearchKeyword(event.target.value)}
               placeholder="Search model / repo / file"
-              disabled={isBusy}
+              disabled={isBusy || isCatalogMutating}
             />
 
-            <Select value={backendFilter} onValueChange={setBackendFilter} disabled={isBusy}>
+            <Select value={backendFilter} onValueChange={setBackendFilter} disabled={isBusy || isCatalogMutating}>
               <SelectTrigger>
                 <SelectValue placeholder="Filter by backend" />
               </SelectTrigger>
@@ -517,7 +469,7 @@ export default function Hub() {
               </SelectContent>
             </Select>
 
-            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)} disabled={isBusy}>
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as StatusFilter)} disabled={isBusy || isCatalogMutating}>
               <SelectTrigger>
                 <SelectValue placeholder="Filter by status" />
               </SelectTrigger>
@@ -539,7 +491,7 @@ export default function Hub() {
                   <TableHead className="w-[220px]">Backends</TableHead>
                   <TableHead className="w-[140px]">Status</TableHead>
                   <TableHead>Local Path</TableHead>
-                  <TableHead className="w-[220px] text-right">Actions</TableHead>
+                  <TableHead className="sticky right-0 z-20 w-[360px] border-l bg-background text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -557,21 +509,36 @@ export default function Hub() {
                   </TableRow>
                 ) : filteredModels.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="text-center text-muted-foreground">
-                      No models matched the filters
+                    <TableCell colSpan={6} className="py-8 text-center">
+                      {modelList.length === 0 ? (
+                        <div className="space-y-2">
+                          <p className="font-medium">No model entries yet</p>
+                          <p className="text-sm text-muted-foreground">
+                            Add your first model to make it available for downloads and workflows.
+                          </p>
+                          <Button onClick={openCreateModelDialog} size="sm" disabled={isBusy || isCatalogMutating}>
+                            <Plus className="mr-2 h-4 w-4" />
+                            Add First Model
+                          </Button>
+                        </div>
+                      ) : (
+                        <p className="text-muted-foreground">No models matched the filters</p>
+                      )}
                     </TableCell>
                   </TableRow>
                 ) : (
                   filteredModels.map((model) => {
                     const isSelected = selectedModelId === model.id;
                     const modelStatus = statusOfModel(model);
+                    const isDownloaded = modelStatus === 'downloaded';
+                    const isPending = modelStatus === 'pending';
                     const rowBackend = chooseBackendForModel(model);
                     const rowBusy = busyModelId === model.id;
 
                     return (
                       <TableRow
                         key={model.id}
-                        className={isSelected ? 'bg-muted/40' : undefined}
+                        className={isSelected ? 'group bg-muted/40' : 'group'}
                         onClick={() => {
                           setSelectedModelId(model.id);
                           setSelectedBackendId(rowBackend);
@@ -607,24 +574,29 @@ export default function Hub() {
                           {model.local_path ?? '-'}
                         </TableCell>
 
-                        <TableCell>
-                          <div className="flex justify-end gap-2">
+                        <TableCell className={`sticky right-0 z-10 border-l group-hover:bg-muted/50 ${isSelected ? 'bg-muted/40' : 'bg-background'}`}>
+                          <div className="flex items-center justify-end gap-2">
                             <Button
                               type="button"
                               size="sm"
+                              variant="outline"
                               onClick={(event) => {
                                 event.stopPropagation();
-                                void handleRowPrepare(model.id);
+                                void handleRowDownload(model.id);
                               }}
-                              disabled={isBusy}
+                              disabled={isBusy || isCatalogMutating || deletingModelId === model.id || isDownloaded || isPending}
                             >
-                              {rowBusy && busyAction === 'prepare' ? (
+                              {rowBusy && busyAction === 'download' ? (
                                 <>
                                   <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                                  Using...
+                                  Downloading...
                                 </>
+                              ) : isPending ? (
+                                'Downloading...'
+                              ) : isDownloaded ? (
+                                'Downloaded'
                               ) : (
-                                'Use'
+                                'Download'
                               )}
                             </Button>
 
@@ -634,19 +606,49 @@ export default function Hub() {
                               variant="outline"
                               onClick={(event) => {
                                 event.stopPropagation();
-                                void handleRowDownload(model.id);
+                                openEditModelDialog(model);
                               }}
-                              disabled={isBusy}
+                              disabled={isBusy || isCatalogMutating}
                             >
-                              {rowBusy && busyAction === 'download' ? (
-                                <>
-                                  <Loader2 className="mr-1 h-3 w-3 animate-spin" />
-                                  Downloading...
-                                </>
-                              ) : (
-                                'Download'
-                              )}
+                              <Pencil className="mr-1 h-3.5 w-3.5" />
+                              Edit
                             </Button>
+
+                            <AlertDialog>
+                              <AlertDialogTrigger asChild>
+                                <Button
+                                  type="button"
+                                  size="sm"
+                                  variant="destructive"
+                                  disabled={deletingModelId === model.id || isBusy || isCatalogMutating}
+                                  onClick={(event) => event.stopPropagation()}
+                                >
+                                  {deletingModelId === model.id ? (
+                                    <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                  ) : (
+                                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  )}
+                                  Delete
+                                </Button>
+                              </AlertDialogTrigger>
+                              <AlertDialogContent size="sm">
+                                <AlertDialogHeader>
+                                  <AlertDialogTitle>Delete model entry?</AlertDialogTitle>
+                                  <AlertDialogDescription>
+                                    This will remove <strong>{model.display_name}</strong> from the model catalog.
+                                  </AlertDialogDescription>
+                                </AlertDialogHeader>
+                                <AlertDialogFooter>
+                                  <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                  <AlertDialogAction
+                                    variant="destructive"
+                                    onClick={() => void deleteModel(model.id)}
+                                  >
+                                    Delete
+                                  </AlertDialogAction>
+                                </AlertDialogFooter>
+                              </AlertDialogContent>
+                            </AlertDialog>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -658,6 +660,87 @@ export default function Hub() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog
+        open={isModelDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            resetModelDialog();
+          } else {
+            setIsModelDialogOpen(true);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle>{editingModelId ? 'Edit Model' : 'Add Model'}</DialogTitle>
+            <DialogDescription>
+              {editingModelId
+                ? 'Update this model catalog entry.'
+                : 'Create a model catalog entry for download and workflow selection.'}
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveModel();
+            }}
+            className="space-y-4"
+          >
+            <div className="grid gap-2">
+              <Label>Display Name</Label>
+              <Input
+                value={modelDraft.display_name}
+                onChange={(event) => setModelField('display_name', event.target.value)}
+                placeholder="Qwen2.5 0.5B Instruct (Q4_K_M)"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Repository ID</Label>
+              <Input
+                value={modelDraft.repo_id}
+                onChange={(event) => setModelField('repo_id', event.target.value)}
+                placeholder="bartowski/Qwen2.5-0.5B-Instruct-GGUF"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Filename</Label>
+              <Input
+                value={modelDraft.filename}
+                onChange={(event) => setModelField('filename', event.target.value)}
+                placeholder="Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+              />
+            </div>
+
+            <div className="grid gap-2">
+              <Label>Compatible Backends</Label>
+              <div className="grid grid-cols-1 gap-2 rounded-md border p-3 sm:grid-cols-2">
+                {availableBackendIds.map((backendId) => (
+                  <label key={backendId} className="flex items-center gap-2 text-sm">
+                    <Checkbox
+                      checked={modelDraft.backend_ids.includes(backendId)}
+                      onCheckedChange={(checked) => toggleBackendId(backendId, Boolean(checked))}
+                    />
+                    <span>{backendId}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={resetModelDialog}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={isSavingModel}>
+                {isSavingModel && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {editingModelId ? 'Save Changes' : 'Add Model'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
