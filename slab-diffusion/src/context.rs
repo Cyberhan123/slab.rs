@@ -105,11 +105,29 @@ impl SdContext {
             custom_sigmas_count: 0,
         };
 
-        let null_image = slab_diffusion_sys::sd_image_t {
-            width: 0,
-            height: 0,
-            channel: 3,
-            data: ptr::null_mut(),
+        // Build the init image struct (img2img / vid_gen).
+        // We store a mutable copy of the data so we can hand a raw pointer to
+        // the C library for the duration of the call without transferring ownership.
+        let mut init_image_data_storage: Vec<u8> = Vec::new();
+        let init_image = if let Some(ref img) = params.init_image {
+            init_image_data_storage = img.data.clone();
+            slab_diffusion_sys::sd_image_t {
+                width: img.width,
+                height: img.height,
+                channel: img.channel,
+                data: if init_image_data_storage.is_empty() {
+                    ptr::null_mut()
+                } else {
+                    init_image_data_storage.as_mut_ptr()
+                },
+            }
+        } else {
+            slab_diffusion_sys::sd_image_t {
+                width: 0,
+                height: 0,
+                channel: 3,
+                data: ptr::null_mut(),
+            }
         };
 
         let mask_image = slab_diffusion_sys::sd_image_t {
@@ -161,7 +179,7 @@ impl SdContext {
             prompt: prompt_ptr,
             negative_prompt: neg_ptr,
             clip_skip: params.clip_skip,
-            init_image: null_image,
+            init_image,
             ref_images: ptr::null_mut(),
             ref_images_count: 0,
             auto_resize_ref_image: true,
