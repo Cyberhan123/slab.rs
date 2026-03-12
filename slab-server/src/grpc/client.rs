@@ -175,11 +175,19 @@ pub async fn chat_stream(
     Ok(response.into_inner())
 }
 
-pub async fn transcribe(channel: Channel, path: String) -> anyhow::Result<String> {
+pub async fn transcribe(channel: Channel, req: pb::TranscribeRequest) -> anyhow::Result<String> {
     let (mut client, request_id) = whisper_client(channel);
-    debug!(request_id = %request_id, audio_path = %path, "sending gRPC transcribe request");
+    let vad_enabled = req.vad.as_ref().is_some_and(|v| v.enabled);
+    let decode_configured = req.decode.is_some();
+    debug!(
+        request_id = %request_id,
+        audio_path = %req.path,
+        vad_enabled,
+        decode_configured,
+        "sending gRPC transcribe request"
+    );
     let response = client
-        .transcribe(pb::TranscribeRequest { path })
+        .transcribe(req)
         .await
         .map_err(|s| {
             log_grpc_error("transcribe", &request_id, &s);

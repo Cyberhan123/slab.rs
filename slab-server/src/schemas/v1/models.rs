@@ -78,6 +78,8 @@ pub struct ModelCatalogItemResponse {
     pub repo_id: String,
     pub filename: String,
     pub backend_ids: Vec<String>,
+    /// Whether this catalog entry is recognized as a Whisper VAD model candidate.
+    pub is_vad_model: bool,
     pub status: ModelListStatus,
     pub local_path: Option<String>,
     pub last_downloaded_at: Option<String>,
