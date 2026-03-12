@@ -24,10 +24,13 @@
 
 use std::sync::Arc;
 
+use serde::Deserialize;
 use tokio::sync::broadcast;
 
 use crate::engine::ggml::config::{LibLoadConfig, ModelLoadConfig};
-use crate::engine::ggml::whisper::adapter::GGMLWhisperEngine;
+use crate::engine::ggml::whisper::adapter::{
+    GGMLWhisperEngine, WhisperDecodeConfig, WhisperVadConfig,
+};
 use crate::runtime::backend::backend_handler;
 use crate::runtime::backend::protocol::{
     BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
@@ -56,6 +59,129 @@ pub(crate) struct WhisperWorker {
     bc_tx: broadcast::Sender<WorkerCommand>,
     /// Stable index used to populate `sender_id` when broadcasting.
     worker_id: usize,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(default)]
+struct WhisperInferenceOptions {
+    vad: Option<WhisperVadInferenceOptions>,
+    decode: Option<WhisperDecodeInferenceOptions>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WhisperVadInferenceOptions {
+    model_path: String,
+    threshold: Option<f32>,
+    min_speech_duration_ms: Option<i32>,
+    min_silence_duration_ms: Option<i32>,
+    max_speech_duration_s: Option<f32>,
+    speech_pad_ms: Option<i32>,
+    samples_overlap: Option<f32>,
+}
+
+impl WhisperVadInferenceOptions {
+    fn into_engine_config(self) -> WhisperVadConfig {
+        WhisperVadConfig {
+            model_path: self.model_path,
+            threshold: self.threshold,
+            min_speech_duration_ms: self.min_speech_duration_ms,
+            min_silence_duration_ms: self.min_silence_duration_ms,
+            max_speech_duration_s: self.max_speech_duration_s,
+            speech_pad_ms: self.speech_pad_ms,
+            samples_overlap: self.samples_overlap,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct WhisperDecodeInferenceOptions {
+    offset_ms: Option<i32>,
+    duration_ms: Option<i32>,
+    no_context: Option<bool>,
+    no_timestamps: Option<bool>,
+    token_timestamps: Option<bool>,
+    split_on_word: Option<bool>,
+    suppress_nst: Option<bool>,
+    word_thold: Option<f32>,
+    max_len: Option<i32>,
+    max_tokens: Option<i32>,
+    temperature: Option<f32>,
+    temperature_inc: Option<f32>,
+    entropy_thold: Option<f32>,
+    logprob_thold: Option<f32>,
+    no_speech_thold: Option<f32>,
+    tdrz_enable: Option<bool>,
+}
+
+impl WhisperDecodeInferenceOptions {
+    fn into_engine_config(self) -> WhisperDecodeConfig {
+        WhisperDecodeConfig {
+            offset_ms: self.offset_ms,
+            duration_ms: self.duration_ms,
+            no_context: self.no_context,
+            no_timestamps: self.no_timestamps,
+            token_timestamps: self.token_timestamps,
+            split_on_word: self.split_on_word,
+            suppress_nst: self.suppress_nst,
+            word_thold: self.word_thold,
+            max_len: self.max_len,
+            max_tokens: self.max_tokens,
+            temperature: self.temperature,
+            temperature_inc: self.temperature_inc,
+            entropy_thold: self.entropy_thold,
+            logprob_thold: self.logprob_thold,
+            no_speech_thold: self.no_speech_thold,
+            tdrz_enable: self.tdrz_enable,
+        }
+    }
+}
+
+fn parse_inference_options(raw: &Payload) -> Result<WhisperInferenceOptions, String> {
+    let value = raw.to_serde_value();
+    if value.is_null() {
+        return Ok(WhisperInferenceOptions::default());
+    }
+    let opts: WhisperInferenceOptions = serde_json::from_value(value)
+        .map_err(|e| format!("invalid whisper inference options: {e}"))?;
+
+    if let Some(vad) = opts.vad.as_ref() {
+        if vad.model_path.trim().is_empty() {
+            return Err("invalid whisper inference options: vad.model_path is empty".into());
+        }
+    }
+
+    if let Some(decode) = opts.decode.as_ref() {
+        for (name, value) in [
+            ("decode.offset_ms", decode.offset_ms),
+            ("decode.duration_ms", decode.duration_ms),
+            ("decode.max_len", decode.max_len),
+            ("decode.max_tokens", decode.max_tokens),
+        ] {
+            if value.is_some_and(|v| v < 0) {
+                return Err(format!("invalid whisper inference options: {name} must be >= 0"));
+            }
+        }
+
+        if let Some(word_thold) = decode.word_thold {
+            if !(0.0..=1.0).contains(&word_thold) {
+                return Err(
+                    "invalid whisper inference options: decode.word_thold must be between 0.0 and 1.0"
+                        .into(),
+                );
+            }
+        }
+
+        for (name, value) in [
+            ("decode.temperature", decode.temperature),
+            ("decode.temperature_inc", decode.temperature_inc),
+        ] {
+            if value.is_some_and(|v| v < 0.0) {
+                return Err(format!("invalid whisper inference options: {name} must be >= 0.0"));
+            }
+        }
+    }
+
+    Ok(opts)
 }
 
 #[backend_handler]
@@ -122,9 +248,25 @@ impl WhisperWorker {
     #[on_event(Inference)]
     async fn on_inference(&mut self, req: BackendRequest) {
         let BackendRequest {
-            input, reply_tx, ..
+            op,
+            input,
+            reply_tx,
+            ..
         } = req;
-        self.handle_inference(input, reply_tx).await;
+        let options = match parse_inference_options(&op.options) {
+            Ok(options) => options,
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e));
+                return;
+            }
+        };
+        self.handle_inference(
+            input,
+            options.vad.map(|v| v.into_engine_config()),
+            options.decode.map(|d| d.into_engine_config()),
+            reply_tx,
+        )
+        .await;
     }
 
     // ── lib.load ──────────────────────────────────────────────────────────────
@@ -303,6 +445,8 @@ impl WhisperWorker {
     async fn handle_inference(
         &mut self,
         input: Payload,
+        vad: Option<WhisperVadConfig>,
+        decode: Option<WhisperDecodeConfig>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -334,13 +478,17 @@ impl WhisperWorker {
 
         // Whisper inference is CPU/GPU-bound; use block_in_place so the engine
         // context stays on this thread without needing an additional spawn_blocking.
+        let vad_enabled = vad.is_some();
+        let decode_configured = decode.is_some();
         let result = tokio::task::block_in_place(|| {
             tracing::debug!(
                 sample_count = samples.len(),
                 duration_sec = samples.len() as f64 / 16000.0,
+                vad_enabled,
+                decode_configured,
                 "starting whisper inference"
             );
-            engine.inference(&samples)
+            engine.inference(&samples, vad.as_ref(), decode.as_ref())
         });
 
         match result {

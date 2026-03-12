@@ -26,7 +26,16 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
             return Err(Status::invalid_argument("audio file path is empty"));
         }
 
-        debug!(audio_path = %req.path, "whisper transcribe request received");
+        let op_options = build_whisper_inference_options(&req)?;
+        let vad_enabled = req.vad.as_ref().is_some_and(|v| v.enabled);
+        let decode_configured = req.decode.is_some();
+
+        debug!(
+            audio_path = %req.path,
+            vad_enabled,
+            decode_configured,
+            "whisper transcribe request received"
+        );
 
         // Capture the current span so it can be entered inside the
         // spawn_blocking closure used by the CpuStage; without this the
@@ -34,6 +43,7 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         let preprocess_span = tracing::Span::current();
         let output = slab_core::api::backend(Backend::GGMLWhisper)
             .inference()
+            .options(slab_core::Payload::Json(op_options))
             .input(slab_core::Payload::Text(req.path.into()))
             .preprocess("ffmpeg.to_pcm_f32le", move |payload| {
                 let _guard = preprocess_span.enter();
@@ -89,6 +99,155 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         let status = reload_library_for_backend(Backend::GGMLWhisper, request.into_inner()).await?;
         Ok(Response::new(status))
     }
+}
+
+fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<serde_json::Value, Status> {
+    let mut options = serde_json::Map::new();
+
+    if let Some(vad) = req.vad.as_ref() {
+        if vad.enabled {
+            let model_path = vad.model_path.trim();
+            if model_path.is_empty() {
+                return Err(Status::invalid_argument(
+                    "vad.model_path is required when VAD is enabled",
+                ));
+            }
+
+            let mut vad_json = serde_json::Map::new();
+            vad_json.insert(
+                "model_path".to_owned(),
+                serde_json::Value::String(model_path.to_owned()),
+            );
+
+            if let Some(params) = vad.params.as_ref() {
+                if let Some(threshold) = params.threshold {
+                    if !(0.0..=1.0).contains(&threshold) {
+                        return Err(Status::invalid_argument(
+                            "vad.threshold must be between 0.0 and 1.0",
+                        ));
+                    }
+                    vad_json.insert("threshold".to_owned(), serde_json::json!(threshold));
+                }
+
+                for (name, value) in [
+                    ("vad.min_speech_duration_ms", params.min_speech_duration_ms),
+                    ("vad.min_silence_duration_ms", params.min_silence_duration_ms),
+                    ("vad.speech_pad_ms", params.speech_pad_ms),
+                ] {
+                    if let Some(v) = value {
+                        if v < 0 {
+                            return Err(Status::invalid_argument(format!("{name} must be >= 0")));
+                        }
+                        vad_json.insert(
+                            name.trim_start_matches("vad.").to_owned(),
+                            serde_json::json!(v),
+                        );
+                    }
+                }
+
+                if let Some(max_speech_duration_s) = params.max_speech_duration_s {
+                    if max_speech_duration_s <= 0.0 {
+                        return Err(Status::invalid_argument(
+                            "vad.max_speech_duration_s must be > 0.0",
+                        ));
+                    }
+                    vad_json.insert(
+                        "max_speech_duration_s".to_owned(),
+                        serde_json::json!(max_speech_duration_s),
+                    );
+                }
+
+                if let Some(samples_overlap) = params.samples_overlap {
+                    if samples_overlap < 0.0 {
+                        return Err(Status::invalid_argument("vad.samples_overlap must be >= 0.0"));
+                    }
+                    vad_json.insert("samples_overlap".to_owned(), serde_json::json!(samples_overlap));
+                }
+            }
+
+            options.insert("vad".to_owned(), serde_json::Value::Object(vad_json));
+        }
+    }
+
+    if let Some(decode) = req.decode.as_ref() {
+        let mut decode_json = serde_json::Map::new();
+
+        for (name, value) in [
+            ("decode.offset_ms", decode.offset_ms),
+            ("decode.duration_ms", decode.duration_ms),
+            ("decode.max_len", decode.max_len),
+            ("decode.max_tokens", decode.max_tokens),
+        ] {
+            if let Some(v) = value {
+                if v < 0 {
+                    return Err(Status::invalid_argument(format!("{name} must be >= 0")));
+                }
+                decode_json.insert(
+                    name.trim_start_matches("decode.").to_owned(),
+                    serde_json::json!(v),
+                );
+            }
+        }
+
+        if let Some(word_thold) = decode.word_thold {
+            if !(0.0..=1.0).contains(&word_thold) {
+                return Err(Status::invalid_argument(
+                    "decode.word_thold must be between 0.0 and 1.0",
+                ));
+            }
+            decode_json.insert("word_thold".to_owned(), serde_json::json!(word_thold));
+        }
+
+        for (name, value) in [
+            ("decode.temperature", decode.temperature),
+            ("decode.temperature_inc", decode.temperature_inc),
+        ] {
+            if let Some(v) = value {
+                if v < 0.0 {
+                    return Err(Status::invalid_argument(format!("{name} must be >= 0.0")));
+                }
+                decode_json.insert(
+                    name.trim_start_matches("decode.").to_owned(),
+                    serde_json::json!(v),
+                );
+            }
+        }
+
+        for (name, value) in [
+            ("decode.no_context", decode.no_context),
+            ("decode.no_timestamps", decode.no_timestamps),
+            ("decode.token_timestamps", decode.token_timestamps),
+            ("decode.split_on_word", decode.split_on_word),
+            ("decode.suppress_nst", decode.suppress_nst),
+            ("decode.tdrz_enable", decode.tdrz_enable),
+        ] {
+            if let Some(v) = value {
+                decode_json.insert(
+                    name.trim_start_matches("decode.").to_owned(),
+                    serde_json::json!(v),
+                );
+            }
+        }
+
+        for (name, value) in [
+            ("decode.entropy_thold", decode.entropy_thold),
+            ("decode.logprob_thold", decode.logprob_thold),
+            ("decode.no_speech_thold", decode.no_speech_thold),
+        ] {
+            if let Some(v) = value {
+                decode_json.insert(
+                    name.trim_start_matches("decode.").to_owned(),
+                    serde_json::json!(v),
+                );
+            }
+        }
+
+        if !decode_json.is_empty() {
+            options.insert("decode".to_owned(), serde_json::Value::Object(decode_json));
+        }
+    }
+
+    Ok(serde_json::Value::Object(options))
 }
 
 fn convert_to_pcm_f32le(payload: slab_core::Payload) -> Result<slab_core::Payload, String> {

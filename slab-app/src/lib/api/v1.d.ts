@@ -191,6 +191,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/chat/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_chat_models"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ffmpeg/convert": {
         parameters: {
             query?: never;
@@ -512,7 +528,11 @@ export interface components {
             max_tokens?: number | null;
             /** @description Conversation history; the last user message is used as the prompt. */
             messages: components["schemas"]["ChatMessage"][];
-            /** @description The model identifier to use (maps to a loaded slab-core backend). */
+            /**
+             * @description The model identifier to use. It can be:
+             *     - local model id from `/v1/models`
+             *     - cloud model option id from `GET /v1/chat/models`
+             */
             model: string;
             /** @description When `true`, the response is streamed token-by-token using SSE. */
             stream?: boolean;
@@ -545,9 +565,35 @@ export interface components {
             /** @description The role of the message author (`"system"`, `"user"`, `"assistant"`). */
             role: string;
         };
+        /** @description A selectable chat model option from `GET /v1/chat/models`. */
+        ChatModelOption: {
+            /** @description Backend id when `source = local`, e.g. `ggml.llama`. */
+            backend_id?: string | null;
+            /** @description User-facing display label. */
+            display_name: string;
+            /** @description Whether model artifacts are already downloaded locally. */
+            downloaded: boolean;
+            /** @description Stable option id used in `POST /v1/chat/completions`. */
+            id: string;
+            /** @description Whether a model download task is running. */
+            pending: boolean;
+            /** @description Cloud provider id when `source = cloud`. */
+            provider_id?: string | null;
+            /** @description Cloud provider name when `source = cloud`. */
+            provider_name?: string | null;
+            /** @description Whether this option is local or cloud. */
+            source: components["schemas"]["ChatModelSource"];
+        };
+        /**
+         * @description Chat model source type.
+         * @enum {string}
+         */
+        ChatModelSource: "local" | "cloud";
         CompletionRequest: {
+            decode?: null | components["schemas"]["TranscribeDecodeRequest"];
             /** @description The audio file path to transcribe. */
             path: string;
+            vad?: null | components["schemas"]["TranscribeVadRequest"];
         };
         ConfigEntry: {
             key: string;
@@ -689,6 +735,8 @@ export interface components {
             display_name: string;
             filename: string;
             id: string;
+            /** @description Whether this catalog entry is recognized as a Whisper VAD model candidate. */
+            is_vad_model: boolean;
             last_downloaded_at?: string | null;
             local_path?: string | null;
             pending_task_id?: string | null;
@@ -767,6 +815,106 @@ export interface components {
         };
         TaskTypeQuery: {
             type?: string | null;
+        };
+        TranscribeDecodeRequest: {
+            /**
+             * Format: int32
+             * @description Duration in milliseconds to process (0 means full input).
+             */
+            duration_ms?: number | null;
+            /**
+             * Format: float
+             * @description Entropy threshold.
+             */
+            entropy_thold?: number | null;
+            /**
+             * Format: float
+             * @description Log probability threshold.
+             */
+            logprob_thold?: number | null;
+            /**
+             * Format: int32
+             * @description Maximum segment length in characters.
+             */
+            max_len?: number | null;
+            /**
+             * Format: int32
+             * @description Maximum tokens per segment.
+             */
+            max_tokens?: number | null;
+            /** @description Do not use past transcription as prompt. */
+            no_context?: boolean | null;
+            /**
+             * Format: float
+             * @description No-speech threshold.
+             */
+            no_speech_thold?: number | null;
+            /** @description Do not generate timestamps. */
+            no_timestamps?: boolean | null;
+            /**
+             * Format: int32
+             * @description Start offset in milliseconds.
+             */
+            offset_ms?: number | null;
+            /** @description Split timestamps on words instead of tokens. */
+            split_on_word?: boolean | null;
+            /** @description Suppress non-speech tokens. */
+            suppress_nst?: boolean | null;
+            /** @description Enable tinydiarize speaker turn detection. */
+            tdrz_enable?: boolean | null;
+            /**
+             * Format: float
+             * @description Initial decoding temperature.
+             */
+            temperature?: number | null;
+            /**
+             * Format: float
+             * @description Temperature increment for fallback decoding.
+             */
+            temperature_inc?: number | null;
+            /** @description Enable token-level timestamps. */
+            token_timestamps?: boolean | null;
+            /**
+             * Format: float
+             * @description Word timestamp probability threshold.
+             */
+            word_thold?: number | null;
+        };
+        TranscribeVadRequest: {
+            /** @description Enable VAD during whisper transcription. */
+            enabled?: boolean;
+            /**
+             * Format: float
+             * @description Maximum speech segment duration in seconds before auto-splitting.
+             */
+            max_speech_duration_s?: number | null;
+            /**
+             * Format: int32
+             * @description Minimum silence duration in milliseconds used to split segments.
+             */
+            min_silence_duration_ms?: number | null;
+            /**
+             * Format: int32
+             * @description Minimum speech segment duration in milliseconds.
+             */
+            min_speech_duration_ms?: number | null;
+            /** @description Absolute path to the VAD model file. */
+            model_path?: string | null;
+            /**
+             * Format: float
+             * @description Overlap in seconds between adjacent VAD segments.
+             */
+            samples_overlap?: number | null;
+            /**
+             * Format: int32
+             * @description Padding in milliseconds added around each detected speech segment.
+             */
+            speech_pad_ms?: number | null;
+            /**
+             * Format: float
+             * @description Probability threshold used to classify speech.
+             */
+            threshold?: number | null;
         };
         UpdateModelRequest: {
             backend_ids?: string[] | null;
@@ -1201,7 +1349,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description Audio file path */
+        /** @description Audio transcription request */
         requestBody: {
             content: {
                 "application/json": components["schemas"]["CompletionRequest"];
@@ -1261,6 +1409,33 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_chat_models: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Selectable chat models (local + cloud providers) */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatModelOption"][];
+                };
             };
             /** @description Backend error */
             500: {

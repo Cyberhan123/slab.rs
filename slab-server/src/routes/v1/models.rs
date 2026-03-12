@@ -51,6 +51,7 @@ const WHISPER_NUM_WORKERS_CONFIG_KEY: &str = "whisper_num_workers";
 const DIFFUSION_NUM_WORKERS_CONFIG_KEY: &str = "diffusion_num_workers";
 const LLAMA_CONTEXT_LENGTH_CONFIG_KEY: &str = "llama_context_length";
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
+const WHISPER_BACKEND_ID: &str = "ggml.whisper";
 
 /// Register model-management routes.
 pub fn router() -> Router<Arc<AppState>> {
@@ -146,6 +147,38 @@ fn parse_positive_u32(raw: &str, key: &str) -> Result<u32, ServerError> {
 
 fn parse_num_workers(raw: &str, key: &str) -> Result<u32, ServerError> {
     parse_positive_u32(raw, key)
+}
+
+fn detect_whisper_vad_model(
+    backend_ids: &[String],
+    display_name: &str,
+    repo_id: &str,
+    filename: &str,
+) -> bool {
+    if !backend_ids.iter().any(|v| v == WHISPER_BACKEND_ID) {
+        return false;
+    }
+
+    let haystack = format!(
+        "{} {} {}",
+        display_name.to_ascii_lowercase(),
+        repo_id.to_ascii_lowercase(),
+        filename.to_ascii_lowercase()
+    );
+
+    [
+        " vad",
+        "vad ",
+        "-vad",
+        "_vad",
+        "vad-",
+        "vad_",
+        "silero",
+        "fsmn-vad",
+    ]
+    .iter()
+    .any(|needle| haystack.contains(needle))
+        || haystack.ends_with("vad")
 }
 
 async fn resolve_model_workers(
@@ -285,12 +318,20 @@ pub async fn list_models(
             continue;
         }
 
+        let is_vad_model = detect_whisper_vad_model(
+            &model.backend_ids,
+            &model.display_name,
+            &model.repo_id,
+            &model.filename,
+        );
+
         items.push(ModelCatalogItemResponse {
             id: model.id,
             display_name: model.display_name,
             repo_id: model.repo_id,
             filename: model.filename,
             backend_ids: model.backend_ids,
+            is_vad_model,
             status: computed_status,
             local_path: model.local_path,
             last_downloaded_at: model.last_downloaded_at.map(|v| v.to_rfc3339()),

@@ -1,5 +1,8 @@
 use crate::engine;
-use slab_whisper::{SamplingStrategy, Whisper, WhisperContext, WhisperContextParameters, WhisperError};
+use slab_whisper::{
+    SamplingStrategy, Whisper, WhisperContext, WhisperContextParameters, WhisperError,
+    WhisperVadParams,
+};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -51,6 +54,46 @@ pub enum GGMLWhisperEngineError {
         #[source]
         source: WhisperError,
     },
+
+    #[error("VAD model path must not be empty")]
+    InvalidVadModelPath,
+
+    #[error("Failed to configure VAD for whisper inference")]
+    ConfigureVad {
+        #[source]
+        source: WhisperError,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct WhisperVadConfig {
+    pub model_path: String,
+    pub threshold: Option<f32>,
+    pub min_speech_duration_ms: Option<i32>,
+    pub min_silence_duration_ms: Option<i32>,
+    pub max_speech_duration_s: Option<f32>,
+    pub speech_pad_ms: Option<i32>,
+    pub samples_overlap: Option<f32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct WhisperDecodeConfig {
+    pub offset_ms: Option<i32>,
+    pub duration_ms: Option<i32>,
+    pub no_context: Option<bool>,
+    pub no_timestamps: Option<bool>,
+    pub token_timestamps: Option<bool>,
+    pub split_on_word: Option<bool>,
+    pub suppress_nst: Option<bool>,
+    pub word_thold: Option<f32>,
+    pub max_len: Option<i32>,
+    pub max_tokens: Option<i32>,
+    pub temperature: Option<f32>,
+    pub temperature_inc: Option<f32>,
+    pub entropy_thold: Option<f32>,
+    pub logprob_thold: Option<f32>,
+    pub no_speech_thold: Option<f32>,
+    pub tdrz_enable: Option<bool>,
 }
 
 /// Engine wrapping a Whisper shared library handle.
@@ -148,16 +191,106 @@ impl GGMLWhisperEngine {
     /// Returns `GGMLWhisperEngineError::ContextNotInitialized` if no model is loaded.
     /// Returns `GGMLWhisperEngineError::CreateInferenceState` if state creation fails.
     /// Returns `GGMLWhisperEngineError::InferenceFailed` if transcription fails.
-    pub fn inference(&self, audio_data: &[f32]) -> Result<Vec<SubtitleEntry>, engine::EngineError> {
+    pub fn inference(
+        &self,
+        audio_data: &[f32],
+        vad: Option<&WhisperVadConfig>,
+        decode: Option<&WhisperDecodeConfig>,
+    ) -> Result<Vec<SubtitleEntry>, engine::EngineError> {
         let ctx = self
             .ctx
             .as_ref()
             .ok_or(GGMLWhisperEngineError::ContextNotInitialized)?;
 
-        let params = self.instance.new_full_params(SamplingStrategy::BeamSearch {
+        let mut params = self.instance.new_full_params(SamplingStrategy::BeamSearch {
             beam_size: 5,
             patience: -1.0,
         });
+
+        if let Some(vad) = vad {
+            let model_path = vad.model_path.trim();
+            if model_path.is_empty() {
+                return Err(GGMLWhisperEngineError::InvalidVadModelPath.into());
+            }
+
+            params.set_vad_model_path(Some(model_path));
+
+            let mut vad_params = WhisperVadParams::new();
+            if let Some(threshold) = vad.threshold {
+                vad_params.set_threshold(threshold);
+            }
+            if let Some(min_speech_duration_ms) = vad.min_speech_duration_ms {
+                vad_params.set_min_speech_duration(min_speech_duration_ms);
+            }
+            if let Some(min_silence_duration_ms) = vad.min_silence_duration_ms {
+                vad_params.set_min_silence_duration(min_silence_duration_ms);
+            }
+            if let Some(max_speech_duration_s) = vad.max_speech_duration_s {
+                vad_params.set_max_speech_duration(max_speech_duration_s);
+            }
+            if let Some(speech_pad_ms) = vad.speech_pad_ms {
+                vad_params.set_speech_pad(speech_pad_ms);
+            }
+            if let Some(samples_overlap) = vad.samples_overlap {
+                vad_params.set_samples_overlap(samples_overlap);
+            }
+
+            params.set_vad_params(vad_params);
+            params
+                .try_enable_vad(true)
+                .map_err(|source| GGMLWhisperEngineError::ConfigureVad { source })?;
+        }
+
+        if let Some(decode) = decode {
+            if let Some(offset_ms) = decode.offset_ms {
+                params.set_offset_ms(offset_ms);
+            }
+            if let Some(duration_ms) = decode.duration_ms {
+                params.set_duration_ms(duration_ms);
+            }
+            if let Some(no_context) = decode.no_context {
+                params.set_no_context(no_context);
+            }
+            if let Some(no_timestamps) = decode.no_timestamps {
+                params.set_no_timestamps(no_timestamps);
+            }
+            if let Some(token_timestamps) = decode.token_timestamps {
+                params.set_token_timestamps(token_timestamps);
+            }
+            if let Some(split_on_word) = decode.split_on_word {
+                params.set_split_on_word(split_on_word);
+            }
+            if let Some(suppress_nst) = decode.suppress_nst {
+                params.set_suppress_nst(suppress_nst);
+            }
+            if let Some(word_thold) = decode.word_thold {
+                params.set_thold_pt(word_thold);
+            }
+            if let Some(max_len) = decode.max_len {
+                params.set_max_len(max_len);
+            }
+            if let Some(max_tokens) = decode.max_tokens {
+                params.set_max_tokens(max_tokens);
+            }
+            if let Some(temperature) = decode.temperature {
+                params.set_temperature(temperature);
+            }
+            if let Some(temperature_inc) = decode.temperature_inc {
+                params.set_temperature_inc(temperature_inc);
+            }
+            if let Some(entropy_thold) = decode.entropy_thold {
+                params.set_entropy_thold(entropy_thold);
+            }
+            if let Some(logprob_thold) = decode.logprob_thold {
+                params.set_logprob_thold(logprob_thold);
+            }
+            if let Some(no_speech_thold) = decode.no_speech_thold {
+                params.set_no_speech_thold(no_speech_thold);
+            }
+            if let Some(tdrz_enable) = decode.tdrz_enable {
+                params.set_tdrz_enable(tdrz_enable);
+            }
+        }
 
         let mut state =
             ctx.create_state()
