@@ -6,6 +6,19 @@ message ModelLoadRequest {
   string model_path = 1;
   uint32 num_workers = 2;
   uint32 context_length = 3;
+
+  // Diffusion-specific context params (ignored by non-diffusion backends).
+  string diffusion_model_path = 10;
+  string vae_path = 11;
+  string taesd_path = 12;
+  string lora_model_dir = 13;
+  string clip_l_path = 14;
+  string clip_g_path = 15;
+  string t5xxl_path = 16;
+  bool flash_attn = 17;
+  bool keep_vae_on_cpu = 18;
+  bool keep_clip_on_cpu = 19;
+  bool offload_params_to_cpu = 20;
 }
 
 message ModelUnloadRequest {}
