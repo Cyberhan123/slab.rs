@@ -46,6 +46,8 @@ import {
   Label,
 } from '@/components/ui/label';
 import { Input } from '@/components/ui/input';
+import { Separator } from '@/components/ui/separator';
+import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -88,6 +90,18 @@ const MODEL_AUTO_UNLOAD_ENABLED_KEY = 'model_auto_unload_enabled';
 const MODEL_AUTO_UNLOAD_IDLE_MINUTES_KEY = 'model_auto_unload_idle_minutes';
 const CHAT_MODEL_PROVIDERS_KEY = 'chat_model_providers';
 
+const DIFFUSION_VAE_PATH_KEY = 'diffusion_vae_path';
+const DIFFUSION_TAESD_PATH_KEY = 'diffusion_taesd_path';
+const DIFFUSION_LORA_MODEL_DIR_KEY = 'diffusion_lora_model_dir';
+const DIFFUSION_CLIP_L_PATH_KEY = 'diffusion_clip_l_path';
+const DIFFUSION_CLIP_G_PATH_KEY = 'diffusion_clip_g_path';
+const DIFFUSION_T5XXL_PATH_KEY = 'diffusion_t5xxl_path';
+const DIFFUSION_FLASH_ATTN_KEY = 'diffusion_flash_attn';
+const DIFFUSION_KEEP_VAE_ON_CPU_KEY = 'diffusion_keep_vae_on_cpu';
+const DIFFUSION_KEEP_CLIP_ON_CPU_KEY = 'diffusion_keep_clip_on_cpu';
+const DIFFUSION_OFFLOAD_PARAMS_KEY = 'diffusion_offload_params_to_cpu';
+
+
 function parseConfigBool(value?: string | null) {
   if (!value) return false;
   return ['1', 'true', 'yes', 'on'].includes(value.trim().toLowerCase());
@@ -110,6 +124,19 @@ export default function Settings() {
   const [isSavingAutoUnload, setIsSavingAutoUnload] = useState(false);
   const [chatProvidersRaw, setChatProvidersRaw] = useState('[]');
   const [isSavingChatProviders, setIsSavingChatProviders] = useState(false);
+
+  // Diffusion global settings
+  const [diffusionVaePath, setDiffusionVaePath] = useState('');
+  const [diffusionTaesdPath, setDiffusionTaesdPath] = useState('');
+  const [diffusionLoraModelDir, setDiffusionLoraModelDir] = useState('');
+  const [diffusionClipLPath, setDiffusionClipLPath] = useState('');
+  const [diffusionClipGPath, setDiffusionClipGPath] = useState('');
+  const [diffusionT5xxlPath, setDiffusionT5xxlPath] = useState('');
+  const [diffusionFlashAttn, setDiffusionFlashAttn] = useState(false);
+  const [diffusionKeepVaeOnCpu, setDiffusionKeepVaeOnCpu] = useState(false);
+  const [diffusionKeepClipOnCpu, setDiffusionKeepClipOnCpu] = useState(false);
+  const [diffusionOffloadParams, setDiffusionOffloadParams] = useState(false);
+  const [isSavingDiffusion, setIsSavingDiffusion] = useState(false);
 
   const [isModelDialogOpen, setIsModelDialogOpen] = useState(false);
   const [editingModelId, setEditingModelId] = useState<string | null>(null);
@@ -156,6 +183,17 @@ export default function Settings() {
     setAutoUnloadEnabled(parseConfigBool(configValueByKey.get(MODEL_AUTO_UNLOAD_ENABLED_KEY)));
     setAutoUnloadMinutes(configValueByKey.get(MODEL_AUTO_UNLOAD_IDLE_MINUTES_KEY)?.trim() || '10');
     setChatProvidersRaw(configValueByKey.get(CHAT_MODEL_PROVIDERS_KEY)?.trim() || '[]');
+    setDiffusionVaePath(configValueByKey.get(DIFFUSION_VAE_PATH_KEY) ?? '');
+    setDiffusionTaesdPath(configValueByKey.get(DIFFUSION_TAESD_PATH_KEY) ?? '');
+    setDiffusionLoraModelDir(configValueByKey.get(DIFFUSION_LORA_MODEL_DIR_KEY) ?? '');
+    setDiffusionClipLPath(configValueByKey.get(DIFFUSION_CLIP_L_PATH_KEY) ?? '');
+    setDiffusionClipGPath(configValueByKey.get(DIFFUSION_CLIP_G_PATH_KEY) ?? '');
+    setDiffusionT5xxlPath(configValueByKey.get(DIFFUSION_T5XXL_PATH_KEY) ?? '');
+    setDiffusionFlashAttn(parseConfigBool(configValueByKey.get(DIFFUSION_FLASH_ATTN_KEY)));
+    setDiffusionKeepVaeOnCpu(parseConfigBool(configValueByKey.get(DIFFUSION_KEEP_VAE_ON_CPU_KEY)));
+    setDiffusionKeepClipOnCpu(parseConfigBool(configValueByKey.get(DIFFUSION_KEEP_CLIP_ON_CPU_KEY)));
+    setDiffusionOffloadParams(parseConfigBool(configValueByKey.get(DIFFUSION_OFFLOAD_PARAMS_KEY)));
+
   }, [configValueByKey]);
 
   const resetModelDialog = () => {
@@ -394,15 +432,46 @@ export default function Settings() {
     }
   };
 
+  const saveDiffusionSettings = async () => {
+    setIsSavingDiffusion(true);
+    const entries: Array<[string, string]> = [
+      [DIFFUSION_VAE_PATH_KEY, diffusionVaePath],
+      [DIFFUSION_TAESD_PATH_KEY, diffusionTaesdPath],
+      [DIFFUSION_LORA_MODEL_DIR_KEY, diffusionLoraModelDir],
+      [DIFFUSION_CLIP_L_PATH_KEY, diffusionClipLPath],
+      [DIFFUSION_CLIP_G_PATH_KEY, diffusionClipGPath],
+      [DIFFUSION_T5XXL_PATH_KEY, diffusionT5xxlPath],
+      [DIFFUSION_FLASH_ATTN_KEY, diffusionFlashAttn ? '1' : '0'],
+      [DIFFUSION_KEEP_VAE_ON_CPU_KEY, diffusionKeepVaeOnCpu ? '1' : '0'],
+      [DIFFUSION_KEEP_CLIP_ON_CPU_KEY, diffusionKeepClipOnCpu ? '1' : '0'],
+      [DIFFUSION_OFFLOAD_PARAMS_KEY, diffusionOffloadParams ? '1' : '0'],
+    ];
+    try {
+      await Promise.all(entries.map(([key, value]) =>
+        updateConfigMutation.mutateAsync({
+          params: { path: { key } },
+          body: { name: key, value },
+        })
+      ));
+      toast.success('Diffusion settings saved');
+      await refetchConfigs();
+    } catch (error) {
+      toast.error(getErrorMessage(error));
+    } finally {
+      setIsSavingDiffusion(false);
+    }
+  };
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="container mx-auto space-y-8 px-4 py-8">
       <h1 className="text-3xl font-bold">Settings</h1>
 
       <Tabs defaultValue="models">
-        <TabsList className="grid w-full grid-cols-3">
+        <TabsList className="grid w-full grid-cols-4">
           <TabsTrigger value="models">Models</TabsTrigger>
           <TabsTrigger value="config">Configuration</TabsTrigger>
+          <TabsTrigger value="diffusion">Diffusion</TabsTrigger>
           <TabsTrigger value="backends">Backends</TabsTrigger>
         </TabsList>
 
@@ -764,6 +833,133 @@ export default function Settings() {
                   </CardContent>
                 </Card>
               )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="diffusion" className="mt-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Diffusion Settings</CardTitle>
+              <CardDescription>
+                Global parameters applied when loading a diffusion model.
+                Changes take effect on the next model load.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-6">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label htmlFor="vae-path">VAE Path</Label>
+                  <Input
+                    id="vae-path"
+                    placeholder="/models/vae.safetensors"
+                    value={diffusionVaePath}
+                    onChange={(e) => setDiffusionVaePath(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Optional external VAE model path.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="taesd-path">TAESD Path</Label>
+                  <Input
+                    id="taesd-path"
+                    placeholder="/models/taesd.safetensors"
+                    value={diffusionTaesdPath}
+                    onChange={(e) => setDiffusionTaesdPath(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Tiny AutoEncoder for fast decoding.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="lora-dir">LoRA Model Directory</Label>
+                  <Input
+                    id="lora-dir"
+                    placeholder="/models/loras"
+                    value={diffusionLoraModelDir}
+                    onChange={(e) => setDiffusionLoraModelDir(e.target.value)}
+                  />
+                  <p className="text-xs text-muted-foreground">Directory containing LoRA .safetensors files.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="clip-l">CLIP-L Path</Label>
+                  <Input
+                    id="clip-l"
+                    placeholder="/models/clip_l.safetensors"
+                    value={diffusionClipLPath}
+                    onChange={(e) => setDiffusionClipLPath(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="clip-g">CLIP-G Path</Label>
+                  <Input
+                    id="clip-g"
+                    placeholder="/models/clip_g.safetensors"
+                    value={diffusionClipGPath}
+                    onChange={(e) => setDiffusionClipGPath(e.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="t5xxl">T5XXL Path</Label>
+                  <Input
+                    id="t5xxl"
+                    placeholder="/models/t5xxl_fp16.safetensors"
+                    value={diffusionT5xxlPath}
+                    onChange={(e) => setDiffusionT5xxlPath(e.target.value)}
+                  />
+                </div>
+              </div>
+              <Separator />
+              <div className="space-y-4">
+                <h4 className="font-medium text-sm">Performance Options</h4>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <Label htmlFor="flash-attn">Flash Attention</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Faster attention computation (requires compatible GPU).</p>
+                    </div>
+                    <Switch
+                      id="flash-attn"
+                      checked={diffusionFlashAttn}
+                      onCheckedChange={setDiffusionFlashAttn}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <Label htmlFor="keep-vae-cpu">Keep VAE on CPU</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Reduce VRAM usage by keeping VAE on CPU.</p>
+                    </div>
+                    <Switch
+                      id="keep-vae-cpu"
+                      checked={diffusionKeepVaeOnCpu}
+                      onCheckedChange={setDiffusionKeepVaeOnCpu}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <Label htmlFor="keep-clip-cpu">Keep CLIP on CPU</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Reduce VRAM usage by keeping CLIP on CPU.</p>
+                    </div>
+                    <Switch
+                      id="keep-clip-cpu"
+                      checked={diffusionKeepClipOnCpu}
+                      onCheckedChange={setDiffusionKeepClipOnCpu}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border p-3">
+                    <div>
+                      <Label htmlFor="offload-params">Offload Params to CPU</Label>
+                      <p className="text-xs text-muted-foreground mt-0.5">Reduce VRAM by offloading model params to RAM.</p>
+                    </div>
+                    <Switch
+                      id="offload-params"
+                      checked={diffusionOffloadParams}
+                      onCheckedChange={setDiffusionOffloadParams}
+                    />
+                  </div>
+                </div>
+              </div>
+              <Button onClick={() => void saveDiffusionSettings()} disabled={isSavingDiffusion}>
+                {isSavingDiffusion && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                Save Diffusion Settings
+              </Button>
             </CardContent>
           </Card>
         </TabsContent>

@@ -38,8 +38,8 @@ pub fn router() -> Router<Arc<AppState>> {
 /// Decode a base64 data URI to raw RGB pixel bytes.
 ///
 /// Strips the `data:<mime>;base64,` prefix, base64-decodes the payload,
-/// then uses the `image` crate to decode the image format to raw RGBA
-/// bytes, and converts to RGB.
+/// then uses the `image` crate to decode the image format directly to RGB8
+/// (24-bit RGB) pixel data.
 ///
 /// Returns `(raw_rgb_bytes, width, height, channels)`.
 fn decode_init_image(data_uri: &str) -> Result<(Vec<u8>, u32, u32, u32), ServerError> {
