@@ -6,6 +6,7 @@ pub mod models;
 pub mod session;
 pub mod system;
 pub mod tasks;
+pub mod video;
 
 use crate::state::AppState;
 use utoipa::OpenApi;
@@ -23,6 +24,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .merge(chat::router())
         .merge(audio::router())
         .merge(images::router())
+        .merge(video::router())
         .merge(ffmpeg::router())
         .merge(session::router())
         .merge(models::router())
@@ -36,6 +38,7 @@ pub fn api_docs() -> utoipa::openapi::OpenApi {
     spec.merge(chat::ChatApi::openapi());
     spec.merge(ffmpeg::FfmpegApi::openapi());
     spec.merge(images::ImagesApi::openapi());
+    spec.merge(video::VideoApi::openapi());
     spec.merge(models::ModelsApi::openapi());
     spec.merge(session::SessionApi::openapi());
     spec.merge(system::SystemApi::openapi());

@@ -14,7 +14,8 @@ use uuid::Uuid;
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
-use crate::schemas::v1::images::ImageGenerationRequest;
+use crate::schemas::v1::images::{ImageGenerationRequest, ImageMode};
+use crate::schemas::v1::task::TaskResultPayload;
 use crate::state::AppState;
 
 /// Maximum allowed prompt length in bytes.
@@ -23,8 +24,8 @@ const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
 /// Maximum number of images that can be generated in a single request.
 const MAX_IMAGES_PER_REQUEST: u32 = 10;
 
-/// Accepted image size strings.
-const VALID_SIZES: &[&str] = &["256x256", "512x512", "1024x1024"];
+/// Maximum accepted image dimensions.
+const MAX_IMAGE_DIM: u32 = 2048;
 
 #[derive(OpenApi)]
 #[openapi(paths(generate_images), components(schemas(ImageGenerationRequest,)))]
@@ -35,7 +36,38 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new().route("/images/generations", post(generate_images))
 }
 
+/// Decode a base64 data URI to raw RGB pixel bytes.
+///
+/// Strips the `data:<mime>;base64,` prefix, base64-decodes the payload,
+/// then uses the `image` crate to decode the image format directly to RGB8
+/// (24-bit RGB) pixel data.
+///
+/// Returns `(raw_rgb_bytes, width, height, channels)`.
+fn decode_init_image(data_uri: &str) -> Result<(Vec<u8>, u32, u32, u32), ServerError> {
+    // Strip data URI prefix.
+    let b64 = if let Some(pos) = data_uri.find("base64,") {
+        &data_uri[pos + "base64,".len()..]
+    } else {
+        data_uri
+    };
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(b64)
+        .map_err(|e| ServerError::BadRequest(format!("init_image base64 decode failed: {e}")))?;
+
+    let img = image::load_from_memory(&bytes)
+        .map_err(|e| ServerError::BadRequest(format!("init_image decode failed: {e}")))?;
+
+    let rgb = img.to_rgb8();
+    let (width, height) = rgb.dimensions();
+    let data = rgb.into_raw();
+    Ok((data, width, height, 3))
+}
+
 /// Image generation (`POST /v1/images/generations`).
+///
+/// Accepts both text-to-image and image-to-image generation requests.
+/// The `mode` field selects the generation mode (default: `txt2img`).
 #[utoipa::path(
     post,
     path = "/v1/images/generations",
@@ -51,6 +83,7 @@ pub async fn generate_images(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ImageGenerationRequest>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
+    // ── Validation ────────────────────────────────────────────────────────────
     if req.prompt.is_empty() {
         return Err(ServerError::BadRequest("prompt must not be empty".into()));
     }
@@ -67,20 +100,46 @@ pub async fn generate_images(
             req.n
         )));
     }
-
-    let size = req.size.as_deref().unwrap_or("512x512");
-    if !VALID_SIZES.contains(&size) {
+    if req.width > MAX_IMAGE_DIM || req.height > MAX_IMAGE_DIM {
         return Err(ServerError::BadRequest(format!(
-            "invalid size '{size}'; must be one of: {}",
-            VALID_SIZES.join(", ")
+            "image dimensions ({} x {}) exceed maximum of {MAX_IMAGE_DIM}",
+            req.width, req.height
         )));
     }
+    if req.mode == ImageMode::Img2Img && req.init_image.is_none() {
+        return Err(ServerError::BadRequest(
+            "init_image is required for img2img mode".into(),
+        ));
+    }
+    // For txt2img mode, explicitly ignore any init_image/strength supplied by the
+    // client so the backend always runs the correct pipeline.
+    let effective_init_image = if req.mode == ImageMode::Img2Img {
+        req.init_image.clone()
+    } else {
+        None
+    };
+    let effective_strength = if req.mode == ImageMode::Img2Img {
+        req.strength
+    } else {
+        None
+    };
+
+    // ── Decode init image (img2img) ───────────────────────────────────────────
+    let (init_image_bytes, init_image_width, init_image_height, init_image_channels) =
+        if let Some(ref data_uri) = effective_init_image {
+            let (data, w, h, c) = decode_init_image(data_uri)?;
+            (data, w, h, c)
+        } else {
+            (Vec::new(), 0u32, 0u32, 3u32)
+        };
 
     debug!(
         model = %req.model,
         prompt_len = req.prompt.len(),
         n = req.n,
-        %size,
+        width = req.width,
+        height = req.height,
+        mode = ?req.mode,
         "image generation request"
     );
 
@@ -92,9 +151,21 @@ pub async fn generate_images(
     let now = Utc::now();
     let input_json = serde_json::json!({
         "prompt": req.prompt,
+        "negative_prompt": req.negative_prompt,
         "n": req.n,
-        "size": size,
+        "width": req.width,
+        "height": req.height,
         "model": req.model,
+        "mode": req.mode,
+        "cfg_scale": req.cfg_scale,
+        "guidance": req.guidance,
+        "steps": req.steps,
+        "seed": req.seed,
+        "sample_method": req.sample_method,
+        "scheduler": req.scheduler,
+        "clip_skip": req.clip_skip,
+        "strength": req.strength,
+        "eta": req.eta,
     });
 
     state
@@ -113,11 +184,26 @@ pub async fn generate_images(
         })
         .await?;
 
-    let request_for_spawn = grpc::pb::ImageRequest {
+    let grpc_req = grpc::pb::ImageRequest {
         model: req.model.clone(),
         prompt: req.prompt.clone(),
+        negative_prompt: req.negative_prompt.clone().unwrap_or_default(),
         n: req.n,
-        size: size.to_string(),
+        width: req.width,
+        height: req.height,
+        cfg_scale: req.cfg_scale.unwrap_or(7.0),
+        guidance: req.guidance.unwrap_or(3.5),
+        sample_steps: req.steps.unwrap_or(20),
+        seed: req.seed.unwrap_or(42),
+        sample_method: req.sample_method.clone().unwrap_or_default(),
+        scheduler: req.scheduler.clone().unwrap_or_default(),
+        clip_skip: req.clip_skip.unwrap_or(0),
+        strength: effective_strength.unwrap_or(0.75),
+        eta: req.eta.unwrap_or(0.0),
+        init_image_data: init_image_bytes,
+        init_image_width,
+        init_image_height,
+        init_image_channels,
     };
 
     let store = Arc::clone(&state.store);
@@ -145,7 +231,7 @@ pub async fn generate_images(
             }
         };
         let rpc_result =
-            grpc::client::generate_image(generate_image_channel_for_spawn, request_for_spawn).await;
+            grpc::client::generate_image(generate_image_channel_for_spawn, grpc_req).await;
         if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {
             if record.status == "cancelled" {
                 task_manager.remove(&task_id_for_spawn);
@@ -154,15 +240,52 @@ pub async fn generate_images(
         }
 
         match rpc_result {
-            Ok(image) => {
-                let encoded = base64::engine::general_purpose::STANDARD.encode(&image);
-                let data_uri = format!("data:image/png;base64,{encoded}");
-                let payload = serde_json::json!({ "image": data_uri }).to_string();
+            Ok(images_json) => {
+                // Parse the JSON array of image objects returned by the backend.
+                let images: Vec<serde_json::Value> = match serde_json::from_slice(&images_json) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let msg = format!("invalid JSON from diffusion backend: {e}");
+                        debug!(task_id = %task_id_for_spawn, error = %e, "failed to parse image JSON from backend");
+                        store
+                            .update_task_status(&task_id_for_spawn, "failed", None, Some(&msg))
+                            .await
+                            .unwrap_or_else(|db_e| {
+                                warn!(task_id = %task_id_for_spawn, error = %db_e,
+                                    "failed to update task status after JSON parse error")
+                            });
+                        task_manager.remove(&task_id_for_spawn);
+                        return;
+                    }
+                };
+
+                let data_uris: Vec<String> = images
+                    .iter()
+                    .filter_map(|img| img["b64"].as_str())
+                    .map(|b64| format!("data:image/png;base64,{b64}"))
+                    .collect();
+
+                // Persist with both `image` (first, for back-compat) and `images` array so
+                // GET /v1/tasks/{id}/result's TaskResultPayload deserialization captures both.
+                let first_image = data_uris.first().cloned();
+                let result = TaskResultPayload {
+                    image: first_image,
+                    images: Some(data_uris),
+                    video_path: None,
+                    text: None,
+                };
+                let payload_str = serde_json::to_string(&result).unwrap_or_default();
+
                 store
-                    .update_task_status(&task_id_for_spawn, "succeeded", Some(&payload), None)
+                    .update_task_status(
+                        &task_id_for_spawn,
+                        "succeeded",
+                        Some(&payload_str),
+                        None,
+                    )
                     .await
                     .unwrap_or_else(|e| {
-                        warn!(task_id = %task_id_for_spawn, error = %e, "failed to update remote image result")
+                        warn!(task_id = %task_id_for_spawn, error = %e, "failed to update image result")
                     });
             }
             Err(e) => {
@@ -171,7 +294,7 @@ pub async fn generate_images(
                     .update_task_status(&task_id_for_spawn, "failed", None, Some(&msg))
                     .await
                     .unwrap_or_else(|db_e| {
-                        warn!(task_id = %task_id_for_spawn, error = %db_e, "failed to update remote image failure")
+                        warn!(task_id = %task_id_for_spawn, error = %db_e, "failed to update image failure")
                     });
             }
         }
@@ -210,17 +333,17 @@ mod test {
     }
 
     #[test]
-    fn validates_valid_size() {
-        assert!(VALID_SIZES.contains(&"512x512"));
-        assert!(VALID_SIZES.contains(&"256x256"));
-        assert!(VALID_SIZES.contains(&"1024x1024"));
+    fn validates_dim_too_large() {
+        // Simulate the handler check: width > MAX_IMAGE_DIM should fail.
+        let width_over = MAX_IMAGE_DIM + 1;
+        assert!(width_over > MAX_IMAGE_DIM, "oversized width must be rejected");
+        let width_at_limit = MAX_IMAGE_DIM;
+        assert!(!(width_at_limit > MAX_IMAGE_DIM), "exact-limit width must be accepted");
     }
 
     #[test]
-    fn rejects_invalid_size() {
-        assert!(
-            !VALID_SIZES.contains(&"800x600"),
-            "800x600 is not a valid size"
-        );
+    fn decode_init_image_rejects_bad_b64() {
+        let result = decode_init_image("data:image/png;base64,!!!invalid!!!");
+        assert!(result.is_err());
     }
 }

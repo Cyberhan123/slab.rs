@@ -6,3 +6,4 @@ pub mod models;
 pub mod session;
 pub mod system;
 pub mod task;
+pub mod video;

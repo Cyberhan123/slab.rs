@@ -271,6 +271,13 @@ pub struct SdImgGenParams {
 
     /// Strength of the init-image influence (img2img / inpainting).
     pub strength: f32,
+
+    /// Optional initial image for img2img / video generation.
+    ///
+    /// The pixel data must be in row-major, channel-last (HWC) order with
+    /// `channel == 3` (RGB).  When `None`, a text-to-image generation is
+    /// performed instead.
+    pub init_image: Option<SdImage>,
 }
 
 impl Default for SdImgGenParams {
@@ -290,6 +297,7 @@ impl Default for SdImgGenParams {
             seed: 42,
             batch_count: 1,
             strength: 0.75,
+            init_image: None,
         }
     }
 }
