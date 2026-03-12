@@ -93,6 +93,18 @@ pub(super) async fn load_model_for_backend(
             "model_path": req.model_path,
             "num_workers": req.num_workers,
             "context_length": req.context_length,
+            // Diffusion-specific context params (ignored by non-diffusion backends).
+            "diffusion_model_path": req.diffusion_model_path,
+            "vae_path": req.vae_path,
+            "taesd_path": req.taesd_path,
+            "lora_model_dir": req.lora_model_dir,
+            "clip_l_path": req.clip_l_path,
+            "clip_g_path": req.clip_g_path,
+            "t5xxl_path": req.t5xxl_path,
+            "flash_attn": req.flash_attn,
+            "keep_vae_on_cpu": req.keep_vae_on_cpu,
+            "keep_clip_on_cpu": req.keep_clip_on_cpu,
+            "offload_params_to_cpu": req.offload_params_to_cpu,
         })))
         .run()
         .await

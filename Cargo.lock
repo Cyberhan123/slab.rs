@@ -6688,6 +6688,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum 0.8.8",
+ "base64 0.22.1",
  "bytemuck",
  "bytes",
  "futures",
@@ -6697,6 +6698,7 @@ dependencies = [
  "serde_json",
  "slab-core-macros",
  "slab-diffusion",
+ "slab-diffusion-sys",
  "slab-libfetch",
  "slab-llama",
  "slab-whisper",
@@ -6793,6 +6795,7 @@ name = "slab-runtime"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "base64 0.22.1",
  "bytemuck",
  "clap",
  "futures",
@@ -6825,6 +6828,7 @@ dependencies = [
  "http",
  "http-body-util",
  "hyper-util",
+ "image 0.25.9",
  "parity-tokio-ipc",
  "serde",
  "serde_json",

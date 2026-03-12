@@ -1,3 +1,4 @@
+use base64::Engine as _;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, instrument, warn};
 
@@ -28,15 +29,37 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
         debug!(
             prompt_len = req.prompt.len(),
             n = req.n,
-            size = %req.size,
+            width = req.width,
+            height = req.height,
             "diffusion generate_image request received"
         );
 
+        // Build init_image_b64 if raw pixel data was provided.
+        let init_image_b64 = if !req.init_image_data.is_empty() {
+            Some(base64::engine::general_purpose::STANDARD.encode(&req.init_image_data))
+        } else {
+            None
+        };
+
         let payload = serde_json::json!({
             "prompt": req.prompt,
-            "n": req.n,
-            "size": req.size,
-            "model": req.model,
+            "negative_prompt": req.negative_prompt,
+            "width": if req.width == 0 { 512u32 } else { req.width },
+            "height": if req.height == 0 { 512u32 } else { req.height },
+            "cfg_scale": if req.cfg_scale == 0.0 { 7.0f32 } else { req.cfg_scale },
+            "guidance": if req.guidance == 0.0 { 3.5f32 } else { req.guidance },
+            "sample_steps": if req.sample_steps == 0 { 20i32 } else { req.sample_steps },
+            "seed": req.seed,
+            "sample_method": if req.sample_method.is_empty() { "auto" } else { &req.sample_method },
+            "scheduler": if req.scheduler.is_empty() { "auto" } else { &req.scheduler },
+            "clip_skip": req.clip_skip,
+            "strength": if req.strength == 0.0 { 0.75f32 } else { req.strength },
+            "eta": req.eta,
+            "batch_count": if req.n == 0 { 1u32 } else { req.n },
+            "init_image_b64": init_image_b64,
+            "init_image_width": req.init_image_width,
+            "init_image_height": req.init_image_height,
+            "init_image_channels": if req.init_image_channels == 0 { 3u32 } else { req.init_image_channels },
         });
 
         let output = slab_core::api::backend(Backend::GGMLDiffusion)
@@ -49,9 +72,70 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
                 runtime_to_status(e)
             })?;
 
-        info!(image_bytes = output.len(), "diffusion image generation completed");
+        info!(images_json_bytes = output.len(), "diffusion image generation completed");
         Ok(Response::new(pb::ImageResponse {
-            image: output.to_vec(),
+            images_json: output.to_vec(),
+        }))
+    }
+
+    #[instrument(skip_all, fields(request_id, backend = "ggml.diffusion"))]
+    async fn generate_video(
+        &self,
+        request: Request<pb::VideoRequest>,
+    ) -> Result<Response<pb::VideoResponse>, Status> {
+        let request_id = extract_request_id(request.metadata());
+        tracing::Span::current().record("request_id", &request_id);
+
+        let req = request.into_inner();
+        if req.prompt.is_empty() {
+            warn!("generate_video rejected: prompt is empty");
+            return Err(Status::invalid_argument("prompt must not be empty"));
+        }
+
+        debug!(
+            prompt_len = req.prompt.len(),
+            video_frames = req.video_frames,
+            "diffusion generate_video request received"
+        );
+
+        let init_image_b64 = if !req.init_image_data.is_empty() {
+            Some(base64::engine::general_purpose::STANDARD.encode(&req.init_image_data))
+        } else {
+            None
+        };
+
+        let payload = serde_json::json!({
+            "prompt": req.prompt,
+            "negative_prompt": req.negative_prompt,
+            "width": if req.width == 0 { 512u32 } else { req.width },
+            "height": if req.height == 0 { 512u32 } else { req.height },
+            "cfg_scale": if req.cfg_scale == 0.0 { 7.0f32 } else { req.cfg_scale },
+            "guidance": if req.guidance == 0.0 { 3.5f32 } else { req.guidance },
+            "sample_steps": if req.sample_steps == 0 { 20i32 } else { req.sample_steps },
+            "seed": req.seed,
+            "sample_method": if req.sample_method.is_empty() { "auto" } else { &req.sample_method },
+            "scheduler": if req.scheduler.is_empty() { "auto" } else { &req.scheduler },
+            "strength": if req.strength == 0.0 { 0.75f32 } else { req.strength },
+            "batch_count": if req.video_frames == 0 { 16i32 } else { req.video_frames },
+            "init_image_b64": init_image_b64,
+            "init_image_width": req.init_image_width,
+            "init_image_height": req.init_image_height,
+            "init_image_channels": if req.init_image_channels == 0 { 3u32 } else { req.init_image_channels },
+        });
+
+        let output = slab_core::api::backend(Backend::GGMLDiffusion)
+            .inference()
+            .input(slab_core::Payload::Json(payload))
+            .run_wait()
+            .await
+            .map_err(|e| {
+                error!(error = %e, "diffusion video inference failed");
+                runtime_to_status(e)
+            })?;
+
+        info!(frames_json_bytes = output.len(), "diffusion video generation completed");
+        Ok(Response::new(pb::VideoResponse {
+            frames_json: output.to_vec(),
         }))
     }
 

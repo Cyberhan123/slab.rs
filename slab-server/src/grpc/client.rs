@@ -200,7 +200,21 @@ pub async fn generate_image(channel: Channel, req: pb::ImageRequest) -> anyhow::
             s
         })
         .context("generate_image RPC failed")?;
-    Ok(response.into_inner().image)
+    Ok(response.into_inner().images_json)
+}
+
+pub async fn generate_video(channel: Channel, req: pb::VideoRequest) -> anyhow::Result<Vec<u8>> {
+    let (mut client, request_id) = diffusion_client(channel);
+    debug!(request_id = %request_id, "sending gRPC generate_video request");
+    let response = client
+        .generate_video(req)
+        .await
+        .map_err(|s| {
+            log_grpc_error("generate_video", &request_id, &s);
+            s
+        })
+        .context("generate_video RPC failed")?;
+    Ok(response.into_inner().frames_json)
 }
 
 // ---------------------------------------------------------------------------

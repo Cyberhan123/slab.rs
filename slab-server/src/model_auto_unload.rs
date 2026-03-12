@@ -267,6 +267,7 @@ impl ModelAutoUnloadManager {
             model_path: spec.model_path.clone(),
             num_workers: spec.num_workers.max(1),
             context_length: spec.context_length,
+            ..Default::default()
         };
 
         match grpc::client::load_model(channel, &backend, req).await {
