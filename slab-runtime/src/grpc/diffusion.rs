@@ -44,16 +44,22 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
         let payload = serde_json::json!({
             "prompt": req.prompt,
             "negative_prompt": req.negative_prompt,
+            // Dimensions: the server layer ensures these are non-zero before the gRPC call.
+            // Fall back to 512 here only as a last-resort guard against malformed requests.
             "width": if req.width == 0 { 512u32 } else { req.width },
             "height": if req.height == 0 { 512u32 } else { req.height },
-            "cfg_scale": if req.cfg_scale == 0.0 { 7.0f32 } else { req.cfg_scale },
-            "guidance": if req.guidance == 0.0 { 3.5f32 } else { req.guidance },
+            // Numeric parameters: pass through as-is.  The slab-server layer applies all
+            // defaults via Option::unwrap_or before the gRPC call, so 0 / 0.0 here is a
+            // legitimate value (e.g. cfg_scale=0 for distilled models, strength=0 for a
+            // no-op img2img), not an "unset" signal.
+            "cfg_scale": req.cfg_scale,
+            "guidance": req.guidance,
             "sample_steps": if req.sample_steps == 0 { 20i32 } else { req.sample_steps },
             "seed": req.seed,
             "sample_method": if req.sample_method.is_empty() { "auto" } else { &req.sample_method },
             "scheduler": if req.scheduler.is_empty() { "auto" } else { &req.scheduler },
             "clip_skip": req.clip_skip,
-            "strength": if req.strength == 0.0 { 0.75f32 } else { req.strength },
+            "strength": req.strength,
             "eta": req.eta,
             "batch_count": if req.n == 0 { 1u32 } else { req.n },
             "init_image_b64": init_image_b64,
@@ -109,13 +115,14 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             "negative_prompt": req.negative_prompt,
             "width": if req.width == 0 { 512u32 } else { req.width },
             "height": if req.height == 0 { 512u32 } else { req.height },
-            "cfg_scale": if req.cfg_scale == 0.0 { 7.0f32 } else { req.cfg_scale },
-            "guidance": if req.guidance == 0.0 { 3.5f32 } else { req.guidance },
+            // Numeric parameters: pass through as-is (see generate_image comment).
+            "cfg_scale": req.cfg_scale,
+            "guidance": req.guidance,
             "sample_steps": if req.sample_steps == 0 { 20i32 } else { req.sample_steps },
             "seed": req.seed,
             "sample_method": if req.sample_method.is_empty() { "auto" } else { &req.sample_method },
             "scheduler": if req.scheduler.is_empty() { "auto" } else { &req.scheduler },
-            "strength": if req.strength == 0.0 { 0.75f32 } else { req.strength },
+            "strength": req.strength,
             "batch_count": if req.video_frames == 0 { 16i32 } else { req.video_frames },
             "init_image_b64": init_image_b64,
             "init_image_width": req.init_image_width,

@@ -53,6 +53,7 @@ const LLAMA_CONTEXT_LENGTH_CONFIG_KEY: &str = "llama_context_length";
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 
 // Diffusion-specific global config keys (used when loading a diffusion model).
+const DIFFUSION_MODEL_PATH_CONFIG_KEY: &str = "diffusion_model_path";
 const DIFFUSION_VAE_PATH_CONFIG_KEY: &str = "diffusion_vae_path";
 const DIFFUSION_TAESD_PATH_CONFIG_KEY: &str = "diffusion_taesd_path";
 const DIFFUSION_LORA_MODEL_DIR_CONFIG_KEY: &str = "diffusion_lora_model_dir";
@@ -214,15 +215,49 @@ async fn resolve_llama_context_length(
     Ok((context_length, "config"))
 }
 
+/// Named set of diffusion model-context parameters resolved from the admin config store.
+/// This struct is returned by `resolve_diffusion_context_params` and mapped directly
+/// into `grpc::pb::ModelLoadRequest` fields, making call-sites readable and extension-safe.
+struct DiffusionContextParams {
+    diffusion_model_path: String,
+    vae_path: String,
+    taesd_path: String,
+    lora_model_dir: String,
+    clip_l_path: String,
+    clip_g_path: String,
+    t5xxl_path: String,
+    flash_attn: bool,
+    keep_vae_on_cpu: bool,
+    keep_clip_on_cpu: bool,
+    offload_params_to_cpu: bool,
+}
+
+impl Default for DiffusionContextParams {
+    fn default() -> Self {
+        Self {
+            diffusion_model_path: String::new(),
+            vae_path: String::new(),
+            taesd_path: String::new(),
+            lora_model_dir: String::new(),
+            clip_l_path: String::new(),
+            clip_g_path: String::new(),
+            t5xxl_path: String::new(),
+            flash_attn: false,
+            keep_vae_on_cpu: false,
+            keep_clip_on_cpu: false,
+            offload_params_to_cpu: false,
+        }
+    }
+}
+
 /// Resolve diffusion model context parameters from the admin config store.
 ///
-/// Returns a `grpc::pb::ModelLoadRequest`-compatible set of diffusion fields,
-/// merged from the stored config values.  All fields default to empty string /
-/// false when not configured.
+/// Returns `None` for non-diffusion backends.  All fields default to empty
+/// string / `false` when the corresponding config key is not set.
 async fn resolve_diffusion_context_params(
     state: &AppState,
     canonical_backend: &str,
-) -> Result<Option<(String, String, String, String, String, String, String, bool, bool, bool, bool)>, ServerError> {
+) -> Result<Option<DiffusionContextParams>, ServerError> {
     if canonical_backend != "ggml.diffusion" {
         return Ok(None);
     }
@@ -244,23 +279,19 @@ async fn resolve_diffusion_context_params(
         Ok(["1", "true", "yes"].contains(&raw.trim().to_lowercase().as_str()))
     }
 
-    let diffusion_model_path = get_str(state, "diffusion_model_path").await?;
-    let vae_path = get_str(state, DIFFUSION_VAE_PATH_CONFIG_KEY).await?;
-    let taesd_path = get_str(state, DIFFUSION_TAESD_PATH_CONFIG_KEY).await?;
-    let lora_model_dir = get_str(state, DIFFUSION_LORA_MODEL_DIR_CONFIG_KEY).await?;
-    let clip_l_path = get_str(state, DIFFUSION_CLIP_L_PATH_CONFIG_KEY).await?;
-    let clip_g_path = get_str(state, DIFFUSION_CLIP_G_PATH_CONFIG_KEY).await?;
-    let t5xxl_path = get_str(state, DIFFUSION_T5XXL_PATH_CONFIG_KEY).await?;
-    let flash_attn = get_bool(state, DIFFUSION_FLASH_ATTN_CONFIG_KEY).await?;
-    let keep_vae_on_cpu = get_bool(state, DIFFUSION_KEEP_VAE_ON_CPU_CONFIG_KEY).await?;
-    let keep_clip_on_cpu = get_bool(state, DIFFUSION_KEEP_CLIP_ON_CPU_CONFIG_KEY).await?;
-    let offload_params = get_bool(state, DIFFUSION_OFFLOAD_PARAMS_CONFIG_KEY).await?;
-
-    Ok(Some((
-        diffusion_model_path, vae_path, taesd_path, lora_model_dir,
-        clip_l_path, clip_g_path, t5xxl_path,
-        flash_attn, keep_vae_on_cpu, keep_clip_on_cpu, offload_params,
-    )))
+    Ok(Some(DiffusionContextParams {
+        diffusion_model_path: get_str(state, DIFFUSION_MODEL_PATH_CONFIG_KEY).await?,
+        vae_path: get_str(state, DIFFUSION_VAE_PATH_CONFIG_KEY).await?,
+        taesd_path: get_str(state, DIFFUSION_TAESD_PATH_CONFIG_KEY).await?,
+        lora_model_dir: get_str(state, DIFFUSION_LORA_MODEL_DIR_CONFIG_KEY).await?,
+        clip_l_path: get_str(state, DIFFUSION_CLIP_L_PATH_CONFIG_KEY).await?,
+        clip_g_path: get_str(state, DIFFUSION_CLIP_G_PATH_CONFIG_KEY).await?,
+        t5xxl_path: get_str(state, DIFFUSION_T5XXL_PATH_CONFIG_KEY).await?,
+        flash_attn: get_bool(state, DIFFUSION_FLASH_ATTN_CONFIG_KEY).await?,
+        keep_vae_on_cpu: get_bool(state, DIFFUSION_KEEP_VAE_ON_CPU_CONFIG_KEY).await?,
+        keep_clip_on_cpu: get_bool(state, DIFFUSION_KEEP_CLIP_ON_CPU_CONFIG_KEY).await?,
+        offload_params_to_cpu: get_bool(state, DIFFUSION_OFFLOAD_PARAMS_CONFIG_KEY).await?,
+    }))
 }
 
 fn grpc_status_message(status: &tonic::Status) -> String {
@@ -401,28 +432,25 @@ pub async fn load_model(
         "loading model"
     );
 
-    let diffusion_ctx = resolve_diffusion_context_params(&state, &canonical_backend).await?;
-    let (
-        diffusion_model_path, vae_path, taesd_path, lora_model_dir,
-        clip_l_path, clip_g_path, t5xxl_path,
-        flash_attn, keep_vae_on_cpu, keep_clip_on_cpu, offload_params_to_cpu,
-    ) = diffusion_ctx.unwrap_or_default();
+    let diffusion_ctx = resolve_diffusion_context_params(&state, &canonical_backend)
+        .await?
+        .unwrap_or_default();
 
     let grpc_req = grpc::pb::ModelLoadRequest {
         model_path: req.model_path.clone(),
         num_workers,
         context_length,
-        diffusion_model_path,
-        vae_path,
-        taesd_path,
-        lora_model_dir,
-        clip_l_path,
-        clip_g_path,
-        t5xxl_path,
-        flash_attn,
-        keep_vae_on_cpu,
-        keep_clip_on_cpu,
-        offload_params_to_cpu,
+        diffusion_model_path: diffusion_ctx.diffusion_model_path,
+        vae_path: diffusion_ctx.vae_path,
+        taesd_path: diffusion_ctx.taesd_path,
+        lora_model_dir: diffusion_ctx.lora_model_dir,
+        clip_l_path: diffusion_ctx.clip_l_path,
+        clip_g_path: diffusion_ctx.clip_g_path,
+        t5xxl_path: diffusion_ctx.t5xxl_path,
+        flash_attn: diffusion_ctx.flash_attn,
+        keep_vae_on_cpu: diffusion_ctx.keep_vae_on_cpu,
+        keep_clip_on_cpu: diffusion_ctx.keep_clip_on_cpu,
+        offload_params_to_cpu: diffusion_ctx.offload_params_to_cpu,
     };
     let response = grpc::client::load_model(channel, &canonical_backend, grpc_req)
         .await
@@ -558,12 +586,9 @@ pub async fn switch_model(
         "switching model"
     );
 
-    let switch_diffusion_ctx = resolve_diffusion_context_params(&state, &canonical_backend).await?;
-    let (
-        sw_diffusion_model_path, sw_vae_path, sw_taesd_path, sw_lora_model_dir,
-        sw_clip_l_path, sw_clip_g_path, sw_t5xxl_path,
-        sw_flash_attn, sw_keep_vae_on_cpu, sw_keep_clip_on_cpu, sw_offload_params_to_cpu,
-    ) = switch_diffusion_ctx.unwrap_or_default();
+    let switch_diffusion_ctx = resolve_diffusion_context_params(&state, &canonical_backend)
+        .await?
+        .unwrap_or_default();
 
     let response = grpc::client::load_model(
         channel,
@@ -572,17 +597,17 @@ pub async fn switch_model(
             model_path: req.model_path.clone(),
             num_workers,
             context_length,
-            diffusion_model_path: sw_diffusion_model_path,
-            vae_path: sw_vae_path,
-            taesd_path: sw_taesd_path,
-            lora_model_dir: sw_lora_model_dir,
-            clip_l_path: sw_clip_l_path,
-            clip_g_path: sw_clip_g_path,
-            t5xxl_path: sw_t5xxl_path,
-            flash_attn: sw_flash_attn,
-            keep_vae_on_cpu: sw_keep_vae_on_cpu,
-            keep_clip_on_cpu: sw_keep_clip_on_cpu,
-            offload_params_to_cpu: sw_offload_params_to_cpu,
+            diffusion_model_path: switch_diffusion_ctx.diffusion_model_path,
+            vae_path: switch_diffusion_ctx.vae_path,
+            taesd_path: switch_diffusion_ctx.taesd_path,
+            lora_model_dir: switch_diffusion_ctx.lora_model_dir,
+            clip_l_path: switch_diffusion_ctx.clip_l_path,
+            clip_g_path: switch_diffusion_ctx.clip_g_path,
+            t5xxl_path: switch_diffusion_ctx.t5xxl_path,
+            flash_attn: switch_diffusion_ctx.flash_attn,
+            keep_vae_on_cpu: switch_diffusion_ctx.keep_vae_on_cpu,
+            keep_clip_on_cpu: switch_diffusion_ctx.keep_clip_on_cpu,
+            offload_params_to_cpu: switch_diffusion_ctx.offload_params_to_cpu,
         },
     )
     .await

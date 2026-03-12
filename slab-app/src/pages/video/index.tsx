@@ -255,12 +255,20 @@ export default function VideoPage() {
     };
   }, [isPolling, taskId]);
 
-  const handleCancel = useCallback(() => {
+  const handleCancel = useCallback(async () => {
     abortRef.current = true;
+    if (pollTimer.current) clearTimeout(pollTimer.current);
+    if (taskId) {
+      try {
+        await fetch(`${API_BASE_URL}/v1/tasks/${taskId}/cancel`, { method: 'POST' });
+      } catch (err) {
+        // Best-effort — don't block UI cleanup on server errors.
+        console.error('Failed to cancel task', err);
+      }
+    }
     setIsPolling(false);
     setTaskId(null);
-    if (pollTimer.current) clearTimeout(pollTimer.current);
-  }, []);
+  }, [taskId]);
 
   // ── Render ───────────────────────────────────────────────────────────────────
   const isGenerating = isSubmitting || isPolling;
@@ -406,7 +414,7 @@ export default function VideoPage() {
             <input
               ref={initImageInputRef}
               type="file"
-              accept="image/png,image/jpeg,image/webp"
+              accept="image/png,image/jpeg"
               className="hidden"
               onChange={handleInitImageChange}
             />

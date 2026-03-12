@@ -138,47 +138,66 @@ pub async fn get_task_result(
                         if record.task_type == "image" {
                             let encoded =
                                 base64::engine::general_purpose::STANDARD.encode(b.as_ref());
+                            let uri = format!("data:image/png;base64,{encoded}");
                             TaskResultPayload {
-                                image: Some(format!("data:image/png;base64,{encoded}")),
+                                image: Some(uri.clone()),
+                                images: Some(vec![uri]),
+                                video_path: None,
                                 text: None,
                             }
                         } else {
                             TaskResultPayload {
                                 image: None,
+                                images: None,
+                                video_path: None,
                                 text: Some(String::from_utf8_lossy(b).to_string()),
                             }
                         }
                     }
                     slab_core::Payload::Text(t) => TaskResultPayload {
                         image: None,
+                        images: None,
+                        video_path: None,
                         text: Some(t.to_string()),
                     },
                     slab_core::Payload::Json(v) => {
                         // `Payload::Json` is rare for inference results (it is mainly used
                         // for control payloads such as model-load parameters).  When it
                         // does appear we try to map well-known keys:
-                        //   • "image" → TaskResultPayload.image
-                        //   • "text"  → TaskResultPayload.text
-                        // If neither key is present the entire JSON value is serialised to
+                        //   • "image" / "images" → TaskResultPayload.image / .images
+                        //   • "video_path"        → TaskResultPayload.video_path
+                        //   • "text"              → TaskResultPayload.text
+                        // If none are present the entire JSON value is serialised to
                         // a compact string and stored in `text` so callers can still
                         // inspect the raw payload rather than receiving an empty response.
                         let image =
                             v.get("image").and_then(|s| s.as_str()).map(str::to_owned);
+                        let images = v.get("images").and_then(|a| {
+                            a.as_array().map(|arr| {
+                                arr.iter()
+                                    .filter_map(|s| s.as_str().map(str::to_owned))
+                                    .collect::<Vec<_>>()
+                            })
+                        });
+                        let video_path =
+                            v.get("video_path").and_then(|s| s.as_str()).map(str::to_owned);
                         let text = v
                             .get("text")
                             .and_then(|s| s.as_str())
                             .map(str::to_owned)
                             .or_else(|| {
-                                if image.is_none() {
+                                if image.is_none() && video_path.is_none() {
                                     Some(v.to_string())
                                 } else {
                                     None
                                 }
                             });
-                        TaskResultPayload { image, text }
+                        TaskResultPayload { image, images, video_path, text }
                     }
                     _ => TaskResultPayload {
                         image: None,
+                        images: None,
+                        video_path: None,
                         text: None,
                     },
                 };
@@ -208,6 +227,8 @@ pub async fn get_task_result(
                             warn!(task_id = %id, error = %e, "persisted result_data is not a TaskResultPayload; returning as text");
                             TaskResultPayload {
                                 image: None,
+                                images: None,
+                                video_path: None,
                                 text: Some(data),
                             }
                         });
@@ -241,12 +262,16 @@ pub async fn get_task_result(
                         warn!(task_id = %id, error = %e, "persisted result_data is not a TaskResultPayload; returning as text");
                         TaskResultPayload {
                             image: None,
+                            images: None,
+                            video_path: None,
                             text: Some(data),
                         }
                     })
                 })
                 .unwrap_or(TaskResultPayload {
                     image: None,
+                    images: None,
+                    video_path: None,
                     text: None,
                 });
             Ok(Json(result_payload))
@@ -369,13 +394,18 @@ mod test {
     fn bytes_to_result_payload(task_type: &str, bytes: &[u8]) -> TaskResultPayload {
         if task_type == "image" {
             let encoded = base64::engine::general_purpose::STANDARD.encode(bytes);
+            let uri = format!("data:image/png;base64,{encoded}");
             TaskResultPayload {
-                image: Some(format!("data:image/png;base64,{encoded}")),
+                image: Some(uri.clone()),
+                images: Some(vec![uri]),
+                video_path: None,
                 text: None,
             }
         } else {
             TaskResultPayload {
                 image: None,
+                images: None,
+                video_path: None,
                 text: Some(String::from_utf8_lossy(bytes).to_string()),
             }
         }
@@ -424,18 +454,26 @@ mod test {
     /// Helper that replicates the `Payload::Json` → `TaskResultPayload` mapping.
     fn json_to_result_payload(v: &serde_json::Value) -> TaskResultPayload {
         let image = v.get("image").and_then(|s| s.as_str()).map(str::to_owned);
+        let images = v.get("images").and_then(|a| {
+            a.as_array().map(|arr| {
+                arr.iter()
+                    .filter_map(|s| s.as_str().map(str::to_owned))
+                    .collect::<Vec<_>>()
+            })
+        });
+        let video_path = v.get("video_path").and_then(|s| s.as_str()).map(str::to_owned);
         let text = v
             .get("text")
             .and_then(|s| s.as_str())
             .map(str::to_owned)
             .or_else(|| {
-                if image.is_none() {
+                if image.is_none() && video_path.is_none() {
                     Some(v.to_string())
                 } else {
                     None
                 }
             });
-        TaskResultPayload { image, text }
+        TaskResultPayload { image, images, video_path, text }
     }
 
     #[test]
@@ -472,12 +510,15 @@ mod test {
     fn task_result_payload_roundtrips_through_json() {
         let original = TaskResultPayload {
             image: Some("data:image/png;base64,abc=".to_owned()),
+            images: Some(vec!["data:image/png;base64,abc=".to_owned()]),
+            video_path: None,
             text: None,
         };
         let serialized = serde_json::to_string(&original).expect("serialize");
         let deserialized: TaskResultPayload =
             serde_json::from_str(&serialized).expect("deserialize");
         assert_eq!(deserialized.image, original.image);
+        assert_eq!(deserialized.images, original.images);
         assert_eq!(deserialized.text, original.text);
     }
 
@@ -485,6 +526,8 @@ mod test {
     fn task_result_payload_text_roundtrips_through_json() {
         let original = TaskResultPayload {
             image: None,
+            images: None,
+            video_path: None,
             text: Some("hello world".to_owned()),
         };
         let serialized = serde_json::to_string(&original).expect("serialize");
