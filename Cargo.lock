@@ -6693,6 +6693,7 @@ dependencies = [
  "bytes",
  "futures",
  "hf-hub",
+ "image 0.25.9",
  "libloading 0.8.9",
  "serde",
  "serde_json",

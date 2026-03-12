@@ -527,19 +527,39 @@ impl DiffusionWorker {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
             }
             Ok(images) => {
-                // Encode all images as a JSON array of base64 PNG strings so the
-                // caller can pick individual frames for img2img or video assembly.
+                // Encode each output image as a PNG file, then base64-encode that PNG
+                // so callers receive a standard image that can be decoded by any PNG
+                // library.  `SdImage.data` contains raw pixel bytes (width × height ×
+                // channel), NOT an image file — we must encode it ourselves.
                 let encoded: Vec<serde_json::Value> = images
                     .into_iter()
                     .filter(|img| !img.data.is_empty())
-                    .map(|img| {
-                        let b64 = base64::engine::general_purpose::STANDARD.encode(&img.data);
-                        serde_json::json!({
+                    .filter_map(|img| {
+                        let (w, h, channels) = (img.width, img.height, img.channel as u8);
+                        // Move `img.data` into the ImageBuffer — no clone needed since
+                        // `img` is consumed by `into_iter()`.
+                        let dyn_img: Option<image::DynamicImage> = if channels == 3 {
+                            image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(w, h, img.data)
+                                .map(image::DynamicImage::ImageRgb8)
+                        } else {
+                            image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(w, h, img.data)
+                                .map(image::DynamicImage::ImageRgba8)
+                        };
+                        let dyn_img = dyn_img?;
+                        let mut png_bytes: Vec<u8> = Vec::new();
+                        dyn_img
+                            .write_to(
+                                &mut std::io::Cursor::new(&mut png_bytes),
+                                image::ImageFormat::Png,
+                            )
+                            .ok()?;
+                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
+                        Some(serde_json::json!({
                             "b64": b64,
-                            "width": img.width,
-                            "height": img.height,
-                            "channels": img.channel,
-                        })
+                            "width": w,
+                            "height": h,
+                            "channels": channels,
+                        }))
                     })
                     .collect();
                 let json_bytes = serde_json::to_vec(&encoded).unwrap_or_default();

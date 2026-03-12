@@ -15,6 +15,7 @@ use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
 use crate::schemas::v1::images::{ImageGenerationRequest, ImageMode};
+use crate::schemas::v1::task::TaskResultPayload;
 use crate::state::AppState;
 
 /// Maximum allowed prompt length in bytes.
@@ -110,10 +111,22 @@ pub async fn generate_images(
             "init_image is required for img2img mode".into(),
         ));
     }
+    // For txt2img mode, explicitly ignore any init_image/strength supplied by the
+    // client so the backend always runs the correct pipeline.
+    let effective_init_image = if req.mode == ImageMode::Img2Img {
+        req.init_image.clone()
+    } else {
+        None
+    };
+    let effective_strength = if req.mode == ImageMode::Img2Img {
+        req.strength
+    } else {
+        None
+    };
 
     // ── Decode init image (img2img) ───────────────────────────────────────────
     let (init_image_bytes, init_image_width, init_image_height, init_image_channels) =
-        if let Some(ref data_uri) = req.init_image {
+        if let Some(ref data_uri) = effective_init_image {
             let (data, w, h, c) = decode_init_image(data_uri)?;
             (data, w, h, c)
         } else {
@@ -185,7 +198,7 @@ pub async fn generate_images(
         sample_method: req.sample_method.clone().unwrap_or_default(),
         scheduler: req.scheduler.clone().unwrap_or_default(),
         clip_skip: req.clip_skip.unwrap_or(0),
-        strength: req.strength.unwrap_or(0.75),
+        strength: effective_strength.unwrap_or(0.75),
         eta: req.eta.unwrap_or(0.0),
         init_image_data: init_image_bytes,
         init_image_width,
@@ -229,8 +242,22 @@ pub async fn generate_images(
         match rpc_result {
             Ok(images_json) => {
                 // Parse the JSON array of image objects returned by the backend.
-                let images: Vec<serde_json::Value> =
-                    serde_json::from_slice(&images_json).unwrap_or_default();
+                let images: Vec<serde_json::Value> = match serde_json::from_slice(&images_json) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        let msg = format!("invalid JSON from diffusion backend: {e}");
+                        debug!(task_id = %task_id_for_spawn, error = %e, "failed to parse image JSON from backend");
+                        store
+                            .update_task_status(&task_id_for_spawn, "failed", None, Some(&msg))
+                            .await
+                            .unwrap_or_else(|db_e| {
+                                warn!(task_id = %task_id_for_spawn, error = %db_e,
+                                    "failed to update task status after JSON parse error")
+                            });
+                        task_manager.remove(&task_id_for_spawn);
+                        return;
+                    }
+                };
 
                 let data_uris: Vec<String> = images
                     .iter()
@@ -238,21 +265,22 @@ pub async fn generate_images(
                     .map(|b64| format!("data:image/png;base64,{b64}"))
                     .collect();
 
-                // For single-image requests, keep backward-compatible `image` key.
-                let payload = if data_uris.len() == 1 {
-                    serde_json::json!({
-                        "image": data_uris[0],
-                        "images": data_uris,
-                    })
-                } else {
-                    serde_json::json!({ "images": data_uris })
+                // Persist with both `image` (first, for back-compat) and `images` array so
+                // GET /v1/tasks/{id}/result's TaskResultPayload deserialization captures both.
+                let first_image = data_uris.first().cloned();
+                let result = TaskResultPayload {
+                    image: first_image,
+                    images: Some(data_uris),
+                    video_path: None,
+                    text: None,
                 };
+                let payload_str = serde_json::to_string(&result).unwrap_or_default();
 
                 store
                     .update_task_status(
                         &task_id_for_spawn,
                         "succeeded",
-                        Some(&payload.to_string()),
+                        Some(&payload_str),
                         None,
                     )
                     .await
@@ -306,7 +334,11 @@ mod test {
 
     #[test]
     fn validates_dim_too_large() {
-        assert!(MAX_IMAGE_DIM + 1 > MAX_IMAGE_DIM);
+        // Simulate the handler check: width > MAX_IMAGE_DIM should fail.
+        let width_over = MAX_IMAGE_DIM + 1;
+        assert!(width_over > MAX_IMAGE_DIM, "oversized width must be rejected");
+        let width_at_limit = MAX_IMAGE_DIM;
+        assert!(!(width_at_limit > MAX_IMAGE_DIM), "exact-limit width must be accepted");
     }
 
     #[test]

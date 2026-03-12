@@ -18,6 +18,7 @@ use uuid::Uuid;
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
+use crate::schemas::v1::task::TaskResultPayload;
 use crate::schemas::v1::video::VideoGenerationRequest;
 use crate::state::AppState;
 
@@ -93,6 +94,11 @@ pub async fn generate_video(
             "frame dimensions ({} x {}) exceed maximum of {MAX_IMAGE_DIM}",
             req.width, req.height
         )));
+    }
+    if !req.fps.is_finite() || req.fps < 1.0 || req.fps > 60.0 {
+        return Err(ServerError::BadRequest(
+            "fps must be a finite value between 1 and 60".into(),
+        ));
     }
 
     // ── Decode optional init image ────────────────────────────────────────────
@@ -212,8 +218,22 @@ pub async fn generate_video(
         };
 
         // Parse frame objects: [{b64, width, height, channels}, ...]
-        let frames: Vec<serde_json::Value> =
-            serde_json::from_slice(&frames_json).unwrap_or_default();
+        let frames: Vec<serde_json::Value> = match serde_json::from_slice(&frames_json) {
+            Ok(v) => v,
+            Err(e) => {
+                store
+                    .update_task_status(
+                        &task_id_for_spawn,
+                        "failed",
+                        None,
+                        Some(&format!("failed to parse frames JSON from diffusion backend: {e}")),
+                    )
+                    .await
+                    .ok();
+                task_manager.remove(&task_id_for_spawn);
+                return;
+            }
+        };
 
         if frames.is_empty() {
             store
@@ -245,15 +265,16 @@ pub async fn generate_video(
             return;
         }
 
-        let mut frame_paths: Vec<String> = Vec::with_capacity(frames.len());
+        let mut written_index: usize = 0;
         for (i, frame) in frames.iter().enumerate() {
             let Some(b64) = frame["b64"].as_str() else {
+                warn!(task_id = %task_id_for_spawn, source_frame = i, written = written_index, "frame missing b64 field; skipping");
                 continue;
             };
             let frame_bytes = match base64::engine::general_purpose::STANDARD.decode(b64) {
                 Ok(b) => b,
                 Err(e) => {
-                    warn!(task_id = %task_id_for_spawn, frame = i, error = %e, "failed to decode frame");
+                    warn!(task_id = %task_id_for_spawn, source_frame = i, written = written_index, error = %e, "failed to decode frame base64; skipping");
                     continue;
                 }
             };
@@ -271,19 +292,22 @@ pub async fn generate_video(
             };
 
             let Some(img) = img_result else {
-                warn!(task_id = %task_id_for_spawn, frame = i, "failed to construct frame image");
+                warn!(task_id = %task_id_for_spawn, source_frame = i, written = written_index, "failed to construct image from raw pixels; skipping");
                 continue;
             };
 
-            let frame_path = frame_dir.join(format!("frame_{i:05}.png"));
+            // Use `written_index` for the filename so ffmpeg always gets a
+            // contiguous sequence (frame_00000.png, frame_00001.png, …) even
+            // when individual source frames are skipped above.
+            let frame_path = frame_dir.join(format!("frame_{written_index:05}.png"));
             if let Err(e) = img.save(&frame_path) {
-                warn!(task_id = %task_id_for_spawn, frame = i, error = %e, "failed to save frame");
+                warn!(task_id = %task_id_for_spawn, source_frame = i, written = written_index, error = %e, "failed to save frame PNG; skipping");
                 continue;
             }
-            frame_paths.push(frame_path.to_string_lossy().into_owned());
+            written_index += 1;
         }
 
-        if frame_paths.is_empty() {
+        if written_index == 0 {
             store
                 .update_task_status(
                     &task_id_for_spawn,
@@ -301,18 +325,16 @@ pub async fn generate_video(
         let output_path = std::env::temp_dir().join(format!("slab-video-{task_id_for_spawn}.mp4"));
         let frame_pattern = frame_dir.join("frame_%05d.png");
         let ffmpeg_result = tokio::process::Command::new("ffmpeg")
-            .args([
-                "-y",
-                "-framerate",
-                &fps.to_string(),
-                "-i",
-                frame_pattern.to_str().unwrap_or(""),
-                "-c:v",
-                "libx264",
-                "-pix_fmt",
-                "yuv420p",
-                output_path.to_str().unwrap_or(""),
-            ])
+            .arg("-y")
+            .arg("-framerate")
+            .arg(fps.to_string())
+            .arg("-i")
+            .arg(&frame_pattern)
+            .arg("-c:v")
+            .arg("libx264")
+            .arg("-pix_fmt")
+            .arg("yuv420p")
+            .arg(&output_path)
             .output()
             .await;
 
@@ -323,7 +345,13 @@ pub async fn generate_video(
             Ok(output) if output.status.success() => {
                 let video_path = output_path.to_string_lossy().into_owned();
                 info!(task_id = %task_id_for_spawn, video_path = %video_path, "video generation succeeded");
-                let payload = serde_json::json!({ "video_path": video_path }).to_string();
+                let result = TaskResultPayload {
+                    image: None,
+                    images: None,
+                    video_path: Some(video_path),
+                    text: None,
+                };
+                let payload = serde_json::to_string(&result).unwrap_or_default();
                 store
                     .update_task_status(&task_id_for_spawn, "succeeded", Some(&payload), None)
                     .await
