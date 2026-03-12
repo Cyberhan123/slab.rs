@@ -4,20 +4,22 @@ use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
-use axum::extract::State;
-use axum::routing::{get, post};
+use axum::extract::{Path, State};
+use axum::routing::{get, post, put};
 use axum::{Json, Router};
+use chrono::Utc;
 use tonic::transport::Channel;
 use tracing::{info, warn};
 use utoipa::OpenApi;
 
-use crate::entities::{ConfigStore, ModelStore, TaskRecord, TaskStore};
+use crate::entities::{ConfigStore, ModelCatalogRecord, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
 use crate::model_auto_unload::LoadedModelSpec;
 use crate::schemas::v1::models::{
-    DownloadModelRequest, ListAvailableQuery, ListModelsQuery, LoadModelRequest,
-    ModelCatalogItemResponse, ModelListStatus, ModelStatusResponse, SwitchModelRequest,
+    CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
+    LoadModelRequest, ModelCatalogItemResponse, ModelListStatus, ModelStatusResponse,
+    SwitchModelRequest, UpdateModelRequest,
 };
 use crate::state::AppState;
 use hf_hub::api::sync::{Api, ApiBuilder};
@@ -27,6 +29,9 @@ use slab_core::api::Backend;
 #[openapi(
     paths(
         list_models,
+        create_model,
+        update_model,
+        delete_model,
         load_model,
         unload_model,
         list_available_models,
@@ -34,6 +39,8 @@ use slab_core::api::Backend;
         download_model
     ),
     components(schemas(
+        CreateModelRequest,
+        UpdateModelRequest,
         LoadModelRequest,
         ModelStatusResponse,
         SwitchModelRequest,
@@ -69,7 +76,8 @@ const DIFFUSION_OFFLOAD_PARAMS_CONFIG_KEY: &str = "diffusion_offload_params_to_c
 /// Register model-management routes.
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
-        .route("/models", get(list_models))
+        .route("/models", get(list_models).post(create_model))
+        .route("/models/{id}", put(update_model).delete(delete_model))
         .route("/models/available", get(list_available_models))
         .route("/models/load", post(load_model))
         .route("/models/unload", post(unload_model))
@@ -114,6 +122,83 @@ fn validate_existing_model_file(path: &str) -> Result<(), ServerError> {
     Ok(())
 }
 
+fn normalize_backend_ids(raw: &[String]) -> Result<Vec<String>, ServerError> {
+    if raw.is_empty() {
+        return Err(ServerError::BadRequest(
+            "backend_ids must include at least one backend".into(),
+        ));
+    }
+
+    let mut out = Vec::with_capacity(raw.len());
+    for backend_id in raw {
+        let trimmed = backend_id.trim();
+        if trimmed.is_empty() {
+            return Err(ServerError::BadRequest(
+                "backend_ids must not contain empty values".into(),
+            ));
+        }
+        let backend = Backend::from_str(trimmed)
+            .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {trimmed}")))?;
+        out.push(backend.to_string());
+    }
+    out.sort();
+    out.dedup();
+    Ok(out)
+}
+
+fn validate_catalog_fields(
+    display_name: &str,
+    repo_id: &str,
+    filename: &str,
+) -> Result<(), ServerError> {
+    if display_name.trim().is_empty() {
+        return Err(ServerError::BadRequest(
+            "display_name must not be empty".into(),
+        ));
+    }
+    if repo_id.trim().is_empty() {
+        return Err(ServerError::BadRequest("repo_id must not be empty".into()));
+    }
+    if filename.trim().is_empty() {
+        return Err(ServerError::BadRequest("filename must not be empty".into()));
+    }
+    Ok(())
+}
+
+fn to_model_catalog_item_response(
+    model: ModelCatalogRecord,
+    pending_task: Option<&TaskRecord>,
+) -> ModelCatalogItemResponse {
+    let computed_status = if model.local_path.is_some() {
+        ModelListStatus::Downloaded
+    } else if pending_task.is_some() {
+        ModelListStatus::Pending
+    } else {
+        ModelListStatus::NotDownloaded
+    };
+
+    let is_vad_model = detect_whisper_vad_model(
+        &model.backend_ids,
+        &model.display_name,
+        &model.repo_id,
+        &model.filename,
+    );
+
+    ModelCatalogItemResponse {
+        id: model.id,
+        display_name: model.display_name,
+        repo_id: model.repo_id,
+        filename: model.filename,
+        backend_ids: model.backend_ids,
+        is_vad_model,
+        status: computed_status,
+        local_path: model.local_path,
+        last_downloaded_at: model.last_downloaded_at.map(|v| v.to_rfc3339()),
+        pending_task_id: pending_task.map(|t| t.id.clone()),
+        pending_task_status: pending_task.map(|t| t.status.clone()),
+    }
+}
+
 fn resolve_backend_channel(
     state: &AppState,
     backend_id: &str,
@@ -144,9 +229,7 @@ fn workers_config_key_for_backend(backend_id: &str) -> Option<&'static str> {
 fn parse_positive_u32(raw: &str, key: &str) -> Result<u32, ServerError> {
     let trimmed = raw.trim();
     let parsed = trimmed.parse::<u32>().map_err(|_| {
-        ServerError::BadRequest(format!(
-            "config key '{key}' must be a positive integer"
-        ))
+        ServerError::BadRequest(format!("config key '{key}' must be a positive integer"))
     })?;
 
     if parsed == 0 {
@@ -180,14 +263,7 @@ fn detect_whisper_vad_model(
     );
 
     [
-        " vad",
-        "vad ",
-        "-vad",
-        "_vad",
-        "vad-",
-        "vad_",
-        "silero",
-        "fsmn-vad",
+        " vad", "vad ", "-vad", "_vad", "vad-", "vad_", "silero", "fsmn-vad",
     ]
     .iter()
     .any(|needle| haystack.contains(needle))
@@ -296,19 +372,11 @@ async fn resolve_diffusion_context_params(
     }
 
     async fn get_str(state: &AppState, key: &str) -> Result<String, ServerError> {
-        Ok(state
-            .store
-            .get_config_value(key)
-            .await?
-            .unwrap_or_default())
+        Ok(state.store.get_config_value(key).await?.unwrap_or_default())
     }
 
     async fn get_bool(state: &AppState, key: &str) -> Result<bool, ServerError> {
-        let raw = state
-            .store
-            .get_config_value(key)
-            .await?
-            .unwrap_or_default();
+        let raw = state.store.get_config_value(key).await?.unwrap_or_default();
         Ok(["1", "true", "yes"].contains(&raw.trim().to_lowercase().as_str()))
     }
 
@@ -355,6 +423,141 @@ fn map_grpc_model_error(action: &str, err: anyhow::Error) -> ServerError {
     ServerError::Internal(format!("grpc {action} failed: {err:#}"))
 }
 
+async fn latest_pending_download_task_for_model(
+    state: &AppState,
+    model_id: &str,
+) -> Result<Option<TaskRecord>, ServerError> {
+    let tasks = state.store.list_tasks(Some("model_download")).await?;
+    Ok(tasks
+        .into_iter()
+        .filter(|task| {
+            task.model_id.as_deref() == Some(model_id)
+                && matches!(task.status.as_str(), "pending" | "running")
+        })
+        .max_by_key(|task| task.updated_at))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/models",
+    tag = "models",
+    request_body = CreateModelRequest,
+    responses(
+        (status = 200, description = "Model catalog entry created", body = ModelCatalogItemResponse),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+pub async fn create_model(
+    State(state): State<Arc<AppState>>,
+    Json(req): Json<CreateModelRequest>,
+) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
+    validate_catalog_fields(&req.display_name, &req.repo_id, &req.filename)?;
+    let backend_ids = normalize_backend_ids(&req.backend_ids)?;
+
+    let now = Utc::now();
+    let record = ModelCatalogRecord {
+        id: uuid::Uuid::new_v4().to_string(),
+        display_name: req.display_name.trim().to_owned(),
+        repo_id: req.repo_id.trim().to_owned(),
+        filename: req.filename.trim().to_owned(),
+        backend_ids,
+        local_path: None,
+        last_download_task_id: None,
+        last_downloaded_at: None,
+        created_at: now,
+        updated_at: now,
+    };
+
+    state.store.insert_model(record.clone()).await?;
+    Ok(Json(to_model_catalog_item_response(record, None)))
+}
+
+#[utoipa::path(
+    put,
+    path = "/v1/models/{id}",
+    tag = "models",
+    request_body = UpdateModelRequest,
+    params(
+        ("id" = String, Path, description = "Model catalog entry ID")
+    ),
+    responses(
+        (status = 200, description = "Model catalog entry updated", body = ModelCatalogItemResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Model not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+pub async fn update_model(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+    Json(req): Json<UpdateModelRequest>,
+) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
+    let existing = state
+        .store
+        .get_model(&id)
+        .await?
+        .ok_or_else(|| ServerError::NotFound(format!("model {id} not found")))?;
+
+    let display_name = req
+        .display_name
+        .unwrap_or(existing.display_name)
+        .trim()
+        .to_owned();
+    let repo_id = req.repo_id.unwrap_or(existing.repo_id).trim().to_owned();
+    let filename = req.filename.unwrap_or(existing.filename).trim().to_owned();
+    let backend_ids = if let Some(ids) = req.backend_ids {
+        normalize_backend_ids(&ids)?
+    } else {
+        existing.backend_ids
+    };
+
+    validate_catalog_fields(&display_name, &repo_id, &filename)?;
+
+    state
+        .store
+        .update_model_metadata(&id, &display_name, &repo_id, &filename, &backend_ids)
+        .await?;
+
+    let updated = state
+        .store
+        .get_model(&id)
+        .await?
+        .ok_or_else(|| ServerError::NotFound(format!("model {id} not found after update")))?;
+    let pending_task = latest_pending_download_task_for_model(&state, &id).await?;
+
+    Ok(Json(to_model_catalog_item_response(
+        updated,
+        pending_task.as_ref(),
+    )))
+}
+
+#[utoipa::path(
+    delete,
+    path = "/v1/models/{id}",
+    tag = "models",
+    params(
+        ("id" = String, Path, description = "Model catalog entry ID")
+    ),
+    responses(
+        (status = 200, description = "Model catalog entry deleted", body = serde_json::Value),
+        (status = 404, description = "Model not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+pub async fn delete_model(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<String>,
+) -> Result<Json<serde_json::Value>, ServerError> {
+    let exists = state.store.get_model(&id).await?;
+    if exists.is_none() {
+        return Err(ServerError::NotFound(format!("model {id} not found")));
+    }
+
+    state.store.delete_model(&id).await?;
+    Ok(Json(serde_json::json!({ "id": id, "status": "deleted" })))
+}
+
 #[utoipa::path(
     get,
     path = "/v1/models",
@@ -394,42 +597,16 @@ pub async fn list_models(
     let mut items = Vec::with_capacity(models.len());
     for model in models {
         let pending_task = pending_by_model.get(&model.id);
-        let computed_status = if model.local_path.is_some() {
-            ModelListStatus::Downloaded
-        } else if pending_task.is_some() {
-            ModelListStatus::Pending
-        } else {
-            ModelListStatus::NotDownloaded
-        };
+        let item = to_model_catalog_item_response(model, pending_task);
 
         let include = match q.status {
             ModelListStatus::All => true,
-            _ => q.status == computed_status,
+            _ => q.status == item.status,
         };
         if !include {
             continue;
         }
-
-        let is_vad_model = detect_whisper_vad_model(
-            &model.backend_ids,
-            &model.display_name,
-            &model.repo_id,
-            &model.filename,
-        );
-
-        items.push(ModelCatalogItemResponse {
-            id: model.id,
-            display_name: model.display_name,
-            repo_id: model.repo_id,
-            filename: model.filename,
-            backend_ids: model.backend_ids,
-            is_vad_model,
-            status: computed_status,
-            local_path: model.local_path,
-            last_downloaded_at: model.last_downloaded_at.map(|v| v.to_rfc3339()),
-            pending_task_id: pending_task.map(|t| t.id.clone()),
-            pending_task_status: pending_task.map(|t| t.status.clone()),
-        });
+        items.push(item);
     }
 
     Ok(Json(items))
@@ -811,6 +988,7 @@ pub async fn download_model(
         let result = tokio::task::spawn_blocking(move || {
             let api = if let Some(dir) = model_cache_dir {
                 ApiBuilder::new()
+                    // TODO: support with_endpoint and proxy
                     .with_cache_dir(std::path::PathBuf::from(dir))
                     .build()
                     .map_err(|e| format!("hf-hub build failed: {e}"))?

@@ -344,16 +344,6 @@ export default function ImagePage() {
 
   return (
     <div className="container mx-auto px-4 py-6 max-w-6xl space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Image Generation</h1>
-        {isGenerating && (
-          <Badge variant="secondary" className="gap-1">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Generating…
-          </Badge>
-        )}
-      </div>
-
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* ── Left panel: controls ── */}
         <div className="lg:col-span-1 space-y-4">
