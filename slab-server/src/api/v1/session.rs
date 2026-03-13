@@ -7,10 +7,10 @@ use chrono::Utc;
 use utoipa::OpenApi;
 use uuid::Uuid;
 
-use crate::infra::db::{ChatSession, ChatStore};
+use crate::infra::db::{ChatSession, ChatStore, SessionStore};
 use crate::error::ServerError;
-use crate::schemas::v1::session::{CreateSessionRequest, MessageResponse, SessionResponse};
-use crate::context::AppState;
+use crate::api::dto::v1::session::{CreateSessionRequest, MessageResponse, SessionResponse};
+use crate::context::{AppState, ModelState};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -40,7 +40,7 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 pub async fn create_session(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Json(req): Json<CreateSessionRequest>,
 ) -> Result<Json<SessionResponse>, ServerError> {
     let now = Utc::now();
@@ -51,7 +51,7 @@ pub async fn create_session(
         created_at: now,
         updated_at: now,
     };
-    state.store.create_session(session.clone()).await?;
+    state.store().create_session(session.clone()).await?;
     Ok(Json(session.to_response()))
 }
 
@@ -66,9 +66,9 @@ pub async fn create_session(
     )
 )]
 pub async fn list_sessions(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
 ) -> Result<Json<Vec<SessionResponse>>, ServerError> {
-    let sessions = state.store.list_sessions().await?;
+    let sessions = state.store().list_sessions().await?;
     Ok(Json(
         sessions.into_iter().map(|s| s.to_response()).collect(),
     ))
@@ -85,10 +85,10 @@ pub async fn list_sessions(
     )
 )]
 pub async fn delete_session(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    state.store.delete_session(&id).await?;
+    state.store().delete_session(&id).await?;
     Ok(Json(serde_json::json!({ "deleted": true })))
 }
 
@@ -103,10 +103,10 @@ pub async fn delete_session(
     )
 )]
 pub async fn list_session_messages(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Path(id): Path<String>,
 ) -> Result<Json<Vec<MessageResponse>>, ServerError> {
-    let messages = state.store.list_messages(&id).await?;
+    let messages = state.store().list_messages(&id).await?;
     Ok(Json(
         messages.into_iter().map(|m| m.to_response()).collect(),
     ))

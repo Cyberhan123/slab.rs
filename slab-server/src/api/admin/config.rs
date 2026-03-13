@@ -9,8 +9,8 @@ use utoipa::OpenApi;
 
 use crate::infra::db::ConfigStore;
 use crate::error::ServerError;
-use crate::schemas::admin::config::{ConfigEntry, SetConfigBody};
-use crate::context::AppState;
+use crate::api::dto::admin::config::{ConfigEntry, SetConfigBody};
+use crate::context::{AppState, ModelState};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -35,9 +35,9 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 pub async fn list_config(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
 ) -> Result<Json<Vec<ConfigEntry>>, ServerError> {
-    let entries = state.store.list_config_values().await?;
+    let entries = state.store().list_config_values().await?;
     Ok(Json(
         entries
             .into_iter()
@@ -57,11 +57,11 @@ pub async fn list_config(
     )
 )]
 pub async fn get_config_value(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Path(key): Path<String>,
 ) -> Result<Json<ConfigEntry>, ServerError> {
     let (name, value) = state
-        .store
+        .store()
         .get_config_entry(&key)
         .await?
         .ok_or_else(|| ServerError::NotFound(format!("config key '{key}' not found")))?;
@@ -80,16 +80,16 @@ pub async fn get_config_value(
     )
 )]
 pub async fn set_config_value(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Path(key): Path<String>,
     Json(body): Json<SetConfigBody>,
 ) -> Result<Json<ConfigEntry>, ServerError> {
     state
-        .store
+        .store()
         .set_config_entry(&key, body.name.as_deref(), &body.value)
         .await?;
     let (name, value) = state
-        .store
+        .store()
         .get_config_entry(&key)
         .await?
         .ok_or_else(|| ServerError::NotFound(format!("config key '{key}' not found")))?;

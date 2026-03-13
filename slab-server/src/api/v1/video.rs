@@ -16,8 +16,8 @@ use utoipa::OpenApi;
 use crate::context::{AppState, SubmitOperation, WorkerState};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
-use crate::schemas::v1::task::{OperationAcceptedResponse, TaskResultPayload};
-use crate::schemas::v1::video::VideoGenerationRequest;
+use crate::api::dto::v1::task::{OperationAcceptedResponse, TaskResultPayload};
+use crate::api::dto::v1::video::VideoGenerationRequest;
 
 const MAX_PROMPT_BYTES: usize = 128 * 1024;
 const MAX_VIDEO_FRAMES: i32 = 120;

@@ -9,7 +9,7 @@ use chrono::Utc;
 use tracing::{debug, warn};
 use utoipa::OpenApi;
 
-use crate::schemas::v1::system::{GpuDeviceStatus, GpuStatusResponse};
+use crate::api::dto::v1::system::{GpuDeviceStatus, GpuStatusResponse};
 use crate::context::AppState;
 
 #[derive(OpenApi)]

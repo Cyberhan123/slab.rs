@@ -12,8 +12,8 @@ use crate::domain::services::{
     GetTaskResultUseCase, TaskApplicationService, TaskResultPort, to_task_result_response,
 };
 use crate::error::ServerError;
-use crate::schemas::v1::task::{TaskResponse, TaskResultPayload, TaskTypeQuery};
-use crate::context::AppState;
+use crate::api::dto::v1::task::{TaskResponse, TaskResultPayload, TaskTypeQuery};
+use crate::context::{AppState, WorkerState};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -43,7 +43,7 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 pub async fn list_tasks(
-    State(state): State<Arc<AppState>>,
+    State(state): State<WorkerState>,
     Query(q): Query<TaskTypeQuery>,
 ) -> Result<Json<Vec<TaskResponse>>, ServerError> {
     let service = TaskApplicationService::new(state);
@@ -66,7 +66,7 @@ pub async fn list_tasks(
     )
 )]
 pub async fn get_task(
-    State(state): State<Arc<AppState>>,
+    State(state): State<WorkerState>,
     Path(id): Path<String>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let service = TaskApplicationService::new(state);
@@ -89,7 +89,7 @@ pub async fn get_task(
     )
 )]
 pub async fn get_task_result(
-    State(state): State<Arc<AppState>>,
+    State(state): State<WorkerState>,
     Path(id): Path<String>,
 ) -> Result<Json<TaskResultPayload>, ServerError> {
     let use_case = GetTaskResultUseCase::new(TaskResultRoutePort { state });
@@ -98,7 +98,7 @@ pub async fn get_task_result(
 }
 
 struct TaskResultRoutePort {
-    state: Arc<AppState>,
+    state: WorkerState,
 }
 
 impl TaskResultPort for TaskResultRoutePort {
@@ -108,7 +108,7 @@ impl TaskResultPort for TaskResultRoutePort {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<TaskResult, ServerError>> + Send + '_>,
     > {
-        let state = Arc::clone(&self.state);
+        let state = self.state.clone();
         Box::pin(async move {
             let service = TaskApplicationService::new(state);
             service.get_task_result(&id).await
@@ -131,7 +131,7 @@ impl TaskResultPort for TaskResultRoutePort {
     )
 )]
 pub async fn cancel_task(
-    State(state): State<Arc<AppState>>,
+    State(state): State<WorkerState>,
     Path(id): Path<String>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let service = TaskApplicationService::new(state);
@@ -154,7 +154,7 @@ pub async fn cancel_task(
     )
 )]
 pub async fn restart_task(
-    State(state): State<Arc<AppState>>,
+    State(state): State<WorkerState>,
     Path(id): Path<String>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let service = TaskApplicationService::new(state);

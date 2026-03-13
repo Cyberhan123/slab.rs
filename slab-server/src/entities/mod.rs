@@ -1,14 +1,19 @@
+pub mod chat;
 pub mod config;
-pub mod contexts;
+pub mod model;
+pub mod session;
+pub mod task;
 pub(crate) mod dao;
 
+pub use chat::ChatStore;
 pub use config::ConfigStore;
-pub use contexts::chat::application::ports::ChatRepository;
-pub use contexts::chat::domain::{ChatMessage, ChatSession};
-pub use contexts::model::application::ports::ModelRepository;
-pub use contexts::model::domain::ModelCatalogRecord;
-pub use contexts::task::application::ports::TaskRepository;
-pub use contexts::task::domain::{TaskRecord, TaskStatus};
+pub use dao::chat::ChatMessage;
+pub use dao::model::ModelCatalogRecord;
+pub use dao::session::ChatSession;
+pub use dao::task::TaskRecord;
+pub use model::ModelStore;
+pub use session::SessionStore;
+pub use task::TaskStore;
 
 use std::str::FromStr;
 
@@ -28,12 +33,3 @@ impl SqlxStore {
 }
 
 pub type AnyStore = SqlxStore;
-pub use ChatRepository as ChatStore;
-pub use ChatRepository as SessionStore;
-pub use ModelRepository as ModelStore;
-pub use TaskRepository as TaskStore;
-
-// Ensure SQLx implementations are linked.
-use contexts::chat::infrastructure::persistence::sqlx as _chat_sqlx_impl;
-use contexts::model::infrastructure::persistence::sqlx as _model_sqlx_impl;
-use contexts::task::infrastructure::persistence::sqlx as _task_sqlx_impl;

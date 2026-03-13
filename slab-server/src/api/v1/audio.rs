@@ -12,8 +12,8 @@ use utoipa::OpenApi;
 use crate::context::{AppState, SubmitOperation, WorkerState};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
-use crate::schemas::v1::audio::{CompletionRequest, TranscribeDecodeRequest, TranscribeVadRequest};
-use crate::schemas::v1::task::OperationAcceptedResponse;
+use crate::api::dto::v1::audio::{CompletionRequest, TranscribeDecodeRequest, TranscribeVadRequest};
+use crate::api::dto::v1::task::OperationAcceptedResponse;
 
 #[derive(OpenApi)]
 #[openapi(paths(transcribe), components(schemas(OperationAcceptedResponse)))]

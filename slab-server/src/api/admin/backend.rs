@@ -13,14 +13,14 @@ use tracing::{info, warn};
 use utoipa::OpenApi;
 
 use crate::context::worker_state::OperationContext;
-use crate::context::{AppState, SubmitOperation, WorkerState};
+use crate::context::{AppState, ModelState, SubmitOperation, WorkerState};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
-use crate::schemas::admin::backend::{
+use crate::api::dto::admin::backend::{
     BackendListResponse, BackendStatusResponse, BackendTypeQuery, DownloadLibRequest,
     ReloadLibRequest,
 };
-use crate::schemas::v1::task::OperationAcceptedResponse;
+use crate::api::dto::v1::task::OperationAcceptedResponse;
 use strum::IntoEnumIterator;
 
 type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
@@ -185,13 +185,13 @@ async fn run_libfetch_download(
     )
 )]
 pub async fn backend_status(
-    State(state): State<Arc<AppState>>,
+    State(model_state): State<ModelState>,
     Query(BackendTypeQuery { backend_id }): Query<BackendTypeQuery>,
 ) -> Result<Json<BackendStatusResponse>, ServerError> {
     let backend = Backend::from_str(&backend_id)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {backend_id}")))?;
     let canonical_backend = backend.to_string();
-    let status = if state.grpc.has_backend(&canonical_backend) {
+    let status = if model_state.grpc().has_backend(&canonical_backend) {
         "ready"
     } else {
         "disabled"
@@ -213,12 +213,12 @@ pub async fn backend_status(
     )
 )]
 pub async fn list_backends(
-    State(state): State<Arc<AppState>>,
+    State(model_state): State<ModelState>,
 ) -> Result<Json<BackendListResponse>, ServerError> {
     let backends = Backend::iter()
         .map(|name| {
             let backend_str = name.to_string();
-            let status = if state.grpc.has_backend(&backend_str) {
+            let status = if model_state.grpc().has_backend(&backend_str) {
                 "ready"
             } else {
                 "disabled"
@@ -298,7 +298,7 @@ pub async fn download_lib(
     )
 )]
 pub async fn reload_lib(
-    State(state): State<Arc<AppState>>,
+    State(model_state): State<ModelState>,
     Json(req): Json<ReloadLibRequest>,
 ) -> Result<Json<BackendStatusResponse>, ServerError> {
     let bid = &req.backend_id;
@@ -317,8 +317,8 @@ pub async fn reload_lib(
     let backend = Backend::from_str(bid)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {bid}")))?;
     let canonical_backend = backend.to_string();
-    let channel = state
-        .grpc
+    let channel = model_state
+        .grpc()
         .backend_channel(&canonical_backend)
         .ok_or_else(|| {
             ServerError::BackendNotReady(format!(

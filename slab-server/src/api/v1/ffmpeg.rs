@@ -11,8 +11,8 @@ use utoipa::OpenApi;
 
 use crate::context::{AppState, SubmitOperation, WorkerState};
 use crate::error::ServerError;
-use crate::schemas::v1::ffmpeg::ConvertRequest;
-use crate::schemas::v1::task::OperationAcceptedResponse;
+use crate::api::dto::v1::ffmpeg::ConvertRequest;
+use crate::api::dto::v1::task::OperationAcceptedResponse;
 
 #[derive(OpenApi)]
 #[openapi(

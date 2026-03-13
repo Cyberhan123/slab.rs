@@ -8,13 +8,15 @@
 //! - admin `/admin` routes (optionally protected by bearer token)
 
 mod admin;
+pub mod dto;
 pub mod doc;
 pub mod health;
+mod middleware;
 pub(crate) mod v1;
-use crate::middleware::{cors, trace};
+use crate::api::middleware::{cors, trace};
 use crate::context::AppState;
 use axum::{
-    middleware::{self},
+    middleware as axum_middleware,
     Router,
 };
 use std::sync::Arc;
@@ -37,7 +39,7 @@ pub fn build(state: Arc<AppState>) -> Router {
     }
 
     app.layer(ServiceBuilder::new().layer(cors::cors_layer(state.clone())))
-        .layer(middleware::from_fn_with_state(
+        .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             trace::trace_middleware,
         ))
