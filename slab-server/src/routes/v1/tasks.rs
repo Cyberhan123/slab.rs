@@ -7,7 +7,7 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use utoipa::OpenApi;
 
-use crate::contexts::task::application::TaskApplicationService;
+use crate::bounded_contexts::task_management::application::TaskApplicationService;
 use crate::error::ServerError;
 use crate::schemas::v1::task::{TaskResponse, TaskResultPayload, TaskTypeQuery};
 use crate::state::AppState;

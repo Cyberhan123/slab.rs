@@ -1,8 +1,8 @@
 //! slab-server entry point.
 //! Runs in supervisor mode by default.
 
+mod bounded_contexts;
 mod config;
-mod contexts;
 mod entities;
 mod error;
 mod grpc;
