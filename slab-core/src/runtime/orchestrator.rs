@@ -627,4 +627,15 @@ impl Orchestrator {
     ) -> Option<crate::runtime::backend::protocol::StreamHandle> {
         self.storage.take_stream(task_id).await
     }
+
+    /// Remove the in-memory task record for `task_id`.
+    ///
+    /// Call this once the task has reached a terminal state **and** its result
+    /// (or stream handle) has been fully consumed.  Failing to call this on
+    /// long-lived processes will cause the task map to grow without bound.
+    ///
+    /// This is a no-op if `task_id` is not found (e.g. already purged).
+    pub async fn purge_task(&self, task_id: TaskId) {
+        self.storage.remove_task(task_id).await;
+    }
 }

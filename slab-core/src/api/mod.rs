@@ -353,6 +353,19 @@ pub fn cancel(task_id: TaskId) -> Result<(), RuntimeError> {
     Ok(())
 }
 
+/// Remove the in-memory task record for `task_id`.
+///
+/// Call this once the task has reached a terminal state **and** its result
+/// (or stream handle) has been fully consumed.  Failing to call this on
+/// long-lived processes will cause the task map to grow without bound.
+///
+/// This is a no-op if `task_id` is not found (e.g. already purged).
+pub async fn purge_task(task_id: TaskId) -> Result<(), RuntimeError> {
+    let rt = CallBuilder::runtime()?;
+    rt.orchestrator.purge_task(task_id).await;
+    Ok(())
+}
+
 /// Check if a backend is ready to accept inference requests.
 ///
 /// Returns `true` if the backend has both its library and model loaded.
@@ -670,7 +683,7 @@ impl CallBuilder {
         let task_id = builder.run().await?;
 
         // Poll until the task reaches a terminal state.
-        tokio::time::timeout(timeout, async {
+        let wait_result = tokio::time::timeout(timeout, async {
             loop {
                 match rt.orchestrator.get_status(task_id).await {
                     Err(e) => return Err(e),
@@ -683,8 +696,24 @@ impl CallBuilder {
                 }
             }
         })
-        .await
-        .map_err(|_| RuntimeError::Timeout)??;
+        .await;
+
+        match wait_result {
+            // Deadline expired: cancel the still-running task and remove its
+            // in-memory record so the map does not grow without bound.
+            Err(_timeout) => {
+                rt.orchestrator.cancel(task_id);
+                rt.orchestrator.purge_task(task_id).await;
+                return Err(RuntimeError::Timeout);
+            }
+            // Task reached a non-success terminal state (Failed / Cancelled).
+            // Remove the record since the result will never be consumed.
+            Ok(Err(e)) => {
+                rt.orchestrator.purge_task(task_id).await;
+                return Err(e);
+            }
+            Ok(Ok(())) => {}
+        }
 
         // Extract result bytes.
         let result = rt
@@ -692,6 +721,9 @@ impl CallBuilder {
             .get_result(task_id)
             .await
             .ok_or(RuntimeError::TaskNotFound { task_id })?;
+
+        // Remove the record now that the result has been consumed.
+        rt.orchestrator.purge_task(task_id).await;
 
         payload_to_bytes(result)
     }
@@ -732,7 +764,7 @@ impl CallBuilder {
             .await?;
 
         // Wait for the backend to open the stream (task → SucceededStreaming).
-        tokio::time::timeout(STREAM_INIT_TIMEOUT, async {
+        let init_result = tokio::time::timeout(STREAM_INIT_TIMEOUT, async {
             loop {
                 match rt.orchestrator.get_status(task_id).await {
                     Err(e) => return Err(e),
@@ -744,14 +776,32 @@ impl CallBuilder {
                 }
             }
         })
-        .await
-        .map_err(|_| RuntimeError::Timeout)??;
+        .await;
+
+        match init_result {
+            // Stream init timed out: cancel and clean up.
+            Err(_timeout) => {
+                rt.orchestrator.cancel(task_id);
+                rt.orchestrator.purge_task(task_id).await;
+                return Err(RuntimeError::Timeout);
+            }
+            // Task failed before the stream was opened: clean up.
+            Ok(Err(e)) => {
+                rt.orchestrator.purge_task(task_id).await;
+                return Err(e);
+            }
+            Ok(Ok(())) => {}
+        }
 
         let handle = rt
             .orchestrator
             .take_stream(task_id)
             .await
             .ok_or(RuntimeError::TaskNotFound { task_id })?;
+
+        // The stream handle has been transferred to the caller; remove the
+        // in-memory task record so the map does not grow without bound.
+        rt.orchestrator.purge_task(task_id).await;
 
         // Convert the mpsc::Receiver<StreamChunk> into a Stream<Item=Result<Bytes>>.
         let stream = futures::stream::unfold(handle, |mut rx| async move {
