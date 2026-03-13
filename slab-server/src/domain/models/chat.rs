@@ -2,6 +2,17 @@ use genai::chat::ChatMessage as GenaiChatMessage;
 
 use crate::api::v1::chat::schema::{ChatCompletionRequest, ChatMessage};
 use crate::infra::db;
+use futures::stream::BoxStream;
+
+pub enum ChatStreamChunk {
+    Data(String),
+    Comment(String),
+}
+
+pub enum ChatCompletionOutput {
+    Json(ChatCompletionResult),
+    Stream(BoxStream<'static, ChatStreamChunk>),
+}
 
 #[derive(Debug, Clone)]
 pub struct ConversationMessage {

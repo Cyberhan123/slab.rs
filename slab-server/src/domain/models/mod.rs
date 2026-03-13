@@ -17,6 +17,7 @@ pub use backend::{
 pub use chat::{
     ChatCompletionCommand, ChatCompletionResult, ChatModelOption, ChatModelSource,
     ChatResultChoice, ConversationMessage,
+    ChatCompletionOutput, ChatStreamChunk,
 };
 pub use config::{ConfigEntryView, SetConfigValueCommand};
 pub use ffmpeg::FfmpegConvertCommand;

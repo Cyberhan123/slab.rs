@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -29,19 +29,29 @@ export default function Task() {
   const [taskType, setTaskType] = useState<string>('all');
 
   // API queries and mutations
-  const { data: tasks, error: tasksError, isLoading: tasksLoading, refetch: refetchTasks } = api.useQuery('get', '/v1/tasks', {
-    params: {
-      query: taskType !== 'all' ? { type: taskType } : undefined
+  const { data: tasks, error: tasksError, isLoading: tasksLoading, refetch: refetchTasks } = api.useQuery(
+    'get',
+    '/v1/tasks',
+    {
+      params: {
+        path: { type: null },
+      },
     }
-  });
+  );
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
   const getTaskResultMutation = api.useMutation('get', '/v1/tasks/{id}/result');
   const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
   const restartTaskMutation = api.useMutation('post', '/v1/tasks/{id}/restart');
 
+  const filteredTasks = useMemo(() => {
+    if (!Array.isArray(tasks)) return [];
+    if (taskType === 'all') return tasks;
+    return tasks.filter((task) => task.task_type === taskType);
+  }, [taskType, tasks]);
+
   // Auto-refresh for running tasks in the list
   useEffect(() => {
-    const hasRunningTasks = tasks?.some(task => task.status === 'running');
+    const hasRunningTasks = filteredTasks.some(task => task.status === 'running');
     if (!hasRunningTasks) return;
 
     const interval = setInterval(() => {
@@ -49,7 +59,7 @@ export default function Task() {
     }, 3000); // Poll every 3 seconds
 
     return () => clearInterval(interval);
-  }, [tasks, refetchTasks]);
+  }, [filteredTasks, refetchTasks]);
 
   // Auto-refresh for selected running task
   useEffect(() => {
@@ -213,7 +223,7 @@ export default function Task() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {tasks?.length === 0 ? (
+                  {filteredTasks.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
                         <div className="flex flex-col items-center space-y-2">
@@ -223,7 +233,7 @@ export default function Task() {
                       </TableCell>
                     </TableRow>
                   ) : (
-                    tasks?.map((task) => (
+                    filteredTasks.map((task) => (
                       <TableRow key={task.id} className="group">
                         <TableCell className="max-w-[220px] truncate font-mono text-xs font-medium" title={task.id}>
                           {task.id}

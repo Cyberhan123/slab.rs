@@ -41,7 +41,7 @@ const useTranscribe = () => {
     const handleTranscribe = async (
         value: File | string,
         options?: TranscribeOptions
-    ): Promise<{ task_id: string }> => {
+    ): Promise<{ operation_id: string }> => {
         if (!isTauri) {
             throw new Error('Web audio upload is not implemented yet. Please use the desktop app.');
         }
@@ -64,7 +64,7 @@ const useTranscribe = () => {
 
         const response = await mutateAsync({
             body
-        }) as { task_id: string };
+        }) as { operation_id: string };
 
         return response;
     }

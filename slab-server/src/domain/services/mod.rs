@@ -1,27 +1,58 @@
-mod app_services;
-mod audio_service;
-mod backend_service;
-mod chat_completion;
-mod chat_service;
-mod config_service;
-mod ffmpeg_service;
-mod image_service;
-mod model_service;
-mod session_service;
-mod system_service;
-mod task_application_service;
-mod video_service;
+mod audio;
+mod backend;
+mod chat;
+mod config;
+mod ffmpeg;
+mod image;
+mod model;
+mod session;
+mod system;
+mod task;
+mod video;
 
-pub use app_services::AppServices;
-pub use audio_service::AudioService;
-pub use backend_service::BackendService;
-pub use chat_completion::{ChatCompletionOutput, ChatStreamChunk};
-pub use chat_service::ChatService;
-pub use config_service::ConfigService;
-pub use ffmpeg_service::FfmpegService;
-pub use image_service::ImageService;
-pub use model_service::ModelService;
-pub use session_service::SessionService;
-pub use system_service::SystemService;
-pub use task_application_service::TaskApplicationService;
-pub use video_service::VideoService;
+pub use audio::AudioService;
+pub use backend::BackendService;
+pub use chat::ChatService;
+pub use config::ConfigService;
+pub use ffmpeg::FfmpegService;
+pub use image::ImageService;
+pub use model::ModelService;
+pub use session::SessionService;
+pub use system::SystemService;
+pub use task::TaskApplicationService;
+pub use video::VideoService;
+
+use crate::context::{ModelState, WorkerState};
+
+#[derive(Clone)]
+pub struct AppServices {
+    pub audio: AudioService,
+    pub backend: BackendService,
+    pub chat: ChatService,
+    pub config: ConfigService,
+    pub ffmpeg: FfmpegService,
+    pub image: ImageService,
+    pub model: ModelService,
+    pub session: SessionService,
+    pub system: SystemService,
+    pub task_application: TaskApplicationService,
+    pub video: VideoService,
+}
+
+impl AppServices {
+    pub fn new(model_state: ModelState, worker_state: WorkerState) -> Self {
+        Self {
+            audio: AudioService::new(worker_state.clone()),
+            backend: BackendService::new(model_state.clone(), worker_state.clone()),
+            chat: ChatService::new(model_state.clone()),
+            config: ConfigService::new(model_state.clone()),
+            ffmpeg: FfmpegService::new(worker_state.clone()),
+            image: ImageService::new(worker_state.clone()),
+            model: ModelService::new(model_state.clone(), worker_state.clone()),
+            session: SessionService::new(model_state.clone()),
+            system: SystemService::new(),
+            task_application: TaskApplicationService::new(worker_state.clone()),
+            video: VideoService::new(worker_state),
+        }
+    }
+}
