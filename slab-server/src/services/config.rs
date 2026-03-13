@@ -9,7 +9,7 @@ use utoipa::OpenApi;
 
 use crate::infra::db::ConfigStore;
 use crate::error::ServerError;
-use crate::api::dto::admin::config::{ConfigEntry, SetConfigBody};
+use crate::api::dto::v1::config::{ConfigEntry, SetConfigBody};
 use crate::context::{AppState, ModelState};
 
 #[derive(OpenApi)]
@@ -27,8 +27,8 @@ pub fn router() -> Router<Arc<AppState>> {
 
 #[utoipa::path(
     get,
-    path = "/admin/config",
-    tag = "admin",
+    path = "/v1/config",
+    tag = "config",
     responses(
         (status = 200, description = "List of all configuration entries", body = Vec<ConfigEntry>),
         (status = 401, description = "Unauthorised (management token required)"),
@@ -48,8 +48,8 @@ pub async fn list_config(
 
 #[utoipa::path(
     get,
-    path = "/admin/config/{key}",
-    tag = "admin",
+    path = "/v1/config/{key}",
+    tag = "config",
     responses(
         (status = 200, description = "Get a configuration entry by key", body = ConfigEntry),
         (status = 401, description = "Unauthorised (management token required)"),
@@ -70,8 +70,8 @@ pub async fn get_config_value(
 
 #[utoipa::path(
     put,
-    path = "/admin/config/{key}",
-    tag = "admin",
+    path = "/v1/config/{key}",
+    tag = "config",
     request_body = SetConfigBody,
     responses(
         (status = 200, description = "Set a configuration entry by key", body = ConfigEntry),

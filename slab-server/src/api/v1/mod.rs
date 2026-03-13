@@ -1,25 +1,55 @@
-use crate::context::AppState;
-use crate::api::{model, worker};
-use utoipa::OpenApi;
+mod audio;
+mod backend;
+mod chat;
+mod config;
+mod ffmpeg;
+mod images;
+mod models;
+mod session;
+mod system;
+mod tasks;
+mod video;
+
+use std::sync::Arc;
 
 use axum::Router;
-use std::sync::Arc;
+use utoipa::OpenApi;
+
+use crate::context::AppState;
 
 #[derive(OpenApi)]
 #[openapi()]
 pub struct V1Api;
 
 /// Routes nested under `/v1`.
-pub fn router() -> Router<Arc<AppState>> {
+pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
-        .merge(model::router())
-        .merge(worker::router())
+        .merge(chat::router())
+        .merge(models::router())
+        .merge(session::router())
+        .merge(audio::router())
+        .merge(images::router())
+        .merge(video::router())
+        .merge(ffmpeg::router())
+        .merge(system::router())
+        .merge(tasks::router())
+        .merge(config::router(state.clone()))
+        .merge(backend::router(state))
 }
 
 pub fn api_docs() -> utoipa::openapi::OpenApi {
     let mut spec = V1Api::openapi();
-    model::merge_api_docs(&mut spec);
-    worker::merge_api_docs(&mut spec);
+    spec.merge(chat::ChatApi::openapi());
+    spec.merge(models::ModelsApi::openapi());
+    spec.merge(session::SessionApi::openapi());
+    spec.merge(audio::AudioApi::openapi());
+    spec.merge(images::ImagesApi::openapi());
+    spec.merge(video::VideoApi::openapi());
+    spec.merge(ffmpeg::FfmpegApi::openapi());
+    spec.merge(system::SystemApi::openapi());
+    spec.merge(tasks::TasksApi::openapi());
+    spec.merge(config::ConfigApi::openapi());
+    spec.merge(backend::BackendApi::openapi());
 
     spec
 }
