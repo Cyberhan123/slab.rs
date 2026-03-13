@@ -53,4 +53,3 @@ pub fn api_docs() -> utoipa::openapi::OpenApi {
 
     spec
 }
-

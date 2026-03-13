@@ -6,8 +6,8 @@ use crate::context::{SubmitOperation, WorkerState};
 use crate::error::ServerError;
 
 const ALLOWED_OUTPUT_FORMATS: &[&str] = &[
-    "mp3", "mp4", "wav", "flac", "ogg", "opus", "webm", "avi", "mkv", "mov", "aac", "m4a",
-    "m4v", "f32le", "pcm",
+    "mp3", "mp4", "wav", "flac", "ogg", "opus", "webm", "avi", "mkv", "mov", "aac", "m4a", "m4v",
+    "f32le", "pcm",
 ];
 
 #[derive(Clone)]
@@ -46,7 +46,10 @@ impl FfmpegService {
                 ALLOWED_OUTPUT_FORMATS.join(", ")
             )));
         }
-        if !tokio::fs::try_exists(&req.source_path).await.unwrap_or(false) {
+        if !tokio::fs::try_exists(&req.source_path)
+            .await
+            .unwrap_or(false)
+        {
             return Err(ServerError::BadRequest(format!(
                 "source_path '{}' does not exist or is not accessible",
                 req.source_path
@@ -155,7 +158,10 @@ mod test {
     #[test]
     fn accepts_allowed_formats() {
         for fmt in &["mp3", "mp4", "wav", "flac", "ogg"] {
-            assert!(ALLOWED_OUTPUT_FORMATS.contains(fmt), "{fmt} should be allowed");
+            assert!(
+                ALLOWED_OUTPUT_FORMATS.contains(fmt),
+                "{fmt} should be allowed"
+            );
         }
     }
 

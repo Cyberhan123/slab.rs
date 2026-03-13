@@ -104,4 +104,3 @@ mod tests {
         assert_eq!(decoded, b"\x89PNG\r\n\x1a\n");
     }
 }
-

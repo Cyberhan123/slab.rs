@@ -4,7 +4,7 @@ use uuid::Uuid;
 use crate::api::v1::session::schema::{CreateSessionRequest, MessageResponse, SessionResponse};
 use crate::context::ModelState;
 use crate::error::ServerError;
-use crate::infra::db::{ChatStore, ChatSession, SessionStore};
+use crate::infra::db::{ChatSession, ChatStore, SessionStore};
 
 #[derive(Clone)]
 pub struct SessionService {
@@ -34,7 +34,10 @@ impl SessionService {
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionResponse>, ServerError> {
         let sessions = self.state.store().list_sessions().await?;
-        Ok(sessions.into_iter().map(|session| session.to_response()).collect())
+        Ok(sessions
+            .into_iter()
+            .map(|session| session.to_response())
+            .collect())
     }
 
     pub async fn delete_session(&self, id: &str) -> Result<serde_json::Value, ServerError> {

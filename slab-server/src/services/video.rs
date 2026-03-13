@@ -69,9 +69,10 @@ impl VideoService {
             "video generation request"
         );
 
-        let generate_image_channel = self.state.grpc().generate_image_channel().ok_or_else(|| {
-            ServerError::BackendNotReady("diffusion gRPC endpoint is not configured".into())
-        })?;
+        let generate_image_channel =
+            self.state.grpc().generate_image_channel().ok_or_else(|| {
+                ServerError::BackendNotReady("diffusion gRPC endpoint is not configured".into())
+            })?;
 
         let fps = req.fps;
         let input_json = serde_json::json!({
@@ -292,7 +293,9 @@ fn decode_init_image(data_uri: &str) -> Result<(Vec<u8>, u32, u32, u32), ServerE
     };
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
-        .map_err(|error| ServerError::BadRequest(format!("init_image base64 decode failed: {error}")))?;
+        .map_err(|error| {
+            ServerError::BadRequest(format!("init_image base64 decode failed: {error}"))
+        })?;
     let image = image::load_from_memory(&bytes)
         .map_err(|error| ServerError::BadRequest(format!("init_image decode failed: {error}")))?;
     let rgb = image.to_rgb8();

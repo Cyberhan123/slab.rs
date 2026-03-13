@@ -1,8 +1,6 @@
 use crate::api::v1::tasks::schema::{TaskResponse, TaskResultPayload};
 use crate::context::WorkerState;
-use crate::domain::services::{
-    TaskApplicationService, to_task_result_response,
-};
+use crate::domain::services::{to_task_result_response, TaskApplicationService};
 use crate::error::ServerError;
 
 #[derive(Clone)]

@@ -729,4 +729,3 @@ async fn shutdown_signal(listen_stdin: bool) {
     }
     info!("shutdown signal received; starting graceful shutdown");
 }
-

@@ -63,4 +63,3 @@ impl FromRef<Arc<AppState>> for AppConfig {
         (*input.config).clone()
     }
 }
-

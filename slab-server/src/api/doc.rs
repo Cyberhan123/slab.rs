@@ -17,4 +17,3 @@ pub fn get_docs() -> utoipa::openapi::OpenApi {
     root.merge(v1::api_docs());
     root
 }
-
