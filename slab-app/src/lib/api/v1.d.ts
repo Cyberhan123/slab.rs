@@ -4,106 +4,6 @@
  */
 
 export interface paths {
-    "/admin/backends": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** List all registered backends and their status (`GET /admin/backends`). */
-        get: operations["list_backends"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/backends/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Download a backend shared library from a GitHub release (`POST /admin/backends/download`). */
-        post: operations["download_lib"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/backends/reload": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** Reload a backend with a new shared library path (`POST /admin/backends/reload`). */
-        post: operations["reload_lib"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/backends/status": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Get status of a model backend (`GET /admin/backends/status`). */
-        get: operations["backend_status"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_config"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/config/{key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_config_value"];
-        put: operations["set_config_value"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/health": {
         parameters: {
             query?: never;
@@ -134,8 +34,71 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Speech-to-text transcription (`POST /v1/audio/transcriptions`). */
         post: operations["transcribe"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backends": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_backends"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backends/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["download_lib"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backends/reload": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["reload_lib"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/backends/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["backend_status"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -151,7 +114,6 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** OpenAI chat completions (`POST /v1/chat/completions`). */
         post: operations["chat_completions"];
         delete?: never;
         options?: never;
@@ -168,6 +130,38 @@ export interface paths {
         };
         get: operations["list_chat_models"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_config"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/config/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_config_value"];
+        put: operations["set_config_value"];
         post?: never;
         delete?: never;
         options?: never;
@@ -200,11 +194,6 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Image generation (`POST /v1/images/generations`).
-         * @description Accepts both text-to-image and image-to-image generation requests.
-         *     The `mode` field selects the generation mode (default: `txt2img`).
-         */
         post: operations["generate_images"];
         delete?: never;
         options?: never;
@@ -235,7 +224,6 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        /** List the files available in a HuggingFace model repo (`GET /v1/models/available?repo_id=...`). */
         get: operations["list_available_models"];
         put?: never;
         post?: never;
@@ -254,7 +242,6 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Download a model file from HuggingFace (`POST /v1/models/download`). */
         post: operations["download_model"];
         delete?: never;
         options?: never;
@@ -271,7 +258,6 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Load (or hot-reload) a model (`POST /v1/models/load`). */
         post: operations["load_model"];
         delete?: never;
         options?: never;
@@ -288,7 +274,6 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Switch the loaded model to a different weights file (`POST /v1/models/switch`). */
         post: operations["switch_model"];
         delete?: never;
         options?: never;
@@ -305,7 +290,6 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /** Unload the currently loaded model (`POST /v1/models/unload`). */
         post: operations["unload_model"];
         delete?: never;
         options?: never;
@@ -482,13 +466,6 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Video generation (`POST /v1/video/generations`).
-         * @description Generates `video_frames` images via the diffusion backend, then assembles
-         *     them into an MP4 video using FFmpeg.  Returns a `task_id` immediately;
-         *     poll `GET /v1/tasks/{id}` until `status == "succeeded"`, then retrieve
-         *     the output video path from `GET /v1/tasks/{id}/result`.
-         */
         post: operations["generate_video"];
         delete?: never;
         options?: never;
@@ -518,7 +495,7 @@ export interface components {
         };
         /** @description A single choice in the completion response. */
         ChatChoice: {
-            /** @description Why generation stopped (`"stop"`, `"length"`, …). */
+            /** @description Why generation stopped (`"stop"`, `"length"`, 鈥?. */
             finish_reason: string;
             /**
              * Format: int32
@@ -618,9 +595,6 @@ export interface components {
             output_path?: string | null;
             /** @description Absolute path to the source file. */
             source_path: string;
-        };
-        ConvertResponse: {
-            task_id: string;
         };
         /** @description Request body for `POST /v1/models`. */
         CreateModelRequest: {
@@ -760,7 +734,7 @@ export interface components {
             steps?: number | null;
             /**
              * Format: float
-             * @description Init-image influence strength for img2img (0–1, default `0.75`).
+             * @description Init-image influence strength for img2img (0鈥?, default `0.75`).
              */
             strength?: number | null;
             /**
@@ -826,6 +800,9 @@ export interface components {
             /** @description Human-readable status string. */
             status: string;
         };
+        OperationAcceptedResponse: {
+            operation_id: string;
+        };
         ReloadLibRequest: {
             backend_id: string;
             lib_path: string;
@@ -865,7 +842,7 @@ export interface components {
          * @description Result payload returned by `GET /v1/tasks/{id}/result`.
          *
          *     Fields are populated depending on the task type:
-         *     - Single-image tasks: `image` contains a `data:image/png;base64,…` data URI.
+         *     - Single-image tasks: `image` contains a `data:image/png;base64,鈥 data URI.
          *     - Multi-image diffusion tasks: `images` contains an array of data URIs; `image`
          *       also holds the first one for backward compatibility.
          *     - Video tasks: `video_path` holds the path of the assembled MP4 file.
@@ -1063,6 +1040,65 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    get_health: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Server is healthy */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
+    transcribe: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** @description Audio transcription request */
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     list_backends: {
         parameters: {
             query?: never;
@@ -1103,13 +1139,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Download task created */
-            200: {
+            /** @description Download task accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
                 };
             };
             /** @description Bad request (invalid path) */
@@ -1168,12 +1204,12 @@ export interface operations {
     };
     backend_status: {
         parameters: {
-            query: {
+            query?: never;
+            header?: never;
+            path: {
                 /** @description One of `"ggml.llama"`, `"ggml.whisper"`, or `"ggml.diffusion"`. */
                 backend_id: string;
             };
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -1196,168 +1232,6 @@ export interface operations {
             };
             /** @description Unauthorised (admin token required) */
             401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    list_config: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List of all configuration entries */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigEntry"][];
-                };
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_config_value: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Get a configuration entry by key */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigEntry"];
-                };
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Config key not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    set_config_value: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetConfigBody"];
-            };
-        };
-        responses: {
-            /** @description Set a configuration entry by key */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigEntry"];
-                };
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Config key not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_health: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Server is healthy */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    transcribe: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** @description Audio transcription request */
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["CompletionRequest"];
-            };
-        };
-        responses: {
-            /** @description Task accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-            /** @description Bad request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Backend error */
-            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1430,6 +1304,105 @@ export interface operations {
             };
         };
     };
+    list_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List of all configuration entries */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigEntry"][];
+                };
+            };
+            /** @description Unauthorised (management token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_config_value: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Get a configuration entry by key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigEntry"];
+                };
+            };
+            /** @description Unauthorised (management token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Config key not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    set_config_value: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetConfigBody"];
+            };
+        };
+        responses: {
+            /** @description Set a configuration entry by key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ConfigEntry"];
+                };
+            };
+            /** @description Unauthorised (management token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Config key not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     convert: {
         parameters: {
             query?: never;
@@ -1443,13 +1416,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Conversion task created */
-            200: {
+            /** @description Conversion task accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ConvertResponse"];
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
                 };
             };
             /** @description Bad request */
@@ -1487,7 +1460,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
                 };
             };
             /** @description Bad request (invalid parameters) */
@@ -1582,12 +1555,12 @@ export interface operations {
     };
     list_available_models: {
         parameters: {
-            query: {
+            query?: never;
+            header?: never;
+            path: {
                 /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
                 repo_id: string;
             };
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -1601,7 +1574,7 @@ export interface operations {
                     "application/json": unknown;
                 };
             };
-            /** @description Bad request (invalid parameters) */
+            /** @description Bad request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -1630,16 +1603,16 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Download task created */
-            200: {
+            /** @description Download task accepted */
+            202: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
                 };
             };
-            /** @description Bad request (invalid parameters) */
+            /** @description Bad request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -1691,13 +1664,6 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
             /** @description Backend error */
             500: {
                 headers: {
@@ -1729,7 +1695,7 @@ export interface operations {
                     "application/json": components["schemas"]["ModelStatusResponse"];
                 };
             };
-            /** @description Bad request (invalid parameters) */
+            /** @description Bad request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -1758,8 +1724,8 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Task accepted */
-            202: {
+            /** @description Model unloaded */
+            200: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -1767,7 +1733,7 @@ export interface operations {
                     "application/json": components["schemas"]["ModelStatusResponse"];
                 };
             };
-            /** @description Bad request (invalid parameters) */
+            /** @description Bad request */
             400: {
                 headers: {
                     [name: string]: unknown;
@@ -1944,9 +1910,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -1980,9 +1944,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                id: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -2034,11 +1996,11 @@ export interface operations {
     };
     list_tasks: {
         parameters: {
-            query?: {
-                type?: string | null;
-            };
+            query?: never;
             header?: never;
-            path?: never;
+            path: {
+                type: string | null;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -2261,7 +2223,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
                 };
             };
             /** @description Bad request */

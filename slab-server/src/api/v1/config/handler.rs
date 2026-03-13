@@ -10,7 +10,6 @@ use validator::Validate;
 use crate::api::v1::config::schema::{ConfigEntry, SetConfigBody};
 use crate::api::validation::{validate, ValidatedJson};
 use crate::context::AppState;
-use crate::domain::models::{ConfigEntryView, SetConfigValueCommand};
 use crate::domain::services::ConfigService;
 use crate::error::ServerError;
 
@@ -43,7 +42,7 @@ async fn list_config(
         .list_config()
         .await?
         .into_iter()
-        .map(to_config_entry)
+        .map(Into::into)
         .collect();
     Ok(Json(entries))
 }
@@ -63,9 +62,7 @@ async fn get_config_value(
     Path(params): Path<ConfigKeyPath>,
 ) -> Result<Json<ConfigEntry>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(to_config_entry(
-        service.get_config_value(params.key).await?,
-    )))
+    Ok(Json(service.get_config_value(params.key).await?.into()))
 }
 
 #[utoipa::path(
@@ -85,17 +82,12 @@ async fn set_config_value(
     ValidatedJson(body): ValidatedJson<SetConfigBody>,
 ) -> Result<Json<ConfigEntry>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(to_config_entry(
+    Ok(Json(
         service
-            .set_config_value(
-                params.key,
-                SetConfigValueCommand {
-                    name: body.name,
-                    value: body.value,
-                },
-            )
-            .await?,
-    )))
+            .set_config_value(params.key, body.into())
+            .await?
+            .into(),
+    ))
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -105,12 +97,4 @@ struct ConfigKeyPath {
         message = "key must not be empty"
     ))]
     key: String,
-}
-
-fn to_config_entry(entry: ConfigEntryView) -> ConfigEntry {
-    ConfigEntry {
-        key: entry.key,
-        value: entry.value,
-        name: entry.name,
-    }
 }

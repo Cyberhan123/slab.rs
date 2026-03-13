@@ -20,7 +20,7 @@ pub use chat::{
 };
 pub use config::{ConfigEntryView, SetConfigValueCommand};
 pub use ffmpeg::FfmpegConvertCommand;
-pub use image::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
+pub use image::{ImageGenerationCommand, ImageGenerationMode};
 pub use model::{
     AvailableModelsQuery, AvailableModelsView, CreateModelCommand, DeletedModelView,
     DownloadModelCommand, ListModelsFilter, ModelCatalogItemView, ModelCatalogStatus,
@@ -29,4 +29,4 @@ pub use model::{
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
 pub use task::{AcceptedOperation, TaskResult, TaskView};
-pub use video::{DecodedVideoInitImage, VideoGenerationCommand};
+pub use video::VideoGenerationCommand;

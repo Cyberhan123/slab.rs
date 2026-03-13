@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
+use crate::domain::models::{AcceptedOperation, TaskResult, TaskView};
+
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OperationAcceptedResponse {
     pub operation_id: String,
@@ -50,4 +52,36 @@ pub struct TaskResponse {
     pub error_msg: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+impl From<AcceptedOperation> for OperationAcceptedResponse {
+    fn from(result: AcceptedOperation) -> Self {
+        Self {
+            operation_id: result.operation_id,
+        }
+    }
+}
+
+impl From<TaskResult> for TaskResultPayload {
+    fn from(result: TaskResult) -> Self {
+        Self {
+            image: result.image,
+            images: result.images,
+            video_path: result.video_path,
+            text: result.text,
+        }
+    }
+}
+
+impl From<TaskView> for TaskResponse {
+    fn from(view: TaskView) -> Self {
+        Self {
+            id: view.id,
+            task_type: view.task_type,
+            status: view.status,
+            error_msg: view.error_msg,
+            created_at: view.created_at,
+            updated_at: view.updated_at,
+        }
+    }
 }

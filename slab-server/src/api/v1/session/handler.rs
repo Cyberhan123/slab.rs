@@ -10,7 +10,6 @@ use validator::Validate;
 use crate::api::v1::session::schema::{CreateSessionRequest, MessageResponse, SessionResponse};
 use crate::api::validation::{validate, ValidatedJson};
 use crate::context::AppState;
-use crate::domain::models::{CreateSessionCommand, SessionMessageView, SessionView};
 use crate::domain::services::SessionService;
 use crate::error::ServerError;
 
@@ -43,11 +42,7 @@ async fn create_session(
     State(service): State<SessionService>,
     ValidatedJson(req): ValidatedJson<CreateSessionRequest>,
 ) -> Result<Json<SessionResponse>, ServerError> {
-    Ok(Json(to_session_response(
-        service
-            .create_session(CreateSessionCommand { name: req.name })
-            .await?,
-    )))
+    Ok(Json(service.create_session(req.into()).await?.into()))
 }
 
 #[utoipa::path(
@@ -67,7 +62,7 @@ async fn list_sessions(
         .list_sessions()
         .await?
         .into_iter()
-        .map(to_session_response)
+        .map(Into::into)
         .collect();
     Ok(Json(sessions))
 }
@@ -109,7 +104,7 @@ async fn list_session_messages(
         .list_session_messages(&params.id)
         .await?
         .into_iter()
-        .map(to_message_response)
+        .map(Into::into)
         .collect();
     Ok(Json(messages))
 }
@@ -121,24 +116,4 @@ struct SessionIdPath {
         message = "id must not be empty"
     ))]
     id: String,
-}
-
-fn to_session_response(session: SessionView) -> SessionResponse {
-    SessionResponse {
-        id: session.id,
-        name: session.name,
-        state_path: session.state_path,
-        created_at: session.created_at,
-        updated_at: session.updated_at,
-    }
-}
-
-fn to_message_response(message: SessionMessageView) -> MessageResponse {
-    MessageResponse {
-        id: message.id,
-        session_id: message.session_id,
-        role: message.role,
-        content: message.content,
-        created_at: message.created_at,
-    }
 }

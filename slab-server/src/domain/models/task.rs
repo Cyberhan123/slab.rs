@@ -1,3 +1,5 @@
+use crate::infra::db::TaskRecord;
+
 use serde::Serialize;
 
 #[derive(Debug, Clone)]
@@ -21,4 +23,17 @@ pub struct TaskResult {
     pub images: Option<Vec<String>>,
     pub video_path: Option<String>,
     pub text: Option<String>,
+}
+
+impl From<&TaskRecord> for TaskView {
+    fn from(record: &TaskRecord) -> Self {
+        Self {
+            id: record.id.clone(),
+            task_type: record.task_type.clone(),
+            status: record.status.clone(),
+            error_msg: record.error_msg.clone(),
+            created_at: record.created_at.to_rfc3339(),
+            updated_at: record.updated_at.to_rfc3339(),
+        }
+    }
 }

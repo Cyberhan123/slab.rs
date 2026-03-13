@@ -3,6 +3,8 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
+use crate::domain::models::{GpuDeviceSnapshot, GpuStatusSnapshot};
+
 /// Per-GPU snapshot from `all-smi`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct GpuDeviceStatus {
@@ -39,4 +41,32 @@ pub struct GpuStatusResponse {
     pub devices: Vec<GpuDeviceStatus>,
     /// Optional reason when telemetry is unavailable.
     pub error: Option<String>,
+}
+
+impl From<GpuDeviceSnapshot> for GpuDeviceStatus {
+    fn from(snapshot: GpuDeviceSnapshot) -> Self {
+        Self {
+            id: snapshot.id,
+            name: snapshot.name,
+            device_type: snapshot.device_type,
+            utilization_percent: snapshot.utilization_percent,
+            temperature_celsius: snapshot.temperature_celsius,
+            used_memory_bytes: snapshot.used_memory_bytes,
+            total_memory_bytes: snapshot.total_memory_bytes,
+            memory_usage_percent: snapshot.memory_usage_percent,
+            power_draw_watts: snapshot.power_draw_watts,
+        }
+    }
+}
+
+impl From<GpuStatusSnapshot> for GpuStatusResponse {
+    fn from(snapshot: GpuStatusSnapshot) -> Self {
+        Self {
+            available: snapshot.available,
+            backend: snapshot.backend,
+            updated_at: snapshot.updated_at,
+            devices: snapshot.devices.into_iter().map(Into::into).collect(),
+            error: snapshot.error,
+        }
+    }
 }

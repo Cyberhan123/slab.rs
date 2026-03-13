@@ -2,7 +2,6 @@ use tracing::{info, warn};
 
 use crate::context::WorkerState;
 use crate::domain::models::{TaskResult, TaskView};
-use crate::domain::services::to_task_view;
 use crate::error::ServerError;
 use crate::infra::db::TaskStore;
 use crate::infra::rpc::adapter::payload_to_task_result;
@@ -21,7 +20,7 @@ impl TaskApplicationService {
         let records = self.state.store().list_tasks(task_type).await?;
         Ok(records
             .into_iter()
-            .map(|record| to_task_view(&record))
+            .map(|record| TaskView::from(&record))
             .collect())
     }
 
@@ -54,7 +53,7 @@ impl TaskApplicationService {
             }
         }
 
-        Ok(to_task_view(&record))
+        Ok(TaskView::from(&record))
     }
 
     pub async fn get_task_result(&self, id: &str) -> Result<TaskResult, ServerError> {
@@ -166,7 +165,7 @@ impl TaskApplicationService {
             self.state.store().get_task(id).await?.ok_or_else(|| {
                 ServerError::NotFound(format!("task {id} not found after cancel"))
             })?;
-        Ok(to_task_view(&updated))
+        Ok(TaskView::from(&updated))
     }
 
     pub async fn validate_restartable(&self, id: &str) -> Result<(), ServerError> {

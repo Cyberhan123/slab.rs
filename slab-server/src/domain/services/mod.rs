@@ -6,7 +6,6 @@ mod chat_service;
 mod config_service;
 mod ffmpeg_service;
 mod image_service;
-mod mappers;
 mod model_service;
 mod session_service;
 mod system_service;
@@ -21,10 +20,6 @@ pub use chat_service::ChatService;
 pub use config_service::ConfigService;
 pub use ffmpeg_service::FfmpegService;
 pub use image_service::ImageService;
-pub use mappers::{
-    to_chat_completion_command, to_chat_completion_response, to_chat_model_option_response,
-    to_operation_accepted_response, to_task_response, to_task_result_response, to_task_view,
-};
 pub use model_service::ModelService;
 pub use session_service::SessionService;
 pub use system_service::SystemService;

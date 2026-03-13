@@ -4,6 +4,11 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
+use crate::domain::models::{
+    ModelCatalogItemView as DomainModelCatalogItemView,
+    ModelCatalogStatus as DomainModelCatalogStatus, ModelStatus as DomainModelStatus,
+};
+
 /// Request body for `POST /v1/models`.
 #[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
 pub struct CreateModelRequest {
@@ -166,4 +171,42 @@ pub struct ModelCatalogItemResponse {
     pub last_downloaded_at: Option<String>,
     pub pending_task_id: Option<String>,
     pub pending_task_status: Option<String>,
+}
+
+impl From<DomainModelStatus> for ModelStatusResponse {
+    fn from(status: DomainModelStatus) -> Self {
+        Self {
+            backend: status.backend,
+            status: status.status,
+        }
+    }
+}
+
+impl From<DomainModelCatalogStatus> for ModelListStatus {
+    fn from(status: DomainModelCatalogStatus) -> Self {
+        match status {
+            DomainModelCatalogStatus::Downloaded => Self::Downloaded,
+            DomainModelCatalogStatus::Pending => Self::Pending,
+            DomainModelCatalogStatus::NotDownloaded => Self::NotDownloaded,
+            DomainModelCatalogStatus::All => Self::All,
+        }
+    }
+}
+
+impl From<DomainModelCatalogItemView> for ModelCatalogItemResponse {
+    fn from(item: DomainModelCatalogItemView) -> Self {
+        Self {
+            id: item.id,
+            display_name: item.display_name,
+            repo_id: item.repo_id,
+            filename: item.filename,
+            backend_ids: item.backend_ids,
+            is_vad_model: item.is_vad_model,
+            status: item.status.into(),
+            local_path: item.local_path,
+            last_downloaded_at: item.last_downloaded_at,
+            pending_task_id: item.pending_task_id,
+            pending_task_status: item.pending_task_status,
+        }
+    }
 }

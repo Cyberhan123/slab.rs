@@ -14,10 +14,6 @@ use crate::api::v1::backend::schema::{
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::{ValidatedJson, ValidatedQuery};
 use crate::context::AppState;
-use crate::domain::models::{
-    BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand, ReloadBackendLibCommand,
-};
-use crate::domain::services::to_operation_accepted_response;
 use crate::domain::services::BackendService;
 use crate::error::ServerError;
 
@@ -63,13 +59,7 @@ async fn backend_status(
     State(service): State<BackendService>,
     ValidatedQuery(query): ValidatedQuery<BackendTypeQuery>,
 ) -> Result<Json<BackendStatusResponse>, ServerError> {
-    Ok(Json(to_backend_status_response(
-        service
-            .backend_status(BackendStatusQuery {
-                backend_id: query.backend_id,
-            })
-            .await?,
-    )))
+    Ok(Json(service.backend_status(query.into()).await?.into()))
 }
 
 #[utoipa::path(
@@ -88,7 +78,7 @@ async fn list_backends(
         .list_backends()
         .await?
         .into_iter()
-        .map(to_backend_status_response)
+        .map(Into::into)
         .collect();
     Ok(Json(BackendListResponse { backends }))
 }
@@ -108,16 +98,8 @@ async fn download_lib(
     State(service): State<BackendService>,
     ValidatedJson(req): ValidatedJson<DownloadLibRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
-    let response = service
-        .download_lib(DownloadBackendLibCommand {
-            backend_id: req.backend_id,
-            target_dir: req.target_dir,
-        })
-        .await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(to_operation_accepted_response(response)),
-    ))
+    let response = service.download_lib(req.into()).await?;
+    Ok((StatusCode::ACCEPTED, Json(response.into())))
 }
 
 #[utoipa::path(
@@ -135,21 +117,5 @@ async fn reload_lib(
     State(service): State<BackendService>,
     ValidatedJson(req): ValidatedJson<ReloadLibRequest>,
 ) -> Result<Json<BackendStatusResponse>, ServerError> {
-    Ok(Json(to_backend_status_response(
-        service
-            .reload_lib(ReloadBackendLibCommand {
-                backend_id: req.backend_id,
-                lib_path: req.lib_path,
-                model_path: req.model_path,
-                num_workers: req.num_workers,
-            })
-            .await?,
-    )))
-}
-
-fn to_backend_status_response(view: BackendStatusView) -> BackendStatusResponse {
-    BackendStatusResponse {
-        backend: view.backend,
-        status: view.status,
-    }
+    Ok(Json(service.reload_lib(req.into()).await?.into()))
 }

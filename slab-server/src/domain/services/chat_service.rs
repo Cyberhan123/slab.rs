@@ -431,16 +431,8 @@ fn build_genai_client_for_target(target: &ResolvedCloudModel) -> GenaiClient {
         .build()
 }
 
-fn to_genai_chat_message(message: &DomainConversationMessage) -> GenaiChatMessage {
-    match message.role.as_str() {
-        "system" => GenaiChatMessage::system(message.content.clone()),
-        "assistant" => GenaiChatMessage::assistant(message.content.clone()),
-        _ => GenaiChatMessage::user(message.content.clone()),
-    }
-}
-
 fn build_genai_chat_request(messages: &[DomainConversationMessage]) -> GenaiChatRequest {
-    let mapped: Vec<GenaiChatMessage> = messages.iter().map(to_genai_chat_message).collect();
+    let mapped: Vec<GenaiChatMessage> = messages.iter().map(Into::into).collect();
     GenaiChatRequest::new(mapped)
 }
 
@@ -730,10 +722,7 @@ async fn build_messages(
                 if msg.content.trim().is_empty() {
                     continue;
                 }
-                merged.push(DomainConversationMessage {
-                    role: msg.role,
-                    content: msg.content,
-                });
+                merged.push(msg.into());
             }
         }
     }
