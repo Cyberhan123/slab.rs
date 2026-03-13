@@ -7,15 +7,13 @@ use axum::routing::{get, post};
 use axum::{Json, Router};
 use utoipa::OpenApi;
 
-use crate::bounded_contexts::task_management::application::TaskApplicationService;
-use crate::contexts::task::application::get_task_result_use_case::{
-    GetTaskResultUseCase, TaskResultPort,
+use crate::domain::models::TaskResult;
+use crate::domain::services::{
+    GetTaskResultUseCase, TaskApplicationService, TaskResultPort, to_task_result_response,
 };
-use crate::contexts::task::domain::TaskResult;
-use crate::contexts::task::interface::http::mappers::task_mapper::to_task_result_response;
 use crate::error::ServerError;
 use crate::schemas::v1::task::{TaskResponse, TaskResultPayload, TaskTypeQuery};
-use crate::state::AppState;
+use crate::context::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -166,3 +164,4 @@ pub async fn restart_task(
         "task restart is not yet implemented".to_owned(),
     ))
 }
+

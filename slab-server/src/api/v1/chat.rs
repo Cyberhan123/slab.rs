@@ -25,21 +25,22 @@ use tracing::{debug, info, warn};
 use utoipa::OpenApi;
 use uuid::Uuid;
 
-use crate::contexts::chat::application::create_chat_completion_use_case::{
-    ChatCompletionOutput, ChatCompletionPort, ChatStreamChunk, CreateChatCompletionUseCase,
+use crate::domain::models::{
+    ChatCompletionCommand, ChatCompletionResult, ChatResultChoice,
+    ConversationMessage as DomainConversationMessage,
 };
-use crate::contexts::chat::domain::ChatCompletionCommand;
-use crate::contexts::chat::interface::http::mappers::chat_mapper::{
+use crate::domain::services::{
+    ChatCompletionOutput, ChatCompletionPort, ChatStreamChunk, CreateChatCompletionUseCase,
     to_chat_completion_command, to_chat_completion_response, to_openai_messages,
 };
-use crate::entities::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
+use crate::infra::db::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
-use crate::grpc;
+use crate::infra::rpc::{self, pb};
 use crate::schemas::v1::chat::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
     ChatModelOption, ChatModelSource,
 };
-use crate::state::AppState;
+use crate::context::AppState;
 
 /// Maximum allowed prompt length in bytes.
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
@@ -556,10 +557,7 @@ async fn cloud_chat_stream(
     tag = "chat",
     request_body = ChatCompletionRequest,
     responses(
-        (status = 200, description = "Completion generated", content(
-            ("application/json" = ChatCompletionResponse),
-            ("text/event-stream" = String),
-        )),
+        (status = 200, description = "Completion generated", body = ChatCompletionResponse),
         (status = 400, description = "Bad request"),
         (status = 500, description = "Backend error"),
     )
@@ -704,7 +702,7 @@ pub(crate) async fn create_chat_completion_with_state(
         cloud_chat_completion(&target, &resolved_messages, max_tokens, temperature).await?
     } else {
         let prompt = build_prompt(&resolved_messages);
-        let grpc_req = grpc::pb::ChatRequest {
+        let grpc_req = pb::ChatRequest {
             prompt: prompt.clone(),
             model: command.model.clone(),
             max_tokens,
@@ -725,7 +723,7 @@ pub(crate) async fn create_chat_completion_with_state(
                     ServerError::BackendNotReady(format!("llama backend not ready: {e}"))
                 })?;
 
-            let backend_stream = grpc::client::chat_stream(llama_channel.clone(), grpc_req.clone())
+            let backend_stream = rpc::client::chat_stream(llama_channel.clone(), grpc_req.clone())
                 .await
                 .map_err(|e| ServerError::Internal(format!("grpc chat stream failed: {e}")))?;
 
@@ -764,7 +762,7 @@ pub(crate) async fn create_chat_completion_with_state(
             .await
             .map_err(|e| ServerError::BackendNotReady(format!("llama backend not ready: {e}")))?;
 
-        grpc::client::chat(llama_channel, grpc_req)
+        rpc::client::chat(llama_channel, grpc_req)
             .await
             .map_err(|e| ServerError::Internal(format!("grpc chat failed: {e}")))?
     };
@@ -789,14 +787,14 @@ pub(crate) async fn create_chat_completion_with_state(
             .unwrap_or_else(|e| tracing::warn!(error = %e, "failed to persist assistant message"));
     }
 
-    let resp = ChatCompletionResponse {
+    let resp = ChatCompletionResult {
         id: format!("chatcmpl-{}", Uuid::new_v4()),
         object: "chat.completion".into(),
         created: Utc::now().timestamp(),
         model: command.model,
-        choices: vec![ChatChoice {
+        choices: vec![ChatResultChoice {
             index: 0,
-            message: OpenAiMessage {
+            message: DomainConversationMessage {
                 role: "assistant".into(),
                 content: generated,
             },
@@ -937,3 +935,4 @@ mod test {
         assert_eq!(cloud_option_id("openai", "gpt-4.1"), "cloud/openai/gpt-4.1");
     }
 }
+

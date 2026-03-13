@@ -7,10 +7,10 @@ use axum::routing::get;
 use axum::{Json, Router};
 use utoipa::OpenApi;
 
-use crate::entities::ConfigStore;
+use crate::infra::db::ConfigStore;
 use crate::error::ServerError;
 use crate::schemas::admin::config::{ConfigEntry, SetConfigBody};
-use crate::state::AppState;
+use crate::context::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -112,3 +112,4 @@ mod test {
         assert_eq!(e.value, "bar");
     }
 }
+

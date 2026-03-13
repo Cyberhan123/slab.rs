@@ -3,20 +3,18 @@
 use std::sync::Arc;
 
 use axum::extract::State;
+use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
 use base64::Engine as _;
-use chrono::Utc;
 use tracing::{debug, warn};
 use utoipa::OpenApi;
-use uuid::Uuid;
 
-use crate::entities::{TaskRecord, TaskStore};
+use crate::context::{AppState, SubmitOperation, WorkerState};
 use crate::error::ServerError;
-use crate::grpc;
+use crate::infra::rpc::{self, pb};
 use crate::schemas::v1::images::{ImageGenerationRequest, ImageMode};
-use crate::schemas::v1::task::TaskResultPayload;
-use crate::state::AppState;
+use crate::schemas::v1::task::{OperationAcceptedResponse, TaskResultPayload};
 
 /// Maximum allowed prompt length in bytes.
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
@@ -28,7 +26,10 @@ const MAX_IMAGES_PER_REQUEST: u32 = 10;
 const MAX_IMAGE_DIM: u32 = 2048;
 
 #[derive(OpenApi)]
-#[openapi(paths(generate_images), components(schemas(ImageGenerationRequest,)))]
+#[openapi(
+    paths(generate_images),
+    components(schemas(ImageGenerationRequest, OperationAcceptedResponse,))
+)]
 pub struct ImagesApi;
 
 /// Register image generation routes.
@@ -74,16 +75,16 @@ fn decode_init_image(data_uri: &str) -> Result<(Vec<u8>, u32, u32, u32), ServerE
     tag = "images",
     request_body = ImageGenerationRequest,
     responses(
-        (status = 202, description = "Task accepted", body = serde_json::Value),
+        (status = 202, description = "Task accepted", body = OperationAcceptedResponse),
         (status = 400, description = "Bad request (invalid parameters)"),
         (status = 500, description = "Backend error"),
     )
 )]
 pub async fn generate_images(
-    State(state): State<Arc<AppState>>,
+    State(worker_state): State<WorkerState>,
     Json(req): Json<ImageGenerationRequest>,
-) -> Result<Json<serde_json::Value>, ServerError> {
-    // ── Validation ────────────────────────────────────────────────────────────
+) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
+    // 鈹€鈹€ Validation 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     if req.prompt.is_empty() {
         return Err(ServerError::BadRequest("prompt must not be empty".into()));
     }
@@ -124,7 +125,7 @@ pub async fn generate_images(
         None
     };
 
-    // ── Decode init image (img2img) ───────────────────────────────────────────
+    // 鈹€鈹€ Decode init image (img2img) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
     let (init_image_bytes, init_image_width, init_image_height, init_image_channels) =
         if let Some(ref data_uri) = effective_init_image {
             let (data, w, h, c) = decode_init_image(data_uri)?;
@@ -143,12 +144,10 @@ pub async fn generate_images(
         "image generation request"
     );
 
-    let generate_image_channel = state.grpc.generate_image_channel().ok_or_else(|| {
+    let generate_image_channel = worker_state.grpc().generate_image_channel().ok_or_else(|| {
         ServerError::BackendNotReady("diffusion gRPC endpoint is not configured".into())
     })?;
 
-    let task_id = Uuid::new_v4().to_string();
-    let now = Utc::now();
     let input_json = serde_json::json!({
         "prompt": req.prompt,
         "negative_prompt": req.negative_prompt,
@@ -166,25 +165,10 @@ pub async fn generate_images(
         "clip_skip": req.clip_skip,
         "strength": req.strength,
         "eta": req.eta,
-    });
+    })
+    .to_string();
 
-    state
-        .store
-        .insert_task(TaskRecord {
-            id: task_id.clone(),
-            task_type: "ggml.diffusion".into(),
-            status: "running".into(),
-            model_id: None,
-            input_data: Some(input_json.to_string()),
-            result_data: None,
-            error_msg: None,
-            core_task_id: None,
-            created_at: now,
-            updated_at: now,
-        })
-        .await?;
-
-    let grpc_req = grpc::pb::ImageRequest {
+    let grpc_req = pb::ImageRequest {
         model: req.model.clone(),
         prompt: req.prompt.clone(),
         negative_prompt: req.negative_prompt.clone().unwrap_or_default(),
@@ -206,108 +190,80 @@ pub async fn generate_images(
         init_image_channels,
     };
 
-    let store = Arc::clone(&state.store);
-    let task_manager = Arc::clone(&state.task_manager);
-    let model_auto_unload = Arc::clone(&state.model_auto_unload);
-    let task_id_for_spawn = task_id.clone();
+    let model_auto_unload = Arc::clone(worker_state.auto_unload());
     let generate_image_channel_for_spawn = generate_image_channel;
-    let join = tokio::spawn(async move {
-        let _usage_guard = match model_auto_unload
-            .acquire_for_inference("ggml.diffusion")
-            .await
-        {
-            Ok(guard) => guard,
-            Err(error) => {
-                store
-                    .update_task_status(
-                        &task_id_for_spawn,
-                        "failed",
-                        None,
-                        Some(&format!("diffusion backend not ready: {error}")),
-                    )
-                    .await
-                    .unwrap_or_else(|db_e| {
-                        warn!(task_id = %task_id_for_spawn, error = %db_e, "failed to update auto-reload failure")
-                    });
-                task_manager.remove(&task_id_for_spawn);
-                return;
-            }
-        };
-        let rpc_result =
-            grpc::client::generate_image(generate_image_channel_for_spawn, grpc_req).await;
-        if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {
-            if record.status == "cancelled" {
-                task_manager.remove(&task_id_for_spawn);
-                return;
-            }
-        }
-
-        match rpc_result {
-            Ok(images_json) => {
-                // Parse the JSON array of image objects returned by the backend.
-                let images: Vec<serde_json::Value> = match serde_json::from_slice(&images_json) {
-                    Ok(v) => v,
-                    Err(e) => {
-                        let msg = format!("invalid JSON from diffusion backend: {e}");
-                        debug!(task_id = %task_id_for_spawn, error = %e, "failed to parse image JSON from backend");
-                        store
-                            .update_task_status(&task_id_for_spawn, "failed", None, Some(&msg))
-                            .await
-                            .unwrap_or_else(|db_e| {
-                                warn!(task_id = %task_id_for_spawn, error = %db_e,
-                                    "failed to update task status after JSON parse error")
-                            });
-                        task_manager.remove(&task_id_for_spawn);
+    let operation_id = worker_state
+        .submit_operation(
+            SubmitOperation::running("ggml.diffusion", None, Some(input_json)),
+            move |operation| async move {
+                let operation_id = operation.id().to_owned();
+                let _usage_guard = match model_auto_unload.acquire_for_inference("ggml.diffusion").await {
+                    Ok(guard) => guard,
+                    Err(error) => {
+                        let msg = format!("diffusion backend not ready: {error}");
+                        if let Err(db_e) = operation.mark_failed(&msg).await {
+                            warn!(task_id = %operation_id, error = %db_e, "failed to update auto-reload failure");
+                        }
                         return;
                     }
                 };
 
-                let data_uris: Vec<String> = images
-                    .iter()
-                    .filter_map(|img| img["b64"].as_str())
-                    .map(|b64| format!("data:image/png;base64,{b64}"))
-                    .collect();
+                let rpc_result =
+                    rpc::client::generate_image(generate_image_channel_for_spawn, grpc_req).await;
+                if operation.is_cancelled().await {
+                    return;
+                }
 
-                // Persist with both `image` (first, for back-compat) and `images` array so
-                // GET /v1/tasks/{id}/result's TaskResultPayload deserialization captures both.
-                let first_image = data_uris.first().cloned();
-                let result = TaskResultPayload {
-                    image: first_image,
-                    images: Some(data_uris),
-                    video_path: None,
-                    text: None,
-                };
-                let payload_str = serde_json::to_string(&result).unwrap_or_default();
+                match rpc_result {
+                    Ok(images_json) => {
+                        let images: Vec<serde_json::Value> = match serde_json::from_slice(&images_json) {
+                            Ok(v) => v,
+                            Err(e) => {
+                                let msg = format!("invalid JSON from diffusion backend: {e}");
+                                debug!(task_id = %operation_id, error = %e, "failed to parse image JSON from backend");
+                                if let Err(db_e) = operation.mark_failed(&msg).await {
+                                    warn!(task_id = %operation_id, error = %db_e,
+                                        "failed to update task status after JSON parse error");
+                                }
+                                return;
+                            }
+                        };
 
-                store
-                    .update_task_status(
-                        &task_id_for_spawn,
-                        "succeeded",
-                        Some(&payload_str),
-                        None,
-                    )
-                    .await
-                    .unwrap_or_else(|e| {
-                        warn!(task_id = %task_id_for_spawn, error = %e, "failed to update image result")
-                    });
-            }
-            Err(e) => {
-                let msg = e.to_string();
-                store
-                    .update_task_status(&task_id_for_spawn, "failed", None, Some(&msg))
-                    .await
-                    .unwrap_or_else(|db_e| {
-                        warn!(task_id = %task_id_for_spawn, error = %db_e, "failed to update image failure")
-                    });
-            }
-        }
-        task_manager.remove(&task_id_for_spawn);
-    });
-    state
-        .task_manager
-        .insert(task_id.clone(), join.abort_handle());
+                        let data_uris: Vec<String> = images
+                            .iter()
+                            .filter_map(|img| img["b64"].as_str())
+                            .map(|b64| format!("data:image/png;base64,{b64}"))
+                            .collect();
 
-    Ok(Json(serde_json::json!({ "task_id": task_id })))
+                        let first_image = data_uris.first().cloned();
+                        let result = TaskResultPayload {
+                            image: first_image,
+                            images: Some(data_uris),
+                            video_path: None,
+                            text: None,
+                        };
+                        let payload_str = serde_json::to_string(&result).unwrap_or_default();
+                        if let Err(e) = operation.mark_succeeded(&payload_str).await {
+                            warn!(task_id = %operation_id, error = %e, "failed to update image result");
+                        }
+                    }
+                    Err(e) => {
+                        let msg = e.to_string();
+                        if let Err(db_e) = operation.mark_failed(&msg).await {
+                            warn!(task_id = %operation_id, error = %db_e, "failed to update image failure");
+                        }
+                    }
+                }
+            },
+        )
+        .await?;
+
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(OperationAcceptedResponse {
+            operation_id,
+        }),
+    ))
 }
 
 #[cfg(test)]
@@ -356,3 +312,4 @@ mod test {
         assert!(result.is_err());
     }
 }
+

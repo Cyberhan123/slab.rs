@@ -7,10 +7,10 @@ use chrono::Utc;
 use utoipa::OpenApi;
 use uuid::Uuid;
 
-use crate::entities::{ChatSession, ChatStore, SessionStore};
+use crate::infra::db::{ChatSession, ChatStore};
 use crate::error::ServerError;
 use crate::schemas::v1::session::{CreateSessionRequest, MessageResponse, SessionResponse};
-use crate::state::AppState;
+use crate::context::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -27,7 +27,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/sessions/{id}/messages", get(list_session_messages))
 }
 
-// ── Session handlers ──────────────────────────────────────────────────────────
+// 鈹€鈹€ Session handlers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 #[utoipa::path(
     post,
     path = "/v1/sessions",
@@ -111,3 +111,4 @@ pub async fn list_session_messages(
         messages.into_iter().map(|m| m.to_response()).collect(),
     ))
 }
+

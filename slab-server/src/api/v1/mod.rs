@@ -8,7 +8,7 @@ pub mod system;
 pub mod tasks;
 pub mod video;
 
-use crate::state::AppState;
+use crate::context::AppState;
 use utoipa::OpenApi;
 
 use axum::Router;
@@ -46,3 +46,4 @@ pub fn api_docs() -> utoipa::openapi::OpenApi {
 
     spec
 }
+

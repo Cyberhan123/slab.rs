@@ -12,7 +12,7 @@ pub mod doc;
 pub mod health;
 pub(crate) mod v1;
 use crate::middleware::{cors, trace};
-use crate::state::AppState;
+use crate::context::AppState;
 use axum::{
     middleware::{self},
     Router,
@@ -43,3 +43,4 @@ pub fn build(state: Arc<AppState>) -> Router {
         ))
         .with_state(state)
 }
+

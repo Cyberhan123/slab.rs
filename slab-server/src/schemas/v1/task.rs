@@ -2,6 +2,11 @@ use serde::{Deserialize, Serialize};
 use slab_core::TaskStatus;
 use utoipa::{IntoParams, ToSchema};
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct OperationAcceptedResponse {
+    pub operation_id: String,
+}
+
 /// Result payload returned by `GET /v1/tasks/{id}/result`.
 ///
 /// Fields are populated depending on the task type:

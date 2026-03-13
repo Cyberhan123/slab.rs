@@ -2,7 +2,7 @@ pub mod backend;
 pub mod config;
 
 use crate::middleware::auth;
-use crate::state::AppState;
+use crate::context::AppState;
 
 use axum::{middleware, Router};
 use std::sync::Arc;
@@ -30,3 +30,4 @@ pub fn api_docs() -> utoipa::openapi::OpenApi {
     spec.merge(backend::BackendApi::openapi());
     spec
 }
+

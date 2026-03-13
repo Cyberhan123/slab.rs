@@ -10,8 +10,3 @@ pub struct ConvertRequest {
     /// Optional output path; defaults to source path with new extension.
     pub output_path: Option<String>,
 }
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct ConvertResponse {
-    pub task_id: String,
-}

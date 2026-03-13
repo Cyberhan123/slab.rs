@@ -10,7 +10,7 @@ use tracing::{debug, warn};
 use utoipa::OpenApi;
 
 use crate::schemas::v1::system::{GpuDeviceStatus, GpuStatusResponse};
-use crate::state::AppState;
+use crate::context::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -101,3 +101,4 @@ pub async fn gpu_status() -> Json<GpuStatusResponse> {
         error,
     })
 }
+
