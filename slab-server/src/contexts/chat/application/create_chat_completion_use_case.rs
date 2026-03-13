@@ -1,20 +1,30 @@
-use std::convert::Infallible;
 use std::future::Future;
 use std::pin::Pin;
 
-use axum::response::sse::Event;
 use futures::stream::BoxStream;
 
 use crate::error::ServerError;
 use crate::schemas::v1::chat::{ChatCompletionRequest, ChatCompletionResponse};
+
+/// A single framework-agnostic chunk in a streaming chat completion.
+/// The route layer is responsible for mapping this to the transport-specific
+/// representation (e.g. an SSE `Event`).
+pub enum ChatStreamChunk {
+    /// A serialized data payload (maps to an SSE `data:` field).
+    Data(String),
+    /// An out-of-band signal or error description (maps to an SSE `:` comment field).
+    /// This is used for backend-specific signals (e.g. gRPC done markers) and
+    /// error descriptions that should not appear as data tokens to the client.
+    Comment(String),
+}
 
 /// Application-level output of the chat completion use-case.
 /// Routes are responsible for converting this into an Axum `Response`.
 pub enum ChatCompletionOutput {
     /// A complete JSON response payload.
     Json(ChatCompletionResponse),
-    /// A server-sent events stream.
-    Stream(BoxStream<'static, Result<Event, Infallible>>),
+    /// A server-sent events stream of framework-agnostic chunks.
+    Stream(BoxStream<'static, ChatStreamChunk>),
 }
 
 pub trait ChatCompletionPort: Send + Sync {
