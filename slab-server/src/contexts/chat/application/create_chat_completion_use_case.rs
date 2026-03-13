@@ -3,17 +3,22 @@ use std::pin::Pin;
 
 use futures::stream::BoxStream;
 
-use crate::contexts::chat::domain::ChatCompletionCommand;
+use crate::contexts::chat::domain::{ChatCompletionCommand, ChatCompletionResult};
 use crate::error::ServerError;
-use crate::schemas::v1::chat::ChatCompletionResponse;
 
+/// A single chunk yielded by a streaming chat completion response.
 pub enum ChatStreamChunk {
+    /// A data frame (token or `[DONE]` sentinel) to be sent as an SSE `data:` line.
     Data(String),
+    /// An SSE comment line used to signal errors or metadata without closing the stream.
     Comment(String),
 }
 
+/// The output of a chat completion request.
 pub enum ChatCompletionOutput {
-    Json(ChatCompletionResponse),
+    /// A complete, non-streaming completion serialised as JSON.
+    Json(ChatCompletionResult),
+    /// A stream of SSE chunks for incremental token delivery.
     Stream(BoxStream<'static, ChatStreamChunk>),
 }
 
