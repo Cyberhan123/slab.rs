@@ -28,7 +28,7 @@ use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::entities::{AnyStore, TaskStore};
-use crate::state::{AppState, TaskManager};
+use crate::state::{AppState, ChatContext, ModelContext, TaskContext, TaskManager};
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -217,13 +217,34 @@ where
     ));
     let state = Arc::new(AppState {
         config: Arc::new(cfg.clone()),
-        grpc,
+        grpc: Arc::clone(&grpc),
         store: Arc::clone(&store),
         task_manager: Arc::new(TaskManager::new()),
-        model_auto_unload,
+        model_auto_unload: Arc::clone(&model_auto_unload),
     });
 
-    let app = routes::build(Arc::clone(&state));
+    let chat_context = Arc::new(ChatContext {
+        store: Arc::clone(&store),
+        grpc: Arc::clone(&grpc),
+        model_auto_unload: Arc::clone(&model_auto_unload),
+    });
+    let model_context = Arc::new(ModelContext {
+        store: Arc::clone(&store),
+        grpc: Arc::clone(&grpc),
+        task_manager: Arc::clone(&state.task_manager),
+        model_auto_unload: Arc::clone(&model_auto_unload),
+    });
+    let task_context = Arc::new(TaskContext {
+        store: Arc::clone(&store),
+        task_manager: Arc::clone(&state.task_manager),
+    });
+
+    let app = routes::build(
+        Arc::clone(&state),
+        Arc::clone(&chat_context),
+        Arc::clone(&model_context),
+        Arc::clone(&task_context),
+    );
     let addr: SocketAddr = cfg.bind_address.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!(%addr, "HTTP gateway listening");
