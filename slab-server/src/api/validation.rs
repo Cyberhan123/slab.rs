@@ -8,8 +8,8 @@ use validator::{Validate, ValidationError};
 use crate::error::ServerError;
 
 const ALLOWED_FFMPEG_OUTPUT_FORMATS: &[&str] = &[
-    "mp3", "mp4", "wav", "flac", "ogg", "opus", "webm", "avi", "mkv", "mov", "aac", "m4a",
-    "m4v", "f32le", "pcm",
+    "mp3", "mp4", "wav", "flac", "ogg", "opus", "webm", "avi", "mkv", "mov", "aac", "m4a", "m4v",
+    "f32le", "pcm",
 ];
 
 pub struct ValidatedJson<T>(pub T);

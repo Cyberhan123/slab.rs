@@ -22,31 +22,25 @@ pub enum ImageMode {
 #[validate(schema(function = "validate_image_generation_request"))]
 pub struct ImageGenerationRequest {
     /// The model identifier to use.
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "model must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "model must not be empty"
+    ))]
     pub model: String,
 
     /// Text description of the desired image.
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "prompt must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "prompt must not be empty"
+    ))]
     pub prompt: String,
 
     /// Negative text prompt (things to avoid in the generated image).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "negative_prompt must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "negative_prompt must not be empty"
+    ))]
     pub negative_prompt: Option<String>,
 
     /// Number of images to generate (default `1`).
@@ -85,22 +79,18 @@ pub struct ImageGenerationRequest {
 
     /// Sampling method (`"euler"`, `"euler_a"`, `"lcm"`, etc., `"auto"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "sample_method must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "sample_method must not be empty"
+    ))]
     pub sample_method: Option<String>,
 
     /// Sigma schedule (`"discrete"`, `"karras"`, etc., `"auto"`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "scheduler must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "scheduler must not be empty"
+    ))]
     pub scheduler: Option<String>,
 
     /// CLIP skip layers (default `0` = auto).
@@ -121,12 +111,10 @@ pub struct ImageGenerationRequest {
     /// Init image as a base64-encoded data URI (`data:image/png;base64,...`).
     /// Required when `mode` is `img2img`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "init_image must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "init_image must not be empty"
+    ))]
     pub init_image: Option<String>,
 
     /// Generation mode (default `txt2img`).
@@ -168,17 +156,13 @@ fn validate_image_generation_request(
 
     if request.n > MAX_IMAGES_PER_REQUEST {
         let mut error = ValidationError::new("invalid_n");
-        error.message = Some(
-            format!("n must be between 1 and {MAX_IMAGES_PER_REQUEST}").into(),
-        );
+        error.message = Some(format!("n must be between 1 and {MAX_IMAGES_PER_REQUEST}").into());
         return Err(error);
     }
 
     if request.width > MAX_IMAGE_DIM || request.height > MAX_IMAGE_DIM {
         let mut error = ValidationError::new("invalid_dimensions");
-        error.message = Some(
-            format!("image dimensions must not exceed {MAX_IMAGE_DIM}").into(),
-        );
+        error.message = Some(format!("image dimensions must not exceed {MAX_IMAGE_DIM}").into());
         return Err(error);
     }
 

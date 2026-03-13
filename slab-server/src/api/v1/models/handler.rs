@@ -8,22 +8,22 @@ use serde::Deserialize;
 use utoipa::OpenApi;
 use validator::Validate;
 
-use crate::api::validation::{validate, ValidatedJson, ValidatedQuery};
 use crate::api::v1::models::schema::{
     CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
     LoadModelRequest, ModelCatalogItemResponse, ModelListStatus, ModelStatusResponse,
     SwitchModelRequest, UpdateModelRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
+use crate::api::validation::{validate, ValidatedJson, ValidatedQuery};
 use crate::context::AppState;
-use crate::domain::models::ModelLoadCommand;
-use crate::domain::services::to_operation_accepted_response;
-use crate::error::ServerError;
-use crate::services::models::{
+use crate::domain::models::{
     AvailableModelsQuery, CreateModelCommand, DeletedModelView, DownloadModelCommand,
-    ListModelsFilter, ModelCatalogItemView, ModelCatalogStatus, ModelsService,
+    ListModelsFilter, ModelCatalogItemView, ModelCatalogStatus, ModelLoadCommand,
     UpdateModelCommand,
 };
+use crate::domain::services::to_operation_accepted_response;
+use crate::domain::services::ModelService;
+use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -76,7 +76,7 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 async fn create_model(
-    State(service): State<ModelsService>,
+    State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<CreateModelRequest>,
 ) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
     Ok(Json(to_model_catalog_item_response(
@@ -107,7 +107,7 @@ async fn create_model(
     )
 )]
 async fn update_model(
-    State(service): State<ModelsService>,
+    State(service): State<ModelService>,
     Path(params): Path<ModelIdPath>,
     ValidatedJson(req): ValidatedJson<UpdateModelRequest>,
 ) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
@@ -141,7 +141,7 @@ async fn update_model(
     )
 )]
 async fn delete_model(
-    State(service): State<ModelsService>,
+    State(service): State<ModelService>,
     Path(params): Path<ModelIdPath>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     let params = validate(params)?;
@@ -162,7 +162,7 @@ async fn delete_model(
     )
 )]
 async fn list_models(
-    State(service): State<ModelsService>,
+    State(service): State<ModelService>,
     Query(query): Query<ListModelsQuery>,
 ) -> Result<Json<Vec<ModelCatalogItemResponse>>, ServerError> {
     let items = service
@@ -188,7 +188,7 @@ async fn list_models(
     )
 )]
 async fn load_model(
-    State(service): State<ModelsService>,
+    State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<LoadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     Ok(Json(to_model_status_response(
@@ -208,7 +208,7 @@ async fn load_model(
     )
 )]
 async fn unload_model(
-    State(service): State<ModelsService>,
+    State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<LoadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     Ok(Json(to_model_status_response(
@@ -228,7 +228,7 @@ async fn unload_model(
     )
 )]
 async fn list_available_models(
-    State(service): State<ModelsService>,
+    State(service): State<ModelService>,
     ValidatedQuery(query): ValidatedQuery<ListAvailableQuery>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     let response = service
@@ -254,7 +254,7 @@ async fn list_available_models(
     )
 )]
 async fn switch_model(
-    State(service): State<ModelsService>,
+    State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<SwitchModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     Ok(Json(to_model_status_response(
@@ -281,7 +281,7 @@ async fn switch_model(
     )
 )]
 async fn download_model(
-    State(service): State<ModelsService>,
+    State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<DownloadModelRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
     let response = service
@@ -298,12 +298,10 @@ async fn download_model(
 
 #[derive(Debug, Deserialize, Validate)]
 struct ModelIdPath {
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "id must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "id must not be empty"
+    ))]
     id: String,
 }
 

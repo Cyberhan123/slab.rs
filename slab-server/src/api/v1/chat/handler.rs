@@ -17,10 +17,9 @@ use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
 use crate::domain::services::{
     to_chat_completion_command, to_chat_completion_response, to_chat_model_option_response,
-    ChatCompletionOutput, ChatStreamChunk,
+    ChatCompletionOutput, ChatService, ChatStreamChunk,
 };
 use crate::error::ServerError;
-use crate::services::chat::ChatService;
 
 #[derive(OpenApi)]
 #[openapi(

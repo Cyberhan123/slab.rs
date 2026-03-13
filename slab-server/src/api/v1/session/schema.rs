@@ -4,12 +4,10 @@ use validator::Validate;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 pub struct CreateSessionRequest {
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "name must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "name must not be empty"
+    ))]
     pub name: Option<String>,
 }
 

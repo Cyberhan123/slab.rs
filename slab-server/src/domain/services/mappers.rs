@@ -4,8 +4,8 @@ use crate::api::v1::chat::schema::{
 use crate::api::v1::tasks::schema::{TaskResponse, TaskResultPayload};
 use crate::domain::models::{
     AcceptedOperation, ChatCompletionCommand, ChatCompletionResult,
-    ChatModelOption as DomainChatModelOption,
-    ChatModelSource as DomainChatModelSource, ConversationMessage, TaskResult, TaskView,
+    ChatModelOption as DomainChatModelOption, ChatModelSource as DomainChatModelSource,
+    ConversationMessage, TaskResult, TaskView,
 };
 use crate::infra::db::TaskRecord;
 
@@ -97,7 +97,9 @@ pub fn to_task_result_response(result: TaskResult) -> TaskResultPayload {
     }
 }
 
-pub fn to_operation_accepted_response(result: AcceptedOperation) -> crate::api::v1::tasks::schema::OperationAcceptedResponse {
+pub fn to_operation_accepted_response(
+    result: AcceptedOperation,
+) -> crate::api::v1::tasks::schema::OperationAcceptedResponse {
     crate::api::v1::tasks::schema::OperationAcceptedResponse {
         operation_id: result.operation_id,
     }

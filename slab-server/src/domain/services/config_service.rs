@@ -1,19 +1,7 @@
 use crate::context::ModelState;
+use crate::domain::models::{ConfigEntryView, SetConfigValueCommand};
 use crate::error::ServerError;
 use crate::infra::db::ConfigStore;
-
-#[derive(Debug, Clone)]
-pub struct ConfigEntryView {
-    pub key: String,
-    pub value: String,
-    pub name: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct SetConfigValueCommand {
-    pub name: Option<String>,
-    pub value: String,
-}
 
 #[derive(Clone)]
 pub struct ConfigService {

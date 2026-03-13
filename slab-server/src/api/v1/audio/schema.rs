@@ -5,12 +5,10 @@ use validator::{Validate, ValidationError};
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 pub struct CompletionRequest {
     /// The audio file path to transcribe.
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_absolute_path",
-            message = "path must be an absolute path without '..'"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_absolute_path",
+        message = "path must be an absolute path without '..'"
+    ))]
     pub path: String,
     /// Optional VAD (Voice Activity Detection) settings.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -30,16 +28,18 @@ pub struct TranscribeVadRequest {
     pub enabled: bool,
     /// Absolute path to the VAD model file.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_absolute_path",
-            message = "model_path must be an absolute path without '..'"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_absolute_path",
+        message = "model_path must be an absolute path without '..'"
+    ))]
     pub model_path: Option<String>,
     /// Probability threshold used to classify speech.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    #[validate(range(min = 0.0, max = 1.0, message = "threshold must be between 0.0 and 1.0"))]
+    #[validate(range(
+        min = 0.0,
+        max = 1.0,
+        message = "threshold must be between 0.0 and 1.0"
+    ))]
     pub threshold: Option<f32>,
     /// Minimum speech segment duration in milliseconds.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -89,7 +89,11 @@ pub struct TranscribeDecodeRequest {
     pub suppress_nst: Option<bool>,
     /// Word timestamp probability threshold.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    #[validate(range(min = 0.0, max = 1.0, message = "word_thold must be between 0.0 and 1.0"))]
+    #[validate(range(
+        min = 0.0,
+        max = 1.0,
+        message = "word_thold must be between 0.0 and 1.0"
+    ))]
     pub word_thold: Option<f32>,
     /// Maximum segment length in characters.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -135,7 +139,10 @@ fn validate_vad_request(request: &TranscribeVadRequest) -> Result<(), Validation
         return Err(error);
     }
 
-    if request.max_speech_duration_s.is_some_and(|value| value <= 0.0) {
+    if request
+        .max_speech_duration_s
+        .is_some_and(|value| value <= 0.0)
+    {
         let mut error = ValidationError::new("max_speech_duration_s");
         error.message = Some("max_speech_duration_s must be > 0.0".into());
         return Err(error);

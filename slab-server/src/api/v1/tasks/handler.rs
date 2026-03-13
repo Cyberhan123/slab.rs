@@ -7,12 +7,11 @@ use serde::Deserialize;
 use utoipa::OpenApi;
 use validator::Validate;
 
-use crate::api::validation::{validate, ValidatedQuery};
 use crate::api::v1::tasks::schema::{TaskResponse, TaskResultPayload, TaskTypeQuery};
+use crate::api::validation::{validate, ValidatedQuery};
 use crate::context::AppState;
-use crate::domain::services::{to_task_response, to_task_result_response};
+use crate::domain::services::{to_task_response, to_task_result_response, TaskApplicationService};
 use crate::error::ServerError;
-use crate::services::tasks::TasksService;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -42,7 +41,7 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 async fn list_tasks(
-    State(service): State<TasksService>,
+    State(service): State<TaskApplicationService>,
     ValidatedQuery(q): ValidatedQuery<TaskTypeQuery>,
 ) -> Result<Json<Vec<TaskResponse>>, ServerError> {
     let tasks = service
@@ -69,7 +68,7 @@ async fn list_tasks(
     )
 )]
 async fn get_task(
-    State(service): State<TasksService>,
+    State(service): State<TaskApplicationService>,
     Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let params = validate(params)?;
@@ -91,7 +90,7 @@ async fn get_task(
     )
 )]
 async fn get_task_result(
-    State(service): State<TasksService>,
+    State(service): State<TaskApplicationService>,
     Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResultPayload>, ServerError> {
     let params = validate(params)?;
@@ -115,11 +114,13 @@ async fn get_task_result(
     )
 )]
 async fn cancel_task(
-    State(service): State<TasksService>,
+    State(service): State<TaskApplicationService>,
     Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(to_task_response(service.cancel_task(&params.id).await?)))
+    Ok(Json(to_task_response(
+        service.cancel_task(&params.id).await?,
+    )))
 }
 
 #[utoipa::path(
@@ -137,7 +138,7 @@ async fn cancel_task(
     )
 )]
 async fn restart_task(
-    State(service): State<TasksService>,
+    State(service): State<TaskApplicationService>,
     Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let params = validate(params)?;
@@ -150,11 +151,9 @@ async fn restart_task(
 
 #[derive(Debug, Deserialize, Validate)]
 struct TaskIdPath {
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "id must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "id must not be empty"
+    ))]
     id: String,
 }

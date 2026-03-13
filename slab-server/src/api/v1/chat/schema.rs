@@ -14,20 +14,16 @@ const MAX_PROMPT_BYTES: usize = 128 * 1024;
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 pub struct ChatMessage {
     /// The role of the message author (`"system"`, `"user"`, `"assistant"`).
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_chat_role",
-            message = "role must be one of: system, user, assistant"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_chat_role",
+        message = "role must be one of: system, user, assistant"
+    ))]
     pub role: String,
     /// The content of the message.
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "content must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "content must not be empty"
+    ))]
     pub content: String,
 }
 
@@ -37,22 +33,18 @@ pub struct ChatMessage {
 pub struct ChatCompletionRequest {
     /// Optional chat session ID for stateful conversations.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "id must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "id must not be empty"
+    ))]
     pub id: Option<String>,
     /// The model identifier to use. It can be:
     /// - local model id from `/v1/models`
     /// - cloud model option id from `GET /v1/chat/models`
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "model must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "model must not be empty"
+    ))]
     pub model: String,
     /// Conversation history; the last user message is used as the prompt.
     #[validate(length(min = 1, message = "messages must not be empty"))]
@@ -67,7 +59,11 @@ pub struct ChatCompletionRequest {
     pub max_tokens: Option<u32>,
     /// Sampling temperature in [0, 2].
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(min = 0.0, max = 2.0, message = "temperature must be between 0.0 and 2.0"))]
+    #[validate(range(
+        min = 0.0,
+        max = 2.0,
+        message = "temperature must be between 0.0 and 2.0"
+    ))]
     pub temperature: Option<f32>,
 }
 
@@ -129,7 +125,9 @@ pub struct ChatModelOption {
     pub pending: bool,
 }
 
-fn validate_chat_completion_request(request: &ChatCompletionRequest) -> Result<(), ValidationError> {
+fn validate_chat_completion_request(
+    request: &ChatCompletionRequest,
+) -> Result<(), ValidationError> {
     let Some(user_message) = request
         .messages
         .iter()

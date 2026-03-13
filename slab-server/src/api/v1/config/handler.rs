@@ -7,11 +7,12 @@ use serde::Deserialize;
 use utoipa::OpenApi;
 use validator::Validate;
 
-use crate::api::validation::{validate, ValidatedJson};
 use crate::api::v1::config::schema::{ConfigEntry, SetConfigBody};
+use crate::api::validation::{validate, ValidatedJson};
 use crate::context::AppState;
+use crate::domain::models::{ConfigEntryView, SetConfigValueCommand};
+use crate::domain::services::ConfigService;
 use crate::error::ServerError;
-use crate::services::config::{ConfigEntryView, ConfigService, SetConfigValueCommand};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -99,12 +100,10 @@ async fn set_config_value(
 
 #[derive(Debug, Deserialize, Validate)]
 struct ConfigKeyPath {
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "key must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "key must not be empty"
+    ))]
     key: String,
 }
 

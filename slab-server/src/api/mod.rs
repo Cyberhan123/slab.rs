@@ -9,8 +9,8 @@
 pub mod doc;
 pub mod health;
 mod middleware;
-pub mod validation;
 pub(crate) mod v1;
+pub mod validation;
 use crate::api::middleware::{cors, trace};
 use crate::context::AppState;
 use axum::{middleware as axum_middleware, Router};

@@ -6,13 +6,14 @@ use axum::routing::post;
 use axum::{Json, Router};
 use utoipa::OpenApi;
 
-use crate::api::validation::ValidatedJson;
 use crate::api::v1::ffmpeg::schema::ConvertRequest;
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
+use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
+use crate::domain::models::FfmpegConvertCommand;
 use crate::domain::services::to_operation_accepted_response;
+use crate::domain::services::FfmpegService;
 use crate::error::ServerError;
-use crate::services::ffmpeg::{FfmpegConvertCommand, FfmpegService};
 
 #[derive(OpenApi)]
 #[openapi(

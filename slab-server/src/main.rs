@@ -8,7 +8,6 @@ mod domain;
 mod error;
 mod infra;
 mod model_auto_unload;
-mod services;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
