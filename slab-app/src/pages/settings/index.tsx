@@ -65,6 +65,8 @@ import {
   XCircle,
 } from 'lucide-react';
 
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
+
 interface BackendListItem {
   model_type: string;
   backend: string;
@@ -159,13 +161,11 @@ export default function Settings() {
   const [busyModelId, setBusyModelId] = useState<string | null>(null);
 
   // API calls using react-query
-  const { data: configs, error: configsError, isLoading: configsLoading, refetch: refetchConfigs } = api.useQuery('get', '/admin/config');
-  const { data: backends, error: backendsError, isLoading: backendsLoading } = api.useQuery('get', '/admin/backends');
+  const { data: configs, error: configsError, isLoading: configsLoading, refetch: refetchConfigs } = api.useQuery('get', '/v1/config');
+  const { data: backends, error: backendsError, isLoading: backendsLoading } = api.useQuery('get', '/v1/backends');
   const { data: models, error: modelsError, isLoading: modelsLoading, refetch: refetchModels } = api.useQuery('get', '/v1/models');
 
   // Mutations
-  const updateConfigMutation = api.useMutation('put', '/admin/config/{key}');
-  const getBackendStatusMutation = api.useMutation('get', '/admin/backends/status');
   const createModelMutation = api.useMutation('post', '/v1/models');
   const updateModelMutation = api.useMutation('put', '/v1/models/{id}');
   const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
@@ -391,10 +391,29 @@ export default function Settings() {
 
   const extractTaskId = (payload: unknown): string | null => {
     if (typeof payload !== 'object' || payload === null) return null;
-    const taskId = (payload as { task_id?: unknown }).task_id;
+    const taskId =
+      (payload as { operation_id?: unknown }).operation_id ??
+      (payload as { task_id?: unknown }).task_id;
     if (typeof taskId !== 'string') return null;
     const trimmed = taskId.trim();
     return trimmed.length > 0 ? trimmed : null;
+  };
+
+  const putConfigValue = async (key: string, body: { name?: string; value: string }) => {
+    const response = await fetch(`${API_BASE_URL}/v1/config/${encodeURIComponent(key)}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || `HTTP ${response.status}`);
+    }
+
+    return response.json();
   };
 
   const waitForTaskToFinish = async (taskId: string) => {
@@ -523,15 +542,7 @@ export default function Settings() {
   // Function to update config value
   const updateConfig = async (key: string, value: string, name?: string) => {
     try {
-      await updateConfigMutation.mutateAsync({
-        params: {
-          path: { key },
-        },
-        body: {
-          name,
-          value,
-        },
-      });
+      await putConfigValue(key, { name, value });
       toast.success('Configuration updated successfully');
       refetchConfigs();
     } catch (error) {
@@ -542,11 +553,13 @@ export default function Settings() {
   // Function to get backend status
   const getBackendStatus = async (backendId: string) => {
     try {
-      const status = await getBackendStatusMutation.mutateAsync({
-        params: {
-          query: { backend_id: backendId },
-        },
-      });
+      const response = await fetch(
+        `${API_BASE_URL}/v1/backends/status?backend_id=${encodeURIComponent(backendId)}`
+      );
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      const status = (await response.json()) as { status?: string };
       toast.success(`Backend Status: ${status?.status}`);
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -558,7 +571,7 @@ export default function Settings() {
     setDownloadingBackend(backendId);
     try {
       toast.warning(
-        `Backend ${backendId} download requires backend_id and target_dir. Use /admin/backends/download with payload like {"backend_id":"ggml.llama","target_dir":"C:\\\\slab\\\\llama"}.`
+        `Backend ${backendId} download requires backend_id and target_dir. Use /v1/backends/download with payload like {"backend_id":"ggml.llama","target_dir":"C:\\\\slab\\\\llama"}.`
       );
     } catch (error) {
       toast.error(getErrorMessage(error));
@@ -598,24 +611,14 @@ export default function Settings() {
 
     setIsSavingAutoUnload(true);
     try {
-      await updateConfigMutation.mutateAsync({
-        params: {
-          path: { key: MODEL_AUTO_UNLOAD_ENABLED_KEY },
-        },
-        body: {
-          name: 'Model Auto Unload Enabled',
-          value: autoUnloadEnabled ? 'true' : 'false',
-        },
+      await putConfigValue(MODEL_AUTO_UNLOAD_ENABLED_KEY, {
+        name: 'Model Auto Unload Enabled',
+        value: autoUnloadEnabled ? 'true' : 'false',
       });
 
-      await updateConfigMutation.mutateAsync({
-        params: {
-          path: { key: MODEL_AUTO_UNLOAD_IDLE_MINUTES_KEY },
-        },
-        body: {
-          name: 'Model Auto Unload Idle Minutes',
-          value: autoUnloadMinutes.trim() || '10',
-        },
+      await putConfigValue(MODEL_AUTO_UNLOAD_IDLE_MINUTES_KEY, {
+        name: 'Model Auto Unload Idle Minutes',
+        value: autoUnloadMinutes.trim() || '10',
       });
 
       toast.success('Model auto-unload configuration saved');
@@ -645,14 +648,9 @@ export default function Settings() {
 
     setIsSavingChatProviders(true);
     try {
-      await updateConfigMutation.mutateAsync({
-        params: {
-          path: { key: CHAT_MODEL_PROVIDERS_KEY },
-        },
-        body: {
-          name: 'Chat Model Providers',
-          value: raw,
-        },
+      await putConfigValue(CHAT_MODEL_PROVIDERS_KEY, {
+        name: 'Chat Model Providers',
+        value: raw,
       });
       toast.success('Chat model providers saved');
       await refetchConfigs();
@@ -679,10 +677,7 @@ export default function Settings() {
     ];
     try {
       await Promise.all(entries.map(([key, value]) =>
-        updateConfigMutation.mutateAsync({
-          params: { path: { key } },
-          body: { name: key, value },
-        })
+        putConfigValue(key, { name: key, value })
       ));
       toast.success('Diffusion settings saved');
       await refetchConfigs();

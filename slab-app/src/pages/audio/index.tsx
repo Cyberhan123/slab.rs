@@ -160,7 +160,9 @@ export default function Audio() {
 
   const extractTaskId = (payload: unknown): string | null => {
     if (typeof payload !== 'object' || payload === null) return null;
-    const taskId = (payload as { task_id?: unknown }).task_id;
+    const taskId =
+      (payload as { operation_id?: unknown }).operation_id ??
+      (payload as { task_id?: unknown }).task_id;
     if (typeof taskId !== 'string') return null;
     const trimmed = taskId.trim();
     return trimmed.length > 0 ? trimmed : null;
@@ -450,10 +452,10 @@ export default function Audio() {
 
       setPreparingStage('transcribe');
       const result = await transcribe.handleTranscribe(file.file, transcribeOptions);
-      setTaskId(result.task_id);
+      setTaskId(result.operation_id);
 
       toast.success('Transcription task created.', {
-        description: `Task ID: ${result.task_id} | Model: ${modelName} | ${vadDescription} | ${decodeDescription}`,
+        description: `Task ID: ${result.operation_id} | Model: ${modelName} | ${vadDescription} | ${decodeDescription}`,
         action: {
           label: 'View tasks',
           onClick: () => navigate('/task')

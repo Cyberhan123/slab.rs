@@ -4,7 +4,6 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
-import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
@@ -27,9 +26,7 @@ import { Dialog, DialogContent } from '@/components/ui/dialog';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const API_BASE_URL = (typeof import.meta !== 'undefined' && (import.meta as Record<string, unknown>).env)
-  ? ((import.meta as Record<string, { VITE_API_BASE_URL?: string }>).env.VITE_API_BASE_URL ?? 'http://localhost:3000')
-  : 'http://localhost:3000';
+const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
 
 const SAMPLE_METHODS = [
   { value: 'auto', label: 'Auto' },
@@ -84,11 +81,6 @@ interface TaskResult {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function parseSize(s: string): [number, number] {
-  const [w, h] = s.split('x').map(Number);
-  return [w || 512, h || 512];
-}
-
 async function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -107,8 +99,6 @@ export default function ImagePage() {
   // ── Model selection ─────────────────────────────────────────────────────────
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [selectedModelId, setSelectedModelId] = useState('');
-  const [modelsLoading, setModelsLoading] = useState(false);
-
   // ── Basic params ────────────────────────────────────────────────────────────
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
@@ -233,8 +223,8 @@ export default function ImagePage() {
         throw new Error(`HTTP ${response.status}: ${detail || 'generation failed'}`);
       }
 
-      const { task_id } = (await response.json()) as { task_id: string };
-      setTaskId(task_id);
+      const { operation_id } = (await response.json()) as { operation_id: string };
+      setTaskId(operation_id);
       setIsPolling(true);
       pollAttempts.current = 0;
     } catch (err) {

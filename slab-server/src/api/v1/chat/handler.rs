@@ -12,10 +12,12 @@ use utoipa::OpenApi;
 use crate::api::v1::chat::schema::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
     ChatModelOption, ChatModelSource,
+    
 };
 use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
-use crate::domain::services::{ChatCompletionOutput, ChatService, ChatStreamChunk};
+use crate::domain::models::{ChatCompletionOutput, ChatStreamChunk};
+use crate::domain::services::ChatService;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]

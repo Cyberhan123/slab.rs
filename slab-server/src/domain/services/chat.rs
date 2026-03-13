@@ -20,8 +20,8 @@ use crate::context::ModelState;
 use crate::domain::models::{
     ChatCompletionCommand, ChatCompletionResult, ChatModelOption, ChatModelSource,
     ChatResultChoice, ConversationMessage as DomainConversationMessage,
+    ChatCompletionOutput, ChatStreamChunk,
 };
-use crate::domain::services::{ChatCompletionOutput, ChatStreamChunk};
 use crate::error::ServerError;
 use crate::infra::db::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::infra::rpc::{self, pb};
