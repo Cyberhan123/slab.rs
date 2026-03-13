@@ -16,7 +16,7 @@ use crate::context::worker_state::OperationContext;
 use crate::context::{AppState, ModelState, SubmitOperation, WorkerState};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
-use crate::api::dto::admin::backend::{
+use crate::api::dto::v1::backend::{
     BackendListResponse, BackendStatusResponse, BackendTypeQuery, DownloadLibRequest,
     ReloadLibRequest,
 };
@@ -170,13 +170,13 @@ async fn run_libfetch_download(
     }
 }
 
-// 鈹€鈹€ Handlers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+//  Handlers 
 
-/// Get status of a model backend (`GET /admin/backends/status`).
+/// Get status of a model backend (`GET /v1/backends/status`).
 #[utoipa::path(
     get,
-    path = "/admin/backends/status",
-    tag = "admin",
+    path = "/v1/backends/status",
+    tag = "backends",
   params(BackendTypeQuery),
     responses(
         (status = 200, description = "Backend worker is running", body = BackendStatusResponse),
@@ -202,11 +202,11 @@ pub async fn backend_status(
     }))
 }
 
-/// List all registered backends and their status (`GET /admin/backends`).
+/// List all registered backends and their status (`GET /v1/backends`).
 #[utoipa::path(
     get,
-    path = "/admin/backends",
-    tag = "admin",
+    path = "/v1/backends",
+    tag = "backends",
     responses(
         (status = 200, description = "List of all registered backends", body = BackendListResponse),
         (status = 401, description = "Unauthorised (admin token required)"),
@@ -232,11 +232,11 @@ pub async fn list_backends(
     Ok(Json(BackendListResponse { backends: backends }))
 }
 
-/// Download a backend shared library from a GitHub release (`POST /admin/backends/download`).
+/// Download a backend shared library from a GitHub release (`POST /v1/backends/download`).
 #[utoipa::path(
     post,
-    path = "/admin/backends/download",
-    tag = "admin",
+    path = "/v1/backends/download",
+    tag = "backends",
     request_body = DownloadLibRequest,
     responses(
         (status = 202, description = "Download task accepted", body = OperationAcceptedResponse),
@@ -285,11 +285,11 @@ pub async fn download_lib(
     ))
 }
 
-/// Reload a backend with a new shared library path (`POST /admin/backends/reload`).
+/// Reload a backend with a new shared library path (`POST /v1/backends/reload`).
 #[utoipa::path(
     post,
-    path = "/admin/backends/reload",
-    tag = "admin",
+    path = "/v1/backends/reload",
+    tag = "backends",
     request_body = ReloadLibRequest,
     responses(
         (status = 200, description = "Backend reloaded with new library", body = BackendStatusResponse),
@@ -341,7 +341,7 @@ pub async fn reload_lib(
     }))
 }
 
-// 鈹€鈹€ Tests 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+// Tests 
 
 #[cfg(test)]
 mod test {

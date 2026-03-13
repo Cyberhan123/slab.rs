@@ -47,7 +47,7 @@ pub struct Config {
     /// but should be restricted to trusted origins in production.
     pub cors_allowed_origins: Option<String>,
 
-    /// Optional bearer token required for admin endpoints (`/admin/*`).
+    /// Optional bearer token required for management endpoints (`/v1/config/*`, `/v1/backends/*`).
     ///
     /// Set `SLAB_ADMIN_TOKEN=<secret>` to require an
     /// `Authorization: Bearer <secret>` header on those routes.

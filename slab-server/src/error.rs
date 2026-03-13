@@ -103,7 +103,7 @@ impl IntoResponse for ServerError {
                 let message = match e {
                     slab_core::RuntimeError::NotInitialized => {
                         "Backend not initialized. Please ensure the Whisper library and model are loaded. \
-                        Set SLAB_WHISPER_LIB_DIR environment variable or use POST /admin/backends/reload".to_owned()
+                        Set SLAB_WHISPER_LIB_DIR environment variable or use POST /v1/backends/reload".to_owned()
                     }
                     slab_core::RuntimeError::LibraryLoadFailed { backend, .. } => {
                         format!("{} library failed to load. Check SLAB_{}_LIB_DIR environment variable.",

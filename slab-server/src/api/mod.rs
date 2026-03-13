@@ -5,15 +5,11 @@
 //! - Optional Swagger UI / OpenAPI spec endpoint (disable with `SLAB_ENABLE_SWAGGER=false`)
 //! - Health / heartbeat route
 //! - OpenAI-compatible `/v1` routes
-//! - admin `/admin` routes (optionally protected by bearer token)
 
-mod admin;
 pub mod dto;
 pub mod doc;
 pub mod health;
 mod middleware;
-mod model;
-mod worker;
 pub(crate) mod v1;
 use crate::api::middleware::{cors, trace};
 use crate::context::AppState;
@@ -30,8 +26,7 @@ use utoipa_swagger_ui::SwaggerUi;
 pub fn build(state: Arc<AppState>) -> Router {
     let api_router = Router::new()
         .merge(health::router())
-        .nest("/v1", v1::router())
-        .nest("/admin", admin::router(state.clone()));
+        .nest("/v1", v1::router(state.clone()));
 
     let mut app = Router::new().merge(api_router);
     let api_doc = doc::get_docs();

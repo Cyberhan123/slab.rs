@@ -27,7 +27,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/sessions/{id}/messages", get(list_session_messages))
 }
 
-// 鈹€鈹€ Session handlers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+//  Session handlers 
 #[utoipa::path(
     post,
     path = "/v1/sessions",

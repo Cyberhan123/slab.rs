@@ -1,4 +1,3 @@
-use crate::api::admin;
 use crate::api::health;
 use crate::api::v1;
 use utoipa::OpenApi;
@@ -16,7 +15,6 @@ pub fn get_docs() -> utoipa::openapi::OpenApi {
     let mut root = ApiDoc::openapi();
     root.merge(health::HealthApi::openapi());
     root.merge(v1::api_docs());
-    root.merge(admin::api_docs());
     root
 }
 

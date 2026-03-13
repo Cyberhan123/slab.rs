@@ -84,7 +84,7 @@ pub async fn generate_images(
     State(worker_state): State<WorkerState>,
     Json(req): Json<ImageGenerationRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
-    // 鈹€鈹€ Validation 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //  Validation 
     if req.prompt.is_empty() {
         return Err(ServerError::BadRequest("prompt must not be empty".into()));
     }
@@ -125,7 +125,7 @@ pub async fn generate_images(
         None
     };
 
-    // 鈹€鈹€ Decode init image (img2img) 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
+    //  Decode init image (img2img) 鈹
     let (init_image_bytes, init_image_width, init_image_height, init_image_channels) =
         if let Some(ref data_uri) = effective_init_image {
             let (data, w, h, c) = decode_init_image(data_uri)?;

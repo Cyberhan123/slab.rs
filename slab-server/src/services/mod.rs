@@ -7,5 +7,5 @@ pub mod images;
 pub mod models;
 pub mod session;
 pub mod system;
-pub mod task;
+pub mod tasks;
 pub mod video;
