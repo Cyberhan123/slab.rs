@@ -574,11 +574,8 @@ pub async fn chat_completions(
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
     let use_case = CreateChatCompletionUseCase::new(ChatRoutePort { context });
-    let command = to_chat_completion_command(req);
-    match use_case.execute(command).await? {
-        ChatCompletionOutput::Json(resp) => {
-            Ok(Json(to_chat_completion_response(resp)).into_response())
-        }
+    match use_case.execute(req).await? {
+        ChatCompletionOutput::Json(resp) => Ok(Json(resp).into_response()),
         ChatCompletionOutput::Stream(stream) => {
             let event_stream = stream.map(|chunk| -> Result<Event, Infallible> {
                 match chunk {
@@ -606,14 +603,14 @@ impl ChatCompletionPort for ChatRoutePort {
     > {
         Box::pin(create_chat_completion_with_context(
             Arc::clone(&self.context),
-            command,
+            req,
         ))
     }
 }
 
 pub(crate) async fn create_chat_completion_with_context(
     context: Arc<ChatContext>,
-    mut command: ChatCompletionCommand,
+    req: ChatCompletionRequest,
 ) -> Result<ChatCompletionOutput, ServerError> {
     let user_content = command
         .messages
@@ -653,14 +650,9 @@ pub(crate) async fn create_chat_completion_with_context(
         "chat completion request"
     );
 
-    let resolved_messages = build_messages(
-        &context,
-        command.id.as_deref(),
-        &to_openai_messages(std::mem::take(&mut command.messages)),
-    )
-    .await?;
+    let resolved_messages = build_messages(&context, req.id.as_deref(), &req.messages).await?;
 
-    if let Some(sid) = command.id.as_deref() {
+    if let Some(sid) = req.id.as_deref() {
         context
             .store
             .append_message(ChatMessage {
@@ -674,9 +666,9 @@ pub(crate) async fn create_chat_completion_with_context(
             .unwrap_or_else(|e| tracing::warn!(error = %e, "failed to persist user message"));
     }
 
-    let generated = if is_cloud_model_option_id(&command.model) {
-        let target = resolve_cloud_model(&context, &command.model).await?;
-        if command.stream {
+    let generated = if is_cloud_model_option_id(&req.model) {
+        let target = resolve_cloud_model(&context, &req.model).await?;
+        if req.stream {
             let backend_stream =
                 cloud_chat_stream(&target, &resolved_messages, max_tokens, temperature).await?;
 
@@ -721,7 +713,7 @@ pub(crate) async fn create_chat_completion_with_context(
             ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
         })?;
 
-        if command.stream {
+        if req.stream {
             let usage_guard = context
                 .model_auto_unload
                 .acquire_for_inference(LLAMA_BACKEND_ID)
@@ -780,7 +772,7 @@ pub(crate) async fn create_chat_completion_with_context(
         "chat completion done"
     );
 
-    if let Some(sid) = command.id.as_deref() {
+    if let Some(sid) = req.id.as_deref() {
         context
             .store
             .append_message(ChatMessage {

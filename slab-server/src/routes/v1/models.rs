@@ -645,8 +645,8 @@ pub async fn load_model(
     Json(req): Json<LoadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     let use_case = LoadModelUseCase::new(ModelRoutePort { context });
-    let result = use_case.execute(to_model_load_command(req)).await?;
-    Ok(Json(to_model_status_response(result)))
+    let result = use_case.execute(req).await?;
+    Ok(Json(result))
 }
 
 struct ModelRoutePort {
@@ -660,22 +660,22 @@ impl ModelLoadPort for ModelRoutePort {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<ModelStatus, ServerError>> + Send + '_>,
     > {
-        Box::pin(load_model_with_context(Arc::clone(&self.context), command))
+        Box::pin(load_model_with_context(Arc::clone(&self.context), req))
     }
 }
 
 pub(crate) async fn load_model_with_context(
     context: Arc<ModelContext>,
-    command: ModelLoadCommand,
-) -> Result<ModelStatus, ServerError> {
-    let bid = &command.backend_id;
+    req: LoadModelRequest,
+) -> Result<ModelStatusResponse, ServerError> {
+    let bid = &req.backend_id;
 
     validate_path("model_path", &command.model_path)?;
     validate_existing_model_file(&command.model_path)?;
 
     let (canonical_backend, channel) = resolve_backend_channel(&context, bid)?;
     let (num_workers, worker_source) =
-        resolve_model_workers(&context, &canonical_backend, command.num_workers).await?;
+        resolve_model_workers(&context, &canonical_backend, req.num_workers).await?;
     let (context_length, context_source) =
         resolve_llama_context_length(&context, &canonical_backend).await?;
 
