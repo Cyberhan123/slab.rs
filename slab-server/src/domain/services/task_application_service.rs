@@ -1,22 +1,20 @@
-use std::sync::Arc;
-
 use tracing::{info, warn};
 
-use crate::context::AppState;
+use crate::context::WorkerState;
 use crate::domain::models::TaskResult;
 use crate::domain::services::to_task_response;
 use crate::error::ServerError;
 use crate::infra::db::TaskStore;
 use crate::infra::rpc::adapter::payload_to_task_result;
-use crate::schemas::v1::task::{TaskResponse, TaskStatusEnumExt};
+use crate::api::dto::v1::task::{TaskResponse, TaskStatusEnumExt};
 
 #[derive(Clone)]
 pub struct TaskApplicationService {
-    state: Arc<AppState>,
+    state: WorkerState,
 }
 
 impl TaskApplicationService {
-    pub fn new(state: Arc<AppState>) -> Self {
+    pub fn new(state: WorkerState) -> Self {
         Self { state }
     }
 
@@ -24,7 +22,7 @@ impl TaskApplicationService {
         &self,
         task_type: Option<&str>,
     ) -> Result<Vec<TaskResponse>, ServerError> {
-        let records = self.state.store.list_tasks(task_type).await?;
+        let records = self.state.store().list_tasks(task_type).await?;
         Ok(records
             .into_iter()
             .map(|record| to_task_response(&record))
@@ -34,7 +32,7 @@ impl TaskApplicationService {
     pub async fn get_task(&self, id: &str) -> Result<TaskResponse, ServerError> {
         let mut record = self
             .state
-            .store
+            .store()
             .get_task(id)
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("task {id} not found")))?;
@@ -48,7 +46,7 @@ impl TaskApplicationService {
                 };
                 if live_status != record.status || live_error.as_deref() != record.error_msg.as_deref() {
                     self.state
-                        .store
+                        .store()
                         .update_task_status(id, live_status, None, live_error.as_deref())
                         .await
                         .unwrap_or_else(|e| warn!(error = %e, "failed to sync task status"));
@@ -64,7 +62,7 @@ impl TaskApplicationService {
     pub async fn get_task_result(&self, id: &str) -> Result<TaskResult, ServerError> {
         let record = self
             .state
-            .store
+            .store()
             .get_task(id)
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("task {id} not found")))?;
@@ -75,7 +73,7 @@ impl TaskApplicationService {
                     let result_payload = payload_to_task_result(&record.task_type, &payload);
                     if let Ok(result_json) = serialize_task_result(&result_payload) {
                         self.state
-                            .store
+                            .store()
                             .update_task_status(id, "succeeded", Some(&result_json), None)
                             .await
                             .unwrap_or_else(|e| warn!(error = %e, "failed to persist result"));
@@ -102,7 +100,7 @@ impl TaskApplicationService {
                 Err(e) => {
                     let err_msg = e.to_string();
                     self.state
-                        .store
+                        .store()
                         .update_task_status(id, "failed", None, Some(&err_msg))
                         .await
                         .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to sync failed task error"));
@@ -137,7 +135,7 @@ impl TaskApplicationService {
     pub async fn cancel_task(&self, id: &str) -> Result<TaskResponse, ServerError> {
         let record = self
             .state
-            .store
+            .store()
             .get_task(id)
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("task {id} not found")))?;
@@ -150,7 +148,7 @@ impl TaskApplicationService {
         }
 
         self.state
-            .store
+            .store()
             .update_task_status(id, "cancelled", None, None)
             .await?;
 
@@ -159,12 +157,12 @@ impl TaskApplicationService {
                 warn!(task_id = %id, error = %e, "failed to cancel slab-core task");
             }
         }
-        self.state.task_manager.cancel(id);
+        self.state.cancel_operation(id);
 
         info!(task_id = %id, "task cancelled");
         let updated = self
             .state
-            .store
+            .store()
             .get_task(id)
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("task {id} not found after cancel")))?;
@@ -174,7 +172,7 @@ impl TaskApplicationService {
     pub async fn validate_restartable(&self, id: &str) -> Result<(), ServerError> {
         let record = self
             .state
-            .store
+            .store()
             .get_task(id)
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("task {id} not found")))?;

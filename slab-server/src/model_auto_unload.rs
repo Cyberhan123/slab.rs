@@ -5,7 +5,7 @@ use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use crate::entities::{AnyStore, ConfigStore};
-use crate::grpc;
+use crate::infra::rpc;
 
 pub const MODEL_AUTO_UNLOAD_ENABLED_CONFIG_KEY: &str = "model_auto_unload_enabled";
 pub const MODEL_AUTO_UNLOAD_IDLE_MINUTES_CONFIG_KEY: &str = "model_auto_unload_idle_minutes";
@@ -29,7 +29,7 @@ struct BackendRefState {
 #[derive(Debug)]
 pub struct ModelAutoUnloadManager {
     store: Arc<AnyStore>,
-    grpc: Arc<crate::grpc::gateway::GrpcGateway>,
+    grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
     states: tokio::sync::Mutex<HashMap<String, BackendRefState>>,
 }
 
@@ -51,7 +51,7 @@ impl Drop for ModelUsageGuard {
 }
 
 impl ModelAutoUnloadManager {
-    pub fn new(store: Arc<AnyStore>, grpc: Arc<crate::grpc::gateway::GrpcGateway>) -> Self {
+    pub fn new(store: Arc<AnyStore>, grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>) -> Self {
         Self {
             store,
             grpc,
@@ -198,10 +198,10 @@ impl ModelAutoUnloadManager {
             return;
         };
 
-        match grpc::client::unload_model(
+        match rpc::client::unload_model(
             channel,
             &backend_id,
-            grpc::pb::ModelUnloadRequest::default(),
+            rpc::pb::ModelUnloadRequest::default(),
         )
         .await
         {
@@ -263,14 +263,14 @@ impl ModelAutoUnloadManager {
             ));
         };
 
-        let req = grpc::pb::ModelLoadRequest {
+        let req = rpc::pb::ModelLoadRequest {
             model_path: spec.model_path.clone(),
             num_workers: spec.num_workers.max(1),
             context_length: spec.context_length,
             ..Default::default()
         };
 
-        match grpc::client::load_model(channel, &backend, req).await {
+        match rpc::client::load_model(channel, &backend, req).await {
             Ok(_) => {
                 info!(
                     backend = %backend,

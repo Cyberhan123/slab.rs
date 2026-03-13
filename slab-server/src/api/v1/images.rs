@@ -13,8 +13,8 @@ use utoipa::OpenApi;
 use crate::context::{AppState, SubmitOperation, WorkerState};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
-use crate::schemas::v1::images::{ImageGenerationRequest, ImageMode};
-use crate::schemas::v1::task::{OperationAcceptedResponse, TaskResultPayload};
+use crate::api::dto::v1::images::{ImageGenerationRequest, ImageMode};
+use crate::api::dto::v1::task::{OperationAcceptedResponse, TaskResultPayload};
 
 /// Maximum allowed prompt length in bytes.
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB

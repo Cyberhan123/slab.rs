@@ -36,11 +36,11 @@ use crate::domain::services::{
 use crate::infra::db::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
-use crate::schemas::v1::chat::{
+use crate::api::dto::v1::chat::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
     ChatModelOption, ChatModelSource,
 };
-use crate::context::AppState;
+use crate::context::{AppState, ModelState};
 
 /// Maximum allowed prompt length in bytes.
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
@@ -219,10 +219,10 @@ fn canonicalize_cloud_provider(
 }
 
 async fn load_cloud_providers_strict(
-    state: &AppState,
+    state: &ModelState,
 ) -> Result<Vec<CloudProviderConfig>, ServerError> {
     let raw = state
-        .store
+        .store()
         .get_config_value(CHAT_MODEL_PROVIDERS_CONFIG_KEY)
         .await?;
 
@@ -261,7 +261,7 @@ async fn load_cloud_providers_strict(
     Ok(out)
 }
 
-async fn load_cloud_providers_lenient(state: &AppState) -> Vec<CloudProviderConfig> {
+async fn load_cloud_providers_lenient(state: &ModelState) -> Vec<CloudProviderConfig> {
     match load_cloud_providers_strict(state).await {
         Ok(v) => v,
         Err(err) => {
@@ -305,7 +305,7 @@ fn resolve_provider_api_key(provider: &CloudProviderConfig) -> Result<String, Se
 }
 
 async fn resolve_cloud_model(
-    state: &AppState,
+    state: &ModelState,
     requested_model: &str,
 ) -> Result<ResolvedCloudModel, ServerError> {
     let providers = load_cloud_providers_strict(state).await?;
@@ -368,10 +368,10 @@ fn pending_download_map(tasks: Vec<TaskRecord>) -> HashMap<String, TaskRecord> {
     )
 )]
 pub async fn list_chat_models(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
 ) -> Result<Json<Vec<ChatModelOption>>, ServerError> {
-    let local_models = state.store.list_models().await?;
-    let download_tasks = state.store.list_tasks(Some("model_download")).await?;
+    let local_models = state.store().list_models().await?;
+    let download_tasks = state.store().list_tasks(Some("model_download")).await?;
     let pending_by_model = pending_download_map(download_tasks);
 
     let mut items: Vec<ChatModelOption> = local_models
@@ -563,7 +563,7 @@ async fn cloud_chat_stream(
     )
 )]
 pub async fn chat_completions(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
     let use_case = CreateChatCompletionUseCase::new(ChatRoutePort { state });
@@ -585,7 +585,7 @@ pub async fn chat_completions(
 }
 
 struct ChatRoutePort {
-    state: Arc<AppState>,
+    state: ModelState,
 }
 
 impl ChatCompletionPort for ChatRoutePort {
@@ -597,15 +597,12 @@ impl ChatCompletionPort for ChatRoutePort {
             dyn std::future::Future<Output = Result<ChatCompletionOutput, ServerError>> + Send + '_,
         >,
     > {
-        Box::pin(create_chat_completion_with_state(
-            Arc::clone(&self.state),
-            command,
-        ))
+        Box::pin(create_chat_completion_with_state(self.state.clone(), command))
     }
 }
 
 pub(crate) async fn create_chat_completion_with_state(
-    state: Arc<AppState>,
+    state: ModelState,
     command: ChatCompletionCommand,
 ) -> Result<ChatCompletionOutput, ServerError> {
     let user_content = command
@@ -655,7 +652,7 @@ pub(crate) async fn create_chat_completion_with_state(
 
     if let Some(sid) = command.id.as_deref() {
         state
-            .store
+            .store()
             .append_message(ChatMessage {
                 id: Uuid::new_v4().to_string(),
                 session_id: sid.to_owned(),
@@ -710,13 +707,13 @@ pub(crate) async fn create_chat_completion_with_state(
             session_key: command.id.clone().unwrap_or_default(),
         };
 
-        let llama_channel = state.grpc.chat_channel().ok_or_else(|| {
+        let llama_channel = state.grpc().chat_channel().ok_or_else(|| {
             ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
         })?;
 
         if command.stream {
             let usage_guard = state
-                .model_auto_unload
+                .auto_unload()
                 .acquire_for_inference(LLAMA_BACKEND_ID)
                 .await
                 .map_err(|e| {
@@ -757,7 +754,7 @@ pub(crate) async fn create_chat_completion_with_state(
         }
 
         let _usage_guard = state
-            .model_auto_unload
+            .auto_unload()
             .acquire_for_inference(LLAMA_BACKEND_ID)
             .await
             .map_err(|e| ServerError::BackendNotReady(format!("llama backend not ready: {e}")))?;
@@ -775,7 +772,7 @@ pub(crate) async fn create_chat_completion_with_state(
 
     if let Some(sid) = command.id.as_deref() {
         state
-            .store
+            .store()
             .append_message(ChatMessage {
                 id: Uuid::new_v4().to_string(),
                 session_id: sid.to_owned(),
@@ -807,7 +804,7 @@ pub(crate) async fn create_chat_completion_with_state(
 
 /// Merge history from DB and current request messages while avoiding duplicates.
 async fn build_messages(
-    state: &AppState,
+    state: &ModelState,
     session_id: Option<&str>,
     current_messages: &[OpenAiMessage],
 ) -> Result<Vec<OpenAiMessage>, ServerError> {
@@ -822,7 +819,7 @@ async fn build_messages(
     // Avoid duplicating turns: if client already sends history, do not merge DB history again.
     if !client_sent_history {
         if let Some(sid) = session_id {
-            let history = state.store.list_messages(sid).await?;
+            let history = state.store().list_messages(sid).await?;
             for msg in history {
                 if msg.content.trim().is_empty() {
                     continue;
@@ -860,7 +857,7 @@ fn capitalize_role(role: &str) -> &str {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::schemas::v1::chat::ChatMessage as OpenAiMsg;
+    use crate::api::dto::v1::chat::ChatMessage as OpenAiMsg;
 
     fn make_request(role: &str, content: &str) -> ChatCompletionRequest {
         ChatCompletionRequest {

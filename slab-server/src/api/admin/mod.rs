@@ -1,7 +1,7 @@
 pub mod backend;
 pub mod config;
 
-use crate::middleware::auth;
+use crate::api::middleware::auth;
 use crate::context::AppState;
 
 use axum::{middleware, Router};

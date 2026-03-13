@@ -7,11 +7,8 @@ mod context;
 mod domain;
 mod entities;
 mod error;
-mod grpc;
 mod infra;
-mod middleware;
 mod model_auto_unload;
-mod schemas;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};

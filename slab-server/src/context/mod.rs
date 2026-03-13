@@ -13,10 +13,6 @@ pub use worker_state::{OperationManager, SubmitOperation, WorkerState};
 #[derive(Clone, Debug)]
 pub struct AppState {
     pub config: Arc<AppConfig>,
-    pub grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
-    pub store: Arc<crate::infra::db::AnyStore>,
-    pub task_manager: Arc<OperationManager>,
-    pub model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     pub model_state: Arc<ModelState>,
     pub worker_state: Arc<WorkerState>,
 }
@@ -44,10 +40,6 @@ impl AppState {
 
         Self {
             config,
-            grpc,
-            store,
-            task_manager,
-            model_auto_unload,
             model_state,
             worker_state,
         }

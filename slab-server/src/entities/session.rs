@@ -1,4 +1,4 @@
-use crate::entities::{dao::ChatSession, AnyStore};
+use crate::entities::{dao::session::ChatSession, AnyStore};
 use std::future::Future;
 
 pub trait SessionStore: Send + Sync + 'static {

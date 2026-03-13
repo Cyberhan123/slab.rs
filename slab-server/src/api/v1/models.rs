@@ -21,13 +21,13 @@ use crate::infra::db::{ConfigStore, ModelCatalogRecord, ModelStore, TaskRecord, 
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::LoadedModelSpec;
-use crate::schemas::v1::models::{
+use crate::api::dto::v1::models::{
     CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
     LoadModelRequest, ModelCatalogItemResponse, ModelListStatus, ModelStatusResponse,
     SwitchModelRequest, UpdateModelRequest,
 };
-use crate::schemas::v1::task::OperationAcceptedResponse;
-use crate::context::{AppState, SubmitOperation};
+use crate::api::dto::v1::task::OperationAcceptedResponse;
+use crate::context::{AppState, ModelState, SubmitOperation, WorkerState};
 use hf_hub::api::sync::{Api, ApiBuilder};
 use slab_core::api::Backend;
 
@@ -207,14 +207,14 @@ fn to_model_catalog_item_response(
 }
 
 fn resolve_backend_channel(
-    state: &AppState,
+    state: &ModelState,
     backend_id: &str,
 ) -> Result<(String, Channel), ServerError> {
     let backend = Backend::from_str(backend_id)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
     let canonical_backend = backend.to_string();
     let channel = state
-        .grpc
+        .grpc()
         .backend_channel(&canonical_backend)
         .ok_or_else(|| {
             ServerError::BackendNotReady(format!(
@@ -278,7 +278,7 @@ fn detect_whisper_vad_model(
 }
 
 async fn resolve_model_workers(
-    state: &AppState,
+    state: &ModelState,
     canonical_backend: &str,
     requested_workers: Option<u32>,
 ) -> Result<(u32, &'static str), ServerError> {
@@ -295,7 +295,7 @@ async fn resolve_model_workers(
         return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
     };
 
-    let configured = state.store.get_config_value(config_key).await?;
+    let configured = state.store().get_config_value(config_key).await?;
     let Some(raw) = configured else {
         return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
     };
@@ -309,7 +309,7 @@ async fn resolve_model_workers(
 }
 
 async fn resolve_llama_context_length(
-    state: &AppState,
+    state: &ModelState,
     canonical_backend: &str,
 ) -> Result<(u32, &'static str), ServerError> {
     if canonical_backend != "ggml.llama" {
@@ -317,7 +317,7 @@ async fn resolve_llama_context_length(
     }
 
     let configured = state
-        .store
+        .store()
         .get_config_value(LLAMA_CONTEXT_LENGTH_CONFIG_KEY)
         .await?;
     let Some(raw) = configured else {
@@ -371,19 +371,19 @@ impl Default for DiffusionContextParams {
 /// Returns `None` for non-diffusion backends.  All fields default to empty
 /// string / `false` when the corresponding config key is not set.
 async fn resolve_diffusion_context_params(
-    state: &AppState,
+    state: &ModelState,
     canonical_backend: &str,
 ) -> Result<Option<DiffusionContextParams>, ServerError> {
     if canonical_backend != "ggml.diffusion" {
         return Ok(None);
     }
 
-    async fn get_str(state: &AppState, key: &str) -> Result<String, ServerError> {
-        Ok(state.store.get_config_value(key).await?.unwrap_or_default())
+    async fn get_str(state: &ModelState, key: &str) -> Result<String, ServerError> {
+        Ok(state.store().get_config_value(key).await?.unwrap_or_default())
     }
 
-    async fn get_bool(state: &AppState, key: &str) -> Result<bool, ServerError> {
-        let raw = state.store.get_config_value(key).await?.unwrap_or_default();
+    async fn get_bool(state: &ModelState, key: &str) -> Result<bool, ServerError> {
+        let raw = state.store().get_config_value(key).await?.unwrap_or_default();
         Ok(["1", "true", "yes"].contains(&raw.trim().to_lowercase().as_str()))
     }
 
@@ -431,10 +431,10 @@ fn map_grpc_model_error(action: &str, err: anyhow::Error) -> ServerError {
 }
 
 async fn latest_pending_download_task_for_model(
-    state: &AppState,
+    state: &ModelState,
     model_id: &str,
 ) -> Result<Option<TaskRecord>, ServerError> {
-    let tasks = state.store.list_tasks(Some("model_download")).await?;
+    let tasks = state.store().list_tasks(Some("model_download")).await?;
     Ok(tasks
         .into_iter()
         .filter(|task| {
@@ -456,7 +456,7 @@ async fn latest_pending_download_task_for_model(
     )
 )]
 pub async fn create_model(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Json(req): Json<CreateModelRequest>,
 ) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
     validate_catalog_fields(&req.display_name, &req.repo_id, &req.filename)?;
@@ -476,7 +476,7 @@ pub async fn create_model(
         updated_at: now,
     };
 
-    state.store.insert_model(record.clone()).await?;
+    state.store().insert_model(record.clone()).await?;
     Ok(Json(to_model_catalog_item_response(record, None)))
 }
 
@@ -496,12 +496,12 @@ pub async fn create_model(
     )
 )]
 pub async fn update_model(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Path(id): Path<String>,
     Json(req): Json<UpdateModelRequest>,
 ) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
     let existing = state
-        .store
+        .store()
         .get_model(&id)
         .await?
         .ok_or_else(|| ServerError::NotFound(format!("model {id} not found")))?;
@@ -522,12 +522,12 @@ pub async fn update_model(
     validate_catalog_fields(&display_name, &repo_id, &filename)?;
 
     state
-        .store
+        .store()
         .update_model_metadata(&id, &display_name, &repo_id, &filename, &backend_ids)
         .await?;
 
     let updated = state
-        .store
+        .store()
         .get_model(&id)
         .await?
         .ok_or_else(|| ServerError::NotFound(format!("model {id} not found after update")))?;
@@ -553,15 +553,15 @@ pub async fn update_model(
     )
 )]
 pub async fn delete_model(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    let exists = state.store.get_model(&id).await?;
+    let exists = state.store().get_model(&id).await?;
     if exists.is_none() {
         return Err(ServerError::NotFound(format!("model {id} not found")));
     }
 
-    state.store.delete_model(&id).await?;
+    state.store().delete_model(&id).await?;
     Ok(Json(serde_json::json!({ "id": id, "status": "deleted" })))
 }
 
@@ -577,11 +577,11 @@ pub async fn delete_model(
     )
 )]
 pub async fn list_models(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     axum::extract::Query(q): axum::extract::Query<ListModelsQuery>,
 ) -> Result<Json<Vec<ModelCatalogItemResponse>>, ServerError> {
-    let models = state.store.list_models().await?;
-    let download_tasks = state.store.list_tasks(Some("model_download")).await?;
+    let models = state.store().list_models().await?;
+    let download_tasks = state.store().list_tasks(Some("model_download")).await?;
 
     // Keep the most recent pending/running model download task per model_id.
     let mut pending_by_model: HashMap<String, TaskRecord> = HashMap::new();
@@ -633,7 +633,7 @@ pub async fn list_models(
     )
 )]
 pub async fn load_model(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Json(req): Json<LoadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     let use_case = LoadModelUseCase::new(ModelRoutePort { state });
@@ -643,7 +643,7 @@ pub async fn load_model(
 }
 
 struct ModelRoutePort {
-    state: Arc<AppState>,
+    state: ModelState,
 }
 
 impl ModelLoadPort for ModelRoutePort {
@@ -653,12 +653,12 @@ impl ModelLoadPort for ModelRoutePort {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<ModelStatus, ServerError>> + Send + '_>,
     > {
-        Box::pin(load_model_with_state(Arc::clone(&self.state), command))
+        Box::pin(load_model_with_state(self.state.clone(), command))
     }
 }
 
 pub(crate) async fn load_model_with_state(
-    state: Arc<AppState>,
+    state: ModelState,
     command: ModelLoadCommand,
 ) -> Result<ModelStatus, ServerError> {
     let bid = &command.backend_id;
@@ -706,7 +706,7 @@ pub(crate) async fn load_model_with_state(
         .await
         .map_err(|e| map_grpc_model_error("load_model", e))?;
     state
-        .model_auto_unload
+        .auto_unload()
         .notify_model_loaded(
             &canonical_backend,
             LoadedModelSpec {
@@ -736,7 +736,7 @@ pub(crate) async fn load_model_with_state(
     )
 )]
 pub async fn unload_model(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Json(req): Json<LoadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     let bid = &req.backend_id;
@@ -749,7 +749,7 @@ pub async fn unload_model(
             .await
             .map_err(|e| ServerError::Internal(format!("grpc unload_model failed: {e}")))?;
     state
-        .model_auto_unload
+        .auto_unload()
         .notify_model_unloaded(&canonical_backend)
         .await;
 
@@ -772,7 +772,7 @@ pub async fn unload_model(
         )
     )]
 pub async fn list_available_models(
-    State(_state): State<Arc<AppState>>,
+    State(_state): State<ModelState>,
     axum::extract::Query(q): axum::extract::Query<ListAvailableQuery>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     if q.repo_id.is_empty() {
@@ -813,7 +813,7 @@ pub async fn list_available_models(
     )
 )]
 pub async fn switch_model(
-    State(state): State<Arc<AppState>>,
+    State(state): State<ModelState>,
     Json(req): Json<SwitchModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     let bid = &req.backend_id;
@@ -863,7 +863,7 @@ pub async fn switch_model(
     .await
     .map_err(|e| map_grpc_model_error("switch_model", e))?;
     state
-        .model_auto_unload
+        .auto_unload()
         .notify_model_loaded(
             &canonical_backend,
             LoadedModelSpec {
@@ -894,7 +894,8 @@ pub async fn switch_model(
     )
 )]
 pub async fn download_model(
-    State(state): State<Arc<AppState>>,
+    State(model_state): State<ModelState>,
+    State(worker_state): State<WorkerState>,
     Json(req): Json<DownloadModelRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
     let model_id = req.model_id.trim();
@@ -909,8 +910,8 @@ pub async fn download_model(
         ));
     }
 
-    let configured_model_cache_dir = state
-        .store
+    let configured_model_cache_dir = model_state
+        .store()
         .get_config_value(MODEL_CACHE_DIR_CONFIG_KEY)
         .await?
         .as_deref()
@@ -926,8 +927,8 @@ pub async fn download_model(
         .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {backend_id}")))?;
     let canonical_backend_id = backend.to_string();
 
-    let model = state
-        .store
+    let model = model_state
+        .store()
         .get_model(model_id)
         .await?
         .ok_or_else(|| ServerError::NotFound(format!("model {model_id} not found")))?;
@@ -947,9 +948,8 @@ pub async fn download_model(
     })
     .to_string();
 
-    let store = Arc::clone(&state.store);
-    let operation_id = state
-        .worker_state
+    let store = Arc::clone(model_state.store());
+    let operation_id = worker_state
         .submit_operation(
             SubmitOperation::pending(
                 "model_download",
