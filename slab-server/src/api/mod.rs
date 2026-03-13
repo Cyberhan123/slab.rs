@@ -12,6 +12,8 @@ pub mod dto;
 pub mod doc;
 pub mod health;
 mod middleware;
+mod model;
+mod worker;
 pub(crate) mod v1;
 use crate::api::middleware::{cors, trace};
 use crate::context::AppState;

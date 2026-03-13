@@ -3,14 +3,9 @@ pub mod config;
 pub mod model;
 pub mod session;
 pub mod task;
-pub(crate) mod dao;
 
 pub use chat::ChatStore;
 pub use config::ConfigStore;
-pub use dao::chat::ChatMessage;
-pub use dao::model::ModelCatalogRecord;
-pub use dao::session::ChatSession;
-pub use dao::task::TaskRecord;
 pub use model::ModelStore;
 pub use session::SessionStore;
 pub use task::TaskStore;

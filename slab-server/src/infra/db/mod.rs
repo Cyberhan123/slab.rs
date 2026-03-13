@@ -1,9 +1,8 @@
 pub mod entities;
 pub mod repository;
 
-pub use repository::AnyStore;
-pub use crate::entities::{
-    ChatMessage, ChatSession, ChatStore, ConfigStore, ModelCatalogRecord, ModelStore, SessionStore,
-    TaskRecord, TaskStore,
+pub use entities::{ChatMessage, ChatSession, ModelCatalogRecord, TaskRecord};
+pub use repository::{
+    AnyStore, ChatStore, ConfigStore, ModelStore, SessionStore, TaskStore,
 };
 

@@ -1,4 +1,4 @@
-use crate::entities::{ChatMessage, ChatSession};
+use crate::infra::db::{ChatMessage, ChatSession};
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 

@@ -1,4 +1,5 @@
-use crate::entities::{dao::task::TaskRecord, AnyStore};
+use super::AnyStore;
+use crate::infra::db::entities::TaskRecord;
 
 use chrono::Utc;
 use std::future::Future;

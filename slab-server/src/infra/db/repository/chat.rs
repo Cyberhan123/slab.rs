@@ -1,4 +1,5 @@
-use crate::entities::{dao::chat::ChatMessage, AnyStore};
+use super::AnyStore;
+use crate::infra::db::entities::ChatMessage;
 use chrono::Utc;
 use std::future::Future;
 
