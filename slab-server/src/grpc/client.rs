@@ -56,18 +56,15 @@ impl Interceptor for RequestIdInterceptor {
 // Typed client helpers
 // ---------------------------------------------------------------------------
 
-type LlamaClient =
-    pb::llama_service_client::LlamaServiceClient<
-        tonic::service::interceptor::InterceptedService<Channel, RequestIdInterceptor>,
-    >;
-type WhisperClient =
-    pb::whisper_service_client::WhisperServiceClient<
-        tonic::service::interceptor::InterceptedService<Channel, RequestIdInterceptor>,
-    >;
-type DiffusionClient =
-    pb::diffusion_service_client::DiffusionServiceClient<
-        tonic::service::interceptor::InterceptedService<Channel, RequestIdInterceptor>,
-    >;
+type LlamaClient = pb::llama_service_client::LlamaServiceClient<
+    tonic::service::interceptor::InterceptedService<Channel, RequestIdInterceptor>,
+>;
+type WhisperClient = pb::whisper_service_client::WhisperServiceClient<
+    tonic::service::interceptor::InterceptedService<Channel, RequestIdInterceptor>,
+>;
+type DiffusionClient = pb::diffusion_service_client::DiffusionServiceClient<
+    tonic::service::interceptor::InterceptedService<Channel, RequestIdInterceptor>,
+>;
 
 /// Create a Llama client wrapped with a fresh [`RequestIdInterceptor`].
 /// Returns both the client and the generated request ID for downstream
@@ -75,12 +72,10 @@ type DiffusionClient =
 fn llama_client(channel: Channel) -> (LlamaClient, String) {
     let interceptor = RequestIdInterceptor::new();
     let request_id = interceptor.id().to_owned();
-    let client = pb::llama_service_client::LlamaServiceClient::with_interceptor(
-        channel,
-        interceptor,
-    )
-    .max_decoding_message_size(MAX_MESSAGE_BYTES)
-    .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let client =
+        pb::llama_service_client::LlamaServiceClient::with_interceptor(channel, interceptor)
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES);
     (client, request_id)
 }
 
@@ -88,12 +83,10 @@ fn llama_client(channel: Channel) -> (LlamaClient, String) {
 fn whisper_client(channel: Channel) -> (WhisperClient, String) {
     let interceptor = RequestIdInterceptor::new();
     let request_id = interceptor.id().to_owned();
-    let client = pb::whisper_service_client::WhisperServiceClient::with_interceptor(
-        channel,
-        interceptor,
-    )
-    .max_decoding_message_size(MAX_MESSAGE_BYTES)
-    .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let client =
+        pb::whisper_service_client::WhisperServiceClient::with_interceptor(channel, interceptor)
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES);
     (client, request_id)
 }
 
@@ -259,9 +252,7 @@ pub async fn load_model(
     };
 
     let response = response.with_context(|| {
-        format!(
-            "load_model RPC failed for backend: {backend_id} (request_id={request_id})"
-        )
+        format!("load_model RPC failed for backend: {backend_id} (request_id={request_id})")
     })?;
     Ok(response.into_inner())
 }
@@ -285,9 +276,7 @@ pub async fn unload_model(
     };
 
     let response = response.with_context(|| {
-        format!(
-            "unload_model RPC failed for backend: {backend_id} (request_id={request_id})"
-        )
+        format!("unload_model RPC failed for backend: {backend_id} (request_id={request_id})")
     })?;
     Ok(response.into_inner())
 }
@@ -305,17 +294,27 @@ pub async fn reload_library(
             grpc_call!("reload_library", llama_client, channel, reload_library, req)
         }
         BackendKind::Whisper => {
-            grpc_call!("reload_library", whisper_client, channel, reload_library, req)
+            grpc_call!(
+                "reload_library",
+                whisper_client,
+                channel,
+                reload_library,
+                req
+            )
         }
         BackendKind::Diffusion => {
-            grpc_call!("reload_library", diffusion_client, channel, reload_library, req)
+            grpc_call!(
+                "reload_library",
+                diffusion_client,
+                channel,
+                reload_library,
+                req
+            )
         }
     };
 
     let response = response.with_context(|| {
-        format!(
-            "reload_library RPC failed for backend: {backend_id} (request_id={request_id})"
-        )
+        format!("reload_library RPC failed for backend: {backend_id} (request_id={request_id})")
     })?;
     Ok(response.into_inner())
 }

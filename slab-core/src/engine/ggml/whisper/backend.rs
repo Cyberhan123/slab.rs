@@ -158,7 +158,9 @@ fn parse_inference_options(raw: &Payload) -> Result<WhisperInferenceOptions, Str
             ("decode.max_tokens", decode.max_tokens),
         ] {
             if value.is_some_and(|v| v < 0) {
-                return Err(format!("invalid whisper inference options: {name} must be >= 0"));
+                return Err(format!(
+                    "invalid whisper inference options: {name} must be >= 0"
+                ));
             }
         }
 
@@ -176,7 +178,9 @@ fn parse_inference_options(raw: &Payload) -> Result<WhisperInferenceOptions, Str
             ("decode.temperature_inc", decode.temperature_inc),
         ] {
             if value.is_some_and(|v| v < 0.0) {
-                return Err(format!("invalid whisper inference options: {name} must be >= 0.0"));
+                return Err(format!(
+                    "invalid whisper inference options: {name} must be >= 0.0"
+                ));
             }
         }
     }

@@ -56,11 +56,7 @@ impl PluginRuntimeManager {
 
         if !guard.contains_key(&plugin.manifest.id) {
             let instance = RuntimeInstance {
-                plugin: build_extism_plugin(
-                    app_handle,
-                    plugin,
-                    self.blocking_http_client.clone(),
-                )?,
+                plugin: build_extism_plugin(app_handle, plugin, self.blocking_http_client.clone())?,
             };
             guard.insert(plugin.manifest.id.clone(), instance);
         }
@@ -148,7 +144,8 @@ fn build_extism_plugin(
     if plugin.manifest.network.mode == PluginNetworkMode::Allowlist
         && !plugin.manifest.network.allow_hosts.is_empty()
     {
-        manifest = manifest.with_allowed_hosts(plugin.manifest.network.allow_hosts.clone().into_iter());
+        manifest =
+            manifest.with_allowed_hosts(plugin.manifest.network.allow_hosts.clone().into_iter());
     }
 
     let context = HostFunctionContext {
@@ -175,10 +172,17 @@ fn build_extism_plugin(
             slab_ui_emit,
         )
         .build()
-        .map_err(|e| format!("failed to initialize extism plugin `{}`: {e}", plugin.manifest.id))
+        .map_err(|e| {
+            format!(
+                "failed to initialize extism plugin `{}`: {e}",
+                plugin.manifest.id
+            )
+        })
 }
 
-pub async fn execute_plugin_api_request_async(request: &PluginApiRequest) -> Result<PluginApiResponse, String> {
+pub async fn execute_plugin_api_request_async(
+    request: &PluginApiRequest,
+) -> Result<PluginApiResponse, String> {
     let method = reqwest::Method::from_bytes(request.method.as_bytes())
         .map_err(|e| format!("invalid HTTP method `{}`: {e}", request.method))?;
     let url = build_upstream_url(&request.path)?;
@@ -248,8 +252,8 @@ fn sanitize_request_headers(headers: &HashMap<String, String>) -> Result<HeaderM
             continue;
         }
 
-        let header_name = HeaderName::from_str(name)
-            .map_err(|e| format!("invalid header name `{name}`: {e}"))?;
+        let header_name =
+            HeaderName::from_str(name).map_err(|e| format!("invalid header name `{name}`: {e}"))?;
         let header_value = HeaderValue::from_str(value)
             .map_err(|e| format!("invalid header value for `{name}`: {e}"))?;
         clean.insert(header_name, header_value);

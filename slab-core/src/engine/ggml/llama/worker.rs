@@ -149,8 +149,7 @@ impl InferenceWorkerState {
         if !can_shift {
             warn!(
                 seq_id = session.seq_id,
-                context_length,
-                "KV cache shift unsupported; clearing session cache to continue"
+                context_length, "KV cache shift unsupported; clearing session cache to continue"
             );
             let _ = ctx.kv_cache_seq_rm(session.seq_id, 0, i32::MAX);
             session.n_past = 0;
@@ -198,10 +197,9 @@ impl InferenceWorkerState {
                     self.next_seq_id += 1;
                     id
                 } else {
-                    let _ =
-                        reply_tx.send(Err(GGMLLlamaEngineError::SessionCapacityExceeded {
-                            max_sessions: self.max_seq_id_exclusive.max(0) as usize,
-                        }));
+                    let _ = reply_tx.send(Err(GGMLLlamaEngineError::SessionCapacityExceeded {
+                        max_sessions: self.max_seq_id_exclusive.max(0) as usize,
+                    }));
                     return;
                 };
                 let sampler = self.model.new_sampler();
@@ -238,9 +236,7 @@ impl InferenceWorkerState {
                         .map(|tokens| {
                             session.pending_tokens.extend(tokens);
                         })
-                        .map_err(|source| GGMLLlamaEngineError::TokenizeFailed {
-                            source,
-                        });
+                        .map_err(|source| GGMLLlamaEngineError::TokenizeFailed { source });
                     let _ = reply_tx.send(result);
                 }
             },

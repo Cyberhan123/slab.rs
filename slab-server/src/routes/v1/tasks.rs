@@ -108,8 +108,9 @@ impl TaskResultPort for TaskResultRoutePort {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<TaskResultPayload, ServerError>> + Send + '_>,
     > {
+        let state = Arc::clone(&self.state);
         Box::pin(async move {
-            let service = TaskApplicationService::new(Arc::clone(&self.state));
+            let service = TaskApplicationService::new(state);
             service.get_task_result(&id).await
         })
     }

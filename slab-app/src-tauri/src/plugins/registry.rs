@@ -169,8 +169,12 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
     let mut loaded = HashMap::new();
     let mut invalid = HashMap::new();
 
-    let entries = fs::read_dir(root_dir)
-        .map_err(|e| format!("failed to scan plugins directory {}: {e}", root_dir.display()))?;
+    let entries = fs::read_dir(root_dir).map_err(|e| {
+        format!(
+            "failed to scan plugins directory {}: {e}",
+            root_dir.display()
+        )
+    })?;
 
     for entry in entries {
         let entry = match entry {
@@ -212,7 +216,10 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
             Err(error) => {
                 invalid.insert(
                     folder_name,
-                    format!("failed to read plugin.json at {}: {error}", manifest_path.display()),
+                    format!(
+                        "failed to read plugin.json at {}: {error}",
+                        manifest_path.display()
+                    ),
                 );
                 continue;
             }
@@ -223,7 +230,10 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
             Err(error) => {
                 invalid.insert(
                     folder_name,
-                    format!("invalid plugin.json at {}: {error}", manifest_path.display()),
+                    format!(
+                        "invalid plugin.json at {}: {error}",
+                        manifest_path.display()
+                    ),
                 );
                 continue;
             }
@@ -247,7 +257,10 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
     Ok(PluginRegistrySnapshot { loaded, invalid })
 }
 
-fn validate_and_load_plugin(plugin_dir: &Path, manifest: PluginManifest) -> Result<LoadedPlugin, String> {
+fn validate_and_load_plugin(
+    plugin_dir: &Path,
+    manifest: PluginManifest,
+) -> Result<LoadedPlugin, String> {
     if !is_valid_plugin_id(&manifest.id) {
         return Err(format!(
             "invalid plugin id `{}`: use lowercase letters, numbers, '-' or '_' and length 2..64",
@@ -317,7 +330,9 @@ fn validate_and_load_plugin(plugin_dir: &Path, manifest: PluginManifest) -> Resu
         return Err("integrity.filesSha256 must contain wasm.entry".to_string());
     }
 
-    if manifest.network.mode == PluginNetworkMode::Blocked && !manifest.network.allow_hosts.is_empty() {
+    if manifest.network.mode == PluginNetworkMode::Blocked
+        && !manifest.network.allow_hosts.is_empty()
+    {
         return Err("network.allowHosts must be empty when mode is `blocked`".to_string());
     }
 

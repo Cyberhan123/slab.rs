@@ -292,16 +292,12 @@ impl GGMLWhisperEngine {
             }
         }
 
-        let mut state =
-            ctx.create_state()
-                .map_err(|source| GGMLWhisperEngineError::CreateInferenceState {
-                    source,
-                })?;
-        state.full(params, &audio_data[..]).map_err(|source| {
-            GGMLWhisperEngineError::InferenceFailed {
-                source,
-            }
-        })?;
+        let mut state = ctx
+            .create_state()
+            .map_err(|source| GGMLWhisperEngineError::CreateInferenceState { source })?;
+        state
+            .full(params, &audio_data[..])
+            .map_err(|source| GGMLWhisperEngineError::InferenceFailed { source })?;
 
         let srt_entries: Vec<SubtitleEntry> = state
             .as_iter()

@@ -137,12 +137,12 @@ impl GGMLLlamaEngine {
     }
 
     fn require_model(&self) -> Result<Arc<LlamaModel>, engine::EngineError> {
-        let read_lock = self
-            .loaded_model
-            .read()
-            .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                operation: "read loaded llama model state",
-            })?;
+        let read_lock =
+            self.loaded_model
+                .read()
+                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+                    operation: "read loaded llama model state",
+                })?;
         let model = read_lock
             .as_ref()
             .ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
@@ -203,7 +203,10 @@ impl GGMLLlamaEngine {
     ///
     /// Called from tests and available for future API callers via the backend dispatch path.
     #[cfg_attr(not(test), allow(dead_code))]
-    pub(crate) async fn cancel_generate(&self, session_id: SessionId) -> Result<(), engine::EngineError> {
+    pub(crate) async fn cancel_generate(
+        &self,
+        session_id: SessionId,
+    ) -> Result<(), engine::EngineError> {
         let engine = self.require_engine()?;
         engine.cancel_generate(session_id).await.map_err(Into::into)
     }
@@ -251,9 +254,7 @@ impl GGMLLlamaEngine {
                 StreamChunk::Token(piece) => output.push_str(&piece),
                 StreamChunk::Done => break,
                 StreamChunk::Error(message) => {
-                    stream_error = Some(GGMLLlamaEngineError::InferenceStreamError {
-                        message,
-                    });
+                    stream_error = Some(GGMLLlamaEngineError::InferenceStreamError { message });
                     break;
                 }
             }
