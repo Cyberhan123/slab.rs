@@ -1,20 +1,25 @@
 use std::sync::Arc;
 
-use axum::extract::{Query, State};
+use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{middleware, Json, Router};
 use utoipa::OpenApi;
 
 use crate::api::middleware::auth;
+use crate::api::validation::{ValidatedJson, ValidatedQuery};
 use crate::api::v1::backend::schema::{
     BackendListResponse, BackendStatusResponse, BackendTypeQuery, DownloadLibRequest,
     ReloadLibRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
-use crate::context::{AppState, ModelState, WorkerState};
+use crate::context::AppState;
+use crate::domain::services::to_operation_accepted_response;
 use crate::error::ServerError;
-use crate::services::backend::BackendService;
+use crate::services::backend::{
+    BackendService, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
+    ReloadBackendLibCommand,
+};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -55,12 +60,16 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     )
 )]
 async fn backend_status(
-    State(model_state): State<ModelState>,
-    State(worker_state): State<WorkerState>,
-    Query(query): Query<BackendTypeQuery>,
+    State(service): State<BackendService>,
+    ValidatedQuery(query): ValidatedQuery<BackendTypeQuery>,
 ) -> Result<Json<BackendStatusResponse>, ServerError> {
-    let service = BackendService::new(model_state, worker_state);
-    Ok(Json(service.backend_status(query).await?))
+    Ok(Json(to_backend_status_response(
+        service
+            .backend_status(BackendStatusQuery {
+                backend_id: query.backend_id,
+            })
+            .await?,
+    )))
 }
 
 #[utoipa::path(
@@ -73,11 +82,15 @@ async fn backend_status(
     )
 )]
 async fn list_backends(
-    State(model_state): State<ModelState>,
-    State(worker_state): State<WorkerState>,
+    State(service): State<BackendService>,
 ) -> Result<Json<BackendListResponse>, ServerError> {
-    let service = BackendService::new(model_state, worker_state);
-    Ok(Json(service.list_backends().await?))
+    let backends = service
+        .list_backends()
+        .await?
+        .into_iter()
+        .map(to_backend_status_response)
+        .collect();
+    Ok(Json(BackendListResponse { backends }))
 }
 
 #[utoipa::path(
@@ -92,13 +105,19 @@ async fn list_backends(
     )
 )]
 async fn download_lib(
-    State(model_state): State<ModelState>,
-    State(worker_state): State<WorkerState>,
-    Json(req): Json<DownloadLibRequest>,
+    State(service): State<BackendService>,
+    ValidatedJson(req): ValidatedJson<DownloadLibRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
-    let service = BackendService::new(model_state, worker_state);
-    let response = service.download_lib(req).await?;
-    Ok((StatusCode::ACCEPTED, Json(response)))
+    let response = service
+        .download_lib(DownloadBackendLibCommand {
+            backend_id: req.backend_id,
+            target_dir: req.target_dir,
+        })
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(to_operation_accepted_response(response)),
+    ))
 }
 
 #[utoipa::path(
@@ -113,10 +132,24 @@ async fn download_lib(
     )
 )]
 async fn reload_lib(
-    State(model_state): State<ModelState>,
-    State(worker_state): State<WorkerState>,
-    Json(req): Json<ReloadLibRequest>,
+    State(service): State<BackendService>,
+    ValidatedJson(req): ValidatedJson<ReloadLibRequest>,
 ) -> Result<Json<BackendStatusResponse>, ServerError> {
-    let service = BackendService::new(model_state, worker_state);
-    Ok(Json(service.reload_lib(req).await?))
+    Ok(Json(to_backend_status_response(
+        service
+            .reload_lib(ReloadBackendLibCommand {
+                backend_id: req.backend_id,
+                lib_path: req.lib_path,
+                model_path: req.model_path,
+                num_workers: req.num_workers,
+            })
+            .await?,
+    )))
+}
+
+fn to_backend_status_response(view: BackendStatusView) -> BackendStatusResponse {
+    BackendStatusResponse {
+        backend: view.backend,
+        status: view.status,
+    }
 }

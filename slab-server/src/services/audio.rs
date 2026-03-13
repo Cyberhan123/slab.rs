@@ -2,13 +2,49 @@ use std::sync::Arc;
 
 use tracing::{debug, warn};
 
-use crate::api::v1::audio::schema::{
-    CompletionRequest, TranscribeDecodeRequest, TranscribeVadRequest,
-};
-use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::context::{SubmitOperation, WorkerState};
+use crate::domain::models::AcceptedOperation;
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
+
+#[derive(Debug, Clone)]
+pub struct AudioTranscriptionCommand {
+    pub path: String,
+    pub vad: Option<TranscribeVadOptions>,
+    pub decode: Option<TranscribeDecodeOptions>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TranscribeVadOptions {
+    pub enabled: bool,
+    pub model_path: Option<String>,
+    pub threshold: Option<f32>,
+    pub min_speech_duration_ms: Option<i32>,
+    pub min_silence_duration_ms: Option<i32>,
+    pub max_speech_duration_s: Option<f32>,
+    pub speech_pad_ms: Option<i32>,
+    pub samples_overlap: Option<f32>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TranscribeDecodeOptions {
+    pub offset_ms: Option<i32>,
+    pub duration_ms: Option<i32>,
+    pub no_context: Option<bool>,
+    pub no_timestamps: Option<bool>,
+    pub token_timestamps: Option<bool>,
+    pub split_on_word: Option<bool>,
+    pub suppress_nst: Option<bool>,
+    pub word_thold: Option<f32>,
+    pub max_len: Option<i32>,
+    pub max_tokens: Option<i32>,
+    pub temperature: Option<f32>,
+    pub temperature_inc: Option<f32>,
+    pub entropy_thold: Option<f32>,
+    pub logprob_thold: Option<f32>,
+    pub no_speech_thold: Option<f32>,
+    pub tdrz_enable: Option<bool>,
+}
 
 #[derive(Clone)]
 pub struct AudioService {
@@ -22,8 +58,8 @@ impl AudioService {
 
     pub async fn transcribe(
         &self,
-        req: CompletionRequest,
-    ) -> Result<OperationAcceptedResponse, ServerError> {
+        req: AudioTranscriptionCommand,
+    ) -> Result<AcceptedOperation, ServerError> {
         let vad = build_vad_request(req.vad.as_ref())?;
         let decode = build_decode_request(req.decode.as_ref())?;
         let vad_enabled = vad.is_some();
@@ -34,10 +70,6 @@ impl AudioService {
             decode_configured,
             "transcription request"
         );
-
-        if req.path.is_empty() {
-            return Err(ServerError::BadRequest("audio file path is empty".into()));
-        }
 
         let transcribe_channel = self.state.grpc().transcribe_channel().ok_or_else(|| {
             ServerError::BackendNotReady("whisper gRPC endpoint is not configured".into())
@@ -94,12 +126,12 @@ impl AudioService {
             )
             .await?;
 
-        Ok(OperationAcceptedResponse { operation_id })
+        Ok(AcceptedOperation { operation_id })
     }
 }
 
 fn build_vad_request(
-    vad: Option<&TranscribeVadRequest>,
+    vad: Option<&TranscribeVadOptions>,
 ) -> Result<Option<pb::TranscribeVadOptions>, ServerError> {
     let Some(vad) = vad else {
         return Ok(None);
@@ -109,50 +141,11 @@ fn build_vad_request(
         return Ok(None);
     }
 
-    let model_path = vad
-        .model_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .ok_or_else(|| {
-            ServerError::BadRequest(
-                "VAD is enabled but model_path is empty. Please select a VAD model.".into(),
-            )
-        })?;
-
-    if let Some(threshold) = vad.threshold {
-        if !(0.0..=1.0).contains(&threshold) {
-            return Err(ServerError::BadRequest(
-                "vad.threshold must be between 0.0 and 1.0".into(),
-            ));
-        }
-    }
-
-    for (name, value) in [
-        ("vad.min_speech_duration_ms", vad.min_speech_duration_ms),
-        ("vad.min_silence_duration_ms", vad.min_silence_duration_ms),
-        ("vad.speech_pad_ms", vad.speech_pad_ms),
-    ] {
-        if value.is_some_and(|number| number < 0) {
-            return Err(ServerError::BadRequest(format!("{name} must be >= 0")));
-        }
-    }
-
-    if let Some(max_speech_duration_s) = vad.max_speech_duration_s {
-        if max_speech_duration_s <= 0.0 {
-            return Err(ServerError::BadRequest(
-                "vad.max_speech_duration_s must be > 0.0".into(),
-            ));
-        }
-    }
-
-    if let Some(samples_overlap) = vad.samples_overlap {
-        if samples_overlap < 0.0 {
-            return Err(ServerError::BadRequest(
-                "vad.samples_overlap must be >= 0.0".into(),
-            ));
-        }
-    }
+    let model_path = vad.model_path.as_deref().ok_or_else(|| {
+        ServerError::BadRequest(
+            "VAD is enabled but model_path is empty. Please select a VAD model.".into(),
+        )
+    })?;
 
     let has_custom_params = vad.threshold.is_some()
         || vad.min_speech_duration_ms.is_some()
@@ -178,39 +171,11 @@ fn build_vad_request(
 }
 
 fn build_decode_request(
-    decode: Option<&TranscribeDecodeRequest>,
+    decode: Option<&TranscribeDecodeOptions>,
 ) -> Result<Option<pb::TranscribeDecodeOptions>, ServerError> {
     let Some(decode) = decode else {
         return Ok(None);
     };
-
-    for (name, value) in [
-        ("decode.offset_ms", decode.offset_ms),
-        ("decode.duration_ms", decode.duration_ms),
-        ("decode.max_len", decode.max_len),
-        ("decode.max_tokens", decode.max_tokens),
-    ] {
-        if value.is_some_and(|number| number < 0) {
-            return Err(ServerError::BadRequest(format!("{name} must be >= 0")));
-        }
-    }
-
-    if let Some(word_thold) = decode.word_thold {
-        if !(0.0..=1.0).contains(&word_thold) {
-            return Err(ServerError::BadRequest(
-                "decode.word_thold must be between 0.0 and 1.0".into(),
-            ));
-        }
-    }
-
-    for (name, value) in [
-        ("decode.temperature", decode.temperature),
-        ("decode.temperature_inc", decode.temperature_inc),
-    ] {
-        if value.is_some_and(|number| number < 0.0) {
-            return Err(ServerError::BadRequest(format!("{name} must be >= 0.0")));
-        }
-    }
 
     let has_values = decode.offset_ms.is_some()
         || decode.duration_ms.is_some()

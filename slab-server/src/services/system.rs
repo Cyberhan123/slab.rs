@@ -2,12 +2,37 @@ use all_smi::AllSmi;
 use chrono::Utc;
 use tracing::{debug, warn};
 
-use crate::api::v1::system::schema::{GpuDeviceStatus, GpuStatusResponse};
+#[derive(Debug, Clone)]
+pub struct GpuDeviceSnapshot {
+    pub id: u32,
+    pub name: String,
+    pub device_type: String,
+    pub utilization_percent: f64,
+    pub temperature_celsius: u32,
+    pub used_memory_bytes: u64,
+    pub total_memory_bytes: u64,
+    pub memory_usage_percent: f64,
+    pub power_draw_watts: f64,
+}
 
+#[derive(Debug, Clone)]
+pub struct GpuStatusSnapshot {
+    pub available: bool,
+    pub backend: String,
+    pub updated_at: String,
+    pub devices: Vec<GpuDeviceSnapshot>,
+    pub error: Option<String>,
+}
+
+#[derive(Clone, Default)]
 pub struct SystemService;
 
 impl SystemService {
-    pub async fn gpu_status() -> GpuStatusResponse {
+    pub fn new() -> Self {
+        Self
+    }
+
+    pub async fn gpu_status(&self) -> GpuStatusSnapshot {
         let snapshot = tokio::task::spawn_blocking(collect_gpu_devices).await;
 
         let (available, devices, error) = match snapshot {
@@ -39,7 +64,7 @@ impl SystemService {
             debug!(device_count = devices.len(), "gpu telemetry snapshot ready");
         }
 
-        GpuStatusResponse {
+        GpuStatusSnapshot {
             available,
             backend: "all-smi".to_owned(),
             updated_at: Utc::now().to_rfc3339(),
@@ -56,13 +81,13 @@ fn memory_usage_percent(used: u64, total: u64) -> f64 {
     ((used as f64) / (total as f64) * 100.0).clamp(0.0, 100.0)
 }
 
-fn collect_gpu_devices() -> Result<Vec<GpuDeviceStatus>, String> {
+fn collect_gpu_devices() -> Result<Vec<GpuDeviceSnapshot>, String> {
     let all_smi = AllSmi::new().map_err(|err| err.to_string())?;
     let devices = all_smi
         .get_gpu_info()
         .into_iter()
         .enumerate()
-        .map(|(index, gpu)| GpuDeviceStatus {
+        .map(|(index, gpu)| GpuDeviceSnapshot {
             id: index as u32,
             name: gpu.name,
             device_type: gpu.device_type,

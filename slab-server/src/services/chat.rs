@@ -16,22 +16,19 @@ use std::collections::HashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
-use crate::api::v1::chat::schema::{
-    ChatCompletionRequest, ChatMessage as OpenAiMessage, ChatModelOption, ChatModelSource,
-};
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatCompletionCommand, ChatCompletionResult, ChatResultChoice,
+    ChatCompletionCommand, ChatCompletionResult, ChatModelOption, ChatModelSource,
+    ChatResultChoice,
     ConversationMessage as DomainConversationMessage,
 };
-use crate::domain::services::{
-    to_chat_completion_command, to_openai_messages, ChatCompletionOutput, ChatStreamChunk,
-};
+use crate::domain::services::{ChatCompletionOutput, ChatStreamChunk};
 use crate::error::ServerError;
 use crate::infra::db::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::infra::rpc::{self, pb};
 
 /// Maximum allowed prompt length in bytes.
+#[cfg(test)]
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
 const LLAMA_BACKEND_ID: &str = "ggml.llama";
 const CHAT_MODEL_PROVIDERS_CONFIG_KEY: &str = "chat_model_providers";
@@ -99,9 +96,8 @@ impl ChatService {
 
     pub async fn create_chat_completion(
         &self,
-        req: ChatCompletionRequest,
+        command: ChatCompletionCommand,
     ) -> Result<ChatCompletionOutput, ServerError> {
-        let command = to_chat_completion_command(req);
         create_chat_completion_with_state(self.state.clone(), command).await
     }
 }
@@ -436,7 +432,7 @@ fn build_genai_client_for_target(target: &ResolvedCloudModel) -> GenaiClient {
         .build()
 }
 
-fn to_genai_chat_message(message: &OpenAiMessage) -> GenaiChatMessage {
+fn to_genai_chat_message(message: &DomainConversationMessage) -> GenaiChatMessage {
     match message.role.as_str() {
         "system" => GenaiChatMessage::system(message.content.clone()),
         "assistant" => GenaiChatMessage::assistant(message.content.clone()),
@@ -444,7 +440,7 @@ fn to_genai_chat_message(message: &OpenAiMessage) -> GenaiChatMessage {
     }
 }
 
-fn build_genai_chat_request(messages: &[OpenAiMessage]) -> GenaiChatRequest {
+fn build_genai_chat_request(messages: &[DomainConversationMessage]) -> GenaiChatRequest {
     let mapped: Vec<GenaiChatMessage> = messages.iter().map(to_genai_chat_message).collect();
     GenaiChatRequest::new(mapped)
 }
@@ -457,7 +453,7 @@ fn build_genai_chat_options(max_tokens: u32, temperature: f32) -> GenaiChatOptio
 
 async fn cloud_chat_completion(
     target: &ResolvedCloudModel,
-    messages: &[OpenAiMessage],
+    messages: &[DomainConversationMessage],
     max_tokens: u32,
     temperature: f32,
 ) -> Result<String, ServerError> {
@@ -485,7 +481,7 @@ async fn cloud_chat_completion(
 
 async fn cloud_chat_stream(
     target: &ResolvedCloudModel,
-    messages: &[OpenAiMessage],
+    messages: &[DomainConversationMessage],
     max_tokens: u32,
     temperature: f32,
 ) -> Result<CloudTokenStream, ServerError> {
@@ -545,29 +541,10 @@ pub(crate) async fn create_chat_completion_with_state(
         .rev()
         .find(|m| m.role == "user")
         .map(|m| m.content.clone())
-        .ok_or_else(|| ServerError::BadRequest("no user message found".into()))?;
-
-    if user_content.len() > MAX_PROMPT_BYTES {
-        return Err(ServerError::BadRequest(format!(
-            "prompt too large ({} bytes); maximum is {} bytes",
-            user_content.len(),
-            MAX_PROMPT_BYTES,
-        )));
-    }
+        .unwrap_or_default();
 
     let max_tokens = command.max_tokens.unwrap_or(512);
-    if max_tokens == 0 || max_tokens > 4096 {
-        return Err(ServerError::BadRequest(format!(
-            "invalid max_tokens ({max_tokens}): must be between 1 and 4096"
-        )));
-    }
-
     let temperature = command.temperature.unwrap_or(0.7);
-    if !(0.0..=2.0).contains(&temperature) {
-        return Err(ServerError::BadRequest(format!(
-            "invalid temperature ({temperature}): must be between 0.0 and 2.0"
-        )));
-    }
 
     debug!(
         model = %command.model,
@@ -580,7 +557,7 @@ pub(crate) async fn create_chat_completion_with_state(
     let resolved_messages = build_messages(
         &state,
         command.id.as_deref(),
-        &to_openai_messages(command.messages.clone()),
+        &command.messages,
     )
     .await?;
 
@@ -740,16 +717,16 @@ pub(crate) async fn create_chat_completion_with_state(
 async fn build_messages(
     state: &ModelState,
     session_id: Option<&str>,
-    current_messages: &[OpenAiMessage],
-) -> Result<Vec<OpenAiMessage>, ServerError> {
-    let current: Vec<OpenAiMessage> = current_messages
+    current_messages: &[DomainConversationMessage],
+) -> Result<Vec<DomainConversationMessage>, ServerError> {
+    let current: Vec<DomainConversationMessage> = current_messages
         .iter()
         .filter(|m| !m.content.trim().is_empty())
         .cloned()
         .collect();
     let client_sent_history = current.len() > 1;
 
-    let mut merged: Vec<OpenAiMessage> = Vec::new();
+    let mut merged: Vec<DomainConversationMessage> = Vec::new();
     // Avoid duplicating turns: if client already sends history, do not merge DB history again.
     if !client_sent_history {
         if let Some(sid) = session_id {
@@ -758,7 +735,7 @@ async fn build_messages(
                 if msg.content.trim().is_empty() {
                     continue;
                 }
-                merged.push(OpenAiMessage {
+                merged.push(DomainConversationMessage {
                     role: msg.role,
                     content: msg.content,
                 });
@@ -770,7 +747,7 @@ async fn build_messages(
 }
 
 /// Build the local llama prompt from merged message history.
-fn build_prompt(messages: &[OpenAiMessage]) -> String {
+fn build_prompt(messages: &[DomainConversationMessage]) -> String {
     let mut parts: Vec<String> = messages
         .iter()
         .map(|msg| format!("{}: {}", capitalize_role(&msg.role), msg.content))
@@ -791,12 +768,11 @@ fn capitalize_role(role: &str) -> &str {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::api::v1::chat::schema::ChatMessage as OpenAiMsg;
 
-    fn make_request(role: &str, content: &str) -> ChatCompletionRequest {
-        ChatCompletionRequest {
+    fn make_command(role: &str, content: &str) -> ChatCompletionCommand {
+        ChatCompletionCommand {
             model: "test".into(),
-            messages: vec![OpenAiMsg {
+            messages: vec![DomainConversationMessage {
                 role: role.into(),
                 content: content.into(),
             }],
@@ -809,9 +785,9 @@ mod test {
 
     #[test]
     fn validate_max_tokens_zero() {
-        let req = ChatCompletionRequest {
+        let req = ChatCompletionCommand {
             max_tokens: Some(0),
-            ..make_request("user", "hello")
+            ..make_command("user", "hello")
         };
         assert_eq!(req.max_tokens, Some(0));
         let mt = req.max_tokens.unwrap_or(512);
@@ -820,9 +796,9 @@ mod test {
 
     #[test]
     fn validate_max_tokens_too_large() {
-        let req = ChatCompletionRequest {
+        let req = ChatCompletionCommand {
             max_tokens: Some(9999),
-            ..make_request("user", "hello")
+            ..make_command("user", "hello")
         };
         let mt = req.max_tokens.unwrap_or(512);
         assert!(mt > 4096, "should be out of range");
@@ -842,7 +818,7 @@ mod test {
 
     #[test]
     fn no_user_message_returns_error() {
-        let req = make_request("system", "you are a bot");
+        let req = make_command("system", "you are a bot");
         let found = req.messages.iter().rev().find(|m| m.role == "user");
         assert!(found.is_none());
     }

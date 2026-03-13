@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
-use slab_core::TaskStatus;
 use utoipa::{IntoParams, ToSchema};
+use validator::Validate;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OperationAcceptedResponse {
@@ -10,7 +10,7 @@ pub struct OperationAcceptedResponse {
 /// Result payload returned by `GET /v1/tasks/{id}/result`.
 ///
 /// Fields are populated depending on the task type:
-/// - Single-image tasks: `image` contains a `data:image/png;base64,…` data URI.
+/// - Single-image tasks: `image` contains a `data:image/png;base64,鈥 data URI.
 /// - Multi-image diffusion tasks: `images` contains an array of data URIs; `image`
 ///   also holds the first one for backward compatibility.
 /// - Video tasks: `video_path` holds the path of the assembled MP4 file.
@@ -32,9 +32,15 @@ pub struct TaskResultPayload {
     pub text: Option<String>,
 }
 
-#[derive(Deserialize, ToSchema, IntoParams)]
+#[derive(Deserialize, ToSchema, IntoParams, Validate)]
 pub struct TaskTypeQuery {
     #[serde(rename = "type")]
+    #[validate(
+        custom(
+            function = "crate::api::validation::validate_non_blank",
+            message = "type must not be empty"
+        )
+    )]
     pub task_type: Option<String>,
 }
 
@@ -46,23 +52,4 @@ pub struct TaskResponse {
     pub error_msg: Option<String>,
     pub created_at: String,
     pub updated_at: String,
-}
-
-pub trait TaskStatusEnumExt {
-    fn as_str(&self) -> &'static str;
-}
-
-impl TaskStatusEnumExt for TaskStatus {
-    fn as_str(&self) -> &'static str {
-        match &self {
-            TaskStatus::Pending => "pending",
-            TaskStatus::Running { .. } => "running",
-            TaskStatus::Succeeded { .. } => "succeeded",
-            // Result was already consumed; task is still considered succeeded.
-            TaskStatus::ResultConsumed => "succeeded",
-            TaskStatus::SucceededStreaming => "succeeded",
-            TaskStatus::Failed { .. } => "failed",
-            TaskStatus::Cancelled => "cancelled",
-        }
-    }
 }

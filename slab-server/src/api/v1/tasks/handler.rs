@@ -1,12 +1,16 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, State};
 use axum::routing::{get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
 use utoipa::OpenApi;
+use validator::Validate;
 
+use crate::api::validation::{validate, ValidatedQuery};
 use crate::api::v1::tasks::schema::{TaskResponse, TaskResultPayload, TaskTypeQuery};
-use crate::context::{AppState, WorkerState};
+use crate::context::AppState;
+use crate::domain::services::{to_task_response, to_task_result_response};
 use crate::error::ServerError;
 use crate::services::tasks::TasksService;
 
@@ -38,11 +42,16 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 async fn list_tasks(
-    State(state): State<WorkerState>,
-    Query(q): Query<TaskTypeQuery>,
+    State(service): State<TasksService>,
+    ValidatedQuery(q): ValidatedQuery<TaskTypeQuery>,
 ) -> Result<Json<Vec<TaskResponse>>, ServerError> {
-    let service = TasksService::new(state);
-    Ok(Json(service.list_tasks(q.task_type.as_deref()).await?))
+    let tasks = service
+        .list_tasks(q.task_type.as_deref())
+        .await?
+        .into_iter()
+        .map(to_task_response)
+        .collect();
+    Ok(Json(tasks))
 }
 
 #[utoipa::path(
@@ -60,11 +69,11 @@ async fn list_tasks(
     )
 )]
 async fn get_task(
-    State(state): State<WorkerState>,
-    Path(id): Path<String>,
+    State(service): State<TasksService>,
+    Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
-    let service = TasksService::new(state);
-    Ok(Json(service.get_task(&id).await?))
+    let params = validate(params)?;
+    Ok(Json(to_task_response(service.get_task(&params.id).await?)))
 }
 
 #[utoipa::path(
@@ -82,11 +91,13 @@ async fn get_task(
     )
 )]
 async fn get_task_result(
-    State(state): State<WorkerState>,
-    Path(id): Path<String>,
+    State(service): State<TasksService>,
+    Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResultPayload>, ServerError> {
-    let service = TasksService::new(state);
-    Ok(Json(service.get_task_result(&id).await?))
+    let params = validate(params)?;
+    Ok(Json(to_task_result_response(
+        service.get_task_result(&params.id).await?,
+    )))
 }
 
 #[utoipa::path(
@@ -104,11 +115,11 @@ async fn get_task_result(
     )
 )]
 async fn cancel_task(
-    State(state): State<WorkerState>,
-    Path(id): Path<String>,
+    State(service): State<TasksService>,
+    Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
-    let service = TasksService::new(state);
-    Ok(Json(service.cancel_task(&id).await?))
+    let params = validate(params)?;
+    Ok(Json(to_task_response(service.cancel_task(&params.id).await?)))
 }
 
 #[utoipa::path(
@@ -126,13 +137,24 @@ async fn cancel_task(
     )
 )]
 async fn restart_task(
-    State(state): State<WorkerState>,
-    Path(id): Path<String>,
+    State(service): State<TasksService>,
+    Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
-    let service = TasksService::new(state);
-    service.validate_restartable(&id).await?;
+    let params = validate(params)?;
+    service.validate_restartable(&params.id).await?;
 
     Err(ServerError::NotImplemented(
         "task restart is not yet implemented".to_owned(),
     ))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+struct TaskIdPath {
+    #[validate(
+        custom(
+            function = "crate::api::validation::validate_non_blank",
+            message = "id must not be empty"
+        )
+    )]
+    id: String,
 }

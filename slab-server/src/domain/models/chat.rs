@@ -4,6 +4,24 @@ pub struct ConversationMessage {
     pub content: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ChatModelSource {
+    Local,
+    Cloud,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatModelOption {
+    pub id: String,
+    pub display_name: String,
+    pub source: ChatModelSource,
+    pub provider_id: Option<String>,
+    pub provider_name: Option<String>,
+    pub backend_id: Option<String>,
+    pub downloaded: bool,
+    pub pending: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatCompletionCommand {
     pub id: Option<String>,
