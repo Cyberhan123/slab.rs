@@ -1,9 +1,8 @@
 use tracing::{info, warn};
 
-use crate::api::v1::tasks::schema::{TaskResponse, TaskStatusEnumExt};
 use crate::context::WorkerState;
-use crate::domain::models::TaskResult;
-use crate::domain::services::to_task_response;
+use crate::domain::models::{TaskResult, TaskView};
+use crate::domain::services::to_task_view;
 use crate::error::ServerError;
 use crate::infra::db::TaskStore;
 use crate::infra::rpc::adapter::payload_to_task_result;
@@ -21,15 +20,15 @@ impl TaskApplicationService {
     pub async fn list_tasks(
         &self,
         task_type: Option<&str>,
-    ) -> Result<Vec<TaskResponse>, ServerError> {
+    ) -> Result<Vec<TaskView>, ServerError> {
         let records = self.state.store().list_tasks(task_type).await?;
         Ok(records
             .into_iter()
-            .map(|record| to_task_response(&record))
+            .map(|record| to_task_view(&record))
             .collect())
     }
 
-    pub async fn get_task(&self, id: &str) -> Result<TaskResponse, ServerError> {
+    pub async fn get_task(&self, id: &str) -> Result<TaskView, ServerError> {
         let mut record = self
             .state
             .store()
@@ -39,7 +38,7 @@ impl TaskApplicationService {
 
         if let Some(core_tid) = record.core_task_id {
             if let Ok(view) = slab_core::api::status(core_tid as u64).await {
-                let live_status = view.status.as_str();
+                let live_status = core_task_status(&view.status);
                 let live_error = match &view.status {
                     slab_core::TaskStatus::Failed { error } => Some(error.to_string()),
                     _ => None,
@@ -58,7 +57,7 @@ impl TaskApplicationService {
             }
         }
 
-        Ok(to_task_response(&record))
+        Ok(to_task_view(&record))
     }
 
     pub async fn get_task_result(&self, id: &str) -> Result<TaskResult, ServerError> {
@@ -138,7 +137,7 @@ impl TaskApplicationService {
         }
     }
 
-    pub async fn cancel_task(&self, id: &str) -> Result<TaskResponse, ServerError> {
+    pub async fn cancel_task(&self, id: &str) -> Result<TaskView, ServerError> {
         let record = self
             .state
             .store()
@@ -170,7 +169,7 @@ impl TaskApplicationService {
             self.state.store().get_task(id).await?.ok_or_else(|| {
                 ServerError::NotFound(format!("task {id} not found after cancel"))
             })?;
-        Ok(to_task_response(&updated))
+        Ok(to_task_view(&updated))
     }
 
     pub async fn validate_restartable(&self, id: &str) -> Result<(), ServerError> {
@@ -230,4 +229,16 @@ fn deserialize_task_result(raw: &str) -> Result<TaskResult, serde_json::Error> {
             .and_then(|v| v.as_str())
             .map(str::to_owned),
     })
+}
+
+fn core_task_status(status: &slab_core::TaskStatus) -> &'static str {
+    match status {
+        slab_core::TaskStatus::Pending => "pending",
+        slab_core::TaskStatus::Running { .. } => "running",
+        slab_core::TaskStatus::Succeeded { .. }
+        | slab_core::TaskStatus::ResultConsumed
+        | slab_core::TaskStatus::SucceededStreaming => "succeeded",
+        slab_core::TaskStatus::Failed { .. } => "failed",
+        slab_core::TaskStatus::Cancelled => "cancelled",
+    }
 }

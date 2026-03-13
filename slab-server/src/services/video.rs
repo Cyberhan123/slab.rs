@@ -3,15 +3,37 @@ use std::sync::Arc;
 use base64::Engine as _;
 use tracing::{debug, info, warn};
 
-use crate::api::v1::tasks::schema::{OperationAcceptedResponse, TaskResultPayload};
-use crate::api::v1::video::schema::VideoGenerationRequest;
 use crate::context::{SubmitOperation, WorkerState};
+use crate::domain::models::{AcceptedOperation, TaskResult};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
 
-const MAX_PROMPT_BYTES: usize = 128 * 1024;
-const MAX_VIDEO_FRAMES: i32 = 120;
-const MAX_IMAGE_DIM: u32 = 2048;
+#[derive(Debug, Clone)]
+pub struct DecodedVideoInitImage {
+    pub data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct VideoGenerationCommand {
+    pub model: String,
+    pub prompt: String,
+    pub negative_prompt: Option<String>,
+    pub width: u32,
+    pub height: u32,
+    pub video_frames: i32,
+    pub fps: f32,
+    pub cfg_scale: Option<f32>,
+    pub guidance: Option<f32>,
+    pub steps: Option<i32>,
+    pub seed: Option<i64>,
+    pub sample_method: Option<String>,
+    pub scheduler: Option<String>,
+    pub init_image: Option<DecodedVideoInitImage>,
+    pub strength: Option<f32>,
+}
 
 #[derive(Clone)]
 pub struct VideoService {
@@ -25,39 +47,11 @@ impl VideoService {
 
     pub async fn generate_video(
         &self,
-        req: VideoGenerationRequest,
-    ) -> Result<OperationAcceptedResponse, ServerError> {
-        if req.prompt.is_empty() {
-            return Err(ServerError::BadRequest("prompt must not be empty".into()));
-        }
-        if req.prompt.len() > MAX_PROMPT_BYTES {
-            return Err(ServerError::BadRequest(format!(
-                "prompt too large ({} bytes); maximum is {} bytes",
-                req.prompt.len(),
-                MAX_PROMPT_BYTES
-            )));
-        }
-        if req.video_frames < 1 || req.video_frames > MAX_VIDEO_FRAMES {
-            return Err(ServerError::BadRequest(format!(
-                "video_frames must be between 1 and {MAX_VIDEO_FRAMES}"
-            )));
-        }
-        if req.width > MAX_IMAGE_DIM || req.height > MAX_IMAGE_DIM {
-            return Err(ServerError::BadRequest(format!(
-                "frame dimensions ({} x {}) exceed maximum of {MAX_IMAGE_DIM}",
-                req.width, req.height
-            )));
-        }
-        if !req.fps.is_finite() || req.fps < 1.0 || req.fps > 60.0 {
-            return Err(ServerError::BadRequest(
-                "fps must be a finite value between 1 and 60".into(),
-            ));
-        }
-
+        req: VideoGenerationCommand,
+    ) -> Result<AcceptedOperation, ServerError> {
         let (init_image_bytes, init_image_width, init_image_height, init_image_channels) =
-            if let Some(ref data_uri) = req.init_image {
-                let (data, width, height, channels) = decode_init_image(data_uri)?;
-                (data, width, height, channels)
+            if let Some(image) = req.init_image {
+                (image.data, image.width, image.height, image.channels)
             } else {
                 (Vec::new(), 0u32, 0u32, 3u32)
             };
@@ -252,7 +246,7 @@ impl VideoService {
                         Ok(output) if output.status.success() => {
                             let video_path = output_path.to_string_lossy().into_owned();
                             info!(task_id = %operation_id, video_path = %video_path, "video generation succeeded");
-                            let result = TaskResultPayload {
+                            let result = TaskResult {
                                 image: None,
                                 images: None,
                                 video_path: Some(video_path),
@@ -281,24 +275,6 @@ impl VideoService {
             )
             .await?;
 
-        Ok(OperationAcceptedResponse { operation_id })
+        Ok(AcceptedOperation { operation_id })
     }
-}
-
-fn decode_init_image(data_uri: &str) -> Result<(Vec<u8>, u32, u32, u32), ServerError> {
-    let b64 = if let Some(pos) = data_uri.find("base64,") {
-        &data_uri[pos + "base64,".len()..]
-    } else {
-        data_uri
-    };
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(b64)
-        .map_err(|error| {
-            ServerError::BadRequest(format!("init_image base64 decode failed: {error}"))
-        })?;
-    let image = image::load_from_memory(&bytes)
-        .map_err(|error| ServerError::BadRequest(format!("init_image decode failed: {error}")))?;
-    let rgb = image.to_rgb8();
-    let (width, height) = rgb.dimensions();
-    Ok((rgb.into_raw(), width, height, 3))
 }

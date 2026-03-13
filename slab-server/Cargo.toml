@@ -58,6 +58,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 # Error handling
 thiserror = { workspace = true }
 anyhow    = { workspace = true }
+validator = { version = "0.19", features = ["derive"] }
 
 # Misc
 base64    = { workspace = true }

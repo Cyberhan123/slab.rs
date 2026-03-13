@@ -14,6 +14,7 @@ use axum::Json;
 use serde::Serialize;
 use thiserror::Error;
 use tracing::error;
+use validator::{ValidationErrors, ValidationErrorsKind};
 
 /// Standard error response format
 #[derive(Serialize)]
@@ -155,5 +156,61 @@ impl From<anyhow::Error> for ServerError {
         // logs even though clients only see a generic message.
         error!(error = ?e, "converting anyhow error to ServerError::Internal");
         ServerError::Internal(e.to_string())
+    }
+}
+
+impl From<ValidationErrors> for ServerError {
+    fn from(errors: ValidationErrors) -> Self {
+        ServerError::BadRequest(format_validation_errors(&errors))
+    }
+}
+
+fn format_validation_errors(errors: &ValidationErrors) -> String {
+    let mut messages = Vec::new();
+    collect_validation_messages("", errors, &mut messages);
+
+    if messages.is_empty() {
+        "request validation failed".to_owned()
+    } else {
+        messages.join("; ")
+    }
+}
+
+fn collect_validation_messages(
+    prefix: &str,
+    errors: &ValidationErrors,
+    messages: &mut Vec<String>,
+) {
+    for (field, kind) in errors.errors() {
+        let field_path = if prefix.is_empty() {
+            field.to_string()
+        } else {
+            format!("{prefix}.{field}")
+        };
+
+        match kind {
+            ValidationErrorsKind::Field(field_errors) => {
+                for error in field_errors {
+                    let message = error
+                        .message
+                        .as_ref()
+                        .map(ToString::to_string)
+                        .unwrap_or_else(|| error.code.to_string());
+                    messages.push(format!("{field_path}: {message}"));
+                }
+            }
+            ValidationErrorsKind::Struct(nested) => {
+                collect_validation_messages(&field_path, nested, messages);
+            }
+            ValidationErrorsKind::List(items) => {
+                for (index, nested) in items {
+                    collect_validation_messages(
+                        &format!("{field_path}[{index}]"),
+                        nested,
+                        messages,
+                    );
+                }
+            }
+        }
     }
 }

@@ -9,6 +9,7 @@
 pub mod doc;
 pub mod health;
 mod middleware;
+pub mod validation;
 pub(crate) mod v1;
 use crate::api::middleware::{cors, trace};
 use crate::context::AppState;
@@ -27,7 +28,7 @@ pub fn build(state: Arc<AppState>) -> Router {
     let mut app = Router::new().merge(api_router);
     let api_doc = doc::get_docs();
 
-    if state.config.enable_swagger {
+    if state.context.config.enable_swagger {
         app = app.merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", api_doc));
     }
 

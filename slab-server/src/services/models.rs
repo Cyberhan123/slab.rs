@@ -8,14 +8,8 @@ use slab_core::api::Backend;
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
-use crate::api::v1::models::schema::{
-    CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
-    LoadModelRequest, ModelCatalogItemResponse, ModelListStatus, ModelStatusResponse,
-    SwitchModelRequest, UpdateModelRequest,
-};
-use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
-use crate::domain::models::{ModelLoadCommand, ModelStatus};
+use crate::domain::models::{AcceptedOperation, ModelLoadCommand, ModelStatus};
 use crate::error::ServerError;
 use crate::infra::db::{ConfigStore, ModelCatalogRecord, ModelStore, TaskRecord, TaskStore};
 use crate::infra::rpc::{self, pb};
@@ -41,6 +35,73 @@ const DIFFUSION_KEEP_VAE_ON_CPU_CONFIG_KEY: &str = "diffusion_keep_vae_on_cpu";
 const DIFFUSION_KEEP_CLIP_ON_CPU_CONFIG_KEY: &str = "diffusion_keep_clip_on_cpu";
 const DIFFUSION_OFFLOAD_PARAMS_CONFIG_KEY: &str = "diffusion_offload_params_to_cpu";
 
+#[derive(Debug, Clone)]
+pub struct CreateModelCommand {
+    pub display_name: String,
+    pub repo_id: String,
+    pub filename: String,
+    pub backend_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateModelCommand {
+    pub display_name: Option<String>,
+    pub repo_id: Option<String>,
+    pub filename: Option<String>,
+    pub backend_ids: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelCatalogStatus {
+    Downloaded,
+    Pending,
+    NotDownloaded,
+    All,
+}
+
+#[derive(Debug, Clone)]
+pub struct ListModelsFilter {
+    pub status: ModelCatalogStatus,
+}
+
+#[derive(Debug, Clone)]
+pub struct AvailableModelsQuery {
+    pub repo_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct AvailableModelsView {
+    pub repo_id: String,
+    pub files: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadModelCommand {
+    pub model_id: String,
+    pub backend_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelCatalogItemView {
+    pub id: String,
+    pub display_name: String,
+    pub repo_id: String,
+    pub filename: String,
+    pub backend_ids: Vec<String>,
+    pub is_vad_model: bool,
+    pub status: ModelCatalogStatus,
+    pub local_path: Option<String>,
+    pub last_downloaded_at: Option<String>,
+    pub pending_task_id: Option<String>,
+    pub pending_task_status: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DeletedModelView {
+    pub id: String,
+    pub status: String,
+}
+
 #[derive(Clone)]
 pub struct ModelsService {
     model_state: ModelState,
@@ -57,9 +118,8 @@ impl ModelsService {
 
     pub async fn create_model(
         &self,
-        req: CreateModelRequest,
-    ) -> Result<ModelCatalogItemResponse, ServerError> {
-        validate_catalog_fields(&req.display_name, &req.repo_id, &req.filename)?;
+        req: CreateModelCommand,
+    ) -> Result<ModelCatalogItemView, ServerError> {
         let backend_ids = normalize_backend_ids(&req.backend_ids)?;
 
         let now = Utc::now();
@@ -80,14 +140,14 @@ impl ModelsService {
             .store()
             .insert_model(record.clone())
             .await?;
-        Ok(to_model_catalog_item_response(record, None))
+        Ok(to_model_catalog_item_view(record, None))
     }
 
     pub async fn update_model(
         &self,
         id: &str,
-        req: UpdateModelRequest,
-    ) -> Result<ModelCatalogItemResponse, ServerError> {
+        req: UpdateModelCommand,
+    ) -> Result<ModelCatalogItemView, ServerError> {
         let existing = self
             .model_state
             .store()
@@ -107,8 +167,6 @@ impl ModelsService {
             existing.backend_ids
         };
 
-        validate_catalog_fields(&display_name, &repo_id, &filename)?;
-
         self.model_state
             .store()
             .update_model_metadata(id, &display_name, &repo_id, &filename, &backend_ids)
@@ -122,26 +180,29 @@ impl ModelsService {
             .ok_or_else(|| ServerError::NotFound(format!("model {id} not found after update")))?;
         let pending_task = latest_pending_download_task_for_model(&self.model_state, id).await?;
 
-        Ok(to_model_catalog_item_response(
+        Ok(to_model_catalog_item_view(
             updated,
             pending_task.as_ref(),
         ))
     }
 
-    pub async fn delete_model(&self, id: &str) -> Result<serde_json::Value, ServerError> {
+    pub async fn delete_model(&self, id: &str) -> Result<DeletedModelView, ServerError> {
         let exists = self.model_state.store().get_model(id).await?;
         if exists.is_none() {
             return Err(ServerError::NotFound(format!("model {id} not found")));
         }
 
         self.model_state.store().delete_model(id).await?;
-        Ok(serde_json::json!({ "id": id, "status": "deleted" }))
+        Ok(DeletedModelView {
+            id: id.to_owned(),
+            status: "deleted".to_owned(),
+        })
     }
 
     pub async fn list_models(
         &self,
-        query: ListModelsQuery,
-    ) -> Result<Vec<ModelCatalogItemResponse>, ServerError> {
+        query: ListModelsFilter,
+    ) -> Result<Vec<ModelCatalogItemView>, ServerError> {
         let models = self.model_state.store().list_models().await?;
         let download_tasks = self
             .model_state
@@ -153,10 +214,10 @@ impl ModelsService {
         let mut items = Vec::with_capacity(models.len());
         for model in models {
             let pending_task = pending_by_model.get(&model.id);
-            let item = to_model_catalog_item_response(model, pending_task);
+            let item = to_model_catalog_item_view(model, pending_task);
 
             let include = match query.status {
-                ModelListStatus::All => true,
+                ModelCatalogStatus::All => true,
                 _ => query.status == item.status,
             };
             if include {
@@ -169,28 +230,17 @@ impl ModelsService {
 
     pub async fn load_model(
         &self,
-        req: LoadModelRequest,
-    ) -> Result<ModelStatusResponse, ServerError> {
-        let result = self
-            .load_model_command(
-                "load_model",
-                "loading model",
-                ModelLoadCommand {
-                    backend_id: req.backend_id,
-                    model_path: req.model_path,
-                    num_workers: req.num_workers,
-                },
-            )
-            .await?;
-
-        Ok(to_model_status_response(result))
+        command: ModelLoadCommand,
+    ) -> Result<ModelStatus, ServerError> {
+        self.load_model_command("load_model", "loading model", command)
+            .await
     }
 
     pub async fn unload_model(
         &self,
-        req: LoadModelRequest,
-    ) -> Result<ModelStatusResponse, ServerError> {
-        let backend_id = req.backend_id;
+        command: ModelLoadCommand,
+    ) -> Result<ModelStatus, ServerError> {
+        let backend_id = command.backend_id;
         info!(backend = %backend_id, "unloading model");
 
         let (canonical_backend, channel) = resolve_backend_channel(&self.model_state, &backend_id)?;
@@ -205,7 +255,7 @@ impl ModelsService {
             .notify_model_unloaded(&canonical_backend)
             .await;
 
-        Ok(ModelStatusResponse {
+        Ok(ModelStatus {
             backend: response.backend,
             status: response.status,
         })
@@ -213,14 +263,8 @@ impl ModelsService {
 
     pub async fn list_available_models(
         &self,
-        query: ListAvailableQuery,
-    ) -> Result<serde_json::Value, ServerError> {
-        if query.repo_id.is_empty() {
-            return Err(ServerError::BadRequest(
-                "repo_id query parameter must not be empty".into(),
-            ));
-        }
-
+        query: AvailableModelsQuery,
+    ) -> Result<AvailableModelsView, ServerError> {
         let repo_id = query.repo_id.clone();
         let files: Vec<String> = tokio::task::spawn_blocking(move || {
             let api = Api::new().map_err(|error| format!("hf-hub init failed: {error}"))?;
@@ -239,46 +283,26 @@ impl ModelsService {
         .map_err(|error| ServerError::Internal(format!("spawn_blocking panicked: {error}")))?
         .map_err(ServerError::Internal)?;
 
-        Ok(serde_json::json!({
-            "repo_id": query.repo_id,
-            "files": files,
-        }))
+        Ok(AvailableModelsView {
+            repo_id: query.repo_id,
+            files,
+        })
     }
 
     pub async fn switch_model(
         &self,
-        req: SwitchModelRequest,
-    ) -> Result<ModelStatusResponse, ServerError> {
-        let result = self
-            .load_model_command(
-                "switch_model",
-                "switching model",
-                ModelLoadCommand {
-                    backend_id: req.backend_id,
-                    model_path: req.model_path,
-                    num_workers: req.num_workers,
-                },
-            )
-            .await?;
-
-        Ok(to_model_status_response(result))
+        command: ModelLoadCommand,
+    ) -> Result<ModelStatus, ServerError> {
+        self.load_model_command("switch_model", "switching model", command)
+            .await
     }
 
     pub async fn download_model(
         &self,
-        req: DownloadModelRequest,
-    ) -> Result<OperationAcceptedResponse, ServerError> {
+        req: DownloadModelCommand,
+    ) -> Result<AcceptedOperation, ServerError> {
         let model_id = req.model_id.trim();
-        if model_id.is_empty() {
-            return Err(ServerError::BadRequest("model_id must not be empty".into()));
-        }
-
         let backend_id = req.backend_id.trim();
-        if backend_id.is_empty() {
-            return Err(ServerError::BadRequest(
-                "backend_id must not be empty".into(),
-            ));
-        }
 
         let configured_model_cache_dir = self
             .model_state
@@ -439,7 +463,7 @@ impl ModelsService {
             "model download task accepted"
         );
 
-        Ok(OperationAcceptedResponse { operation_id })
+        Ok(AcceptedOperation { operation_id })
     }
 
     async fn load_model_command(
@@ -513,35 +537,16 @@ fn normalize_backend_ids(raw: &[String]) -> Result<Vec<String>, ServerError> {
     Ok(out)
 }
 
-fn validate_catalog_fields(
-    display_name: &str,
-    repo_id: &str,
-    filename: &str,
-) -> Result<(), ServerError> {
-    if display_name.trim().is_empty() {
-        return Err(ServerError::BadRequest(
-            "display_name must not be empty".into(),
-        ));
-    }
-    if repo_id.trim().is_empty() {
-        return Err(ServerError::BadRequest("repo_id must not be empty".into()));
-    }
-    if filename.trim().is_empty() {
-        return Err(ServerError::BadRequest("filename must not be empty".into()));
-    }
-    Ok(())
-}
-
-fn to_model_catalog_item_response(
+fn to_model_catalog_item_view(
     model: ModelCatalogRecord,
     pending_task: Option<&TaskRecord>,
-) -> ModelCatalogItemResponse {
+) -> ModelCatalogItemView {
     let computed_status = if model.local_path.is_some() {
-        ModelListStatus::Downloaded
+        ModelCatalogStatus::Downloaded
     } else if pending_task.is_some() {
-        ModelListStatus::Pending
+        ModelCatalogStatus::Pending
     } else {
-        ModelListStatus::NotDownloaded
+        ModelCatalogStatus::NotDownloaded
     };
 
     let is_vad_model = detect_whisper_vad_model(
@@ -551,7 +556,7 @@ fn to_model_catalog_item_response(
         &model.filename,
     );
 
-    ModelCatalogItemResponse {
+    ModelCatalogItemView {
         id: model.id,
         display_name: model.display_name,
         repo_id: model.repo_id,
@@ -886,11 +891,4 @@ async fn load_model_with_state(
         backend: response.backend,
         status: response.status,
     })
-}
-
-fn to_model_status_response(status: ModelStatus) -> ModelStatusResponse {
-    ModelStatusResponse {
-        backend: status.backend,
-        status: status.status,
-    }
 }

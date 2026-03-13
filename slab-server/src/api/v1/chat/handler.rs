@@ -13,8 +13,12 @@ use crate::api::v1::chat::schema::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
     ChatModelOption, ChatModelSource,
 };
-use crate::context::{AppState, ModelState};
-use crate::domain::services::{to_chat_completion_response, ChatCompletionOutput, ChatStreamChunk};
+use crate::api::validation::ValidatedJson;
+use crate::context::AppState;
+use crate::domain::services::{
+    to_chat_completion_command, to_chat_completion_response, to_chat_model_option_response,
+    ChatCompletionOutput, ChatStreamChunk,
+};
 use crate::error::ServerError;
 use crate::services::chat::ChatService;
 
@@ -48,10 +52,15 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 async fn list_chat_models(
-    State(state): State<ModelState>,
+    State(service): State<ChatService>,
 ) -> Result<Json<Vec<ChatModelOption>>, ServerError> {
-    let service = ChatService::new(state);
-    Ok(Json(service.list_chat_models().await?))
+    let models = service
+        .list_chat_models()
+        .await?
+        .into_iter()
+        .map(to_chat_model_option_response)
+        .collect();
+    Ok(Json(models))
 }
 
 #[utoipa::path(
@@ -66,11 +75,13 @@ async fn list_chat_models(
     )
 )]
 async fn chat_completions(
-    State(state): State<ModelState>,
-    Json(req): Json<ChatCompletionRequest>,
+    State(service): State<ChatService>,
+    ValidatedJson(req): ValidatedJson<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
-    let service = ChatService::new(state);
-    match service.create_chat_completion(req).await? {
+    match service
+        .create_chat_completion(to_chat_completion_command(req))
+        .await?
+    {
         ChatCompletionOutput::Json(response) => {
             Ok(Json(to_chat_completion_response(response)).into_response())
         }

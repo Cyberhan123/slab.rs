@@ -4,17 +4,38 @@ use slab_core::api::Backend;
 use strum::IntoEnumIterator;
 use tracing::{info, warn};
 
-use crate::api::v1::backend::schema::{
-    BackendListResponse, BackendStatusResponse, BackendTypeQuery, DownloadLibRequest,
-    ReloadLibRequest,
-};
-use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
+use crate::domain::models::AcceptedOperation;
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
 
 type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
+
+#[derive(Debug, Clone)]
+pub struct BackendStatusQuery {
+    pub backend_id: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct DownloadBackendLibCommand {
+    pub backend_id: String,
+    pub target_dir: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ReloadBackendLibCommand {
+    pub backend_id: String,
+    pub lib_path: String,
+    pub model_path: String,
+    pub num_workers: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct BackendStatusView {
+    pub backend: String,
+    pub status: String,
+}
 
 #[derive(Clone)]
 pub struct BackendService {
@@ -32,8 +53,8 @@ impl BackendService {
 
     pub async fn backend_status(
         &self,
-        query: BackendTypeQuery,
-    ) -> Result<BackendStatusResponse, ServerError> {
+        query: BackendStatusQuery,
+    ) -> Result<BackendStatusView, ServerError> {
         let backend = Backend::from_str(&query.backend_id).map_err(|_| {
             ServerError::BadRequest(format!("unknown backend_id: {}", query.backend_id))
         })?;
@@ -43,13 +64,13 @@ impl BackendService {
         } else {
             "disabled"
         };
-        Ok(BackendStatusResponse {
+        Ok(BackendStatusView {
             backend: canonical_backend,
             status: status.into(),
         })
     }
 
-    pub async fn list_backends(&self) -> Result<BackendListResponse, ServerError> {
+    pub async fn list_backends(&self) -> Result<Vec<BackendStatusView>, ServerError> {
         let backends = Backend::iter()
             .map(|name| {
                 let backend_str = name.to_string();
@@ -58,21 +79,19 @@ impl BackendService {
                 } else {
                     "disabled"
                 };
-                BackendStatusResponse {
+                BackendStatusView {
                     backend: backend_str,
                     status: status.into(),
                 }
             })
             .collect();
-        Ok(BackendListResponse { backends })
+        Ok(backends)
     }
 
     pub async fn download_lib(
         &self,
-        req: DownloadLibRequest,
-    ) -> Result<OperationAcceptedResponse, ServerError> {
-        validate_path("target_dir", &req.target_dir)?;
-
+        req: DownloadBackendLibCommand,
+    ) -> Result<AcceptedOperation, ServerError> {
         if std::env::consts::OS != "windows" {
             return Err(ServerError::BadRequest(
                 "download_lib currently supports only Windows hosts".into(),
@@ -105,23 +124,14 @@ impl BackendService {
             )
             .await?;
 
-        Ok(OperationAcceptedResponse { operation_id })
+        Ok(AcceptedOperation { operation_id })
     }
 
     pub async fn reload_lib(
         &self,
-        req: ReloadLibRequest,
-    ) -> Result<BackendStatusResponse, ServerError> {
+        req: ReloadBackendLibCommand,
+    ) -> Result<BackendStatusView, ServerError> {
         let backend_id = req.backend_id.clone();
-
-        validate_path("lib_path", &req.lib_path)?;
-        validate_path("model_path", &req.model_path)?;
-
-        if req.num_workers == 0 {
-            return Err(ServerError::BadRequest(
-                "num_workers must be at least 1".into(),
-            ));
-        }
 
         info!(backend = %backend_id, lib_path = %req.lib_path, "reloading lib");
 
@@ -149,7 +159,7 @@ impl BackendService {
                 ServerError::Internal(format!("grpc reload_library failed: {error}"))
             })?;
 
-        Ok(BackendStatusResponse {
+        Ok(BackendStatusView {
             backend: response.backend,
             status: response.status,
         })
@@ -179,28 +189,6 @@ fn windows_download_spec(
             Box::new(|version: &str| format!("stable-diffusion-{version}-bin-win-cpu-x64.zip")),
         )),
     }
-}
-
-fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
-    if path.is_empty() {
-        return Err(ServerError::BadRequest(format!(
-            "{label} must not be empty"
-        )));
-    }
-    if !std::path::Path::new(path).is_absolute() {
-        return Err(ServerError::BadRequest(format!(
-            "{label} must be an absolute path (got: {path})"
-        )));
-    }
-    let has_traversal = std::path::Path::new(path)
-        .components()
-        .any(|component| component == std::path::Component::ParentDir);
-    if has_traversal {
-        return Err(ServerError::BadRequest(format!(
-            "{label} must not contain '..' components"
-        )));
-    }
-    Ok(())
 }
 
 async fn run_libfetch_download(
@@ -278,26 +266,6 @@ async fn run_libfetch_download(
 #[cfg(test)]
 mod test {
     use super::*;
-
-    #[test]
-    fn validate_path_empty() {
-        assert!(validate_path("lib_path", "").is_err());
-    }
-
-    #[test]
-    fn validate_path_relative() {
-        assert!(validate_path("lib_path", "relative/path.so").is_err());
-    }
-
-    #[test]
-    fn validate_path_traversal() {
-        assert!(validate_path("lib_path", "/safe/../../../etc/passwd").is_err());
-    }
-
-    #[test]
-    fn validate_path_absolute_ok() {
-        assert!(validate_path("lib_path", "/usr/lib/libllama.so").is_ok());
-    }
 
     #[test]
     fn windows_download_spec_llama() {

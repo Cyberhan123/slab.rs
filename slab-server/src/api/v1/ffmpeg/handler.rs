@@ -6,11 +6,13 @@ use axum::routing::post;
 use axum::{Json, Router};
 use utoipa::OpenApi;
 
+use crate::api::validation::ValidatedJson;
 use crate::api::v1::ffmpeg::schema::ConvertRequest;
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
-use crate::context::{AppState, WorkerState};
+use crate::context::AppState;
+use crate::domain::services::to_operation_accepted_response;
 use crate::error::ServerError;
-use crate::services::ffmpeg::FfmpegService;
+use crate::services::ffmpeg::{FfmpegConvertCommand, FfmpegService};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -35,10 +37,28 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 async fn convert(
-    State(state): State<WorkerState>,
-    Json(req): Json<ConvertRequest>,
+    State(service): State<FfmpegService>,
+    ValidatedJson(req): ValidatedJson<ConvertRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
-    let service = FfmpegService::new(state);
-    let response = service.convert(req).await?;
-    Ok((StatusCode::ACCEPTED, Json(response)))
+    if !tokio::fs::try_exists(&req.source_path)
+        .await
+        .unwrap_or(false)
+    {
+        return Err(ServerError::BadRequest(format!(
+            "source_path '{}' does not exist or is not accessible",
+            req.source_path
+        )));
+    }
+
+    let response = service
+        .convert(FfmpegConvertCommand {
+            source_path: req.source_path,
+            output_format: req.output_format,
+            output_path: req.output_path,
+        })
+        .await?;
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(to_operation_accepted_response(response)),
+    ))
 }

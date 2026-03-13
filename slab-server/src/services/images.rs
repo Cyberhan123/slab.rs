@@ -1,17 +1,47 @@
 use std::sync::Arc;
 
-use base64::Engine as _;
+use serde::Serialize;
 use tracing::{debug, warn};
 
-use crate::api::v1::images::schema::{ImageGenerationRequest, ImageMode};
-use crate::api::v1::tasks::schema::{OperationAcceptedResponse, TaskResultPayload};
 use crate::context::{SubmitOperation, WorkerState};
+use crate::domain::models::{AcceptedOperation, TaskResult};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
 
-const MAX_PROMPT_BYTES: usize = 128 * 1024;
-const MAX_IMAGES_PER_REQUEST: u32 = 10;
-const MAX_IMAGE_DIM: u32 = 2048;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub enum ImageGenerationMode {
+    Txt2Img,
+    Img2Img,
+}
+
+#[derive(Debug, Clone)]
+pub struct DecodedImageInput {
+    pub data: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+    pub channels: u32,
+}
+
+#[derive(Debug, Clone)]
+pub struct ImageGenerationCommand {
+    pub model: String,
+    pub prompt: String,
+    pub negative_prompt: Option<String>,
+    pub n: u32,
+    pub width: u32,
+    pub height: u32,
+    pub cfg_scale: Option<f32>,
+    pub guidance: Option<f32>,
+    pub steps: Option<i32>,
+    pub seed: Option<i64>,
+    pub sample_method: Option<String>,
+    pub scheduler: Option<String>,
+    pub clip_skip: Option<i32>,
+    pub eta: Option<f32>,
+    pub strength: Option<f32>,
+    pub init_image: Option<DecodedImageInput>,
+    pub mode: ImageGenerationMode,
+}
 
 #[derive(Clone)]
 pub struct ImagesService {
@@ -25,51 +55,22 @@ impl ImagesService {
 
     pub async fn generate_images(
         &self,
-        req: ImageGenerationRequest,
-    ) -> Result<OperationAcceptedResponse, ServerError> {
-        if req.prompt.is_empty() {
-            return Err(ServerError::BadRequest("prompt must not be empty".into()));
-        }
-        if req.prompt.len() > MAX_PROMPT_BYTES {
-            return Err(ServerError::BadRequest(format!(
-                "prompt too large ({} bytes); maximum is {} bytes",
-                req.prompt.len(),
-                MAX_PROMPT_BYTES,
-            )));
-        }
-        if req.n == 0 || req.n > MAX_IMAGES_PER_REQUEST {
-            return Err(ServerError::BadRequest(format!(
-                "invalid n ({}): must be between 1 and {MAX_IMAGES_PER_REQUEST}",
-                req.n
-            )));
-        }
-        if req.width > MAX_IMAGE_DIM || req.height > MAX_IMAGE_DIM {
-            return Err(ServerError::BadRequest(format!(
-                "image dimensions ({} x {}) exceed maximum of {MAX_IMAGE_DIM}",
-                req.width, req.height
-            )));
-        }
-        if req.mode == ImageMode::Img2Img && req.init_image.is_none() {
-            return Err(ServerError::BadRequest(
-                "init_image is required for img2img mode".into(),
-            ));
-        }
-
-        let effective_init_image = if req.mode == ImageMode::Img2Img {
+        req: ImageGenerationCommand,
+    ) -> Result<AcceptedOperation, ServerError> {
+        let effective_init_image = if req.mode == ImageGenerationMode::Img2Img {
             req.init_image.clone()
         } else {
             None
         };
-        let effective_strength = if req.mode == ImageMode::Img2Img {
+        let effective_strength = if req.mode == ImageGenerationMode::Img2Img {
             req.strength
         } else {
             None
         };
 
         let (init_image_bytes, init_image_width, init_image_height, init_image_channels) =
-            if let Some(ref data_uri) = effective_init_image {
-                let (data, width, height, channels) = decode_init_image(data_uri)?;
-                (data, width, height, channels)
+            if let Some(image) = effective_init_image {
+                (image.data, image.width, image.height, image.channels)
             } else {
                 (Vec::new(), 0u32, 0u32, 3u32)
             };
@@ -179,7 +180,7 @@ impl ImagesService {
                                 .map(|b64| format!("data:image/png;base64,{b64}"))
                                 .collect();
 
-                            let result = TaskResultPayload {
+                            let result = TaskResult {
                                 image: data_uris.first().cloned(),
                                 images: Some(data_uris),
                                 video_path: None,
@@ -201,73 +202,6 @@ impl ImagesService {
             )
             .await?;
 
-        Ok(OperationAcceptedResponse { operation_id })
-    }
-}
-
-fn decode_init_image(data_uri: &str) -> Result<(Vec<u8>, u32, u32, u32), ServerError> {
-    let b64 = if let Some(pos) = data_uri.find("base64,") {
-        &data_uri[pos + "base64,".len()..]
-    } else {
-        data_uri
-    };
-
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(b64)
-        .map_err(|error| {
-            ServerError::BadRequest(format!("init_image base64 decode failed: {error}"))
-        })?;
-
-    let image = image::load_from_memory(&bytes)
-        .map_err(|error| ServerError::BadRequest(format!("init_image decode failed: {error}")))?;
-
-    let rgb = image.to_rgb8();
-    let (width, height) = rgb.dimensions();
-    Ok((rgb.into_raw(), width, height, 3))
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-
-    #[test]
-    fn validates_n_zero() {
-        let n = 0u32;
-        assert!(
-            n == 0 || n > MAX_IMAGES_PER_REQUEST,
-            "n=0 should be invalid"
-        );
-    }
-
-    #[test]
-    fn validates_n_too_large() {
-        let n = MAX_IMAGES_PER_REQUEST + 1;
-        assert!(n > MAX_IMAGES_PER_REQUEST, "n too large should be invalid");
-    }
-
-    #[test]
-    fn validates_n_one() {
-        let n = 1u32;
-        assert!(n >= 1 && n <= MAX_IMAGES_PER_REQUEST, "n=1 should be valid");
-    }
-
-    #[test]
-    fn validates_dim_too_large() {
-        let width_over = MAX_IMAGE_DIM + 1;
-        assert!(
-            width_over > MAX_IMAGE_DIM,
-            "oversized width must be rejected"
-        );
-        let width_at_limit = MAX_IMAGE_DIM;
-        assert!(
-            !(width_at_limit > MAX_IMAGE_DIM),
-            "exact-limit width must be accepted"
-        );
-    }
-
-    #[test]
-    fn decode_init_image_rejects_bad_b64() {
-        let result = decode_init_image("data:image/png;base64,!!!invalid!!!");
-        assert!(result.is_err());
+        Ok(AcceptedOperation { operation_id })
     }
 }

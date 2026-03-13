@@ -3,12 +3,15 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::routing::get;
 use axum::{Json, Router};
+use serde::Deserialize;
 use utoipa::OpenApi;
+use validator::Validate;
 
+use crate::api::validation::{validate, ValidatedJson};
 use crate::api::v1::config::schema::{ConfigEntry, SetConfigBody};
-use crate::context::{AppState, ModelState};
+use crate::context::AppState;
 use crate::error::ServerError;
-use crate::services::config::ConfigService;
+use crate::services::config::{ConfigEntryView, ConfigService, SetConfigValueCommand};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -33,10 +36,15 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 async fn list_config(
-    State(state): State<ModelState>,
+    State(service): State<ConfigService>,
 ) -> Result<Json<Vec<ConfigEntry>>, ServerError> {
-    let service = ConfigService::new(state);
-    Ok(Json(service.list_config().await?))
+    let entries = service
+        .list_config()
+        .await?
+        .into_iter()
+        .map(to_config_entry)
+        .collect();
+    Ok(Json(entries))
 }
 
 #[utoipa::path(
@@ -50,11 +58,13 @@ async fn list_config(
     )
 )]
 async fn get_config_value(
-    State(state): State<ModelState>,
-    Path(key): Path<String>,
+    State(service): State<ConfigService>,
+    Path(params): Path<ConfigKeyPath>,
 ) -> Result<Json<ConfigEntry>, ServerError> {
-    let service = ConfigService::new(state);
-    Ok(Json(service.get_config_value(key).await?))
+    let params = validate(params)?;
+    Ok(Json(to_config_entry(
+        service.get_config_value(params.key).await?,
+    )))
 }
 
 #[utoipa::path(
@@ -69,10 +79,39 @@ async fn get_config_value(
     )
 )]
 async fn set_config_value(
-    State(state): State<ModelState>,
-    Path(key): Path<String>,
-    Json(body): Json<SetConfigBody>,
+    State(service): State<ConfigService>,
+    Path(params): Path<ConfigKeyPath>,
+    ValidatedJson(body): ValidatedJson<SetConfigBody>,
 ) -> Result<Json<ConfigEntry>, ServerError> {
-    let service = ConfigService::new(state);
-    Ok(Json(service.set_config_value(key, body).await?))
+    let params = validate(params)?;
+    Ok(Json(to_config_entry(
+        service
+            .set_config_value(
+                params.key,
+                SetConfigValueCommand {
+                    name: body.name,
+                    value: body.value,
+                },
+            )
+            .await?,
+    )))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+struct ConfigKeyPath {
+    #[validate(
+        custom(
+            function = "crate::api::validation::validate_non_blank",
+            message = "key must not be empty"
+        )
+    )]
+    key: String,
+}
+
+fn to_config_entry(entry: ConfigEntryView) -> ConfigEntry {
+    ConfigEntry {
+        key: entry.key,
+        value: entry.value,
+        name: entry.name,
+    }
 }

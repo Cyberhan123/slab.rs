@@ -87,13 +87,15 @@ pub fn payload_to_task_result(task_type: &str, payload: &slab_core::Payload) -> 
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use base64::Engine as _;
 
     use super::payload_to_task_result;
 
     #[test]
     fn image_payload_maps_to_data_uri() {
-        let payload = slab_core::Payload::Bytes(bytes::Bytes::from_static(b"\x89PNG\r\n\x1a\n"));
+        let payload = slab_core::Payload::Bytes(Arc::<[u8]>::from(&b"\x89PNG\r\n\x1a\n"[..]));
         let result = payload_to_task_result("image", &payload);
 
         let uri = result.image.expect("image must exist");

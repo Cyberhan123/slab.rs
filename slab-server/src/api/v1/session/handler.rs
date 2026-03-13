@@ -3,12 +3,17 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
+use serde::Deserialize;
 use utoipa::OpenApi;
+use validator::Validate;
 
+use crate::api::validation::{validate, ValidatedJson};
 use crate::api::v1::session::schema::{CreateSessionRequest, MessageResponse, SessionResponse};
-use crate::context::{AppState, ModelState};
+use crate::context::AppState;
 use crate::error::ServerError;
-use crate::services::session::SessionService;
+use crate::services::session::{
+    CreateSessionCommand, SessionMessageView, SessionService, SessionView,
+};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -36,11 +41,14 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 async fn create_session(
-    State(state): State<ModelState>,
-    Json(req): Json<CreateSessionRequest>,
+    State(service): State<SessionService>,
+    ValidatedJson(req): ValidatedJson<CreateSessionRequest>,
 ) -> Result<Json<SessionResponse>, ServerError> {
-    let service = SessionService::new(state);
-    Ok(Json(service.create_session(req).await?))
+    Ok(Json(to_session_response(
+        service
+            .create_session(CreateSessionCommand { name: req.name })
+            .await?,
+    )))
 }
 
 #[utoipa::path(
@@ -54,10 +62,15 @@ async fn create_session(
     )
 )]
 async fn list_sessions(
-    State(state): State<ModelState>,
+    State(service): State<SessionService>,
 ) -> Result<Json<Vec<SessionResponse>>, ServerError> {
-    let service = SessionService::new(state);
-    Ok(Json(service.list_sessions().await?))
+    let sessions = service
+        .list_sessions()
+        .await?
+        .into_iter()
+        .map(to_session_response)
+        .collect();
+    Ok(Json(sessions))
 }
 
 #[utoipa::path(
@@ -71,11 +84,11 @@ async fn list_sessions(
     )
 )]
 async fn delete_session(
-    State(state): State<ModelState>,
-    Path(id): Path<String>,
+    State(service): State<SessionService>,
+    Path(params): Path<SessionIdPath>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    let service = SessionService::new(state);
-    Ok(Json(service.delete_session(&id).await?))
+    let params = validate(params)?;
+    Ok(Json(service.delete_session(&params.id).await?))
 }
 
 #[utoipa::path(
@@ -89,9 +102,46 @@ async fn delete_session(
     )
 )]
 async fn list_session_messages(
-    State(state): State<ModelState>,
-    Path(id): Path<String>,
+    State(service): State<SessionService>,
+    Path(params): Path<SessionIdPath>,
 ) -> Result<Json<Vec<MessageResponse>>, ServerError> {
-    let service = SessionService::new(state);
-    Ok(Json(service.list_session_messages(&id).await?))
+    let params = validate(params)?;
+    let messages = service
+        .list_session_messages(&params.id)
+        .await?
+        .into_iter()
+        .map(to_message_response)
+        .collect();
+    Ok(Json(messages))
+}
+
+#[derive(Debug, Deserialize, Validate)]
+struct SessionIdPath {
+    #[validate(
+        custom(
+            function = "crate::api::validation::validate_non_blank",
+            message = "id must not be empty"
+        )
+    )]
+    id: String,
+}
+
+fn to_session_response(session: SessionView) -> SessionResponse {
+    SessionResponse {
+        id: session.id,
+        name: session.name,
+        state_path: session.state_path,
+        created_at: session.created_at,
+        updated_at: session.updated_at,
+    }
+}
+
+fn to_message_response(message: SessionMessageView) -> MessageResponse {
+    MessageResponse {
+        id: message.id,
+        session_id: message.session_id,
+        role: message.role,
+        content: message.content,
+        created_at: message.created_at,
+    }
 }

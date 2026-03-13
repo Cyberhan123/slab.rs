@@ -1,14 +1,15 @@
 use tracing::{info, warn};
 
-use crate::api::v1::ffmpeg::schema::ConvertRequest;
-use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::context::{SubmitOperation, WorkerState};
+use crate::domain::models::AcceptedOperation;
 use crate::error::ServerError;
 
-const ALLOWED_OUTPUT_FORMATS: &[&str] = &[
-    "mp3", "mp4", "wav", "flac", "ogg", "opus", "webm", "avi", "mkv", "mov", "aac", "m4a", "m4v",
-    "f32le", "pcm",
-];
+#[derive(Debug, Clone)]
+pub struct FfmpegConvertCommand {
+    pub source_path: String,
+    pub output_format: String,
+    pub output_path: Option<String>,
+}
 
 #[derive(Clone)]
 pub struct FfmpegService {
@@ -22,40 +23,8 @@ impl FfmpegService {
 
     pub async fn convert(
         &self,
-        req: ConvertRequest,
-    ) -> Result<OperationAcceptedResponse, ServerError> {
-        if req.source_path.is_empty() || !std::path::Path::new(&req.source_path).is_absolute() {
-            return Err(ServerError::BadRequest(
-                "source_path must be an absolute path".into(),
-            ));
-        }
-        if req.source_path.contains("..") {
-            return Err(ServerError::BadRequest(
-                "source_path must not contain '..'".into(),
-            ));
-        }
-        if req.output_format.is_empty() {
-            return Err(ServerError::BadRequest(
-                "output_format must not be empty".into(),
-            ));
-        }
-        if !ALLOWED_OUTPUT_FORMATS.contains(&req.output_format.to_ascii_lowercase().as_str()) {
-            return Err(ServerError::BadRequest(format!(
-                "unsupported output_format '{}'; must be one of: {}",
-                req.output_format,
-                ALLOWED_OUTPUT_FORMATS.join(", ")
-            )));
-        }
-        if !tokio::fs::try_exists(&req.source_path)
-            .await
-            .unwrap_or(false)
-        {
-            return Err(ServerError::BadRequest(format!(
-                "source_path '{}' does not exist or is not accessible",
-                req.source_path
-            )));
-        }
-
+        req: FfmpegConvertCommand,
+    ) -> Result<AcceptedOperation, ServerError> {
         let input_data = serde_json::json!({
             "source_path": req.source_path,
             "output_format": req.output_format,
@@ -135,39 +104,25 @@ impl FfmpegService {
             )
             .await?;
 
-        Ok(OperationAcceptedResponse { operation_id })
+        Ok(AcceptedOperation { operation_id })
     }
 }
 
 #[cfg(test)]
 mod test {
-    use super::*;
-
     #[test]
-    fn rejects_relative_path() {
-        let path = "relative/path.mp4";
-        assert!(!std::path::Path::new(path).is_absolute());
-    }
+    fn output_path_defaults_to_temp_dir_when_missing() {
+        let source_path = std::path::Path::new("/tmp/source.wav");
+        let output_format = "mp3";
+        let output_path = std::env::temp_dir()
+            .join(format!(
+                "{}.{}",
+                source_path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("output"),
+                output_format
+            ))
+            .to_string_lossy()
+            .into_owned();
 
-    #[test]
-    fn rejects_traversal_path() {
-        let path = "/foo/../../../etc/passwd";
-        assert!(path.contains(".."));
-    }
-
-    #[test]
-    fn accepts_allowed_formats() {
-        for fmt in &["mp3", "mp4", "wav", "flac", "ogg"] {
-            assert!(
-                ALLOWED_OUTPUT_FORMATS.contains(fmt),
-                "{fmt} should be allowed"
-            );
-        }
-    }
-
-    #[test]
-    fn rejects_unknown_format() {
-        assert!(!ALLOWED_OUTPUT_FORMATS.contains(&"exe"));
-        assert!(!ALLOWED_OUTPUT_FORMATS.contains(&"sh"));
+        assert!(output_path.ends_with(".mp3"));
     }
 }

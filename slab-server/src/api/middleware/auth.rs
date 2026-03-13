@@ -21,7 +21,7 @@ pub async fn auth_middleware(
     // If no admin token is configured, management routes are open to all callers.
     // When SLAB_ADMIN_TOKEN is set, the caller must supply a matching
     // `Authorization: Bearer <token>` header.
-    let is_authorized = match state.config.admin_api_token.as_deref() {
+    let is_authorized = match state.context.config.admin_api_token.as_deref() {
         None => true,
         Some(expected) => provided.map(|p| p == expected).unwrap_or(false),
     };
