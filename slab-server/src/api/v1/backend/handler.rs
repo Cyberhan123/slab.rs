@@ -7,19 +7,19 @@ use axum::{middleware, Json, Router};
 use utoipa::OpenApi;
 
 use crate::api::middleware::auth;
-use crate::api::validation::{ValidatedJson, ValidatedQuery};
 use crate::api::v1::backend::schema::{
     BackendListResponse, BackendStatusResponse, BackendTypeQuery, DownloadLibRequest,
     ReloadLibRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
+use crate::api::validation::{ValidatedJson, ValidatedQuery};
 use crate::context::AppState;
-use crate::domain::services::to_operation_accepted_response;
-use crate::error::ServerError;
-use crate::services::backend::{
-    BackendService, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
-    ReloadBackendLibCommand,
+use crate::domain::models::{
+    BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand, ReloadBackendLibCommand,
 };
+use crate::domain::services::to_operation_accepted_response;
+use crate::domain::services::BackendService;
+use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(

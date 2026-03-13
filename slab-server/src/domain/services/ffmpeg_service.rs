@@ -1,15 +1,8 @@
 use tracing::{info, warn};
 
 use crate::context::{SubmitOperation, WorkerState};
-use crate::domain::models::AcceptedOperation;
+use crate::domain::models::{AcceptedOperation, FfmpegConvertCommand};
 use crate::error::ServerError;
-
-#[derive(Debug, Clone)]
-pub struct FfmpegConvertCommand {
-    pub source_path: String,
-    pub output_format: String,
-    pub output_path: Option<String>,
-}
 
 #[derive(Clone)]
 pub struct FfmpegService {
@@ -117,7 +110,10 @@ mod test {
         let output_path = std::env::temp_dir()
             .join(format!(
                 "{}.{}",
-                source_path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("output"),
+                source_path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("output"),
                 output_format
             ))
             .to_string_lossy()

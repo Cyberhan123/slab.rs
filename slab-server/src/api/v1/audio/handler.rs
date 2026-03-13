@@ -6,17 +6,18 @@ use axum::routing::post;
 use axum::{Json, Router};
 use utoipa::OpenApi;
 
-use crate::api::validation::ValidatedJson;
 use crate::api::v1::audio::schema::{
     CompletionRequest, TranscribeDecodeRequest, TranscribeVadRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
+use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
-use crate::domain::services::to_operation_accepted_response;
-use crate::error::ServerError;
-use crate::services::audio::{
-    AudioService, AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions,
+use crate::domain::models::{
+    AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions,
 };
+use crate::domain::services::to_operation_accepted_response;
+use crate::domain::services::AudioService;
+use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(

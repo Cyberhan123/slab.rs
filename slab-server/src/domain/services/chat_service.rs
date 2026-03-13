@@ -19,8 +19,7 @@ use uuid::Uuid;
 use crate::context::ModelState;
 use crate::domain::models::{
     ChatCompletionCommand, ChatCompletionResult, ChatModelOption, ChatModelSource,
-    ChatResultChoice,
-    ConversationMessage as DomainConversationMessage,
+    ChatResultChoice, ConversationMessage as DomainConversationMessage,
 };
 use crate::domain::services::{ChatCompletionOutput, ChatStreamChunk};
 use crate::error::ServerError;
@@ -554,12 +553,8 @@ pub(crate) async fn create_chat_completion_with_state(
         "chat completion request"
     );
 
-    let resolved_messages = build_messages(
-        &state,
-        command.id.as_deref(),
-        &command.messages,
-    )
-    .await?;
+    let resolved_messages =
+        build_messages(&state, command.id.as_deref(), &command.messages).await?;
 
     if let Some(sid) = command.id.as_deref() {
         state

@@ -6,36 +6,14 @@ use tracing::{info, warn};
 
 use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
-use crate::domain::models::AcceptedOperation;
+use crate::domain::models::{
+    AcceptedOperation, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
+    ReloadBackendLibCommand,
+};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
 
 type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
-
-#[derive(Debug, Clone)]
-pub struct BackendStatusQuery {
-    pub backend_id: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct DownloadBackendLibCommand {
-    pub backend_id: String,
-    pub target_dir: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct ReloadBackendLibCommand {
-    pub backend_id: String,
-    pub lib_path: String,
-    pub model_path: String,
-    pub num_workers: u32,
-}
-
-#[derive(Debug, Clone)]
-pub struct BackendStatusView {
-    pub backend: String,
-    pub status: String,
-}
 
 #[derive(Clone)]
 pub struct BackendService {

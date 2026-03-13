@@ -35,12 +35,10 @@ pub struct TaskResultPayload {
 #[derive(Deserialize, ToSchema, IntoParams, Validate)]
 pub struct TaskTypeQuery {
     #[serde(rename = "type")]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "type must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "type must not be empty"
+    ))]
     pub task_type: Option<String>,
 }
 

@@ -7,7 +7,8 @@ use utoipa::OpenApi;
 
 use crate::api::v1::system::schema::{GpuDeviceStatus, GpuStatusResponse};
 use crate::context::AppState;
-use crate::services::system::{GpuDeviceSnapshot, GpuStatusSnapshot, SystemService};
+use crate::domain::models::{GpuDeviceSnapshot, GpuStatusSnapshot};
+use crate::domain::services::SystemService;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -28,9 +29,7 @@ pub fn router() -> Router<Arc<AppState>> {
         (status = 200, description = "Current GPU telemetry snapshot", body = GpuStatusResponse),
     )
 )]
-async fn gpu_status(
-    State(service): State<SystemService>,
-) -> Json<GpuStatusResponse> {
+async fn gpu_status(State(service): State<SystemService>) -> Json<GpuStatusResponse> {
     Json(to_gpu_status_response(service.gpu_status().await))
 }
 

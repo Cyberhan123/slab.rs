@@ -49,7 +49,7 @@ impl AppContext {
 #[derive(Clone)]
 pub struct AppState {
     pub context: Arc<AppContext>,
-    pub services: Arc<crate::services::AppServices>,
+    pub services: Arc<crate::domain::services::AppServices>,
 }
 
 impl AppState {
@@ -60,7 +60,7 @@ impl AppState {
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
         let context = Arc::new(AppContext::new(config, grpc, store, model_auto_unload));
-        let services = Arc::new(crate::services::AppServices::new(
+        let services = Arc::new(crate::domain::services::AppServices::new(
             (*context.model_state).clone(),
             (*context.worker_state).clone(),
         ));
@@ -87,67 +87,67 @@ impl FromRef<Arc<AppState>> for AppConfig {
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::audio::AudioService {
+impl FromRef<Arc<AppState>> for crate::domain::services::AudioService {
     fn from_ref(input: &Arc<AppState>) -> Self {
         input.services.audio.clone()
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::backend::BackendService {
+impl FromRef<Arc<AppState>> for crate::domain::services::BackendService {
     fn from_ref(input: &Arc<AppState>) -> Self {
         input.services.backend.clone()
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::chat::ChatService {
+impl FromRef<Arc<AppState>> for crate::domain::services::ChatService {
     fn from_ref(input: &Arc<AppState>) -> Self {
         input.services.chat.clone()
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::config::ConfigService {
+impl FromRef<Arc<AppState>> for crate::domain::services::ConfigService {
     fn from_ref(input: &Arc<AppState>) -> Self {
         input.services.config.clone()
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::ffmpeg::FfmpegService {
+impl FromRef<Arc<AppState>> for crate::domain::services::FfmpegService {
     fn from_ref(input: &Arc<AppState>) -> Self {
         input.services.ffmpeg.clone()
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::images::ImagesService {
+impl FromRef<Arc<AppState>> for crate::domain::services::ImageService {
     fn from_ref(input: &Arc<AppState>) -> Self {
-        input.services.images.clone()
+        input.services.image.clone()
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::models::ModelsService {
+impl FromRef<Arc<AppState>> for crate::domain::services::ModelService {
     fn from_ref(input: &Arc<AppState>) -> Self {
-        input.services.models.clone()
+        input.services.model.clone()
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::session::SessionService {
+impl FromRef<Arc<AppState>> for crate::domain::services::SessionService {
     fn from_ref(input: &Arc<AppState>) -> Self {
         input.services.session.clone()
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::system::SystemService {
+impl FromRef<Arc<AppState>> for crate::domain::services::SystemService {
     fn from_ref(input: &Arc<AppState>) -> Self {
         input.services.system.clone()
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::tasks::TasksService {
+impl FromRef<Arc<AppState>> for crate::domain::services::TaskApplicationService {
     fn from_ref(input: &Arc<AppState>) -> Self {
-        input.services.tasks.clone()
+        input.services.task_application.clone()
     }
 }
 
-impl FromRef<Arc<AppState>> for crate::services::video::VideoService {
+impl FromRef<Arc<AppState>> for crate::domain::services::VideoService {
     fn from_ref(input: &Arc<AppState>) -> Self {
         input.services.video.clone()
     }

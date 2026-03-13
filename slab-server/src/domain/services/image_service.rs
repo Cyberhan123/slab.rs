@@ -1,54 +1,20 @@
 use std::sync::Arc;
 
-use serde::Serialize;
 use tracing::{debug, warn};
 
 use crate::context::{SubmitOperation, WorkerState};
-use crate::domain::models::{AcceptedOperation, TaskResult};
+use crate::domain::models::{
+    AcceptedOperation, ImageGenerationCommand, ImageGenerationMode, TaskResult,
+};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-pub enum ImageGenerationMode {
-    Txt2Img,
-    Img2Img,
-}
-
-#[derive(Debug, Clone)]
-pub struct DecodedImageInput {
-    pub data: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-    pub channels: u32,
-}
-
-#[derive(Debug, Clone)]
-pub struct ImageGenerationCommand {
-    pub model: String,
-    pub prompt: String,
-    pub negative_prompt: Option<String>,
-    pub n: u32,
-    pub width: u32,
-    pub height: u32,
-    pub cfg_scale: Option<f32>,
-    pub guidance: Option<f32>,
-    pub steps: Option<i32>,
-    pub seed: Option<i64>,
-    pub sample_method: Option<String>,
-    pub scheduler: Option<String>,
-    pub clip_skip: Option<i32>,
-    pub eta: Option<f32>,
-    pub strength: Option<f32>,
-    pub init_image: Option<DecodedImageInput>,
-    pub mode: ImageGenerationMode,
-}
-
 #[derive(Clone)]
-pub struct ImagesService {
+pub struct ImageService {
     state: WorkerState,
 }
 
-impl ImagesService {
+impl ImageService {
     pub fn new(state: WorkerState) -> Self {
         Self { state }
     }

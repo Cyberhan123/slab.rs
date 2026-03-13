@@ -9,7 +9,11 @@ use tonic::transport::Channel;
 use tracing::{info, warn};
 
 use crate::context::{ModelState, SubmitOperation, WorkerState};
-use crate::domain::models::{AcceptedOperation, ModelLoadCommand, ModelStatus};
+use crate::domain::models::{
+    AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand,
+    DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelCatalogItemView,
+    ModelCatalogStatus, ModelLoadCommand, ModelStatus, UpdateModelCommand,
+};
 use crate::error::ServerError;
 use crate::infra::db::{ConfigStore, ModelCatalogRecord, ModelStore, TaskRecord, TaskStore};
 use crate::infra::rpc::{self, pb};
@@ -35,80 +39,13 @@ const DIFFUSION_KEEP_VAE_ON_CPU_CONFIG_KEY: &str = "diffusion_keep_vae_on_cpu";
 const DIFFUSION_KEEP_CLIP_ON_CPU_CONFIG_KEY: &str = "diffusion_keep_clip_on_cpu";
 const DIFFUSION_OFFLOAD_PARAMS_CONFIG_KEY: &str = "diffusion_offload_params_to_cpu";
 
-#[derive(Debug, Clone)]
-pub struct CreateModelCommand {
-    pub display_name: String,
-    pub repo_id: String,
-    pub filename: String,
-    pub backend_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct UpdateModelCommand {
-    pub display_name: Option<String>,
-    pub repo_id: Option<String>,
-    pub filename: Option<String>,
-    pub backend_ids: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModelCatalogStatus {
-    Downloaded,
-    Pending,
-    NotDownloaded,
-    All,
-}
-
-#[derive(Debug, Clone)]
-pub struct ListModelsFilter {
-    pub status: ModelCatalogStatus,
-}
-
-#[derive(Debug, Clone)]
-pub struct AvailableModelsQuery {
-    pub repo_id: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct AvailableModelsView {
-    pub repo_id: String,
-    pub files: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DownloadModelCommand {
-    pub model_id: String,
-    pub backend_id: String,
-}
-
-#[derive(Debug, Clone)]
-pub struct ModelCatalogItemView {
-    pub id: String,
-    pub display_name: String,
-    pub repo_id: String,
-    pub filename: String,
-    pub backend_ids: Vec<String>,
-    pub is_vad_model: bool,
-    pub status: ModelCatalogStatus,
-    pub local_path: Option<String>,
-    pub last_downloaded_at: Option<String>,
-    pub pending_task_id: Option<String>,
-    pub pending_task_status: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DeletedModelView {
-    pub id: String,
-    pub status: String,
-}
-
 #[derive(Clone)]
-pub struct ModelsService {
+pub struct ModelService {
     model_state: ModelState,
     worker_state: WorkerState,
 }
 
-impl ModelsService {
+impl ModelService {
     pub fn new(model_state: ModelState, worker_state: WorkerState) -> Self {
         Self {
             model_state,
@@ -180,10 +117,7 @@ impl ModelsService {
             .ok_or_else(|| ServerError::NotFound(format!("model {id} not found after update")))?;
         let pending_task = latest_pending_download_task_for_model(&self.model_state, id).await?;
 
-        Ok(to_model_catalog_item_view(
-            updated,
-            pending_task.as_ref(),
-        ))
+        Ok(to_model_catalog_item_view(updated, pending_task.as_ref()))
     }
 
     pub async fn delete_model(&self, id: &str) -> Result<DeletedModelView, ServerError> {
@@ -228,10 +162,7 @@ impl ModelsService {
         Ok(items)
     }
 
-    pub async fn load_model(
-        &self,
-        command: ModelLoadCommand,
-    ) -> Result<ModelStatus, ServerError> {
+    pub async fn load_model(&self, command: ModelLoadCommand) -> Result<ModelStatus, ServerError> {
         self.load_model_command("load_model", "loading model", command)
             .await
     }

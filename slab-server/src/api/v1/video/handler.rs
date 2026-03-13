@@ -7,13 +7,14 @@ use axum::{Json, Router};
 use base64::Engine as _;
 use utoipa::OpenApi;
 
-use crate::api::validation::ValidatedJson;
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::v1::video::schema::VideoGenerationRequest;
+use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
+use crate::domain::models::{DecodedVideoInitImage, VideoGenerationCommand};
 use crate::domain::services::to_operation_accepted_response;
+use crate::domain::services::VideoService;
 use crate::error::ServerError;
-use crate::services::video::{DecodedVideoInitImage, VideoGenerationCommand, VideoService};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -48,7 +49,9 @@ async fn generate_video(
     ))
 }
 
-fn to_video_command(request: VideoGenerationRequest) -> Result<VideoGenerationCommand, ServerError> {
+fn to_video_command(
+    request: VideoGenerationRequest,
+) -> Result<VideoGenerationCommand, ServerError> {
     let init_image = request
         .init_image
         .as_deref()

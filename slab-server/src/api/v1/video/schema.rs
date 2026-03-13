@@ -9,31 +9,25 @@ const MAX_PROMPT_BYTES: usize = 128 * 1024;
 #[validate(schema(function = "validate_video_generation_request"))]
 pub struct VideoGenerationRequest {
     /// The model identifier to use.
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "model must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "model must not be empty"
+    ))]
     pub model: String,
 
     /// Text description of the desired video content.
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "prompt must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "prompt must not be empty"
+    ))]
     pub prompt: String,
 
     /// Negative text prompt.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "negative_prompt must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "negative_prompt must not be empty"
+    ))]
     pub negative_prompt: Option<String>,
 
     /// Frame width in pixels (default `512`).
@@ -77,32 +71,26 @@ pub struct VideoGenerationRequest {
 
     /// Sampling method.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "sample_method must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "sample_method must not be empty"
+    ))]
     pub sample_method: Option<String>,
 
     /// Sigma schedule.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "scheduler must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "scheduler must not be empty"
+    ))]
     pub scheduler: Option<String>,
 
     /// Init-image for video2video (base64 data URI).
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "init_image must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "init_image must not be empty"
+    ))]
     pub init_image: Option<String>,
 
     /// Strength for init-image influence (default `0.75`).

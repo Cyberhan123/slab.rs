@@ -7,13 +7,12 @@ use serde::Deserialize;
 use utoipa::OpenApi;
 use validator::Validate;
 
-use crate::api::validation::{validate, ValidatedJson};
 use crate::api::v1::session::schema::{CreateSessionRequest, MessageResponse, SessionResponse};
+use crate::api::validation::{validate, ValidatedJson};
 use crate::context::AppState;
+use crate::domain::models::{CreateSessionCommand, SessionMessageView, SessionView};
+use crate::domain::services::SessionService;
 use crate::error::ServerError;
-use crate::services::session::{
-    CreateSessionCommand, SessionMessageView, SessionService, SessionView,
-};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -117,12 +116,10 @@ async fn list_session_messages(
 
 #[derive(Debug, Deserialize, Validate)]
 struct SessionIdPath {
-    #[validate(
-        custom(
-            function = "crate::api::validation::validate_non_blank",
-            message = "id must not be empty"
-        )
-    )]
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "id must not be empty"
+    ))]
     id: String,
 }
 

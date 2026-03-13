@@ -1,21 +1,20 @@
 use std::sync::Arc;
 
-use base64::Engine as _;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::post;
 use axum::{Json, Router};
+use base64::Engine as _;
 use utoipa::OpenApi;
 
-use crate::api::validation::ValidatedJson;
 use crate::api::v1::images::schema::{ImageGenerationRequest, ImageMode};
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
+use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
+use crate::domain::models::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
 use crate::domain::services::to_operation_accepted_response;
+use crate::domain::services::ImageService;
 use crate::error::ServerError;
-use crate::services::images::{
-    DecodedImageInput, ImageGenerationCommand, ImageGenerationMode, ImagesService,
-};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -40,7 +39,7 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 async fn generate_images(
-    State(service): State<ImagesService>,
+    State(service): State<ImageService>,
     ValidatedJson(req): ValidatedJson<ImageGenerationRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
     let response = service.generate_images(to_image_command(req)?).await?;
@@ -50,7 +49,9 @@ async fn generate_images(
     ))
 }
 
-fn to_image_command(request: ImageGenerationRequest) -> Result<ImageGenerationCommand, ServerError> {
+fn to_image_command(
+    request: ImageGenerationRequest,
+) -> Result<ImageGenerationCommand, ServerError> {
     let mode = match request.mode {
         ImageMode::Txt2Img => ImageGenerationMode::Txt2Img,
         ImageMode::Img2Img => ImageGenerationMode::Img2Img,

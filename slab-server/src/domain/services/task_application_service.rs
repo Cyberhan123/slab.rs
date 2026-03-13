@@ -17,10 +17,7 @@ impl TaskApplicationService {
         Self { state }
     }
 
-    pub async fn list_tasks(
-        &self,
-        task_type: Option<&str>,
-    ) -> Result<Vec<TaskView>, ServerError> {
+    pub async fn list_tasks(&self, task_type: Option<&str>) -> Result<Vec<TaskView>, ServerError> {
         let records = self.state.store().list_tasks(task_type).await?;
         Ok(records
             .into_iter()
