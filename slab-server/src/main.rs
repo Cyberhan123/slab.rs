@@ -3,6 +3,7 @@
 
 mod bounded_contexts;
 mod config;
+mod contexts;
 mod entities;
 mod error;
 mod grpc;

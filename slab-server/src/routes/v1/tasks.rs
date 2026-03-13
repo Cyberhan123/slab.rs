@@ -8,6 +8,9 @@ use axum::{Json, Router};
 use utoipa::OpenApi;
 
 use crate::bounded_contexts::task_management::application::TaskApplicationService;
+use crate::contexts::task::application::get_task_result_use_case::{
+    GetTaskResultUseCase, TaskResultPort,
+};
 use crate::error::ServerError;
 use crate::schemas::v1::task::{TaskResponse, TaskResultPayload, TaskTypeQuery};
 use crate::state::AppState;
@@ -89,9 +92,27 @@ pub async fn get_task_result(
     State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<TaskResultPayload>, ServerError> {
-    let service = TaskApplicationService::new(state);
-    let task_result = service.get_task_result(&id).await?;
+    let use_case = GetTaskResultUseCase::new(TaskResultRoutePort { state });
+    let task_result = use_case.execute(id).await?;
     Ok(Json(task_result))
+}
+
+struct TaskResultRoutePort {
+    state: Arc<AppState>,
+}
+
+impl TaskResultPort for TaskResultRoutePort {
+    fn get_task_result(
+        &self,
+        id: String,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<TaskResultPayload, ServerError>> + Send + '_>,
+    > {
+        Box::pin(async move {
+            let service = TaskApplicationService::new(Arc::clone(&self.state));
+            service.get_task_result(&id).await
+        })
+    }
 }
 
 #[utoipa::path(
