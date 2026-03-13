@@ -17,12 +17,17 @@ use genai::chat::{
     ChatRequest as GenaiChatRequest, ChatStreamEvent as GenaiChatStreamEvent,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
-use genai::{Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget};
+use genai::{
+    Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget,
+};
 use serde::Deserialize;
 use tracing::{debug, info, warn};
 use utoipa::OpenApi;
 use uuid::Uuid;
 
+use crate::contexts::chat::application::create_chat_completion_use_case::{
+    ChatCompletionPort, CreateChatCompletionUseCase,
+};
 use crate::entities::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
@@ -187,9 +192,8 @@ fn canonicalize_cloud_provider(
     let mut model_ids = std::collections::HashSet::new();
     for model in &mut provider.models {
         model.id = model.id.trim().to_owned();
-        model.display_name = Some(
-            trim_to_option(model.display_name.take()).unwrap_or_else(|| model.id.clone()),
-        );
+        model.display_name =
+            Some(trim_to_option(model.display_name.take()).unwrap_or_else(|| model.id.clone()));
         model.remote_model = trim_to_option(model.remote_model.take());
 
         if model.id.is_empty() {
@@ -209,7 +213,9 @@ fn canonicalize_cloud_provider(
     Ok(provider)
 }
 
-async fn load_cloud_providers_strict(state: &AppState) -> Result<Vec<CloudProviderConfig>, ServerError> {
+async fn load_cloud_providers_strict(
+    state: &AppState,
+) -> Result<Vec<CloudProviderConfig>, ServerError> {
     let raw = state
         .store
         .get_config_value(CHAT_MODEL_PROVIDERS_CONFIG_KEY)
@@ -383,9 +389,7 @@ pub async fn list_chat_models(
         for model in provider.models {
             cloud_items.push(ChatModelOption {
                 id: cloud_option_id(&provider.id, &model.id),
-                display_name: model
-                    .display_name
-                    .unwrap_or_else(|| model.id.clone()),
+                display_name: model.display_name.unwrap_or_else(|| model.id.clone()),
                 source: ChatModelSource::Cloud,
                 provider_id: Some(provider.id.clone()),
                 provider_name: Some(provider.name.clone()),
@@ -484,10 +488,9 @@ async fn cloud_chat_completion(
         .await
         .map_err(|e| map_genai_error("chat", e))?;
 
-    response
-        .first_text()
-        .map(str::to_owned)
-        .ok_or_else(|| ServerError::Internal("cloud response has empty assistant content".to_owned()))
+    response.first_text().map(str::to_owned).ok_or_else(|| {
+        ServerError::Internal("cloud response has empty assistant content".to_owned())
+    })
 }
 
 async fn cloud_chat_stream(
@@ -558,6 +561,32 @@ pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
+    let use_case = CreateChatCompletionUseCase::new(ChatRoutePort { state });
+    use_case.execute(req).await
+}
+
+struct ChatRoutePort {
+    state: Arc<AppState>,
+}
+
+impl ChatCompletionPort for ChatRoutePort {
+    fn create_chat_completion(
+        &self,
+        req: ChatCompletionRequest,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Response, ServerError>> + Send + '_>,
+    > {
+        Box::pin(create_chat_completion_with_state(
+            Arc::clone(&self.state),
+            req,
+        ))
+    }
+}
+
+pub(crate) async fn create_chat_completion_with_state(
+    state: Arc<AppState>,
+    req: ChatCompletionRequest,
+) -> Result<Response, ServerError> {
     let user_content = req
         .messages
         .iter()
@@ -624,18 +653,15 @@ pub async fn chat_completions(
 
             let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
                 match chunk {
-                    Ok(CloudDelta::Content(token)) => Ok(
-                        Event::default()
-                            .data(build_chunk(&completion_id, created_ts, &model_name, &token)),
-                    ),
-                    Ok(CloudDelta::Reasoning(token)) => Ok(
-                        Event::default().data(build_reasoning_chunk(
-                            &completion_id,
-                            created_ts,
-                            &model_name,
-                            &token,
-                        )),
-                    ),
+                    Ok(CloudDelta::Content(token)) => Ok(Event::default().data(build_chunk(
+                        &completion_id,
+                        created_ts,
+                        &model_name,
+                        &token,
+                    ))),
+                    Ok(CloudDelta::Reasoning(token)) => Ok(Event::default().data(
+                        build_reasoning_chunk(&completion_id, created_ts, &model_name, &token),
+                    )),
                     Err(e) => Ok(Event::default().comment(e.to_string())),
                 }
             });
@@ -880,9 +906,6 @@ mod test {
 
     #[test]
     fn cloud_option_id_has_prefix() {
-        assert_eq!(
-            cloud_option_id("openai", "gpt-4.1"),
-            "cloud/openai/gpt-4.1"
-        );
+        assert_eq!(cloud_option_id("openai", "gpt-4.1"), "cloud/openai/gpt-4.1");
     }
 }
