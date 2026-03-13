@@ -1,7 +1,14 @@
 use crate::entities::contexts::task::application::ports::TaskRepository;
-use crate::entities::contexts::task::domain::{TaskRecord, TaskStatus};
+use crate::entities::contexts::task::domain::TaskRecord;
 use crate::entities::SqlxStore;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+
+fn parse_rfc3339_or_now(raw: String, field: &'static str) -> DateTime<Utc> {
+    raw.parse().unwrap_or_else(|e: chrono::ParseError| {
+        tracing::warn!(raw = %raw, error = %e, field, "failed to parse task timestamp; using now");
+        Utc::now()
+    })
+}
 
 impl TaskRepository for SqlxStore {
     async fn insert_task(&self, record: TaskRecord) -> Result<(), sqlx::Error> {
@@ -32,15 +39,6 @@ impl TaskRepository for SqlxStore {
         result_data: Option<&str>,
         error_msg: Option<&str>,
     ) -> Result<(), sqlx::Error> {
-        if let Some(mut record) = self.get_task(id).await? {
-            if let Some(target) = TaskStatus::parse(status) {
-                let _ = record.transition_to(
-                    target,
-                    result_data.map(str::to_owned),
-                    error_msg.map(str::to_owned),
-                );
-            }
-        }
         let updated_at = Utc::now().to_rfc3339();
         sqlx::query("UPDATE tasks SET status = ?1, result_data = ?2, error_msg = ?3, updated_at = ?4 WHERE id = ?5")
             .bind(status)
@@ -80,8 +78,8 @@ impl TaskRepository for SqlxStore {
                 result_data,
                 error_msg,
                 core_task_id,
-                created_at: created_at.parse().unwrap_or_else(|_| Utc::now()),
-                updated_at: updated_at.parse().unwrap_or_else(|_| Utc::now()),
+                created_at: parse_rfc3339_or_now(created_at, "created_at"),
+                updated_at: parse_rfc3339_or_now(updated_at, "updated_at"),
             },
         ))
     }
@@ -131,8 +129,8 @@ impl TaskRepository for SqlxStore {
                     result_data,
                     error_msg,
                     core_task_id,
-                    created_at: created_at.parse().unwrap_or_else(|_| Utc::now()),
-                    updated_at: updated_at.parse().unwrap_or_else(|_| Utc::now()),
+                    created_at: parse_rfc3339_or_now(created_at, "created_at"),
+                    updated_at: parse_rfc3339_or_now(updated_at, "updated_at"),
                 },
             )
             .collect())
@@ -141,7 +139,7 @@ impl TaskRepository for SqlxStore {
     async fn interrupt_running_tasks(&self) -> Result<u64, sqlx::Error> {
         let updated_at = Utc::now().to_rfc3339();
         let result = sqlx::query(
-            "UPDATE tasks SET status = 'interrupted', updated_at = ?1 WHERE status = 'running'",
+            "UPDATE tasks SET status = 'interrupted', updated_at = ?1 WHERE status IN ('pending', 'running')",
         )
         .bind(updated_at)
         .execute(&self.pool)

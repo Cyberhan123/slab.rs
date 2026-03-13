@@ -1,7 +1,14 @@
 use crate::entities::contexts::chat::application::ports::ChatRepository;
 use crate::entities::contexts::chat::domain::{ChatMessage, ChatSession};
 use crate::entities::SqlxStore;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
+
+fn parse_rfc3339_or_now(raw: String, field: &'static str) -> DateTime<Utc> {
+    raw.parse().unwrap_or_else(|e: chrono::ParseError| {
+        tracing::warn!(raw = %raw, error = %e, field, "failed to parse chat timestamp; using now");
+        Utc::now()
+    })
+}
 
 impl ChatRepository for SqlxStore {
     async fn create_session(&self, session: ChatSession) -> Result<(), sqlx::Error> {
@@ -29,8 +36,8 @@ impl ChatRepository for SqlxStore {
                     id,
                     name,
                     state_path,
-                    created_at: created_at.parse().unwrap_or_else(|_| Utc::now()),
-                    updated_at: updated_at.parse().unwrap_or_else(|_| Utc::now()),
+                    created_at: parse_rfc3339_or_now(created_at, "created_at"),
+                    updated_at: parse_rfc3339_or_now(updated_at, "updated_at"),
                 },
             )
             .collect())
@@ -74,7 +81,7 @@ impl ChatRepository for SqlxStore {
                 session_id,
                 role,
                 content,
-                created_at: created_at.parse().unwrap_or_else(|_| Utc::now()),
+                created_at: parse_rfc3339_or_now(created_at, "created_at"),
             })
             .collect())
     }
