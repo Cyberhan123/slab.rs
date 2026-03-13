@@ -1,4 +1,3 @@
-use crate::entities::TaskRecord;
 use serde::{Deserialize, Serialize};
 use slab_core::TaskStatus;
 use utoipa::{IntoParams, ToSchema};
@@ -42,19 +41,6 @@ pub struct TaskResponse {
     pub error_msg: Option<String>,
     pub created_at: String,
     pub updated_at: String,
-}
-
-impl TaskRecord {
-    pub fn to_response(&self) -> TaskResponse {
-        TaskResponse {
-            id: self.id.clone(),
-            task_type: self.task_type.clone(),
-            status: self.status.clone(),
-            error_msg: self.error_msg.clone(),
-            created_at: self.created_at.to_rfc3339(),
-            updated_at: self.updated_at.to_rfc3339(),
-        }
-    }
 }
 
 pub trait TaskStatusEnumExt {

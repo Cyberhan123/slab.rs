@@ -4,9 +4,11 @@ use base64::Engine as _;
 use tracing::{info, warn};
 
 use crate::bounded_contexts::task_management::domain::TaskAggregate;
+use crate::contexts::task::domain::TaskResult;
+use crate::contexts::task::interface::http::mappers::task_mapper::to_task_response;
 use crate::entities::TaskStore;
 use crate::error::ServerError;
-use crate::schemas::v1::task::{TaskResponse, TaskResultPayload};
+use crate::schemas::v1::task::TaskResponse;
 use crate::state::AppState;
 
 #[derive(Clone)]
@@ -26,7 +28,7 @@ impl TaskApplicationService {
         let records = self.state.store.list_tasks(task_type).await?;
         Ok(records
             .into_iter()
-            .map(|record| record.to_response())
+            .map(|record| to_task_response(&record))
             .collect())
     }
 
@@ -59,10 +61,10 @@ impl TaskApplicationService {
             }
         }
 
-        Ok(record.to_response())
+        Ok(to_task_response(&record))
     }
 
-    pub async fn get_task_result(&self, id: &str) -> Result<TaskResultPayload, ServerError> {
+    pub async fn get_task_result(&self, id: &str) -> Result<TaskResult, ServerError> {
         let record = self
             .state
             .store
@@ -74,7 +76,7 @@ impl TaskApplicationService {
             match slab_core::api::result(core_tid as u64).await {
                 Ok(Some(payload)) => {
                     let result_payload = map_payload(&record.task_type, &payload);
-                    if let Ok(result_json) = serde_json::to_string(&result_payload) {
+                    if let Ok(result_json) = serialize_task_result(&result_payload) {
                         self.state
                             .store
                             .update_task_status(id, "succeeded", Some(&result_json), None)
@@ -88,9 +90,9 @@ impl TaskApplicationService {
                 Ok(None) => {
                     if let Some(data) = record.result_data {
                         let result_payload =
-                            serde_json::from_str::<TaskResultPayload>(&data).unwrap_or_else(|e| {
+                            deserialize_task_result(&data).unwrap_or_else(|e| {
                                 warn!(task_id = %id, error = %e, "persisted result_data is not a TaskResultPayload; returning as text");
-                                TaskResultPayload {
+                                TaskResult {
                                     image: None,
                                     images: None,
                                     video_path: None,
@@ -121,14 +123,14 @@ impl TaskApplicationService {
             "succeeded" => Ok(record
                 .result_data
                 .map(|data| {
-                    serde_json::from_str::<TaskResultPayload>(&data).unwrap_or(TaskResultPayload {
+                    deserialize_task_result(&data).unwrap_or(TaskResult {
                         image: None,
                         images: None,
                         video_path: None,
                         text: Some(data),
                     })
                 })
-                .unwrap_or(TaskResultPayload {
+                .unwrap_or(TaskResult {
                     image: None,
                     images: None,
                     video_path: None,
@@ -173,7 +175,7 @@ impl TaskApplicationService {
             self.state.store.get_task(id).await?.ok_or_else(|| {
                 ServerError::NotFound(format!("task {id} not found after cancel"))
             })?;
-        Ok(updated.to_response())
+        Ok(to_task_response(&updated))
     }
 
     pub async fn validate_restartable(&self, id: &str) -> Result<(), ServerError> {
@@ -195,20 +197,20 @@ impl TaskApplicationService {
     }
 }
 
-fn map_payload(task_type: &str, payload: &slab_core::Payload) -> TaskResultPayload {
+fn map_payload(task_type: &str, payload: &slab_core::Payload) -> TaskResult {
     match payload {
         slab_core::Payload::Bytes(bytes) => {
             if task_type == "image" {
                 let encoded = base64::engine::general_purpose::STANDARD.encode(bytes.as_ref());
                 let uri = format!("data:image/png;base64,{encoded}");
-                TaskResultPayload {
+                TaskResult {
                     image: Some(uri.clone()),
                     images: Some(vec![uri]),
                     video_path: None,
                     text: None,
                 }
             } else {
-                TaskResultPayload {
+                TaskResult {
                     image: None,
                     images: None,
                     video_path: None,
@@ -216,7 +218,7 @@ fn map_payload(task_type: &str, payload: &slab_core::Payload) -> TaskResultPaylo
                 }
             }
         }
-        slab_core::Payload::Text(text) => TaskResultPayload {
+        slab_core::Payload::Text(text) => TaskResult {
             image: None,
             images: None,
             video_path: None,
@@ -250,7 +252,7 @@ fn map_payload(task_type: &str, payload: &slab_core::Payload) -> TaskResultPaylo
                     }
                 });
 
-            TaskResultPayload {
+            TaskResult {
                 image,
                 images,
                 video_path,
@@ -289,4 +291,36 @@ mod tests {
             .unwrap_or_default()
             .contains("unexpected"));
     }
+}
+
+fn serialize_task_result(result: &TaskResult) -> Result<String, serde_json::Error> {
+    serde_json::to_string(&serde_json::json!({
+        "image": result.image,
+        "images": result.images,
+        "video_path": result.video_path,
+        "text": result.text,
+    }))
+}
+
+fn deserialize_task_result(raw: &str) -> Result<TaskResult, serde_json::Error> {
+    let value: serde_json::Value = serde_json::from_str(raw)?;
+    Ok(TaskResult {
+        image: value
+            .get("image")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        images: value.get("images").and_then(|v| v.as_array()).map(|arr| {
+            arr.iter()
+                .filter_map(|item| item.as_str().map(str::to_owned))
+                .collect()
+        }),
+        video_path: value
+            .get("video_path")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+        text: value
+            .get("text")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned),
+    })
 }

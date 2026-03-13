@@ -1,14 +1,14 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::contexts::task::domain::TaskResult;
 use crate::error::ServerError;
-use crate::schemas::v1::task::TaskResultPayload;
 
 pub trait TaskResultPort: Send + Sync {
     fn get_task_result(
         &self,
         id: String,
-    ) -> Pin<Box<dyn Future<Output = Result<TaskResultPayload, ServerError>> + Send + '_>>;
+    ) -> Pin<Box<dyn Future<Output = Result<TaskResult, ServerError>> + Send + '_>>;
 }
 
 pub struct GetTaskResultUseCase<P> {
@@ -23,7 +23,7 @@ where
         Self { port }
     }
 
-    pub async fn execute(&self, id: String) -> Result<TaskResultPayload, ServerError> {
+    pub async fn execute(&self, id: String) -> Result<TaskResult, ServerError> {
         self.port.get_task_result(id).await
     }
 }

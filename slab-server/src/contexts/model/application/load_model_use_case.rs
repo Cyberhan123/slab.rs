@@ -1,14 +1,14 @@
 use std::future::Future;
 use std::pin::Pin;
 
+use crate::contexts::model::domain::{ModelLoadCommand, ModelStatus};
 use crate::error::ServerError;
-use crate::schemas::v1::models::{LoadModelRequest, ModelStatusResponse};
 
 pub trait ModelLoadPort: Send + Sync {
     fn load_model(
         &self,
-        req: LoadModelRequest,
-    ) -> Pin<Box<dyn Future<Output = Result<ModelStatusResponse, ServerError>> + Send + '_>>;
+        command: ModelLoadCommand,
+    ) -> Pin<Box<dyn Future<Output = Result<ModelStatus, ServerError>> + Send + '_>>;
 }
 
 pub struct LoadModelUseCase<P> {
@@ -23,7 +23,7 @@ where
         Self { port }
     }
 
-    pub async fn execute(&self, req: LoadModelRequest) -> Result<ModelStatusResponse, ServerError> {
-        self.port.load_model(req).await
+    pub async fn execute(&self, command: ModelLoadCommand) -> Result<ModelStatus, ServerError> {
+        self.port.load_model(command).await
     }
 }
