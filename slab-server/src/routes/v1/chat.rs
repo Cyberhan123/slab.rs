@@ -594,14 +594,14 @@ impl ChatCompletionPort for ChatRoutePort {
             dyn std::future::Future<Output = Result<ChatCompletionOutput, ServerError>> + Send + '_,
         >,
     > {
-        Box::pin(create_chat_completion_with_state(
+        Box::pin(create_chat_completion_with_context(
             Arc::clone(&self.context),
             req,
         ))
     }
 }
 
-pub(crate) async fn create_chat_completion_with_state(
+pub(crate) async fn create_chat_completion_with_context(
     context: Arc<ChatContext>,
     req: ChatCompletionRequest,
 ) -> Result<ChatCompletionOutput, ServerError> {
