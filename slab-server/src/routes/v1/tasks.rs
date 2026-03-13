@@ -15,9 +15,7 @@ use crate::contexts::task::domain::TaskResult;
 use crate::contexts::task::interface::http::mappers::task_mapper::to_task_result_response;
 use crate::error::ServerError;
 use crate::schemas::v1::task::{TaskResponse, TaskResultPayload, TaskTypeQuery};
-use crate::state::TaskContext;
-
-use super::V1State;
+use crate::state::AppState;
 
 #[derive(OpenApi)]
 #[openapi(
@@ -26,7 +24,7 @@ use super::V1State;
 )]
 pub struct TasksApi;
 
-pub fn router() -> Router<Arc<V1State>> {
+pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/tasks", get(list_tasks))
         .route("/tasks/{id}", get(get_task))
@@ -47,10 +45,10 @@ pub fn router() -> Router<Arc<V1State>> {
     )
 )]
 pub async fn list_tasks(
-    State(context): State<Arc<TaskContext>>,
+    State(state): State<Arc<AppState>>,
     Query(q): Query<TaskTypeQuery>,
 ) -> Result<Json<Vec<TaskResponse>>, ServerError> {
-    let service = TaskApplicationService::new(context);
+    let service = TaskApplicationService::new(state);
     let tasks = service.list_tasks(q.task_type.as_deref()).await?;
     Ok(Json(tasks))
 }
@@ -70,10 +68,10 @@ pub async fn list_tasks(
     )
 )]
 pub async fn get_task(
-    State(context): State<Arc<TaskContext>>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<TaskResponse>, ServerError> {
-    let service = TaskApplicationService::new(context);
+    let service = TaskApplicationService::new(state);
     let task = service.get_task(&id).await?;
     Ok(Json(task))
 }
@@ -93,16 +91,16 @@ pub async fn get_task(
     )
 )]
 pub async fn get_task_result(
-    State(context): State<Arc<TaskContext>>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<TaskResultPayload>, ServerError> {
-    let use_case = GetTaskResultUseCase::new(TaskResultRoutePort { context });
+    let use_case = GetTaskResultUseCase::new(TaskResultRoutePort { state });
     let task_result = use_case.execute(id).await?;
     Ok(Json(to_task_result_response(task_result)))
 }
 
 struct TaskResultRoutePort {
-    context: Arc<TaskContext>,
+    state: Arc<AppState>,
 }
 
 impl TaskResultPort for TaskResultRoutePort {
@@ -112,9 +110,9 @@ impl TaskResultPort for TaskResultRoutePort {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<TaskResult, ServerError>> + Send + '_>,
     > {
-        let context = Arc::clone(&self.context);
+        let state = Arc::clone(&self.state);
         Box::pin(async move {
-            let service = TaskApplicationService::new(context);
+            let service = TaskApplicationService::new(state);
             service.get_task_result(&id).await
         })
     }
@@ -135,10 +133,10 @@ impl TaskResultPort for TaskResultRoutePort {
     )
 )]
 pub async fn cancel_task(
-    State(context): State<Arc<TaskContext>>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<TaskResponse>, ServerError> {
-    let service = TaskApplicationService::new(context);
+    let service = TaskApplicationService::new(state);
     let task = service.cancel_task(&id).await?;
     Ok(Json(task))
 }
@@ -158,10 +156,10 @@ pub async fn cancel_task(
     )
 )]
 pub async fn restart_task(
-    State(context): State<Arc<TaskContext>>,
+    State(state): State<Arc<AppState>>,
     Path(id): Path<String>,
 ) -> Result<Json<TaskResponse>, ServerError> {
-    let service = TaskApplicationService::new(context);
+    let service = TaskApplicationService::new(state);
     service.validate_restartable(&id).await?;
 
     Err(ServerError::NotImplemented(
