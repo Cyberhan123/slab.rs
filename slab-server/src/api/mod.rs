@@ -12,10 +12,7 @@ mod middleware;
 pub(crate) mod v1;
 use crate::api::middleware::{cors, trace};
 use crate::context::AppState;
-use axum::{
-    middleware as axum_middleware,
-    Router,
-};
+use axum::{middleware as axum_middleware, Router};
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use utoipa_swagger_ui::SwaggerUi;
@@ -41,4 +38,3 @@ pub fn build(state: Arc<AppState>) -> Router {
         ))
         .with_state(state)
 }
-

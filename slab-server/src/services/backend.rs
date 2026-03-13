@@ -34,8 +34,9 @@ impl BackendService {
         &self,
         query: BackendTypeQuery,
     ) -> Result<BackendStatusResponse, ServerError> {
-        let backend = Backend::from_str(&query.backend_id)
-            .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {}", query.backend_id)))?;
+        let backend = Backend::from_str(&query.backend_id).map_err(|_| {
+            ServerError::BadRequest(format!("unknown backend_id: {}", query.backend_id))
+        })?;
         let canonical_backend = backend.to_string();
         let status = if self.model_state.grpc().has_backend(&canonical_backend) {
             "ready"
@@ -78,11 +79,14 @@ impl BackendService {
             ));
         }
 
-        let backend_id = Backend::from_str(&req.backend_id)
-            .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {}", req.backend_id)))?;
+        let backend_id = Backend::from_str(&req.backend_id).map_err(|_| {
+            ServerError::BadRequest(format!("unknown backend_id: {}", req.backend_id))
+        })?;
 
-        let (owner, repo, tag, asset_resolver) = windows_download_spec(backend_id)
-            .ok_or_else(|| ServerError::BadRequest(format!("unsupported backend_id: {backend_id}")))?;
+        let (owner, repo, tag, asset_resolver) =
+            windows_download_spec(backend_id).ok_or_else(|| {
+                ServerError::BadRequest(format!("unsupported backend_id: {backend_id}"))
+            })?;
 
         let input_data = serde_json::json!({
             "backend_id": req.backend_id,
@@ -141,7 +145,9 @@ impl BackendService {
         };
         let response = rpc::client::reload_library(channel, &canonical_backend, grpc_req)
             .await
-            .map_err(|error| ServerError::Internal(format!("grpc reload_library failed: {error}")))?;
+            .map_err(|error| {
+                ServerError::Internal(format!("grpc reload_library failed: {error}"))
+            })?;
 
         Ok(BackendStatusResponse {
             backend: response.backend,

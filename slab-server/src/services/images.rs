@@ -84,9 +84,10 @@ impl ImagesService {
             "image generation request"
         );
 
-        let generate_image_channel = self.state.grpc().generate_image_channel().ok_or_else(|| {
-            ServerError::BackendNotReady("diffusion gRPC endpoint is not configured".into())
-        })?;
+        let generate_image_channel =
+            self.state.grpc().generate_image_channel().ok_or_else(|| {
+                ServerError::BackendNotReady("diffusion gRPC endpoint is not configured".into())
+            })?;
 
         let input_json = serde_json::json!({
             "prompt": req.prompt,
@@ -213,7 +214,9 @@ fn decode_init_image(data_uri: &str) -> Result<(Vec<u8>, u32, u32, u32), ServerE
 
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
-        .map_err(|error| ServerError::BadRequest(format!("init_image base64 decode failed: {error}")))?;
+        .map_err(|error| {
+            ServerError::BadRequest(format!("init_image base64 decode failed: {error}"))
+        })?;
 
     let image = image::load_from_memory(&bytes)
         .map_err(|error| ServerError::BadRequest(format!("init_image decode failed: {error}")))?;
@@ -230,7 +233,10 @@ mod test {
     #[test]
     fn validates_n_zero() {
         let n = 0u32;
-        assert!(n == 0 || n > MAX_IMAGES_PER_REQUEST, "n=0 should be invalid");
+        assert!(
+            n == 0 || n > MAX_IMAGES_PER_REQUEST,
+            "n=0 should be invalid"
+        );
     }
 
     #[test]
@@ -248,7 +254,10 @@ mod test {
     #[test]
     fn validates_dim_too_large() {
         let width_over = MAX_IMAGE_DIM + 1;
-        assert!(width_over > MAX_IMAGE_DIM, "oversized width must be rejected");
+        assert!(
+            width_over > MAX_IMAGE_DIM,
+            "oversized width must be rejected"
+        );
         let width_at_limit = MAX_IMAGE_DIM;
         assert!(
             !(width_at_limit > MAX_IMAGE_DIM),

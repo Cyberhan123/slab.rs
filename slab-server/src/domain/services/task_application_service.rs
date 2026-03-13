@@ -1,12 +1,12 @@
 use tracing::{info, warn};
 
+use crate::api::v1::tasks::schema::{TaskResponse, TaskStatusEnumExt};
 use crate::context::WorkerState;
 use crate::domain::models::TaskResult;
 use crate::domain::services::to_task_response;
 use crate::error::ServerError;
 use crate::infra::db::TaskStore;
 use crate::infra::rpc::adapter::payload_to_task_result;
-use crate::api::v1::tasks::schema::{TaskResponse, TaskStatusEnumExt};
 
 #[derive(Clone)]
 pub struct TaskApplicationService {
@@ -44,7 +44,9 @@ impl TaskApplicationService {
                     slab_core::TaskStatus::Failed { error } => Some(error.to_string()),
                     _ => None,
                 };
-                if live_status != record.status || live_error.as_deref() != record.error_msg.as_deref() {
+                if live_status != record.status
+                    || live_error.as_deref() != record.error_msg.as_deref()
+                {
                     self.state
                         .store()
                         .update_task_status(id, live_status, None, live_error.as_deref())
@@ -95,7 +97,9 @@ impl TaskApplicationService {
                         });
                         return Ok(result_payload);
                     }
-                    return Err(ServerError::BadRequest(format!("task {id} is not completed yet")));
+                    return Err(ServerError::BadRequest(format!(
+                        "task {id} is not completed yet"
+                    )));
                 }
                 Err(e) => {
                     let err_msg = e.to_string();
@@ -103,7 +107,9 @@ impl TaskApplicationService {
                         .store()
                         .update_task_status(id, "failed", None, Some(&err_msg))
                         .await
-                        .unwrap_or_else(|db_e| warn!(error = %db_e, "failed to sync failed task error"));
+                        .unwrap_or_else(
+                            |db_e| warn!(error = %db_e, "failed to sync failed task error"),
+                        );
                     return Err(ServerError::Runtime(e));
                 }
             }
@@ -160,12 +166,10 @@ impl TaskApplicationService {
         self.state.cancel_operation(id);
 
         info!(task_id = %id, "task cancelled");
-        let updated = self
-            .state
-            .store()
-            .get_task(id)
-            .await?
-            .ok_or_else(|| ServerError::NotFound(format!("task {id} not found after cancel")))?;
+        let updated =
+            self.state.store().get_task(id).await?.ok_or_else(|| {
+                ServerError::NotFound(format!("task {id} not found after cancel"))
+            })?;
         Ok(to_task_response(&updated))
     }
 

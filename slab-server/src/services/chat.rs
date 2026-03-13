@@ -1,6 +1,5 @@
 //! OpenAI-compatible chat completion routes.
 
-use std::collections::HashMap;
 use chrono::Utc;
 use futures::{stream, StreamExt};
 use genai::adapter::AdapterKind;
@@ -13,23 +12,24 @@ use genai::{
     Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget,
 };
 use serde::Deserialize;
+use std::collections::HashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
+use crate::api::v1::chat::schema::{
+    ChatCompletionRequest, ChatMessage as OpenAiMessage, ChatModelOption, ChatModelSource,
+};
+use crate::context::ModelState;
 use crate::domain::models::{
     ChatCompletionCommand, ChatCompletionResult, ChatResultChoice,
     ConversationMessage as DomainConversationMessage,
 };
 use crate::domain::services::{
-    ChatCompletionOutput, ChatStreamChunk, to_chat_completion_command, to_openai_messages,
+    to_chat_completion_command, to_openai_messages, ChatCompletionOutput, ChatStreamChunk,
 };
-use crate::infra::db::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
+use crate::infra::db::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::infra::rpc::{self, pb};
-use crate::api::v1::chat::schema::{
-    ChatCompletionRequest, ChatMessage as OpenAiMessage, ChatModelOption, ChatModelSource,
-};
-use crate::context::ModelState;
 
 /// Maximum allowed prompt length in bytes.
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
@@ -49,12 +49,21 @@ impl ChatService {
 
     pub async fn list_chat_models(&self) -> Result<Vec<ChatModelOption>, ServerError> {
         let local_models = self.state.store().list_models().await?;
-        let download_tasks = self.state.store().list_tasks(Some("model_download")).await?;
+        let download_tasks = self
+            .state
+            .store()
+            .list_tasks(Some("model_download"))
+            .await?;
         let pending_by_model = pending_download_map(download_tasks);
 
         let mut items: Vec<ChatModelOption> = local_models
             .into_iter()
-            .filter(|model| model.backend_ids.iter().any(|backend| backend == LLAMA_BACKEND_ID))
+            .filter(|model| {
+                model
+                    .backend_ids
+                    .iter()
+                    .any(|backend| backend == LLAMA_BACKEND_ID)
+            })
             .map(|model| ChatModelOption {
                 id: model.id.clone(),
                 display_name: model.display_name,
@@ -857,4 +866,3 @@ mod test {
         assert_eq!(cloud_option_id("openai", "gpt-4.1"), "cloud/openai/gpt-4.1");
     }
 }
-

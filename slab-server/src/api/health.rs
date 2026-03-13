@@ -36,7 +36,7 @@ pub async fn get_health() -> Json<Value> {
     }))
 }
 
-//  Tests 
+//  Tests
 
 #[cfg(test)]
 mod test {
@@ -54,4 +54,3 @@ mod test {
         assert!(!body["version"].as_str().unwrap_or("").is_empty());
     }
 }
-

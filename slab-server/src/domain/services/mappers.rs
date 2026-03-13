@@ -1,13 +1,11 @@
-use crate::domain::models::{
-    ChatCompletionCommand, ChatCompletionResult, ConversationMessage, ModelLoadCommand, ModelStatus,
-    TaskResult,
-};
-use crate::infra::db::TaskRecord;
 use crate::api::v1::chat::schema::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
 };
-use crate::api::v1::models::schema::{LoadModelRequest, ModelStatusResponse};
 use crate::api::v1::tasks::schema::{TaskResponse, TaskResultPayload};
+use crate::domain::models::{
+    ChatCompletionCommand, ChatCompletionResult, ConversationMessage, TaskResult,
+};
+use crate::infra::db::TaskRecord;
 
 pub fn to_chat_completion_command(request: ChatCompletionRequest) -> ChatCompletionCommand {
     ChatCompletionCommand {
@@ -56,21 +54,6 @@ pub fn to_openai_messages(messages: Vec<ConversationMessage>) -> Vec<OpenAiMessa
             content: message.content,
         })
         .collect()
-}
-
-pub fn to_model_load_command(request: LoadModelRequest) -> ModelLoadCommand {
-    ModelLoadCommand {
-        backend_id: request.backend_id,
-        model_path: request.model_path,
-        num_workers: request.num_workers,
-    }
-}
-
-pub fn to_model_status_response(status: ModelStatus) -> ModelStatusResponse {
-    ModelStatusResponse {
-        backend: status.backend,
-        status: status.status,
-    }
 }
 
 pub fn to_task_response(record: &TaskRecord) -> TaskResponse {
