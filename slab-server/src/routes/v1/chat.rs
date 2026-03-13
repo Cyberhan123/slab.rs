@@ -35,6 +35,7 @@ use crate::contexts::chat::interface::http::mappers::chat_mapper::{
 use crate::entities::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
+use crate::contexts::chat::domain::{ChatCompletionResult, ChatResultChoice, ConversationMessage as DomainConversationMessage};
 use crate::schemas::v1::chat::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
     ChatModelOption, ChatModelSource,
@@ -608,7 +609,7 @@ impl ChatCompletionPort for ChatRoutePort {
 
 pub(crate) async fn create_chat_completion_with_state(
     state: Arc<AppState>,
-    command: ChatCompletionCommand,
+    mut command: ChatCompletionCommand,
 ) -> Result<ChatCompletionOutput, ServerError> {
     let user_content = command
         .messages
@@ -651,7 +652,7 @@ pub(crate) async fn create_chat_completion_with_state(
     let resolved_messages = build_messages(
         &state,
         command.id.as_deref(),
-        &to_openai_messages(command.messages.clone()),
+        &to_openai_messages(std::mem::take(&mut command.messages)),
     )
     .await?;
 
@@ -789,14 +790,14 @@ pub(crate) async fn create_chat_completion_with_state(
             .unwrap_or_else(|e| tracing::warn!(error = %e, "failed to persist assistant message"));
     }
 
-    let resp = ChatCompletionResponse {
+    let resp = ChatCompletionResult {
         id: format!("chatcmpl-{}", Uuid::new_v4()),
         object: "chat.completion".into(),
         created: Utc::now().timestamp(),
         model: command.model,
-        choices: vec![ChatChoice {
+        choices: vec![ChatResultChoice {
             index: 0,
-            message: OpenAiMessage {
+            message: DomainConversationMessage {
                 role: "assistant".into(),
                 content: generated,
             },
