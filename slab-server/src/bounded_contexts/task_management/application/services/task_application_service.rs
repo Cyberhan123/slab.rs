@@ -8,7 +8,7 @@ use crate::contexts::task::domain::TaskResult;
 use crate::contexts::task::interface::http::mappers::task_mapper::to_task_response;
 use crate::entities::TaskStore;
 use crate::error::ServerError;
-use crate::schemas::v1::task::TaskResponse;
+use crate::schemas::v1::task::{TaskResponse, TaskResultPayload};
 use crate::state::TaskContext;
 
 #[derive(Clone)]
@@ -76,7 +76,7 @@ impl TaskApplicationService {
             match slab_core::api::result(core_tid as u64).await {
                 Ok(Some(payload)) => {
                     let result_payload = map_payload(&record.task_type, &payload);
-                    if let Ok(result_json) = serialize_task_result(&result_payload) {
+                    if let Ok(result_json) = serde_json::to_string(&result_payload) {
                         self.context
                             .store
                             .update_task_status(id, "succeeded", Some(&result_json), None)
