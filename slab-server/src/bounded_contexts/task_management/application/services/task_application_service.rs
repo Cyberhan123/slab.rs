@@ -3,7 +3,7 @@ use std::sync::Arc;
 use base64::Engine as _;
 use tracing::{info, warn};
 
-use crate::contexts::task::domain::TaskAggregate;
+use crate::bounded_contexts::task_management::domain::TaskAggregate;
 use crate::entities::TaskStore;
 use crate::error::ServerError;
 use crate::schemas::v1::task::{TaskResponse, TaskResultPayload};
