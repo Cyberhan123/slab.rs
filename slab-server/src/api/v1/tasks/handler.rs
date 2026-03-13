@@ -10,7 +10,7 @@ use validator::Validate;
 use crate::api::v1::tasks::schema::{TaskResponse, TaskResultPayload, TaskTypeQuery};
 use crate::api::validation::{validate, ValidatedQuery};
 use crate::context::AppState;
-use crate::domain::services::{to_task_response, to_task_result_response, TaskApplicationService};
+use crate::domain::services::TaskApplicationService;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
@@ -48,7 +48,7 @@ async fn list_tasks(
         .list_tasks(q.task_type.as_deref())
         .await?
         .into_iter()
-        .map(to_task_response)
+        .map(Into::into)
         .collect();
     Ok(Json(tasks))
 }
@@ -72,7 +72,7 @@ async fn get_task(
     Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(to_task_response(service.get_task(&params.id).await?)))
+    Ok(Json(service.get_task(&params.id).await?.into()))
 }
 
 #[utoipa::path(
@@ -94,9 +94,7 @@ async fn get_task_result(
     Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResultPayload>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(to_task_result_response(
-        service.get_task_result(&params.id).await?,
-    )))
+    Ok(Json(service.get_task_result(&params.id).await?.into()))
 }
 
 #[utoipa::path(
@@ -118,9 +116,7 @@ async fn cancel_task(
     Path(params): Path<TaskIdPath>,
 ) -> Result<Json<TaskResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(to_task_response(
-        service.cancel_task(&params.id).await?,
-    )))
+    Ok(Json(service.cancel_task(&params.id).await?.into()))
 }
 
 #[utoipa::path(

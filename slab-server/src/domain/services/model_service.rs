@@ -25,7 +25,6 @@ const WHISPER_NUM_WORKERS_CONFIG_KEY: &str = "whisper_num_workers";
 const DIFFUSION_NUM_WORKERS_CONFIG_KEY: &str = "diffusion_num_workers";
 const LLAMA_CONTEXT_LENGTH_CONFIG_KEY: &str = "llama_context_length";
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
-const WHISPER_BACKEND_ID: &str = "ggml.whisper";
 
 const DIFFUSION_MODEL_PATH_CONFIG_KEY: &str = "diffusion_model_path";
 const DIFFUSION_VAE_PATH_CONFIG_KEY: &str = "diffusion_vae_path";
@@ -77,7 +76,7 @@ impl ModelService {
             .store()
             .insert_model(record.clone())
             .await?;
-        Ok(to_model_catalog_item_view(record, None))
+        Ok(ModelCatalogItemView::from((record, None)))
     }
 
     pub async fn update_model(
@@ -117,7 +116,7 @@ impl ModelService {
             .ok_or_else(|| ServerError::NotFound(format!("model {id} not found after update")))?;
         let pending_task = latest_pending_download_task_for_model(&self.model_state, id).await?;
 
-        Ok(to_model_catalog_item_view(updated, pending_task.as_ref()))
+        Ok(ModelCatalogItemView::from((updated, pending_task.as_ref())))
     }
 
     pub async fn delete_model(&self, id: &str) -> Result<DeletedModelView, ServerError> {
@@ -148,7 +147,7 @@ impl ModelService {
         let mut items = Vec::with_capacity(models.len());
         for model in models {
             let pending_task = pending_by_model.get(&model.id);
-            let item = to_model_catalog_item_view(model, pending_task);
+            let item = ModelCatalogItemView::from((model, pending_task));
 
             let include = match query.status {
                 ModelCatalogStatus::All => true,
@@ -468,40 +467,6 @@ fn normalize_backend_ids(raw: &[String]) -> Result<Vec<String>, ServerError> {
     Ok(out)
 }
 
-fn to_model_catalog_item_view(
-    model: ModelCatalogRecord,
-    pending_task: Option<&TaskRecord>,
-) -> ModelCatalogItemView {
-    let computed_status = if model.local_path.is_some() {
-        ModelCatalogStatus::Downloaded
-    } else if pending_task.is_some() {
-        ModelCatalogStatus::Pending
-    } else {
-        ModelCatalogStatus::NotDownloaded
-    };
-
-    let is_vad_model = detect_whisper_vad_model(
-        &model.backend_ids,
-        &model.display_name,
-        &model.repo_id,
-        &model.filename,
-    );
-
-    ModelCatalogItemView {
-        id: model.id,
-        display_name: model.display_name,
-        repo_id: model.repo_id,
-        filename: model.filename,
-        backend_ids: model.backend_ids,
-        is_vad_model,
-        status: computed_status,
-        local_path: model.local_path,
-        last_downloaded_at: model.last_downloaded_at.map(|value| value.to_rfc3339()),
-        pending_task_id: pending_task.map(|task| task.id.clone()),
-        pending_task_status: pending_task.map(|task| task.status.clone()),
-    }
-}
-
 fn pending_download_map(tasks: Vec<TaskRecord>) -> HashMap<String, TaskRecord> {
     let mut pending_by_model = HashMap::new();
     for task in tasks {
@@ -566,31 +531,6 @@ fn parse_positive_u32(raw: &str, key: &str) -> Result<u32, ServerError> {
 
 fn parse_num_workers(raw: &str, key: &str) -> Result<u32, ServerError> {
     parse_positive_u32(raw, key)
-}
-
-fn detect_whisper_vad_model(
-    backend_ids: &[String],
-    display_name: &str,
-    repo_id: &str,
-    filename: &str,
-) -> bool {
-    if !backend_ids.iter().any(|value| value == WHISPER_BACKEND_ID) {
-        return false;
-    }
-
-    let haystack = format!(
-        "{} {} {}",
-        display_name.to_ascii_lowercase(),
-        repo_id.to_ascii_lowercase(),
-        filename.to_ascii_lowercase()
-    );
-
-    [
-        " vad", "vad ", "-vad", "_vad", "vad-", "vad_", "silero", "fsmn-vad",
-    ]
-    .iter()
-    .any(|needle| haystack.contains(needle))
-        || haystack.ends_with("vad")
 }
 
 async fn resolve_model_workers(

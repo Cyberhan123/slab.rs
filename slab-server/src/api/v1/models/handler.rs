@@ -10,18 +10,12 @@ use validator::Validate;
 
 use crate::api::v1::models::schema::{
     CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
-    LoadModelRequest, ModelCatalogItemResponse, ModelListStatus, ModelStatusResponse,
-    SwitchModelRequest, UpdateModelRequest,
+    LoadModelRequest, ModelCatalogItemResponse, ModelStatusResponse, SwitchModelRequest,
+    UpdateModelRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::{validate, ValidatedJson, ValidatedQuery};
 use crate::context::AppState;
-use crate::domain::models::{
-    AvailableModelsQuery, CreateModelCommand, DeletedModelView, DownloadModelCommand,
-    ListModelsFilter, ModelCatalogItemView, ModelCatalogStatus, ModelLoadCommand,
-    UpdateModelCommand,
-};
-use crate::domain::services::to_operation_accepted_response;
 use crate::domain::services::ModelService;
 use crate::error::ServerError;
 
@@ -79,16 +73,7 @@ async fn create_model(
     State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<CreateModelRequest>,
 ) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
-    Ok(Json(to_model_catalog_item_response(
-        service
-            .create_model(CreateModelCommand {
-                display_name: req.display_name,
-                repo_id: req.repo_id,
-                filename: req.filename,
-                backend_ids: req.backend_ids,
-            })
-            .await?,
-    )))
+    Ok(Json(service.create_model(req.into()).await?.into()))
 }
 
 #[utoipa::path(
@@ -112,19 +97,7 @@ async fn update_model(
     ValidatedJson(req): ValidatedJson<UpdateModelRequest>,
 ) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(to_model_catalog_item_response(
-        service
-            .update_model(
-                &params.id,
-                UpdateModelCommand {
-                    display_name: req.display_name,
-                    repo_id: req.repo_id,
-                    filename: req.filename,
-                    backend_ids: req.backend_ids,
-                },
-            )
-            .await?,
-    )))
+    Ok(Json(service.update_model(&params.id, req.into()).await?.into()))
 }
 
 #[utoipa::path(
@@ -145,9 +118,11 @@ async fn delete_model(
     Path(params): Path<ModelIdPath>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(to_deleted_model_response(
-        service.delete_model(&params.id).await?,
-    )))
+    let view = service.delete_model(&params.id).await?;
+    Ok(Json(serde_json::json!({
+        "id": view.id,
+        "status": view.status,
+    })))
 }
 
 #[utoipa::path(
@@ -166,12 +141,10 @@ async fn list_models(
     Query(query): Query<ListModelsQuery>,
 ) -> Result<Json<Vec<ModelCatalogItemResponse>>, ServerError> {
     let items = service
-        .list_models(ListModelsFilter {
-            status: to_model_catalog_status(query.status),
-        })
+        .list_models(query.into())
         .await?
         .into_iter()
-        .map(to_model_catalog_item_response)
+        .map(Into::into)
         .collect();
     Ok(Json(items))
 }
@@ -191,9 +164,7 @@ async fn load_model(
     State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<LoadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
-    Ok(Json(to_model_status_response(
-        service.load_model(to_model_load_command(req)).await?,
-    )))
+    Ok(Json(service.load_model(req.into()).await?.into()))
 }
 
 #[utoipa::path(
@@ -211,9 +182,7 @@ async fn unload_model(
     State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<LoadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
-    Ok(Json(to_model_status_response(
-        service.unload_model(to_model_load_command(req)).await?,
-    )))
+    Ok(Json(service.unload_model(req.into()).await?.into()))
 }
 
 #[utoipa::path(
@@ -231,11 +200,7 @@ async fn list_available_models(
     State(service): State<ModelService>,
     ValidatedQuery(query): ValidatedQuery<ListAvailableQuery>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    let response = service
-        .list_available_models(AvailableModelsQuery {
-            repo_id: query.repo_id,
-        })
-        .await?;
+    let response = service.list_available_models(query.into()).await?;
     Ok(Json(serde_json::json!({
         "repo_id": response.repo_id,
         "files": response.files,
@@ -257,15 +222,7 @@ async fn switch_model(
     State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<SwitchModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
-    Ok(Json(to_model_status_response(
-        service
-            .switch_model(ModelLoadCommand {
-                backend_id: req.backend_id,
-                model_path: req.model_path,
-                num_workers: req.num_workers,
-            })
-            .await?,
-    )))
+    Ok(Json(service.switch_model(req.into()).await?.into()))
 }
 
 #[utoipa::path(
@@ -284,16 +241,8 @@ async fn download_model(
     State(service): State<ModelService>,
     ValidatedJson(req): ValidatedJson<DownloadModelRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
-    let response = service
-        .download_model(DownloadModelCommand {
-            model_id: req.model_id,
-            backend_id: req.backend_id,
-        })
-        .await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(to_operation_accepted_response(response)),
-    ))
+    let response = service.download_model(req.into()).await?;
+    Ok((StatusCode::ACCEPTED, Json(response.into())))
 }
 
 #[derive(Debug, Deserialize, Validate)]
@@ -303,56 +252,4 @@ struct ModelIdPath {
         message = "id must not be empty"
     ))]
     id: String,
-}
-
-fn to_model_load_command(request: LoadModelRequest) -> ModelLoadCommand {
-    ModelLoadCommand {
-        backend_id: request.backend_id,
-        model_path: request.model_path,
-        num_workers: request.num_workers,
-    }
-}
-
-fn to_model_status_response(status: crate::domain::models::ModelStatus) -> ModelStatusResponse {
-    ModelStatusResponse {
-        backend: status.backend,
-        status: status.status,
-    }
-}
-
-fn to_model_catalog_item_response(item: ModelCatalogItemView) -> ModelCatalogItemResponse {
-    ModelCatalogItemResponse {
-        id: item.id,
-        display_name: item.display_name,
-        repo_id: item.repo_id,
-        filename: item.filename,
-        backend_ids: item.backend_ids,
-        is_vad_model: item.is_vad_model,
-        status: match item.status {
-            ModelCatalogStatus::Downloaded => ModelListStatus::Downloaded,
-            ModelCatalogStatus::Pending => ModelListStatus::Pending,
-            ModelCatalogStatus::NotDownloaded => ModelListStatus::NotDownloaded,
-            ModelCatalogStatus::All => ModelListStatus::All,
-        },
-        local_path: item.local_path,
-        last_downloaded_at: item.last_downloaded_at,
-        pending_task_id: item.pending_task_id,
-        pending_task_status: item.pending_task_status,
-    }
-}
-
-fn to_model_catalog_status(status: ModelListStatus) -> ModelCatalogStatus {
-    match status {
-        ModelListStatus::Downloaded => ModelCatalogStatus::Downloaded,
-        ModelListStatus::Pending => ModelCatalogStatus::Pending,
-        ModelListStatus::NotDownloaded => ModelCatalogStatus::NotDownloaded,
-        ModelListStatus::All => ModelCatalogStatus::All,
-    }
-}
-
-fn to_deleted_model_response(view: DeletedModelView) -> serde_json::Value {
-    serde_json::json!({
-        "id": view.id,
-        "status": view.status,
-    })
 }

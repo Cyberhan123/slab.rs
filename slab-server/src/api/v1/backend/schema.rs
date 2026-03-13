@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
+use crate::domain::models::BackendStatusView;
+
 #[derive(Debug, Deserialize, ToSchema, Validate)]
 pub struct DownloadLibRequest {
     /// Backend identifier, e.g. `"ggml.llama"`, `"ggml.whisper"`, `"ggml.diffusion"`.
@@ -68,4 +70,13 @@ pub struct BackendStatusResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct BackendListResponse {
     pub backends: Vec<BackendStatusResponse>,
+}
+
+impl From<BackendStatusView> for BackendStatusResponse {
+    fn from(view: BackendStatusView) -> Self {
+        Self {
+            backend: view.backend,
+            status: view.status,
+        }
+    }
 }

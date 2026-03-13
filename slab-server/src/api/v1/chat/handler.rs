@@ -15,10 +15,7 @@ use crate::api::v1::chat::schema::{
 };
 use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
-use crate::domain::services::{
-    to_chat_completion_command, to_chat_completion_response, to_chat_model_option_response,
-    ChatCompletionOutput, ChatService, ChatStreamChunk,
-};
+use crate::domain::services::{ChatCompletionOutput, ChatService, ChatStreamChunk};
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
@@ -57,7 +54,7 @@ async fn list_chat_models(
         .list_chat_models()
         .await?
         .into_iter()
-        .map(to_chat_model_option_response)
+        .map(Into::into)
         .collect();
     Ok(Json(models))
 }
@@ -77,13 +74,8 @@ async fn chat_completions(
     State(service): State<ChatService>,
     ValidatedJson(req): ValidatedJson<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
-    match service
-        .create_chat_completion(to_chat_completion_command(req))
-        .await?
-    {
-        ChatCompletionOutput::Json(response) => {
-            Ok(Json(to_chat_completion_response(response)).into_response())
-        }
+    match service.create_chat_completion(req.into()).await? {
+        ChatCompletionOutput::Json(response) => Ok(Json(ChatCompletionResponse::from(response)).into_response()),
         ChatCompletionOutput::Stream(stream) => {
             let event_stream = stream.map(|chunk| -> Result<Event, Infallible> {
                 match chunk {

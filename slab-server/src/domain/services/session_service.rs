@@ -29,14 +29,14 @@ impl SessionService {
             updated_at: now,
         };
         self.state.store().create_session(session.clone()).await?;
-        Ok(to_session_view(&session))
+        Ok(SessionView::from(&session))
     }
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionView>, ServerError> {
         let sessions = self.state.store().list_sessions().await?;
         Ok(sessions
             .into_iter()
-            .map(|session| to_session_view(&session))
+            .map(|session| SessionView::from(&session))
             .collect())
     }
 
@@ -52,27 +52,7 @@ impl SessionService {
         let messages = self.state.store().list_messages(id).await?;
         Ok(messages
             .into_iter()
-            .map(|message| to_session_message_view(&message))
+            .map(|message| SessionMessageView::from(&message))
             .collect())
-    }
-}
-
-fn to_session_view(session: &ChatSession) -> SessionView {
-    SessionView {
-        id: session.id.clone(),
-        name: session.name.clone(),
-        state_path: session.state_path.clone(),
-        created_at: session.created_at.to_rfc3339(),
-        updated_at: session.updated_at.to_rfc3339(),
-    }
-}
-
-fn to_session_message_view(message: &crate::infra::db::ChatMessage) -> SessionMessageView {
-    SessionMessageView {
-        id: message.id.clone(),
-        session_id: message.session_id.clone(),
-        role: message.role.clone(),
-        content: message.content.clone(),
-        created_at: message.created_at.to_rfc3339(),
     }
 }

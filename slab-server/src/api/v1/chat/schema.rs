@@ -8,6 +8,12 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
+use crate::domain::models::{
+    ChatCompletionResult as DomainChatCompletionResult,
+    ChatModelOption as DomainChatModelOption, ChatModelSource as DomainChatModelSource,
+    ChatResultChoice as DomainChatResultChoice, ConversationMessage,
+};
+
 const MAX_PROMPT_BYTES: usize = 128 * 1024;
 
 /// A single message in the conversation history.
@@ -123,6 +129,61 @@ pub struct ChatModelOption {
     pub downloaded: bool,
     /// Whether a model download task is running.
     pub pending: bool,
+}
+
+impl From<ConversationMessage> for ChatMessage {
+    fn from(message: ConversationMessage) -> Self {
+        Self {
+            role: message.role,
+            content: message.content,
+        }
+    }
+}
+
+impl From<DomainChatResultChoice> for ChatChoice {
+    fn from(choice: DomainChatResultChoice) -> Self {
+        Self {
+            index: choice.index,
+            message: choice.message.into(),
+            finish_reason: choice.finish_reason,
+        }
+    }
+}
+
+impl From<DomainChatCompletionResult> for ChatCompletionResponse {
+    fn from(result: DomainChatCompletionResult) -> Self {
+        Self {
+            id: result.id,
+            object: result.object,
+            created: result.created,
+            model: result.model,
+            choices: result.choices.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<DomainChatModelSource> for ChatModelSource {
+    fn from(source: DomainChatModelSource) -> Self {
+        match source {
+            DomainChatModelSource::Local => Self::Local,
+            DomainChatModelSource::Cloud => Self::Cloud,
+        }
+    }
+}
+
+impl From<DomainChatModelOption> for ChatModelOption {
+    fn from(option: DomainChatModelOption) -> Self {
+        Self {
+            id: option.id,
+            display_name: option.display_name,
+            source: option.source.into(),
+            provider_id: option.provider_id,
+            provider_name: option.provider_name,
+            backend_id: option.backend_id,
+            downloaded: option.downloaded,
+            pending: option.pending,
+        }
+    }
 }
 
 fn validate_chat_completion_request(

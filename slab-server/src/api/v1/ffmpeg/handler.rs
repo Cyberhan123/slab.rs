@@ -10,8 +10,6 @@ use crate::api::v1::ffmpeg::schema::ConvertRequest;
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
-use crate::domain::models::FfmpegConvertCommand;
-use crate::domain::services::to_operation_accepted_response;
 use crate::domain::services::FfmpegService;
 use crate::error::ServerError;
 
@@ -52,14 +50,7 @@ async fn convert(
     }
 
     let response = service
-        .convert(FfmpegConvertCommand {
-            source_path: req.source_path,
-            output_format: req.output_format,
-            output_path: req.output_path,
-        })
+        .convert(req.into())
         .await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(to_operation_accepted_response(response)),
-    ))
+    Ok((StatusCode::ACCEPTED, Json(response.into())))
 }
