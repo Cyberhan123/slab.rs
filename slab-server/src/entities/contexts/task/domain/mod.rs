@@ -134,10 +134,9 @@ mod tests {
     #[test]
     fn pending_to_failed_allowed() {
         let mut r = make_record("pending");
-        assert!(
-            r.transition_to(TaskStatus::Failed, None, Some("err".to_owned()))
-                .is_ok()
-        );
+        assert!(r
+            .transition_to(TaskStatus::Failed, None, Some("err".to_owned()))
+            .is_ok());
         assert_eq!(r.status, "failed");
     }
 
@@ -158,10 +157,9 @@ mod tests {
     #[test]
     fn running_to_succeeded_allowed() {
         let mut r = make_record("running");
-        assert!(
-            r.transition_to(TaskStatus::Succeeded, Some("result".to_owned()), None)
-                .is_ok()
-        );
+        assert!(r
+            .transition_to(TaskStatus::Succeeded, Some("result".to_owned()), None)
+            .is_ok());
         assert_eq!(r.status, "succeeded");
         assert_eq!(r.result_data.as_deref(), Some("result"));
     }
@@ -169,10 +167,9 @@ mod tests {
     #[test]
     fn running_to_failed_allowed() {
         let mut r = make_record("running");
-        assert!(
-            r.transition_to(TaskStatus::Failed, None, Some("err".to_owned()))
-                .is_ok()
-        );
+        assert!(r
+            .transition_to(TaskStatus::Failed, None, Some("err".to_owned()))
+            .is_ok());
         assert_eq!(r.status, "failed");
     }
 
@@ -198,7 +195,9 @@ mod tests {
     #[test]
     fn succeeded_to_running_denied() {
         let mut r = make_record("succeeded");
-        let err = r.transition_to(TaskStatus::Running, None, None).unwrap_err();
+        let err = r
+            .transition_to(TaskStatus::Running, None, None)
+            .unwrap_err();
         assert!(matches!(err, TaskDomainError::InvalidTransition { .. }));
     }
 
