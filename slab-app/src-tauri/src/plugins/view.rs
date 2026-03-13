@@ -1,15 +1,15 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use tauri::webview::{NewWindowResponse, WebviewBuilder};
 use tauri::utils::config::WebviewUrl;
+use tauri::webview::{NewWindowResponse, WebviewBuilder};
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, Runtime, State, Window};
 
 use super::protocol::{collect_navigation_allow_hosts, is_allowed_navigation, plugin_ui_url};
 use super::registry::PluginRegistryState;
 use super::types::{
-    PluginMountViewRequest, PluginMountViewResponse, PluginUnmountViewRequest, PluginUpdateViewBoundsRequest,
-    PluginViewBounds,
+    PluginMountViewRequest, PluginMountViewResponse, PluginUnmountViewRequest,
+    PluginUpdateViewBoundsRequest, PluginViewBounds,
 };
 
 #[derive(Default)]

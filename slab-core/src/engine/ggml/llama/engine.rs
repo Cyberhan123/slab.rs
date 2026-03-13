@@ -290,11 +290,9 @@ impl LlamaInferenceEngine {
             let (cmd_tx, cmd_rx) = mpsc::channel::<WorkerCommand>(128);
             worker_txs.push(cmd_tx);
 
-            let ctx = model.new_context(ctx_params.clone()).map_err(|source| {
-                GGMLLlamaEngineError::CreateContext {
-                    source,
-                }
-            })?;
+            let ctx = model
+                .new_context(ctx_params.clone())
+                .map_err(|source| GGMLLlamaEngineError::CreateContext { source })?;
 
             let worker_state =
                 InferenceWorkerState::new(worker_id, Arc::clone(&model), ctx, cmd_rx);

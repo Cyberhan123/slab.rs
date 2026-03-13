@@ -12,6 +12,7 @@ use tonic::transport::Channel;
 use tracing::{info, warn};
 use utoipa::OpenApi;
 
+use crate::contexts::model::application::load_model_use_case::{LoadModelUseCase, ModelLoadPort};
 use crate::entities::{ConfigStore, ModelCatalogRecord, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
@@ -629,6 +630,30 @@ pub async fn load_model(
     State(state): State<Arc<AppState>>,
     Json(req): Json<LoadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
+    let use_case = LoadModelUseCase::new(ModelRoutePort { state });
+    let result = use_case.execute(req).await?;
+    Ok(Json(result))
+}
+
+struct ModelRoutePort {
+    state: Arc<AppState>,
+}
+
+impl ModelLoadPort for ModelRoutePort {
+    fn load_model(
+        &self,
+        req: LoadModelRequest,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<ModelStatusResponse, ServerError>> + Send + '_>,
+    > {
+        Box::pin(load_model_with_state(Arc::clone(&self.state), req))
+    }
+}
+
+pub(crate) async fn load_model_with_state(
+    state: Arc<AppState>,
+    req: LoadModelRequest,
+) -> Result<ModelStatusResponse, ServerError> {
     let bid = &req.backend_id;
 
     validate_path("model_path", &req.model_path)?;
@@ -685,10 +710,10 @@ pub async fn load_model(
         )
         .await;
 
-    Ok(Json(ModelStatusResponse {
+    Ok(ModelStatusResponse {
         backend: response.backend,
         status: response.status,
-    }))
+    })
 }
 
 /// Unload the currently loaded model (`POST /v1/models/unload`).

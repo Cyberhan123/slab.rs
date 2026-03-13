@@ -100,7 +100,9 @@ fn parse_sample_method(s: &str) -> slab_diffusion::SampleMethod {
 
 /// Parse a scheduler string into the native enum value.
 fn parse_scheduler(s: &str) -> slab_diffusion::Scheduler {
-    use slab_diffusion::{SCHEDULER_COUNT, SCHEDULER_DISCRETE as SD_DISCRETE, SCHEDULER_KARRAS as SD_KARRAS};
+    use slab_diffusion::{
+        SCHEDULER_COUNT, SCHEDULER_DISCRETE as SD_DISCRETE, SCHEDULER_KARRAS as SD_KARRAS,
+    };
     use slab_diffusion_sys::{
         scheduler_t_AYS_SCHEDULER as SD_AYS, scheduler_t_EXPONENTIAL_SCHEDULER as SD_EXPONENTIAL,
         scheduler_t_GITS_SCHEDULER as SD_GITS,
@@ -157,17 +159,39 @@ struct GenImageParams {
     init_image_channels: u32,
 }
 
-fn default_width() -> u32 { 512 }
-fn default_height() -> u32 { 512 }
-fn default_steps() -> i32 { 20 }
-fn default_cfg_scale() -> f32 { 7.0 }
-fn default_guidance() -> f32 { 3.5 }
-fn default_seed() -> i64 { 42 }
-fn default_sample_method() -> String { "auto".to_string() }
-fn default_scheduler() -> String { "auto".to_string() }
-fn default_strength() -> f32 { 0.75 }
-fn default_batch_count() -> i32 { 1 }
-fn default_channels() -> u32 { 3 }
+fn default_width() -> u32 {
+    512
+}
+fn default_height() -> u32 {
+    512
+}
+fn default_steps() -> i32 {
+    20
+}
+fn default_cfg_scale() -> f32 {
+    7.0
+}
+fn default_guidance() -> f32 {
+    3.5
+}
+fn default_seed() -> i64 {
+    42
+}
+fn default_sample_method() -> String {
+    "auto".to_string()
+}
+fn default_scheduler() -> String {
+    "auto".to_string()
+}
+fn default_strength() -> f32 {
+    0.75
+}
+fn default_batch_count() -> i32 {
+    1
+}
+fn default_channels() -> u32 {
+    3
+}
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 

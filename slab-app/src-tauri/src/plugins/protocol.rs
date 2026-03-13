@@ -4,7 +4,9 @@ use std::fs;
 use tauri::http::{self, header, Method, StatusCode};
 use tauri::{AppHandle, Manager, Runtime};
 
-use super::registry::{is_path_within_root, normalize_relative_path, LoadedPlugin, PluginRegistryState};
+use super::registry::{
+    is_path_within_root, normalize_relative_path, LoadedPlugin, PluginRegistryState,
+};
 use super::types::{PluginNetworkManifest, PluginNetworkMode};
 
 pub fn register_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
@@ -117,7 +119,10 @@ pub fn handle_protocol_request<R: Runtime>(
 }
 
 pub fn plugin_ui_url(plugin: &LoadedPlugin) -> String {
-    format!("slab-plugin://localhost/{}/{}", plugin.manifest.id, plugin.ui_entry)
+    format!(
+        "slab-plugin://localhost/{}/{}",
+        plugin.manifest.id, plugin.ui_entry
+    )
 }
 
 pub fn collect_navigation_allow_hosts(network: &PluginNetworkManifest) -> HashSet<String> {

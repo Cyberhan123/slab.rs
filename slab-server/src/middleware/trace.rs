@@ -53,8 +53,7 @@ pub async fn trace_middleware(
         // which are always valid HTTP header value bytes.
         let trace_id_value = HeaderValue::from_str(&trace_id.to_string())
             .expect("UUID is always a valid HTTP header value");
-        req.headers_mut()
-            .insert(X_TRACE_ID, trace_id_value.clone());
+        req.headers_mut().insert(X_TRACE_ID, trace_id_value.clone());
 
         let response = next.run(req).await;
 
@@ -80,9 +79,7 @@ pub async fn trace_middleware(
 
         let latency = start_time.elapsed();
 
-        response
-            .headers_mut()
-            .insert(X_TRACE_ID, trace_id_value);
+        response.headers_mut().insert(X_TRACE_ID, trace_id_value);
 
         info!(
             status = response.status().as_u16(),
