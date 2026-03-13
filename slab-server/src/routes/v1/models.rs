@@ -22,7 +22,9 @@ use crate::schemas::v1::models::{
     LoadModelRequest, ModelCatalogItemResponse, ModelListStatus, ModelStatusResponse,
     SwitchModelRequest, UpdateModelRequest,
 };
-use crate::state::AppState;
+use crate::state::ModelContext;
+
+use super::V1State;
 use hf_hub::api::sync::{Api, ApiBuilder};
 use slab_core::api::Backend;
 
@@ -75,7 +77,7 @@ const DIFFUSION_KEEP_CLIP_ON_CPU_CONFIG_KEY: &str = "diffusion_keep_clip_on_cpu"
 const DIFFUSION_OFFLOAD_PARAMS_CONFIG_KEY: &str = "diffusion_offload_params_to_cpu";
 
 /// Register model-management routes.
-pub fn router() -> Router<Arc<AppState>> {
+pub fn router() -> Router<Arc<V1State>> {
     Router::new()
         .route("/models", get(list_models).post(create_model))
         .route("/models/{id}", put(update_model).delete(delete_model))
@@ -201,13 +203,13 @@ fn to_model_catalog_item_response(
 }
 
 fn resolve_backend_channel(
-    state: &AppState,
+    context: &ModelContext,
     backend_id: &str,
 ) -> Result<(String, Channel), ServerError> {
     let backend = Backend::from_str(backend_id)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
     let canonical_backend = backend.to_string();
-    let channel = state
+    let channel = context
         .grpc
         .backend_channel(&canonical_backend)
         .ok_or_else(|| {
@@ -272,7 +274,7 @@ fn detect_whisper_vad_model(
 }
 
 async fn resolve_model_workers(
-    state: &AppState,
+    context: &ModelContext,
     canonical_backend: &str,
     requested_workers: Option<u32>,
 ) -> Result<(u32, &'static str), ServerError> {
@@ -289,7 +291,7 @@ async fn resolve_model_workers(
         return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
     };
 
-    let configured = state.store.get_config_value(config_key).await?;
+    let configured = context.store.get_config_value(config_key).await?;
     let Some(raw) = configured else {
         return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
     };
@@ -303,14 +305,14 @@ async fn resolve_model_workers(
 }
 
 async fn resolve_llama_context_length(
-    state: &AppState,
+    context: &ModelContext,
     canonical_backend: &str,
 ) -> Result<(u32, &'static str), ServerError> {
     if canonical_backend != "ggml.llama" {
         return Ok((0, "not_applicable"));
     }
 
-    let configured = state
+    let configured = context
         .store
         .get_config_value(LLAMA_CONTEXT_LENGTH_CONFIG_KEY)
         .await?;
@@ -365,34 +367,42 @@ impl Default for DiffusionContextParams {
 /// Returns `None` for non-diffusion backends.  All fields default to empty
 /// string / `false` when the corresponding config key is not set.
 async fn resolve_diffusion_context_params(
-    state: &AppState,
+    context: &ModelContext,
     canonical_backend: &str,
 ) -> Result<Option<DiffusionContextParams>, ServerError> {
     if canonical_backend != "ggml.diffusion" {
         return Ok(None);
     }
 
-    async fn get_str(state: &AppState, key: &str) -> Result<String, ServerError> {
-        Ok(state.store.get_config_value(key).await?.unwrap_or_default())
+    async fn get_str(context: &ModelContext, key: &str) -> Result<String, ServerError> {
+        Ok(context
+            .store
+            .get_config_value(key)
+            .await?
+            .unwrap_or_default())
     }
 
-    async fn get_bool(state: &AppState, key: &str) -> Result<bool, ServerError> {
-        let raw = state.store.get_config_value(key).await?.unwrap_or_default();
+    async fn get_bool(context: &ModelContext, key: &str) -> Result<bool, ServerError> {
+        let raw = context
+            .store
+            .get_config_value(key)
+            .await?
+            .unwrap_or_default();
         Ok(["1", "true", "yes"].contains(&raw.trim().to_lowercase().as_str()))
     }
 
     Ok(Some(DiffusionContextParams {
-        diffusion_model_path: get_str(state, DIFFUSION_MODEL_PATH_CONFIG_KEY).await?,
-        vae_path: get_str(state, DIFFUSION_VAE_PATH_CONFIG_KEY).await?,
-        taesd_path: get_str(state, DIFFUSION_TAESD_PATH_CONFIG_KEY).await?,
-        lora_model_dir: get_str(state, DIFFUSION_LORA_MODEL_DIR_CONFIG_KEY).await?,
-        clip_l_path: get_str(state, DIFFUSION_CLIP_L_PATH_CONFIG_KEY).await?,
-        clip_g_path: get_str(state, DIFFUSION_CLIP_G_PATH_CONFIG_KEY).await?,
-        t5xxl_path: get_str(state, DIFFUSION_T5XXL_PATH_CONFIG_KEY).await?,
-        flash_attn: get_bool(state, DIFFUSION_FLASH_ATTN_CONFIG_KEY).await?,
-        keep_vae_on_cpu: get_bool(state, DIFFUSION_KEEP_VAE_ON_CPU_CONFIG_KEY).await?,
-        keep_clip_on_cpu: get_bool(state, DIFFUSION_KEEP_CLIP_ON_CPU_CONFIG_KEY).await?,
-        offload_params_to_cpu: get_bool(state, DIFFUSION_OFFLOAD_PARAMS_CONFIG_KEY).await?,
+        diffusion_model_path: get_str(context, DIFFUSION_MODEL_PATH_CONFIG_KEY).await?,
+        vae_path: get_str(context, DIFFUSION_VAE_PATH_CONFIG_KEY).await?,
+        taesd_path: get_str(context, DIFFUSION_TAESD_PATH_CONFIG_KEY).await?,
+        lora_model_dir: get_str(context, DIFFUSION_LORA_MODEL_DIR_CONFIG_KEY).await?,
+        clip_l_path: get_str(context, DIFFUSION_CLIP_L_PATH_CONFIG_KEY).await?,
+        clip_g_path: get_str(context, DIFFUSION_CLIP_G_PATH_CONFIG_KEY).await?,
+        t5xxl_path: get_str(context, DIFFUSION_T5XXL_PATH_CONFIG_KEY).await?,
+        flash_attn: get_bool(context, DIFFUSION_FLASH_ATTN_CONFIG_KEY).await?,
+        keep_vae_on_cpu: get_bool(context, DIFFUSION_KEEP_VAE_ON_CPU_CONFIG_KEY).await?,
+        keep_clip_on_cpu: get_bool(context, DIFFUSION_KEEP_CLIP_ON_CPU_CONFIG_KEY).await?,
+        offload_params_to_cpu: get_bool(context, DIFFUSION_OFFLOAD_PARAMS_CONFIG_KEY).await?,
     }))
 }
 
@@ -425,10 +435,10 @@ fn map_grpc_model_error(action: &str, err: anyhow::Error) -> ServerError {
 }
 
 async fn latest_pending_download_task_for_model(
-    state: &AppState,
+    context: &ModelContext,
     model_id: &str,
 ) -> Result<Option<TaskRecord>, ServerError> {
-    let tasks = state.store.list_tasks(Some("model_download")).await?;
+    let tasks = context.store.list_tasks(Some("model_download")).await?;
     Ok(tasks
         .into_iter()
         .filter(|task| {
@@ -450,7 +460,7 @@ async fn latest_pending_download_task_for_model(
     )
 )]
 pub async fn create_model(
-    State(state): State<Arc<AppState>>,
+    State(context): State<Arc<ModelContext>>,
     Json(req): Json<CreateModelRequest>,
 ) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
     validate_catalog_fields(&req.display_name, &req.repo_id, &req.filename)?;
@@ -470,7 +480,7 @@ pub async fn create_model(
         updated_at: now,
     };
 
-    state.store.insert_model(record.clone()).await?;
+    context.store.insert_model(record.clone()).await?;
     Ok(Json(to_model_catalog_item_response(record, None)))
 }
 
@@ -490,11 +500,11 @@ pub async fn create_model(
     )
 )]
 pub async fn update_model(
-    State(state): State<Arc<AppState>>,
+    State(context): State<Arc<ModelContext>>,
     Path(id): Path<String>,
     Json(req): Json<UpdateModelRequest>,
 ) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
-    let existing = state
+    let existing = context
         .store
         .get_model(&id)
         .await?
@@ -515,17 +525,17 @@ pub async fn update_model(
 
     validate_catalog_fields(&display_name, &repo_id, &filename)?;
 
-    state
+    context
         .store
         .update_model_metadata(&id, &display_name, &repo_id, &filename, &backend_ids)
         .await?;
 
-    let updated = state
+    let updated = context
         .store
         .get_model(&id)
         .await?
         .ok_or_else(|| ServerError::NotFound(format!("model {id} not found after update")))?;
-    let pending_task = latest_pending_download_task_for_model(&state, &id).await?;
+    let pending_task = latest_pending_download_task_for_model(&context, &id).await?;
 
     Ok(Json(to_model_catalog_item_response(
         updated,
@@ -547,15 +557,15 @@ pub async fn update_model(
     )
 )]
 pub async fn delete_model(
-    State(state): State<Arc<AppState>>,
+    State(context): State<Arc<ModelContext>>,
     Path(id): Path<String>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
-    let exists = state.store.get_model(&id).await?;
+    let exists = context.store.get_model(&id).await?;
     if exists.is_none() {
         return Err(ServerError::NotFound(format!("model {id} not found")));
     }
 
-    state.store.delete_model(&id).await?;
+    context.store.delete_model(&id).await?;
     Ok(Json(serde_json::json!({ "id": id, "status": "deleted" })))
 }
 
@@ -571,11 +581,11 @@ pub async fn delete_model(
     )
 )]
 pub async fn list_models(
-    State(state): State<Arc<AppState>>,
+    State(context): State<Arc<ModelContext>>,
     axum::extract::Query(q): axum::extract::Query<ListModelsQuery>,
 ) -> Result<Json<Vec<ModelCatalogItemResponse>>, ServerError> {
-    let models = state.store.list_models().await?;
-    let download_tasks = state.store.list_tasks(Some("model_download")).await?;
+    let models = context.store.list_models().await?;
+    let download_tasks = context.store.list_tasks(Some("model_download")).await?;
 
     // Keep the most recent pending/running model download task per model_id.
     let mut pending_by_model: HashMap<String, TaskRecord> = HashMap::new();
@@ -627,16 +637,16 @@ pub async fn list_models(
     )
 )]
 pub async fn load_model(
-    State(state): State<Arc<AppState>>,
+    State(context): State<Arc<ModelContext>>,
     Json(req): Json<LoadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
-    let use_case = LoadModelUseCase::new(ModelRoutePort { state });
+    let use_case = LoadModelUseCase::new(ModelRoutePort { context });
     let result = use_case.execute(req).await?;
     Ok(Json(result))
 }
 
 struct ModelRoutePort {
-    state: Arc<AppState>,
+    context: Arc<ModelContext>,
 }
 
 impl ModelLoadPort for ModelRoutePort {
@@ -646,12 +656,12 @@ impl ModelLoadPort for ModelRoutePort {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<ModelStatusResponse, ServerError>> + Send + '_>,
     > {
-        Box::pin(load_model_with_state(Arc::clone(&self.state), req))
+        Box::pin(load_model_with_state(Arc::clone(&self.context), req))
     }
 }
 
 pub(crate) async fn load_model_with_state(
-    state: Arc<AppState>,
+    context: Arc<ModelContext>,
     req: LoadModelRequest,
 ) -> Result<ModelStatusResponse, ServerError> {
     let bid = &req.backend_id;
@@ -659,11 +669,11 @@ pub(crate) async fn load_model_with_state(
     validate_path("model_path", &req.model_path)?;
     validate_existing_model_file(&req.model_path)?;
 
-    let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
+    let (canonical_backend, channel) = resolve_backend_channel(&context, bid)?;
     let (num_workers, worker_source) =
-        resolve_model_workers(&state, &canonical_backend, req.num_workers).await?;
+        resolve_model_workers(&context, &canonical_backend, req.num_workers).await?;
     let (context_length, context_source) =
-        resolve_llama_context_length(&state, &canonical_backend).await?;
+        resolve_llama_context_length(&context, &canonical_backend).await?;
 
     info!(
         backend = %bid,
@@ -675,7 +685,7 @@ pub(crate) async fn load_model_with_state(
         "loading model"
     );
 
-    let diffusion_ctx = resolve_diffusion_context_params(&state, &canonical_backend)
+    let diffusion_ctx = resolve_diffusion_context_params(&context, &canonical_backend)
         .await?
         .unwrap_or_default();
 
@@ -698,7 +708,7 @@ pub(crate) async fn load_model_with_state(
     let response = grpc::client::load_model(channel, &canonical_backend, grpc_req)
         .await
         .map_err(|e| map_grpc_model_error("load_model", e))?;
-    state
+    context
         .model_auto_unload
         .notify_model_loaded(
             &canonical_backend,
@@ -729,19 +739,19 @@ pub(crate) async fn load_model_with_state(
     )
 )]
 pub async fn unload_model(
-    State(state): State<Arc<AppState>>,
+    State(context): State<Arc<ModelContext>>,
     Json(req): Json<LoadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     let bid = &req.backend_id;
 
     info!(backend = %bid, "unloading model");
 
-    let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
+    let (canonical_backend, channel) = resolve_backend_channel(&context, bid)?;
     let response =
         grpc::client::unload_model(channel, &canonical_backend, grpc::pb::ModelUnloadRequest {})
             .await
             .map_err(|e| ServerError::Internal(format!("grpc unload_model failed: {e}")))?;
-    state
+    context
         .model_auto_unload
         .notify_model_unloaded(&canonical_backend)
         .await;
@@ -765,7 +775,7 @@ pub async fn unload_model(
         )
     )]
 pub async fn list_available_models(
-    State(_state): State<Arc<AppState>>,
+    State(_context): State<Arc<ModelContext>>,
     axum::extract::Query(q): axum::extract::Query<ListAvailableQuery>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     if q.repo_id.is_empty() {
@@ -806,18 +816,18 @@ pub async fn list_available_models(
     )
 )]
 pub async fn switch_model(
-    State(state): State<Arc<AppState>>,
+    State(context): State<Arc<ModelContext>>,
     Json(req): Json<SwitchModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     let bid = &req.backend_id;
     validate_path("model_path", &req.model_path)?;
     validate_existing_model_file(&req.model_path)?;
 
-    let (canonical_backend, channel) = resolve_backend_channel(&state, bid)?;
+    let (canonical_backend, channel) = resolve_backend_channel(&context, bid)?;
     let (num_workers, worker_source) =
-        resolve_model_workers(&state, &canonical_backend, req.num_workers).await?;
+        resolve_model_workers(&context, &canonical_backend, req.num_workers).await?;
     let (context_length, context_source) =
-        resolve_llama_context_length(&state, &canonical_backend).await?;
+        resolve_llama_context_length(&context, &canonical_backend).await?;
 
     info!(
         backend = %bid,
@@ -829,7 +839,7 @@ pub async fn switch_model(
         "switching model"
     );
 
-    let switch_diffusion_ctx = resolve_diffusion_context_params(&state, &canonical_backend)
+    let switch_diffusion_ctx = resolve_diffusion_context_params(&context, &canonical_backend)
         .await?
         .unwrap_or_default();
 
@@ -855,7 +865,7 @@ pub async fn switch_model(
     )
     .await
     .map_err(|e| map_grpc_model_error("switch_model", e))?;
-    state
+    context
         .model_auto_unload
         .notify_model_loaded(
             &canonical_backend,
@@ -887,7 +897,7 @@ pub async fn switch_model(
     )
 )]
 pub async fn download_model(
-    State(state): State<Arc<AppState>>,
+    State(context): State<Arc<ModelContext>>,
     Json(req): Json<DownloadModelRequest>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
     let model_id = req.model_id.trim();
@@ -902,7 +912,7 @@ pub async fn download_model(
         ));
     }
 
-    let configured_model_cache_dir = state
+    let configured_model_cache_dir = context
         .store
         .get_config_value(MODEL_CACHE_DIR_CONFIG_KEY)
         .await?
@@ -919,7 +929,7 @@ pub async fn download_model(
         .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {backend_id}")))?;
     let canonical_backend_id = backend.to_string();
 
-    let model = state
+    let model = context
         .store
         .get_model(model_id)
         .await?
@@ -942,7 +952,7 @@ pub async fn download_model(
     })
     .to_string();
 
-    state
+    context
         .store
         .insert_task(TaskRecord {
             id: task_id.clone(),
@@ -958,8 +968,8 @@ pub async fn download_model(
         })
         .await?;
 
-    let store = Arc::clone(&state.store);
-    let task_manager = Arc::clone(&state.task_manager);
+    let store = Arc::clone(&context.store);
+    let task_manager = Arc::clone(&context.task_manager);
     let tid = task_id.clone();
 
     let join = tokio::spawn(async move {
@@ -1072,7 +1082,7 @@ pub async fn download_model(
         task_manager.remove(&tid);
     });
 
-    state
+    context
         .task_manager
         .insert(task_id.clone(), join.abort_handle());
     info!(

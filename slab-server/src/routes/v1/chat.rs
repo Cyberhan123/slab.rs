@@ -35,7 +35,9 @@ use crate::schemas::v1::chat::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
     ChatModelOption, ChatModelSource,
 };
-use crate::state::AppState;
+use crate::state::ChatContext;
+
+use super::V1State;
 
 /// Maximum allowed prompt length in bytes.
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
@@ -58,7 +60,7 @@ const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
 pub struct ChatApi;
 
 /// Register chat routes.
-pub fn router() -> Router<Arc<AppState>> {
+pub fn router() -> Router<Arc<V1State>> {
     Router::new()
         .route("/chat/completions", post(chat_completions))
         .route("/chat/models", get(list_chat_models))
@@ -214,9 +216,9 @@ fn canonicalize_cloud_provider(
 }
 
 async fn load_cloud_providers_strict(
-    state: &AppState,
+    context: &ChatContext,
 ) -> Result<Vec<CloudProviderConfig>, ServerError> {
-    let raw = state
+    let raw = context
         .store
         .get_config_value(CHAT_MODEL_PROVIDERS_CONFIG_KEY)
         .await?;
@@ -256,8 +258,8 @@ async fn load_cloud_providers_strict(
     Ok(out)
 }
 
-async fn load_cloud_providers_lenient(state: &AppState) -> Vec<CloudProviderConfig> {
-    match load_cloud_providers_strict(state).await {
+async fn load_cloud_providers_lenient(context: &ChatContext) -> Vec<CloudProviderConfig> {
+    match load_cloud_providers_strict(context).await {
         Ok(v) => v,
         Err(err) => {
             warn!(
@@ -300,10 +302,10 @@ fn resolve_provider_api_key(provider: &CloudProviderConfig) -> Result<String, Se
 }
 
 async fn resolve_cloud_model(
-    state: &AppState,
+    context: &ChatContext,
     requested_model: &str,
 ) -> Result<ResolvedCloudModel, ServerError> {
-    let providers = load_cloud_providers_strict(state).await?;
+    let providers = load_cloud_providers_strict(context).await?;
 
     for provider in providers {
         for model in &provider.models {
@@ -363,10 +365,10 @@ fn pending_download_map(tasks: Vec<TaskRecord>) -> HashMap<String, TaskRecord> {
     )
 )]
 pub async fn list_chat_models(
-    State(state): State<Arc<AppState>>,
+    State(context): State<Arc<ChatContext>>,
 ) -> Result<Json<Vec<ChatModelOption>>, ServerError> {
-    let local_models = state.store.list_models().await?;
-    let download_tasks = state.store.list_tasks(Some("model_download")).await?;
+    let local_models = context.store.list_models().await?;
+    let download_tasks = context.store.list_tasks(Some("model_download")).await?;
     let pending_by_model = pending_download_map(download_tasks);
 
     let mut items: Vec<ChatModelOption> = local_models
@@ -385,7 +387,7 @@ pub async fn list_chat_models(
         .collect();
 
     let mut cloud_items = Vec::new();
-    for provider in load_cloud_providers_lenient(&state).await {
+    for provider in load_cloud_providers_lenient(&context).await {
         for model in provider.models {
             cloud_items.push(ChatModelOption {
                 id: cloud_option_id(&provider.id, &model.id),
@@ -561,10 +563,10 @@ async fn cloud_chat_stream(
     )
 )]
 pub async fn chat_completions(
-    State(state): State<Arc<AppState>>,
+    State(context): State<Arc<ChatContext>>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
-    let use_case = CreateChatCompletionUseCase::new(ChatRoutePort { state });
+    let use_case = CreateChatCompletionUseCase::new(ChatRoutePort { context });
     match use_case.execute(req).await? {
         ChatCompletionOutput::Json(resp) => Ok(Json(resp).into_response()),
         ChatCompletionOutput::Stream(stream) => {
@@ -580,7 +582,7 @@ pub async fn chat_completions(
 }
 
 struct ChatRoutePort {
-    state: Arc<AppState>,
+    context: Arc<ChatContext>,
 }
 
 impl ChatCompletionPort for ChatRoutePort {
@@ -593,14 +595,14 @@ impl ChatCompletionPort for ChatRoutePort {
         >,
     > {
         Box::pin(create_chat_completion_with_state(
-            Arc::clone(&self.state),
+            Arc::clone(&self.context),
             req,
         ))
     }
 }
 
 pub(crate) async fn create_chat_completion_with_state(
-    state: Arc<AppState>,
+    context: Arc<ChatContext>,
     req: ChatCompletionRequest,
 ) -> Result<ChatCompletionOutput, ServerError> {
     let user_content = req
@@ -641,10 +643,10 @@ pub(crate) async fn create_chat_completion_with_state(
         "chat completion request"
     );
 
-    let resolved_messages = build_messages(&state, req.id.as_deref(), &req.messages).await?;
+    let resolved_messages = build_messages(&context, req.id.as_deref(), &req.messages).await?;
 
     if let Some(sid) = req.id.as_deref() {
-        state
+        context
             .store
             .append_message(ChatMessage {
                 id: Uuid::new_v4().to_string(),
@@ -658,7 +660,7 @@ pub(crate) async fn create_chat_completion_with_state(
     }
 
     let generated = if is_cloud_model_option_id(&req.model) {
-        let target = resolve_cloud_model(&state, &req.model).await?;
+        let target = resolve_cloud_model(&context, &req.model).await?;
         if req.stream {
             let backend_stream =
                 cloud_chat_stream(&target, &resolved_messages, max_tokens, temperature).await?;
@@ -700,12 +702,12 @@ pub(crate) async fn create_chat_completion_with_state(
             session_key: req.id.clone().unwrap_or_default(),
         };
 
-        let llama_channel = state.grpc.chat_channel().ok_or_else(|| {
+        let llama_channel = context.grpc.chat_channel().ok_or_else(|| {
             ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
         })?;
 
         if req.stream {
-            let usage_guard = state
+            let usage_guard = context
                 .model_auto_unload
                 .acquire_for_inference(LLAMA_BACKEND_ID)
                 .await
@@ -746,7 +748,7 @@ pub(crate) async fn create_chat_completion_with_state(
             return Ok(ChatCompletionOutput::Stream(Box::pin(sse_stream)));
         }
 
-        let _usage_guard = state
+        let _usage_guard = context
             .model_auto_unload
             .acquire_for_inference(LLAMA_BACKEND_ID)
             .await
@@ -764,7 +766,7 @@ pub(crate) async fn create_chat_completion_with_state(
     );
 
     if let Some(sid) = req.id.as_deref() {
-        state
+        context
             .store
             .append_message(ChatMessage {
                 id: Uuid::new_v4().to_string(),
@@ -797,7 +799,7 @@ pub(crate) async fn create_chat_completion_with_state(
 
 /// Merge history from DB and current request messages while avoiding duplicates.
 async fn build_messages(
-    state: &AppState,
+    context: &ChatContext,
     session_id: Option<&str>,
     current_messages: &[OpenAiMessage],
 ) -> Result<Vec<OpenAiMessage>, ServerError> {
@@ -812,7 +814,7 @@ async fn build_messages(
     // Avoid duplicating turns: if client already sends history, do not merge DB history again.
     if !client_sent_history {
         if let Some(sid) = session_id {
-            let history = state.store.list_messages(sid).await?;
+            let history = context.store.list_messages(sid).await?;
             for msg in history {
                 if msg.content.trim().is_empty() {
                     continue;
