@@ -48,9 +48,7 @@ pub enum WhisperError {
     },
     /// A null byte was detected in a user-provided string.
     #[error("A null byte was detected in a user-provided string. Index: {idx}")]
-    NullByteInString {
-        idx: usize,
-    },
+    NullByteInString { idx: usize },
     /// Whisper returned a null pointer.
     #[error("Whisper returned a null pointer.")]
     NullPointer,
@@ -68,10 +66,7 @@ pub enum WhisperError {
     NoSamples,
     /// Input and output slices were not the same length.
     #[error("Input and output slices were not the same length. Input: {input_len}, Output: {output_len}")]
-    InputOutputLengthMismatch {
-        input_len: usize,
-        output_len: usize,
-    },
+    InputOutputLengthMismatch { input_len: usize, output_len: usize },
     /// Input slice was not an even number of samples.
     #[error("Input slice was not an even number of samples: got {0} (must be an even number)")]
     HalfSampleMissing(usize),

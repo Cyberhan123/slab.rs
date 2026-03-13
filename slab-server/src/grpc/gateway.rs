@@ -167,8 +167,8 @@ fn parse_grpc_endpoint(raw: &str) -> anyhow::Result<GrpcEndpoint> {
 }
 
 async fn connect_http_channel(url: &str) -> anyhow::Result<Channel> {
-    let transport =
-        Endpoint::from_shared(url.to_owned()).with_context(|| format!("invalid gRPC URL: {url}"))?;
+    let transport = Endpoint::from_shared(url.to_owned())
+        .with_context(|| format!("invalid gRPC URL: {url}"))?;
     let channel = transport
         .connect()
         .await

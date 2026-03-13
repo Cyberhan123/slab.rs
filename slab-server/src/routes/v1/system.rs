@@ -15,10 +15,7 @@ use crate::state::AppState;
 #[derive(OpenApi)]
 #[openapi(
     paths(gpu_status),
-    components(schemas(
-        GpuStatusResponse,
-        GpuDeviceStatus
-    ))
+    components(schemas(GpuStatusResponse, GpuDeviceStatus))
 )]
 pub struct SystemApi;
 

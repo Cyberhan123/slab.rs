@@ -8,7 +8,8 @@ use tauri::{AppHandle, Manager, Runtime, State, Window};
 
 pub use types::{
     PluginApiRequest, PluginApiResponse, PluginCallRequest, PluginCallResponse, PluginInfo,
-    PluginMountViewRequest, PluginMountViewResponse, PluginUnmountViewRequest, PluginUpdateViewBoundsRequest,
+    PluginMountViewRequest, PluginMountViewResponse, PluginUnmountViewRequest,
+    PluginUpdateViewBoundsRequest,
 };
 pub use view::PluginViewManager;
 

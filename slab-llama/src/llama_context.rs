@@ -162,7 +162,11 @@ impl LlamaContext {
         if mem.is_null() {
             return;
         }
-        unsafe { self.model.lib.llama_memory_seq_add(mem, seq_id, p0, p1, delta) };
+        unsafe {
+            self.model
+                .lib
+                .llama_memory_seq_add(mem, seq_id, p0, p1, delta)
+        };
     }
 
     /// Returns whether the KV cache implementation supports position shifting.

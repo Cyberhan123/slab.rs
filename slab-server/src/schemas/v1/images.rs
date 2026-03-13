@@ -83,7 +83,15 @@ pub struct ImageGenerationRequest {
     pub mode: ImageMode,
 }
 
-fn default_n() -> u32 { 1 }
-fn default_width() -> u32 { 512 }
-fn default_height() -> u32 { 512 }
-fn default_cfg_scale() -> Option<f32> { None }
+fn default_n() -> u32 {
+    1
+}
+fn default_width() -> u32 {
+    512
+}
+fn default_height() -> u32 {
+    512
+}
+fn default_cfg_scale() -> Option<f32> {
+    None
+}

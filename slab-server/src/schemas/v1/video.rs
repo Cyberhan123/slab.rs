@@ -63,7 +63,15 @@ pub struct VideoGenerationRequest {
     pub strength: Option<f32>,
 }
 
-fn default_width() -> u32 { 512 }
-fn default_height() -> u32 { 512 }
-fn default_frames() -> i32 { 16 }
-fn default_fps() -> f32 { 8.0 }
+fn default_width() -> u32 {
+    512
+}
+fn default_height() -> u32 {
+    512
+}
+fn default_frames() -> i32 {
+    16
+}
+fn default_fps() -> f32 {
+    8.0
+}

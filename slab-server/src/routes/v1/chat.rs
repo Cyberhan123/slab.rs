@@ -17,12 +17,17 @@ use genai::chat::{
     ChatRequest as GenaiChatRequest, ChatStreamEvent as GenaiChatStreamEvent,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
-use genai::{Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget};
+use genai::{
+    Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget,
+};
 use serde::Deserialize;
 use tracing::{debug, info, warn};
 use utoipa::OpenApi;
 use uuid::Uuid;
 
+use crate::contexts::chat::application::create_chat_completion_use_case::{
+    ChatCompletionOutput, ChatCompletionPort, ChatStreamChunk, CreateChatCompletionUseCase,
+};
 use crate::entities::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
@@ -187,9 +192,8 @@ fn canonicalize_cloud_provider(
     let mut model_ids = std::collections::HashSet::new();
     for model in &mut provider.models {
         model.id = model.id.trim().to_owned();
-        model.display_name = Some(
-            trim_to_option(model.display_name.take()).unwrap_or_else(|| model.id.clone()),
-        );
+        model.display_name =
+            Some(trim_to_option(model.display_name.take()).unwrap_or_else(|| model.id.clone()));
         model.remote_model = trim_to_option(model.remote_model.take());
 
         if model.id.is_empty() {
@@ -209,7 +213,9 @@ fn canonicalize_cloud_provider(
     Ok(provider)
 }
 
-async fn load_cloud_providers_strict(state: &AppState) -> Result<Vec<CloudProviderConfig>, ServerError> {
+async fn load_cloud_providers_strict(
+    state: &AppState,
+) -> Result<Vec<CloudProviderConfig>, ServerError> {
     let raw = state
         .store
         .get_config_value(CHAT_MODEL_PROVIDERS_CONFIG_KEY)
@@ -383,9 +389,7 @@ pub async fn list_chat_models(
         for model in provider.models {
             cloud_items.push(ChatModelOption {
                 id: cloud_option_id(&provider.id, &model.id),
-                display_name: model
-                    .display_name
-                    .unwrap_or_else(|| model.id.clone()),
+                display_name: model.display_name.unwrap_or_else(|| model.id.clone()),
                 source: ChatModelSource::Cloud,
                 provider_id: Some(provider.id.clone()),
                 provider_name: Some(provider.name.clone()),
@@ -484,10 +488,9 @@ async fn cloud_chat_completion(
         .await
         .map_err(|e| map_genai_error("chat", e))?;
 
-    response
-        .first_text()
-        .map(str::to_owned)
-        .ok_or_else(|| ServerError::Internal("cloud response has empty assistant content".to_owned()))
+    response.first_text().map(str::to_owned).ok_or_else(|| {
+        ServerError::Internal("cloud response has empty assistant content".to_owned())
+    })
 }
 
 async fn cloud_chat_stream(
@@ -549,7 +552,10 @@ async fn cloud_chat_stream(
     tag = "chat",
     request_body = ChatCompletionRequest,
     responses(
-        (status = 200, description = "Completion generated", body = ChatCompletionResponse),
+        (status = 200, description = "Completion generated", content(
+            ("application/json" = ChatCompletionResponse),
+            ("text/event-stream" = String),
+        )),
         (status = 400, description = "Bad request"),
         (status = 500, description = "Backend error"),
     )
@@ -558,6 +564,45 @@ pub async fn chat_completions(
     State(state): State<Arc<AppState>>,
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
+    let use_case = CreateChatCompletionUseCase::new(ChatRoutePort { state });
+    match use_case.execute(req).await? {
+        ChatCompletionOutput::Json(resp) => Ok(Json(resp).into_response()),
+        ChatCompletionOutput::Stream(stream) => {
+            let event_stream = stream.map(|chunk| -> Result<Event, Infallible> {
+                match chunk {
+                    ChatStreamChunk::Data(data) => Ok(Event::default().data(data)),
+                    ChatStreamChunk::Comment(comment) => Ok(Event::default().comment(comment)),
+                }
+            });
+            Ok(Sse::new(event_stream).into_response())
+        }
+    }
+}
+
+struct ChatRoutePort {
+    state: Arc<AppState>,
+}
+
+impl ChatCompletionPort for ChatRoutePort {
+    fn create_chat_completion(
+        &self,
+        req: ChatCompletionRequest,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<ChatCompletionOutput, ServerError>> + Send + '_,
+        >,
+    > {
+        Box::pin(create_chat_completion_with_state(
+            Arc::clone(&self.state),
+            req,
+        ))
+    }
+}
+
+pub(crate) async fn create_chat_completion_with_state(
+    state: Arc<AppState>,
+    req: ChatCompletionRequest,
+) -> Result<ChatCompletionOutput, ServerError> {
     let user_content = req
         .messages
         .iter()
@@ -622,29 +667,26 @@ pub async fn chat_completions(
             let created_ts = Utc::now().timestamp();
             let model_name = req.model.clone();
 
-            let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
+            let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
                 match chunk {
-                    Ok(CloudDelta::Content(token)) => Ok(
-                        Event::default()
-                            .data(build_chunk(&completion_id, created_ts, &model_name, &token)),
+                    Ok(CloudDelta::Content(token)) => ChatStreamChunk::Data(build_chunk(
+                        &completion_id,
+                        created_ts,
+                        &model_name,
+                        &token,
+                    )),
+                    Ok(CloudDelta::Reasoning(token)) => ChatStreamChunk::Data(
+                        build_reasoning_chunk(&completion_id, created_ts, &model_name, &token),
                     ),
-                    Ok(CloudDelta::Reasoning(token)) => Ok(
-                        Event::default().data(build_reasoning_chunk(
-                            &completion_id,
-                            created_ts,
-                            &model_name,
-                            &token,
-                        )),
-                    ),
-                    Err(e) => Ok(Event::default().comment(e.to_string())),
+                    Err(e) => ChatStreamChunk::Comment(e.to_string()),
                 }
             });
 
             let sse_stream = token_stream.chain(stream::once(async {
-                Ok::<Event, Infallible>(Event::default().data("[DONE]"))
+                ChatStreamChunk::Data("[DONE]".into())
             }));
 
-            return Ok(Sse::new(sse_stream).into_response());
+            return Ok(ChatCompletionOutput::Stream(Box::pin(sse_stream)));
         }
 
         cloud_chat_completion(&target, &resolved_messages, max_tokens, temperature).await?
@@ -679,21 +721,21 @@ pub async fn chat_completions(
             let created_ts = Utc::now().timestamp();
             let model_name = req.model.clone();
 
-            let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
+            let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
                 match chunk {
-                    Ok(msg) if !msg.error.is_empty() => Ok(Event::default().comment(msg.error)),
-                    Ok(msg) if msg.done => Ok(Event::default().comment("done")),
+                    Ok(msg) if !msg.error.is_empty() => ChatStreamChunk::Comment(msg.error),
+                    Ok(msg) if msg.done => ChatStreamChunk::Comment("done".into()),
                     Ok(msg) => {
                         let data = build_chunk(&completion_id, created_ts, &model_name, &msg.token);
-                        Ok(Event::default().data(data))
+                        ChatStreamChunk::Data(data)
                     }
-                    Err(e) => Ok(Event::default().comment(e.to_string())),
+                    Err(e) => ChatStreamChunk::Comment(e.to_string()),
                 }
             });
 
             let sse_stream = token_stream
                 .chain(stream::once(async {
-                    Ok::<Event, Infallible>(Event::default().data("[DONE]"))
+                    ChatStreamChunk::Data("[DONE]".into())
                 }))
                 .map(move |item| {
                     // Keep the usage guard alive for the whole SSE stream lifetime.
@@ -701,7 +743,7 @@ pub async fn chat_completions(
                     item
                 });
 
-            return Ok(Sse::new(sse_stream).into_response());
+            return Ok(ChatCompletionOutput::Stream(Box::pin(sse_stream)));
         }
 
         let _usage_guard = state
@@ -750,7 +792,7 @@ pub async fn chat_completions(
         }],
     };
 
-    Ok(Json(resp).into_response())
+    Ok(ChatCompletionOutput::Json(resp))
 }
 
 /// Merge history from DB and current request messages while avoiding duplicates.
@@ -880,9 +922,6 @@ mod test {
 
     #[test]
     fn cloud_option_id_has_prefix() {
-        assert_eq!(
-            cloud_option_id("openai", "gpt-4.1"),
-            "cloud/openai/gpt-4.1"
-        );
+        assert_eq!(cloud_option_id("openai", "gpt-4.1"), "cloud/openai/gpt-4.1");
     }
 }
