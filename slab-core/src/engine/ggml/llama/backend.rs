@@ -307,7 +307,8 @@ impl LlamaWorker {
         let mut cached_prompt = String::with_capacity(full_prompt.len() + generated.len());
         cached_prompt.push_str(full_prompt);
         cached_prompt.push_str(generated);
-        self.sessions.insert(key, SessionBinding { sid, cached_prompt });
+        self.sessions
+            .insert(key, SessionBinding { sid, cached_prompt });
     }
 
     #[on_runtime_control(GlobalUnload)]
@@ -559,7 +560,12 @@ impl LlamaWorker {
             .await
         {
             Ok(text) => {
-                self.commit_session_success(prepared.key, prepared.sid, &prepared.full_prompt, &text);
+                self.commit_session_success(
+                    prepared.key,
+                    prepared.sid,
+                    &prepared.full_prompt,
+                    &text,
+                );
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(
                     text.as_bytes(),
                 ))));
@@ -696,7 +702,8 @@ impl LlamaWorker {
                     sid,
                     cached_prompt,
                 } => {
-                    self.sessions.insert(key, SessionBinding { sid, cached_prompt });
+                    self.sessions
+                        .insert(key, SessionBinding { sid, cached_prompt });
                 }
                 SessionUpdate::Drop { key, sid } => {
                     self.sessions.remove(&key);

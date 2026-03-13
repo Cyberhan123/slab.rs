@@ -236,7 +236,10 @@ async fn serve_grpc(grpc_bind: &str, shutdown_on_stdin_close: bool) -> anyhow::R
     if let Some(raw_ipc_path) = grpc_bind.strip_prefix("ipc://") {
         let ipc_path = raw_ipc_path.trim();
         if ipc_path.is_empty() {
-            anyhow::bail!("invalid IPC gRPC endpoint '{}': missing socket/pipe path", grpc_bind);
+            anyhow::bail!(
+                "invalid IPC gRPC endpoint '{}': missing socket/pipe path",
+                grpc_bind
+            );
         }
 
         #[cfg(unix)]

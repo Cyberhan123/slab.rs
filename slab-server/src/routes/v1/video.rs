@@ -177,7 +177,10 @@ pub async fn generate_video(
     let task_id_for_spawn = task_id.clone();
 
     let join = tokio::spawn(async move {
-        let _usage_guard = match model_auto_unload.acquire_for_inference("ggml.diffusion").await {
+        let _usage_guard = match model_auto_unload
+            .acquire_for_inference("ggml.diffusion")
+            .await
+        {
             Ok(guard) => guard,
             Err(error) => {
                 store
@@ -195,8 +198,7 @@ pub async fn generate_video(
         };
 
         // Generate frames via the diffusion backend.
-        let rpc_result =
-            grpc::client::generate_video(generate_image_channel, grpc_req).await;
+        let rpc_result = grpc::client::generate_video(generate_image_channel, grpc_req).await;
 
         if let Ok(Some(record)) = store.get_task(&task_id_for_spawn).await {
             if record.status == "cancelled" {
@@ -226,7 +228,9 @@ pub async fn generate_video(
                         &task_id_for_spawn,
                         "failed",
                         None,
-                        Some(&format!("failed to parse frames JSON from diffusion backend: {e}")),
+                        Some(&format!(
+                            "failed to parse frames JSON from diffusion backend: {e}"
+                        )),
                     )
                     .await
                     .ok();
