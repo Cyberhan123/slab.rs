@@ -107,11 +107,10 @@ impl GGMLDiffusionEngine {
     pub fn new_context(&mut self, params: &SdContextParams) -> Result<(), engine::EngineError> {
         self.ctx = None;
 
-        let ctx = self.instance.new_context(params).map_err(|source| {
-            GGMLDiffusionEngineError::CreateContext {
-                source,
-            }
-        })?;
+        let ctx = self
+            .instance
+            .new_context(params)
+            .map_err(|source| GGMLDiffusionEngineError::CreateContext { source })?;
         self.ctx = Some(ctx);
 
         Ok(())
@@ -129,12 +128,8 @@ impl GGMLDiffusionEngine {
             .as_ref()
             .ok_or(GGMLDiffusionEngineError::ContextNotInitialized)?;
 
-        ctx.generate_image(params).map_err(|source| {
-            GGMLDiffusionEngineError::InferenceFailed {
-                source,
-            }
-            .into()
-        })
+        ctx.generate_image(params)
+            .map_err(|source| GGMLDiffusionEngineError::InferenceFailed { source }.into())
     }
 
     /// Unload the current context and release its resources.

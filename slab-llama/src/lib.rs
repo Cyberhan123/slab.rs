@@ -33,11 +33,11 @@
 //! llama.backend_free();
 //! ```
 
-use std::fmt;
+use libloading::Library;
 use std::ffi::CString;
+use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
-use libloading::Library;
 
 mod context_params;
 mod error;
@@ -87,12 +87,8 @@ fn load_ggml_backend(
         return Ok(None);
     }
 
-    let c_dir = CString::new(
-        llama_dir_path
-            .to_str()
-            .unwrap_or_default(),
-    )
-    .map_err(|source| ::libloading::Error::CreateCString { source })?;
+    let c_dir = CString::new(llama_dir_path.to_str().unwrap_or_default())
+        .map_err(|source| ::libloading::Error::CreateCString { source })?;
 
     if let Ok(ggml_backend_load_all_from_path) = llama_lib.ggml_backend_load_all_from_path.as_ref()
     {

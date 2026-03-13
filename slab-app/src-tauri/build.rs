@@ -16,8 +16,8 @@ fn main() {
         &manifest_dir,
     );
 
-    let attributes = tauri_build::Attributes::new().app_manifest(
-        tauri_build::AppManifest::new().commands(&[
+    let attributes =
+        tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
             "greet",
             "get_api_url",
             "check_backend_status",
@@ -28,8 +28,7 @@ fn main() {
             "plugin_unmount_view",
             "plugin_call",
             "plugin_api_request",
-        ]),
-    );
+        ]));
 
     tauri_build::try_build(attributes).expect("failed to run tauri build script");
 }

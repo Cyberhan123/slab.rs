@@ -26,7 +26,7 @@ use utoipa::OpenApi;
 use uuid::Uuid;
 
 use crate::contexts::chat::application::create_chat_completion_use_case::{
-    ChatCompletionPort, CreateChatCompletionUseCase,
+    ChatCompletionOutput, ChatCompletionPort, CreateChatCompletionUseCase,
 };
 use crate::entities::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
@@ -562,7 +562,10 @@ pub async fn chat_completions(
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
     let use_case = CreateChatCompletionUseCase::new(ChatRoutePort { state });
-    use_case.execute(req).await
+    match use_case.execute(req).await? {
+        ChatCompletionOutput::Json(resp) => Ok(Json(resp).into_response()),
+        ChatCompletionOutput::Stream(stream) => Ok(Sse::new(stream).into_response()),
+    }
 }
 
 struct ChatRoutePort {
@@ -574,7 +577,9 @@ impl ChatCompletionPort for ChatRoutePort {
         &self,
         req: ChatCompletionRequest,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Response, ServerError>> + Send + '_>,
+        Box<
+            dyn std::future::Future<Output = Result<ChatCompletionOutput, ServerError>> + Send + '_,
+        >,
     > {
         Box::pin(create_chat_completion_with_state(
             Arc::clone(&self.state),
@@ -586,7 +591,7 @@ impl ChatCompletionPort for ChatRoutePort {
 pub(crate) async fn create_chat_completion_with_state(
     state: Arc<AppState>,
     req: ChatCompletionRequest,
-) -> Result<Response, ServerError> {
+) -> Result<ChatCompletionOutput, ServerError> {
     let user_content = req
         .messages
         .iter()
@@ -670,7 +675,7 @@ pub(crate) async fn create_chat_completion_with_state(
                 Ok::<Event, Infallible>(Event::default().data("[DONE]"))
             }));
 
-            return Ok(Sse::new(sse_stream).into_response());
+            return Ok(ChatCompletionOutput::Stream(Box::pin(sse_stream)));
         }
 
         cloud_chat_completion(&target, &resolved_messages, max_tokens, temperature).await?
@@ -727,7 +732,7 @@ pub(crate) async fn create_chat_completion_with_state(
                     item
                 });
 
-            return Ok(Sse::new(sse_stream).into_response());
+            return Ok(ChatCompletionOutput::Stream(Box::pin(sse_stream)));
         }
 
         let _usage_guard = state
@@ -776,7 +781,7 @@ pub(crate) async fn create_chat_completion_with_state(
         }],
     };
 
-    Ok(Json(resp).into_response())
+    Ok(ChatCompletionOutput::Json(resp))
 }
 
 /// Merge history from DB and current request messages while avoiding duplicates.

@@ -101,7 +101,9 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
     }
 }
 
-fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<serde_json::Value, Status> {
+fn build_whisper_inference_options(
+    req: &pb::TranscribeRequest,
+) -> Result<serde_json::Value, Status> {
     let mut options = serde_json::Map::new();
 
     if let Some(vad) = req.vad.as_ref() {
@@ -131,7 +133,10 @@ fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<serde_
 
                 for (name, value) in [
                     ("vad.min_speech_duration_ms", params.min_speech_duration_ms),
-                    ("vad.min_silence_duration_ms", params.min_silence_duration_ms),
+                    (
+                        "vad.min_silence_duration_ms",
+                        params.min_silence_duration_ms,
+                    ),
                     ("vad.speech_pad_ms", params.speech_pad_ms),
                 ] {
                     if let Some(v) = value {
@@ -159,9 +164,14 @@ fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<serde_
 
                 if let Some(samples_overlap) = params.samples_overlap {
                     if samples_overlap < 0.0 {
-                        return Err(Status::invalid_argument("vad.samples_overlap must be >= 0.0"));
+                        return Err(Status::invalid_argument(
+                            "vad.samples_overlap must be >= 0.0",
+                        ));
                     }
-                    vad_json.insert("samples_overlap".to_owned(), serde_json::json!(samples_overlap));
+                    vad_json.insert(
+                        "samples_overlap".to_owned(),
+                        serde_json::json!(samples_overlap),
+                    );
                 }
             }
 
