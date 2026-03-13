@@ -3,34 +3,29 @@ use std::pin::Pin;
 
 use futures::stream::BoxStream;
 
+use crate::contexts::chat::domain::{ChatCompletionCommand, ChatCompletionResult};
 use crate::error::ServerError;
-use crate::schemas::v1::chat::{ChatCompletionRequest, ChatCompletionResponse};
 
-/// A single framework-agnostic chunk in a streaming chat completion.
-/// The route layer is responsible for mapping this to the transport-specific
-/// representation (e.g. an SSE `Event`).
+/// A single chunk yielded by a streaming chat completion response.
 pub enum ChatStreamChunk {
-    /// A serialized data payload (maps to an SSE `data:` field).
+    /// A data frame (token or `[DONE]` sentinel) to be sent as an SSE `data:` line.
     Data(String),
-    /// An out-of-band signal or error description (maps to an SSE `:` comment field).
-    /// This is used for backend-specific signals (e.g. gRPC done markers) and
-    /// error descriptions that should not appear as data tokens to the client.
+    /// An SSE comment line used to signal errors or metadata without closing the stream.
     Comment(String),
 }
 
-/// Application-level output of the chat completion use-case.
-/// Routes are responsible for converting this into an Axum `Response`.
+/// The output of a chat completion request.
 pub enum ChatCompletionOutput {
-    /// A complete JSON response payload.
-    Json(ChatCompletionResponse),
-    /// A server-sent events stream of framework-agnostic chunks.
+    /// A complete, non-streaming completion serialised as JSON.
+    Json(ChatCompletionResult),
+    /// A stream of SSE chunks for incremental token delivery.
     Stream(BoxStream<'static, ChatStreamChunk>),
 }
 
 pub trait ChatCompletionPort: Send + Sync {
     fn create_chat_completion(
         &self,
-        req: ChatCompletionRequest,
+        command: ChatCompletionCommand,
     ) -> Pin<Box<dyn Future<Output = Result<ChatCompletionOutput, ServerError>> + Send + '_>>;
 }
 
@@ -48,8 +43,8 @@ where
 
     pub async fn execute(
         &self,
-        req: ChatCompletionRequest,
+        command: ChatCompletionCommand,
     ) -> Result<ChatCompletionOutput, ServerError> {
-        self.port.create_chat_completion(req).await
+        self.port.create_chat_completion(command).await
     }
 }

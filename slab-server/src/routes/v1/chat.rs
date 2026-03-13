@@ -28,6 +28,13 @@ use uuid::Uuid;
 use crate::contexts::chat::application::create_chat_completion_use_case::{
     ChatCompletionOutput, ChatCompletionPort, ChatStreamChunk, CreateChatCompletionUseCase,
 };
+use crate::contexts::chat::domain::{
+    ChatCompletionCommand, ChatCompletionResult, ChatResultChoice,
+    ConversationMessage as DomainConversationMessage,
+};
+use crate::contexts::chat::interface::http::mappers::chat_mapper::{
+    to_chat_completion_command, to_chat_completion_response, to_openai_messages,
+};
 use crate::entities::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
@@ -588,7 +595,7 @@ struct ChatRoutePort {
 impl ChatCompletionPort for ChatRoutePort {
     fn create_chat_completion(
         &self,
-        req: ChatCompletionRequest,
+        command: ChatCompletionCommand,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<ChatCompletionOutput, ServerError>> + Send + '_,
@@ -605,7 +612,7 @@ pub(crate) async fn create_chat_completion_with_context(
     context: Arc<ChatContext>,
     req: ChatCompletionRequest,
 ) -> Result<ChatCompletionOutput, ServerError> {
-    let user_content = req
+    let user_content = command
         .messages
         .iter()
         .rev()
@@ -621,14 +628,14 @@ pub(crate) async fn create_chat_completion_with_context(
         )));
     }
 
-    let max_tokens = req.max_tokens.unwrap_or(512);
+    let max_tokens = command.max_tokens.unwrap_or(512);
     if max_tokens == 0 || max_tokens > 4096 {
         return Err(ServerError::BadRequest(format!(
             "invalid max_tokens ({max_tokens}): must be between 1 and 4096"
         )));
     }
 
-    let temperature = req.temperature.unwrap_or(0.7);
+    let temperature = command.temperature.unwrap_or(0.7);
     if !(0.0..=2.0).contains(&temperature) {
         return Err(ServerError::BadRequest(format!(
             "invalid temperature ({temperature}): must be between 0.0 and 2.0"
@@ -636,10 +643,10 @@ pub(crate) async fn create_chat_completion_with_context(
     }
 
     debug!(
-        model = %req.model,
+        model = %command.model,
         prompt_len = user_content.len(),
-        stream = req.stream,
-        session_id = ?req.id,
+        stream = command.stream,
+        session_id = ?command.id,
         "chat completion request"
     );
 
@@ -667,7 +674,7 @@ pub(crate) async fn create_chat_completion_with_context(
 
             let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
             let created_ts = Utc::now().timestamp();
-            let model_name = req.model.clone();
+            let model_name = command.model.clone();
 
             let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
                 match chunk {
@@ -696,10 +703,10 @@ pub(crate) async fn create_chat_completion_with_context(
         let prompt = build_prompt(&resolved_messages);
         let grpc_req = grpc::pb::ChatRequest {
             prompt: prompt.clone(),
-            model: req.model.clone(),
+            model: command.model.clone(),
             max_tokens,
             temperature,
-            session_key: req.id.clone().unwrap_or_default(),
+            session_key: command.id.clone().unwrap_or_default(),
         };
 
         let llama_channel = context.grpc.chat_channel().ok_or_else(|| {
@@ -721,7 +728,7 @@ pub(crate) async fn create_chat_completion_with_context(
 
             let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
             let created_ts = Utc::now().timestamp();
-            let model_name = req.model.clone();
+            let model_name = command.model.clone();
 
             let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
                 match chunk {
@@ -760,7 +767,7 @@ pub(crate) async fn create_chat_completion_with_context(
     };
 
     info!(
-        model = %req.model,
+        model = %command.model,
         output_len = generated.len(),
         "chat completion done"
     );
@@ -779,14 +786,14 @@ pub(crate) async fn create_chat_completion_with_context(
             .unwrap_or_else(|e| tracing::warn!(error = %e, "failed to persist assistant message"));
     }
 
-    let resp = ChatCompletionResponse {
+    let resp = ChatCompletionResult {
         id: format!("chatcmpl-{}", Uuid::new_v4()),
         object: "chat.completion".into(),
         created: Utc::now().timestamp(),
-        model: req.model,
-        choices: vec![ChatChoice {
+        model: command.model,
+        choices: vec![ChatResultChoice {
             index: 0,
-            message: OpenAiMessage {
+            message: DomainConversationMessage {
                 role: "assistant".into(),
                 content: generated,
             },

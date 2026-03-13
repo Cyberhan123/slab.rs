@@ -13,6 +13,10 @@ use tracing::{info, warn};
 use utoipa::OpenApi;
 
 use crate::contexts::model::application::load_model_use_case::{LoadModelUseCase, ModelLoadPort};
+use crate::contexts::model::domain::{ModelLoadCommand, ModelStatus};
+use crate::contexts::model::interface::http::mappers::model_mapper::{
+    to_model_load_command, to_model_status_response,
+};
 use crate::entities::{ConfigStore, ModelCatalogRecord, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
@@ -652,9 +656,9 @@ struct ModelRoutePort {
 impl ModelLoadPort for ModelRoutePort {
     fn load_model(
         &self,
-        req: LoadModelRequest,
+        command: ModelLoadCommand,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<ModelStatusResponse, ServerError>> + Send + '_>,
+        Box<dyn std::future::Future<Output = Result<ModelStatus, ServerError>> + Send + '_>,
     > {
         Box::pin(load_model_with_context(Arc::clone(&self.context), req))
     }
@@ -666,8 +670,8 @@ pub(crate) async fn load_model_with_context(
 ) -> Result<ModelStatusResponse, ServerError> {
     let bid = &req.backend_id;
 
-    validate_path("model_path", &req.model_path)?;
-    validate_existing_model_file(&req.model_path)?;
+    validate_path("model_path", &command.model_path)?;
+    validate_existing_model_file(&command.model_path)?;
 
     let (canonical_backend, channel) = resolve_backend_channel(&context, bid)?;
     let (num_workers, worker_source) =
@@ -677,7 +681,7 @@ pub(crate) async fn load_model_with_context(
 
     info!(
         backend = %bid,
-        model_path = %req.model_path,
+        model_path = %command.model_path,
         workers = num_workers,
         worker_source = worker_source,
         context_length = context_length,
@@ -690,7 +694,7 @@ pub(crate) async fn load_model_with_context(
         .unwrap_or_default();
 
     let grpc_req = grpc::pb::ModelLoadRequest {
-        model_path: req.model_path.clone(),
+        model_path: command.model_path.clone(),
         num_workers,
         context_length,
         diffusion_model_path: diffusion_ctx.diffusion_model_path,
@@ -713,14 +717,14 @@ pub(crate) async fn load_model_with_context(
         .notify_model_loaded(
             &canonical_backend,
             LoadedModelSpec {
-                model_path: req.model_path,
+                model_path: command.model_path,
                 num_workers,
                 context_length,
             },
         )
         .await;
 
-    Ok(ModelStatusResponse {
+    Ok(ModelStatus {
         backend: response.backend,
         status: response.status,
     })
