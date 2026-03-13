@@ -26,7 +26,7 @@ use utoipa::OpenApi;
 use uuid::Uuid;
 
 use crate::contexts::chat::application::create_chat_completion_use_case::{
-    ChatCompletionPort, CreateChatCompletionUseCase,
+    ChatCompletionOutput, ChatCompletionPort, ChatStreamChunk, CreateChatCompletionUseCase,
 };
 use crate::entities::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
@@ -552,7 +552,10 @@ async fn cloud_chat_stream(
     tag = "chat",
     request_body = ChatCompletionRequest,
     responses(
-        (status = 200, description = "Completion generated", body = ChatCompletionResponse),
+        (status = 200, description = "Completion generated", content(
+            ("application/json" = ChatCompletionResponse),
+            ("text/event-stream" = String),
+        )),
         (status = 400, description = "Bad request"),
         (status = 500, description = "Backend error"),
     )
@@ -562,7 +565,18 @@ pub async fn chat_completions(
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
     let use_case = CreateChatCompletionUseCase::new(ChatRoutePort { state });
-    use_case.execute(req).await
+    match use_case.execute(req).await? {
+        ChatCompletionOutput::Json(resp) => Ok(Json(resp).into_response()),
+        ChatCompletionOutput::Stream(stream) => {
+            let event_stream = stream.map(|chunk| -> Result<Event, Infallible> {
+                match chunk {
+                    ChatStreamChunk::Data(data) => Ok(Event::default().data(data)),
+                    ChatStreamChunk::Comment(comment) => Ok(Event::default().comment(comment)),
+                }
+            });
+            Ok(Sse::new(event_stream).into_response())
+        }
+    }
 }
 
 struct ChatRoutePort {
@@ -574,7 +588,9 @@ impl ChatCompletionPort for ChatRoutePort {
         &self,
         req: ChatCompletionRequest,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<Response, ServerError>> + Send + '_>,
+        Box<
+            dyn std::future::Future<Output = Result<ChatCompletionOutput, ServerError>> + Send + '_,
+        >,
     > {
         Box::pin(create_chat_completion_with_state(
             Arc::clone(&self.state),
@@ -586,7 +602,7 @@ impl ChatCompletionPort for ChatRoutePort {
 pub(crate) async fn create_chat_completion_with_state(
     state: Arc<AppState>,
     req: ChatCompletionRequest,
-) -> Result<Response, ServerError> {
+) -> Result<ChatCompletionOutput, ServerError> {
     let user_content = req
         .messages
         .iter()
@@ -651,26 +667,26 @@ pub(crate) async fn create_chat_completion_with_state(
             let created_ts = Utc::now().timestamp();
             let model_name = req.model.clone();
 
-            let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
+            let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
                 match chunk {
-                    Ok(CloudDelta::Content(token)) => Ok(Event::default().data(build_chunk(
+                    Ok(CloudDelta::Content(token)) => ChatStreamChunk::Data(build_chunk(
                         &completion_id,
                         created_ts,
                         &model_name,
                         &token,
-                    ))),
-                    Ok(CloudDelta::Reasoning(token)) => Ok(Event::default().data(
-                        build_reasoning_chunk(&completion_id, created_ts, &model_name, &token),
                     )),
-                    Err(e) => Ok(Event::default().comment(e.to_string())),
+                    Ok(CloudDelta::Reasoning(token)) => ChatStreamChunk::Data(
+                        build_reasoning_chunk(&completion_id, created_ts, &model_name, &token),
+                    ),
+                    Err(e) => ChatStreamChunk::Comment(e.to_string()),
                 }
             });
 
             let sse_stream = token_stream.chain(stream::once(async {
-                Ok::<Event, Infallible>(Event::default().data("[DONE]"))
+                ChatStreamChunk::Data("[DONE]".into())
             }));
 
-            return Ok(Sse::new(sse_stream).into_response());
+            return Ok(ChatCompletionOutput::Stream(Box::pin(sse_stream)));
         }
 
         cloud_chat_completion(&target, &resolved_messages, max_tokens, temperature).await?
@@ -705,21 +721,21 @@ pub(crate) async fn create_chat_completion_with_state(
             let created_ts = Utc::now().timestamp();
             let model_name = req.model.clone();
 
-            let token_stream = backend_stream.map(move |chunk| -> Result<Event, Infallible> {
+            let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
                 match chunk {
-                    Ok(msg) if !msg.error.is_empty() => Ok(Event::default().comment(msg.error)),
-                    Ok(msg) if msg.done => Ok(Event::default().comment("done")),
+                    Ok(msg) if !msg.error.is_empty() => ChatStreamChunk::Comment(msg.error),
+                    Ok(msg) if msg.done => ChatStreamChunk::Comment("done".into()),
                     Ok(msg) => {
                         let data = build_chunk(&completion_id, created_ts, &model_name, &msg.token);
-                        Ok(Event::default().data(data))
+                        ChatStreamChunk::Data(data)
                     }
-                    Err(e) => Ok(Event::default().comment(e.to_string())),
+                    Err(e) => ChatStreamChunk::Comment(e.to_string()),
                 }
             });
 
             let sse_stream = token_stream
                 .chain(stream::once(async {
-                    Ok::<Event, Infallible>(Event::default().data("[DONE]"))
+                    ChatStreamChunk::Data("[DONE]".into())
                 }))
                 .map(move |item| {
                     // Keep the usage guard alive for the whole SSE stream lifetime.
@@ -727,7 +743,7 @@ pub(crate) async fn create_chat_completion_with_state(
                     item
                 });
 
-            return Ok(Sse::new(sse_stream).into_response());
+            return Ok(ChatCompletionOutput::Stream(Box::pin(sse_stream)));
         }
 
         let _usage_guard = state
@@ -776,7 +792,7 @@ pub(crate) async fn create_chat_completion_with_state(
         }],
     };
 
-    Ok(Json(resp).into_response())
+    Ok(ChatCompletionOutput::Json(resp))
 }
 
 /// Merge history from DB and current request messages while avoiding duplicates.

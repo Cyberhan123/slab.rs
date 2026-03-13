@@ -212,7 +212,10 @@ pub async fn generate_images(
     let task_id_for_spawn = task_id.clone();
     let generate_image_channel_for_spawn = generate_image_channel;
     let join = tokio::spawn(async move {
-        let _usage_guard = match model_auto_unload.acquire_for_inference("ggml.diffusion").await {
+        let _usage_guard = match model_auto_unload
+            .acquire_for_inference("ggml.diffusion")
+            .await
+        {
             Ok(guard) => guard,
             Err(error) => {
                 store
@@ -336,9 +339,15 @@ mod test {
     fn validates_dim_too_large() {
         // Simulate the handler check: width > MAX_IMAGE_DIM should fail.
         let width_over = MAX_IMAGE_DIM + 1;
-        assert!(width_over > MAX_IMAGE_DIM, "oversized width must be rejected");
+        assert!(
+            width_over > MAX_IMAGE_DIM,
+            "oversized width must be rejected"
+        );
         let width_at_limit = MAX_IMAGE_DIM;
-        assert!(!(width_at_limit > MAX_IMAGE_DIM), "exact-limit width must be accepted");
+        assert!(
+            !(width_at_limit > MAX_IMAGE_DIM),
+            "exact-limit width must be accepted"
+        );
     }
 
     #[test]

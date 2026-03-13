@@ -13,9 +13,7 @@ use uuid::Uuid;
 use crate::entities::{TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
-use crate::schemas::v1::audio::{
-    CompletionRequest, TranscribeDecodeRequest, TranscribeVadRequest,
-};
+use crate::schemas::v1::audio::{CompletionRequest, TranscribeDecodeRequest, TranscribeVadRequest};
 use crate::state::AppState;
 
 #[derive(OpenApi)]
@@ -248,7 +246,10 @@ pub async fn transcribe(
     let task_id_for_spawn = task_id.clone();
     let transcribe_channel_for_spawn = transcribe_channel;
     let join = tokio::spawn(async move {
-        let _usage_guard = match model_auto_unload.acquire_for_inference("ggml.whisper").await {
+        let _usage_guard = match model_auto_unload
+            .acquire_for_inference("ggml.whisper")
+            .await
+        {
             Ok(guard) => guard,
             Err(error) => {
                 store

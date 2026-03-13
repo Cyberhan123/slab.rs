@@ -23,7 +23,11 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         let req = request.into_inner();
-        debug!(prompt_len = req.prompt.len(), max_tokens = req.max_tokens, "llama chat request received");
+        debug!(
+            prompt_len = req.prompt.len(),
+            max_tokens = req.max_tokens,
+            "llama chat request received"
+        );
 
         let options = serde_json::json!({
             "max_tokens": req.max_tokens,
@@ -66,7 +70,11 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         let req = request.into_inner();
-        debug!(prompt_len = req.prompt.len(), max_tokens = req.max_tokens, "llama chat_stream request received");
+        debug!(
+            prompt_len = req.prompt.len(),
+            max_tokens = req.max_tokens,
+            "llama chat_stream request received"
+        );
 
         let options = serde_json::json!({
             "max_tokens": req.max_tokens,

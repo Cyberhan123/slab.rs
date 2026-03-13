@@ -209,8 +209,7 @@ impl LlamaModel {
         // Like llama_tokenize/llama_detokenize, negative means the buffer was too
         // small and abs(n) is the required byte length.
         let required = if n < 0 {
-            n.checked_abs()
-                .ok_or(LlamaError::TokenToPieceFailed(n))? as usize
+            n.checked_abs().ok_or(LlamaError::TokenToPieceFailed(n))? as usize
         } else {
             n as usize
         };
@@ -266,8 +265,7 @@ impl LlamaModel {
         // Negative means the destination buffer was too small; abs(n) is the
         // required number of bytes.
         let required = if n < 0 {
-            n.checked_abs()
-                .ok_or(LlamaError::TokenToPieceFailed(n))? as usize
+            n.checked_abs().ok_or(LlamaError::TokenToPieceFailed(n))? as usize
         } else {
             n as usize
         };

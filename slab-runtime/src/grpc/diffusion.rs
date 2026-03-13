@@ -78,7 +78,10 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
                 runtime_to_status(e)
             })?;
 
-        info!(images_json_bytes = output.len(), "diffusion image generation completed");
+        info!(
+            images_json_bytes = output.len(),
+            "diffusion image generation completed"
+        );
         Ok(Response::new(pb::ImageResponse {
             images_json: output.to_vec(),
         }))
@@ -140,7 +143,10 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
                 runtime_to_status(e)
             })?;
 
-        info!(frames_json_bytes = output.len(), "diffusion video generation completed");
+        info!(
+            frames_json_bytes = output.len(),
+            "diffusion video generation completed"
+        );
         Ok(Response::new(pb::VideoResponse {
             frames_json: output.to_vec(),
         }))
