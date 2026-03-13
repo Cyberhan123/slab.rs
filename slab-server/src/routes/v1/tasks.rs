@@ -11,6 +11,8 @@ use crate::bounded_contexts::task_management::application::TaskApplicationServic
 use crate::contexts::task::application::get_task_result_use_case::{
     GetTaskResultUseCase, TaskResultPort,
 };
+use crate::contexts::task::domain::TaskResult;
+use crate::contexts::task::interface::http::mappers::task_mapper::to_task_result_response;
 use crate::error::ServerError;
 use crate::schemas::v1::task::{TaskResponse, TaskResultPayload, TaskTypeQuery};
 use crate::state::AppState;
@@ -94,7 +96,7 @@ pub async fn get_task_result(
 ) -> Result<Json<TaskResultPayload>, ServerError> {
     let use_case = GetTaskResultUseCase::new(TaskResultRoutePort { state });
     let task_result = use_case.execute(id).await?;
-    Ok(Json(task_result))
+    Ok(Json(to_task_result_response(task_result)))
 }
 
 struct TaskResultRoutePort {
@@ -106,7 +108,7 @@ impl TaskResultPort for TaskResultRoutePort {
         &self,
         id: String,
     ) -> std::pin::Pin<
-        Box<dyn std::future::Future<Output = Result<TaskResultPayload, ServerError>> + Send + '_>,
+        Box<dyn std::future::Future<Output = Result<TaskResult, ServerError>> + Send + '_>,
     > {
         let state = Arc::clone(&self.state);
         Box::pin(async move {

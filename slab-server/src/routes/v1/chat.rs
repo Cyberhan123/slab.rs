@@ -28,6 +28,10 @@ use uuid::Uuid;
 use crate::contexts::chat::application::create_chat_completion_use_case::{
     ChatCompletionOutput, ChatCompletionPort, ChatStreamChunk, CreateChatCompletionUseCase,
 };
+use crate::contexts::chat::domain::ChatCompletionCommand;
+use crate::contexts::chat::interface::http::mappers::chat_mapper::{
+    to_chat_completion_command, to_chat_completion_response, to_openai_messages,
+};
 use crate::entities::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::grpc;
@@ -565,8 +569,11 @@ pub async fn chat_completions(
     Json(req): Json<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
     let use_case = CreateChatCompletionUseCase::new(ChatRoutePort { state });
-    match use_case.execute(req).await? {
-        ChatCompletionOutput::Json(resp) => Ok(Json(resp).into_response()),
+    let command = to_chat_completion_command(req);
+    match use_case.execute(command).await? {
+        ChatCompletionOutput::Json(resp) => {
+            Ok(Json(to_chat_completion_response(resp)).into_response())
+        }
         ChatCompletionOutput::Stream(stream) => {
             let event_stream = stream.map(|chunk| -> Result<Event, Infallible> {
                 match chunk {
@@ -586,7 +593,7 @@ struct ChatRoutePort {
 impl ChatCompletionPort for ChatRoutePort {
     fn create_chat_completion(
         &self,
-        req: ChatCompletionRequest,
+        command: ChatCompletionCommand,
     ) -> std::pin::Pin<
         Box<
             dyn std::future::Future<Output = Result<ChatCompletionOutput, ServerError>> + Send + '_,
@@ -594,16 +601,16 @@ impl ChatCompletionPort for ChatRoutePort {
     > {
         Box::pin(create_chat_completion_with_state(
             Arc::clone(&self.state),
-            req,
+            command,
         ))
     }
 }
 
 pub(crate) async fn create_chat_completion_with_state(
     state: Arc<AppState>,
-    req: ChatCompletionRequest,
+    command: ChatCompletionCommand,
 ) -> Result<ChatCompletionOutput, ServerError> {
-    let user_content = req
+    let user_content = command
         .messages
         .iter()
         .rev()
@@ -619,14 +626,14 @@ pub(crate) async fn create_chat_completion_with_state(
         )));
     }
 
-    let max_tokens = req.max_tokens.unwrap_or(512);
+    let max_tokens = command.max_tokens.unwrap_or(512);
     if max_tokens == 0 || max_tokens > 4096 {
         return Err(ServerError::BadRequest(format!(
             "invalid max_tokens ({max_tokens}): must be between 1 and 4096"
         )));
     }
 
-    let temperature = req.temperature.unwrap_or(0.7);
+    let temperature = command.temperature.unwrap_or(0.7);
     if !(0.0..=2.0).contains(&temperature) {
         return Err(ServerError::BadRequest(format!(
             "invalid temperature ({temperature}): must be between 0.0 and 2.0"
@@ -634,16 +641,21 @@ pub(crate) async fn create_chat_completion_with_state(
     }
 
     debug!(
-        model = %req.model,
+        model = %command.model,
         prompt_len = user_content.len(),
-        stream = req.stream,
-        session_id = ?req.id,
+        stream = command.stream,
+        session_id = ?command.id,
         "chat completion request"
     );
 
-    let resolved_messages = build_messages(&state, req.id.as_deref(), &req.messages).await?;
+    let resolved_messages = build_messages(
+        &state,
+        command.id.as_deref(),
+        &to_openai_messages(command.messages.clone()),
+    )
+    .await?;
 
-    if let Some(sid) = req.id.as_deref() {
+    if let Some(sid) = command.id.as_deref() {
         state
             .store
             .append_message(ChatMessage {
@@ -657,15 +669,15 @@ pub(crate) async fn create_chat_completion_with_state(
             .unwrap_or_else(|e| tracing::warn!(error = %e, "failed to persist user message"));
     }
 
-    let generated = if is_cloud_model_option_id(&req.model) {
-        let target = resolve_cloud_model(&state, &req.model).await?;
-        if req.stream {
+    let generated = if is_cloud_model_option_id(&command.model) {
+        let target = resolve_cloud_model(&state, &command.model).await?;
+        if command.stream {
             let backend_stream =
                 cloud_chat_stream(&target, &resolved_messages, max_tokens, temperature).await?;
 
             let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
             let created_ts = Utc::now().timestamp();
-            let model_name = req.model.clone();
+            let model_name = command.model.clone();
 
             let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
                 match chunk {
@@ -694,17 +706,17 @@ pub(crate) async fn create_chat_completion_with_state(
         let prompt = build_prompt(&resolved_messages);
         let grpc_req = grpc::pb::ChatRequest {
             prompt: prompt.clone(),
-            model: req.model.clone(),
+            model: command.model.clone(),
             max_tokens,
             temperature,
-            session_key: req.id.clone().unwrap_or_default(),
+            session_key: command.id.clone().unwrap_or_default(),
         };
 
         let llama_channel = state.grpc.chat_channel().ok_or_else(|| {
             ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
         })?;
 
-        if req.stream {
+        if command.stream {
             let usage_guard = state
                 .model_auto_unload
                 .acquire_for_inference(LLAMA_BACKEND_ID)
@@ -719,7 +731,7 @@ pub(crate) async fn create_chat_completion_with_state(
 
             let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
             let created_ts = Utc::now().timestamp();
-            let model_name = req.model.clone();
+            let model_name = command.model.clone();
 
             let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
                 match chunk {
@@ -758,12 +770,12 @@ pub(crate) async fn create_chat_completion_with_state(
     };
 
     info!(
-        model = %req.model,
+        model = %command.model,
         output_len = generated.len(),
         "chat completion done"
     );
 
-    if let Some(sid) = req.id.as_deref() {
+    if let Some(sid) = command.id.as_deref() {
         state
             .store
             .append_message(ChatMessage {
@@ -781,7 +793,7 @@ pub(crate) async fn create_chat_completion_with_state(
         id: format!("chatcmpl-{}", Uuid::new_v4()),
         object: "chat.completion".into(),
         created: Utc::now().timestamp(),
-        model: req.model,
+        model: command.model,
         choices: vec![ChatChoice {
             index: 0,
             message: OpenAiMessage {
