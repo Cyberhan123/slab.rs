@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use tracing::{debug, info, warn};
 
-use crate::entities::{AnyStore, ConfigStore};
+use crate::infra::db::{AnyStore, ConfigStore};
 use crate::infra::rpc;
 
 pub const MODEL_AUTO_UNLOAD_ENABLED_CONFIG_KEY: &str = "model_auto_unload_enabled";

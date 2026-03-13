@@ -3,6 +3,8 @@ use std::sync::Arc;
 use axum::extract::FromRef;
 
 pub mod config;
+pub mod model_catalog_service;
+pub mod model_chat_service;
 pub mod model_state;
 pub mod worker_state;
 

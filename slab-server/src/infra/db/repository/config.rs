@@ -1,4 +1,4 @@
-use crate::entities::AnyStore;
+use super::AnyStore;
 use std::future::Future;
 
 pub trait ConfigStore: Send + Sync + 'static {

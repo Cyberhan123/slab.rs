@@ -1,4 +1,5 @@
-use crate::entities::{dao::model::ModelCatalogRecord, AnyStore};
+use super::AnyStore;
+use crate::infra::db::entities::ModelCatalogRecord;
 use chrono::{DateTime, Utc};
 use std::collections::HashMap;
 use std::future::Future;

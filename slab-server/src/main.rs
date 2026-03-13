@@ -5,7 +5,6 @@ mod api;
 mod config;
 mod context;
 mod domain;
-mod entities;
 mod error;
 mod infra;
 mod model_auto_unload;
