@@ -1,6 +1,6 @@
-use crate::routes::admin;
-use crate::routes::health;
-use crate::routes::v1;
+use crate::api::admin;
+use crate::api::health;
+use crate::api::v1;
 use utoipa::OpenApi;
 
 #[derive(OpenApi)]
@@ -19,3 +19,4 @@ pub fn get_docs() -> utoipa::openapi::OpenApi {
     root.merge(admin::api_docs());
     root
 }
+

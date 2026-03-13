@@ -3,6 +3,7 @@
 use std::sync::Arc;
 
 use axum::extract::{Query, State};
+use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 
@@ -11,14 +12,15 @@ use std::str::FromStr;
 use tracing::{info, warn};
 use utoipa::OpenApi;
 
-use crate::entities::{TaskRecord, TaskStore};
+use crate::context::worker_state::OperationContext;
+use crate::context::{AppState, SubmitOperation, WorkerState};
 use crate::error::ServerError;
-use crate::grpc;
+use crate::infra::rpc::{self, pb};
 use crate::schemas::admin::backend::{
     BackendListResponse, BackendStatusResponse, BackendTypeQuery, DownloadLibRequest,
     ReloadLibRequest,
 };
-use crate::state::AppState;
+use crate::schemas::v1::task::OperationAcceptedResponse;
 use strum::IntoEnumIterator;
 
 type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
@@ -32,6 +34,7 @@ type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
         BackendTypeQuery,
         BackendStatusResponse,
         BackendListResponse,
+        OperationAcceptedResponse,
     ))
 )]
 pub struct BackendApi;
@@ -96,31 +99,24 @@ fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
 ///
 /// Validates queued task input and runs `VersionApi::install` in a background task.
 async fn run_libfetch_download(
-    store: Arc<crate::entities::AnyStore>,
-    task_manager: Arc<crate::state::TaskManager>,
-    tid: String,
+    operation: OperationContext,
     input_data: String,
     default_asset_fn: AssetNameResolver,
 ) {
-    store
-        .update_task_status(&tid, "running", None, None)
-        .await
-        .ok();
+    let operation_id = operation.id().to_owned();
+    if let Err(e) = operation.mark_running().await {
+        warn!(task_id = %operation_id, error = %e, "failed to mark lib download running");
+        return;
+    }
 
     let input: serde_json::Value = match serde_json::from_str(&input_data) {
         Ok(v) => v,
         Err(e) => {
-            warn!(task_id = %tid, error = %e, "invalid stored input_data for download task");
-            store
-                .update_task_status(
-                    &tid,
-                    "failed",
-                    None,
-                    Some(&format!("invalid stored input_data: {e}")),
-                )
-                .await
-                .ok();
-            task_manager.remove(&tid);
+            warn!(task_id = %operation_id, error = %e, "invalid stored input_data for download task");
+            let msg = format!("invalid stored input_data: {e}");
+            if let Err(db_e) = operation.mark_failed(&msg).await {
+                warn!(task_id = %operation_id, error = %db_e, "failed to persist lib download parse error");
+            }
             return;
         }
     };
@@ -135,16 +131,12 @@ async fn run_libfetch_download(
     let asset_name = input["asset_name"].as_str().map(str::to_owned);
 
     if owner.is_empty() || repo.is_empty() || target_dir.is_empty() {
-        store
-            .update_task_status(
-                &tid,
-                "failed",
-                None,
-                Some("owner, repo, and target_dir are required"),
-            )
+        if let Err(db_e) = operation
+            .mark_failed("owner, repo, and target_dir are required")
             .await
-            .ok();
-        task_manager.remove(&tid);
+        {
+            warn!(task_id = %operation_id, error = %db_e, "failed to persist lib download validation error");
+        }
         return;
     }
 
@@ -165,22 +157,20 @@ async fn run_libfetch_download(
     match version_api.install(asset_resolver).await {
         Ok(path) => {
             let result_json = serde_json::json!({ "path": path }).to_string();
-            store
-                .update_task_status(&tid, "succeeded", Some(&result_json), None)
-                .await
-                .ok();
+            if let Err(db_e) = operation.mark_succeeded(&result_json).await {
+                warn!(task_id = %operation_id, error = %db_e, "failed to persist lib download success");
+            }
         }
         Err(e) => {
-            store
-                .update_task_status(&tid, "failed", None, Some(&e.to_string()))
-                .await
-                .ok();
+            let msg = e.to_string();
+            if let Err(db_e) = operation.mark_failed(&msg).await {
+                warn!(task_id = %operation_id, error = %db_e, "failed to persist lib download failure");
+            }
         }
     }
-    task_manager.remove(&tid);
 }
 
-// ── Handlers ──────────────────────────────────────────────────────────────────
+// 鈹€鈹€ Handlers 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 /// Get status of a model backend (`GET /admin/backends/status`).
 #[utoipa::path(
@@ -249,15 +239,15 @@ pub async fn list_backends(
     tag = "admin",
     request_body = DownloadLibRequest,
     responses(
-        (status = 200, description = "Download task created", body = serde_json::Value),
+        (status = 202, description = "Download task accepted", body = OperationAcceptedResponse),
         (status = 400, description = "Bad request (invalid path)"),
         (status = 401, description = "Unauthorised (management token required)"),
     )
 )]
 pub async fn download_lib(
-    State(state): State<Arc<AppState>>,
+    State(worker_state): State<WorkerState>,
     Json(req): Json<DownloadLibRequest>,
-) -> Result<Json<serde_json::Value>, ServerError> {
+) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
     validate_path("target_dir", &req.target_dir)?;
 
     if std::env::consts::OS != "windows" {
@@ -272,8 +262,6 @@ pub async fn download_lib(
     let (owner, repo, tag, asset_resolver) = windows_download_spec(backend_id)
         .ok_or_else(|| ServerError::BadRequest(format!("unsupported backend_id: {backend_id}")))?;
 
-    let task_id = uuid::Uuid::new_v4().to_string();
-    let now = chrono::Utc::now();
     let input_data = serde_json::json!({
         "backend_id": req.backend_id.to_string(),
         "owner": owner,
@@ -283,38 +271,18 @@ pub async fn download_lib(
     })
     .to_string();
 
-    state
-        .store
-        .insert_task(TaskRecord {
-            id: task_id.clone(),
-            task_type: "lib_download".into(),
-            status: "pending".into(),
-            model_id: None,
-            input_data: Some(input_data.clone()),
-            result_data: None,
-            error_msg: None,
-            core_task_id: None,
-            created_at: now,
-            updated_at: now,
-        })
+    let operation_id = worker_state
+        .submit_operation(
+            SubmitOperation::pending("lib_download", None, Some(input_data.clone())),
+            move |operation| run_libfetch_download(operation, input_data, asset_resolver),
+        )
         .await?;
-
-    let store = Arc::clone(&state.store);
-    let task_manager = Arc::clone(&state.task_manager);
-    let tid = task_id.clone();
-
-    let join = tokio::spawn(run_libfetch_download(
-        store,
-        task_manager,
-        tid,
-        input_data,
-        asset_resolver,
-    ));
-
-    state
-        .task_manager
-        .insert(task_id.clone(), join.abort_handle());
-    Ok(Json(serde_json::json!({ "task_id": task_id })))
+    Ok((
+        StatusCode::ACCEPTED,
+        Json(OperationAcceptedResponse {
+            operation_id,
+        }),
+    ))
 }
 
 /// Reload a backend with a new shared library path (`POST /admin/backends/reload`).
@@ -357,13 +325,13 @@ pub async fn reload_lib(
                 "{canonical_backend} gRPC endpoint is not configured"
             ))
         })?;
-    let grpc_req = grpc::pb::ReloadLibraryRequest {
+    let grpc_req = pb::ReloadLibraryRequest {
         lib_path: req.lib_path,
         model_path: req.model_path,
         num_workers: req.num_workers,
         context_length: 0,
     };
-    let response = grpc::client::reload_library(channel, &canonical_backend, grpc_req)
+    let response = rpc::client::reload_library(channel, &canonical_backend, grpc_req)
         .await
         .map_err(|e| ServerError::Internal(format!("grpc reload_library failed: {e}")))?;
 
@@ -373,7 +341,7 @@ pub async fn reload_lib(
     }))
 }
 
-// ── Tests ──────────────────────────────────────────────────────────────────────
+// 鈹€鈹€ Tests 鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€鈹€
 
 #[cfg(test)]
 mod test {
@@ -432,3 +400,4 @@ mod test {
         );
     }
 }
+

@@ -1,17 +1,17 @@
 //! slab-server entry point.
 //! Runs in supervisor mode by default.
 
-mod bounded_contexts;
+mod api;
 mod config;
-mod contexts;
+mod context;
+mod domain;
 mod entities;
 mod error;
 mod grpc;
+mod infra;
 mod middleware;
 mod model_auto_unload;
-mod routes;
 mod schemas;
-mod state;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -27,8 +27,9 @@ use tokio::process::{Child, ChildStdin, Command as TokioCommand};
 use tracing::{info, warn};
 
 use crate::config::Config;
-use crate::entities::{AnyStore, TaskStore};
-use crate::state::{AppState, TaskManager};
+use crate::context::AppState;
+use crate::infra::db::{AnyStore, TaskStore};
+use crate::infra::rpc::gateway::GrpcGateway;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -205,7 +206,7 @@ where
 
     let store = AnyStore::connect(&cfg.database_url).await?;
     info!(database_url = %cfg.database_url, "database ready");
-    let grpc = grpc::gateway::GrpcGateway::connect_from_config(&cfg)
+    let grpc = GrpcGateway::connect_from_config(&cfg)
         .await
         .context("failed to initialize shared gRPC gateway services")?;
 
@@ -215,15 +216,14 @@ where
         Arc::clone(&store),
         Arc::clone(&grpc),
     ));
-    let state = Arc::new(AppState {
-        config: Arc::new(cfg.clone()),
+    let state = Arc::new(AppState::new(
+        Arc::new(cfg.clone()),
         grpc,
-        store: Arc::clone(&store),
-        task_manager: Arc::new(TaskManager::new()),
+        Arc::clone(&store),
         model_auto_unload,
-    });
+    ));
 
-    let app = routes::build(Arc::clone(&state));
+    let app = api::build(Arc::clone(&state));
     let addr: SocketAddr = cfg.bind_address.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!(%addr, "HTTP gateway listening");
@@ -732,3 +732,4 @@ async fn shutdown_signal(listen_stdin: bool) {
     }
     info!("shutdown signal received; starting graceful shutdown");
 }
+
