@@ -74,27 +74,3 @@ pub struct AppState {
     /// Tracks backend in-flight usage and performs optional idle-time auto-unload.
     pub model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
 }
-
-/// Dependencies exposed to chat use-cases and route adapters.
-#[derive(Clone, Debug)]
-pub struct ChatContext {
-    pub store: Arc<AnyStore>,
-    pub grpc: Arc<crate::grpc::gateway::GrpcGateway>,
-    pub model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
-}
-
-/// Dependencies exposed to model-management use-cases and route adapters.
-#[derive(Clone, Debug)]
-pub struct ModelContext {
-    pub store: Arc<AnyStore>,
-    pub grpc: Arc<crate::grpc::gateway::GrpcGateway>,
-    pub task_manager: Arc<TaskManager>,
-    pub model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
-}
-
-/// Dependencies exposed to task-management use-cases and route adapters.
-#[derive(Clone, Debug)]
-pub struct TaskContext {
-    pub store: Arc<AnyStore>,
-    pub task_manager: Arc<TaskManager>,
-}
