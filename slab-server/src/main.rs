@@ -1,6 +1,7 @@
 //! slab-server entry point.
 //! Runs in supervisor mode by default.
 
+mod bounded_contexts;
 mod config;
 mod entities;
 mod error;
@@ -515,11 +516,8 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
     let server_exe =
         std::env::current_exe().context("failed to resolve current executable path")?;
     let runtime_exe = resolve_runtime_exe(&server_exe)?;
-    let runtime_transport = RuntimeTransportMode::parse(
-        args.runtime_transport
-            .as_deref()
-            .unwrap_or("http"),
-    )?;
+    let runtime_transport =
+        RuntimeTransportMode::parse(args.runtime_transport.as_deref().unwrap_or("http"))?;
     let backend_endpoints = build_runtime_backend_endpoints(&args, runtime_transport)?;
     let mut children = Vec::new();
 
@@ -536,10 +534,9 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
         &args,
     )?);
     if args.include_diffusion {
-        let diffusion_endpoint = backend_endpoints
-            .diffusion
-            .as_deref()
-            .ok_or_else(|| anyhow!("diffusion endpoint is missing while diffusion backend is enabled"))?;
+        let diffusion_endpoint = backend_endpoints.diffusion.as_deref().ok_or_else(|| {
+            anyhow!("diffusion endpoint is missing while diffusion backend is enabled")
+        })?;
         children.push(spawn_backend_child(
             &runtime_exe,
             "diffusion",
