@@ -1,27 +1,101 @@
-//! Audio transcription routes.
-
 use std::sync::Arc;
 
-use axum::extract::State;
-use axum::http::StatusCode;
-use axum::routing::post;
-use axum::{Json, Router};
 use tracing::{debug, warn};
-use utoipa::OpenApi;
 
-use crate::context::{AppState, SubmitOperation, WorkerState};
+use crate::api::v1::audio::schema::{
+    CompletionRequest, TranscribeDecodeRequest, TranscribeVadRequest,
+};
+use crate::api::v1::tasks::schema::OperationAcceptedResponse;
+use crate::context::{SubmitOperation, WorkerState};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
-use crate::api::dto::v1::audio::{CompletionRequest, TranscribeDecodeRequest, TranscribeVadRequest};
-use crate::api::dto::v1::task::OperationAcceptedResponse;
 
-#[derive(OpenApi)]
-#[openapi(paths(transcribe), components(schemas(OperationAcceptedResponse)))]
-pub struct AudioApi;
+#[derive(Clone)]
+pub struct AudioService {
+    state: WorkerState,
+}
 
-/// Register audio routes.
-pub fn router() -> Router<Arc<AppState>> {
-    Router::new().route("/audio/transcriptions", post(transcribe))
+impl AudioService {
+    pub fn new(state: WorkerState) -> Self {
+        Self { state }
+    }
+
+    pub async fn transcribe(
+        &self,
+        req: CompletionRequest,
+    ) -> Result<OperationAcceptedResponse, ServerError> {
+        let vad = build_vad_request(req.vad.as_ref())?;
+        let decode = build_decode_request(req.decode.as_ref())?;
+        let vad_enabled = vad.is_some();
+        let decode_configured = decode.is_some();
+        debug!(
+            file_path = %req.path,
+            vad_enabled,
+            decode_configured,
+            "transcription request"
+        );
+
+        if req.path.is_empty() {
+            return Err(ServerError::BadRequest("audio file path is empty".into()));
+        }
+
+        let transcribe_channel = self.state.grpc().transcribe_channel().ok_or_else(|| {
+            ServerError::BackendNotReady("whisper gRPC endpoint is not configured".into())
+        })?;
+
+        let grpc_req = pb::TranscribeRequest {
+            path: req.path.clone(),
+            vad,
+            decode,
+        };
+
+        let model_auto_unload = Arc::clone(self.state.auto_unload());
+        let transcribe_channel_for_spawn = transcribe_channel;
+        let input_data = req.path.clone();
+        let operation_id = self
+            .state
+            .submit_operation(
+                SubmitOperation::running("ggml.whisper", None, Some(input_data)),
+                move |operation| async move {
+                    let operation_id = operation.id().to_owned();
+                    let _usage_guard =
+                        match model_auto_unload.acquire_for_inference("ggml.whisper").await {
+                            Ok(guard) => guard,
+                            Err(error) => {
+                                let msg = format!("whisper backend not ready: {error}");
+                                if let Err(db_e) = operation.mark_failed(&msg).await {
+                                    warn!(task_id = %operation_id, error = %db_e, "failed to update auto-reload failure");
+                                }
+                                return;
+                            }
+                        };
+
+                    let rpc_result =
+                        rpc::client::transcribe(transcribe_channel_for_spawn, grpc_req).await;
+                    if operation.is_cancelled().await {
+                        return;
+                    }
+
+                    match rpc_result {
+                        Ok(text) => {
+                            let payload = serde_json::json!({ "text": text }).to_string();
+                            if let Err(error) = operation.mark_succeeded(&payload).await {
+                                warn!(task_id = %operation_id, error = %error, "failed to update remote transcription result");
+                            }
+                        }
+                        Err(error) => {
+                            let message = error.to_string();
+                            if let Err(db_e) = operation.mark_failed(&message).await {
+                                warn!(task_id = %operation_id, error = %db_e, "failed to update remote transcription failure");
+                            }
+                        }
+                    }
+                },
+            )
+            .await?;
+
+        Ok(OperationAcceptedResponse { operation_id })
+    }
 }
 
 fn build_vad_request(
@@ -39,7 +113,7 @@ fn build_vad_request(
         .model_path
         .as_deref()
         .map(str::trim)
-        .filter(|v| !v.is_empty())
+        .filter(|value| !value.is_empty())
         .ok_or_else(|| {
             ServerError::BadRequest(
                 "VAD is enabled but model_path is empty. Please select a VAD model.".into(),
@@ -59,7 +133,7 @@ fn build_vad_request(
         ("vad.min_silence_duration_ms", vad.min_silence_duration_ms),
         ("vad.speech_pad_ms", vad.speech_pad_ms),
     ] {
-        if value.is_some_and(|v| v < 0) {
+        if value.is_some_and(|number| number < 0) {
             return Err(ServerError::BadRequest(format!("{name} must be >= 0")));
         }
     }
@@ -116,7 +190,7 @@ fn build_decode_request(
         ("decode.max_len", decode.max_len),
         ("decode.max_tokens", decode.max_tokens),
     ] {
-        if value.is_some_and(|v| v < 0) {
+        if value.is_some_and(|number| number < 0) {
             return Err(ServerError::BadRequest(format!("{name} must be >= 0")));
         }
     }
@@ -133,7 +207,7 @@ fn build_decode_request(
         ("decode.temperature", decode.temperature),
         ("decode.temperature_inc", decode.temperature_inc),
     ] {
-        if value.is_some_and(|v| v < 0.0) {
+        if value.is_some_and(|number| number < 0.0) {
             return Err(ServerError::BadRequest(format!("{name} must be >= 0.0")));
         }
     }
@@ -179,98 +253,5 @@ fn build_decode_request(
     }))
 }
 
-/// Speech-to-text transcription (`POST /v1/audio/transcriptions`).
-#[utoipa::path(
-    post,
-    path = "/v1/audio/transcriptions",
-    tag = "audio",
-    request_body(content = CompletionRequest, description = "Audio transcription request"),
-    responses(
-        (status = 202, description = "Task accepted", body = OperationAcceptedResponse),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-pub async fn transcribe(
-    State(worker_state): State<WorkerState>,
-    Json(req): Json<CompletionRequest>,
-) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
-    let vad = build_vad_request(req.vad.as_ref())?;
-    let decode = build_decode_request(req.decode.as_ref())?;
-    let vad_enabled = vad.is_some();
-    let decode_configured = decode.is_some();
-    debug!(
-        file_path = %req.path,
-        vad_enabled,
-        decode_configured,
-        "transcription request"
-    );
-
-    if req.path.is_empty() {
-        return Err(ServerError::BadRequest("audio file path is empty".into()));
-    }
-
-    let transcribe_channel = worker_state.grpc().transcribe_channel().ok_or_else(|| {
-        ServerError::BackendNotReady("whisper gRPC endpoint is not configured".into())
-    })?;
-
-    let grpc_req = pb::TranscribeRequest {
-        path: req.path.clone(),
-        vad,
-        decode,
-    };
-
-    let model_auto_unload = Arc::clone(worker_state.auto_unload());
-    let transcribe_channel_for_spawn = transcribe_channel;
-    let input_data = req.path.clone();
-    let operation_id = worker_state
-        .submit_operation(
-            SubmitOperation::running("ggml.whisper", None, Some(input_data)),
-            move |operation| async move {
-                let operation_id = operation.id().to_owned();
-                let _usage_guard = match model_auto_unload.acquire_for_inference("ggml.whisper").await {
-                    Ok(guard) => guard,
-                    Err(error) => {
-                        let msg = format!("whisper backend not ready: {error}");
-                        if let Err(db_e) = operation.mark_failed(&msg).await {
-                            warn!(task_id = %operation_id, error = %db_e, "failed to update auto-reload failure");
-                        }
-                        return;
-                    }
-                };
-
-                let rpc_result =
-                    rpc::client::transcribe(transcribe_channel_for_spawn, grpc_req).await;
-                if operation.is_cancelled().await {
-                    return;
-                }
-
-                match rpc_result {
-                    Ok(text) => {
-                        let payload = serde_json::json!({ "text": text }).to_string();
-                        if let Err(e) = operation.mark_succeeded(&payload).await {
-                            warn!(task_id = %operation_id, error = %e, "failed to update remote transcription result");
-                        }
-                    }
-                    Err(e) => {
-                        let msg = e.to_string();
-                        if let Err(db_e) = operation.mark_failed(&msg).await {
-                            warn!(task_id = %operation_id, error = %db_e, "failed to update remote transcription failure");
-                        }
-                    }
-                }
-            },
-        )
-        .await?;
-
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(OperationAcceptedResponse {
-            operation_id,
-        }),
-    ))
-}
-
 #[cfg(test)]
 mod test {}
-

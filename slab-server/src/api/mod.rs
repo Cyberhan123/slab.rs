@@ -6,7 +6,6 @@
 //! - Health / heartbeat route
 //! - OpenAI-compatible `/v1` routes
 
-pub mod dto;
 pub mod doc;
 pub mod health;
 mod middleware;

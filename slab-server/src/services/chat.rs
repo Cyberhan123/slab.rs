@@ -1,14 +1,6 @@
 //! OpenAI-compatible chat completion routes.
 
 use std::collections::HashMap;
-use std::convert::Infallible;
-use std::sync::Arc;
-
-use axum::extract::State;
-use axum::response::sse::{Event, Sse};
-use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
-use axum::{Json, Router};
 use chrono::Utc;
 use futures::{stream, StreamExt};
 use genai::adapter::AdapterKind;
@@ -22,7 +14,6 @@ use genai::{
 };
 use serde::Deserialize;
 use tracing::{debug, info, warn};
-use utoipa::OpenApi;
 use uuid::Uuid;
 
 use crate::domain::models::{
@@ -30,17 +21,15 @@ use crate::domain::models::{
     ConversationMessage as DomainConversationMessage,
 };
 use crate::domain::services::{
-    ChatCompletionOutput, ChatCompletionPort, ChatStreamChunk, CreateChatCompletionUseCase,
-    to_chat_completion_command, to_chat_completion_response, to_openai_messages,
+    ChatCompletionOutput, ChatStreamChunk, to_chat_completion_command, to_openai_messages,
 };
 use crate::infra::db::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
-use crate::api::dto::v1::chat::{
-    ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
-    ChatModelOption, ChatModelSource,
+use crate::api::v1::chat::schema::{
+    ChatCompletionRequest, ChatMessage as OpenAiMessage, ChatModelOption, ChatModelSource,
 };
-use crate::context::{AppState, ModelState};
+use crate::context::ModelState;
 
 /// Maximum allowed prompt length in bytes.
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
@@ -48,25 +37,64 @@ const LLAMA_BACKEND_ID: &str = "ggml.llama";
 const CHAT_MODEL_PROVIDERS_CONFIG_KEY: &str = "chat_model_providers";
 const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
 
-#[derive(OpenApi)]
-#[openapi(
-    paths(chat_completions, list_chat_models),
-    components(schemas(
-        ChatCompletionRequest,
-        ChatCompletionResponse,
-        OpenAiMessage,
-        ChatChoice,
-        ChatModelOption,
-        ChatModelSource
-    ))
-)]
-pub struct ChatApi;
+#[derive(Clone)]
+pub struct ChatService {
+    state: ModelState,
+}
 
-/// Register chat routes.
-pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/chat/completions", post(chat_completions))
-        .route("/chat/models", get(list_chat_models))
+impl ChatService {
+    pub fn new(state: ModelState) -> Self {
+        Self { state }
+    }
+
+    pub async fn list_chat_models(&self) -> Result<Vec<ChatModelOption>, ServerError> {
+        let local_models = self.state.store().list_models().await?;
+        let download_tasks = self.state.store().list_tasks(Some("model_download")).await?;
+        let pending_by_model = pending_download_map(download_tasks);
+
+        let mut items: Vec<ChatModelOption> = local_models
+            .into_iter()
+            .filter(|model| model.backend_ids.iter().any(|backend| backend == LLAMA_BACKEND_ID))
+            .map(|model| ChatModelOption {
+                id: model.id.clone(),
+                display_name: model.display_name,
+                source: ChatModelSource::Local,
+                provider_id: None,
+                provider_name: None,
+                backend_id: Some(LLAMA_BACKEND_ID.to_owned()),
+                downloaded: model.local_path.is_some(),
+                pending: pending_by_model.contains_key(&model.id),
+            })
+            .collect();
+
+        let mut cloud_items = Vec::new();
+        for provider in load_cloud_providers_lenient(&self.state).await {
+            for model in provider.models {
+                cloud_items.push(ChatModelOption {
+                    id: cloud_option_id(&provider.id, &model.id),
+                    display_name: model.display_name.unwrap_or_else(|| model.id.clone()),
+                    source: ChatModelSource::Cloud,
+                    provider_id: Some(provider.id.clone()),
+                    provider_name: Some(provider.name.clone()),
+                    backend_id: None,
+                    downloaded: true,
+                    pending: false,
+                });
+            }
+        }
+        cloud_items.sort_by(|left, right| left.display_name.cmp(&right.display_name));
+        items.extend(cloud_items);
+
+        Ok(items)
+    }
+
+    pub async fn create_chat_completion(
+        &self,
+        req: ChatCompletionRequest,
+    ) -> Result<ChatCompletionOutput, ServerError> {
+        let command = to_chat_completion_command(req);
+        create_chat_completion_with_state(self.state.clone(), command).await
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -358,58 +386,6 @@ fn pending_download_map(tasks: Vec<TaskRecord>) -> HashMap<String, TaskRecord> {
     pending_by_model
 }
 
-#[utoipa::path(
-    get,
-    path = "/v1/chat/models",
-    tag = "chat",
-    responses(
-        (status = 200, description = "Selectable chat models (local + cloud providers)", body = [ChatModelOption]),
-        (status = 500, description = "Backend error"),
-    )
-)]
-pub async fn list_chat_models(
-    State(state): State<ModelState>,
-) -> Result<Json<Vec<ChatModelOption>>, ServerError> {
-    let local_models = state.store().list_models().await?;
-    let download_tasks = state.store().list_tasks(Some("model_download")).await?;
-    let pending_by_model = pending_download_map(download_tasks);
-
-    let mut items: Vec<ChatModelOption> = local_models
-        .into_iter()
-        .filter(|m| m.backend_ids.iter().any(|b| b == LLAMA_BACKEND_ID))
-        .map(|m| ChatModelOption {
-            id: m.id.clone(),
-            display_name: m.display_name,
-            source: ChatModelSource::Local,
-            provider_id: None,
-            provider_name: None,
-            backend_id: Some(LLAMA_BACKEND_ID.to_owned()),
-            downloaded: m.local_path.is_some(),
-            pending: pending_by_model.contains_key(&m.id),
-        })
-        .collect();
-
-    let mut cloud_items = Vec::new();
-    for provider in load_cloud_providers_lenient(&state).await {
-        for model in provider.models {
-            cloud_items.push(ChatModelOption {
-                id: cloud_option_id(&provider.id, &model.id),
-                display_name: model.display_name.unwrap_or_else(|| model.id.clone()),
-                source: ChatModelSource::Cloud,
-                provider_id: Some(provider.id.clone()),
-                provider_name: Some(provider.name.clone()),
-                backend_id: None,
-                downloaded: true,
-                pending: false,
-            });
-        }
-    }
-    cloud_items.sort_by(|a, b| a.display_name.cmp(&b.display_name));
-    items.extend(cloud_items);
-
-    Ok(Json(items))
-}
-
 enum CloudDelta {
     Content(String),
     Reasoning(String),
@@ -548,57 +524,6 @@ async fn cloud_chat_stream(
     });
 
     Ok(Box::pin(stream))
-}
-
-/// OpenAI chat completions (`POST /v1/chat/completions`).
-#[utoipa::path(
-    post,
-    path = "/v1/chat/completions",
-    tag = "chat",
-    request_body = ChatCompletionRequest,
-    responses(
-        (status = 200, description = "Completion generated", body = ChatCompletionResponse),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-pub async fn chat_completions(
-    State(state): State<ModelState>,
-    Json(req): Json<ChatCompletionRequest>,
-) -> Result<Response, ServerError> {
-    let use_case = CreateChatCompletionUseCase::new(ChatRoutePort { state });
-    let command = to_chat_completion_command(req);
-    match use_case.execute(command).await? {
-        ChatCompletionOutput::Json(resp) => {
-            Ok(Json(to_chat_completion_response(resp)).into_response())
-        }
-        ChatCompletionOutput::Stream(stream) => {
-            let event_stream = stream.map(|chunk| -> Result<Event, Infallible> {
-                match chunk {
-                    ChatStreamChunk::Data(data) => Ok(Event::default().data(data)),
-                    ChatStreamChunk::Comment(comment) => Ok(Event::default().comment(comment)),
-                }
-            });
-            Ok(Sse::new(event_stream).into_response())
-        }
-    }
-}
-
-struct ChatRoutePort {
-    state: ModelState,
-}
-
-impl ChatCompletionPort for ChatRoutePort {
-    fn create_chat_completion(
-        &self,
-        command: ChatCompletionCommand,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<Output = Result<ChatCompletionOutput, ServerError>> + Send + '_,
-        >,
-    > {
-        Box::pin(create_chat_completion_with_state(self.state.clone(), command))
-    }
 }
 
 pub(crate) async fn create_chat_completion_with_state(
@@ -857,7 +782,7 @@ fn capitalize_role(role: &str) -> &str {
 #[cfg(test)]
 mod test {
     use super::*;
-    use crate::api::dto::v1::chat::ChatMessage as OpenAiMsg;
+    use crate::api::v1::chat::schema::ChatMessage as OpenAiMsg;
 
     fn make_request(role: &str, content: &str) -> ChatCompletionRequest {
         ChatCompletionRequest {
