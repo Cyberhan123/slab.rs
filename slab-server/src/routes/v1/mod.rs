@@ -57,7 +57,7 @@ pub fn router(
     chat_context: Arc<ChatContext>,
     model_context: Arc<ModelContext>,
     task_context: Arc<TaskContext>,
-) -> Router<Arc<V1State>> {
+) -> Router {
     let state = Arc::new(V1State {
         app_state,
         chat_context,

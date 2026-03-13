@@ -656,11 +656,11 @@ impl ModelLoadPort for ModelRoutePort {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<ModelStatusResponse, ServerError>> + Send + '_>,
     > {
-        Box::pin(load_model_with_state(Arc::clone(&self.context), req))
+        Box::pin(load_model_with_context(Arc::clone(&self.context), req))
     }
 }
 
-pub(crate) async fn load_model_with_state(
+pub(crate) async fn load_model_with_context(
     context: Arc<ModelContext>,
     req: LoadModelRequest,
 ) -> Result<ModelStatusResponse, ServerError> {
