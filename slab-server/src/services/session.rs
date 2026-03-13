@@ -1,114 +1,55 @@
-use std::sync::Arc;
-
-use axum::extract::{Path, State};
-use axum::routing::{delete, get, post};
-use axum::{Json, Router};
 use chrono::Utc;
-use utoipa::OpenApi;
 use uuid::Uuid;
 
-use crate::infra::db::{ChatSession, ChatStore, SessionStore};
+use crate::api::v1::session::schema::{CreateSessionRequest, MessageResponse, SessionResponse};
+use crate::context::ModelState;
 use crate::error::ServerError;
-use crate::api::dto::v1::session::{CreateSessionRequest, MessageResponse, SessionResponse};
-use crate::context::{AppState, ModelState};
+use crate::infra::db::{ChatStore, ChatSession, SessionStore};
 
-#[derive(OpenApi)]
-#[openapi(
-    paths(create_session, list_sessions, delete_session, list_session_messages),
-    components(schemas(CreateSessionRequest, SessionResponse, MessageResponse))
-)]
-pub struct SessionApi;
-
-/// Register session routes.
-pub fn router() -> Router<Arc<AppState>> {
-    Router::new()
-        .route("/sessions", post(create_session).get(list_sessions))
-        .route("/sessions/{id}", delete(delete_session))
-        .route("/sessions/{id}/messages", get(list_session_messages))
+#[derive(Clone)]
+pub struct SessionService {
+    state: ModelState,
 }
 
-//  Session handlers 
-#[utoipa::path(
-    post,
-    path = "/v1/sessions",
-    tag = "sessions",
-    request_body = CreateSessionRequest,
-    responses(
-        (status = 200, description = "Session created", body = SessionResponse),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-pub async fn create_session(
-    State(state): State<ModelState>,
-    Json(req): Json<CreateSessionRequest>,
-) -> Result<Json<SessionResponse>, ServerError> {
-    let now = Utc::now();
-    let session = ChatSession {
-        id: Uuid::new_v4().to_string(),
-        name: req.name.unwrap_or_default(),
-        state_path: None,
-        created_at: now,
-        updated_at: now,
-    };
-    state.store().create_session(session.clone()).await?;
-    Ok(Json(session.to_response()))
-}
+impl SessionService {
+    pub fn new(state: ModelState) -> Self {
+        Self { state }
+    }
 
-#[utoipa::path(
-    get,
-    path = "/v1/sessions",
-    tag = "sessions",
-    responses(
-        (status = 200, description = "Session list retrieved", body = Vec<SessionResponse>),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-pub async fn list_sessions(
-    State(state): State<ModelState>,
-) -> Result<Json<Vec<SessionResponse>>, ServerError> {
-    let sessions = state.store().list_sessions().await?;
-    Ok(Json(
-        sessions.into_iter().map(|s| s.to_response()).collect(),
-    ))
-}
+    pub async fn create_session(
+        &self,
+        req: CreateSessionRequest,
+    ) -> Result<SessionResponse, ServerError> {
+        let now = Utc::now();
+        let session = ChatSession {
+            id: Uuid::new_v4().to_string(),
+            name: req.name.unwrap_or_default(),
+            state_path: None,
+            created_at: now,
+            updated_at: now,
+        };
+        self.state.store().create_session(session.clone()).await?;
+        Ok(session.to_response())
+    }
 
-#[utoipa::path(
-    delete,
-    path = "/v1/sessions/{id}",
-    tag = "sessions",
-    responses(
-        (status = 200, description = "Session deleted", body = serde_json::Value),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-pub async fn delete_session(
-    State(state): State<ModelState>,
-    Path(id): Path<String>,
-) -> Result<Json<serde_json::Value>, ServerError> {
-    state.store().delete_session(&id).await?;
-    Ok(Json(serde_json::json!({ "deleted": true })))
-}
+    pub async fn list_sessions(&self) -> Result<Vec<SessionResponse>, ServerError> {
+        let sessions = self.state.store().list_sessions().await?;
+        Ok(sessions.into_iter().map(|session| session.to_response()).collect())
+    }
 
-#[utoipa::path(
-    get,
-    path = "/v1/sessions/{id}/messages",
-    tag = "sessions",
-    responses(
-        (status = 200, description = "Session messages retrieved", body = Vec<MessageResponse>),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-pub async fn list_session_messages(
-    State(state): State<ModelState>,
-    Path(id): Path<String>,
-) -> Result<Json<Vec<MessageResponse>>, ServerError> {
-    let messages = state.store().list_messages(&id).await?;
-    Ok(Json(
-        messages.into_iter().map(|m| m.to_response()).collect(),
-    ))
-}
+    pub async fn delete_session(&self, id: &str) -> Result<serde_json::Value, ServerError> {
+        self.state.store().delete_session(id).await?;
+        Ok(serde_json::json!({ "deleted": true }))
+    }
 
+    pub async fn list_session_messages(
+        &self,
+        id: &str,
+    ) -> Result<Vec<MessageResponse>, ServerError> {
+        let messages = self.state.store().list_messages(id).await?;
+        Ok(messages
+            .into_iter()
+            .map(|message| message.to_response())
+            .collect())
+    }
+}

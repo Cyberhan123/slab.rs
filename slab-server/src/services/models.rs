@@ -21,12 +21,12 @@ use crate::infra::db::{ConfigStore, ModelCatalogRecord, ModelStore, TaskRecord, 
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::LoadedModelSpec;
-use crate::api::dto::v1::models::{
+use crate::api::v1::models::schema::{
     CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
     LoadModelRequest, ModelCatalogItemResponse, ModelListStatus, ModelStatusResponse,
     SwitchModelRequest, UpdateModelRequest,
 };
-use crate::api::dto::v1::task::OperationAcceptedResponse;
+use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::context::{AppState, ModelState, SubmitOperation, WorkerState};
 use hf_hub::api::sync::{Api, ApiBuilder};
 use slab_core::api::Backend;

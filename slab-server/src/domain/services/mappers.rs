@@ -3,11 +3,11 @@ use crate::domain::models::{
     TaskResult,
 };
 use crate::infra::db::TaskRecord;
-use crate::api::dto::v1::chat::{
+use crate::api::v1::chat::schema::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
 };
-use crate::api::dto::v1::models::{LoadModelRequest, ModelStatusResponse};
-use crate::api::dto::v1::task::{TaskResponse, TaskResultPayload};
+use crate::api::v1::models::schema::{LoadModelRequest, ModelStatusResponse};
+use crate::api::v1::tasks::schema::{TaskResponse, TaskResultPayload};
 
 pub fn to_chat_completion_command(request: ChatCompletionRequest) -> ChatCompletionCommand {
     ChatCompletionCommand {

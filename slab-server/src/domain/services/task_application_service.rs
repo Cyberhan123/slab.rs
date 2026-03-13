@@ -6,7 +6,7 @@ use crate::domain::services::to_task_response;
 use crate::error::ServerError;
 use crate::infra::db::TaskStore;
 use crate::infra::rpc::adapter::payload_to_task_result;
-use crate::api::dto::v1::task::{TaskResponse, TaskStatusEnumExt};
+use crate::api::v1::tasks::schema::{TaskResponse, TaskStatusEnumExt};
 
 #[derive(Clone)]
 pub struct TaskApplicationService {

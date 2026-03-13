@@ -1,14 +1,14 @@
-mod audio;
-mod backend;
-mod chat;
-mod config;
-mod ffmpeg;
-mod images;
-mod models;
-mod session;
-mod system;
-mod tasks;
-mod video;
+pub mod audio;
+pub mod backend;
+pub mod chat;
+pub mod config;
+pub mod ffmpeg;
+pub mod images;
+pub mod models;
+pub mod session;
+pub mod system;
+pub mod tasks;
+pub mod video;
 
 use std::sync::Arc;
 
@@ -33,7 +33,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .merge(ffmpeg::router())
         .merge(system::router())
         .merge(tasks::router())
-        .merge(config::router(state.clone()))
+        .merge(config::router())
         .merge(backend::router(state))
 }
 
