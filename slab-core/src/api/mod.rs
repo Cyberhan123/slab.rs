@@ -366,6 +366,22 @@ pub async fn purge_task(task_id: TaskId) -> Result<(), RuntimeError> {
     Ok(())
 }
 
+/// Cancel a task and immediately remove its in-memory record.
+///
+/// This is the preferred cleanup path when discarding a task before its
+/// result has been consumed (e.g. on timeout).  Unlike calling
+/// [`cancel`] + [`purge_task`] separately, this method signals the
+/// cancellation watch channel *directly* before removing the record, so
+/// there is no window where the record has been removed but the running
+/// stage has not yet seen the cancel flag.
+///
+/// This is a no-op if `task_id` is not found.
+pub async fn cancel_and_purge_task(task_id: TaskId) -> Result<(), RuntimeError> {
+    let rt = CallBuilder::runtime()?;
+    rt.orchestrator.cancel_and_purge(task_id).await;
+    Ok(())
+}
+
 /// Check if a backend is ready to accept inference requests.
 ///
 /// Returns `true` if the backend has both its library and model loaded.
@@ -701,9 +717,11 @@ impl CallBuilder {
         match wait_result {
             // Deadline expired: cancel the still-running task and remove its
             // in-memory record so the map does not grow without bound.
+            // cancel_and_purge signals cancellation directly before removing
+            // the record, avoiding a race where the purge would prevent the
+            // queued cancel command from finding cancel_tx.
             Err(_timeout) => {
-                rt.orchestrator.cancel(task_id);
-                rt.orchestrator.purge_task(task_id).await;
+                rt.orchestrator.cancel_and_purge(task_id).await;
                 return Err(RuntimeError::Timeout);
             }
             // Task reached a non-success terminal state (Failed / Cancelled).
@@ -780,9 +798,10 @@ impl CallBuilder {
 
         match init_result {
             // Stream init timed out: cancel and clean up.
+            // cancel_and_purge signals cancellation directly before removing
+            // the record to avoid the race described on run_wait_timeout.
             Err(_timeout) => {
-                rt.orchestrator.cancel(task_id);
-                rt.orchestrator.purge_task(task_id).await;
+                rt.orchestrator.cancel_and_purge(task_id).await;
                 return Err(RuntimeError::Timeout);
             }
             // Task failed before the stream was opened: clean up.
