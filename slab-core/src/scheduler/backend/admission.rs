@@ -9,9 +9,9 @@ use tokio::sync::{
 };
 use tracing::warn;
 
-use crate::runtime::backend::protocol::{BackendRequest, WorkerCommand};
-use crate::runtime::backend::runner::{shared_ingress, SharedIngressRx};
-use crate::runtime::types::{
+use crate::scheduler::backend::protocol::{BackendRequest, WorkerCommand};
+use crate::scheduler::backend::runner::{shared_ingress, SharedIngressRx};
+use crate::scheduler::types::{
     BackendLifecycleState, FailedGlobalOperation, GlobalConsistencyState, RuntimeError,
 };
 

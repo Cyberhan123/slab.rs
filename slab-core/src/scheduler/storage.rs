@@ -2,8 +2,8 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::{mpsc, RwLock};
 
-use crate::runtime::backend::protocol::StreamHandle;
-use crate::runtime::types::{Payload, StageStatus, TaskId, TaskStatus};
+use crate::scheduler::backend::protocol::StreamHandle;
+use crate::scheduler::types::{Payload, StageStatus, TaskId, TaskStatus};
 
 /// The complete in-memory record for a single submitted task.
 #[derive(Debug)]
@@ -25,12 +25,12 @@ pub struct ResultStorage {
     inner: Arc<RwLock<HashMap<TaskId, TaskRecord>>>,
     next_id: Arc<std::sync::atomic::AtomicU64>,
     /// Bounded channel for submitting work to the orchestrator.
-    submit_tx: mpsc::Sender<crate::runtime::orchestrator::OrchestratorCommand>,
+    submit_tx: mpsc::Sender<crate::scheduler::orchestrator::OrchestratorCommand>,
 }
 
 impl ResultStorage {
     /// Create a new, empty storage instance.
-    pub fn new(submit_tx: mpsc::Sender<crate::runtime::orchestrator::OrchestratorCommand>) -> Self {
+    pub fn new(submit_tx: mpsc::Sender<crate::scheduler::orchestrator::OrchestratorCommand>) -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
             next_id: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -150,7 +150,7 @@ impl ResultStorage {
     }
 
     /// Return a clone of the submit sender (used by pipeline builder).
-    pub fn submit_tx(&self) -> mpsc::Sender<crate::runtime::orchestrator::OrchestratorCommand> {
+    pub fn submit_tx(&self) -> mpsc::Sender<crate::scheduler::orchestrator::OrchestratorCommand> {
         self.submit_tx.clone()
     }
 }

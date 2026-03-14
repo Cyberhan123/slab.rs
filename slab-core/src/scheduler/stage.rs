@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
-use crate::runtime::backend::admission::ResourceManager;
-use crate::runtime::backend::protocol::{
+use crate::scheduler::backend::admission::ResourceManager;
+use crate::scheduler::backend::protocol::{
     BackendOp, BackendReply, BackendRequest, BackendRequestKind,
 };
-use crate::runtime::types::{Payload, RuntimeError};
+use crate::scheduler::types::{Payload, RuntimeError};
 
 /// Type alias for the boxed synchronous CPU work closure.
 ///
@@ -154,7 +154,7 @@ impl GpuStage {
 /// A streaming GPU stage; must be the **final** stage in its pipeline.
 ///
 /// Instead of returning a `Payload`, it returns a `StreamHandle` (an `mpsc`
-/// receiver) that yields [`crate::runtime::backend::protocol::StreamChunk`]
+/// receiver) that yields [`crate::scheduler::backend::protocol::StreamChunk`]
 /// items.
 #[derive(Clone, Debug)]
 pub struct GpuStreamStage {
@@ -176,7 +176,7 @@ impl GpuStreamStage {
         input: Payload,
         cancel_rx: tokio::sync::watch::Receiver<bool>,
         rm: &ResourceManager,
-    ) -> Result<crate::runtime::backend::protocol::StreamHandle, RuntimeError> {
+    ) -> Result<crate::scheduler::backend::protocol::StreamHandle, RuntimeError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let ingress_tx = rm.ingress_tx(&self.backend_id)?;
         let req = BackendRequest {

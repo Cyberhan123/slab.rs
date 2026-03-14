@@ -1,9 +1,9 @@
 use std::marker::PhantomData;
 
-use crate::runtime::backend::protocol::BackendOp;
-use crate::runtime::orchestrator::Orchestrator;
-use crate::runtime::stage::{CpuStage, GpuStage, GpuStreamStage, Stage};
-use crate::runtime::types::{Payload, RuntimeError, TaskId};
+use crate::scheduler::backend::protocol::BackendOp;
+use crate::scheduler::orchestrator::Orchestrator;
+use crate::scheduler::stage::{CpuStage, GpuStage, GpuStreamStage, Stage};
+use crate::scheduler::types::{Payload, RuntimeError, TaskId};
 
 // ─── Typestate markers ────────────────────────────────────────────────────────
 

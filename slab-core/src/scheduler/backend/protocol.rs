@@ -1,6 +1,6 @@
 use tokio::sync::{mpsc, oneshot};
 
-use crate::runtime::types::Payload;
+use crate::scheduler::types::Payload;
 
 /// Canonical management events supported by the runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
