@@ -129,6 +129,12 @@ impl FromRef<Arc<AppState>> for crate::domain::services::ModelService {
     }
 }
 
+impl FromRef<Arc<AppState>> for crate::domain::services::SettingsService {
+    fn from_ref(input: &Arc<AppState>) -> Self {
+        input.services.settings.clone()
+    }
+}
+
 impl FromRef<Arc<AppState>> for crate::domain::services::SessionService {
     fn from_ref(input: &Arc<AppState>) -> Self {
         input.services.session.clone()
