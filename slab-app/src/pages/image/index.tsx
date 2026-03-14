@@ -333,10 +333,11 @@ export default function ImagePage() {
   const isGenerating = isSubmitting || isPolling;
 
   return (
-    <div className="container mx-auto px-4 py-6 max-w-6xl space-y-6">
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* ── Left panel: controls ── */}
-        <div className="lg:col-span-1 space-y-4">
+    <div className="h-full overflow-y-auto lg:overflow-hidden">
+      <div className="container mx-auto flex h-full max-w-6xl flex-col px-4 py-6">
+        <div className="grid grid-cols-1 gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-3">
+          {/* ── Left panel: controls ── */}
+          <div className="space-y-4 lg:col-span-1 lg:min-h-0 lg:overflow-y-auto lg:pr-3">
           {/* Mode tabs */}
           <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
             <TabsList className="w-full">
@@ -653,8 +654,8 @@ export default function ImagePage() {
           </div>
         </div>
 
-        {/* ── Right panel: gallery ── */}
-        <div className="lg:col-span-2">
+          {/* ── Right panel: gallery ── */}
+          <div className="min-h-0 lg:col-span-2 lg:overflow-y-auto">
           {images.length === 0 ? (
             <div className="flex flex-col items-center justify-center rounded-lg border border-dashed h-full min-h-[400px] gap-4 text-muted-foreground">
               <ImageIcon className="h-12 w-12 opacity-30" />
@@ -693,17 +694,18 @@ export default function ImagePage() {
               ))}
             </div>
           )}
+          </div>
         </div>
-      </div>
 
-      {/* Zoom dialog */}
-      <Dialog open={!!zoomedImage} onOpenChange={(open) => { if (!open) setZoomedImage(null); }}>
-        <DialogContent className="max-w-3xl p-2">
-          {zoomedImage && (
-            <img src={zoomedImage} alt="preview" className="w-full rounded" />
-          )}
-        </DialogContent>
-      </Dialog>
+        {/* Zoom dialog */}
+        <Dialog open={!!zoomedImage} onOpenChange={(open) => { if (!open) setZoomedImage(null); }}>
+          <DialogContent className="max-w-3xl p-2">
+            {zoomedImage && (
+              <img src={zoomedImage} alt="preview" className="w-full rounded" />
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
     </div>
   );
 }
