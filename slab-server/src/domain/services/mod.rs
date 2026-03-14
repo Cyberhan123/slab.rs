@@ -5,6 +5,7 @@ mod config;
 mod ffmpeg;
 mod image;
 mod model;
+mod settings;
 mod session;
 mod system;
 mod task;
@@ -17,6 +18,7 @@ pub use config::ConfigService;
 pub use ffmpeg::FfmpegService;
 pub use image::ImageService;
 pub use model::ModelService;
+pub use settings::SettingsService;
 pub use session::SessionService;
 pub use system::SystemService;
 pub use task::TaskApplicationService;
@@ -33,6 +35,7 @@ pub struct AppServices {
     pub ffmpeg: FfmpegService,
     pub image: ImageService,
     pub model: ModelService,
+    pub settings: SettingsService,
     pub session: SessionService,
     pub system: SystemService,
     pub task_application: TaskApplicationService,
@@ -49,6 +52,7 @@ impl AppServices {
             ffmpeg: FfmpegService::new(worker_state.clone()),
             image: ImageService::new(worker_state.clone()),
             model: ModelService::new(model_state.clone(), worker_state.clone()),
+            settings: SettingsService::new(model_state.clone()),
             session: SessionService::new(model_state.clone()),
             system: SystemService::new(),
             task_application: TaskApplicationService::new(worker_state.clone()),

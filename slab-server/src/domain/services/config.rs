@@ -1,7 +1,7 @@
 use crate::context::ModelState;
 use crate::domain::models::{ConfigEntryView, SetConfigValueCommand};
+use crate::domain::services::settings::{get_config_entry, list_config_entries, set_config_entry};
 use crate::error::ServerError;
-use crate::infra::db::ConfigStore;
 
 #[derive(Clone)]
 pub struct ConfigService {
@@ -14,21 +14,11 @@ impl ConfigService {
     }
 
     pub async fn list_config(&self) -> Result<Vec<ConfigEntryView>, ServerError> {
-        let entries = self.state.store().list_config_values().await?;
-        Ok(entries
-            .into_iter()
-            .map(|(key, name, value)| ConfigEntryView { key, name, value })
-            .collect())
+        list_config_entries(&self.state).await
     }
 
     pub async fn get_config_value(&self, key: String) -> Result<ConfigEntryView, ServerError> {
-        let (name, value) = self
-            .state
-            .store()
-            .get_config_entry(&key)
-            .await?
-            .ok_or_else(|| ServerError::NotFound(format!("config key '{key}' not found")))?;
-        Ok(ConfigEntryView { key, name, value })
+        get_config_entry(&self.state, &key).await
     }
 
     pub async fn set_config_value(
@@ -36,11 +26,7 @@ impl ConfigService {
         key: String,
         body: SetConfigValueCommand,
     ) -> Result<ConfigEntryView, ServerError> {
-        self.state
-            .store()
-            .set_config_entry(&key, body.name.as_deref(), &body.value)
-            .await?;
-        self.get_config_value(key).await
+        set_config_entry(&self.state, &key, body.name.as_deref(), &body.value).await
     }
 }
 

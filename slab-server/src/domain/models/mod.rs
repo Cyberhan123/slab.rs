@@ -5,6 +5,7 @@ mod config;
 mod ffmpeg;
 mod image;
 mod model;
+mod settings;
 mod session;
 mod system;
 mod task;
@@ -26,6 +27,12 @@ pub use model::{
     AvailableModelsQuery, AvailableModelsView, CreateModelCommand, DeletedModelView,
     DownloadModelCommand, ListModelsFilter, ModelCatalogItemView, ModelCatalogStatus,
     ModelLoadCommand, ModelStatus, UpdateModelCommand,
+};
+pub use settings::{
+    setting_definition, setting_definitions, SettingCategory, SettingControl,
+    SettingValidation, SettingView, SettingsSystemBackendView, SettingsSystemView,
+    UpdateSettingCommand, DIFFUSION_NUM_WORKERS_SETTING_KEY,
+    LLAMA_NUM_WORKERS_SETTING_KEY, WHISPER_NUM_WORKERS_SETTING_KEY,
 };
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
