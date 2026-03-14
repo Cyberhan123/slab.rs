@@ -272,20 +272,11 @@ export default function VideoPage() {
   const isGenerating = isSubmitting || isPolling;
 
   return (
-    <div className="container mx-auto px-4 py-6 max-w-4xl space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Video Generation</h1>
-        {isGenerating && (
-          <Badge variant="secondary" className="gap-1">
-            <Loader2 className="h-3 w-3 animate-spin" />
-            Generating…
-          </Badge>
-        )}
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+    <div className="h-full overflow-y-auto lg:overflow-hidden">
+      <div className="container mx-auto flex h-full max-w-4xl flex-col px-4 py-6">
+        <div className="grid grid-cols-1 gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-2">
         {/* ── Left panel: controls ── */}
-        <div className="space-y-4">
+          <div className="space-y-4 lg:min-h-0 lg:overflow-y-auto lg:pr-3">
           {/* Model selector */}
           <div className="space-y-1.5">
             <Label>Model</Label>
@@ -513,7 +504,7 @@ export default function VideoPage() {
         </div>
 
         {/* ── Right panel: preview ── */}
-        <div className="space-y-4">
+          <div className="space-y-4 lg:min-h-0 lg:overflow-y-auto">
           {videoPath ? (
             <div className="space-y-3">
               <h3 className="font-medium">Generated Video</h3>
@@ -561,6 +552,7 @@ export default function VideoPage() {
               )}
             </div>
           )}
+          </div>
         </div>
       </div>
     </div>
