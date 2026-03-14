@@ -136,6 +136,19 @@ impl ResultStorage {
             .take()
     }
 
+    /// Remove a task record from storage.
+    ///
+    /// Should be called once the task has reached a terminal state and its
+    /// result (or stream handle) has been consumed.  Removing the record
+    /// prevents unbounded growth of the in-memory task map over the lifetime
+    /// of the process.
+    ///
+    /// Subsequent calls to any method on a purged `task_id` are safe but
+    /// will behave as if the task never existed.
+    pub async fn remove_task(&self, task_id: TaskId) {
+        self.inner.write().await.remove(&task_id);
+    }
+
     /// Return a clone of the submit sender (used by pipeline builder).
     pub fn submit_tx(&self) -> mpsc::Sender<crate::runtime::orchestrator::OrchestratorCommand> {
         self.submit_tx.clone()

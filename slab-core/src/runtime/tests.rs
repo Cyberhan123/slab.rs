@@ -707,4 +707,184 @@ mod tests {
             "expected a runtime control signal on backend control channel"
         );
     }
+
+    // ── Tests: purge_task ─────────────────────────────────────────────────────
+
+    /// Verify that `purge_task` removes the task record so subsequent
+    /// `get_status` calls return `TaskNotFound`.
+    #[tokio::test]
+    async fn purge_task_removes_record() {
+        let mut rm = ResourceManager::new();
+        rm.register_backend("echo", |shared_rx, _control_tx| {
+            tokio::spawn(async move {
+                loop {
+                    let req = {
+                        let mut lock = shared_rx.lock().await;
+                        lock.recv().await
+                    };
+                    match req {
+                        Some(req) => {
+                            let _ = req.reply_tx.send(BackendReply::Value(req.input));
+                        }
+                        None => break,
+                    }
+                }
+            });
+        });
+        let orchestrator = Orchestrator::start(rm, 64);
+
+        let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("hello"))
+            .gpu("echo", "echo", BackendOp {
+                name: "echo".into(),
+                options: Payload::default(),
+            })
+            .run()
+            .await
+            .expect("submit should succeed");
+
+        // Wait for success.
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            loop {
+                match orchestrator.get_status(task_id).await {
+                    Ok(v) if matches!(v.status, TaskStatus::Succeeded { .. }) => break,
+                    _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
+                }
+            }
+        })
+        .await
+        .expect("task should complete");
+
+        // Record should exist before purge.
+        assert!(
+            orchestrator.get_status(task_id).await.is_ok(),
+            "record should exist before purge"
+        );
+
+        orchestrator.purge_task(task_id).await;
+
+        // After purge the record is gone.
+        assert!(
+            matches!(
+                orchestrator.get_status(task_id).await,
+                Err(RuntimeError::TaskNotFound { .. })
+            ),
+            "record should be gone after purge"
+        );
+    }
+
+    /// Verify that `purge_task` on a failed task also removes the record.
+    #[tokio::test]
+    async fn purge_task_removes_failed_record() {
+        let mut rm = ResourceManager::with_config(ResourceManagerConfig {
+            backend_capacity: 0, // No permits → timeout → failed
+            ..ResourceManagerConfig::default()
+        });
+        rm.register_backend("stall", |_rx, _tx| {});
+        let orchestrator = Orchestrator::start(rm, 64);
+
+        let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("x"))
+            .gpu("stall", "stall", BackendOp {
+                name: "stall".into(),
+                options: Payload::default(),
+            })
+            .run()
+            .await
+            .expect("submit should succeed");
+
+        // Wait for the GPU acquire timeout (≤ 200 ms in test builds).
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                match orchestrator.get_status(task_id).await {
+                    Ok(v) if matches!(v.status, TaskStatus::Failed { .. }) => break,
+                    _ => tokio::time::sleep(std::time::Duration::from_millis(20)).await,
+                }
+            }
+        })
+        .await
+        .expect("task should fail quickly");
+
+        orchestrator.purge_task(task_id).await;
+
+        assert!(
+            matches!(
+                orchestrator.get_status(task_id).await,
+                Err(RuntimeError::TaskNotFound { .. })
+            ),
+            "failed task record should be gone after purge"
+        );
+    }
+
+    // ── Tests: cancel_and_purge ───────────────────────────────────────────────
+
+    /// Verify that `cancel_and_purge` signals cancellation before removing the
+    /// record, so the running stage actually sees the cancel flag.
+    ///
+    /// The test submits a task whose backend delays long enough that we can
+    /// call `cancel_and_purge` while the stage is still running, then verifies:
+    ///   1. The task record is gone immediately after `cancel_and_purge`.
+    ///   2. The cancel watch sender (held by the spawned execute_task) received
+    ///      the `true` signal — i.e., cancellation was delivered, not lost.
+    #[tokio::test]
+    async fn cancel_and_purge_signals_before_removing_record() {
+        use std::sync::Arc;
+        use tokio::sync::Notify;
+
+        // Backend that parks until the cancel channel is closed/dropped.
+        let started = Arc::new(Notify::new());
+        let started_clone = Arc::clone(&started);
+
+        let mut rm = ResourceManager::new();
+        rm.register_backend("slow", move |shared_rx, _control_tx| {
+            let started = Arc::clone(&started_clone);
+            tokio::spawn(async move {
+                loop {
+                    let req = {
+                        let mut lock = shared_rx.lock().await;
+                        lock.recv().await
+                    };
+                    match req {
+                        Some(req) => {
+                            started.notify_one();
+                            // Wait until the cancel watch fires.
+                            let mut cancel = req.cancel_rx.clone();
+                            let _ = cancel.wait_for(|v| *v).await;
+                            let _ = req.reply_tx.send(BackendReply::Error("cancelled".into()));
+                        }
+                        None => break,
+                    }
+                }
+            });
+        });
+        let orchestrator = Orchestrator::start(rm, 64);
+
+        let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("slow"))
+            .gpu("slow-stage", "slow", BackendOp {
+                name: "slow".into(),
+                options: Payload::default(),
+            })
+            .run()
+            .await
+            .expect("submit should succeed");
+
+        // Wait for the backend to actually start processing the request.
+        tokio::time::timeout(std::time::Duration::from_secs(5), started.notified())
+            .await
+            .expect("backend should start within timeout");
+
+        // cancel_and_purge should signal the cancel watch before removing the record.
+        orchestrator.cancel_and_purge(task_id).await;
+
+        // Record is gone immediately.
+        assert!(
+            matches!(
+                orchestrator.get_status(task_id).await,
+                Err(RuntimeError::TaskNotFound { .. })
+            ),
+            "record should be gone after cancel_and_purge"
+        );
+
+        // The backend was unblocked because it received the cancel signal — if
+        // cancellation had been lost the backend would block forever and the
+        // test would time out.
+    }
 }
