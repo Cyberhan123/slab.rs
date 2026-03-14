@@ -414,6 +414,25 @@ impl Orchestrator {
             .try_send(OrchestratorCommand::Cancel { task_id });
     }
 
+    /// Cancel a task and immediately remove its in-memory record.
+    ///
+    /// Unlike [`cancel`](Self::cancel), this signals cancellation **directly**
+    /// through the task's `cancel_tx` watch channel rather than routing through
+    /// the orchestrator command queue.  This avoids a race where purging the
+    /// record first would prevent the queued cancel command from finding
+    /// `cancel_tx`, leaving the task running indefinitely.
+    ///
+    /// After signalling cancellation the record is removed; subsequent
+    /// status/result calls will return [`RuntimeError::TaskNotFound`].
+    pub async fn cancel_and_purge(&self, task_id: TaskId) {
+        // Signal cancellation directly so that execute_task sees the watch
+        // flag set before the record is removed from storage.
+        if let Some(tx) = self.storage.get_cancel_tx(task_id).await {
+            let _ = tx.send(true);
+        }
+        self.storage.remove_task(task_id).await;
+    }
+
     /// Run backend initialization (`lib.load`) under backend-scoped management lock.
     pub async fn initialize_backend(
         &self,
