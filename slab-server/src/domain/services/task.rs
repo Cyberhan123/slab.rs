@@ -50,6 +50,17 @@ impl TaskApplicationService {
                     record.status = live_status.to_owned();
                     record.error_msg = live_error;
                 }
+                // Once the task reaches a terminal non-succeeded state and has
+                // been synced to the DB, its in-memory record is no longer
+                // needed; remove it to prevent unbounded growth.
+                if matches!(
+                    view.status,
+                    slab_core::TaskStatus::Failed { .. } | slab_core::TaskStatus::Cancelled
+                ) {
+                    if let Err(e) = slab_core::api::purge_task(core_tid as u64).await {
+                        warn!(task_id = %id, error = %e, "failed to purge slab-core task record after terminal status sync");
+                    }
+                }
             }
         }
 
@@ -77,10 +88,27 @@ impl TaskApplicationService {
                     } else {
                         warn!(task_id = %id, "failed to serialize result payload");
                     }
+                    // Result consumed and persisted; remove the in-memory record.
+                    if let Err(e) = slab_core::api::purge_task(core_tid as u64).await {
+                        warn!(task_id = %id, error = %e, "failed to purge slab-core task record after result consumed");
+                    }
                     return Ok(result_payload);
                 }
                 Ok(None) => {
+                    // api::result returns Ok(None) in two distinct situations:
+                    //   (a) ResultConsumed — the result was taken in a prior call and
+                    //       the DB already holds the persisted payload.
+                    //   (b) Task still running — payload not ready yet.
+                    //
+                    // Only purge the in-memory record for case (a), identified by
+                    // result_data being present in the DB record.  For case (b) the
+                    // record must stay alive so the task can complete normally.
                     if let Some(data) = record.result_data {
+                        // Persisted result exists → result was previously consumed.
+                        // Safe to remove the residual in-memory record.
+                        if let Err(e) = slab_core::api::purge_task(core_tid as u64).await {
+                            warn!(task_id = %id, error = %e, "failed to purge slab-core task record (result already consumed)");
+                        }
                         let result_payload = deserialize_task_result(&data).unwrap_or_else(|e| {
                             warn!(task_id = %id, error = %e, "persisted result_data is not a TaskResultPayload; returning as text");
                             TaskResult {
@@ -92,6 +120,7 @@ impl TaskApplicationService {
                         });
                         return Ok(result_payload);
                     }
+                    // No persisted result → task is still running; do not purge.
                     return Err(ServerError::BadRequest(format!(
                         "task {id} is not completed yet"
                     )));
@@ -105,6 +134,10 @@ impl TaskApplicationService {
                         .unwrap_or_else(
                             |db_e| warn!(error = %db_e, "failed to sync failed task error"),
                         );
+                    // Task is in a terminal error state; remove the in-memory record.
+                    if let Err(e) = slab_core::api::purge_task(core_tid as u64).await {
+                        warn!(task_id = %id, error = %e, "failed to purge slab-core task record after failure");
+                    }
                     return Err(ServerError::Runtime(e));
                 }
             }
@@ -154,8 +187,11 @@ impl TaskApplicationService {
             .await?;
 
         if let Some(core_tid) = record.core_task_id {
-            if let Err(e) = slab_core::api::cancel(core_tid as u64) {
-                warn!(task_id = %id, error = %e, "failed to cancel slab-core task");
+            // cancel_and_purge_task signals the cancel_tx directly before
+            // removing the record, so there is no race where the record has
+            // been purged before cancellation is delivered.
+            if let Err(e) = slab_core::api::cancel_and_purge_task(core_tid as u64).await {
+                warn!(task_id = %id, error = %e, "failed to cancel/purge slab-core task");
             }
         }
         self.state.cancel_operation(id);
