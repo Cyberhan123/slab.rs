@@ -5,8 +5,8 @@ use async_trait::async_trait;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
 use crate::api::Event;
-use crate::runtime::backend::protocol::BackendReply;
-use crate::runtime::backend::protocol::{
+use crate::scheduler::backend::protocol::BackendReply;
+use crate::scheduler::backend::protocol::{
     BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
 };
 
@@ -227,14 +227,14 @@ mod tests {
     use async_trait::async_trait;
     use tokio::sync::{broadcast, mpsc, watch, Mutex};
 
-    use crate::runtime::backend::protocol::{
+    use crate::scheduler::backend::protocol::{
         BackendOp, BackendReply, BackendRequest, BackendRequestKind, PeerWorkerCommand,
         RuntimeControlSignal, WorkerCommand,
     };
-    use crate::runtime::backend::runner::{
+    use crate::scheduler::backend::runner::{
         shared_ingress, spawn_runtime_worker, RuntimeWorkerHandler,
     };
-    use crate::runtime::types::Payload;
+    use crate::scheduler::types::Payload;
 
     #[derive(Clone, Default)]
     struct Observed {
