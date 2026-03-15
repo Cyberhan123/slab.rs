@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   CheckCircle2,
@@ -123,7 +124,7 @@ function ComponentRow({
   extra,
 }: {
   status: ComponentStatus;
-  extra?: React.ReactNode;
+  extra?: ReactNode;
 }) {
   return (
     <div className="flex items-center justify-between py-2">
@@ -281,7 +282,7 @@ export default function SetupPage() {
             {checkError}
             <br />
             Make sure <code>slab-server</code> is running on{' '}
-            <code>localhost:3000</code> and reload the app.
+            <code>{SERVER_BASE_URL}</code> and reload the app.
           </AlertDescription>
         </Alert>
       </div>
