@@ -1,9 +1,11 @@
+use std::path::PathBuf;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
 use std::time::Duration;
 
+use dirs_next::config_dir;
 use tauri::path::BaseDirectory;
 use tauri::Manager;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -62,6 +64,11 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
         .path()
         .resolve("resources/lib", BaseDirectory::Resource)?;
     let lib_path_str = lib_path.to_str().ok_or("invalid lib path")?;
+    let settings_path = config_dir()
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Slab")
+        .join("settings.json");
+    let settings_path_str = settings_path.to_str().ok_or("invalid settings path")?;
 
     let sidecar_command = app_handle.shell().sidecar("slab-server")?.args([
         "--gateway-bind",
@@ -74,6 +81,8 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
         "ipc",
         "--lib-dir",
         lib_path_str,
+        "--settings-path",
+        settings_path_str,
         "--shutdown-on-stdin-close",
     ]);
 

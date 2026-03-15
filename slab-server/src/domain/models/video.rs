@@ -68,7 +68,9 @@ fn decode_init_image(data_uri: &str) -> Result<DecodedVideoInitImage, ServerErro
     };
     let bytes = base64::engine::general_purpose::STANDARD
         .decode(b64)
-        .map_err(|error| ServerError::BadRequest(format!("init_image base64 decode failed: {error}")))?;
+        .map_err(|error| {
+            ServerError::BadRequest(format!("init_image base64 decode failed: {error}"))
+        })?;
     let image = image::load_from_memory(&bytes)
         .map_err(|error| ServerError::BadRequest(format!("init_image decode failed: {error}")))?;
     let rgb = image.to_rgb8();

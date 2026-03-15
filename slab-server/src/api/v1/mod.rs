@@ -1,7 +1,6 @@
 pub mod audio;
 pub mod backend;
 pub mod chat;
-pub mod config;
 pub mod ffmpeg;
 pub mod images;
 pub mod models;
@@ -34,7 +33,6 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .merge(ffmpeg::router())
         .merge(system::router())
         .merge(tasks::router())
-        .merge(config::router())
         .merge(settings::router(state.clone()))
         .merge(backend::router(state))
 }
@@ -50,7 +48,6 @@ pub fn api_docs() -> utoipa::openapi::OpenApi {
     spec.merge(ffmpeg::FfmpegApi::openapi());
     spec.merge(system::SystemApi::openapi());
     spec.merge(tasks::TasksApi::openapi());
-    spec.merge(config::ConfigApi::openapi());
     spec.merge(settings::SettingsApi::openapi());
     spec.merge(backend::BackendApi::openapi());
 

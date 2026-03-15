@@ -1,6 +1,7 @@
 use super::AnyStore;
 use std::future::Future;
 
+#[allow(dead_code)]
 pub trait ConfigStore: Send + Sync + 'static {
     fn get_config_entry(
         &self,

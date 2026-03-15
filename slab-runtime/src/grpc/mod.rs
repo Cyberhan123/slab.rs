@@ -49,6 +49,8 @@ pub(super) fn runtime_to_status(err: slab_core::RuntimeError) -> Status {
         slab_core::RuntimeError::GlobalStateInconsistent { .. } => Status::internal(msg),
         slab_core::RuntimeError::CpuStageFailed { .. } => Status::internal(msg),
         slab_core::RuntimeError::GpuStageFailed { .. } => Status::internal(msg),
+        slab_core::RuntimeError::EngineIo(_) => Status::internal(msg),
+        slab_core::RuntimeError::GGMLEngine(_) => Status::internal(msg),
     }
 }
 
@@ -191,4 +193,23 @@ pub(super) async fn reload_library_for_backend(
         backend: backend.to_string(),
         status: "loaded".to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::runtime_to_status;
+    use tonic::Code;
+
+    #[test]
+    fn engine_errors_map_to_internal_status() {
+        let engine_io = runtime_to_status(slab_core::RuntimeError::EngineIo("disk offline".into()));
+        assert_eq!(engine_io.code(), Code::Internal);
+        assert!(engine_io.message().contains("engine I/O error"));
+
+        let ggml = runtime_to_status(slab_core::RuntimeError::GGMLEngine(
+            "session not found".into(),
+        ));
+        assert_eq!(ggml.code(), Code::Internal);
+        assert!(ggml.message().contains("GGML engine error"));
+    }
 }

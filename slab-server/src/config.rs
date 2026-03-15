@@ -1,5 +1,6 @@
 //! Server configuration, loaded from environment variables at startup.
 
+use dirs_next::config_dir;
 use std::path::PathBuf;
 
 /// Runtime configuration for slab-server.
@@ -47,7 +48,7 @@ pub struct Config {
     /// but should be restricted to trusted origins in production.
     pub cors_allowed_origins: Option<String>,
 
-    /// Optional bearer token required for management endpoints (`/v1/config/*`, `/v1/backends/*`).
+    /// Optional bearer token required for management endpoints (`/v1/settings*`, `/v1/backends/*`).
     ///
     /// Set `SLAB_ADMIN_TOKEN=<secret>` to require an
     /// `Authorization: Bearer <secret>` header on those routes.
@@ -72,6 +73,9 @@ pub struct Config {
 
     /// Directory where chat session state files are stored.
     pub session_state_dir: String,
+
+    /// Absolute path of the user-managed settings values file.
+    pub settings_path: PathBuf,
 }
 
 impl Config {
@@ -97,6 +101,10 @@ impl Config {
             diffusion_grpc_endpoint: std::env::var("SLAB_DIFFUSION_GRPC_ENDPOINT").ok(),
             lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(PathBuf::from),
             session_state_dir: env_or("SLAB_SESSION_STATE_DIR", "./tmp/slab-sessions"),
+            settings_path: std::env::var("SLAB_SETTINGS_PATH")
+                .ok()
+                .map(PathBuf::from)
+                .unwrap_or_else(default_settings_path),
         }
     }
 }
@@ -112,4 +120,9 @@ fn parse_env<T: std::str::FromStr>(key: &str, default: T) -> T {
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(default)
+}
+
+pub fn default_settings_path() -> PathBuf {
+    let base_dir = config_dir().unwrap_or_else(|| PathBuf::from("."));
+    base_dir.join("Slab").join("settings.json")
 }

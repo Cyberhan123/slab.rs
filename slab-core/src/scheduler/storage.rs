@@ -30,7 +30,9 @@ pub struct ResultStorage {
 
 impl ResultStorage {
     /// Create a new, empty storage instance.
-    pub fn new(submit_tx: mpsc::Sender<crate::scheduler::orchestrator::OrchestratorCommand>) -> Self {
+    pub fn new(
+        submit_tx: mpsc::Sender<crate::scheduler::orchestrator::OrchestratorCommand>,
+    ) -> Self {
         Self {
             inner: Arc::new(RwLock::new(HashMap::new())),
             next_id: Arc::new(std::sync::atomic::AtomicU64::new(0)),
