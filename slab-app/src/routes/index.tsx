@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { useRoutes } from "react-router-dom";
 import Chat from "@/pages/chat";
 import About from "@/pages/about";
@@ -10,9 +11,29 @@ import Audio from "@/pages/audio";
 import Video from "@/pages/video";
 import Image from "@/pages/image";
 import Plugins from "@/pages/plugins";
+import { Spinner } from "@/components/ui/spinner";
+
+// Lazy-load the setup page so it doesn't bloat the main bundle.
+const SetupPage = lazy(() => import("@/pages/setup"));
 
 function AppRoutes() {
   const routes = useRoutes([
+    {
+      // The setup wizard lives outside the main Layout so it gets a clean,
+      // full-screen canvas.  It navigates to "/" once setup is complete.
+      path: '/setup',
+      element: (
+        <Suspense
+          fallback={
+            <div className="flex h-screen items-center justify-center">
+              <Spinner className="h-8 w-8" />
+            </div>
+          }
+        >
+          <SetupPage />
+        </Suspense>
+      ),
+    },
     {
       path: '/',
       element: <Layout />,
@@ -28,7 +49,7 @@ function AppRoutes() {
         { path: 'about', element: <About /> },
       ],
     },
-    { path: "/theme-preview", element: <ThemePreview /> }
+    { path: "/theme-preview", element: <ThemePreview /> },
   ]);
 
   return routes;
