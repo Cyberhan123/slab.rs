@@ -12,10 +12,10 @@ import { errorMiddleware } from "./errors";
 import { QueryClient } from '@tanstack/react-query'
 
 // Get API configuration from environment
-
+import { SERVER_BASE_URL } from '../config';
 
 const fetchClient = createFetchClient<paths>({
-  baseUrl: 'http://localhost:3000/',
+  baseUrl: `${SERVER_BASE_URL}/`,
 });
 
 // Register error middleware

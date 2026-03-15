@@ -161,3 +161,9 @@ impl FromRef<Arc<AppState>> for crate::domain::services::VideoService {
         input.services.video.clone()
     }
 }
+
+impl FromRef<Arc<AppState>> for crate::domain::services::SetupService {
+    fn from_ref(input: &Arc<AppState>) -> Self {
+        input.services.setup.clone()
+    }
+}

@@ -70,3 +70,4 @@ image     = { workspace = true }
 dirs-next = "2.0.0"
 jsonschema = { version = "0.45.0", default-features = false }
 windows-sys = { version = "0.59.0", features = ["Win32_Storage_FileSystem"] }
+ffmpeg-sidecar = { workspace = true, features = ["download_ffmpeg"] }
