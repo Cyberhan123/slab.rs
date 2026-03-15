@@ -95,34 +95,48 @@ impl BackendService {
             })?;
 
         // Read settings-based overrides, falling back to the built-in spec.
+        // Log a warning on read errors so misconfigured schemas are visible.
         let (tag_pmid, asset_pmid) = settings_pmids_for(backend_id);
 
-        let tag = self
+        let tag = match self
             .model_state
             .settings()
             .get_optional_string(tag_pmid)
             .await
-            .unwrap_or(None)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| default_tag.to_owned());
+        {
+            Ok(value) => value.filter(|s| !s.is_empty()).unwrap_or_else(|| default_tag.to_owned()),
+            Err(error) => {
+                warn!(pmid = tag_pmid, error = %error, "failed to read backend tag setting; using default");
+                default_tag.to_owned()
+            }
+        };
 
-        let asset = self
+        let asset = match self
             .model_state
             .settings()
             .get_optional_string(asset_pmid)
             .await
-            .unwrap_or(None)
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| default_asset_fn(&tag));
+        {
+            Ok(value) => value.filter(|s| !s.is_empty()).unwrap_or_else(|| default_asset_fn(&tag)),
+            Err(error) => {
+                warn!(pmid = asset_pmid, error = %error, "failed to read backend asset setting; using default");
+                default_asset_fn(&tag)
+            }
+        };
 
         // Prefer the backends.dir setting over the explicit target_dir argument.
-        let backends_dir = self
+        let backends_dir = match self
             .model_state
             .settings()
             .get_optional_string(SETUP_BACKENDS_DIR_PMID)
             .await
-            .unwrap_or(None)
-            .filter(|s| !s.is_empty());
+        {
+            Ok(value) => value.filter(|s| !s.is_empty()),
+            Err(error) => {
+                warn!(pmid = SETUP_BACKENDS_DIR_PMID, error = %error, "failed to read backends dir setting; using request target_dir");
+                None
+            }
+        };
 
         let target_dir = backends_dir.unwrap_or(req.target_dir);
 

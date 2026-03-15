@@ -4,9 +4,8 @@ use slab_core::api::Backend;
 use strum::IntoEnumIterator;
 use tracing::{info, warn};
 
-use crate::context::{ModelState, WorkerState};
-use crate::context::SubmitOperation;
 use crate::context::worker_state::OperationContext;
+use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, CompleteSetupCommand, ComponentStatus, EnvironmentStatus,
     UpdateSettingCommand, UpdateSettingOperation, SETUP_FFMPEG_DIR_PMID, SETUP_INITIALIZED_PMID,
@@ -30,12 +29,18 @@ impl SetupService {
     /// Return the current environment status: FFmpeg presence, backend
     /// availability, and whether the setup wizard has been completed.
     pub async fn environment_status(&self) -> Result<EnvironmentStatus, ServerError> {
-        let initialized = self
+        let initialized = match self
             .model_state
             .settings()
             .get_bool(SETUP_INITIALIZED_PMID)
             .await
-            .unwrap_or(false);
+        {
+            Ok(value) => value,
+            Err(error) => {
+                warn!(pmid = SETUP_INITIALIZED_PMID, error = %error, "failed to read setup initialized flag; defaulting to false");
+                false
+            }
+        };
 
         // `ffmpeg_is_installed` is a blocking check — run it off the async executor.
         let ffmpeg_installed =
@@ -78,12 +83,18 @@ impl SetupService {
     /// accepted-operation handle.  The caller should poll the task via the
     /// tasks API to track progress.
     pub async fn download_ffmpeg(&self) -> Result<AcceptedOperation, ServerError> {
-        let ffmpeg_dir = self
+        let ffmpeg_dir = match self
             .model_state
             .settings()
             .get_optional_string(SETUP_FFMPEG_DIR_PMID)
             .await
-            .unwrap_or(None);
+        {
+            Ok(value) => value,
+            Err(error) => {
+                warn!(pmid = SETUP_FFMPEG_DIR_PMID, error = %error, "failed to read ffmpeg dir setting; using default");
+                None
+            }
+        };
 
         let operation_id = self
             .worker_state
@@ -131,10 +142,10 @@ async fn run_ffmpeg_download(operation: OperationContext, ffmpeg_dir: Option<Str
 
     // Resolve destination: use settings-configured dir or fall back to the
     // sidecar directory (next to the server executable).
-    let destination: Option<PathBuf> = match ffmpeg_dir.as_deref().filter(|s| !s.is_empty()) {
-        Some(dir) => Some(PathBuf::from(dir)),
-        None => None,
-    };
+    let destination: Option<PathBuf> = ffmpeg_dir
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
 
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<PathBuf> {
         // Skip if already installed (idempotent).
@@ -178,10 +189,16 @@ async fn run_ffmpeg_download(operation: OperationContext, ffmpeg_dir: Option<Str
             }
         }
         Err(join_error) => {
-            let msg = format!("ffmpeg download task panicked: {join_error}");
+            // JoinError can represent either a task panic or a task cancellation
+            // (e.g., runtime shutdown). Distinguish between them for clearer diagnostics.
+            let msg = if join_error.is_panic() {
+                format!("ffmpeg download worker panicked: {join_error}")
+            } else {
+                format!("ffmpeg download worker was cancelled: {join_error}")
+            };
             warn!(task_id = %operation_id, "{msg}");
             if let Err(db_err) = operation.mark_failed(&msg).await {
-                warn!(task_id = %operation_id, error = %db_err, "failed to persist ffmpeg_download panic");
+                warn!(task_id = %operation_id, error = %db_err, "failed to persist ffmpeg_download task error");
             }
         }
     }
