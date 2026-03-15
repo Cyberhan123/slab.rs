@@ -1,105 +1,133 @@
+use std::collections::{BTreeMap, BTreeSet};
+
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use utoipa::ToSchema;
 
 use crate::error::ServerError;
 
-pub const MODEL_CACHE_DIR_SETTING_KEY: &str = "model_cache_dir";
-pub const LLAMA_NUM_WORKERS_SETTING_KEY: &str = "llama_num_workers";
-pub const WHISPER_NUM_WORKERS_SETTING_KEY: &str = "whisper_num_workers";
-pub const DIFFUSION_NUM_WORKERS_SETTING_KEY: &str = "diffusion_num_workers";
-pub const LLAMA_CONTEXT_LENGTH_SETTING_KEY: &str = "llama_context_length";
-pub const MODEL_AUTO_UNLOAD_ENABLED_SETTING_KEY: &str = "model_auto_unload_enabled";
-pub const MODEL_AUTO_UNLOAD_IDLE_MINUTES_SETTING_KEY: &str = "model_auto_unload_idle_minutes";
-pub const CHAT_MODEL_PROVIDERS_SETTING_KEY: &str = "chat_model_providers";
-pub const DIFFUSION_MODEL_PATH_SETTING_KEY: &str = "diffusion_model_path";
-pub const DIFFUSION_VAE_PATH_SETTING_KEY: &str = "diffusion_vae_path";
-pub const DIFFUSION_TAESD_PATH_SETTING_KEY: &str = "diffusion_taesd_path";
-pub const DIFFUSION_LORA_MODEL_DIR_SETTING_KEY: &str = "diffusion_lora_model_dir";
-pub const DIFFUSION_CLIP_L_PATH_SETTING_KEY: &str = "diffusion_clip_l_path";
-pub const DIFFUSION_CLIP_G_PATH_SETTING_KEY: &str = "diffusion_clip_g_path";
-pub const DIFFUSION_T5XXL_PATH_SETTING_KEY: &str = "diffusion_t5xxl_path";
-pub const DIFFUSION_FLASH_ATTN_SETTING_KEY: &str = "diffusion_flash_attn";
-pub const DIFFUSION_KEEP_VAE_ON_CPU_SETTING_KEY: &str = "diffusion_keep_vae_on_cpu";
-pub const DIFFUSION_KEEP_CLIP_ON_CPU_SETTING_KEY: &str = "diffusion_keep_clip_on_cpu";
-pub const DIFFUSION_OFFLOAD_PARAMS_SETTING_KEY: &str = "diffusion_offload_params_to_cpu";
+pub const MODEL_CACHE_DIR_PMID: &str = "runtime.model_cache_dir";
+pub const LLAMA_NUM_WORKERS_PMID: &str = "runtime.llama.num_workers";
+pub const WHISPER_NUM_WORKERS_PMID: &str = "runtime.whisper.num_workers";
+pub const DIFFUSION_NUM_WORKERS_PMID: &str = "runtime.diffusion.num_workers";
+pub const LLAMA_CONTEXT_LENGTH_PMID: &str = "runtime.llama.context_length";
+pub const MODEL_AUTO_UNLOAD_ENABLED_PMID: &str = "runtime.model_auto_unload.enabled";
+pub const MODEL_AUTO_UNLOAD_IDLE_MINUTES_PMID: &str = "runtime.model_auto_unload.idle_minutes";
+pub const CHAT_PROVIDERS_PMID: &str = "chat.providers";
+pub const DIFFUSION_MODEL_PATH_PMID: &str = "diffusion.paths.model";
+pub const DIFFUSION_VAE_PATH_PMID: &str = "diffusion.paths.vae";
+pub const DIFFUSION_TAESD_PATH_PMID: &str = "diffusion.paths.taesd";
+pub const DIFFUSION_LORA_MODEL_DIR_PMID: &str = "diffusion.paths.lora_model_dir";
+pub const DIFFUSION_CLIP_L_PATH_PMID: &str = "diffusion.paths.clip_l";
+pub const DIFFUSION_CLIP_G_PATH_PMID: &str = "diffusion.paths.clip_g";
+pub const DIFFUSION_T5XXL_PATH_PMID: &str = "diffusion.paths.t5xxl";
+pub const DIFFUSION_FLASH_ATTN_PMID: &str = "diffusion.performance.flash_attn";
+pub const DIFFUSION_KEEP_VAE_ON_CPU_PMID: &str = "diffusion.performance.keep_vae_on_cpu";
+pub const DIFFUSION_KEEP_CLIP_ON_CPU_PMID: &str = "diffusion.performance.keep_clip_on_cpu";
+pub const DIFFUSION_OFFLOAD_PARAMS_TO_CPU_PMID: &str =
+    "diffusion.performance.offload_params_to_cpu";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
-pub enum SettingCategory {
-    Runtime,
-    ChatProviders,
-    Diffusion,
+pub enum SettingValueType {
+    Boolean,
+    Integer,
+    String,
+    Array,
+    Object,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum SettingControl {
-    Toggle,
-    Number,
-    Text,
-    Path,
-    Json,
+impl Default for SettingValueType {
+    fn default() -> Self {
+        Self::String
+    }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, Default)]
-pub struct SettingValidation {
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+pub struct SettingPropertySchema {
+    #[serde(rename = "type")]
+    pub value_type: SettingValueType,
+    #[serde(default, rename = "enum", skip_serializing_if = "Option::is_none")]
+    pub enum_values: Option<Vec<String>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub min: Option<i64>,
+    pub minimum: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub max: Option<i64>,
+    pub maximum: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub step: Option<i64>,
+    pub pattern: Option<String>,
+    #[serde(default)]
+    pub default_value: Value,
+    #[serde(default)]
+    pub secret: bool,
     #[serde(default)]
     pub multiline: bool,
     #[serde(default)]
-    pub allow_empty: bool,
+    pub order: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SettingView {
-    pub key: String,
-    pub category: SettingCategory,
+pub struct SettingPropertyView {
+    pub pmid: String,
     pub label: String,
-    pub description: String,
-    pub control: SettingControl,
+    #[serde(default)]
+    pub description_md: String,
     pub editable: bool,
-    pub value: Value,
+    pub schema: SettingPropertySchema,
     pub effective_value: Value,
-    pub default_value: Value,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub override_value: Option<Value>,
+    pub is_overridden: bool,
     pub search_terms: Vec<String>,
-    pub validation: SettingValidation,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SettingsSystemBackendView {
-    pub backend: String,
-    pub endpoint_configured: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub endpoint: Option<String>,
-    pub runtime_status: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub worker_setting_key: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub configured_workers: Option<u32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub effective_workers: Option<u32>,
+pub struct SettingsSubsectionView {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description_md: String,
+    pub properties: Vec<SettingPropertyView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct SettingsSystemView {
-    pub bind_address: String,
-    pub transport_mode: String,
-    pub swagger_enabled: bool,
-    pub admin_token_enabled: bool,
-    pub cors_configured: bool,
-    pub session_state_dir: String,
-    pub backends: Vec<SettingsSystemBackendView>,
+pub struct SettingsSectionView {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub description_md: String,
+    pub subsections: Vec<SettingsSubsectionView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SettingsDocumentView {
+    pub schema_version: u32,
+    pub settings_path: String,
+    pub warnings: Vec<String>,
+    pub sections: Vec<SettingsSectionView>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum UpdateSettingOperation {
+    Set,
+    Unset,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UpdateSettingCommand {
-    pub value: Value,
+    pub op: UpdateSettingOperation,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub value: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct SettingValidationErrorData {
+    #[serde(rename = "type")]
+    pub error_type: String,
+    pub pmid: String,
+    pub path: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -123,448 +151,397 @@ pub struct CloudProviderModelSettingValue {
     pub id: String,
     #[serde(default, alias = "displayName")]
     pub display_name: String,
-    #[serde(default, alias = "remoteModel", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "remoteModel",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub remote_model: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct SettingDefinition {
-    pub key: &'static str,
-    pub category: SettingCategory,
-    pub label: &'static str,
-    pub description: &'static str,
-    pub control: SettingControl,
-    pub editable: bool,
-    pub validation: SettingValidation,
-    pub search_terms: &'static [&'static str],
-    value_kind: SettingValueKind,
-    default_kind: SettingDefaultKind,
+#[derive(Debug, Clone)]
+pub struct SettingsSchema {
+    schema_version: u32,
+    sections: Vec<SettingsSectionDefinition>,
+    property_index: BTreeMap<String, SettingDefinition>,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum SettingValueKind {
-    Bool,
-    Integer {
-        min: Option<i64>,
-        max: Option<i64>,
-        empty_is_null: bool,
-    },
+#[derive(Debug, Clone)]
+pub struct SettingsSectionDefinition {
+    pub id: String,
+    pub title: String,
+    pub description_md: String,
+    pub subsections: Vec<SettingsSubsectionDefinition>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SettingsSubsectionDefinition {
+    pub id: String,
+    pub title: String,
+    pub description_md: String,
+    pub properties: Vec<SettingDefinition>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SettingDefinition {
+    pub pmid: String,
+    pub label: String,
+    pub description_md: String,
+    pub editable: bool,
+    pub search_terms: Vec<String>,
+    pub schema: SettingPropertySchema,
+    storage_kind: SettingStorageKind,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum SettingStorageKind {
+    Boolean,
+    Integer,
+    String,
     Path,
     ChatProviders,
 }
 
-#[derive(Debug, Clone, Copy)]
-enum SettingDefaultKind {
-    Bool(bool),
-    Integer(Option<i64>),
-    Text(&'static str),
-    ChatProviders,
+#[derive(Debug, Clone, Deserialize)]
+struct RawSettingsSchema {
+    schema_version: u32,
+    sections: Vec<RawSettingsSectionDefinition>,
 }
 
-const SETTINGS_REGISTRY: [SettingDefinition; 19] = [
-    SettingDefinition {
-        key: MODEL_CACHE_DIR_SETTING_KEY,
-        category: SettingCategory::Runtime,
-        label: "Model Cache Directory",
-        description: "Directory used for model downloads. Leave empty to use hf-hub defaults.",
-        control: SettingControl::Path,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["cache", "model", "download", "storage"],
-        value_kind: SettingValueKind::Path,
-        default_kind: SettingDefaultKind::Text(""),
-    },
-    SettingDefinition {
-        key: LLAMA_NUM_WORKERS_SETTING_KEY,
-        category: SettingCategory::Runtime,
-        label: "Llama Workers",
-        description: "Worker count for ggml.llama runtime jobs.",
-        control: SettingControl::Number,
-        editable: true,
-        validation: SettingValidation {
-            min: Some(1),
-            max: None,
-            step: Some(1),
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["llama", "workers", "runtime", "parallel"],
-        value_kind: SettingValueKind::Integer {
-            min: Some(1),
-            max: None,
-            empty_is_null: true,
-        },
-        default_kind: SettingDefaultKind::Integer(Some(1)),
-    },
-    SettingDefinition {
-        key: WHISPER_NUM_WORKERS_SETTING_KEY,
-        category: SettingCategory::Runtime,
-        label: "Whisper Workers",
-        description: "Worker count for ggml.whisper runtime jobs.",
-        control: SettingControl::Number,
-        editable: true,
-        validation: SettingValidation {
-            min: Some(1),
-            max: None,
-            step: Some(1),
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["whisper", "workers", "audio", "runtime"],
-        value_kind: SettingValueKind::Integer {
-            min: Some(1),
-            max: None,
-            empty_is_null: true,
-        },
-        default_kind: SettingDefaultKind::Integer(Some(1)),
-    },
-    SettingDefinition {
-        key: DIFFUSION_NUM_WORKERS_SETTING_KEY,
-        category: SettingCategory::Runtime,
-        label: "Diffusion Workers",
-        description: "Worker count for ggml.diffusion runtime jobs.",
-        control: SettingControl::Number,
-        editable: true,
-        validation: SettingValidation {
-            min: Some(1),
-            max: None,
-            step: Some(1),
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["diffusion", "workers", "image", "runtime"],
-        value_kind: SettingValueKind::Integer {
-            min: Some(1),
-            max: None,
-            empty_is_null: true,
-        },
-        default_kind: SettingDefaultKind::Integer(Some(1)),
-    },
-    SettingDefinition {
-        key: LLAMA_CONTEXT_LENGTH_SETTING_KEY,
-        category: SettingCategory::Runtime,
-        label: "Llama Context Length",
-        description: "Override llama context length. Leave empty to use backend default.",
-        control: SettingControl::Number,
-        editable: true,
-        validation: SettingValidation {
-            min: Some(1),
-            max: None,
-            step: Some(1),
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["llama", "context", "tokens", "runtime"],
-        value_kind: SettingValueKind::Integer {
-            min: Some(1),
-            max: None,
-            empty_is_null: true,
-        },
-        default_kind: SettingDefaultKind::Integer(None),
-    },
-    SettingDefinition {
-        key: MODEL_AUTO_UNLOAD_ENABLED_SETTING_KEY,
-        category: SettingCategory::Runtime,
-        label: "Model Auto Unload Enabled",
-        description: "Unload idle models automatically to free memory.",
-        control: SettingControl::Toggle,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: false,
-        },
-        search_terms: &["auto unload", "idle", "memory", "runtime"],
-        value_kind: SettingValueKind::Bool,
-        default_kind: SettingDefaultKind::Bool(false),
-    },
-    SettingDefinition {
-        key: MODEL_AUTO_UNLOAD_IDLE_MINUTES_SETTING_KEY,
-        category: SettingCategory::Runtime,
-        label: "Model Auto Unload Idle Minutes",
-        description: "Idle timeout in minutes before an auto unload runs.",
-        control: SettingControl::Number,
-        editable: true,
-        validation: SettingValidation {
-            min: Some(1),
-            max: None,
-            step: Some(1),
-            multiline: false,
-            allow_empty: false,
-        },
-        search_terms: &["auto unload", "idle", "minutes", "runtime"],
-        value_kind: SettingValueKind::Integer {
-            min: Some(1),
-            max: None,
-            empty_is_null: false,
-        },
-        default_kind: SettingDefaultKind::Integer(Some(10)),
-    },
-    SettingDefinition {
-        key: CHAT_MODEL_PROVIDERS_SETTING_KEY,
-        category: SettingCategory::ChatProviders,
-        label: "Chat Model Providers",
-        description: "OpenAI-compatible cloud providers used by chat model selection.",
-        control: SettingControl::Json,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: true,
-            allow_empty: true,
-        },
-        search_terms: &["chat", "cloud", "provider", "api", "openai"],
-        value_kind: SettingValueKind::ChatProviders,
-        default_kind: SettingDefaultKind::ChatProviders,
-    },
-    SettingDefinition {
-        key: DIFFUSION_MODEL_PATH_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion Model Path",
-        description: "Default diffusion model path used during model load operations.",
-        control: SettingControl::Path,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["diffusion", "model", "path"],
-        value_kind: SettingValueKind::Path,
-        default_kind: SettingDefaultKind::Text(""),
-    },
-    SettingDefinition {
-        key: DIFFUSION_VAE_PATH_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion VAE Path",
-        description: "Optional external VAE model path.",
-        control: SettingControl::Path,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["diffusion", "vae", "path"],
-        value_kind: SettingValueKind::Path,
-        default_kind: SettingDefaultKind::Text(""),
-    },
-    SettingDefinition {
-        key: DIFFUSION_TAESD_PATH_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion TAESD Path",
-        description: "Tiny autoencoder path for faster decode.",
-        control: SettingControl::Path,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["diffusion", "taesd", "path"],
-        value_kind: SettingValueKind::Path,
-        default_kind: SettingDefaultKind::Text(""),
-    },
-    SettingDefinition {
-        key: DIFFUSION_LORA_MODEL_DIR_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion LoRA Model Directory",
-        description: "Directory containing LoRA safetensors files.",
-        control: SettingControl::Path,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["diffusion", "lora", "directory", "path"],
-        value_kind: SettingValueKind::Path,
-        default_kind: SettingDefaultKind::Text(""),
-    },
-    SettingDefinition {
-        key: DIFFUSION_CLIP_L_PATH_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion CLIP-L Path",
-        description: "Optional CLIP-L path.",
-        control: SettingControl::Path,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["diffusion", "clip", "path", "clip-l"],
-        value_kind: SettingValueKind::Path,
-        default_kind: SettingDefaultKind::Text(""),
-    },
-    SettingDefinition {
-        key: DIFFUSION_CLIP_G_PATH_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion CLIP-G Path",
-        description: "Optional CLIP-G path.",
-        control: SettingControl::Path,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["diffusion", "clip", "path", "clip-g"],
-        value_kind: SettingValueKind::Path,
-        default_kind: SettingDefaultKind::Text(""),
-    },
-    SettingDefinition {
-        key: DIFFUSION_T5XXL_PATH_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion T5XXL Path",
-        description: "Optional T5XXL encoder path.",
-        control: SettingControl::Path,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: true,
-        },
-        search_terms: &["diffusion", "t5xxl", "path", "encoder"],
-        value_kind: SettingValueKind::Path,
-        default_kind: SettingDefaultKind::Text(""),
-    },
-    SettingDefinition {
-        key: DIFFUSION_FLASH_ATTN_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion Flash Attention",
-        description: "Enable flash attention when supported by the backend.",
-        control: SettingControl::Toggle,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: false,
-        },
-        search_terms: &["diffusion", "flash attention", "performance"],
-        value_kind: SettingValueKind::Bool,
-        default_kind: SettingDefaultKind::Bool(false),
-    },
-    SettingDefinition {
-        key: DIFFUSION_KEEP_VAE_ON_CPU_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion Keep VAE On CPU",
-        description: "Reduce VRAM usage by keeping VAE on CPU.",
-        control: SettingControl::Toggle,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: false,
-        },
-        search_terms: &["diffusion", "vae", "cpu", "memory"],
-        value_kind: SettingValueKind::Bool,
-        default_kind: SettingDefaultKind::Bool(false),
-    },
-    SettingDefinition {
-        key: DIFFUSION_KEEP_CLIP_ON_CPU_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion Keep CLIP On CPU",
-        description: "Reduce VRAM usage by keeping CLIP on CPU.",
-        control: SettingControl::Toggle,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: false,
-        },
-        search_terms: &["diffusion", "clip", "cpu", "memory"],
-        value_kind: SettingValueKind::Bool,
-        default_kind: SettingDefaultKind::Bool(false),
-    },
-    SettingDefinition {
-        key: DIFFUSION_OFFLOAD_PARAMS_SETTING_KEY,
-        category: SettingCategory::Diffusion,
-        label: "Diffusion Offload Params To CPU",
-        description: "Reduce VRAM usage by offloading parameters to CPU memory.",
-        control: SettingControl::Toggle,
-        editable: true,
-        validation: SettingValidation {
-            min: None,
-            max: None,
-            step: None,
-            multiline: false,
-            allow_empty: false,
-        },
-        search_terms: &["diffusion", "offload", "cpu", "memory"],
-        value_kind: SettingValueKind::Bool,
-        default_kind: SettingDefaultKind::Bool(false),
-    },
-];
-
-pub fn setting_definitions() -> &'static [SettingDefinition] {
-    &SETTINGS_REGISTRY
+#[derive(Debug, Clone, Deserialize)]
+struct RawSettingsSectionDefinition {
+    id: String,
+    title: String,
+    #[serde(default)]
+    description_md: String,
+    #[serde(default)]
+    order: u32,
+    #[serde(default)]
+    subsections: Vec<RawSettingsSubsectionDefinition>,
 }
 
-pub fn setting_definition(key: &str) -> Option<&'static SettingDefinition> {
-    SETTINGS_REGISTRY.iter().find(|definition| definition.key == key)
+#[derive(Debug, Clone, Deserialize)]
+struct RawSettingsSubsectionDefinition {
+    id: String,
+    title: String,
+    #[serde(default)]
+    description_md: String,
+    #[serde(default)]
+    order: u32,
+    #[serde(default)]
+    properties: Vec<RawSettingDefinition>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct RawSettingDefinition {
+    pmid: String,
+    label: String,
+    #[serde(default)]
+    description_md: String,
+    #[serde(default = "default_true")]
+    editable: bool,
+    #[serde(default)]
+    search_terms: Vec<String>,
+    #[serde(default = "default_storage_kind")]
+    storage_kind: SettingStorageKind,
+    schema: SettingPropertySchema,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SettingsValuesFile {
+    pub version: u32,
+    #[serde(default)]
+    pub values: BTreeMap<String, Value>,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_storage_kind() -> SettingStorageKind {
+    SettingStorageKind::String
+}
+
+pub fn embedded_settings_schema() -> Result<SettingsSchema, ServerError> {
+    SettingsSchema::from_json_str(include_str!("settings-schema.json"))
+}
+
+impl SettingsSchema {
+    pub fn from_json_str(raw: &str) -> Result<Self, ServerError> {
+        let parsed: RawSettingsSchema = serde_json::from_str(raw).map_err(|error| {
+            ServerError::Internal(format!("invalid embedded settings schema: {error}"))
+        })?;
+
+        if parsed.sections.is_empty() {
+            return Err(ServerError::Internal(
+                "embedded settings schema must contain at least one section".into(),
+            ));
+        }
+
+        let mut section_ids = BTreeSet::new();
+        let mut property_index = BTreeMap::new();
+        let mut sections = Vec::with_capacity(parsed.sections.len());
+        let mut raw_sections = parsed.sections;
+        raw_sections.sort_by_key(|section| section.order);
+
+        for raw_section in raw_sections {
+            if !section_ids.insert(raw_section.id.clone()) {
+                return Err(ServerError::Internal(format!(
+                    "duplicate settings section id '{}'",
+                    raw_section.id
+                )));
+            }
+
+            let mut subsection_ids = BTreeSet::new();
+            let mut subsections = Vec::with_capacity(raw_section.subsections.len());
+            let mut raw_subsections = raw_section.subsections;
+            raw_subsections.sort_by_key(|subsection| subsection.order);
+
+            for raw_subsection in raw_subsections {
+                if !subsection_ids.insert(raw_subsection.id.clone()) {
+                    return Err(ServerError::Internal(format!(
+                        "duplicate settings subsection id '{}.{}'",
+                        raw_section.id, raw_subsection.id
+                    )));
+                }
+
+                let mut properties = Vec::with_capacity(raw_subsection.properties.len());
+                let mut raw_properties = raw_subsection.properties;
+                raw_properties.sort_by_key(|property| property.schema.order);
+
+                for raw_property in raw_properties {
+                    let definition = SettingDefinition::from_raw(raw_property)?;
+                    if property_index.contains_key(&definition.pmid) {
+                        return Err(ServerError::Internal(format!(
+                            "duplicate settings pmid '{}'",
+                            definition.pmid
+                        )));
+                    }
+                    property_index.insert(definition.pmid.clone(), definition.clone());
+                    properties.push(definition);
+                }
+
+                subsections.push(SettingsSubsectionDefinition {
+                    id: raw_subsection.id,
+                    title: raw_subsection.title,
+                    description_md: raw_subsection.description_md,
+                    properties,
+                });
+            }
+
+            sections.push(SettingsSectionDefinition {
+                id: raw_section.id,
+                title: raw_section.title,
+                description_md: raw_section.description_md,
+                subsections,
+            });
+        }
+
+        Ok(Self {
+            schema_version: parsed.schema_version,
+            sections,
+            property_index,
+        })
+    }
+
+    pub fn schema_version(&self) -> u32 {
+        self.schema_version
+    }
+
+    pub fn sections(&self) -> &[SettingsSectionDefinition] {
+        &self.sections
+    }
+
+    pub fn property(&self, pmid: &str) -> Option<&SettingDefinition> {
+        self.property_index.get(pmid)
+    }
 }
 
 impl SettingDefinition {
-    pub fn default_value(&self) -> Value {
-        match self.default_kind {
-            SettingDefaultKind::Bool(value) => Value::Bool(value),
-            SettingDefaultKind::Integer(Some(value)) => json!(value),
-            SettingDefaultKind::Integer(None) => Value::Null,
-            SettingDefaultKind::Text(value) => Value::String(value.to_owned()),
-            SettingDefaultKind::ChatProviders => Value::Array(Vec::new()),
+    fn from_raw(raw: RawSettingDefinition) -> Result<Self, ServerError> {
+        let mut definition = Self {
+            pmid: raw.pmid.trim().to_owned(),
+            label: raw.label.trim().to_owned(),
+            description_md: raw.description_md.trim().to_owned(),
+            editable: raw.editable,
+            search_terms: raw.search_terms,
+            schema: raw.schema,
+            storage_kind: raw.storage_kind,
+        };
+
+        if definition.pmid.is_empty() {
+            return Err(ServerError::Internal(
+                "settings pmid must not be empty".into(),
+            ));
+        }
+        if definition.label.is_empty() {
+            return Err(ServerError::Internal(format!(
+                "settings '{}' must define a label",
+                definition.pmid
+            )));
+        }
+
+        definition.validate_storage_shape()?;
+        definition.schema.default_value = definition.canonicalize_default_value()?;
+
+        Ok(definition)
+    }
+
+    pub fn default_value(&self) -> &Value {
+        &self.schema.default_value
+    }
+
+    pub fn build_view(&self, override_value: Option<&Value>) -> SettingPropertyView {
+        let effective_value = override_value
+            .cloned()
+            .unwrap_or_else(|| self.schema.default_value.clone());
+
+        SettingPropertyView {
+            pmid: self.pmid.clone(),
+            label: self.label.clone(),
+            description_md: self.description_md.clone(),
+            editable: self.editable,
+            schema: self.schema.clone(),
+            effective_value,
+            override_value: override_value.cloned(),
+            is_overridden: override_value.is_some(),
+            search_terms: self.search_terms.clone(),
         }
     }
 
-    pub fn stored_value_from_raw(&self, raw: Option<&str>) -> Result<Value, ServerError> {
-        match self.value_kind {
-            SettingValueKind::Bool => match normalize_optional_text(raw) {
-                Some(value) => Ok(Value::Bool(parse_bool_like(&value)?)),
-                None => Ok(Value::Null),
-            },
-            SettingValueKind::Integer {
-                min,
-                max,
-                empty_is_null,
-            } => match normalize_optional_text(raw) {
-                Some(value) => Ok(json!(parse_integer_like(self.key, &value, min, max)?)),
-                None if empty_is_null => Ok(Value::Null),
-                None => Ok(self.default_value()),
-            },
-            SettingValueKind::Path => Ok(Value::String(
-                raw.map(str::trim).unwrap_or_default().to_owned(),
-            )),
-            SettingValueKind::ChatProviders => {
-                let providers = parse_chat_providers_from_raw(raw)?;
+    pub fn canonicalize_update_command(
+        &self,
+        command: &UpdateSettingCommand,
+    ) -> Result<Option<Value>, ServerError> {
+        match command.op {
+            UpdateSettingOperation::Unset => Ok(None),
+            UpdateSettingOperation::Set => {
+                let value = command.value.as_ref().ok_or_else(|| {
+                    self.validation_error("/", "value is required when op is 'set'")
+                })?;
+                Ok(Some(self.canonicalize_runtime_value(value)?))
+            }
+        }
+    }
+
+    pub fn canonicalize_loaded_override(
+        &self,
+        value: &Value,
+    ) -> Result<Option<Value>, ServerError> {
+        let canonical = self.canonicalize_runtime_value(value)?;
+        if canonical == *self.default_value() {
+            Ok(None)
+        } else {
+            Ok(Some(canonical))
+        }
+    }
+
+    fn validate_storage_shape(&self) -> Result<(), ServerError> {
+        let expected_type = match self.storage_kind {
+            SettingStorageKind::Boolean => SettingValueType::Boolean,
+            SettingStorageKind::Integer => SettingValueType::Integer,
+            SettingStorageKind::String | SettingStorageKind::Path => SettingValueType::String,
+            SettingStorageKind::ChatProviders => SettingValueType::Array,
+        };
+
+        if self.schema.value_type != expected_type {
+            return Err(ServerError::Internal(format!(
+                "settings '{}' uses storage kind '{:?}' but schema type '{:?}'",
+                self.pmid, self.storage_kind, self.schema.value_type
+            )));
+        }
+
+        if self.schema.enum_values.is_some() && self.schema.value_type != SettingValueType::String {
+            return Err(ServerError::Internal(format!(
+                "settings '{}' only supports enum values for string properties",
+                self.pmid
+            )));
+        }
+
+        if let Some(pattern) = &self.schema.pattern {
+            Regex::new(pattern).map_err(|error| {
+                ServerError::Internal(format!(
+                    "settings '{}' has invalid pattern '{}': {error}",
+                    self.pmid, pattern
+                ))
+            })?;
+        }
+
+        Ok(())
+    }
+
+    fn canonicalize_default_value(&self) -> Result<Value, ServerError> {
+        if self.schema.default_value.is_null() {
+            return match self.schema.value_type {
+                SettingValueType::Integer => Ok(Value::Null),
+                _ => Err(ServerError::Internal(format!(
+                    "settings '{}' uses null default for a non-nullable property",
+                    self.pmid
+                ))),
+            };
+        }
+
+        self.canonicalize_value(&self.schema.default_value, true)
+            .map_err(|error| match error {
+                ServerError::BadRequest(message) => ServerError::Internal(format!(
+                    "settings '{}' has invalid default value: {message}",
+                    self.pmid
+                )),
+                ServerError::BadRequestData { message, .. } => ServerError::Internal(format!(
+                    "settings '{}' has invalid default value: {message}",
+                    self.pmid
+                )),
+                other => other,
+            })
+    }
+
+    fn canonicalize_runtime_value(&self, value: &Value) -> Result<Value, ServerError> {
+        self.canonicalize_value(value, false)
+    }
+
+    fn canonicalize_value(
+        &self,
+        value: &Value,
+        allow_null_default: bool,
+    ) -> Result<Value, ServerError> {
+        match self.storage_kind {
+            SettingStorageKind::Boolean => parse_bool_from_value(value)
+                .map(Value::Bool)
+                .map_err(|message| self.validation_error("/", message)),
+            SettingStorageKind::Integer => {
+                if allow_null_default && value.is_null() {
+                    return Ok(Value::Null);
+                }
+                let parsed = parse_integer_from_value(value)
+                    .map_err(|message| self.validation_error("/", message))?;
+                if let Some(minimum) = self.schema.minimum {
+                    if parsed < minimum {
+                        return Err(self.validation_error(
+                            "/",
+                            format!("value must be greater than or equal to {minimum}"),
+                        ));
+                    }
+                }
+                if let Some(maximum) = self.schema.maximum {
+                    if parsed > maximum {
+                        return Err(self.validation_error(
+                            "/",
+                            format!("value must be less than or equal to {maximum}"),
+                        ));
+                    }
+                }
+                Ok(json!(parsed))
+            }
+            SettingStorageKind::String | SettingStorageKind::Path => {
+                let parsed = parse_string_from_value(value)
+                    .map_err(|message| self.validation_error("/", message))?;
+                self.validate_string_constraints(&parsed)?;
+                Ok(Value::String(parsed))
+            }
+            SettingStorageKind::ChatProviders => {
+                let providers = canonicalize_chat_providers_from_value(value)
+                    .map_err(|message| self.validation_error("/", message))?;
                 serde_json::to_value(providers).map_err(|error| {
                     ServerError::Internal(format!("serialize settings value: {error}"))
                 })
@@ -572,54 +549,69 @@ impl SettingDefinition {
         }
     }
 
-    pub fn effective_value_from_raw(&self, raw: Option<&str>) -> Result<Value, ServerError> {
-        let value = self.stored_value_from_raw(raw)?;
-        if value.is_null() {
-            Ok(self.default_value())
-        } else {
-            Ok(value)
-        }
-    }
-
-    pub fn normalized_raw_from_value(&self, value: &Value) -> Result<String, ServerError> {
-        match self.value_kind {
-            SettingValueKind::Bool => parse_bool_from_value(value).map(|parsed| parsed.to_string()),
-            SettingValueKind::Integer {
-                min,
-                max,
-                empty_is_null,
-            } => parse_integer_from_value(self.key, value, min, max, empty_is_null)
-                .map(|parsed| parsed.map(|number| number.to_string()).unwrap_or_default()),
-            SettingValueKind::Path => parse_string_from_value(value, false),
-            SettingValueKind::ChatProviders => normalize_chat_providers_from_value(value),
-        }
-    }
-
-    pub fn normalized_raw_from_legacy_input(&self, raw: &str) -> Result<String, ServerError> {
-        match self.value_kind {
-            SettingValueKind::Bool => parse_bool_like(raw).map(|parsed| parsed.to_string()),
-            SettingValueKind::Integer {
-                min,
-                max,
-                empty_is_null,
-            } => {
-                let normalized = normalize_optional_text(Some(raw));
-                match normalized {
-                    Some(value) => {
-                        parse_integer_like(self.key, &value, min, max).map(|parsed| parsed.to_string())
-                    }
-                    None if empty_is_null => Ok(String::new()),
-                    None => Ok(self.default_value().to_string()),
-                }
-            }
-            SettingValueKind::Path => Ok(raw.trim().to_owned()),
-            SettingValueKind::ChatProviders => {
-                let providers = parse_chat_providers_from_raw(Some(raw))?;
-                serde_json::to_string(&providers).map_err(|error| {
-                    ServerError::Internal(format!("serialize settings value: {error}"))
-                })
+    fn validate_string_constraints(&self, value: &str) -> Result<(), ServerError> {
+        if let Some(enum_values) = &self.schema.enum_values {
+            if !enum_values.iter().any(|item| item == value) {
+                return Err(self.validation_error("/", "value is not in the allowed set"));
             }
         }
+
+        if let Some(pattern) = &self.schema.pattern {
+            let regex = Regex::new(pattern).map_err(|error| {
+                ServerError::Internal(format!(
+                    "settings '{}' has invalid pattern '{}': {error}",
+                    self.pmid, pattern
+                ))
+            })?;
+            if !regex.is_match(value) {
+                return Err(self.validation_error("/", "value does not match the required pattern"));
+            }
+        }
+
+        Ok(())
+    }
+
+    fn validation_error(&self, path: &str, message: impl Into<String>) -> ServerError {
+        let message = message.into();
+        ServerError::BadRequestData {
+            message: message.clone(),
+            data: json!(SettingValidationErrorData {
+                error_type: "setting_validation".to_owned(),
+                pmid: self.pmid.clone(),
+                path: path.to_owned(),
+                message,
+            }),
+        }
+    }
+}
+
+fn parse_bool_from_value(value: &Value) -> Result<bool, &'static str> {
+    match value {
+        Value::Bool(parsed) => Ok(*parsed),
+        Value::String(raw) => match raw.trim().to_ascii_lowercase().as_str() {
+            "1" | "true" | "yes" | "on" => Ok(true),
+            "0" | "false" | "no" | "off" => Ok(false),
+            _ => Err("value must be a boolean"),
+        },
+        _ => Err("value must be a boolean"),
+    }
+}
+
+fn parse_integer_from_value(value: &Value) -> Result<i64, &'static str> {
+    match value {
+        Value::Number(number) => number.as_i64().ok_or("value must be an integer"),
+        Value::String(raw) => raw
+            .trim()
+            .parse::<i64>()
+            .map_err(|_| "value must be an integer"),
+        _ => Err("value must be an integer"),
+    }
+}
+
+fn parse_string_from_value(value: &Value) -> Result<String, &'static str> {
+    match value {
+        Value::String(raw) => Ok(raw.trim().to_owned()),
+        _ => Err("value must be a string"),
     }
 }
 
@@ -634,150 +626,28 @@ fn normalize_optional_text(raw: Option<&str>) -> Option<String> {
     })
 }
 
-fn parse_bool_like(raw: &str) -> Result<bool, ServerError> {
-    match raw.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(true),
-        "0" | "false" | "no" | "off" => Ok(false),
-        _ => Err(ServerError::BadRequest(format!(
-            "setting value '{raw}' is not a valid boolean"
-        ))),
-    }
-}
-
-fn parse_bool_from_value(value: &Value) -> Result<bool, ServerError> {
-    match value {
-        Value::Bool(value) => Ok(*value),
-        Value::String(value) => parse_bool_like(value),
-        _ => Err(ServerError::BadRequest(
-            "setting value must be a boolean".into(),
-        )),
-    }
-}
-
-fn parse_integer_like(
-    key: &str,
-    raw: &str,
-    min: Option<i64>,
-    max: Option<i64>,
-) -> Result<i64, ServerError> {
-    let parsed = raw.parse::<i64>().map_err(|_| {
-        ServerError::BadRequest(format!("setting '{key}' must be an integer value"))
-    })?;
-    validate_integer_bounds(key, parsed, min, max)?;
-    Ok(parsed)
-}
-
-fn parse_integer_from_value(
-    key: &str,
+pub fn canonicalize_chat_providers_from_value(
     value: &Value,
-    min: Option<i64>,
-    max: Option<i64>,
-    empty_is_null: bool,
-) -> Result<Option<i64>, ServerError> {
-    match value {
-        Value::Null if empty_is_null => Ok(None),
-        Value::Number(number) => {
-            let parsed = number.as_i64().ok_or_else(|| {
-                ServerError::BadRequest(format!("setting '{key}' must be an integer value"))
-            })?;
-            validate_integer_bounds(key, parsed, min, max)?;
-            Ok(Some(parsed))
-        }
-        Value::String(raw) => {
-            let normalized = normalize_optional_text(Some(raw));
-            match normalized {
-                Some(raw) => parse_integer_like(key, &raw, min, max).map(Some),
-                None if empty_is_null => Ok(None),
-                None => Err(ServerError::BadRequest(format!(
-                    "setting '{key}' must not be empty"
-                ))),
-            }
-        }
-        _ => Err(ServerError::BadRequest(format!(
-            "setting '{key}' must be an integer value"
-        ))),
-    }
-}
-
-fn validate_integer_bounds(
-    key: &str,
-    value: i64,
-    min: Option<i64>,
-    max: Option<i64>,
-) -> Result<(), ServerError> {
-    if let Some(min) = min {
-        if value < min {
-            return Err(ServerError::BadRequest(format!(
-                "setting '{key}' must be at least {min}"
-            )));
-        }
-    }
-    if let Some(max) = max {
-        if value > max {
-            return Err(ServerError::BadRequest(format!(
-                "setting '{key}' must be at most {max}"
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn parse_string_from_value(value: &Value, empty_is_null: bool) -> Result<String, ServerError> {
-    match value {
-        Value::Null if empty_is_null => Ok(String::new()),
-        Value::String(value) => Ok(value.trim().to_owned()),
-        _ => Err(ServerError::BadRequest(
-            "setting value must be a string".into(),
-        )),
-    }
-}
-
-fn parse_chat_providers_from_raw(
-    raw: Option<&str>,
-) -> Result<Vec<CloudProviderSettingValue>, ServerError> {
-    let normalized = normalize_optional_text(raw);
-    let Some(raw) = normalized else {
-        return Ok(Vec::new());
-    };
-
-    let providers: Vec<CloudProviderSettingValue> =
-        serde_json::from_str(&raw).map_err(|error| {
-            ServerError::BadRequest(format!(
-                "setting '{CHAT_MODEL_PROVIDERS_SETTING_KEY}' contains invalid JSON: {error}"
-            ))
-        })?;
-    canonicalize_chat_providers(providers)
-}
-
-fn normalize_chat_providers_from_value(value: &Value) -> Result<String, ServerError> {
+) -> Result<Vec<CloudProviderSettingValue>, String> {
     if value.is_null() {
-        return Ok("[]".to_owned());
+        return Ok(Vec::new());
     }
 
     let providers: Vec<CloudProviderSettingValue> = serde_json::from_value(value.clone())
-        .map_err(|error| {
-            ServerError::BadRequest(format!(
-                "setting '{CHAT_MODEL_PROVIDERS_SETTING_KEY}' has invalid provider payload: {error}"
-            ))
-        })?;
-    let canonical = canonicalize_chat_providers(providers)?;
-    serde_json::to_string(&canonical)
-        .map_err(|error| ServerError::Internal(format!("serialize chat providers setting: {error}")))
+        .map_err(|error| format!("value has invalid provider payload: {error}"))?;
+    canonicalize_chat_providers(providers)
 }
 
 fn canonicalize_chat_providers(
     providers: Vec<CloudProviderSettingValue>,
-) -> Result<Vec<CloudProviderSettingValue>, ServerError> {
+) -> Result<Vec<CloudProviderSettingValue>, String> {
     let mut out = Vec::with_capacity(providers.len());
-    let mut provider_ids = std::collections::HashSet::new();
+    let mut provider_ids = BTreeSet::new();
 
     for provider in providers {
         let canonical = canonicalize_chat_provider(provider)?;
         if !provider_ids.insert(canonical.id.clone()) {
-            return Err(ServerError::BadRequest(format!(
-                "duplicate cloud provider id '{}'",
-                canonical.id
-            )));
+            return Err(format!("duplicate cloud provider id '{}'", canonical.id));
         }
         out.push(canonical);
     }
@@ -787,7 +657,7 @@ fn canonicalize_chat_providers(
 
 fn canonicalize_chat_provider(
     mut provider: CloudProviderSettingValue,
-) -> Result<CloudProviderSettingValue, ServerError> {
+) -> Result<CloudProviderSettingValue, String> {
     provider.id = provider.id.trim().to_owned();
     provider.name = provider.name.trim().to_owned();
     provider.api_base = provider.api_base.trim().trim_end_matches('/').to_owned();
@@ -795,46 +665,44 @@ fn canonicalize_chat_provider(
     provider.api_key_env = normalize_optional_text(provider.api_key_env.as_deref());
 
     if provider.id.is_empty() {
-        return Err(ServerError::BadRequest(
-            "cloud provider id must not be empty".into(),
-        ));
+        return Err("cloud provider id must not be empty".into());
     }
     if provider.name.is_empty() {
         provider.name = provider.id.clone();
     }
     if provider.api_base.is_empty() {
-        return Err(ServerError::BadRequest(format!(
+        return Err(format!(
             "cloud provider '{}' has empty api_base",
             provider.id
-        )));
+        ));
     }
     if provider.models.is_empty() {
-        return Err(ServerError::BadRequest(format!(
+        return Err(format!(
             "cloud provider '{}' must define at least one model",
             provider.id
-        )));
+        ));
     }
 
-    let mut model_ids = std::collections::HashSet::new();
+    let mut model_ids = BTreeSet::new();
     for model in &mut provider.models {
         model.id = model.id.trim().to_owned();
         model.display_name = model.display_name.trim().to_owned();
         model.remote_model = normalize_optional_text(model.remote_model.as_deref());
 
         if model.id.is_empty() {
-            return Err(ServerError::BadRequest(format!(
+            return Err(format!(
                 "cloud provider '{}' contains model with empty id",
                 provider.id
-            )));
+            ));
         }
         if model.display_name.is_empty() {
             model.display_name = model.id.clone();
         }
         if !model_ids.insert(model.id.clone()) {
-            return Err(ServerError::BadRequest(format!(
+            return Err(format!(
                 "cloud provider '{}' contains duplicate model id '{}'",
                 provider.id, model.id
-            )));
+            ));
         }
     }
 
@@ -846,38 +714,96 @@ mod tests {
     use super::*;
 
     #[test]
-    fn workers_use_default_when_empty() {
-        let definition = setting_definition(LLAMA_NUM_WORKERS_SETTING_KEY).expect("definition");
-        assert_eq!(definition.stored_value_from_raw(Some("")).unwrap(), Value::Null);
-        assert_eq!(definition.effective_value_from_raw(Some("")).unwrap(), json!(1));
+    fn schema_rejects_duplicate_pmids() {
+        let raw = r#"{
+          "schema_version": 1,
+          "sections": [
+            {
+              "id": "runtime",
+              "title": "Runtime",
+              "subsections": [
+                {
+                  "id": "general",
+                  "title": "General",
+                  "properties": [
+                    {
+                      "pmid": "runtime.foo",
+                      "label": "Foo",
+                      "storage_kind": "string",
+                      "schema": { "type": "string", "default_value": "" }
+                    },
+                    {
+                      "pmid": "runtime.foo",
+                      "label": "Foo 2",
+                      "storage_kind": "string",
+                      "schema": { "type": "string", "default_value": "" }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let error = SettingsSchema::from_json_str(raw).expect_err("duplicate pmid");
+        assert!(error.to_string().contains("duplicate settings pmid"));
     }
 
     #[test]
-    fn invalid_integer_is_rejected() {
-        let definition = setting_definition(MODEL_AUTO_UNLOAD_IDLE_MINUTES_SETTING_KEY)
-            .expect("definition");
-        let error = definition
-            .normalized_raw_from_value(&json!(0))
-            .expect_err("validation error");
-        assert!(matches!(error, ServerError::BadRequest(_)));
+    fn integer_default_can_be_null() {
+        let schema = embedded_settings_schema().expect("schema");
+        let definition = schema
+            .property(LLAMA_CONTEXT_LENGTH_PMID)
+            .expect("context length");
+
+        assert!(definition.default_value().is_null());
+    }
+
+    #[test]
+    fn schema_rejects_invalid_default_value_shape() {
+        let raw = r#"{
+          "schema_version": 1,
+          "sections": [
+            {
+              "id": "runtime",
+              "title": "Runtime",
+              "subsections": [
+                {
+                  "id": "general",
+                  "title": "General",
+                  "properties": [
+                    {
+                      "pmid": "runtime.flag",
+                      "label": "Flag",
+                      "storage_kind": "boolean",
+                      "schema": { "type": "boolean", "default_value": "nope" }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let error = SettingsSchema::from_json_str(raw).expect_err("invalid default");
+        assert!(error.to_string().contains("invalid default value"));
     }
 
     #[test]
     fn chat_provider_payload_is_canonicalized() {
-        let definition = setting_definition(CHAT_MODEL_PROVIDERS_SETTING_KEY).expect("definition");
-        let raw = definition
-            .normalized_raw_from_value(&json!([
-                {
-                    "id": " openai-main ",
-                    "name": "",
-                    "api_base": "https://api.openai.com/v1/",
-                    "models": [{ "id": "gpt-4.1-mini", "display_name": "" }]
-                }
-            ]))
-            .expect("normalized");
-        assert_eq!(
-            raw,
-            r#"[{"id":"openai-main","name":"openai-main","api_base":"https://api.openai.com/v1","models":[{"id":"gpt-4.1-mini","display_name":"gpt-4.1-mini"}]}]"#
-        );
+        let providers = canonicalize_chat_providers_from_value(&json!([
+            {
+                "id": " openai-main ",
+                "name": "",
+                "api_base": "https://api.openai.com/v1/",
+                "models": [{ "id": "gpt-4.1-mini", "display_name": "" }]
+            }
+        ]))
+        .expect("providers");
+
+        assert_eq!(providers[0].id, "openai-main");
+        assert_eq!(providers[0].name, "openai-main");
+        assert_eq!(providers[0].api_base, "https://api.openai.com/v1");
+        assert_eq!(providers[0].models[0].display_name, "gpt-4.1-mini");
     }
 }

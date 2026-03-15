@@ -49,8 +49,6 @@ async fn convert(
         )));
     }
 
-    let response = service
-        .convert(req.into())
-        .await?;
+    let response = service.convert(req.into()).await?;
     Ok((StatusCode::ACCEPTED, Json(response.into())))
 }

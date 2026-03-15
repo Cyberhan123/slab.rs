@@ -1,12 +1,11 @@
 mod audio;
 mod backend;
 mod chat;
-mod config;
 mod ffmpeg;
 mod image;
 mod model;
-mod settings;
 mod session;
+mod settings;
 mod system;
 mod task;
 mod video;
@@ -16,11 +15,9 @@ pub use backend::{
     BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand, ReloadBackendLibCommand,
 };
 pub use chat::{
-    ChatCompletionCommand, ChatCompletionResult, ChatModelOption, ChatModelSource,
-    ChatResultChoice, ConversationMessage,
-    ChatCompletionOutput, ChatStreamChunk,
+    ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
+    ChatModelSource, ChatResultChoice, ChatStreamChunk, ConversationMessage,
 };
-pub use config::{ConfigEntryView, SetConfigValueCommand};
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{ImageGenerationCommand, ImageGenerationMode};
 pub use model::{
@@ -28,13 +25,20 @@ pub use model::{
     DownloadModelCommand, ListModelsFilter, ModelCatalogItemView, ModelCatalogStatus,
     ModelLoadCommand, ModelStatus, UpdateModelCommand,
 };
-pub use settings::{
-    setting_definition, setting_definitions, SettingCategory, SettingControl,
-    SettingValidation, SettingView, SettingsSystemBackendView, SettingsSystemView,
-    UpdateSettingCommand, DIFFUSION_NUM_WORKERS_SETTING_KEY,
-    LLAMA_NUM_WORKERS_SETTING_KEY, WHISPER_NUM_WORKERS_SETTING_KEY,
-};
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
+pub use settings::{
+    embedded_settings_schema, CloudProviderModelSettingValue, CloudProviderSettingValue,
+    SettingDefinition, SettingPropertySchema, SettingPropertyView, SettingValidationErrorData,
+    SettingValueType, SettingsDocumentView, SettingsSchema, SettingsSectionView,
+    SettingsSubsectionView, SettingsValuesFile, UpdateSettingCommand, UpdateSettingOperation,
+    CHAT_PROVIDERS_PMID, DIFFUSION_CLIP_G_PATH_PMID, DIFFUSION_CLIP_L_PATH_PMID,
+    DIFFUSION_FLASH_ATTN_PMID, DIFFUSION_KEEP_CLIP_ON_CPU_PMID, DIFFUSION_KEEP_VAE_ON_CPU_PMID,
+    DIFFUSION_LORA_MODEL_DIR_PMID, DIFFUSION_MODEL_PATH_PMID, DIFFUSION_NUM_WORKERS_PMID,
+    DIFFUSION_OFFLOAD_PARAMS_TO_CPU_PMID, DIFFUSION_T5XXL_PATH_PMID, DIFFUSION_TAESD_PATH_PMID,
+    DIFFUSION_VAE_PATH_PMID, LLAMA_CONTEXT_LENGTH_PMID, LLAMA_NUM_WORKERS_PMID,
+    MODEL_AUTO_UNLOAD_ENABLED_PMID, MODEL_AUTO_UNLOAD_IDLE_MINUTES_PMID, MODEL_CACHE_DIR_PMID,
+    WHISPER_NUM_WORKERS_PMID,
+};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
 pub use task::{AcceptedOperation, TaskResult, TaskView};
 pub use video::VideoGenerationCommand;

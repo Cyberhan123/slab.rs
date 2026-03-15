@@ -137,38 +137,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/config": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_config"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/config/{key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["get_config_value"];
-        put: operations["set_config_value"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/ffmpeg/convert": {
         parameters: {
             query?: never;
@@ -377,23 +345,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/settings/system": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["system_info"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/settings/{key}": {
+    "/v1/settings/{pmid}": {
         parameters: {
             query?: never;
             header?: never;
@@ -631,11 +583,6 @@ export interface components {
             path: string;
             vad?: null | components["schemas"]["TranscribeVadRequest"];
         };
-        ConfigEntry: {
-            key: string;
-            name: string;
-            value: string;
-        };
         ConvertRequest: {
             /** @description Desired output format (e.g. `"mp3"`, `"wav"`, `"mp4"`). */
             output_format: string;
@@ -865,45 +812,70 @@ export interface components {
             state_path?: string | null;
             updated_at: string;
         };
-        SetConfigBody: {
-            name?: string | null;
-            value: string;
+        CloudProviderModelSettingValue: {
+            display_name: string;
+            id: string;
+            remote_model?: string | null;
         };
-        /** @enum {string} */
-        SettingCategory: "runtime" | "chat_providers" | "diffusion";
-        /** @enum {string} */
-        SettingControl: "toggle" | "number" | "text" | "path" | "json";
-        SettingResponse: {
-            category: components["schemas"]["SettingCategory"];
-            control: components["schemas"]["SettingControl"];
+        CloudProviderSettingValue: {
+            api_base: string;
+            api_key?: string | null;
+            api_key_env?: string | null;
+            id: string;
+            models: components["schemas"]["CloudProviderModelSettingValue"][];
+            name: string;
+        };
+        SettingPropertySchema: {
             default_value: unknown;
-            description: string;
+            enum?: string[] | null;
+            /** Format: int64 */
+            maximum?: number | null;
+            /** Format: int64 */
+            minimum?: number | null;
+            multiline: boolean;
+            /** Format: int32 */
+            order: number;
+            pattern?: string | null;
+            secret: boolean;
+            type: components["schemas"]["SettingValueType"];
+        };
+        SettingResponse: {
+            description_md: string;
             editable: boolean;
             effective_value: unknown;
-            key: string;
+            is_overridden: boolean;
             label: string;
+            override_value?: unknown | null;
+            pmid: string;
+            schema: components["schemas"]["SettingPropertySchema"];
             search_terms: string[];
-            validation: components["schemas"]["SettingValidation"];
-            value: unknown;
         };
-        SettingValidation: {
-            allow_empty?: boolean;
-            /** Format: int64 */
-            max?: number | null;
-            /** Format: int64 */
-            min?: number | null;
-            multiline?: boolean;
-            /** Format: int64 */
-            step?: number | null;
+        SettingValidationErrorData: {
+            message: string;
+            path: string;
+            pmid: string;
+            type: string;
         };
-        SettingsSystemResponse: {
-            admin_token_enabled: boolean;
-            backends: components["schemas"]["SystemBackendResponse"][];
-            bind_address: string;
-            cors_configured: boolean;
-            session_state_dir: string;
-            swagger_enabled: boolean;
-            transport_mode: string;
+        /** @enum {string} */
+        SettingValueType: "boolean" | "integer" | "string" | "array" | "object";
+        SettingsDocumentResponse: {
+            /** Format: int32 */
+            schema_version: number;
+            sections: components["schemas"]["SettingsSectionResponse"][];
+            settings_path: string;
+            warnings: string[];
+        };
+        SettingsSectionResponse: {
+            description_md: string;
+            id: string;
+            subsections: components["schemas"]["SettingsSubsectionResponse"][];
+            title: string;
+        };
+        SettingsSubsectionResponse: {
+            description_md: string;
+            id: string;
+            properties: components["schemas"]["SettingResponse"][];
+            title: string;
         };
         SwitchModelRequest: {
             backend_id: string;
@@ -913,17 +885,6 @@ export interface components {
              * @description Optional worker override. If omitted, server uses global config by backend.
              */
             num_workers?: number | null;
-        };
-        SystemBackendResponse: {
-            backend: string;
-            /** Format: int32 */
-            configured_workers?: number | null;
-            /** Format: int32 */
-            effective_workers?: number | null;
-            endpoint?: string | null;
-            endpoint_configured: boolean;
-            runtime_status: string;
-            worker_setting_key?: string | null;
         };
         TaskResponse: {
             created_at: string;
@@ -1066,8 +1027,11 @@ export interface components {
             filename?: string | null;
             repo_id?: string | null;
         };
+        /** @enum {string} */
+        UpdateSettingOperation: "set" | "unset";
         UpdateSettingRequest: {
-            value: unknown;
+            op: components["schemas"]["UpdateSettingOperation"];
+            value?: unknown | null;
         };
         /** @description Request body for `POST /v1/video/generations`. */
         VideoGenerationRequest: {
@@ -1402,105 +1366,6 @@ export interface operations {
             };
         };
     };
-    list_config: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List of all configuration entries */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigEntry"][];
-                };
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_config_value: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Get a configuration entry by key */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigEntry"];
-                };
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Config key not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    set_config_value: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["SetConfigBody"];
-            };
-        };
-        responses: {
-            /** @description Set a configuration entry by key */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ConfigEntry"];
-                };
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Config key not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     convert: {
         parameters: {
             query?: never;
@@ -1653,12 +1518,12 @@ export interface operations {
     };
     list_available_models: {
         parameters: {
-            query?: never;
-            header?: never;
-            path: {
+            query: {
                 /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
                 repo_id: string;
             };
+            header?: never;
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -2081,40 +1946,13 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description List settings metadata and current values */
+            /** @description Full settings document */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SettingResponse"][];
-                };
-            };
-            /** @description Unauthorised (admin token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    system_info: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Read-only system and backend facts used by Settings UI */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsSystemResponse"];
+                    "application/json": components["schemas"]["SettingsDocumentResponse"];
                 };
             };
             /** @description Unauthorised (admin token required) */
@@ -2130,12 +1968,14 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                pmid: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Get a setting by key */
+            /** @description Get a single setting property by PMID */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2164,7 +2004,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                pmid: string;
+            };
             cookie?: never;
         };
         requestBody: {
@@ -2173,7 +2015,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Update a setting */
+            /** @description Set or unset a setting override */
             200: {
                 headers: {
                     [name: string]: unknown;

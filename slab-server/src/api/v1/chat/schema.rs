@@ -9,9 +9,9 @@ use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
-    ChatCompletionResult as DomainChatCompletionResult,
-    ChatModelOption as DomainChatModelOption, ChatModelSource as DomainChatModelSource,
-    ChatResultChoice as DomainChatResultChoice, ConversationMessage,
+    ChatCompletionResult as DomainChatCompletionResult, ChatModelOption as DomainChatModelOption,
+    ChatModelSource as DomainChatModelSource, ChatResultChoice as DomainChatResultChoice,
+    ConversationMessage,
 };
 
 const MAX_PROMPT_BYTES: usize = 128 * 1024;

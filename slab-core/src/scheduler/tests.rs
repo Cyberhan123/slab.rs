@@ -229,8 +229,9 @@ mod tests {
                     };
                     match req {
                         Some(req) => {
-                            let (stream_tx, stream_rx) =
-                                mpsc::channel::<crate::scheduler::backend::protocol::StreamChunk>(8);
+                            let (stream_tx, stream_rx) = mpsc::channel::<
+                                crate::scheduler::backend::protocol::StreamChunk,
+                            >(8);
                             let _ = req.reply_tx.send(BackendReply::Stream(stream_rx));
                             for word in ["hello", " ", "world"] {
                                 let _ = stream_tx
@@ -734,10 +735,14 @@ mod tests {
         let orchestrator = Orchestrator::start(rm, 64);
 
         let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("hello"))
-            .gpu("echo", "echo", BackendOp {
-                name: "echo".into(),
-                options: Payload::default(),
-            })
+            .gpu(
+                "echo",
+                "echo",
+                BackendOp {
+                    name: "echo".into(),
+                    options: Payload::default(),
+                },
+            )
             .run()
             .await
             .expect("submit should succeed");
@@ -783,10 +788,14 @@ mod tests {
         let orchestrator = Orchestrator::start(rm, 64);
 
         let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("x"))
-            .gpu("stall", "stall", BackendOp {
-                name: "stall".into(),
-                options: Payload::default(),
-            })
+            .gpu(
+                "stall",
+                "stall",
+                BackendOp {
+                    name: "stall".into(),
+                    options: Payload::default(),
+                },
+            )
             .run()
             .await
             .expect("submit should succeed");
@@ -858,10 +867,14 @@ mod tests {
         let orchestrator = Orchestrator::start(rm, 64);
 
         let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("slow"))
-            .gpu("slow-stage", "slow", BackendOp {
-                name: "slow".into(),
-                options: Payload::default(),
-            })
+            .gpu(
+                "slow-stage",
+                "slow",
+                BackendOp {
+                    name: "slow".into(),
+                    options: Payload::default(),
+                },
+            )
             .run()
             .await
             .expect("submit should succeed");

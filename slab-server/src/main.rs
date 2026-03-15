@@ -26,6 +26,7 @@ use crate::config::Config;
 use crate::context::AppState;
 use crate::infra::db::{AnyStore, TaskStore};
 use crate::infra::rpc::gateway::GrpcGateway;
+use crate::infra::settings::SettingsProvider;
 
 #[derive(Parser, Debug, Clone)]
 #[command(
@@ -50,6 +51,8 @@ struct SupervisorArgs {
     runtime_ipc_dir: Option<PathBuf>,
     #[arg(long = "database-url")]
     database_url: Option<String>,
+    #[arg(long = "settings-path")]
+    settings_path: Option<PathBuf>,
     #[arg(long = "log")]
     log_level: Option<String>,
     #[arg(long = "log-json", action = clap::ArgAction::SetTrue)]
@@ -109,6 +112,7 @@ impl Default for SupervisorArgs {
             runtime_transport: None,
             runtime_ipc_dir: None,
             database_url: None,
+            settings_path: None,
             log_level: None,
             log_json: false,
             queue_capacity: None,
@@ -138,6 +142,9 @@ async fn main() -> anyhow::Result<()> {
     }
     if args.log_level.is_none() {
         args.log_level = Some(cfg.log_level.clone());
+    }
+    if args.settings_path.is_none() {
+        args.settings_path = Some(cfg.settings_path.clone());
     }
     if args.queue_capacity.is_none() {
         args.queue_capacity = Some(cfg.queue_capacity);
@@ -202,6 +209,8 @@ where
 
     let store = AnyStore::connect(&cfg.database_url).await?;
     info!(database_url = %cfg.database_url, "database ready");
+    let settings = Arc::new(SettingsProvider::load(cfg.settings_path.clone()).await?);
+    info!(settings_path = %cfg.settings_path.display(), "settings provider ready");
     let grpc = GrpcGateway::connect_from_config(&cfg)
         .await
         .context("failed to initialize shared gRPC gateway services")?;
@@ -209,13 +218,14 @@ where
     let grpc = Arc::new(grpc);
     let store = Arc::new(store.clone());
     let model_auto_unload = Arc::new(model_auto_unload::ModelAutoUnloadManager::new(
-        Arc::clone(&store),
+        Arc::clone(&settings),
         Arc::clone(&grpc),
     ));
     let state = Arc::new(AppState::new(
         Arc::new(cfg.clone()),
         grpc,
         Arc::clone(&store),
+        settings,
         model_auto_unload,
     ));
 
@@ -552,6 +562,9 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
     let mut gateway_cfg = Config::from_env();
     if let Some(v) = &args.database_url {
         gateway_cfg.database_url = v.clone();
+    }
+    if let Some(v) = &args.settings_path {
+        gateway_cfg.settings_path = v.clone();
     }
     if let Some(v) = &args.log_level {
         gateway_cfg.log_level = v.clone();

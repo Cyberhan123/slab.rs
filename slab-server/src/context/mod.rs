@@ -22,12 +22,14 @@ impl AppContext {
         config: Arc<AppConfig>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         store: Arc<crate::infra::db::AnyStore>,
+        settings: Arc<crate::infra::settings::SettingsProvider>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
         let task_manager = Arc::new(OperationManager::new());
         let model_state = Arc::new(ModelState::new(
             Arc::clone(&config),
             Arc::clone(&store),
+            Arc::clone(&settings),
             Arc::clone(&grpc),
             Arc::clone(&model_auto_unload),
         ));
@@ -57,9 +59,16 @@ impl AppState {
         config: Arc<AppConfig>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         store: Arc<crate::infra::db::AnyStore>,
+        settings: Arc<crate::infra::settings::SettingsProvider>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
-        let context = Arc::new(AppContext::new(config, grpc, store, model_auto_unload));
+        let context = Arc::new(AppContext::new(
+            config,
+            grpc,
+            store,
+            settings,
+            model_auto_unload,
+        ));
         let services = Arc::new(crate::domain::services::AppServices::new(
             (*context.model_state).clone(),
             (*context.worker_state).clone(),
@@ -102,12 +111,6 @@ impl FromRef<Arc<AppState>> for crate::domain::services::BackendService {
 impl FromRef<Arc<AppState>> for crate::domain::services::ChatService {
     fn from_ref(input: &Arc<AppState>) -> Self {
         input.services.chat.clone()
-    }
-}
-
-impl FromRef<Arc<AppState>> for crate::domain::services::ConfigService {
-    fn from_ref(input: &Arc<AppState>) -> Self {
-        input.services.config.clone()
     }
 }
 

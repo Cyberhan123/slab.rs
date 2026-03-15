@@ -12,7 +12,6 @@ use utoipa::OpenApi;
 use crate::api::v1::chat::schema::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
     ChatModelOption, ChatModelSource,
-    
 };
 use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
@@ -77,7 +76,9 @@ async fn chat_completions(
     ValidatedJson(req): ValidatedJson<ChatCompletionRequest>,
 ) -> Result<Response, ServerError> {
     match service.create_chat_completion(req.into()).await? {
-        ChatCompletionOutput::Json(response) => Ok(Json(ChatCompletionResponse::from(response)).into_response()),
+        ChatCompletionOutput::Json(response) => {
+            Ok(Json(ChatCompletionResponse::from(response)).into_response())
+        }
         ChatCompletionOutput::Stream(stream) => {
             let event_stream = stream.map(|chunk| -> Result<Event, Infallible> {
                 match chunk {

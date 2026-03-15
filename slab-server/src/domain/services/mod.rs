@@ -1,12 +1,11 @@
 mod audio;
 mod backend;
 mod chat;
-mod config;
 mod ffmpeg;
 mod image;
 mod model;
-mod settings;
 mod session;
+mod settings;
 mod system;
 mod task;
 mod video;
@@ -14,12 +13,11 @@ mod video;
 pub use audio::AudioService;
 pub use backend::BackendService;
 pub use chat::ChatService;
-pub use config::ConfigService;
 pub use ffmpeg::FfmpegService;
 pub use image::ImageService;
 pub use model::ModelService;
-pub use settings::SettingsService;
 pub use session::SessionService;
+pub use settings::SettingsService;
 pub use system::SystemService;
 pub use task::TaskApplicationService;
 pub use video::VideoService;
@@ -31,7 +29,6 @@ pub struct AppServices {
     pub audio: AudioService,
     pub backend: BackendService,
     pub chat: ChatService,
-    pub config: ConfigService,
     pub ffmpeg: FfmpegService,
     pub image: ImageService,
     pub model: ModelService,
@@ -48,7 +45,6 @@ impl AppServices {
             audio: AudioService::new(worker_state.clone()),
             backend: BackendService::new(model_state.clone(), worker_state.clone()),
             chat: ChatService::new(model_state.clone()),
-            config: ConfigService::new(model_state.clone()),
             ffmpeg: FfmpegService::new(worker_state.clone()),
             image: ImageService::new(worker_state.clone()),
             model: ModelService::new(model_state.clone(), worker_state.clone()),

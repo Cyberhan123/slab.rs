@@ -54,6 +54,13 @@ pub enum ServerError {
     #[error("bad request: {0}")]
     BadRequest(String),
 
+    /// The caller sent an invalid or malformed request with structured details.
+    #[error("bad request: {message}")]
+    BadRequestData {
+        message: String,
+        data: serde_json::Value,
+    },
+
     /// Backend not initialized or ready.
     #[error("backend not ready: {0}")]
     BackendNotReady(String),
@@ -82,6 +89,12 @@ impl IntoResponse for ServerError {
                 error_codes::BAD_REQUEST,
                 None,
                 m.clone(),
+            ),
+            ServerError::BadRequestData { message, data } => (
+                StatusCode::BAD_REQUEST,
+                error_codes::BAD_REQUEST,
+                Some(data.clone()),
+                message.clone(),
             ),
             ServerError::BackendNotReady(m) => (
                 StatusCode::SERVICE_UNAVAILABLE,

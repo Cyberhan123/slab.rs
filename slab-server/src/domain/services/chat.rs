@@ -11,26 +11,24 @@ use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{
     Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget,
 };
-use serde::Deserialize;
 use std::collections::HashMap;
 use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatCompletionCommand, ChatCompletionResult, ChatModelOption, ChatModelSource,
-    ChatResultChoice, ConversationMessage as DomainConversationMessage,
-    ChatCompletionOutput, ChatStreamChunk,
+    ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
+    ChatModelSource, ChatResultChoice, ChatStreamChunk, CloudProviderSettingValue,
+    ConversationMessage as DomainConversationMessage, CHAT_PROVIDERS_PMID,
 };
 use crate::error::ServerError;
-use crate::infra::db::{ChatMessage, ChatStore, ConfigStore, ModelStore, TaskRecord, TaskStore};
+use crate::infra::db::{ChatMessage, ChatStore, ModelStore, TaskRecord, TaskStore};
 use crate::infra::rpc::{self, pb};
 
 /// Maximum allowed prompt length in bytes.
 #[cfg(test)]
 const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
 const LLAMA_BACKEND_ID: &str = "ggml.llama";
-const CHAT_MODEL_PROVIDERS_CONFIG_KEY: &str = "chat_model_providers";
 const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
 
 #[derive(Clone)]
@@ -77,7 +75,7 @@ impl ChatService {
             for model in provider.models {
                 cloud_items.push(ChatModelOption {
                     id: cloud_option_id(&provider.id, &model.id),
-                    display_name: model.display_name.unwrap_or_else(|| model.id.clone()),
+                    display_name: model.display_name,
                     source: ChatModelSource::Cloud,
                     provider_id: Some(provider.id.clone()),
                     provider_name: Some(provider.name.clone()),
@@ -101,31 +99,7 @@ impl ChatService {
     }
 }
 
-#[derive(Debug, Clone, Deserialize)]
-struct CloudProviderConfig {
-    #[serde(alias = "provider_id", alias = "providerId")]
-    id: String,
-    #[serde(default, alias = "displayName", alias = "provider_name")]
-    name: String,
-    #[serde(alias = "apiBase", alias = "base_url", alias = "baseUrl")]
-    api_base: String,
-    #[serde(default, alias = "apiKey")]
-    api_key: Option<String>,
-    #[serde(default, alias = "apiKeyEnv")]
-    api_key_env: Option<String>,
-    #[serde(default)]
-    models: Vec<CloudProviderModelConfig>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct CloudProviderModelConfig {
-    #[serde(alias = "model", alias = "model_id", alias = "modelId")]
-    id: String,
-    #[serde(default, alias = "displayName")]
-    display_name: Option<String>,
-    #[serde(default, alias = "remoteModel")]
-    remote_model: Option<String>,
-}
+type CloudProviderConfig = CloudProviderSettingValue;
 
 #[derive(Debug, Clone)]
 struct ResolvedCloudModel {
@@ -176,17 +150,6 @@ fn is_cloud_model_option_id(model_id: &str) -> bool {
     model_id.starts_with("cloud/")
 }
 
-fn trim_to_option(raw: Option<String>) -> Option<String> {
-    raw.and_then(|v| {
-        let trimmed = v.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_owned())
-        }
-    })
-}
-
 fn looks_like_env_var_name(value: &str) -> bool {
     let mut chars = value.chars();
     match chars.next() {
@@ -196,101 +159,13 @@ fn looks_like_env_var_name(value: &str) -> bool {
     chars.all(|ch| ch == '_' || ch.is_ascii_alphanumeric())
 }
 
-fn canonicalize_cloud_provider(
-    mut provider: CloudProviderConfig,
-) -> Result<CloudProviderConfig, ServerError> {
-    provider.id = provider.id.trim().to_owned();
-    provider.name = provider.name.trim().to_owned();
-    provider.api_base = provider.api_base.trim().trim_end_matches('/').to_owned();
-    provider.api_key = trim_to_option(provider.api_key.take());
-    provider.api_key_env = trim_to_option(provider.api_key_env.take());
-
-    if provider.id.is_empty() {
-        return Err(ServerError::BadRequest(
-            "cloud provider id must not be empty".into(),
-        ));
-    }
-    if provider.name.is_empty() {
-        provider.name = provider.id.clone();
-    }
-    if provider.api_base.is_empty() {
-        return Err(ServerError::BadRequest(format!(
-            "cloud provider '{}' has empty api_base",
-            provider.id
-        )));
-    }
-    if provider.models.is_empty() {
-        return Err(ServerError::BadRequest(format!(
-            "cloud provider '{}' must define at least one model",
-            provider.id
-        )));
-    }
-
-    let mut model_ids = std::collections::HashSet::new();
-    for model in &mut provider.models {
-        model.id = model.id.trim().to_owned();
-        model.display_name =
-            Some(trim_to_option(model.display_name.take()).unwrap_or_else(|| model.id.clone()));
-        model.remote_model = trim_to_option(model.remote_model.take());
-
-        if model.id.is_empty() {
-            return Err(ServerError::BadRequest(format!(
-                "cloud provider '{}' contains model with empty id",
-                provider.id
-            )));
-        }
-        if !model_ids.insert(model.id.clone()) {
-            return Err(ServerError::BadRequest(format!(
-                "cloud provider '{}' contains duplicate model id '{}'",
-                provider.id, model.id
-            )));
-        }
-    }
-
-    Ok(provider)
-}
-
 async fn load_cloud_providers_strict(
     state: &ModelState,
 ) -> Result<Vec<CloudProviderConfig>, ServerError> {
-    let raw = state
-        .store()
-        .get_config_value(CHAT_MODEL_PROVIDERS_CONFIG_KEY)
-        .await?;
-
-    let Some(raw) = raw else {
-        return Ok(Vec::new());
-    };
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let parsed: Vec<CloudProviderConfig> = serde_json::from_str(trimmed).map_err(|e| {
-        ServerError::BadRequest(format!(
-            "invalid JSON in config '{}': {e}",
-            CHAT_MODEL_PROVIDERS_CONFIG_KEY
-        ))
-    })?;
-
-    if parsed.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let mut out = Vec::with_capacity(parsed.len());
-    let mut provider_ids = std::collections::HashSet::new();
-    for provider in parsed {
-        let normalized = canonicalize_cloud_provider(provider)?;
-        if !provider_ids.insert(normalized.id.clone()) {
-            return Err(ServerError::BadRequest(format!(
-                "duplicate cloud provider id '{}'",
-                normalized.id
-            )));
-        }
-        out.push(normalized);
-    }
-
-    Ok(out)
+    state
+        .settings()
+        .get_chat_providers(CHAT_PROVIDERS_PMID)
+        .await
 }
 
 async fn load_cloud_providers_lenient(state: &ModelState) -> Vec<CloudProviderConfig> {
@@ -299,8 +174,8 @@ async fn load_cloud_providers_lenient(state: &ModelState) -> Vec<CloudProviderCo
         Err(err) => {
             warn!(
                 error = %err,
-                config_key = CHAT_MODEL_PROVIDERS_CONFIG_KEY,
-                "invalid chat cloud provider config; cloud models disabled"
+                pmid = CHAT_PROVIDERS_PMID,
+                "invalid chat cloud provider settings; cloud models disabled"
             );
             Vec::new()
         }
@@ -331,7 +206,7 @@ fn resolve_provider_api_key(provider: &CloudProviderConfig) -> Result<String, Se
     }
 
     Err(ServerError::BackendNotReady(format!(
-        "cloud provider '{}' is missing api key (set config api_key or api_key_env)",
+        "cloud provider '{}' is missing api key (set settings api_key or api_key_env)",
         provider.id
     )))
 }

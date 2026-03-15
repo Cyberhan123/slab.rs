@@ -97,7 +97,9 @@ async fn update_model(
     ValidatedJson(req): ValidatedJson<UpdateModelRequest>,
 ) -> Result<Json<ModelCatalogItemResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(service.update_model(&params.id, req.into()).await?.into()))
+    Ok(Json(
+        service.update_model(&params.id, req.into()).await?.into(),
+    ))
 }
 
 #[utoipa::path(

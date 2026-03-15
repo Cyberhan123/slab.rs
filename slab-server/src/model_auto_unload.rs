@@ -4,11 +4,9 @@ use std::time::Duration;
 
 use tracing::{debug, info, warn};
 
-use crate::infra::db::{AnyStore, ConfigStore};
+use crate::domain::models::{MODEL_AUTO_UNLOAD_ENABLED_PMID, MODEL_AUTO_UNLOAD_IDLE_MINUTES_PMID};
 use crate::infra::rpc;
 
-pub const MODEL_AUTO_UNLOAD_ENABLED_CONFIG_KEY: &str = "model_auto_unload_enabled";
-pub const MODEL_AUTO_UNLOAD_IDLE_MINUTES_CONFIG_KEY: &str = "model_auto_unload_idle_minutes";
 const DEFAULT_IDLE_MINUTES: u64 = 10;
 
 #[derive(Debug, Clone)]
@@ -28,7 +26,7 @@ struct BackendRefState {
 
 #[derive(Debug)]
 pub struct ModelAutoUnloadManager {
-    store: Arc<AnyStore>,
+    settings: Arc<crate::infra::settings::SettingsProvider>,
     grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
     states: tokio::sync::Mutex<HashMap<String, BackendRefState>>,
 }
@@ -51,9 +49,12 @@ impl Drop for ModelUsageGuard {
 }
 
 impl ModelAutoUnloadManager {
-    pub fn new(store: Arc<AnyStore>, grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>) -> Self {
+    pub fn new(
+        settings: Arc<crate::infra::settings::SettingsProvider>,
+        grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+    ) -> Self {
         Self {
-            store,
+            settings,
             grpc,
             states: tokio::sync::Mutex::new(HashMap::new()),
         }
@@ -300,61 +301,36 @@ impl ModelAutoUnloadManager {
         }
 
         let raw_minutes = match self
-            .store
-            .get_config_value(MODEL_AUTO_UNLOAD_IDLE_MINUTES_CONFIG_KEY)
+            .settings
+            .get_optional_u32(MODEL_AUTO_UNLOAD_IDLE_MINUTES_PMID)
             .await
         {
-            Ok(v) => v,
+            Ok(v) => v.map(u64::from),
             Err(error) => {
                 warn!(
                     error = %error,
-                    "failed to read model auto-unload idle minutes config"
+                    "failed to read model auto-unload idle minutes setting"
                 );
                 None
             }
         };
 
-        let minutes = raw_minutes
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .and_then(|value| match value.parse::<u64>() {
-                Ok(parsed) if parsed > 0 => Some(parsed),
-                _ => {
-                    warn!(
-                        key = MODEL_AUTO_UNLOAD_IDLE_MINUTES_CONFIG_KEY,
-                        value = value,
-                        default_minutes = DEFAULT_IDLE_MINUTES,
-                        "invalid model auto-unload idle minutes config; using default"
-                    );
-                    None
-                }
-            })
-            .unwrap_or(DEFAULT_IDLE_MINUTES);
+        let minutes = raw_minutes.unwrap_or(DEFAULT_IDLE_MINUTES);
 
         Some(Duration::from_secs(minutes.saturating_mul(60)))
     }
 
     async fn auto_unload_enabled(&self) -> bool {
-        let raw_enabled = match self
-            .store
-            .get_config_value(MODEL_AUTO_UNLOAD_ENABLED_CONFIG_KEY)
-            .await
-        {
+        match self.settings.get_bool(MODEL_AUTO_UNLOAD_ENABLED_PMID).await {
             Ok(v) => v,
             Err(error) => {
                 warn!(
                     error = %error,
-                    "failed to read model auto-unload enabled config"
+                    "failed to read model auto-unload enabled setting"
                 );
-                None
+                false
             }
-        };
-
-        raw_enabled
-            .as_deref()
-            .map(str::trim)
-            .is_some_and(parse_bool)
+        }
     }
 }
 
@@ -365,11 +341,4 @@ fn canonical_backend_id(backend_id: &str) -> &str {
         "diffusion" | "ggml.diffusion" => "ggml.diffusion",
         _ => backend_id,
     }
-}
-
-fn parse_bool(value: &str) -> bool {
-    matches!(
-        value.to_ascii_lowercase().as_str(),
-        "1" | "true" | "yes" | "on"
-    )
 }

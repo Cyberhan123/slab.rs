@@ -4,28 +4,44 @@ use axum::extract::{Path, State};
 use axum::routing::get;
 use axum::{middleware, Json, Router};
 use serde::Deserialize;
-use utoipa::OpenApi;
+use utoipa::{IntoParams, OpenApi};
 use validator::Validate;
 
 use crate::api::middleware::auth;
-use crate::api::validation::{validate, ValidatedJson};
-use crate::api::v1::settings::schema::{
-    SettingResponse, SettingsSystemResponse, UpdateSettingRequest,
-};
+use crate::api::validation::validate;
 use crate::context::AppState;
+use crate::domain::models::{
+    CloudProviderModelSettingValue, CloudProviderSettingValue, SettingPropertySchema,
+    SettingPropertyView, SettingValidationErrorData, SettingValueType, SettingsDocumentView,
+    SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand, UpdateSettingOperation,
+};
 use crate::domain::services::SettingsService;
 use crate::error::ServerError;
 
+#[derive(Debug, Deserialize, IntoParams, Validate)]
+struct SettingPmidPath {
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "pmid must not be empty"
+    ))]
+    pmid: String,
+}
+
 #[derive(OpenApi)]
 #[openapi(
-    paths(list_settings, get_setting, update_setting, system_info),
+    paths(list_settings, get_setting, update_setting),
     components(schemas(
-        SettingResponse,
-        SettingsSystemResponse,
-        crate::domain::models::SettingCategory,
-        crate::domain::models::SettingControl,
-        crate::domain::models::SettingValidation,
-        UpdateSettingRequest
+        SettingsDocumentView,
+        SettingsSectionView,
+        SettingsSubsectionView,
+        SettingPropertyView,
+        SettingPropertySchema,
+        SettingValueType,
+        UpdateSettingCommand,
+        UpdateSettingOperation,
+        SettingValidationErrorData,
+        CloudProviderSettingValue,
+        CloudProviderModelSettingValue
     ))
 )]
 pub struct SettingsApi;
@@ -33,8 +49,7 @@ pub struct SettingsApi;
 pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/settings", get(list_settings))
-        .route("/settings/system", get(system_info))
-        .route("/settings/{key}", get(get_setting).put(update_setting))
+        .route("/settings/{pmid}", get(get_setting).put(update_setting))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::auth_middleware,
@@ -47,47 +62,43 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     path = "/v1/settings",
     tag = "settings",
     responses(
-        (status = 200, description = "List settings metadata and current values", body = [SettingResponse]),
+        (status = 200, description = "Full settings document", body = SettingsDocumentView),
         (status = 401, description = "Unauthorised (admin token required)"),
     )
 )]
 async fn list_settings(
     State(service): State<SettingsService>,
-) -> Result<Json<Vec<SettingResponse>>, ServerError> {
-    let items = service
-        .list_settings()
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
-    Ok(Json(items))
+) -> Result<Json<SettingsDocumentView>, ServerError> {
+    Ok(Json(service.list_settings().await?))
 }
 
 #[utoipa::path(
     get,
-    path = "/v1/settings/{key}",
+    path = "/v1/settings/{pmid}",
     tag = "settings",
+    params(SettingPmidPath),
     responses(
-        (status = 200, description = "Get a setting by key", body = SettingResponse),
+        (status = 200, description = "Get a single setting property by PMID", body = SettingPropertyView),
         (status = 401, description = "Unauthorised (admin token required)"),
         (status = 404, description = "Setting not found"),
     )
 )]
 async fn get_setting(
     State(service): State<SettingsService>,
-    Path(params): Path<SettingKeyPath>,
-) -> Result<Json<SettingResponse>, ServerError> {
+    Path(params): Path<SettingPmidPath>,
+) -> Result<Json<SettingPropertyView>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(service.get_setting(&params.key).await?.into()))
+    Ok(Json(service.get_setting(&params.pmid).await?))
 }
 
 #[utoipa::path(
     put,
-    path = "/v1/settings/{key}",
+    path = "/v1/settings/{pmid}",
     tag = "settings",
-    request_body = UpdateSettingRequest,
+    params(SettingPmidPath),
+    request_body = UpdateSettingCommand,
     responses(
-        (status = 200, description = "Update a setting", body = SettingResponse),
+        (status = 200, description = "Set or unset a setting override", body = SettingPropertyView),
         (status = 400, description = "Bad request"),
         (status = 401, description = "Unauthorised (admin token required)"),
         (status = 404, description = "Setting not found"),
@@ -95,33 +106,9 @@ async fn get_setting(
 )]
 async fn update_setting(
     State(service): State<SettingsService>,
-    Path(params): Path<SettingKeyPath>,
-    ValidatedJson(body): ValidatedJson<UpdateSettingRequest>,
-) -> Result<Json<SettingResponse>, ServerError> {
+    Path(params): Path<SettingPmidPath>,
+    Json(body): Json<UpdateSettingCommand>,
+) -> Result<Json<SettingPropertyView>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(service.update_setting(&params.key, body.into()).await?.into()))
-}
-
-#[utoipa::path(
-    get,
-    path = "/v1/settings/system",
-    tag = "settings",
-    responses(
-        (status = 200, description = "Read-only system and backend facts used by Settings UI", body = SettingsSystemResponse),
-        (status = 401, description = "Unauthorised (admin token required)"),
-    )
-)]
-async fn system_info(
-    State(service): State<SettingsService>,
-) -> Result<Json<SettingsSystemResponse>, ServerError> {
-    Ok(Json(service.system_info().await?.into()))
-}
-
-#[derive(Debug, Deserialize, Validate)]
-struct SettingKeyPath {
-    #[validate(custom(
-        function = "crate::api::validation::validate_non_blank",
-        message = "key must not be empty"
-    ))]
-    key: String,
+    Ok(Json(service.update_setting(&params.pmid, body).await?))
 }

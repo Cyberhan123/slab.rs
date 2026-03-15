@@ -10,7 +10,6 @@ use crate::base::types::TaskId;
 #[derive(Debug, Clone, Error)]
 pub enum CoreError {
     // ── Scheduler errors ────────────────────────────────────────────────────
-
     /// The ingress queue for the named backend is at capacity.
     #[error("queue full: {queue} (capacity {capacity})")]
     QueueFull { queue: String, capacity: usize },
@@ -68,7 +67,6 @@ pub enum CoreError {
     NoFailedGlobalOperation,
 
     // ── Engine errors ────────────────────────────────────────────────────────
-
     /// An I/O error raised by an engine backend.
     #[error("engine I/O error: {0}")]
     EngineIo(String),

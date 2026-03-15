@@ -13,30 +13,19 @@ use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand,
     DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelCatalogItemView,
     ModelCatalogStatus, ModelLoadCommand, ModelStatus, UpdateModelCommand,
+    DIFFUSION_CLIP_G_PATH_PMID, DIFFUSION_CLIP_L_PATH_PMID, DIFFUSION_FLASH_ATTN_PMID,
+    DIFFUSION_KEEP_CLIP_ON_CPU_PMID, DIFFUSION_KEEP_VAE_ON_CPU_PMID, DIFFUSION_LORA_MODEL_DIR_PMID,
+    DIFFUSION_MODEL_PATH_PMID, DIFFUSION_NUM_WORKERS_PMID, DIFFUSION_OFFLOAD_PARAMS_TO_CPU_PMID,
+    DIFFUSION_T5XXL_PATH_PMID, DIFFUSION_TAESD_PATH_PMID, DIFFUSION_VAE_PATH_PMID,
+    LLAMA_CONTEXT_LENGTH_PMID, LLAMA_NUM_WORKERS_PMID, MODEL_CACHE_DIR_PMID,
+    WHISPER_NUM_WORKERS_PMID,
 };
 use crate::error::ServerError;
-use crate::infra::db::{ConfigStore, ModelCatalogRecord, ModelStore, TaskRecord, TaskStore};
+use crate::infra::db::{ModelCatalogRecord, ModelStore, TaskRecord, TaskStore};
 use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::LoadedModelSpec;
 
-const MODEL_CACHE_DIR_CONFIG_KEY: &str = "model_cache_dir";
-const LLAMA_NUM_WORKERS_CONFIG_KEY: &str = "llama_num_workers";
-const WHISPER_NUM_WORKERS_CONFIG_KEY: &str = "whisper_num_workers";
-const DIFFUSION_NUM_WORKERS_CONFIG_KEY: &str = "diffusion_num_workers";
-const LLAMA_CONTEXT_LENGTH_CONFIG_KEY: &str = "llama_context_length";
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
-
-const DIFFUSION_MODEL_PATH_CONFIG_KEY: &str = "diffusion_model_path";
-const DIFFUSION_VAE_PATH_CONFIG_KEY: &str = "diffusion_vae_path";
-const DIFFUSION_TAESD_PATH_CONFIG_KEY: &str = "diffusion_taesd_path";
-const DIFFUSION_LORA_MODEL_DIR_CONFIG_KEY: &str = "diffusion_lora_model_dir";
-const DIFFUSION_CLIP_L_PATH_CONFIG_KEY: &str = "diffusion_clip_l_path";
-const DIFFUSION_CLIP_G_PATH_CONFIG_KEY: &str = "diffusion_clip_g_path";
-const DIFFUSION_T5XXL_PATH_CONFIG_KEY: &str = "diffusion_t5xxl_path";
-const DIFFUSION_FLASH_ATTN_CONFIG_KEY: &str = "diffusion_flash_attn";
-const DIFFUSION_KEEP_VAE_ON_CPU_CONFIG_KEY: &str = "diffusion_keep_vae_on_cpu";
-const DIFFUSION_KEEP_CLIP_ON_CPU_CONFIG_KEY: &str = "diffusion_keep_clip_on_cpu";
-const DIFFUSION_OFFLOAD_PARAMS_CONFIG_KEY: &str = "diffusion_offload_params_to_cpu";
 
 #[derive(Clone)]
 pub struct ModelService {
@@ -236,13 +225,9 @@ impl ModelService {
 
         let configured_model_cache_dir = self
             .model_state
-            .store()
-            .get_config_value(MODEL_CACHE_DIR_CONFIG_KEY)
-            .await?
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned);
+            .settings()
+            .get_optional_string(MODEL_CACHE_DIR_PMID)
+            .await?;
         if let Some(dir) = &configured_model_cache_dir {
             validate_path("model_cache_dir", dir)?;
         }
@@ -505,32 +490,13 @@ fn resolve_backend_channel(
     Ok((canonical_backend, channel))
 }
 
-fn workers_config_key_for_backend(backend_id: &str) -> Option<&'static str> {
+fn worker_setting_pmid_for_backend(backend_id: &str) -> Option<&'static str> {
     match backend_id {
-        "ggml.llama" => Some(LLAMA_NUM_WORKERS_CONFIG_KEY),
-        "ggml.whisper" => Some(WHISPER_NUM_WORKERS_CONFIG_KEY),
-        "ggml.diffusion" => Some(DIFFUSION_NUM_WORKERS_CONFIG_KEY),
+        "ggml.llama" => Some(LLAMA_NUM_WORKERS_PMID),
+        "ggml.whisper" => Some(WHISPER_NUM_WORKERS_PMID),
+        "ggml.diffusion" => Some(DIFFUSION_NUM_WORKERS_PMID),
         _ => None,
     }
-}
-
-fn parse_positive_u32(raw: &str, key: &str) -> Result<u32, ServerError> {
-    let trimmed = raw.trim();
-    let parsed = trimmed.parse::<u32>().map_err(|_| {
-        ServerError::BadRequest(format!("config key '{key}' must be a positive integer"))
-    })?;
-
-    if parsed == 0 {
-        return Err(ServerError::BadRequest(format!(
-            "config key '{key}' must be at least 1"
-        )));
-    }
-
-    Ok(parsed)
-}
-
-fn parse_num_workers(raw: &str, key: &str) -> Result<u32, ServerError> {
-    parse_positive_u32(raw, key)
 }
 
 async fn resolve_model_workers(
@@ -547,21 +513,15 @@ async fn resolve_model_workers(
         return Ok((workers, "request"));
     }
 
-    let Some(config_key) = workers_config_key_for_backend(canonical_backend) else {
+    let Some(setting_pmid) = worker_setting_pmid_for_backend(canonical_backend) else {
         return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
     };
 
-    let configured = state.store().get_config_value(config_key).await?;
-    let Some(raw) = configured else {
+    let configured = state.settings().get_optional_u32(setting_pmid).await?;
+    let Some(workers) = configured else {
         return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
     };
-
-    if raw.trim().is_empty() {
-        return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
-    }
-
-    let workers = parse_num_workers(&raw, config_key)?;
-    Ok((workers, "config"))
+    Ok((workers, "settings"))
 }
 
 async fn resolve_llama_context_length(
@@ -573,18 +533,13 @@ async fn resolve_llama_context_length(
     }
 
     let configured = state
-        .store()
-        .get_config_value(LLAMA_CONTEXT_LENGTH_CONFIG_KEY)
+        .settings()
+        .get_optional_u32(LLAMA_CONTEXT_LENGTH_PMID)
         .await?;
-    let Some(raw) = configured else {
+    let Some(context_length) = configured else {
         return Ok((0, "default"));
     };
-    if raw.trim().is_empty() {
-        return Ok((0, "default"));
-    }
-
-    let context_length = parse_positive_u32(&raw, LLAMA_CONTEXT_LENGTH_CONFIG_KEY)?;
-    Ok((context_length, "config"))
+    Ok((context_length, "settings"))
 }
 
 struct DiffusionContextParams {
@@ -629,33 +584,28 @@ async fn resolve_diffusion_context_params(
 
     async fn get_str(state: &ModelState, key: &str) -> Result<String, ServerError> {
         Ok(state
-            .store()
-            .get_config_value(key)
+            .settings()
+            .get_optional_string(key)
             .await?
             .unwrap_or_default())
     }
 
     async fn get_bool(state: &ModelState, key: &str) -> Result<bool, ServerError> {
-        let raw = state
-            .store()
-            .get_config_value(key)
-            .await?
-            .unwrap_or_default();
-        Ok(["1", "true", "yes"].contains(&raw.trim().to_lowercase().as_str()))
+        state.settings().get_bool(key).await
     }
 
     Ok(Some(DiffusionContextParams {
-        diffusion_model_path: get_str(state, DIFFUSION_MODEL_PATH_CONFIG_KEY).await?,
-        vae_path: get_str(state, DIFFUSION_VAE_PATH_CONFIG_KEY).await?,
-        taesd_path: get_str(state, DIFFUSION_TAESD_PATH_CONFIG_KEY).await?,
-        lora_model_dir: get_str(state, DIFFUSION_LORA_MODEL_DIR_CONFIG_KEY).await?,
-        clip_l_path: get_str(state, DIFFUSION_CLIP_L_PATH_CONFIG_KEY).await?,
-        clip_g_path: get_str(state, DIFFUSION_CLIP_G_PATH_CONFIG_KEY).await?,
-        t5xxl_path: get_str(state, DIFFUSION_T5XXL_PATH_CONFIG_KEY).await?,
-        flash_attn: get_bool(state, DIFFUSION_FLASH_ATTN_CONFIG_KEY).await?,
-        keep_vae_on_cpu: get_bool(state, DIFFUSION_KEEP_VAE_ON_CPU_CONFIG_KEY).await?,
-        keep_clip_on_cpu: get_bool(state, DIFFUSION_KEEP_CLIP_ON_CPU_CONFIG_KEY).await?,
-        offload_params_to_cpu: get_bool(state, DIFFUSION_OFFLOAD_PARAMS_CONFIG_KEY).await?,
+        diffusion_model_path: get_str(state, DIFFUSION_MODEL_PATH_PMID).await?,
+        vae_path: get_str(state, DIFFUSION_VAE_PATH_PMID).await?,
+        taesd_path: get_str(state, DIFFUSION_TAESD_PATH_PMID).await?,
+        lora_model_dir: get_str(state, DIFFUSION_LORA_MODEL_DIR_PMID).await?,
+        clip_l_path: get_str(state, DIFFUSION_CLIP_L_PATH_PMID).await?,
+        clip_g_path: get_str(state, DIFFUSION_CLIP_G_PATH_PMID).await?,
+        t5xxl_path: get_str(state, DIFFUSION_T5XXL_PATH_PMID).await?,
+        flash_attn: get_bool(state, DIFFUSION_FLASH_ATTN_PMID).await?,
+        keep_vae_on_cpu: get_bool(state, DIFFUSION_KEEP_VAE_ON_CPU_PMID).await?,
+        keep_clip_on_cpu: get_bool(state, DIFFUSION_KEEP_CLIP_ON_CPU_PMID).await?,
+        offload_params_to_cpu: get_bool(state, DIFFUSION_OFFLOAD_PARAMS_TO_CPU_PMID).await?,
     }))
 }
 
