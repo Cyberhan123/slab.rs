@@ -6,6 +6,7 @@ mod image;
 mod model;
 mod session;
 mod settings;
+mod setup;
 mod system;
 mod task;
 mod video;
@@ -18,6 +19,7 @@ pub use image::ImageService;
 pub use model::ModelService;
 pub use session::SessionService;
 pub use settings::SettingsService;
+pub use setup::SetupService;
 pub use system::SystemService;
 pub use task::TaskApplicationService;
 pub use video::VideoService;
@@ -34,6 +36,7 @@ pub struct AppServices {
     pub model: ModelService,
     pub settings: SettingsService,
     pub session: SessionService,
+    pub setup: SetupService,
     pub system: SystemService,
     pub task_application: TaskApplicationService,
     pub video: VideoService,
@@ -50,6 +53,7 @@ impl AppServices {
             model: ModelService::new(model_state.clone(), worker_state.clone()),
             settings: SettingsService::new(model_state.clone()),
             session: SessionService::new(model_state.clone()),
+            setup: SetupService::new(model_state.clone(), worker_state.clone()),
             system: SystemService::new(),
             task_application: TaskApplicationService::new(worker_state.clone()),
             video: VideoService::new(worker_state),

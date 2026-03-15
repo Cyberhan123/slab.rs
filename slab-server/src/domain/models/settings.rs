@@ -31,6 +31,18 @@ pub const DIFFUSION_KEEP_CLIP_ON_CPU_PMID: &str = "diffusion.performance.keep_cl
 pub const DIFFUSION_OFFLOAD_PARAMS_TO_CPU_PMID: &str =
     "diffusion.performance.offload_params_to_cpu";
 
+// ── Setup / first-run PMIDs ──────────────────────────────────────────────────
+pub const SETUP_INITIALIZED_PMID: &str = "setup.initialized";
+pub const SETUP_FFMPEG_AUTO_DOWNLOAD_PMID: &str = "setup.ffmpeg.auto_download";
+pub const SETUP_FFMPEG_DIR_PMID: &str = "setup.ffmpeg.dir";
+pub const SETUP_BACKENDS_DIR_PMID: &str = "setup.backends.dir";
+pub const SETUP_BACKENDS_LLAMA_TAG_PMID: &str = "setup.backends.llama.tag";
+pub const SETUP_BACKENDS_LLAMA_ASSET_PMID: &str = "setup.backends.llama.asset";
+pub const SETUP_BACKENDS_WHISPER_TAG_PMID: &str = "setup.backends.whisper.tag";
+pub const SETUP_BACKENDS_WHISPER_ASSET_PMID: &str = "setup.backends.whisper.asset";
+pub const SETUP_BACKENDS_DIFFUSION_TAG_PMID: &str = "setup.backends.diffusion.tag";
+pub const SETUP_BACKENDS_DIFFUSION_ASSET_PMID: &str = "setup.backends.diffusion.asset";
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum SettingValueType {

@@ -6,6 +6,16 @@ dependencies = ["build-runtime-dev","build-server-dev", "run-tauri"]
 workspace = false
 dependencies = ["build-runtime-release","build-server-release", "build-tauri-release"]
 
+[tasks.check]
+workspace = false
+command = "cargo"
+args = ["check", "--workspace"]
+
+[tasks.test]
+workspace = false
+command = "cargo"
+args = ["test", "--workspace"]
+
 [tasks.build-server-dev]
 workspace = false
 command = "cargo"
@@ -17,6 +27,7 @@ command = "cargo"
 args = ["build", "-p", "slab-runtime"]
 
 [tasks.build-server-release]
+workspace = false
 command = "cargo"
 args = ["build", "--release", "-p", "slab-server"]
 
@@ -31,13 +42,20 @@ command = "bun"
 args = ["run", "tauri", "dev"]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/slab-app"
 
-[tasks.build-tauri]
+[tasks.build-tauri-release]
 workspace = false
 command = "bun"
-args = ["tauri", "build"]
-cwd = "./tauri-app"
+args = ["run", "tauri", "build"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/slab-app"
 
+[tasks.build-tauri-debug]
+workspace = false
+command = "bun"
+args = ["run", "tauri", "build", "--debug"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/slab-app"
 
-
-
-
+[tasks.install-frontend]
+workspace = false
+command = "bun"
+args = ["install"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/slab-app"

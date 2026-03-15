@@ -65,7 +65,12 @@ impl FfmpegService {
                                 .into_owned()
                         });
 
-                    let result = tokio::process::Command::new("ffmpeg")
+                    // Use the ffmpeg-sidecar path resolver: prefers the sidecar
+                    // binary installed next to the executable, falls back to the
+                    // system `ffmpeg` on $PATH.
+                    let ffmpeg_bin = ffmpeg_sidecar::paths::ffmpeg_path();
+
+                    let result = tokio::process::Command::new(&ffmpeg_bin)
                         .args(["-y", "-i", &source_path, "-f", &output_format, &output_path])
                         .output()
                         .await;
@@ -87,7 +92,7 @@ impl FfmpegService {
                             }
                         }
                         Err(error) => {
-                            warn!(task_id = %operation_id, error = %error, "ffmpeg spawn failed");
+                            warn!(task_id = %operation_id, ffmpeg_bin = %ffmpeg_bin.display(), error = %error, "ffmpeg spawn failed");
                             if let Err(db_error) = operation.mark_failed(&error.to_string()).await {
                                 warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg spawn error");
                             }

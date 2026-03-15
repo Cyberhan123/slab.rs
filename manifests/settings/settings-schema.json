@@ -2,6 +2,222 @@
   "schema_version": 1,
   "sections": [
     {
+      "id": "setup",
+      "title": "Setup & Downloads",
+      "description_md": "First-time setup settings: whether initialization is complete, and configurable download locations and versions for FFmpeg and AI backends.",
+      "order": 5,
+      "subsections": [
+        {
+          "id": "general",
+          "title": "General",
+          "description_md": "Global setup state.",
+          "order": 10,
+          "properties": [
+            {
+              "pmid": "setup.initialized",
+              "label": "Setup Initialized",
+              "description_md": "Whether the first-time environment setup has been completed. Set automatically by the setup wizard.",
+              "editable": true,
+              "search_terms": [
+                "setup",
+                "initialized",
+                "first run",
+                "complete"
+              ],
+              "storage_kind": "boolean",
+              "schema": {
+                "type": "boolean",
+                "default_value": false,
+                "order": 10
+              }
+            }
+          ]
+        },
+        {
+          "id": "ffmpeg",
+          "title": "FFmpeg",
+          "description_md": "Settings for automatic FFmpeg download.",
+          "order": 20,
+          "properties": [
+            {
+              "pmid": "setup.ffmpeg.auto_download",
+              "label": "FFmpeg Auto-Download",
+              "description_md": "Automatically download FFmpeg during setup if it is not already installed.",
+              "editable": true,
+              "search_terms": [
+                "ffmpeg",
+                "download",
+                "auto",
+                "setup"
+              ],
+              "storage_kind": "boolean",
+              "schema": {
+                "type": "boolean",
+                "default_value": true,
+                "order": 10
+              }
+            },
+            {
+              "pmid": "setup.ffmpeg.dir",
+              "label": "FFmpeg Install Directory",
+              "description_md": "Directory where FFmpeg binaries will be downloaded. Leave empty to use the platform default next to the application executable.",
+              "editable": true,
+              "search_terms": [
+                "ffmpeg",
+                "directory",
+                "install",
+                "path"
+              ],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 20
+              }
+            }
+          ]
+        },
+        {
+          "id": "backends",
+          "title": "AI Backend Libraries",
+          "description_md": "Settings for automatic download of AI backend shared libraries (llama, whisper, diffusion).",
+          "order": 30,
+          "properties": [
+            {
+              "pmid": "setup.backends.dir",
+              "label": "Backend Library Directory",
+              "description_md": "Directory where backend shared libraries will be downloaded. Leave empty to use the lib directory configured in the server.",
+              "editable": true,
+              "search_terms": [
+                "backend",
+                "library",
+                "directory",
+                "install",
+                "path"
+              ],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 10
+              }
+            },
+            {
+              "pmid": "setup.backends.llama.tag",
+              "label": "Llama Release Tag",
+              "description_md": "GitHub release tag for the llama.cpp prebuilt library. Leave empty to use the default bundled version.",
+              "editable": true,
+              "search_terms": [
+                "llama",
+                "version",
+                "tag",
+                "release",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 20
+              }
+            },
+            {
+              "pmid": "setup.backends.llama.asset",
+              "label": "Llama Asset Name",
+              "description_md": "GitHub release asset filename for the llama.cpp library. Leave empty to use the platform-default asset.",
+              "editable": true,
+              "search_terms": [
+                "llama",
+                "asset",
+                "filename",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 30
+              }
+            },
+            {
+              "pmid": "setup.backends.whisper.tag",
+              "label": "Whisper Release Tag",
+              "description_md": "GitHub release tag for the whisper.cpp prebuilt library. Leave empty to use the default bundled version.",
+              "editable": true,
+              "search_terms": [
+                "whisper",
+                "version",
+                "tag",
+                "release",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 40
+              }
+            },
+            {
+              "pmid": "setup.backends.whisper.asset",
+              "label": "Whisper Asset Name",
+              "description_md": "GitHub release asset filename for the whisper.cpp library. Leave empty to use the platform-default asset.",
+              "editable": true,
+              "search_terms": [
+                "whisper",
+                "asset",
+                "filename",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 50
+              }
+            },
+            {
+              "pmid": "setup.backends.diffusion.tag",
+              "label": "Diffusion Release Tag",
+              "description_md": "GitHub release tag for the stable-diffusion.cpp prebuilt library. Leave empty to use the default bundled version.",
+              "editable": true,
+              "search_terms": [
+                "diffusion",
+                "version",
+                "tag",
+                "release",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 60
+              }
+            },
+            {
+              "pmid": "setup.backends.diffusion.asset",
+              "label": "Diffusion Asset Name",
+              "description_md": "GitHub release asset filename for the stable-diffusion.cpp library. Leave empty to use the platform-default asset.",
+              "editable": true,
+              "search_terms": [
+                "diffusion",
+                "asset",
+                "filename",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 70
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "runtime",
       "title": "Runtime",
       "description_md": "Core runtime behavior, worker sizing, and automatic unload settings.",
@@ -18,7 +234,12 @@
               "label": "Model Cache Directory",
               "description_md": "Directory used for model downloads. Leave empty to use hf-hub defaults.",
               "editable": true,
-              "search_terms": ["cache", "model", "download", "storage"],
+              "search_terms": [
+                "cache",
+                "model",
+                "download",
+                "storage"
+              ],
               "storage_kind": "path",
               "schema": {
                 "type": "string",
@@ -39,7 +260,12 @@
               "label": "Llama Workers",
               "description_md": "Worker count for ggml.llama runtime jobs.",
               "editable": true,
-              "search_terms": ["llama", "workers", "runtime", "parallel"],
+              "search_terms": [
+                "llama",
+                "workers",
+                "runtime",
+                "parallel"
+              ],
               "storage_kind": "integer",
               "schema": {
                 "type": "integer",
@@ -53,7 +279,12 @@
               "label": "Llama Context Length",
               "description_md": "Override llama context length. Reset to use the backend default.",
               "editable": true,
-              "search_terms": ["llama", "context", "tokens", "runtime"],
+              "search_terms": [
+                "llama",
+                "context",
+                "tokens",
+                "runtime"
+              ],
               "storage_kind": "integer",
               "schema": {
                 "type": "integer",
@@ -75,7 +306,12 @@
               "label": "Whisper Workers",
               "description_md": "Worker count for ggml.whisper runtime jobs.",
               "editable": true,
-              "search_terms": ["whisper", "workers", "audio", "runtime"],
+              "search_terms": [
+                "whisper",
+                "workers",
+                "audio",
+                "runtime"
+              ],
               "storage_kind": "integer",
               "schema": {
                 "type": "integer",
@@ -97,7 +333,12 @@
               "label": "Diffusion Workers",
               "description_md": "Worker count for ggml.diffusion runtime jobs.",
               "editable": true,
-              "search_terms": ["diffusion", "workers", "image", "runtime"],
+              "search_terms": [
+                "diffusion",
+                "workers",
+                "image",
+                "runtime"
+              ],
               "storage_kind": "integer",
               "schema": {
                 "type": "integer",
@@ -119,7 +360,12 @@
               "label": "Model Auto Unload Enabled",
               "description_md": "Unload idle models automatically to free memory.",
               "editable": true,
-              "search_terms": ["auto unload", "idle", "memory", "runtime"],
+              "search_terms": [
+                "auto unload",
+                "idle",
+                "memory",
+                "runtime"
+              ],
               "storage_kind": "boolean",
               "schema": {
                 "type": "boolean",
@@ -132,7 +378,12 @@
               "label": "Model Auto Unload Idle Minutes",
               "description_md": "Idle timeout in minutes before an auto unload runs.",
               "editable": true,
-              "search_terms": ["auto unload", "idle", "minutes", "runtime"],
+              "search_terms": [
+                "auto unload",
+                "idle",
+                "minutes",
+                "runtime"
+              ],
               "storage_kind": "integer",
               "schema": {
                 "type": "integer",
@@ -162,7 +413,13 @@
               "label": "Chat Providers",
               "description_md": "OpenAI-compatible cloud providers used by chat model selection.",
               "editable": true,
-              "search_terms": ["chat", "cloud", "provider", "api", "openai"],
+              "search_terms": [
+                "chat",
+                "cloud",
+                "provider",
+                "api",
+                "openai"
+              ],
               "storage_kind": "chat_providers",
               "schema": {
                 "type": "array",
@@ -192,7 +449,11 @@
               "label": "Diffusion Model Path",
               "description_md": "Default diffusion model path used during model load operations.",
               "editable": true,
-              "search_terms": ["diffusion", "model", "path"],
+              "search_terms": [
+                "diffusion",
+                "model",
+                "path"
+              ],
               "storage_kind": "path",
               "schema": {
                 "type": "string",
@@ -205,7 +466,11 @@
               "label": "Diffusion VAE Path",
               "description_md": "Optional external VAE model path.",
               "editable": true,
-              "search_terms": ["diffusion", "vae", "path"],
+              "search_terms": [
+                "diffusion",
+                "vae",
+                "path"
+              ],
               "storage_kind": "path",
               "schema": {
                 "type": "string",
@@ -218,7 +483,11 @@
               "label": "Diffusion TAESD Path",
               "description_md": "Tiny autoencoder path for faster decode.",
               "editable": true,
-              "search_terms": ["diffusion", "taesd", "path"],
+              "search_terms": [
+                "diffusion",
+                "taesd",
+                "path"
+              ],
               "storage_kind": "path",
               "schema": {
                 "type": "string",
@@ -231,7 +500,12 @@
               "label": "Diffusion LoRA Model Directory",
               "description_md": "Directory containing LoRA safetensors files.",
               "editable": true,
-              "search_terms": ["diffusion", "lora", "directory", "path"],
+              "search_terms": [
+                "diffusion",
+                "lora",
+                "directory",
+                "path"
+              ],
               "storage_kind": "path",
               "schema": {
                 "type": "string",
@@ -244,7 +518,12 @@
               "label": "Diffusion CLIP-L Path",
               "description_md": "Optional CLIP-L path.",
               "editable": true,
-              "search_terms": ["diffusion", "clip", "path", "clip-l"],
+              "search_terms": [
+                "diffusion",
+                "clip",
+                "path",
+                "clip-l"
+              ],
               "storage_kind": "path",
               "schema": {
                 "type": "string",
@@ -257,7 +536,12 @@
               "label": "Diffusion CLIP-G Path",
               "description_md": "Optional CLIP-G path.",
               "editable": true,
-              "search_terms": ["diffusion", "clip", "path", "clip-g"],
+              "search_terms": [
+                "diffusion",
+                "clip",
+                "path",
+                "clip-g"
+              ],
               "storage_kind": "path",
               "schema": {
                 "type": "string",
@@ -270,7 +554,12 @@
               "label": "Diffusion T5XXL Path",
               "description_md": "Optional T5XXL encoder path.",
               "editable": true,
-              "search_terms": ["diffusion", "t5xxl", "path", "encoder"],
+              "search_terms": [
+                "diffusion",
+                "t5xxl",
+                "path",
+                "encoder"
+              ],
               "storage_kind": "path",
               "schema": {
                 "type": "string",
@@ -291,7 +580,11 @@
               "label": "Diffusion Flash Attention",
               "description_md": "Enable flash attention when supported by the backend.",
               "editable": true,
-              "search_terms": ["diffusion", "flash attention", "performance"],
+              "search_terms": [
+                "diffusion",
+                "flash attention",
+                "performance"
+              ],
               "storage_kind": "boolean",
               "schema": {
                 "type": "boolean",
@@ -304,7 +597,12 @@
               "label": "Diffusion Keep VAE On CPU",
               "description_md": "Reduce VRAM usage by keeping VAE on CPU.",
               "editable": true,
-              "search_terms": ["diffusion", "vae", "cpu", "memory"],
+              "search_terms": [
+                "diffusion",
+                "vae",
+                "cpu",
+                "memory"
+              ],
               "storage_kind": "boolean",
               "schema": {
                 "type": "boolean",
@@ -317,7 +615,12 @@
               "label": "Diffusion Keep CLIP On CPU",
               "description_md": "Reduce VRAM usage by keeping CLIP on CPU.",
               "editable": true,
-              "search_terms": ["diffusion", "clip", "cpu", "memory"],
+              "search_terms": [
+                "diffusion",
+                "clip",
+                "cpu",
+                "memory"
+              ],
               "storage_kind": "boolean",
               "schema": {
                 "type": "boolean",
@@ -330,7 +633,12 @@
               "label": "Diffusion Offload Params To CPU",
               "description_md": "Reduce VRAM usage by offloading parameters to CPU memory.",
               "editable": true,
-              "search_terms": ["diffusion", "offload", "cpu", "memory"],
+              "search_terms": [
+                "diffusion",
+                "offload",
+                "cpu",
+                "memory"
+              ],
               "storage_kind": "boolean",
               "schema": {
                 "type": "boolean",
