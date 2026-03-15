@@ -1,0 +1,346 @@
+{
+  "schema_version": 1,
+  "sections": [
+    {
+      "id": "runtime",
+      "title": "Runtime",
+      "description_md": "Core runtime behavior, worker sizing, and automatic unload settings.",
+      "order": 10,
+      "subsections": [
+        {
+          "id": "general",
+          "title": "General",
+          "description_md": "Global runtime paths and cache directories.",
+          "order": 10,
+          "properties": [
+            {
+              "pmid": "runtime.model_cache_dir",
+              "label": "Model Cache Directory",
+              "description_md": "Directory used for model downloads. Leave empty to use hf-hub defaults.",
+              "editable": true,
+              "search_terms": ["cache", "model", "download", "storage"],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 10
+              }
+            }
+          ]
+        },
+        {
+          "id": "llama",
+          "title": "Llama",
+          "description_md": "Settings for the ggml.llama runtime.",
+          "order": 20,
+          "properties": [
+            {
+              "pmid": "runtime.llama.num_workers",
+              "label": "Llama Workers",
+              "description_md": "Worker count for ggml.llama runtime jobs.",
+              "editable": true,
+              "search_terms": ["llama", "workers", "runtime", "parallel"],
+              "storage_kind": "integer",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "default_value": 1,
+                "order": 10
+              }
+            },
+            {
+              "pmid": "runtime.llama.context_length",
+              "label": "Llama Context Length",
+              "description_md": "Override llama context length. Reset to use the backend default.",
+              "editable": true,
+              "search_terms": ["llama", "context", "tokens", "runtime"],
+              "storage_kind": "integer",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "default_value": null,
+                "order": 20
+              }
+            }
+          ]
+        },
+        {
+          "id": "whisper",
+          "title": "Whisper",
+          "description_md": "Settings for the ggml.whisper runtime.",
+          "order": 30,
+          "properties": [
+            {
+              "pmid": "runtime.whisper.num_workers",
+              "label": "Whisper Workers",
+              "description_md": "Worker count for ggml.whisper runtime jobs.",
+              "editable": true,
+              "search_terms": ["whisper", "workers", "audio", "runtime"],
+              "storage_kind": "integer",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "default_value": 1,
+                "order": 10
+              }
+            }
+          ]
+        },
+        {
+          "id": "diffusion_runtime",
+          "title": "Diffusion Runtime",
+          "description_md": "Worker sizing for the ggml.diffusion runtime.",
+          "order": 40,
+          "properties": [
+            {
+              "pmid": "runtime.diffusion.num_workers",
+              "label": "Diffusion Workers",
+              "description_md": "Worker count for ggml.diffusion runtime jobs.",
+              "editable": true,
+              "search_terms": ["diffusion", "workers", "image", "runtime"],
+              "storage_kind": "integer",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "default_value": 1,
+                "order": 10
+              }
+            }
+          ]
+        },
+        {
+          "id": "model_auto_unload",
+          "title": "Model Auto Unload",
+          "description_md": "Unload idle models automatically to reclaim memory.",
+          "order": 50,
+          "properties": [
+            {
+              "pmid": "runtime.model_auto_unload.enabled",
+              "label": "Model Auto Unload Enabled",
+              "description_md": "Unload idle models automatically to free memory.",
+              "editable": true,
+              "search_terms": ["auto unload", "idle", "memory", "runtime"],
+              "storage_kind": "boolean",
+              "schema": {
+                "type": "boolean",
+                "default_value": false,
+                "order": 10
+              }
+            },
+            {
+              "pmid": "runtime.model_auto_unload.idle_minutes",
+              "label": "Model Auto Unload Idle Minutes",
+              "description_md": "Idle timeout in minutes before an auto unload runs.",
+              "editable": true,
+              "search_terms": ["auto unload", "idle", "minutes", "runtime"],
+              "storage_kind": "integer",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "default_value": 10,
+                "order": 20
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "chat",
+      "title": "Chat",
+      "description_md": "Cloud provider mappings used by the chat model picker.",
+      "order": 20,
+      "subsections": [
+        {
+          "id": "providers",
+          "title": "Providers",
+          "description_md": "OpenAI-compatible cloud provider configuration stored as JSON.",
+          "order": 10,
+          "properties": [
+            {
+              "pmid": "chat.providers",
+              "label": "Chat Providers",
+              "description_md": "OpenAI-compatible cloud providers used by chat model selection.",
+              "editable": true,
+              "search_terms": ["chat", "cloud", "provider", "api", "openai"],
+              "storage_kind": "chat_providers",
+              "schema": {
+                "type": "array",
+                "default_value": [],
+                "multiline": true,
+                "order": 10
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "diffusion",
+      "title": "Diffusion",
+      "description_md": "Diffusion model paths and runtime performance toggles.",
+      "order": 30,
+      "subsections": [
+        {
+          "id": "paths",
+          "title": "Paths",
+          "description_md": "Optional model paths passed to the diffusion backend.",
+          "order": 10,
+          "properties": [
+            {
+              "pmid": "diffusion.paths.model",
+              "label": "Diffusion Model Path",
+              "description_md": "Default diffusion model path used during model load operations.",
+              "editable": true,
+              "search_terms": ["diffusion", "model", "path"],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 10
+              }
+            },
+            {
+              "pmid": "diffusion.paths.vae",
+              "label": "Diffusion VAE Path",
+              "description_md": "Optional external VAE model path.",
+              "editable": true,
+              "search_terms": ["diffusion", "vae", "path"],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 20
+              }
+            },
+            {
+              "pmid": "diffusion.paths.taesd",
+              "label": "Diffusion TAESD Path",
+              "description_md": "Tiny autoencoder path for faster decode.",
+              "editable": true,
+              "search_terms": ["diffusion", "taesd", "path"],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 30
+              }
+            },
+            {
+              "pmid": "diffusion.paths.lora_model_dir",
+              "label": "Diffusion LoRA Model Directory",
+              "description_md": "Directory containing LoRA safetensors files.",
+              "editable": true,
+              "search_terms": ["diffusion", "lora", "directory", "path"],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 40
+              }
+            },
+            {
+              "pmid": "diffusion.paths.clip_l",
+              "label": "Diffusion CLIP-L Path",
+              "description_md": "Optional CLIP-L path.",
+              "editable": true,
+              "search_terms": ["diffusion", "clip", "path", "clip-l"],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 50
+              }
+            },
+            {
+              "pmid": "diffusion.paths.clip_g",
+              "label": "Diffusion CLIP-G Path",
+              "description_md": "Optional CLIP-G path.",
+              "editable": true,
+              "search_terms": ["diffusion", "clip", "path", "clip-g"],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 60
+              }
+            },
+            {
+              "pmid": "diffusion.paths.t5xxl",
+              "label": "Diffusion T5XXL Path",
+              "description_md": "Optional T5XXL encoder path.",
+              "editable": true,
+              "search_terms": ["diffusion", "t5xxl", "path", "encoder"],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 70
+              }
+            }
+          ]
+        },
+        {
+          "id": "performance",
+          "title": "Performance",
+          "description_md": "Flags that trade memory usage for performance.",
+          "order": 20,
+          "properties": [
+            {
+              "pmid": "diffusion.performance.flash_attn",
+              "label": "Diffusion Flash Attention",
+              "description_md": "Enable flash attention when supported by the backend.",
+              "editable": true,
+              "search_terms": ["diffusion", "flash attention", "performance"],
+              "storage_kind": "boolean",
+              "schema": {
+                "type": "boolean",
+                "default_value": false,
+                "order": 10
+              }
+            },
+            {
+              "pmid": "diffusion.performance.keep_vae_on_cpu",
+              "label": "Diffusion Keep VAE On CPU",
+              "description_md": "Reduce VRAM usage by keeping VAE on CPU.",
+              "editable": true,
+              "search_terms": ["diffusion", "vae", "cpu", "memory"],
+              "storage_kind": "boolean",
+              "schema": {
+                "type": "boolean",
+                "default_value": false,
+                "order": 20
+              }
+            },
+            {
+              "pmid": "diffusion.performance.keep_clip_on_cpu",
+              "label": "Diffusion Keep CLIP On CPU",
+              "description_md": "Reduce VRAM usage by keeping CLIP on CPU.",
+              "editable": true,
+              "search_terms": ["diffusion", "clip", "cpu", "memory"],
+              "storage_kind": "boolean",
+              "schema": {
+                "type": "boolean",
+                "default_value": false,
+                "order": 30
+              }
+            },
+            {
+              "pmid": "diffusion.performance.offload_params_to_cpu",
+              "label": "Diffusion Offload Params To CPU",
+              "description_md": "Reduce VRAM usage by offloading parameters to CPU memory.",
+              "editable": true,
+              "search_terms": ["diffusion", "offload", "cpu", "memory"],
+              "storage_kind": "boolean",
+              "schema": {
+                "type": "boolean",
+                "default_value": false,
+                "order": 40
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
