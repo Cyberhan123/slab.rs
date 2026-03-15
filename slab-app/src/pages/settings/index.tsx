@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
-import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
+import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
   ArrowRight,
@@ -466,9 +466,6 @@ export default function Settings() {
 
   const installedModelCount = models.filter((model) => Boolean(model.local_path)).length;
   const downloadingModelCount = models.filter((model) => modelStatusOf(model) === 'pending').length;
-  const totalMatches = filteredSettings.length + filteredModels.length + backendRows.length;
-  const activeSectionMeta = SECTION_META.find((item) => item.id === section) ?? SECTION_META[0];
-
   const updateQuery = (next: Partial<{ q: string; section: SettingsSection }>) => {
     startTransition(() => {
       setSearchParams(updateSearchParams(searchParams, next), { replace: true });
@@ -833,7 +830,7 @@ export default function Settings() {
 
         <div className="min-h-0 flex-1">
           <ResizablePanelGroup orientation="horizontal">
-            <ResizablePanel defaultSize={22} minSize={18} maxSize={28}>
+            <ResizablePanel defaultSize="22%" minSize="18%" maxSize="28%">
               <div className="h-full border-r border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--muted)_72%,transparent),transparent_28%)]">
                 <div className="flex h-full flex-col">
                   <div className="border-b border-border/60 px-4 py-4">
@@ -905,7 +902,7 @@ export default function Settings() {
               </div>
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={78}>
+            <ResizablePanel defaultSize="78%">
               <div className="h-full overflow-y-auto">
                 <div className="mx-auto max-w-[1200px] space-y-6 px-4 py-6">
                   {(settingsLoading || modelsLoading || backendsLoading || systemLoading) && (
