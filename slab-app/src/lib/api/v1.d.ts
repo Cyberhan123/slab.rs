@@ -577,6 +577,19 @@ export interface components {
          * @enum {string}
          */
         ChatModelSource: "local" | "cloud";
+        CloudProviderModelSettingValue: {
+            display_name?: string;
+            id: string;
+            remote_model?: string | null;
+        };
+        CloudProviderSettingValue: {
+            api_base: string;
+            api_key?: string | null;
+            api_key_env?: string | null;
+            id: string;
+            models: components["schemas"]["CloudProviderModelSettingValue"][];
+            name?: string;
+        };
         CompletionRequest: {
             decode?: null | components["schemas"]["TranscribeDecodeRequest"];
             /** @description The audio file path to transcribe. */
@@ -812,40 +825,27 @@ export interface components {
             state_path?: string | null;
             updated_at: string;
         };
-        CloudProviderModelSettingValue: {
-            display_name: string;
-            id: string;
-            remote_model?: string | null;
-        };
-        CloudProviderSettingValue: {
-            api_base: string;
-            api_key?: string | null;
-            api_key_env?: string | null;
-            id: string;
-            models: components["schemas"]["CloudProviderModelSettingValue"][];
-            name: string;
-        };
         SettingPropertySchema: {
-            default_value: unknown;
+            default_value?: unknown;
             enum?: string[] | null;
             /** Format: int64 */
             maximum?: number | null;
             /** Format: int64 */
             minimum?: number | null;
-            multiline: boolean;
+            multiline?: boolean;
             /** Format: int32 */
-            order: number;
+            order?: number;
             pattern?: string | null;
-            secret: boolean;
+            secret?: boolean;
             type: components["schemas"]["SettingValueType"];
         };
-        SettingResponse: {
-            description_md: string;
+        SettingPropertyView: {
+            description_md?: string;
             editable: boolean;
             effective_value: unknown;
             is_overridden: boolean;
             label: string;
-            override_value?: unknown | null;
+            override_value?: unknown;
             pmid: string;
             schema: components["schemas"]["SettingPropertySchema"];
             search_terms: string[];
@@ -858,23 +858,23 @@ export interface components {
         };
         /** @enum {string} */
         SettingValueType: "boolean" | "integer" | "string" | "array" | "object";
-        SettingsDocumentResponse: {
+        SettingsDocumentView: {
             /** Format: int32 */
             schema_version: number;
-            sections: components["schemas"]["SettingsSectionResponse"][];
+            sections: components["schemas"]["SettingsSectionView"][];
             settings_path: string;
             warnings: string[];
         };
-        SettingsSectionResponse: {
-            description_md: string;
+        SettingsSectionView: {
+            description_md?: string;
             id: string;
-            subsections: components["schemas"]["SettingsSubsectionResponse"][];
+            subsections: components["schemas"]["SettingsSubsectionView"][];
             title: string;
         };
-        SettingsSubsectionResponse: {
-            description_md: string;
+        SettingsSubsectionView: {
+            description_md?: string;
             id: string;
-            properties: components["schemas"]["SettingResponse"][];
+            properties: components["schemas"]["SettingPropertyView"][];
             title: string;
         };
         SwitchModelRequest: {
@@ -1027,12 +1027,12 @@ export interface components {
             filename?: string | null;
             repo_id?: string | null;
         };
+        UpdateSettingCommand: {
+            op: components["schemas"]["UpdateSettingOperation"];
+            value?: unknown;
+        };
         /** @enum {string} */
         UpdateSettingOperation: "set" | "unset";
-        UpdateSettingRequest: {
-            op: components["schemas"]["UpdateSettingOperation"];
-            value?: unknown | null;
-        };
         /** @description Request body for `POST /v1/video/generations`. */
         VideoGenerationRequest: {
             /**
@@ -1518,12 +1518,12 @@ export interface operations {
     };
     list_available_models: {
         parameters: {
-            query: {
+            query?: never;
+            header?: never;
+            path: {
                 /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
                 repo_id: string;
             };
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -1952,7 +1952,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SettingsDocumentResponse"];
+                    "application/json": components["schemas"]["SettingsDocumentView"];
                 };
             };
             /** @description Unauthorised (admin token required) */
@@ -1981,7 +1981,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SettingResponse"];
+                    "application/json": components["schemas"]["SettingPropertyView"];
                 };
             };
             /** @description Unauthorised (admin token required) */
@@ -2011,7 +2011,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["UpdateSettingRequest"];
+                "application/json": components["schemas"]["UpdateSettingCommand"];
             };
         };
         responses: {
@@ -2021,7 +2021,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["SettingResponse"];
+                    "application/json": components["schemas"]["SettingPropertyView"];
                 };
             };
             /** @description Bad request */
