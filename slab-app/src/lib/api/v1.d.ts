@@ -91,10 +91,7 @@ export interface paths {
     };
     "/v1/backends/status": {
         parameters: {
-            query: {
-                /** @description One of `"ggml.llama"`, `"ggml.whisper"`, or `"ggml.diffusion"`. */
-                backend_id: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -172,56 +169,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/settings": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["list_settings"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/settings/system": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get: operations["system_info"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/settings/{key}": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                key: string;
-            };
-            cookie?: never;
-        };
-        get: operations["get_setting"];
-        put: operations["update_setting"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/ffmpeg/convert": {
         parameters: {
             query?: never;
@@ -272,10 +219,7 @@ export interface paths {
     };
     "/v1/models/available": {
         parameters: {
-            query: {
-                /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
-                repo_id: string;
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
@@ -410,6 +354,54 @@ export interface paths {
         };
         get: operations["list_session_messages"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["list_settings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/system": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["system_info"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_setting"];
+        put: operations["update_setting"];
         post?: never;
         delete?: never;
         options?: never;
@@ -644,55 +636,6 @@ export interface components {
             name: string;
             value: string;
         };
-        /**
-         * @enum {string}
-         */
-        SettingCategory: "runtime" | "chat_providers" | "diffusion";
-        /**
-         * @enum {string}
-         */
-        SettingControl: "toggle" | "number" | "text" | "path" | "json";
-        SettingValidation: {
-            min?: number | null;
-            max?: number | null;
-            step?: number | null;
-            multiline: boolean;
-            allow_empty: boolean;
-        };
-        SettingResponse: {
-            key: string;
-            category: components["schemas"]["SettingCategory"];
-            label: string;
-            description: string;
-            control: components["schemas"]["SettingControl"];
-            editable: boolean;
-            value: unknown;
-            effective_value: unknown;
-            default_value: unknown;
-            search_terms: string[];
-            validation: components["schemas"]["SettingValidation"];
-        };
-        SystemBackendResponse: {
-            backend: string;
-            endpoint_configured: boolean;
-            endpoint?: string | null;
-            runtime_status: string;
-            worker_setting_key?: string | null;
-            configured_workers?: number | null;
-            effective_workers?: number | null;
-        };
-        SettingsSystemResponse: {
-            bind_address: string;
-            transport_mode: string;
-            swagger_enabled: boolean;
-            admin_token_enabled: boolean;
-            cors_configured: boolean;
-            session_state_dir: string;
-            backends: components["schemas"]["SystemBackendResponse"][];
-        };
-        UpdateSettingRequest: {
-            value: unknown;
-        };
         ConvertRequest: {
             /** @description Desired output format (e.g. `"mp3"`, `"wav"`, `"mp4"`). */
             output_format: string;
@@ -926,6 +869,42 @@ export interface components {
             name?: string | null;
             value: string;
         };
+        /** @enum {string} */
+        SettingCategory: "runtime" | "chat_providers" | "diffusion";
+        /** @enum {string} */
+        SettingControl: "toggle" | "number" | "text" | "path" | "json";
+        SettingResponse: {
+            category: components["schemas"]["SettingCategory"];
+            control: components["schemas"]["SettingControl"];
+            default_value: unknown;
+            description: string;
+            editable: boolean;
+            effective_value: unknown;
+            key: string;
+            label: string;
+            search_terms: string[];
+            validation: components["schemas"]["SettingValidation"];
+            value: unknown;
+        };
+        SettingValidation: {
+            allow_empty?: boolean;
+            /** Format: int64 */
+            max?: number | null;
+            /** Format: int64 */
+            min?: number | null;
+            multiline?: boolean;
+            /** Format: int64 */
+            step?: number | null;
+        };
+        SettingsSystemResponse: {
+            admin_token_enabled: boolean;
+            backends: components["schemas"]["SystemBackendResponse"][];
+            bind_address: string;
+            cors_configured: boolean;
+            session_state_dir: string;
+            swagger_enabled: boolean;
+            transport_mode: string;
+        };
         SwitchModelRequest: {
             backend_id: string;
             model_path: string;
@@ -934,6 +913,17 @@ export interface components {
              * @description Optional worker override. If omitted, server uses global config by backend.
              */
             num_workers?: number | null;
+        };
+        SystemBackendResponse: {
+            backend: string;
+            /** Format: int32 */
+            configured_workers?: number | null;
+            /** Format: int32 */
+            effective_workers?: number | null;
+            endpoint?: string | null;
+            endpoint_configured: boolean;
+            runtime_status: string;
+            worker_setting_key?: string | null;
         };
         TaskResponse: {
             created_at: string;
@@ -1075,6 +1065,9 @@ export interface components {
             display_name?: string | null;
             filename?: string | null;
             repo_id?: string | null;
+        };
+        UpdateSettingRequest: {
+            value: unknown;
         };
         /** @description Request body for `POST /v1/video/generations`. */
         VideoGenerationRequest: {
@@ -1309,12 +1302,12 @@ export interface operations {
     };
     backend_status: {
         parameters: {
-            query: {
+            query?: never;
+            header?: never;
+            path: {
                 /** @description One of `"ggml.llama"`, `"ggml.whisper"`, or `"ggml.diffusion"`. */
                 backend_id: string;
             };
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -1508,143 +1501,6 @@ export interface operations {
             };
         };
     };
-    list_settings: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description List settings metadata and current values */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingResponse"][];
-                };
-            };
-            /** @description Unauthorised (admin token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    get_setting: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Get a setting by key */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingResponse"];
-                };
-            };
-            /** @description Unauthorised (admin token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Setting not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    update_setting: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                key: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdateSettingRequest"];
-            };
-        };
-        responses: {
-            /** @description Update a setting */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingResponse"];
-                };
-            };
-            /** @description Bad request */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unauthorised (admin token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Setting not found */
-            404: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    system_info: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Read-only system and backend facts used by Settings UI */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SettingsSystemResponse"];
-                };
-            };
-            /** @description Unauthorised (admin token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
     convert: {
         parameters: {
             query?: never;
@@ -1797,12 +1653,12 @@ export interface operations {
     };
     list_available_models: {
         parameters: {
-            query: {
+            query?: never;
+            header?: never;
+            path: {
                 /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
                 repo_id: string;
             };
-            header?: never;
-            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -2209,6 +2065,139 @@ export interface operations {
             };
             /** @description Backend error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    list_settings: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description List settings metadata and current values */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingResponse"][];
+                };
+            };
+            /** @description Unauthorised (admin token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    system_info: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Read-only system and backend facts used by Settings UI */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsSystemResponse"];
+                };
+            };
+            /** @description Unauthorised (admin token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_setting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Get a setting by key */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingResponse"];
+                };
+            };
+            /** @description Unauthorised (admin token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Setting not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_setting: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateSettingRequest"];
+            };
+        };
+        responses: {
+            /** @description Update a setting */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Unauthorised (admin token required) */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Setting not found */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };
