@@ -1,4 +1,4 @@
-import { Loader2, Search, TriangleAlert } from 'lucide-react';
+import { Loader2, Plus, RefreshCw, Search, TriangleAlert } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -33,6 +33,42 @@ export default function Hub() {
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-10">
         <Card className="border-border/70 shadow-[0_20px_60px_-48px_color-mix(in_oklab,var(--foreground)_32%,transparent)]">
           <CardHeader className="gap-4 border-b border-border/60">
+            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <p className="text-sm font-medium">Model catalog</p>
+                  <p className="text-sm text-muted-foreground">
+                    Add models from Hugging Face repositories, inspect repo files, and manage
+                    runtime-ready catalog entries in one place.
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{hub.models.length} total</Badge>
+                  <Badge variant="outline">{hub.downloadedCount} downloaded</Badge>
+                  <Badge variant="outline">{hub.pendingCount} pending</Badge>
+                </div>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => void hub.refetch()}
+                  disabled={hub.isRefetching}
+                >
+                  {hub.isRefetching ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="mr-2 h-4 w-4" />
+                  )}
+                  Refresh
+                </Button>
+                <Button onClick={() => hub.setCreateOpen(true)}>
+                  <Plus className="mr-2 h-4 w-4" />
+                  Add model
+                </Button>
+              </div>
+            </div>
+
             <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_220px_140px]">
               <div className="relative">
                 <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -101,6 +137,12 @@ export default function Hub() {
                 <p className="mt-2 text-sm text-muted-foreground">
                   Try another search term, change the status filter, or add a new model entry.
                 </p>
+                <div className="mt-4 flex justify-center">
+                  <Button onClick={() => hub.setCreateOpen(true)}>
+                    <Plus className="mr-2 h-4 w-4" />
+                    Add model
+                  </Button>
+                </div>
               </div>
             ) : (
               <>

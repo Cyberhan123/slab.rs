@@ -755,7 +755,7 @@ export interface components {
          * @description Generation mode.
          * @enum {string}
          */
-        ImageMode: "txt2_img" | "img2_img";
+        ImageMode: "txt2img" | "img2img";
         /** @description Query parameters for listing files in a HuggingFace repo. */
         ListAvailableQuery: {
             /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */

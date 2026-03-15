@@ -21,10 +21,10 @@ import {
   X,
   ZoomIn,
 } from 'lucide-react';
-import api from '@/lib/api';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
+import { useImageModelPreparation } from './hooks/use-image-model-preparation';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -56,17 +56,7 @@ const SCHEDULERS = [
 const POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_ATTEMPTS = 150;
 
-const DIFFUSION_BACKEND_ID = 'ggml.diffusion';
-
 // ── Types ─────────────────────────────────────────────────────────────────────
-
-type ModelOption = {
-  id: string;
-  label: string;
-  downloaded: boolean;
-  pending: boolean;
-  local_path: string | null;
-};
 
 interface GeneratedImage {
   src: string;
@@ -104,10 +94,16 @@ export default function ImagePage() {
         ? 'Refine an input image with diffusion controls'
         : 'Generate images from text prompts',
   });
+  const {
+    catalogLoading,
+    isPreparingModel,
+    modelOptions,
+    prepareSelectedModel,
+    selectedModelId,
+    setSelectedModelId,
+  } = useImageModelPreparation();
 
   // ── Model selection ─────────────────────────────────────────────────────────
-  const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
-  const [selectedModelId, setSelectedModelId] = useState('');
   // ── Basic params ────────────────────────────────────────────────────────────
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
@@ -142,30 +138,6 @@ export default function ImagePage() {
   const abortRef = useRef(false);
 
   // ── Model loading ────────────────────────────────────────────────────────────
-  const { data: catalogModels, isLoading: catalogLoading } = api.useQuery('get', '/v1/models');
-
-  useEffect(() => {
-    const models = Array.isArray(catalogModels) ? catalogModels : [];
-    const diffusionModels = models
-      .filter(
-        (m) =>
-          Array.isArray(m.backend_ids) &&
-          m.backend_ids.includes(DIFFUSION_BACKEND_ID),
-      )
-      .map<ModelOption>((m) => ({
-        id: m.id,
-        label: m.display_name,
-        downloaded: Boolean(m.local_path),
-        pending: m.status === 'pending',
-        local_path: m.local_path ?? null,
-      }));
-    setModelOptions(diffusionModels);
-    if (diffusionModels.length > 0 && !selectedModelId) {
-      const downloaded = diffusionModels.find((m) => m.downloaded);
-      setSelectedModelId(downloaded?.id ?? diffusionModels[0].id);
-    }
-  }, [catalogModels, selectedModelId]);
-
   // ── Init image handling ──────────────────────────────────────────────────────
   const handleInitImageChange = useCallback(
     async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -182,7 +154,7 @@ export default function ImagePage() {
   );
 
   // ── Submit ───────────────────────────────────────────────────────────────────
-  const handleSubmit = useCallback(async () => {
+  const handleSubmit = async () => {
     if (!prompt.trim()) {
       toast.error('Please enter a prompt');
       return;
@@ -192,22 +164,18 @@ export default function ImagePage() {
       return;
     }
 
-    const selectedModel = modelOptions.find((m) => m.id === selectedModelId);
-    if (!selectedModel?.local_path) {
-      toast.error('Selected model is not downloaded. Please download it first in Settings.');
-      return;
-    }
-
-    setIsSubmitting(true);
     abortRef.current = false;
 
     try {
+      const modelPath = await prepareSelectedModel();
+
+      setIsSubmitting(true);
       const [w, h] = [parseInt(widthStr, 10) || 512, parseInt(heightStr, 10) || 512];
       const response = await fetch(`${API_BASE_URL}/v1/images/generations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          model: selectedModel.local_path,
+          model: modelPath,
           prompt,
           negative_prompt: negativePrompt || undefined,
           n: numImages,
@@ -242,12 +210,7 @@ export default function ImagePage() {
     } finally {
       setIsSubmitting(false);
     }
-  }, [
-    prompt, negativePrompt, numImages, widthStr, heightStr,
-    cfgScale, guidance, steps, seed, sampleMethod, scheduler,
-    clipSkip, eta, strength, mode, initImageDataUri,
-    modelOptions, selectedModelId,
-  ]);
+  };
 
   // ── Polling ──────────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -340,6 +303,7 @@ export default function ImagePage() {
 
   // ── Render ───────────────────────────────────────────────────────────────────
   const isGenerating = isSubmitting || isPolling;
+  const isBusy = isGenerating || isPreparingModel;
 
   return (
     <div className="h-full overflow-y-auto lg:overflow-hidden">
@@ -400,7 +364,11 @@ export default function ImagePage() {
           {/* Model selector */}
           <div className="space-y-1.5">
             <Label>Model</Label>
-            <Select value={selectedModelId} onValueChange={setSelectedModelId}>
+            <Select
+              value={selectedModelId}
+              onValueChange={setSelectedModelId}
+              disabled={isBusy || modelOptions.length === 0}
+            >
               <SelectTrigger>
                 <SelectValue placeholder={catalogLoading ? 'Loading…' : 'Select a model'} />
               </SelectTrigger>
@@ -411,9 +379,12 @@ export default function ImagePage() {
                   </SelectItem>
                 )}
                 {modelOptions.map((m) => (
-                  <SelectItem key={m.id} value={m.id} disabled={!m.downloaded}>
+                  <SelectItem key={m.id} value={m.id}>
                     <span className="flex items-center gap-2">
                       {m.label}
+                      {m.pending && (
+                        <Badge variant="secondary" className="text-xs">Downloading</Badge>
+                      )}
                       {!m.downloaded && (
                         <Badge variant="outline" className="text-xs">Not downloaded</Badge>
                       )}
@@ -422,6 +393,9 @@ export default function ImagePage() {
                 ))}
               </SelectContent>
             </Select>
+            <p className="text-xs text-muted-foreground">
+              Missing diffusion models are downloaded automatically when you generate.
+            </p>
           </div>
 
           {/* Prompt */}
@@ -641,9 +615,14 @@ export default function ImagePage() {
             <Button
               className="flex-1"
               onClick={handleSubmit}
-              disabled={isGenerating || !prompt.trim()}
+              disabled={isBusy || !prompt.trim() || !selectedModelId}
             >
-              {isGenerating ? (
+              {isPreparingModel ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Preparing model...
+                </>
+              ) : isGenerating ? (
                 <>
                   <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                   Generating…
