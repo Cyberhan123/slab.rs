@@ -23,6 +23,8 @@ import {
 } from 'lucide-react';
 import api from '@/lib/api';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -95,6 +97,13 @@ async function fileToDataUri(file: File): Promise<string> {
 export default function ImagePage() {
   // ── Mode ────────────────────────────────────────────────────────────────────
   const [mode, setMode] = useState<'txt2img' | 'img2img'>('txt2img');
+  usePageHeader({
+    ...PAGE_HEADER_META.image,
+    subtitle:
+      mode === 'img2img'
+        ? 'Refine an input image with diffusion controls'
+        : 'Generate images from text prompts',
+  });
 
   // ── Model selection ─────────────────────────────────────────────────────────
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);

@@ -1,4 +1,9 @@
+import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { PAGE_HEADER_META } from '@/layouts/header-meta';
+
 function About() {
+  usePageHeader(PAGE_HEADER_META.about);
+
   return (
     <main className="max-w-4xl mx-auto p-8 bg-background min-h-screen">
       <div className="bg-card rounded-xl shadow-lg p-8">

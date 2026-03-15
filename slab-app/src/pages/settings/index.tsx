@@ -12,6 +12,8 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api, { getErrorMessage } from '@/lib/api';
 
 import { SettingFieldCard } from './components/setting-field-card';
@@ -83,6 +85,13 @@ export default function SettingsPage() {
     () => countProperties(filteredSections),
     [filteredSections],
   );
+  usePageHeader({
+    ...PAGE_HEADER_META.settings,
+    subtitle:
+      normalizedSearch.length > 0
+        ? `Showing ${visiblePropertyCount} of ${totalPropertyCount} settings for "${deferredSearch.trim()}"`
+        : PAGE_HEADER_META.settings.subtitle,
+  });
 
   const {
     drafts,

@@ -8,7 +8,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
+import { usePageHeader } from "@/hooks/use-global-header-meta";
 import { isTauri } from "@/hooks/use-tauri";
+import { PAGE_HEADER_META } from "@/layouts/header-meta";
 import {
   pluginApiRequest,
   pluginCall,
@@ -25,6 +27,7 @@ import {
 export default function Plugins() {
   const isDesktopTauri = isTauri();
   const viewportRef = useRef<HTMLDivElement | null>(null);
+  usePageHeader(PAGE_HEADER_META.plugins);
 
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [loading, setLoading] = useState(false);

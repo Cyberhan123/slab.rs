@@ -13,6 +13,8 @@ import useFile, { SelectedFile } from '@/hooks/use-file';
 import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } from './hooks/use-transcribe';
 import useIsTauri from '@/hooks/use-tauri';
 import api from '@/lib/api';
+import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 const WHISPER_BACKEND_ID = 'ggml.whisper';
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
@@ -23,6 +25,7 @@ type PreparingStage = 'prepare' | 'transcribe' | null;
 export default function Audio() {
   const navigate = useNavigate();
   const isTauri = useIsTauri();
+  usePageHeader(PAGE_HEADER_META.audio);
 
   // file object or string path (desktop uses string path)
   const [file, setFile] = useState<SelectedFile | null>(null);
