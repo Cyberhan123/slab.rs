@@ -2,33 +2,32 @@ pub mod ggml;
 //todo
 pub mod candle;
 
-use thiserror::Error;
+/// Engine-layer error type alias.
+///
+/// Adapter code can reference `engine::EngineError` without being aware of the
+/// `base` layer.
+pub use crate::base::error::CoreError as EngineError;
 
-#[derive(Debug, Error)]
-/// All errors the API can throw
-pub enum EngineError {
-    /// I/O Error
-    #[error("I/O error {0}")]
-    IoError(#[from] std::io::Error),
+// ── From impls: GGML error types → CoreError ──────────────────────────────────
+//
+// Kept here (not in `base`) so that the base domain layer remains
+// free of any dependency on engine-specific types.
 
-    #[error("GGML error {0}")]
-    GGMLEngineError(#[from] ggml::GGMLEngineError),
+macro_rules! impl_ggml_from {
+    ($($ty:path),+ $(,)?) => {
+        $(
+            impl From<$ty> for crate::base::error::CoreError {
+                fn from(e: $ty) -> Self {
+                    crate::base::error::CoreError::GGMLEngine(e.to_string())
+                }
+            }
+        )+
+    };
 }
 
-impl From<ggml::whisper::GGMLWhisperEngineError> for EngineError {
-    fn from(err: ggml::whisper::GGMLWhisperEngineError) -> Self {
-        EngineError::GGMLEngineError(ggml::GGMLEngineError::from(err))
-    }
-}
-
-impl From<ggml::llama::GGMLLlamaEngineError> for EngineError {
-    fn from(err: ggml::llama::GGMLLlamaEngineError) -> Self {
-        EngineError::GGMLEngineError(ggml::GGMLEngineError::from(err))
-    }
-}
-
-impl From<ggml::diffusion::GGMLDiffusionEngineError> for EngineError {
-    fn from(err: ggml::diffusion::GGMLDiffusionEngineError) -> Self {
-        EngineError::GGMLEngineError(ggml::GGMLEngineError::from(err))
-    }
-}
+impl_ggml_from!(
+    ggml::GGMLEngineError,
+    ggml::whisper::GGMLWhisperEngineError,
+    ggml::llama::GGMLLlamaEngineError,
+    ggml::diffusion::GGMLDiffusionEngineError,
+);

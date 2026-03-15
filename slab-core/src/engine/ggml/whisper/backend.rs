@@ -31,11 +31,11 @@ use crate::engine::ggml::config::{LibLoadConfig, ModelLoadConfig};
 use crate::engine::ggml::whisper::adapter::{
     GGMLWhisperEngine, WhisperDecodeConfig, WhisperVadConfig,
 };
-use crate::runtime::backend::backend_handler;
-use crate::runtime::backend::protocol::{
+use crate::scheduler::backend::backend_handler;
+use crate::scheduler::backend::protocol::{
     BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
 };
-use crate::runtime::types::Payload;
+use crate::scheduler::types::Payload;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 

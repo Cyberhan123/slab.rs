@@ -1,6 +1,7 @@
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::oneshot;
 
-use crate::runtime::types::Payload;
+use crate::base::types::Payload;
+pub use crate::base::types::{StreamChunk, StreamHandle};
 
 /// Canonical management events supported by the runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -102,27 +103,6 @@ pub enum WorkerCommand {
     Peer(PeerWorkerCommand),
     Runtime(RuntimeControlSignal),
 }
-
-/// A single chunk emitted by a streaming backend.
-#[derive(Debug, Clone)]
-pub enum StreamChunk {
-    /// A piece of generated output (e.g. a token string).
-    Token(String),
-    /// Generation completed normally.
-    Done,
-    /// Generation terminated due to a backend error.
-    Error(String),
-    /// A generated image (placeholder for now).
-    #[allow(dead_code)]
-    Image(bytes::Bytes), //TODO: A generated image.
-}
-
-/// A handle to a streaming inference response.
-///
-/// The receiver yields [`StreamChunk`] items as they are produced by the
-/// backend worker.  The stream ends with [`StreamChunk::Done`] or
-/// [`StreamChunk::Error`].
-pub type StreamHandle = mpsc::Receiver<StreamChunk>;
 
 /// Operation identifier passed to a backend in a [`BackendRequest`].
 #[derive(Debug, Clone)]

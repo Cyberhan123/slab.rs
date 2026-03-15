@@ -60,14 +60,14 @@ use std::time::Duration;
 use bytes::Bytes;
 use futures::Stream;
 
-use crate::runtime::backend::admission::{ResourceManager, ResourceManagerConfig};
-use crate::runtime::backend::protocol::{BackendOp, StreamChunk};
-use crate::runtime::orchestrator::Orchestrator;
-use crate::runtime::pipeline::PipelineBuilder;
-use crate::runtime::stage::CpuStage;
-use crate::runtime::storage::TaskStatusView;
-pub use crate::runtime::types::{GlobalConsistencyState, RuntimeError};
-use crate::runtime::types::{GlobalOperationKind, Payload, TaskId, TaskStatus};
+use crate::scheduler::backend::admission::{ResourceManager, ResourceManagerConfig};
+use crate::scheduler::backend::protocol::{BackendOp, StreamChunk};
+use crate::scheduler::orchestrator::Orchestrator;
+use crate::scheduler::pipeline::PipelineBuilder;
+use crate::scheduler::stage::CpuStage;
+use crate::scheduler::storage::TaskStatusView;
+pub use crate::scheduler::types::{GlobalConsistencyState, RuntimeError};
+use crate::scheduler::types::{GlobalOperationKind, Payload, TaskId, TaskStatus};
 use std::path::{Path, PathBuf};
 pub use types::Backend;
 pub use types::Event;
@@ -161,7 +161,7 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
         llama::{spawn_backend_with_engine as spawn_llama, GGMLLlamaEngine},
         whisper::{GGMLWhisperEngine, WhisperWorker},
     };
-    use crate::runtime::backend::runner::spawn_workers;
+    use crate::scheduler::backend::runner::spawn_workers;
     use std::path::Path;
 
     // ── Phase 1: load all library handles synchronously ───────────────────────
@@ -400,7 +400,7 @@ pub async fn is_backend_ready(backend_id: Backend) -> Result<bool, RuntimeError>
         .await?;
     Ok(matches!(
         state,
-        crate::runtime::types::BackendLifecycleState::ModelLoaded
+        crate::scheduler::types::BackendLifecycleState::ModelLoaded
     ))
 }
 
@@ -867,8 +867,8 @@ fn payload_to_bytes(p: Payload) -> Result<Bytes, RuntimeError> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::runtime::backend::protocol::BackendReply;
-    use crate::runtime::backend::runner::SharedIngressRx;
+    use crate::scheduler::backend::protocol::BackendReply;
+    use crate::scheduler::backend::runner::SharedIngressRx;
     use tokio::sync::mpsc;
 
     // ── helpers ───────────────────────────────────────────────────────────────
