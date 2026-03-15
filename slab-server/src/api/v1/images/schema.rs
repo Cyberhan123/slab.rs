@@ -8,12 +8,13 @@ const MAX_IMAGE_DIM: u32 = 2048;
 
 /// Generation mode.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
-#[serde(rename_all = "snake_case")]
 pub enum ImageMode {
     /// Text-to-image (default).
     #[default]
+    #[serde(rename = "txt2img")]
     Txt2Img,
     /// Image-to-image (requires `init_image`).
+    #[serde(rename = "img2img")]
     Img2Img,
 }
 

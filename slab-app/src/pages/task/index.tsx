@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
@@ -173,19 +173,9 @@ export default function Task() {
   return (
     <div className="h-full overflow-auto">
       <div className="container mx-auto space-y-8 px-4 py-8">
-        <div className="space-y-4 text-center">
-          <h1 className="text-center text-3xl font-bold">Task Management</h1>
-          <p className="mx-auto max-w-2xl text-muted-foreground">
-            View and manage system tasks
-          </p>
-        </div>
-
         <Card>
           <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <CardTitle>Task List</CardTitle>
-              <CardDescription>Status and details for all system tasks</CardDescription>
-            </div>
+
             <div className="w-full sm:w-56">
               <Select value={taskType} onValueChange={setTaskType}>
                 <SelectTrigger>
@@ -364,16 +354,6 @@ export default function Task() {
               </Table>
             )}
           </CardContent>
-          <CardFooter className="flex justify-end">
-            <Button
-              onClick={() => {
-                refetchTasks();
-              }}
-              disabled={tasksLoading}
-            >
-              {tasksLoading ? 'Refreshing...' : 'Refresh list'}
-            </Button>
-          </CardFooter>
         </Card>
       </div>
     </div>
