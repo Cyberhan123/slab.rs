@@ -200,3 +200,28 @@ pub enum StageStatus {
     StageFailed,
     StageCancelled,
 }
+
+/// A single chunk emitted by a streaming backend.
+///
+/// Defined here in `base` so that the `ports` interface layer and the
+/// scheduler layer can both reference it without a scheduler→ports or
+/// ports→scheduler dependency.
+#[derive(Debug, Clone)]
+pub enum StreamChunk {
+    /// A piece of generated output (e.g. a token string).
+    Token(String),
+    /// Generation completed normally.
+    Done,
+    /// Generation terminated due to a backend error.
+    Error(String),
+    /// A generated image (placeholder for now).
+    #[allow(dead_code)]
+    Image(bytes::Bytes), //TODO: A generated image.
+}
+
+/// A handle to a streaming inference response.
+///
+/// The receiver yields [`StreamChunk`] items as they are produced by the
+/// backend worker.  The stream ends with [`StreamChunk::Done`] or
+/// [`StreamChunk::Error`].
+pub type StreamHandle = tokio::sync::mpsc::Receiver<StreamChunk>;
