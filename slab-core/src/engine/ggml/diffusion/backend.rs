@@ -60,11 +60,11 @@ use tokio::sync::broadcast;
 
 use crate::engine::ggml::config::{DiffusionModelLoadConfig, LibLoadConfig};
 use crate::engine::ggml::diffusion::adapter::GGMLDiffusionEngine;
-use crate::runtime::backend::backend_handler;
-use crate::runtime::backend::protocol::{
+use crate::scheduler::backend::backend_handler;
+use crate::scheduler::backend::protocol::{
     BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
 };
-use crate::runtime::types::Payload;
+use crate::scheduler::types::Payload;
 
 // ── Configurations ────────────────────────────────────────────────────────────
 
