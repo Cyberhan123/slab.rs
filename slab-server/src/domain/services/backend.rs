@@ -8,12 +8,14 @@ use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
-    ReloadBackendLibCommand,
+    ReloadBackendLibCommand, SETUP_BACKENDS_DIFFUSION_ASSET_PMID, SETUP_BACKENDS_DIFFUSION_TAG_PMID,
+    SETUP_BACKENDS_DIR_PMID, SETUP_BACKENDS_LLAMA_ASSET_PMID, SETUP_BACKENDS_LLAMA_TAG_PMID,
+    SETUP_BACKENDS_WHISPER_ASSET_PMID, SETUP_BACKENDS_WHISPER_TAG_PMID,
 };
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
 
-type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
+pub(crate) type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
 
 #[derive(Clone)]
 pub struct BackendService {
@@ -66,6 +68,13 @@ impl BackendService {
         Ok(backends)
     }
 
+    /// Download a backend library release asset.
+    ///
+    /// The release tag and asset filename are resolved in the following
+    /// priority order:
+    ///
+    /// 1. Values explicitly set in `settings.json` under `setup.backends.*`.
+    /// 2. Built-in platform defaults (the previous hard-coded values).
     pub async fn download_lib(
         &self,
         req: DownloadBackendLibCommand,
@@ -80,25 +89,65 @@ impl BackendService {
             ServerError::BadRequest(format!("unknown backend_id: {}", req.backend_id))
         })?;
 
-        let (owner, repo, tag, asset_resolver) =
+        let (owner, repo, default_tag, default_asset_fn) =
             windows_download_spec(backend_id).ok_or_else(|| {
                 ServerError::BadRequest(format!("unsupported backend_id: {backend_id}"))
             })?;
+
+        // Read settings-based overrides, falling back to the built-in spec.
+        let (tag_pmid, asset_pmid) = settings_pmids_for(backend_id);
+
+        let tag = self
+            .model_state
+            .settings()
+            .get_optional_string(tag_pmid)
+            .await
+            .unwrap_or(None)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| default_tag.to_owned());
+
+        let asset = self
+            .model_state
+            .settings()
+            .get_optional_string(asset_pmid)
+            .await
+            .unwrap_or(None)
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| default_asset_fn(&tag));
+
+        // Prefer the backends.dir setting over the explicit target_dir argument.
+        let backends_dir = self
+            .model_state
+            .settings()
+            .get_optional_string(SETUP_BACKENDS_DIR_PMID)
+            .await
+            .unwrap_or(None)
+            .filter(|s| !s.is_empty());
+
+        let target_dir = backends_dir.unwrap_or(req.target_dir);
 
         let input_data = serde_json::json!({
             "backend_id": req.backend_id,
             "owner": owner,
             "repo": repo,
             "tag": tag,
-            "target_dir": req.target_dir,
+            "target_dir": target_dir,
+            "asset_name": asset,
         })
         .to_string();
 
+        let asset_clone = asset.clone();
         let operation_id = self
             .worker_state
             .submit_operation(
                 SubmitOperation::pending("lib_download", None, Some(input_data.clone())),
-                move |operation| run_libfetch_download(operation, input_data, asset_resolver),
+                move |operation| {
+                    run_libfetch_download(
+                        operation,
+                        input_data,
+                        Box::new(move |_| asset_clone.clone()),
+                    )
+                },
             )
             .await?;
 
@@ -144,32 +193,50 @@ impl BackendService {
     }
 }
 
+// ── static download specs (fallback defaults) ────────────────────────────────
+
 fn windows_download_spec(
     backend_id: Backend,
-) -> Option<(&'static str, &'static str, &'static str, AssetNameResolver)> {
+) -> Option<(&'static str, &'static str, &'static str, fn(&str) -> String)> {
     match backend_id {
         Backend::GGMLLlama => Some((
             "ggml-org",
             "llama.cpp",
             "b8069",
-            Box::new(|version: &str| format!("llama-{version}-bin-win-cpu-x64.zip")),
+            |version: &str| format!("llama-{version}-bin-win-cpu-x64.zip"),
         )),
         Backend::GGMLWhisper => Some((
             "ggml-org",
             "whisper.cpp",
             "v1.8.3",
-            Box::new(|_| "whisper-cublas-12.4.0-bin-x64.zip".to_string()),
+            |_| "whisper-cublas-12.4.0-bin-x64.zip".to_string(),
         )),
         Backend::GGMLDiffusion => Some((
             "leejet",
             "stable-diffusion.cpp",
             "master-504-636d3cb",
-            Box::new(|version: &str| format!("stable-diffusion-{version}-bin-win-cpu-x64.zip")),
+            |version: &str| format!("stable-diffusion-{version}-bin-win-cpu-x64.zip"),
         )),
     }
 }
 
-async fn run_libfetch_download(
+fn settings_pmids_for(backend: Backend) -> (&'static str, &'static str) {
+    match backend {
+        Backend::GGMLLlama => (SETUP_BACKENDS_LLAMA_TAG_PMID, SETUP_BACKENDS_LLAMA_ASSET_PMID),
+        Backend::GGMLWhisper => (
+            SETUP_BACKENDS_WHISPER_TAG_PMID,
+            SETUP_BACKENDS_WHISPER_ASSET_PMID,
+        ),
+        Backend::GGMLDiffusion => (
+            SETUP_BACKENDS_DIFFUSION_TAG_PMID,
+            SETUP_BACKENDS_DIFFUSION_ASSET_PMID,
+        ),
+    }
+}
+
+// ── shared task runner (pub(crate) so SetupService can reuse it) ─────────────
+
+pub(crate) async fn run_libfetch_download(
     operation: OperationContext,
     input_data: String,
     default_asset_fn: AssetNameResolver,
