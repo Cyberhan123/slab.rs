@@ -34,12 +34,12 @@ use tokio::sync::{broadcast, mpsc};
 use crate::engine::ggml::config::LibLoadConfig;
 use crate::engine::ggml::llama::adapter::GGMLLlamaEngine;
 use crate::engine::ggml::llama::errors::SessionId;
-use crate::runtime::backend::backend_handler;
-use crate::runtime::backend::protocol::{
+use crate::scheduler::backend::backend_handler;
+use crate::scheduler::backend::protocol::{
     BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
 };
-use crate::runtime::backend::runner::{spawn_runtime_worker, SharedIngressRx};
-use crate::runtime::types::Payload;
+use crate::scheduler::backend::runner::{spawn_runtime_worker, SharedIngressRx};
+use crate::scheduler::types::Payload;
 
 // ── Configurations ────────────────────────────────────────────────────────────
 
@@ -732,8 +732,8 @@ pub(crate) fn spawn_backend_with_engine(
 #[cfg(test)]
 mod tests {
     use super::{LlamaWorker, SessionBinding};
-    use crate::runtime::backend::protocol::RuntimeControlSignal;
-    use crate::runtime::types::Payload;
+    use crate::scheduler::backend::protocol::RuntimeControlSignal;
+    use crate::scheduler::types::Payload;
 
     #[tokio::test]
     async fn runtime_global_unload_clears_sessions() {

@@ -4,11 +4,11 @@ mod tests {
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
-    use crate::runtime::backend::admission::{ResourceManager, ResourceManagerConfig};
-    use crate::runtime::backend::protocol::{BackendOp, BackendReply};
-    use crate::runtime::orchestrator::Orchestrator;
-    use crate::runtime::pipeline::PipelineBuilder;
-    use crate::runtime::types::{
+    use crate::scheduler::backend::admission::{ResourceManager, ResourceManagerConfig};
+    use crate::scheduler::backend::protocol::{BackendOp, BackendReply};
+    use crate::scheduler::orchestrator::Orchestrator;
+    use crate::scheduler::pipeline::PipelineBuilder;
+    use crate::scheduler::types::{
         FailedGlobalOperation, GlobalOperationKind, Payload, RuntimeError, TaskStatus,
     };
 
@@ -70,14 +70,14 @@ mod tests {
             .await
             .unwrap_err();
         assert!(
-            matches!(err, crate::runtime::types::RuntimeError::Busy { .. }),
+            matches!(err, crate::scheduler::types::RuntimeError::Busy { .. }),
             "expected Busy error"
         );
     }
 
     #[tokio::test]
     async fn cpu_stage_transforms_payload() {
-        use crate::runtime::stage::CpuStage;
+        use crate::scheduler::stage::CpuStage;
 
         let stage = CpuStage::new("uppercase", |p| match p {
             Payload::Text(s) => Ok(Payload::Text(Arc::from(s.to_uppercase().as_str()))),
@@ -95,7 +95,7 @@ mod tests {
 
     #[tokio::test]
     async fn cpu_stage_propagates_error() {
-        use crate::runtime::stage::CpuStage;
+        use crate::scheduler::stage::CpuStage;
 
         let stage = CpuStage::new("fail-stage", |_p| Err("intentional error".to_owned()));
         let result = stage.run(text_payload("x")).await;
@@ -230,17 +230,17 @@ mod tests {
                     match req {
                         Some(req) => {
                             let (stream_tx, stream_rx) =
-                                mpsc::channel::<crate::runtime::backend::protocol::StreamChunk>(8);
+                                mpsc::channel::<crate::scheduler::backend::protocol::StreamChunk>(8);
                             let _ = req.reply_tx.send(BackendReply::Stream(stream_rx));
                             for word in ["hello", " ", "world"] {
                                 let _ = stream_tx
-                                    .send(crate::runtime::backend::protocol::StreamChunk::Token(
+                                    .send(crate::scheduler::backend::protocol::StreamChunk::Token(
                                         word.to_owned(),
                                     ))
                                     .await;
                             }
                             let _ = stream_tx
-                                .send(crate::runtime::backend::protocol::StreamChunk::Done)
+                                .send(crate::scheduler::backend::protocol::StreamChunk::Done)
                                 .await;
                         }
                         None => break,
@@ -284,13 +284,13 @@ mod tests {
         let mut tokens = String::new();
         while let Some(chunk) = handle.recv().await {
             match chunk {
-                crate::runtime::backend::protocol::StreamChunk::Token(t) => tokens.push_str(&t),
-                crate::runtime::backend::protocol::StreamChunk::Done => break,
-                crate::runtime::backend::protocol::StreamChunk::Error(e) => {
+                crate::scheduler::backend::protocol::StreamChunk::Token(t) => tokens.push_str(&t),
+                crate::scheduler::backend::protocol::StreamChunk::Done => break,
+                crate::scheduler::backend::protocol::StreamChunk::Error(e) => {
                     panic!("stream error: {e}")
                 }
-                crate::runtime::backend::protocol::StreamChunk::Image(_) => {
-                    panic!("unexpected image chunk now stream")
+                crate::scheduler::backend::protocol::StreamChunk::Image(_) => {
+                    panic!("unexpected image chunk in stream")
                 }
             }
         }
@@ -301,7 +301,7 @@ mod tests {
     /// instead of failing immediately.
     #[tokio::test]
     async fn acquire_inference_lease_waits_for_capacity() {
-        use crate::runtime::backend::admission::ResourceManager;
+        use crate::scheduler::backend::admission::ResourceManager;
 
         let mut rm = ResourceManager::with_config(ResourceManagerConfig {
             backend_capacity: 1,
@@ -341,7 +341,7 @@ mod tests {
         use std::sync::atomic::{AtomicBool, Ordering};
         use tokio::sync::{broadcast, mpsc, oneshot};
 
-        use crate::runtime::backend::protocol::{PeerWorkerCommand, WorkerCommand};
+        use crate::scheduler::backend::protocol::{PeerWorkerCommand, WorkerCommand};
 
         const NUM_WORKERS: usize = 3;
 
@@ -442,7 +442,7 @@ mod tests {
     async fn stale_broadcast_sequence_is_ignored() {
         use tokio::sync::broadcast;
 
-        use crate::runtime::backend::protocol::{PeerWorkerCommand, WorkerCommand};
+        use crate::scheduler::backend::protocol::{PeerWorkerCommand, WorkerCommand};
 
         let (bc_tx, mut bc_rx) = broadcast::channel::<WorkerCommand>(16);
         let applied = Arc::new(tokio::sync::Mutex::new(Vec::<u64>::new()));
@@ -642,7 +642,7 @@ mod tests {
 
     #[tokio::test]
     async fn global_management_emits_runtime_control_signal() {
-        use crate::runtime::backend::protocol::{RuntimeControlSignal, WorkerCommand};
+        use crate::scheduler::backend::protocol::{RuntimeControlSignal, WorkerCommand};
 
         let mut rm = ResourceManager::with_config(ResourceManagerConfig {
             backend_capacity: 2,
