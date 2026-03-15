@@ -1,10 +1,13 @@
 use std::collections::{BTreeMap, BTreeSet};
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use utoipa::ToSchema;
 
+use super::settings_jsonschema::{
+    base_property_validation_schema, chat_providers_validation_schema, ensure_json_schema_is_valid,
+    normalize_json_pointer, validate_settings_schema_document,
+};
 use crate::error::ServerError;
 
 pub const MODEL_CACHE_DIR_PMID: &str = "runtime.model_cache_dir";
@@ -191,6 +194,8 @@ pub struct SettingDefinition {
     pub search_terms: Vec<String>,
     pub schema: SettingPropertySchema,
     storage_kind: SettingStorageKind,
+    validation_schema: Value,
+    default_validation_schema: Value,
 }
 
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
@@ -200,6 +205,8 @@ enum SettingStorageKind {
     Integer,
     String,
     Path,
+    Array,
+    Object,
     ChatProviders,
 }
 
@@ -264,12 +271,18 @@ fn default_storage_kind() -> SettingStorageKind {
 }
 
 pub fn embedded_settings_schema() -> Result<SettingsSchema, ServerError> {
-    SettingsSchema::from_json_str(include_str!("settings-schema.json"))
+    SettingsSchema::from_json_str(include_str!(
+        "../../../../manifests/settings/settings-schema.json"
+    ))
 }
 
 impl SettingsSchema {
     pub fn from_json_str(raw: &str) -> Result<Self, ServerError> {
-        let parsed: RawSettingsSchema = serde_json::from_str(raw).map_err(|error| {
+        let raw_document: Value = serde_json::from_str(raw).map_err(|error| {
+            ServerError::Internal(format!("invalid embedded settings schema: {error}"))
+        })?;
+        validate_settings_schema_document(&raw_document)?;
+        let parsed: RawSettingsSchema = serde_json::from_value(raw_document).map_err(|error| {
             ServerError::Internal(format!("invalid embedded settings schema: {error}"))
         })?;
 
@@ -368,6 +381,8 @@ impl SettingDefinition {
             search_terms: raw.search_terms,
             schema: raw.schema,
             storage_kind: raw.storage_kind,
+            validation_schema: Value::Null,
+            default_validation_schema: Value::Null,
         };
 
         if definition.pmid.is_empty() {
@@ -383,6 +398,10 @@ impl SettingDefinition {
         }
 
         definition.validate_storage_shape()?;
+        let (validation_schema, default_validation_schema) =
+            definition.build_validation_schemas()?;
+        definition.validation_schema = validation_schema;
+        definition.default_validation_schema = default_validation_schema;
         definition.schema.default_value = definition.canonicalize_default_value()?;
 
         Ok(definition)
@@ -442,6 +461,8 @@ impl SettingDefinition {
             SettingStorageKind::Boolean => SettingValueType::Boolean,
             SettingStorageKind::Integer => SettingValueType::Integer,
             SettingStorageKind::String | SettingStorageKind::Path => SettingValueType::String,
+            SettingStorageKind::Array => SettingValueType::Array,
+            SettingStorageKind::Object => SettingValueType::Object,
             SettingStorageKind::ChatProviders => SettingValueType::Array,
         };
 
@@ -457,15 +478,6 @@ impl SettingDefinition {
                 "settings '{}' only supports enum values for string properties",
                 self.pmid
             )));
-        }
-
-        if let Some(pattern) = &self.schema.pattern {
-            Regex::new(pattern).map_err(|error| {
-                ServerError::Internal(format!(
-                    "settings '{}' has invalid pattern '{}': {error}",
-                    self.pmid, pattern
-                ))
-            })?;
         }
 
         Ok(())
@@ -505,67 +517,107 @@ impl SettingDefinition {
         value: &Value,
         allow_null_default: bool,
     ) -> Result<Value, ServerError> {
+        let schema = if allow_null_default {
+            &self.default_validation_schema
+        } else {
+            &self.validation_schema
+        };
+
         match self.storage_kind {
-            SettingStorageKind::Boolean => parse_bool_from_value(value)
-                .map(Value::Bool)
-                .map_err(|message| self.validation_error("/", message)),
+            SettingStorageKind::Boolean => {
+                let canonical = canonicalize_bool_value(value)
+                    .map_err(|message| self.validation_error("/", message))?;
+                self.validate_json_value(schema, &canonical)?;
+                Ok(canonical)
+            }
             SettingStorageKind::Integer => {
                 if allow_null_default && value.is_null() {
+                    self.validate_json_value(schema, value)?;
                     return Ok(Value::Null);
                 }
-                let parsed = parse_integer_from_value(value)
+                let canonical = canonicalize_integer_value(value)
                     .map_err(|message| self.validation_error("/", message))?;
-                if let Some(minimum) = self.schema.minimum {
-                    if parsed < minimum {
-                        return Err(self.validation_error(
-                            "/",
-                            format!("value must be greater than or equal to {minimum}"),
-                        ));
-                    }
-                }
-                if let Some(maximum) = self.schema.maximum {
-                    if parsed > maximum {
-                        return Err(self.validation_error(
-                            "/",
-                            format!("value must be less than or equal to {maximum}"),
-                        ));
-                    }
-                }
-                Ok(json!(parsed))
+                self.validate_json_value(schema, &canonical)?;
+                Ok(canonical)
             }
             SettingStorageKind::String | SettingStorageKind::Path => {
-                let parsed = parse_string_from_value(value)
+                let canonical = canonicalize_string_value(value)
                     .map_err(|message| self.validation_error("/", message))?;
-                self.validate_string_constraints(&parsed)?;
-                Ok(Value::String(parsed))
+                self.validate_json_value(schema, &canonical)?;
+                Ok(canonical)
+            }
+            SettingStorageKind::Array | SettingStorageKind::Object => {
+                self.validate_json_value(schema, value)?;
+                Ok(value.clone())
             }
             SettingStorageKind::ChatProviders => {
                 let providers = canonicalize_chat_providers_from_value(value)
                     .map_err(|message| self.validation_error("/", message))?;
-                serde_json::to_value(providers).map_err(|error| {
+                let canonical = serde_json::to_value(providers).map_err(|error| {
                     ServerError::Internal(format!("serialize settings value: {error}"))
-                })
+                })?;
+                self.validate_json_value(schema, &canonical)?;
+                Ok(canonical)
             }
         }
     }
 
-    fn validate_string_constraints(&self, value: &str) -> Result<(), ServerError> {
-        if let Some(enum_values) = &self.schema.enum_values {
-            if !enum_values.iter().any(|item| item == value) {
-                return Err(self.validation_error("/", "value is not in the allowed set"));
+    fn build_validation_schemas(&self) -> Result<(Value, Value), ServerError> {
+        let validation_schema = self.build_validation_schema(false);
+        ensure_json_schema_is_valid(
+            &validation_schema,
+            &format!("setting '{}' runtime schema", self.pmid),
+        )?;
+
+        let default_validation_schema = self.build_validation_schema(true);
+        ensure_json_schema_is_valid(
+            &default_validation_schema,
+            &format!("setting '{}' default schema", self.pmid),
+        )?;
+
+        Ok((validation_schema, default_validation_schema))
+    }
+
+    fn build_validation_schema(&self, allow_null_default: bool) -> Value {
+        match self.storage_kind {
+            SettingStorageKind::ChatProviders => chat_providers_validation_schema(),
+            _ => {
+                let mut schema = base_property_validation_schema(
+                    self.schema.value_type,
+                    allow_null_default && self.storage_kind == SettingStorageKind::Integer,
+                );
+
+                if let Some(enum_values) = &self.schema.enum_values {
+                    schema.insert("enum".to_owned(), json!(enum_values));
+                }
+                if let Some(minimum) = self.schema.minimum {
+                    schema.insert("minimum".to_owned(), json!(minimum));
+                }
+                if let Some(maximum) = self.schema.maximum {
+                    schema.insert("maximum".to_owned(), json!(maximum));
+                }
+                if let Some(pattern) = &self.schema.pattern {
+                    schema.insert("pattern".to_owned(), json!(pattern));
+                }
+
+                Value::Object(schema)
             }
         }
+    }
 
-        if let Some(pattern) = &self.schema.pattern {
-            let regex = Regex::new(pattern).map_err(|error| {
-                ServerError::Internal(format!(
-                    "settings '{}' has invalid pattern '{}': {error}",
-                    self.pmid, pattern
-                ))
-            })?;
-            if !regex.is_match(value) {
-                return Err(self.validation_error("/", "value does not match the required pattern"));
-            }
+    fn validate_json_value(&self, schema: &Value, value: &Value) -> Result<(), ServerError> {
+        let validator = jsonschema::validator_for(schema).map_err(|error| {
+            ServerError::Internal(format!(
+                "failed to compile validation schema for '{}': {error}",
+                self.pmid
+            ))
+        })?;
+
+        if let Some(error) = validator.iter_errors(value).next() {
+            return Err(self.validation_error(
+                &normalize_json_pointer(error.instance_path().to_string()),
+                error.to_string(),
+            ));
         }
 
         Ok(())
@@ -585,32 +637,26 @@ impl SettingDefinition {
     }
 }
 
-fn parse_bool_from_value(value: &Value) -> Result<bool, &'static str> {
+fn canonicalize_bool_value(value: &Value) -> Result<Value, &'static str> {
     match value {
-        Value::Bool(parsed) => Ok(*parsed),
-        Value::String(raw) => match raw.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Ok(true),
-            "0" | "false" | "no" | "off" => Ok(false),
-            _ => Err("value must be a boolean"),
-        },
+        Value::Bool(parsed) => Ok(Value::Bool(*parsed)),
         _ => Err("value must be a boolean"),
     }
 }
 
-fn parse_integer_from_value(value: &Value) -> Result<i64, &'static str> {
+fn canonicalize_integer_value(value: &Value) -> Result<Value, &'static str> {
     match value {
-        Value::Number(number) => number.as_i64().ok_or("value must be an integer"),
-        Value::String(raw) => raw
-            .trim()
-            .parse::<i64>()
-            .map_err(|_| "value must be an integer"),
+        Value::Number(number) => number
+            .as_i64()
+            .map(|parsed| json!(parsed))
+            .ok_or("value must be an integer"),
         _ => Err("value must be an integer"),
     }
 }
 
-fn parse_string_from_value(value: &Value) -> Result<String, &'static str> {
+fn canonicalize_string_value(value: &Value) -> Result<Value, &'static str> {
     match value {
-        Value::String(raw) => Ok(raw.trim().to_owned()),
+        Value::String(raw) => Ok(Value::String(raw.trim().to_owned())),
         _ => Err("value must be a string"),
     }
 }
