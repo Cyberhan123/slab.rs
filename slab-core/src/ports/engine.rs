@@ -1,8 +1,7 @@
 use async_trait::async_trait;
 
 use crate::base::error::CoreError;
-use crate::base::types::Payload;
-use crate::scheduler::backend::protocol::StreamHandle;
+use crate::base::types::{Payload, StreamHandle};
 
 /// Abstraction over an AI inference engine backend.
 ///

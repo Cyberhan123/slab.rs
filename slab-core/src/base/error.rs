@@ -83,27 +83,3 @@ impl From<std::io::Error> for CoreError {
         CoreError::EngineIo(e.to_string())
     }
 }
-
-impl From<crate::engine::ggml::GGMLEngineError> for CoreError {
-    fn from(e: crate::engine::ggml::GGMLEngineError) -> Self {
-        CoreError::GGMLEngine(e.to_string())
-    }
-}
-
-impl From<crate::engine::ggml::whisper::GGMLWhisperEngineError> for CoreError {
-    fn from(e: crate::engine::ggml::whisper::GGMLWhisperEngineError) -> Self {
-        CoreError::GGMLEngine(e.to_string())
-    }
-}
-
-impl From<crate::engine::ggml::llama::GGMLLlamaEngineError> for CoreError {
-    fn from(e: crate::engine::ggml::llama::GGMLLlamaEngineError) -> Self {
-        CoreError::GGMLEngine(e.to_string())
-    }
-}
-
-impl From<crate::engine::ggml::diffusion::GGMLDiffusionEngineError> for CoreError {
-    fn from(e: crate::engine::ggml::diffusion::GGMLDiffusionEngineError) -> Self {
-        CoreError::GGMLEngine(e.to_string())
-    }
-}
