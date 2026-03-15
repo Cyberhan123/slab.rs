@@ -1,7 +1,7 @@
 use std::any::Any;
 use std::sync::Arc;
-use std::time::SystemTime;
-use thiserror::Error;
+
+use crate::base::error::CoreError;
 
 /// Unique identifier for a submitted pipeline task.
 pub type TaskId = u64;
@@ -38,9 +38,7 @@ impl Payload {
             _ => serde_json::Value::Null,
         }
     }
-}
 
-impl Payload {
     pub fn text(s: impl Into<Arc<str>>) -> Self {
         Payload::Text(s.into())
     }
@@ -137,7 +135,7 @@ impl From<serde_json::Value> for Payload {
 
 /// High-level lifecycle state of a task managed by the [`Orchestrator`].
 ///
-/// [`Orchestrator`]: crate::runtime::orchestrator::Orchestrator
+/// [`Orchestrator`]: crate::scheduler::orchestrator::Orchestrator
 #[derive(Debug, Clone)]
 pub enum TaskStatus {
     /// Task has been accepted but not yet started.
@@ -156,7 +154,7 @@ pub enum TaskStatus {
     /// Task completed with a streaming terminal stage; handle is available.
     SucceededStreaming,
     /// Task failed with an error.
-    Failed { error: RuntimeError },
+    Failed { error: CoreError },
     /// Task was cancelled before completing.
     Cancelled,
 }
@@ -203,105 +201,27 @@ pub enum StageStatus {
     StageCancelled,
 }
 
-/// Backend lifecycle state tracked centrally by the resource manager.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum BackendLifecycleState {
-    Uninitialized,
-    Initialized,
-    ModelLoaded,
-    Transitioning,
-    Error,
-}
-
-/// Cluster-wide consistency state used to gate inference after failed global operations.
+/// A single chunk emitted by a streaming backend.
+///
+/// Defined here in `base` so that the `ports` interface layer and the
+/// scheduler layer can both reference it without a scheduler→ports or
+/// ports→scheduler dependency.
 #[derive(Debug, Clone)]
-pub enum GlobalConsistencyState {
-    Consistent {
-        generation: u64,
-    },
-    Reconciling {
-        op_id: u64,
-        started_at: SystemTime,
-    },
-    Inconsistent {
-        op_id: u64,
-        failed_backends: Vec<String>,
-        cleanup_report: Vec<String>,
-        since: SystemTime,
-    },
+pub enum StreamChunk {
+    /// A piece of generated output (e.g. a token string).
+    Token(String),
+    /// Generation completed normally.
+    Done,
+    /// Generation terminated due to a backend error.
+    Error(String),
+    /// A generated image (placeholder for now).
+    #[allow(dead_code)]
+    Image(bytes::Bytes), //TODO: A generated image.
 }
 
-/// Global management operation kind stored for retry.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum GlobalOperationKind {
-    InitializeAll,
-    LoadModelsAll,
-    UnloadModelsAll,
-}
-
-/// Snapshot of a failed global operation used for retry.
-#[derive(Debug, Clone)]
-pub struct FailedGlobalOperation {
-    pub kind: GlobalOperationKind,
-    pub payloads: std::collections::HashMap<String, Payload>,
-}
-
-/// Errors produced by the runtime layer.
-#[derive(Debug, Clone, Error)]
-pub enum RuntimeError {
-    /// The ingress queue for the named queue is at capacity.
-    #[error("queue full: {queue} (capacity {capacity})")]
-    QueueFull { queue: String, capacity: usize },
-
-    /// All admission permits for the backend are held; request denied.
-    #[error("backend busy: {backend_id}")]
-    Busy { backend_id: String },
-
-    /// The referenced task does not exist.
-    #[error("task not found: {task_id}")]
-    TaskNotFound { task_id: TaskId },
-
-    /// A CPU stage returned an error.
-    #[error("cpu stage '{stage_name}' failed: {message}")]
-    CpuStageFailed { stage_name: String, message: String },
-
-    /// A GPU stage returned an error.
-    #[error("gpu stage '{stage_name}' failed: {message}")]
-    GpuStageFailed { stage_name: String, message: String },
-
-    /// The backend worker channel closed unexpectedly.
-    #[error("backend worker shutdown")]
-    BackendShutdown,
-
-    /// Orchestrator submission queue is full.
-    #[error("orchestrator queue full (capacity {capacity})")]
-    OrchestratorQueueFull { capacity: usize },
-
-    /// `api::init` was not called before using the API.
-    #[error("api runtime not initialized; call api::init first")]
-    NotInitialized,
-
-    /// A timed wait exceeded its deadline.
-    #[error("operation timed out")]
-    Timeout,
-
-    /// Failed to load a shared library for a backend.
-    #[error("library load failed for backend '{backend}': {message}")]
-    LibraryLoadFailed { backend: String, message: String },
-
-    /// The runtime detected split-brain risk after a failed global operation.
-    #[error("global state is inconsistent (failed operation {op_id})")]
-    GlobalStateInconsistent { op_id: u64 },
-
-    /// Timed out waiting for backend broadcast acknowledgement.
-    #[error("broadcast acknowledgement timed out")]
-    BroadcastAckTimeout,
-
-    /// Requested operation is not implemented for a backend.
-    #[error("unsupported operation '{op}' for backend '{backend}'")]
-    UnsupportedOperation { backend: String, op: String },
-
-    /// No failed global operation is available for retry.
-    #[error("no failed global operation to retry")]
-    NoFailedGlobalOperation,
-}
+/// A handle to a streaming inference response.
+///
+/// The receiver yields [`StreamChunk`] items as they are produced by the
+/// backend worker.  The stream ends with [`StreamChunk::Done`] or
+/// [`StreamChunk::Error`].
+pub type StreamHandle = tokio::sync::mpsc::Receiver<StreamChunk>;

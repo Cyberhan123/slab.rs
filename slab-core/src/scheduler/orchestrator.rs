@@ -3,14 +3,14 @@ use std::collections::HashMap;
 use tokio::sync::mpsc;
 use tracing::{info, warn};
 
-use crate::runtime::backend::admission::ResourceManager;
-use crate::runtime::backend::protocol::{
+use crate::scheduler::backend::admission::ResourceManager;
+use crate::scheduler::backend::protocol::{
     BackendOp, BackendReply, BackendRequest, BackendRequestKind, ManagementEvent,
     RuntimeControlSignal, WorkerCommand,
 };
-use crate::runtime::stage::Stage;
-use crate::runtime::storage::ResultStorage;
-use crate::runtime::types::{
+use crate::scheduler::stage::Stage;
+use crate::scheduler::storage::ResultStorage;
+use crate::scheduler::types::{
     BackendLifecycleState, FailedGlobalOperation, GlobalConsistencyState, GlobalOperationKind,
     Payload, RuntimeError, StageStatus, TaskId, TaskStatus,
 };
@@ -623,7 +623,7 @@ impl Orchestrator {
     pub async fn get_status(
         &self,
         task_id: TaskId,
-    ) -> Result<crate::runtime::storage::TaskStatusView, RuntimeError> {
+    ) -> Result<crate::scheduler::storage::TaskStatusView, RuntimeError> {
         self.storage
             .get_status(task_id)
             .await
@@ -643,7 +643,7 @@ impl Orchestrator {
     pub async fn take_stream(
         &self,
         task_id: TaskId,
-    ) -> Option<crate::runtime::backend::protocol::StreamHandle> {
+    ) -> Option<crate::scheduler::backend::protocol::StreamHandle> {
         self.storage.take_stream(task_id).await
     }
 
