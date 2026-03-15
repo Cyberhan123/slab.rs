@@ -21,9 +21,12 @@ import {
   STATUS_OPTIONS,
   useHubModelCatalog,
 } from './hooks/use-hub-model-catalog';
+import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 export default function Hub() {
   const hub = useHubModelCatalog();
+  usePageHeader(PAGE_HEADER_META.hub);
 
   return (
     <div className="h-full overflow-y-auto px-4 py-4">

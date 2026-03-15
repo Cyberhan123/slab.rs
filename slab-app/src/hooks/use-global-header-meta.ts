@@ -1,135 +1,40 @@
-import { useEffect, useMemo } from "react";
-import {
-  BotMessageSquare,
-  ClipboardList,
-  Film,
-  Info,
-  Mic,
-  Package,
-  Palette,
-  Puzzle,
-  Sparkles,
-  Settings,
-  type LucideIcon,
-} from "lucide-react";
-import { matchPath, useLocation } from "react-router-dom";
-
-export type HeaderMeta = {
-  title: string;
-  description: string;
-  icon: LucideIcon;
-};
-
-const DEFAULT_HEADER_META: HeaderMeta = {
-  title: "Slab",
-  description: "ML Inference Platform",
-  icon: BotMessageSquare,
-};
-
-const HEADER_META_BY_ROUTE: Array<{
-  path: string;
-  end?: boolean;
-  meta: HeaderMeta;
-}> = [
-  {
-    path: "/",
-    end: true,
-    meta: {
-      title: "Chat",
-      description: "Talk with AI models in one workspace",
-      icon: BotMessageSquare,
-    },
-  },
-  {
-    path: "/image",
-    meta: {
-      title: "Image",
-      description: "Generate and manage AI images",
-      icon: Sparkles,
-    },
-  },
-  {
-    path: "/audio",
-    meta: {
-      title: "Audio",
-      description: "Transcribe and process audio files",
-      icon: Mic,
-    },
-  },
-  {
-    path: "/video",
-    meta: {
-      title: "Video",
-      description: "Video tooling and processing",
-      icon: Film,
-    },
-  },
-  {
-    path: "/hub",
-    meta: {
-      title: "Hub",
-      description: "Model and backend operations center",
-      icon: Package,
-    },
-  },
-  {
-    path: "/plugins",
-    meta: {
-      title: "Plugins",
-      description: "Run workspace plugins with Extism runtime",
-      icon: Puzzle,
-    },
-  },
-  {
-    path: "/task",
-    meta: {
-      title: "Tasks",
-      description: "Track and manage system tasks",
-      icon: ClipboardList,
-    },
-  },
-  {
-    path: "/settings",
-    meta: {
-      title: "Settings",
-      description: "Configure app and backend options",
-      icon: Settings,
-    },
-  },
-  {
-    path: "/about",
-    meta: {
-      title: "About",
-      description: "Project and runtime information",
-      icon: Info,
-    },
-  },
-  {
-    path: "/theme-preview",
-    meta: {
-      title: "Theme Preview",
-      description: "Preview UI components and design tokens",
-      icon: Palette,
-    },
-  },
-];
-
-function resolveHeaderMeta(pathname: string): HeaderMeta {
-  const matched = HEADER_META_BY_ROUTE.find((item) =>
-    Boolean(matchPath({ path: item.path, end: item.end ?? true }, pathname)),
-  );
-
-  return matched?.meta ?? DEFAULT_HEADER_META;
-}
+import { useContext, useId, useLayoutEffect } from "react";
+import { GlobalHeaderContext } from "@/layouts/global-header-provider";
+import type { HeaderMeta, HeaderMetaOverride } from "@/layouts/header-meta";
 
 export function useGlobalHeaderMeta(): HeaderMeta {
-  const { pathname } = useLocation();
+  const context = useContext(GlobalHeaderContext);
 
-  const meta = useMemo(() => resolveHeaderMeta(pathname), [pathname]);
+  if (!context) {
+    throw new Error("useGlobalHeaderMeta must be used within GlobalHeaderProvider");
+  }
 
-  useEffect(() => {
-    document.title = `${meta.title} | Slab`;
-  }, [meta.title]);
+  return context.meta;
+}
 
-  return meta;
+export function usePageHeader(meta: HeaderMetaOverride | null | undefined): void {
+  const context = useContext(GlobalHeaderContext);
+  const id = useId();
+
+  if (!context) {
+    throw new Error("usePageHeader must be used within GlobalHeaderProvider");
+  }
+
+  const { setMeta, clearMeta } = context;
+  const isActive = meta != null;
+  const title = meta?.title;
+  const subtitle = meta?.subtitle;
+  const icon = meta?.icon;
+
+  useLayoutEffect(() => {
+    if (!isActive) {
+      return undefined;
+    }
+
+    setMeta(id, { title, subtitle, icon });
+
+    return () => {
+      clearMeta(id);
+    };
+  }, [clearMeta, icon, id, isActive, setMeta, subtitle, title]);
 }

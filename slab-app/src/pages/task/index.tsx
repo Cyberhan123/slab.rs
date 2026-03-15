@@ -9,6 +9,8 @@ import { Spinner } from '@/components/ui/spinner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { toast } from 'sonner';
 import api from '@/lib/api';
+import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 interface Task {
   id: string;
@@ -24,6 +26,8 @@ interface TaskResult {
 }
 
 export default function Task() {
+  usePageHeader(PAGE_HEADER_META.task);
+
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [taskResult, setTaskResult] = useState<TaskResult | null>(null);
   const [taskType, setTaskType] = useState<string>('all');

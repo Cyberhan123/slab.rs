@@ -11,6 +11,8 @@ import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { ChevronDown, ChevronUp, Download, Film, Loader2, Upload, X } from 'lucide-react';
 import api from '@/lib/api';
+import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -60,6 +62,7 @@ async function fileToDataUri(file: File): Promise<string> {
 export default function VideoPage() {
   // ── Model selection ─────────────────────────────────────────────────────────
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
+  usePageHeader(PAGE_HEADER_META.video);
   const [selectedModelId, setSelectedModelId] = useState('');
 
   // ── Basic params ────────────────────────────────────────────────────────────

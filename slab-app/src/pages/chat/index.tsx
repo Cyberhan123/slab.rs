@@ -17,6 +17,8 @@ import { ChatSidebar } from './components/chat-sidebar';
 import { ChatMessageList } from './components/chat-message-list';
 import { ChatInput } from './components/chat-input';
 import { useChat } from './hooks/use-chat';
+import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 const LLAMA_BACKEND_ID = 'ggml.llama';
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
@@ -65,6 +67,8 @@ function Chat() {
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
   const [cloudModelOptions, setCloudModelOptions] = useState<ModelOption[]>([]);
   const [cloudModelsLoading, setCloudModelsLoading] = useState(false);
+
+  usePageHeader(PAGE_HEADER_META.chat);
 
   const {
     data: catalogModels,
