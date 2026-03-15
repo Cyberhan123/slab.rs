@@ -6,6 +6,7 @@ mod image;
 mod model;
 mod session;
 mod settings;
+mod settings_jsonschema;
 mod system;
 mod task;
 mod video;
