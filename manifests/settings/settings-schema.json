@@ -424,6 +424,96 @@
               "schema": {
                 "type": "array",
                 "default_value": [],
+                "json_schema": {
+                  "$schema": "https://json-schema.org/draft/2020-12/schema",
+                  "type": "array",
+                  "title": "Cloud providers",
+                  "description": "Configure OpenAI-compatible providers that should appear in the chat model picker.",
+                  "items": {
+                    "type": "object",
+                    "title": "Provider",
+                    "additionalProperties": false,
+                    "required": [
+                      "id",
+                      "name",
+                      "api_base",
+                      "models"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "title": "Provider ID",
+                        "description": "Stable internal identifier used to distinguish this provider in settings and logs.",
+                        "minLength": 1,
+                        "examples": ["openai-main"]
+                      },
+                      "name": {
+                        "type": "string",
+                        "title": "Display name",
+                        "description": "Friendly label shown in the chat model picker.",
+                        "minLength": 1,
+                        "examples": ["OpenAI"]
+                      },
+                      "api_base": {
+                        "type": "string",
+                        "title": "API base URL",
+                        "description": "Base URL for the provider's OpenAI-compatible API endpoint.",
+                        "minLength": 1,
+                        "examples": ["https://api.openai.com/v1"]
+                      },
+                      "api_key": {
+                        "type": ["string", "null"],
+                        "title": "Literal API key",
+                        "description": "Optional literal API key stored in settings. Leave empty to use an environment variable instead.",
+                        "writeOnly": true,
+                        "examples": ["sk-live-..."]
+                      },
+                      "api_key_env": {
+                        "type": ["string", "null"],
+                        "title": "API key env var",
+                        "description": "Optional environment variable name that contains the provider API key.",
+                        "examples": ["OPENAI_API_KEY"]
+                      },
+                      "models": {
+                        "type": "array",
+                        "title": "Mapped models",
+                        "description": "Models exposed in the chat picker for this provider.",
+                        "minItems": 1,
+                        "items": {
+                          "type": "object",
+                          "title": "Model",
+                          "additionalProperties": false,
+                          "required": [
+                            "id",
+                            "display_name"
+                          ],
+                          "properties": {
+                            "id": {
+                              "type": "string",
+                              "title": "Local model ID",
+                              "description": "Stable identifier stored in chats and used by the picker.",
+                              "minLength": 1,
+                              "examples": ["gpt-4.1-mini"]
+                            },
+                            "display_name": {
+                              "type": "string",
+                              "title": "Model display name",
+                              "description": "Friendly label shown in the UI for this model.",
+                              "minLength": 1,
+                              "examples": ["GPT-4.1 mini"]
+                            },
+                            "remote_model": {
+                              "type": ["string", "null"],
+                              "title": "Remote model name",
+                              "description": "Optional upstream model name to send to the provider when it differs from the local model ID.",
+                              "examples": ["gpt-4.1-mini"]
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "multiline": true,
                 "order": 10
               }

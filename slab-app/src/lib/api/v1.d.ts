@@ -828,6 +828,7 @@ export interface components {
         SettingPropertySchema: {
             default_value?: unknown;
             enum?: string[] | null;
+            json_schema?: unknown;
             /** Format: int64 */
             maximum?: number | null;
             /** Format: int64 */
