@@ -180,9 +180,7 @@ impl BackendService {
 
 // ── static download specs (fallback defaults) ────────────────────────────────
 
-fn windows_download_spec(
-    backend_id: Backend,
-) -> Option<WindowsDownloadSpec> {
+fn windows_download_spec(backend_id: Backend) -> Option<WindowsDownloadSpec> {
     match backend_id {
         Backend::GGMLLlama => Some(("ggml-org", "llama.cpp", "b8069", |version: &str| {
             format!("llama-{version}-bin-win-cpu-x64.zip")

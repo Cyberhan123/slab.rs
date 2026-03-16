@@ -24,7 +24,6 @@ impl AppContext {
         pmid: Arc<crate::domain::services::PmidService>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         store: Arc<crate::infra::db::AnyStore>,
-        settings: Arc<crate::infra::settings::SettingsProvider>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
         let task_manager = Arc::new(OperationManager::new());
@@ -32,7 +31,6 @@ impl AppContext {
             Arc::clone(&config),
             Arc::clone(&pmid),
             Arc::clone(&store),
-            Arc::clone(&settings),
             Arc::clone(&grpc),
             Arc::clone(&model_auto_unload),
         ));
@@ -64,7 +62,6 @@ impl AppState {
         pmid: Arc<crate::domain::services::PmidService>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         store: Arc<crate::infra::db::AnyStore>,
-        settings: Arc<crate::infra::settings::SettingsProvider>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
         let context = Arc::new(AppContext::new(
@@ -72,7 +69,6 @@ impl AppState {
             pmid,
             grpc,
             store,
-            settings,
             model_auto_unload,
         ));
         let services = Arc::new(crate::domain::services::AppServices::new(

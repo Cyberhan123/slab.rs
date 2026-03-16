@@ -1,221 +1,359 @@
 use std::fmt;
-use std::str::FromStr;
 
-use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use strum::{AsRefStr, EnumString, ParseError};
+#[cfg(test)]
+use std::collections::BTreeSet;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Pmid {
-    Setup(Setup),
-    Runtime(Runtime),
-    Chat(Chat),
-    Diffusion(Diffusion),
-}
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct SettingPmid(String);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Setup {
-    Initialized,
-    Ffmpeg(SetupFfmpeg),
-    Backends(SetupBackends),
-}
+impl SettingPmid {
+    pub fn from_segments<const N: usize>(segments: [&'static str; N]) -> Self {
+        Self(segments.join("."))
+    }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, EnumString, Serialize, Deserialize)]
-#[strum(serialize_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
-pub enum SetupFfmpeg {
-    AutoDownload,
-    Dir,
-}
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SetupBackends {
-    Dir,
-    Llama(BackendAsset),
-    Whisper(BackendAsset),
-    Diffusion(BackendAsset),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, EnumString, Serialize, Deserialize)]
-#[strum(serialize_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
-pub enum BackendAsset {
-    Tag,
-    Asset,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Runtime {
-    ModelCacheDir,
-    Llama(RuntimeLlama),
-    Whisper(RuntimeWorker),
-    Diffusion(RuntimeWorker),
-    ModelAutoUnload(RuntimeModelAutoUnload),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, EnumString, Serialize, Deserialize)]
-#[strum(serialize_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeLlama {
-    NumWorkers,
-    ContextLength,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, EnumString, Serialize, Deserialize)]
-#[strum(serialize_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeWorker {
-    NumWorkers,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, EnumString, Serialize, Deserialize)]
-#[strum(serialize_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
-pub enum RuntimeModelAutoUnload {
-    Enabled,
-    IdleMinutes,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, EnumString, Serialize, Deserialize)]
-#[strum(serialize_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
-pub enum Chat {
-    Providers,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Diffusion {
-    Paths(DiffusionPaths),
-    Performance(DiffusionPerformance),
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, EnumString, Serialize, Deserialize)]
-#[strum(serialize_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
-pub enum DiffusionPaths {
-    Model,
-    Vae,
-    Taesd,
-    LoraModelDir,
-    ClipL,
-    ClipG,
-    #[strum(serialize = "t5xxl")]
-    #[serde(rename = "t5xxl")]
-    T5xxl,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, AsRefStr, EnumString, Serialize, Deserialize)]
-#[strum(serialize_all = "snake_case")]
-#[serde(rename_all = "snake_case")]
-pub enum DiffusionPerformance {
-    FlashAttn,
-    KeepVaeOnCpu,
-    KeepClipOnCpu,
-    OffloadParamsToCpu,
-}
-
-macro_rules! define_pmids {
-    ($( $const_name:ident => ($pmid:expr) = $path:literal; )+ ) => {
-        const PMID_ENTRIES: &[(Pmid, &str)] = &[
-            $(
-                ($pmid, $path),
-            )+
-        ];
-
-        $(
-            pub const $const_name: &str = $path;
-        )+
-    };
-}
-
-define_pmids! {
-    SETUP_INITIALIZED_PMID => (Pmid::Setup(Setup::Initialized)) = "setup.initialized";
-    SETUP_FFMPEG_AUTO_DOWNLOAD_PMID => (Pmid::Setup(Setup::Ffmpeg(SetupFfmpeg::AutoDownload))) = "setup.ffmpeg.auto_download";
-    SETUP_FFMPEG_DIR_PMID => (Pmid::Setup(Setup::Ffmpeg(SetupFfmpeg::Dir))) = "setup.ffmpeg.dir";
-    SETUP_BACKENDS_DIR_PMID => (Pmid::Setup(Setup::Backends(SetupBackends::Dir))) = "setup.backends.dir";
-    SETUP_BACKENDS_LLAMA_TAG_PMID => (Pmid::Setup(Setup::Backends(SetupBackends::Llama(BackendAsset::Tag)))) = "setup.backends.llama.tag";
-    SETUP_BACKENDS_LLAMA_ASSET_PMID => (Pmid::Setup(Setup::Backends(SetupBackends::Llama(BackendAsset::Asset)))) = "setup.backends.llama.asset";
-    SETUP_BACKENDS_WHISPER_TAG_PMID => (Pmid::Setup(Setup::Backends(SetupBackends::Whisper(BackendAsset::Tag)))) = "setup.backends.whisper.tag";
-    SETUP_BACKENDS_WHISPER_ASSET_PMID => (Pmid::Setup(Setup::Backends(SetupBackends::Whisper(BackendAsset::Asset)))) = "setup.backends.whisper.asset";
-    SETUP_BACKENDS_DIFFUSION_TAG_PMID => (Pmid::Setup(Setup::Backends(SetupBackends::Diffusion(BackendAsset::Tag)))) = "setup.backends.diffusion.tag";
-    SETUP_BACKENDS_DIFFUSION_ASSET_PMID => (Pmid::Setup(Setup::Backends(SetupBackends::Diffusion(BackendAsset::Asset)))) = "setup.backends.diffusion.asset";
-    MODEL_CACHE_DIR_PMID => (Pmid::Runtime(Runtime::ModelCacheDir)) = "runtime.model_cache_dir";
-    LLAMA_NUM_WORKERS_PMID => (Pmid::Runtime(Runtime::Llama(RuntimeLlama::NumWorkers))) = "runtime.llama.num_workers";
-    LLAMA_CONTEXT_LENGTH_PMID => (Pmid::Runtime(Runtime::Llama(RuntimeLlama::ContextLength))) = "runtime.llama.context_length";
-    WHISPER_NUM_WORKERS_PMID => (Pmid::Runtime(Runtime::Whisper(RuntimeWorker::NumWorkers))) = "runtime.whisper.num_workers";
-    DIFFUSION_NUM_WORKERS_PMID => (Pmid::Runtime(Runtime::Diffusion(RuntimeWorker::NumWorkers))) = "runtime.diffusion.num_workers";
-    MODEL_AUTO_UNLOAD_ENABLED_PMID => (Pmid::Runtime(Runtime::ModelAutoUnload(RuntimeModelAutoUnload::Enabled))) = "runtime.model_auto_unload.enabled";
-    MODEL_AUTO_UNLOAD_IDLE_MINUTES_PMID => (Pmid::Runtime(Runtime::ModelAutoUnload(RuntimeModelAutoUnload::IdleMinutes))) = "runtime.model_auto_unload.idle_minutes";
-    CHAT_PROVIDERS_PMID => (Pmid::Chat(Chat::Providers)) = "chat.providers";
-    DIFFUSION_MODEL_PATH_PMID => (Pmid::Diffusion(Diffusion::Paths(DiffusionPaths::Model))) = "diffusion.paths.model";
-    DIFFUSION_VAE_PATH_PMID => (Pmid::Diffusion(Diffusion::Paths(DiffusionPaths::Vae))) = "diffusion.paths.vae";
-    DIFFUSION_TAESD_PATH_PMID => (Pmid::Diffusion(Diffusion::Paths(DiffusionPaths::Taesd))) = "diffusion.paths.taesd";
-    DIFFUSION_LORA_MODEL_DIR_PMID => (Pmid::Diffusion(Diffusion::Paths(DiffusionPaths::LoraModelDir))) = "diffusion.paths.lora_model_dir";
-    DIFFUSION_CLIP_L_PATH_PMID => (Pmid::Diffusion(Diffusion::Paths(DiffusionPaths::ClipL))) = "diffusion.paths.clip_l";
-    DIFFUSION_CLIP_G_PATH_PMID => (Pmid::Diffusion(Diffusion::Paths(DiffusionPaths::ClipG))) = "diffusion.paths.clip_g";
-    DIFFUSION_T5XXL_PATH_PMID => (Pmid::Diffusion(Diffusion::Paths(DiffusionPaths::T5xxl))) = "diffusion.paths.t5xxl";
-    DIFFUSION_FLASH_ATTN_PMID => (Pmid::Diffusion(Diffusion::Performance(DiffusionPerformance::FlashAttn))) = "diffusion.performance.flash_attn";
-    DIFFUSION_KEEP_VAE_ON_CPU_PMID => (Pmid::Diffusion(Diffusion::Performance(DiffusionPerformance::KeepVaeOnCpu))) = "diffusion.performance.keep_vae_on_cpu";
-    DIFFUSION_KEEP_CLIP_ON_CPU_PMID => (Pmid::Diffusion(Diffusion::Performance(DiffusionPerformance::KeepClipOnCpu))) = "diffusion.performance.keep_clip_on_cpu";
-    DIFFUSION_OFFLOAD_PARAMS_TO_CPU_PMID => (Pmid::Diffusion(Diffusion::Performance(DiffusionPerformance::OffloadParamsToCpu))) = "diffusion.performance.offload_params_to_cpu";
-}
-
-impl Pmid {
     #[cfg(test)]
-    pub fn iter() -> impl Iterator<Item = Pmid> {
-        PMID_ENTRIES.iter().map(|(pmid, _)| *pmid)
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        PMID_ENTRIES
-            .iter()
-            .find_map(|(pmid, path)| (*pmid == *self).then_some(*path))
-            .expect("missing PMID path mapping")
-    }
-
-    pub fn to_path(self) -> String {
-        self.as_str().to_owned()
+    pub fn into_string(self) -> String {
+        self.0
     }
 }
 
-impl AsRef<str> for Pmid {
+impl AsRef<str> for SettingPmid {
     fn as_ref(&self) -> &str {
         self.as_str()
     }
 }
 
-impl fmt::Display for Pmid {
+impl fmt::Display for SettingPmid {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())
     }
 }
 
-impl Serialize for Pmid {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: Serializer,
-    {
-        serializer.serialize_str(self.as_str())
+#[derive(Debug, Clone, Copy)]
+pub struct PmidCatalog {
+    pub setup: SetupPmids,
+    pub runtime: RuntimePmids,
+    pub chat: ChatPmids,
+    pub diffusion: DiffusionPmids,
+}
+
+impl PmidCatalog {
+    pub const fn new() -> Self {
+        Self {
+            setup: SetupPmids::new(),
+            runtime: RuntimePmids::new(),
+            chat: ChatPmids::new(),
+            diffusion: DiffusionPmids::new(),
+        }
+    }
+
+    #[cfg(test)]
+    pub fn all(self) -> Vec<SettingPmid> {
+        vec![
+            self.setup.initialized(),
+            self.setup.ffmpeg.auto_download(),
+            self.setup.ffmpeg.dir(),
+            self.setup.backends.dir(),
+            self.setup.backends.llama.tag(),
+            self.setup.backends.llama.asset(),
+            self.setup.backends.whisper.tag(),
+            self.setup.backends.whisper.asset(),
+            self.setup.backends.diffusion.tag(),
+            self.setup.backends.diffusion.asset(),
+            self.runtime.model_cache_dir(),
+            self.runtime.llama.num_workers(),
+            self.runtime.llama.context_length(),
+            self.runtime.whisper.num_workers(),
+            self.runtime.diffusion.num_workers(),
+            self.runtime.model_auto_unload.enabled(),
+            self.runtime.model_auto_unload.idle_minutes(),
+            self.chat.providers(),
+            self.diffusion.paths.model(),
+            self.diffusion.paths.vae(),
+            self.diffusion.paths.taesd(),
+            self.diffusion.paths.lora_model_dir(),
+            self.diffusion.paths.clip_l(),
+            self.diffusion.paths.clip_g(),
+            self.diffusion.paths.t5xxl(),
+            self.diffusion.performance.flash_attn(),
+            self.diffusion.performance.keep_vae_on_cpu(),
+            self.diffusion.performance.keep_clip_on_cpu(),
+            self.diffusion.performance.offload_params_to_cpu(),
+        ]
     }
 }
 
-impl<'de> Deserialize<'de> for Pmid {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let raw = String::deserialize(deserializer)?;
-        Self::from_str(&raw).map_err(serde::de::Error::custom)
+impl Default for PmidCatalog {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
-impl FromStr for Pmid {
-    type Err = ParseError;
+pub const PMID: PmidCatalog = PmidCatalog::new();
 
-    fn from_str(raw: &str) -> Result<Self, Self::Err> {
-        PMID_ENTRIES
-            .iter()
-            .find_map(|(pmid, path)| (*path == raw).then_some(*pmid))
-            .ok_or(ParseError::VariantNotFound)
+#[derive(Debug, Clone, Copy)]
+pub struct SetupPmids {
+    pub ffmpeg: SetupFfmpegPmids,
+    pub backends: SetupBackendPmids,
+}
+
+impl SetupPmids {
+    pub const fn new() -> Self {
+        Self {
+            ffmpeg: SetupFfmpegPmids::new(),
+            backends: SetupBackendPmids::new(),
+        }
+    }
+
+    pub fn initialized(self) -> SettingPmid {
+        SettingPmid::from_segments(["setup", "initialized"])
+    }
+}
+
+impl Default for SetupPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SetupFfmpegPmids;
+
+impl SetupFfmpegPmids {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub fn auto_download(self) -> SettingPmid {
+        SettingPmid::from_segments(["setup", "ffmpeg", "auto_download"])
+    }
+
+    pub fn dir(self) -> SettingPmid {
+        SettingPmid::from_segments(["setup", "ffmpeg", "dir"])
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SetupBackendPmids {
+    pub llama: SetupBackendReleasePmids,
+    pub whisper: SetupBackendReleasePmids,
+    pub diffusion: SetupBackendReleasePmids,
+}
+
+impl SetupBackendPmids {
+    pub const fn new() -> Self {
+        Self {
+            llama: SetupBackendReleasePmids::new("llama"),
+            whisper: SetupBackendReleasePmids::new("whisper"),
+            diffusion: SetupBackendReleasePmids::new("diffusion"),
+        }
+    }
+
+    pub fn dir(self) -> SettingPmid {
+        SettingPmid::from_segments(["setup", "backends", "dir"])
+    }
+}
+
+impl Default for SetupBackendPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct SetupBackendReleasePmids {
+    backend: &'static str,
+}
+
+impl SetupBackendReleasePmids {
+    pub const fn new(backend: &'static str) -> Self {
+        Self { backend }
+    }
+
+    pub fn tag(self) -> SettingPmid {
+        SettingPmid::from_segments(["setup", "backends", self.backend, "tag"])
+    }
+
+    pub fn asset(self) -> SettingPmid {
+        SettingPmid::from_segments(["setup", "backends", self.backend, "asset"])
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimePmids {
+    pub llama: RuntimeLlamaPmids,
+    pub whisper: RuntimeWorkerPmids,
+    pub diffusion: RuntimeWorkerPmids,
+    pub model_auto_unload: RuntimeModelAutoUnloadPmids,
+}
+
+impl RuntimePmids {
+    pub const fn new() -> Self {
+        Self {
+            llama: RuntimeLlamaPmids::new(),
+            whisper: RuntimeWorkerPmids::new("whisper"),
+            diffusion: RuntimeWorkerPmids::new("diffusion"),
+            model_auto_unload: RuntimeModelAutoUnloadPmids::new(),
+        }
+    }
+
+    pub fn model_cache_dir(self) -> SettingPmid {
+        SettingPmid::from_segments(["runtime", "model_cache_dir"])
+    }
+}
+
+impl Default for RuntimePmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RuntimeLlamaPmids;
+
+impl RuntimeLlamaPmids {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub fn num_workers(self) -> SettingPmid {
+        SettingPmid::from_segments(["runtime", "llama", "num_workers"])
+    }
+
+    pub fn context_length(self) -> SettingPmid {
+        SettingPmid::from_segments(["runtime", "llama", "context_length"])
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct RuntimeWorkerPmids {
+    backend: &'static str,
+}
+
+impl RuntimeWorkerPmids {
+    pub const fn new(backend: &'static str) -> Self {
+        Self { backend }
+    }
+
+    pub fn num_workers(self) -> SettingPmid {
+        SettingPmid::from_segments(["runtime", self.backend, "num_workers"])
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RuntimeModelAutoUnloadPmids;
+
+impl RuntimeModelAutoUnloadPmids {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_segments(["runtime", "model_auto_unload", "enabled"])
+    }
+
+    pub fn idle_minutes(self) -> SettingPmid {
+        SettingPmid::from_segments(["runtime", "model_auto_unload", "idle_minutes"])
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ChatPmids;
+
+impl ChatPmids {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub fn providers(self) -> SettingPmid {
+        SettingPmid::from_segments(["chat", "providers"])
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct DiffusionPmids {
+    pub paths: DiffusionPathPmids,
+    pub performance: DiffusionPerformancePmids,
+}
+
+impl DiffusionPmids {
+    pub const fn new() -> Self {
+        Self {
+            paths: DiffusionPathPmids::new(),
+            performance: DiffusionPerformancePmids::new(),
+        }
+    }
+}
+
+impl Default for DiffusionPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DiffusionPathPmids;
+
+impl DiffusionPathPmids {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub fn model(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "paths", "model"])
+    }
+
+    pub fn vae(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "paths", "vae"])
+    }
+
+    pub fn taesd(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "paths", "taesd"])
+    }
+
+    pub fn lora_model_dir(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "paths", "lora_model_dir"])
+    }
+
+    pub fn clip_l(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "paths", "clip_l"])
+    }
+
+    pub fn clip_g(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "paths", "clip_g"])
+    }
+
+    pub fn t5xxl(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "paths", "t5xxl"])
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DiffusionPerformancePmids;
+
+impl DiffusionPerformancePmids {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub fn flash_attn(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "performance", "flash_attn"])
+    }
+
+    pub fn keep_vae_on_cpu(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "performance", "keep_vae_on_cpu"])
+    }
+
+    pub fn keep_clip_on_cpu(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "performance", "keep_clip_on_cpu"])
+    }
+
+    pub fn offload_params_to_cpu(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "performance", "offload_params_to_cpu"])
     }
 }
 
@@ -225,46 +363,33 @@ mod tests {
     use crate::domain::models::embedded_settings_schema;
 
     #[test]
-    fn pmid_round_trips_from_str() {
-        let parsed = Pmid::from_str(SETUP_INITIALIZED_PMID).expect("parse pmid");
-
-        assert_eq!(parsed, Pmid::Setup(Setup::Initialized));
-        assert_eq!(parsed.to_string(), SETUP_INITIALIZED_PMID);
-        assert_eq!(parsed.to_path(), SETUP_INITIALIZED_PMID);
+    fn nested_builder_generates_expected_pmid() {
+        assert_eq!(
+            PMID.setup.backends.llama.tag().as_str(),
+            "setup.backends.llama.tag"
+        );
+        assert_eq!(
+            PMID.runtime.model_auto_unload.idle_minutes().as_str(),
+            "runtime.model_auto_unload.idle_minutes"
+        );
     }
 
     #[test]
-    fn nested_variants_produce_expected_paths() {
-        let pmid = Pmid::Setup(Setup::Backends(SetupBackends::Llama(BackendAsset::Tag)));
-
-        assert_eq!(pmid.to_path(), SETUP_BACKENDS_LLAMA_TAG_PMID);
-    }
-
-    #[test]
-    fn embedded_schema_pmids_are_covered_by_enum() {
+    fn structured_pmids_cover_embedded_schema() {
         let schema = embedded_settings_schema().expect("schema");
+        let expected: BTreeSet<String> = schema
+            .sections()
+            .iter()
+            .flat_map(|section| section.subsections.iter())
+            .flat_map(|subsection| subsection.properties.iter())
+            .map(|property| property.pmid.clone())
+            .collect();
+        let actual: BTreeSet<String> = PMID
+            .all()
+            .into_iter()
+            .map(SettingPmid::into_string)
+            .collect();
 
-        for section in schema.sections() {
-            for subsection in &section.subsections {
-                for property in &subsection.properties {
-                    let parsed = Pmid::from_str(&property.pmid)
-                        .unwrap_or_else(|_| panic!("missing PMID enum for '{}'", property.pmid));
-                    assert_eq!(parsed.as_str(), property.pmid);
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn enum_pmids_exist_in_embedded_schema() {
-        let schema = embedded_settings_schema().expect("schema");
-
-        for pmid in Pmid::iter() {
-            assert!(
-                schema.property(pmid.as_str()).is_some(),
-                "embedded schema missing '{}'",
-                pmid.as_str()
-            );
-        }
+        assert_eq!(actual, expected);
     }
 }

@@ -733,7 +733,7 @@ fn canonicalize_chat_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::models::LLAMA_CONTEXT_LENGTH_PMID;
+    use crate::domain::models::PMID;
 
     #[test]
     fn schema_rejects_duplicate_pmids() {
@@ -775,7 +775,7 @@ mod tests {
     fn integer_default_can_be_null() {
         let schema = embedded_settings_schema().expect("schema");
         let definition = schema
-            .property(LLAMA_CONTEXT_LENGTH_PMID)
+            .property(PMID.runtime.llama.context_length().as_str())
             .expect("context length");
 
         assert!(definition.default_value().is_null());

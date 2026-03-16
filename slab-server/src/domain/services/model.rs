@@ -217,12 +217,7 @@ impl ModelService {
         let model_id = req.model_id.trim();
         let backend_id = req.backend_id.trim();
 
-        let configured_model_cache_dir = self
-            .model_state
-            .pmid()
-            .config()
-            .runtime
-            .model_cache_dir;
+        let configured_model_cache_dir = self.model_state.pmid().config().runtime.model_cache_dir;
         if let Some(dir) = &configured_model_cache_dir {
             validate_path("model_cache_dir", dir)?;
         }

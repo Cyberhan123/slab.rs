@@ -228,7 +228,6 @@ where
         pmid,
         grpc,
         Arc::clone(&store),
-        settings,
         model_auto_unload,
     ));
 
