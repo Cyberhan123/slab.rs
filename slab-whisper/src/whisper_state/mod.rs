@@ -224,7 +224,7 @@ impl WhisperState {
         if ret < 0 {
             Err(WhisperError::GenericError(ret))
         } else {
-            Ok((ret as i32, lang_probs))
+            Ok((ret, lang_probs))
         }
     }
 
