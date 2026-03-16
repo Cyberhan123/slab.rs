@@ -97,8 +97,9 @@ impl SettingsProvider {
 
     pub async fn property(
         &self,
-        pmid: &str,
+        pmid: impl AsRef<str>,
     ) -> Result<crate::domain::models::SettingPropertyView, ServerError> {
+        let pmid = pmid.as_ref();
         let definition = self.definition(pmid)?;
         let state = self.state.read().await;
         Ok(definition.build_view(state.overrides.get(pmid)))
@@ -106,9 +107,10 @@ impl SettingsProvider {
 
     pub async fn update(
         &self,
-        pmid: &str,
+        pmid: impl AsRef<str>,
         command: UpdateSettingCommand,
     ) -> Result<crate::domain::models::SettingPropertyView, ServerError> {
+        let pmid = pmid.as_ref();
         let definition = self.definition(pmid)?;
         let next_override = definition.canonicalize_update_command(&command)?;
         let mut state = self.state.write().await;
@@ -137,7 +139,11 @@ impl SettingsProvider {
         Ok(definition.build_view(state.overrides.get(pmid)))
     }
 
-    pub async fn get_effective_value(&self, pmid: &str) -> Result<serde_json::Value, ServerError> {
+    pub async fn get_effective_value(
+        &self,
+        pmid: impl AsRef<str>,
+    ) -> Result<serde_json::Value, ServerError> {
+        let pmid = pmid.as_ref();
         let definition = self.definition(pmid)?;
         let state = self.state.read().await;
         Ok(definition
@@ -145,7 +151,11 @@ impl SettingsProvider {
             .effective_value)
     }
 
-    pub async fn get_optional_string(&self, pmid: &str) -> Result<Option<String>, ServerError> {
+    pub async fn get_optional_string(
+        &self,
+        pmid: impl AsRef<str>,
+    ) -> Result<Option<String>, ServerError> {
+        let pmid = pmid.as_ref();
         let value = self.get_effective_value(pmid).await?;
         match value {
             serde_json::Value::String(value) => {
@@ -165,7 +175,8 @@ impl SettingsProvider {
         }
     }
 
-    pub async fn get_bool(&self, pmid: &str) -> Result<bool, ServerError> {
+    pub async fn get_bool(&self, pmid: impl AsRef<str>) -> Result<bool, ServerError> {
+        let pmid = pmid.as_ref();
         let value = self.get_effective_value(pmid).await?;
         match value {
             serde_json::Value::Bool(value) => Ok(value),
@@ -177,7 +188,11 @@ impl SettingsProvider {
         }
     }
 
-    pub async fn get_optional_u32(&self, pmid: &str) -> Result<Option<u32>, ServerError> {
+    pub async fn get_optional_u32(
+        &self,
+        pmid: impl AsRef<str>,
+    ) -> Result<Option<u32>, ServerError> {
+        let pmid = pmid.as_ref();
         let value = self.get_effective_value(pmid).await?;
         match value {
             serde_json::Value::Null => Ok(None),
@@ -202,8 +217,9 @@ impl SettingsProvider {
 
     pub async fn get_chat_providers(
         &self,
-        pmid: &str,
+        pmid: impl AsRef<str>,
     ) -> Result<Vec<CloudProviderSettingValue>, ServerError> {
+        let pmid = pmid.as_ref();
         let value = self.get_effective_value(pmid).await?;
         serde_json::from_value(value).map_err(|error| {
             ServerError::Internal(format!(
@@ -269,11 +285,7 @@ fn load_runtime_state(
                 should_rewrite = true;
             }
             Err(error) => {
-                warnings.push(format!(
-                    "Dropped invalid value for '{}': {}",
-                    pmid,
-                    error
-                ));
+                warnings.push(format!("Dropped invalid value for '{}': {}", pmid, error));
                 should_rewrite = true;
             }
         }
@@ -512,9 +524,7 @@ fn describe_value_type(value: &serde_json::Value) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::domain::models::{
-        CHAT_PROVIDERS_PMID, LLAMA_CONTEXT_LENGTH_PMID, LLAMA_NUM_WORKERS_PMID,
-    };
+    use crate::domain::models::PMID;
 
     fn temp_settings_path() -> PathBuf {
         let base = std::env::temp_dir().join(format!("slab-settings-test-{}", Uuid::new_v4()));
@@ -545,7 +555,10 @@ mod tests {
             &path,
             &SettingsValuesFile {
                 version: 1,
-                values: BTreeMap::from([(LLAMA_NUM_WORKERS_PMID.to_owned(), serde_json::json!(0))]),
+                values: BTreeMap::from([(
+                    PMID.runtime.llama.num_workers().into_string(),
+                    serde_json::json!(0),
+                )]),
             },
         )
         .expect("seed");
@@ -557,7 +570,7 @@ mod tests {
         assert!(!doc.warnings.is_empty());
 
         let property = provider
-            .property(LLAMA_NUM_WORKERS_PMID)
+            .property(PMID.runtime.llama.num_workers())
             .await
             .expect("property");
         assert_eq!(property.effective_value, serde_json::json!(1));
@@ -575,7 +588,7 @@ mod tests {
 
         provider
             .update(
-                LLAMA_CONTEXT_LENGTH_PMID,
+                PMID.runtime.llama.context_length(),
                 UpdateSettingCommand {
                     op: crate::domain::models::UpdateSettingOperation::Set,
                     value: Some(serde_json::json!(4096)),
@@ -585,7 +598,7 @@ mod tests {
             .expect("set");
         provider
             .update(
-                LLAMA_CONTEXT_LENGTH_PMID,
+                PMID.runtime.llama.context_length(),
                 UpdateSettingCommand {
                     op: crate::domain::models::UpdateSettingOperation::Unset,
                     value: None,
@@ -596,7 +609,9 @@ mod tests {
 
         let file: SettingsValuesFile =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
-        assert!(!file.values.contains_key(LLAMA_CONTEXT_LENGTH_PMID));
+        assert!(!file
+            .values
+            .contains_key(PMID.runtime.llama.context_length().as_str()));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
@@ -610,7 +625,7 @@ mod tests {
 
         provider
             .update(
-                CHAT_PROVIDERS_PMID,
+                PMID.chat.providers(),
                 UpdateSettingCommand {
                     op: crate::domain::models::UpdateSettingOperation::Set,
                     value: Some(serde_json::json!([
@@ -627,7 +642,7 @@ mod tests {
             .expect("set");
 
         let providers = provider
-            .get_chat_providers(CHAT_PROVIDERS_PMID)
+            .get_chat_providers(PMID.chat.providers())
             .await
             .expect("providers");
         assert_eq!(providers.len(), 1);

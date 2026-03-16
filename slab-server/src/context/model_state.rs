@@ -7,7 +7,6 @@ pub struct ModelState {
     config: Arc<crate::context::AppConfig>,
     pmid: Arc<crate::domain::services::PmidService>,
     store: Arc<crate::infra::db::AnyStore>,
-    settings: Arc<crate::infra::settings::SettingsProvider>,
     grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
     model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
 }
@@ -17,7 +16,6 @@ impl ModelState {
         config: Arc<crate::context::AppConfig>,
         pmid: Arc<crate::domain::services::PmidService>,
         store: Arc<crate::infra::db::AnyStore>,
-        settings: Arc<crate::infra::settings::SettingsProvider>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
@@ -25,7 +23,6 @@ impl ModelState {
             config,
             pmid,
             store,
-            settings,
             grpc,
             model_auto_unload,
         }
@@ -41,10 +38,6 @@ impl ModelState {
 
     pub fn store(&self) -> &Arc<crate::infra::db::AnyStore> {
         &self.store
-    }
-
-    pub fn settings(&self) -> &Arc<crate::infra::settings::SettingsProvider> {
-        &self.settings
     }
 
     pub fn grpc(&self) -> &Arc<crate::infra::rpc::gateway::GrpcGateway> {

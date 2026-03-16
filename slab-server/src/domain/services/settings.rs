@@ -13,11 +13,11 @@ impl SettingsService {
     }
 
     pub async fn list_settings(&self) -> Result<SettingsDocumentView, ServerError> {
-        Ok(self.state.settings().document().await)
+        Ok(self.state.pmid().document().await)
     }
 
     pub async fn get_setting(&self, pmid: &str) -> Result<SettingPropertyView, ServerError> {
-        self.state.settings().property(pmid).await
+        self.state.pmid().property(pmid).await
     }
 
     pub async fn update_setting(

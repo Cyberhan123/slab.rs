@@ -8,7 +8,6 @@ use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, CompleteSetupCommand, ComponentStatus, EnvironmentStatus,
-    UpdateSettingCommand, UpdateSettingOperation, SETUP_INITIALIZED_PMID,
 };
 use crate::error::ServerError;
 
@@ -94,13 +93,7 @@ impl SetupService {
     ) -> Result<EnvironmentStatus, ServerError> {
         self.model_state
             .pmid()
-            .update_setting(
-                SETUP_INITIALIZED_PMID,
-                UpdateSettingCommand {
-                    op: UpdateSettingOperation::Set,
-                    value: Some(serde_json::Value::Bool(cmd.initialized)),
-                },
-            )
+            .set_setup_initialized(cmd.initialized)
             .await?;
 
         info!(initialized = cmd.initialized, "setup state persisted");
