@@ -19,7 +19,7 @@ export const mockFetch = async (fullContent: string, onFinish?: () => void) => {
           for (const chunk of chunks) {
             await new Promise((resolve) => setTimeout(resolve, 100));
             if (!controller.desiredSize) {
-              // 流已满或关闭，避免写入
+            
               return;
             }
             controller.enqueue(new TextEncoder().encode(chunk));
@@ -44,7 +44,6 @@ export const mockFetch = async (fullContent: string, onFinish?: () => void) => {
 export const useMarkdownTheme = () => {
   const token = theme.useToken();
 
-  // 使用 Ant Design 的主题系统判断亮色还是暗色
   const isLightMode = useMemo(() => {
     return token?.theme?.id === 0;
   }, [token]);

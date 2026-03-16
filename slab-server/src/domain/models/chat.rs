@@ -1,6 +1,10 @@
 use genai::chat::ChatMessage as GenaiChatMessage;
 
-use crate::api::v1::chat::schema::{ChatCompletionRequest, ChatMessage};
+use crate::api::v1::chat::schema::{
+    ChatCompletionRequest, ChatMessage, ChatReasoningEffort as ApiChatReasoningEffort,
+    ChatThinkingConfig as ApiChatThinkingConfig, ChatThinkingType as ApiChatThinkingType,
+    ChatVerbosity as ApiChatVerbosity,
+};
 use crate::infra::db;
 use futures::stream::BoxStream;
 
@@ -26,6 +30,44 @@ pub enum ChatModelSource {
     Cloud,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ChatReasoningEffort {
+    None,
+    Low,
+    Medium,
+    High,
+    Minimal,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum ChatVerbosity {
+    Low,
+    Medium,
+    High,
+}
+
+impl ChatReasoningEffort {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Minimal => "minimal",
+        }
+    }
+}
+
+impl ChatVerbosity {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ChatModelOption {
     pub id: String,
@@ -45,6 +87,8 @@ pub struct ChatCompletionCommand {
     pub messages: Vec<ConversationMessage>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    pub reasoning_effort: Option<ChatReasoningEffort>,
+    pub verbosity: Option<ChatVerbosity>,
     pub stream: bool,
 }
 
@@ -94,13 +138,145 @@ impl From<&ConversationMessage> for GenaiChatMessage {
 
 impl From<ChatCompletionRequest> for ChatCompletionCommand {
     fn from(request: ChatCompletionRequest) -> Self {
+        let reasoning_effort = request.reasoning_effort.map(Into::into).or_else(|| {
+            request
+                .thinking
+                .as_ref()
+                .and_then(reasoning_effort_from_thinking)
+        });
+        let verbosity = request
+            .verbosity
+            .map(Into::into)
+            .or_else(|| request.thinking.as_ref().and_then(verbosity_from_thinking));
+
         Self {
             id: request.id,
             model: request.model,
             messages: request.messages.into_iter().map(Into::into).collect(),
             max_tokens: request.max_tokens,
             temperature: request.temperature,
+            reasoning_effort,
+            verbosity,
             stream: request.stream,
         }
+    }
+}
+
+impl From<ApiChatReasoningEffort> for ChatReasoningEffort {
+    fn from(value: ApiChatReasoningEffort) -> Self {
+        match value {
+            ApiChatReasoningEffort::None => Self::None,
+            ApiChatReasoningEffort::Low => Self::Low,
+            ApiChatReasoningEffort::Medium => Self::Medium,
+            ApiChatReasoningEffort::High => Self::High,
+            ApiChatReasoningEffort::Minimal => Self::Minimal,
+        }
+    }
+}
+
+impl From<ApiChatVerbosity> for ChatVerbosity {
+    fn from(value: ApiChatVerbosity) -> Self {
+        match value {
+            ApiChatVerbosity::Low => Self::Low,
+            ApiChatVerbosity::Medium => Self::Medium,
+            ApiChatVerbosity::High => Self::High,
+        }
+    }
+}
+
+fn reasoning_effort_from_thinking(thinking: &ApiChatThinkingConfig) -> Option<ChatReasoningEffort> {
+    match thinking.mode {
+        ApiChatThinkingType::Disabled => Some(ChatReasoningEffort::None),
+        // Default enabled thinking to `medium` so a plain toggle still has effect.
+        ApiChatThinkingType::Enabled => thinking
+            .reasoning_effort
+            .map(Into::into)
+            .or(Some(ChatReasoningEffort::Medium)),
+    }
+}
+
+fn verbosity_from_thinking(thinking: &ApiChatThinkingConfig) -> Option<ChatVerbosity> {
+    match thinking.mode {
+        ApiChatThinkingType::Disabled => None,
+        ApiChatThinkingType::Enabled => thinking.verbosity.map(Into::into),
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::{ChatCompletionCommand, ChatReasoningEffort, ChatVerbosity};
+    use crate::api::v1::chat::schema::{
+        ChatCompletionRequest, ChatMessage, ChatThinkingConfig, ChatThinkingType,
+    };
+
+    fn make_request() -> ChatCompletionRequest {
+        ChatCompletionRequest {
+            id: None,
+            model: "cloud/provider/model".to_owned(),
+            messages: vec![ChatMessage {
+                role: "user".to_owned(),
+                content: "hello".to_owned(),
+            }],
+            stream: true,
+            max_tokens: None,
+            temperature: None,
+            thinking: None,
+            reasoning_effort: None,
+            verbosity: None,
+        }
+    }
+
+    #[test]
+    fn thinking_disabled_maps_to_reasoning_none() {
+        let mut request = make_request();
+        request.thinking = Some(ChatThinkingConfig {
+            mode: ChatThinkingType::Disabled,
+            reasoning_effort: None,
+            verbosity: None,
+        });
+
+        let command = ChatCompletionCommand::from(request);
+
+        assert!(matches!(
+            command.reasoning_effort,
+            Some(ChatReasoningEffort::None)
+        ));
+    }
+
+    #[test]
+    fn thinking_enabled_defaults_to_medium_reasoning() {
+        let mut request = make_request();
+        request.thinking = Some(ChatThinkingConfig {
+            mode: ChatThinkingType::Enabled,
+            reasoning_effort: None,
+            verbosity: None,
+        });
+
+        let command = ChatCompletionCommand::from(request);
+
+        assert!(matches!(
+            command.reasoning_effort,
+            Some(ChatReasoningEffort::Medium)
+        ));
+    }
+
+    #[test]
+    fn explicit_reasoning_and_verbosity_take_precedence() {
+        let mut request = make_request();
+        request.thinking = Some(ChatThinkingConfig {
+            mode: ChatThinkingType::Disabled,
+            reasoning_effort: None,
+            verbosity: None,
+        });
+        request.reasoning_effort = Some(crate::api::v1::chat::schema::ChatReasoningEffort::High);
+        request.verbosity = Some(crate::api::v1::chat::schema::ChatVerbosity::Low);
+
+        let command = ChatCompletionCommand::from(request);
+
+        assert!(matches!(
+            command.reasoning_effort,
+            Some(ChatReasoningEffort::High)
+        ));
+        assert!(matches!(command.verbosity, Some(ChatVerbosity::Low)));
     }
 }

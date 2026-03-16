@@ -6,6 +6,7 @@ import { providerFactory, historyMessageFactory } from '../chat-context';
 export const useChat = (
   conversationKey: string,
   model: string,
+  deepThink: boolean,
   beforeRequest?: () => Promise<void> | void
 ) => {
   const [activeConversation, setActiveConversation] = useState<string>();
@@ -42,7 +43,7 @@ export const useChat = (
         model,
         messages: [{ role: 'user', content: val }],
         thinking: {
-          type: 'disabled',
+          type: deepThink ? 'enabled' : 'disabled',
         },
       });
       setActiveConversation(conversationKey);
@@ -59,6 +60,9 @@ export const useChat = (
           {
             ...(requestParams ?? {}),
             model,
+            thinking: {
+              type: deepThink ? 'enabled' : 'disabled',
+            },
           },
           opts,
         );

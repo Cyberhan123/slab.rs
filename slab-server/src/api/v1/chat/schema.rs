@@ -33,6 +33,52 @@ pub struct ChatMessage {
     pub content: String,
 }
 
+/// Reasoning effort hint for cloud chat providers that support thinking control.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatReasoningEffort {
+    None,
+    Low,
+    Medium,
+    High,
+    Minimal,
+}
+
+/// Verbosity hint for cloud chat providers that support thinking control.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatVerbosity {
+    Low,
+    Medium,
+    High,
+}
+
+/// High-level thinking toggle used by chat clients.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatThinkingType {
+    Enabled,
+    Disabled,
+}
+
+/// Thinking settings accepted by `POST /v1/chat/completions`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatThinkingConfig {
+    /// Whether server-side reasoning should be enabled for this request.
+    #[serde(rename = "type")]
+    pub mode: ChatThinkingType,
+    /// Optional reasoning effort override when `type = enabled`.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        alias = "reasoningEffort"
+    )]
+    pub reasoning_effort: Option<ChatReasoningEffort>,
+    /// Optional verbosity override when `type = enabled`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub verbosity: Option<ChatVerbosity>,
+}
+
 /// Request body for `POST /v1/chat/completions`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 #[validate(schema(function = "validate_chat_completion_request"))]
@@ -71,6 +117,19 @@ pub struct ChatCompletionRequest {
         message = "temperature must be between 0.0 and 2.0"
     ))]
     pub temperature: Option<f32>,
+    /// Optional client-side thinking toggle. Accepted for compatibility with Ant Design X providers.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub thinking: Option<ChatThinkingConfig>,
+    /// Optional provider reasoning effort override.
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        default,
+        alias = "reasoningEffort"
+    )]
+    pub reasoning_effort: Option<ChatReasoningEffort>,
+    /// Optional provider verbosity override.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub verbosity: Option<ChatVerbosity>,
 }
 
 /// A single choice in the completion response.

@@ -27,6 +27,10 @@ import type {
   SettingResponse,
 } from '../types';
 import { valueToEditorString } from '../utils';
+import {
+  ChatProvidersField,
+  supportsChatProvidersField,
+} from './chat-providers-field';
 import { StructuredJsonField } from './structured-json-field';
 
 type SettingFieldCardProps = {
@@ -50,6 +54,7 @@ export function SettingFieldCard({
 }: SettingFieldCardProps) {
   const propertyType = property.schema.type;
   const structuredSchema = parseStructuredJsonSchema(property);
+  const useChatProvidersField = supportsChatProvidersField(property);
   const isEnum =
     propertyType === 'string' &&
     Array.isArray(property.schema.enum) &&
@@ -146,6 +151,12 @@ export function SettingFieldCard({
               className="h-11 rounded-2xl"
               aria-invalid={Boolean(errorState)}
             />
+          ) : useChatProvidersField ? (
+            <ChatProvidersField
+              value={structuredValue}
+              errorState={errorState}
+              onChange={(value) => onChange(property, value)}
+            />
           ) : structuredSchema ? (
             <StructuredJsonField
               schema={structuredSchema}
@@ -180,7 +191,7 @@ export function SettingFieldCard({
             />
           )}
 
-          {errorState && (!structuredSchema || errorState.path === '/') ? (
+          {errorState && !structuredSchema && !useChatProvidersField ? (
             <p className="text-sm text-destructive">{errorState.message}</p>
           ) : null}
         </div>

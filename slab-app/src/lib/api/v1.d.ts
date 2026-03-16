@@ -529,6 +529,12 @@ export interface components {
              * @description Sampling temperature in [0, 2].
              */
             temperature?: number | null;
+            /** @description Optional client-side thinking toggle. Accepted for compatibility with Ant Design X providers. */
+            thinking?: components["schemas"]["ChatThinkingConfig"] | null;
+            /** @description Optional provider reasoning effort override. */
+            reasoning_effort?: components["schemas"]["ChatReasoningEffort"] | null;
+            /** @description Optional provider verbosity override. */
+            verbosity?: components["schemas"]["ChatVerbosity"] | null;
         };
         /** @description Response body for `POST /v1/chat/completions`. */
         ChatCompletionResponse: {
@@ -553,6 +559,30 @@ export interface components {
             /** @description The role of the message author (`"system"`, `"user"`, `"assistant"`). */
             role: string;
         };
+        /**
+         * @description Reasoning effort hint for cloud chat providers that support thinking control.
+         * @enum {string}
+         */
+        ChatReasoningEffort: "none" | "low" | "medium" | "high" | "minimal";
+        /** @description Thinking settings accepted by `POST /v1/chat/completions`. */
+        ChatThinkingConfig: {
+            /** @description Whether server-side reasoning should be enabled for this request. */
+            type: components["schemas"]["ChatThinkingType"];
+            /** @description Optional reasoning effort override when `type = enabled`. */
+            reasoning_effort?: components["schemas"]["ChatReasoningEffort"] | null;
+            /** @description Optional verbosity override when `type = enabled`. */
+            verbosity?: components["schemas"]["ChatVerbosity"] | null;
+        };
+        /**
+         * @description High-level thinking toggle used by chat clients.
+         * @enum {string}
+         */
+        ChatThinkingType: "enabled" | "disabled";
+        /**
+         * @description Verbosity hint for cloud chat providers that support thinking control.
+         * @enum {string}
+         */
+        ChatVerbosity: "low" | "medium" | "high";
         /** @description A selectable chat model option from `GET /v1/chat/models`. */
         ChatModelOption: {
             /** @description Backend id when `source = local`, e.g. `ggml.llama`. */
