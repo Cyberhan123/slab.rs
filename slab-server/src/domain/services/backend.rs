@@ -8,9 +8,10 @@ use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
-    ReloadBackendLibCommand, SETUP_BACKENDS_DIFFUSION_ASSET_PMID, SETUP_BACKENDS_DIFFUSION_TAG_PMID,
-    SETUP_BACKENDS_DIR_PMID, SETUP_BACKENDS_LLAMA_ASSET_PMID, SETUP_BACKENDS_LLAMA_TAG_PMID,
-    SETUP_BACKENDS_WHISPER_ASSET_PMID, SETUP_BACKENDS_WHISPER_TAG_PMID,
+    ReloadBackendLibCommand, SETUP_BACKENDS_DIFFUSION_ASSET_PMID,
+    SETUP_BACKENDS_DIFFUSION_TAG_PMID, SETUP_BACKENDS_DIR_PMID, SETUP_BACKENDS_LLAMA_ASSET_PMID,
+    SETUP_BACKENDS_LLAMA_TAG_PMID, SETUP_BACKENDS_WHISPER_ASSET_PMID,
+    SETUP_BACKENDS_WHISPER_TAG_PMID,
 };
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
@@ -89,8 +90,8 @@ impl BackendService {
             ServerError::BadRequest(format!("unknown backend_id: {}", req.backend_id))
         })?;
 
-        let (owner, repo, default_tag, default_asset_fn) =
-            windows_download_spec(backend_id).ok_or_else(|| {
+        let (owner, repo, default_tag, default_asset_fn) = windows_download_spec(backend_id)
+            .ok_or_else(|| {
                 ServerError::BadRequest(format!("unsupported backend_id: {backend_id}"))
             })?;
 
@@ -104,7 +105,9 @@ impl BackendService {
             .get_optional_string(tag_pmid)
             .await
         {
-            Ok(value) => value.filter(|s| !s.is_empty()).unwrap_or_else(|| default_tag.to_owned()),
+            Ok(value) => value
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| default_tag.to_owned()),
             Err(error) => {
                 warn!(pmid = tag_pmid, error = %error, "failed to read backend tag setting; using default");
                 default_tag.to_owned()
@@ -117,7 +120,9 @@ impl BackendService {
             .get_optional_string(asset_pmid)
             .await
         {
-            Ok(value) => value.filter(|s| !s.is_empty()).unwrap_or_else(|| default_asset_fn(&tag)),
+            Ok(value) => value
+                .filter(|s| !s.is_empty())
+                .unwrap_or_else(|| default_asset_fn(&tag)),
             Err(error) => {
                 warn!(pmid = asset_pmid, error = %error, "failed to read backend asset setting; using default");
                 default_asset_fn(&tag)
@@ -213,18 +218,12 @@ fn windows_download_spec(
     backend_id: Backend,
 ) -> Option<(&'static str, &'static str, &'static str, fn(&str) -> String)> {
     match backend_id {
-        Backend::GGMLLlama => Some((
-            "ggml-org",
-            "llama.cpp",
-            "b8069",
-            |version: &str| format!("llama-{version}-bin-win-cpu-x64.zip"),
-        )),
-        Backend::GGMLWhisper => Some((
-            "ggml-org",
-            "whisper.cpp",
-            "v1.8.3",
-            |_| "whisper-cublas-12.4.0-bin-x64.zip".to_string(),
-        )),
+        Backend::GGMLLlama => Some(("ggml-org", "llama.cpp", "b8069", |version: &str| {
+            format!("llama-{version}-bin-win-cpu-x64.zip")
+        })),
+        Backend::GGMLWhisper => Some(("ggml-org", "whisper.cpp", "v1.8.3", |_| {
+            "whisper-cublas-12.4.0-bin-x64.zip".to_string()
+        })),
         Backend::GGMLDiffusion => Some((
             "leejet",
             "stable-diffusion.cpp",
@@ -236,7 +235,10 @@ fn windows_download_spec(
 
 fn settings_pmids_for(backend: Backend) -> (&'static str, &'static str) {
     match backend {
-        Backend::GGMLLlama => (SETUP_BACKENDS_LLAMA_TAG_PMID, SETUP_BACKENDS_LLAMA_ASSET_PMID),
+        Backend::GGMLLlama => (
+            SETUP_BACKENDS_LLAMA_TAG_PMID,
+            SETUP_BACKENDS_LLAMA_ASSET_PMID,
+        ),
         Backend::GGMLWhisper => (
             SETUP_BACKENDS_WHISPER_TAG_PMID,
             SETUP_BACKENDS_WHISPER_ASSET_PMID,
