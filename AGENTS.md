@@ -21,6 +21,20 @@ Use these local project skills first. They are the slab.rs-specific adapter laye
 
 Read [docs/ai-skill-map.md](docs/ai-skill-map.md) for the routing map and related generic skills to consult through these project skills.
 
+## Supporting Skills
+
+Use these after selecting the matching project skill, or when the user explicitly names them.
+
+- `frontend-design`: bold visual direction for page work in `slab-app`
+- `ui-ux-pro-max`: design-system-first UI exploration and remediation ideas
+- `use-x-chat`: `useXChat` and `useXConversations` work in `slab-app/src/pages/chat/**`
+- `x-request`: `XRequest` transport changes in `slab-app/src/pages/chat/chat-context.ts`
+- `x-markdown`: Markdown rendering changes in `slab-app/src/pages/chat/components/chat-message-list.tsx`
+- `x-chat-provider`: custom Ant Design X provider work only when the current built-in `DeepSeekChatProvider` no longer fits
+- `shadcn-ui`: generic primitive patterns through `slab-ui-primitives`
+- `tauri-v2`: generic Tauri API details through `slab-tauri-app`
+- `find-skills`: ecosystem discovery only; not a default route for repository work
+
 ## Architecture Overview
 
 This workspace uses a supervisor-gateway plus gRPC worker pattern:
@@ -56,7 +70,7 @@ slab-runtime  (standalone gRPC worker process)
 ## Code Organization
 
 - Rust: keep module boundaries explicit. In `slab-server`, follow the existing `config`, `context`, `api`, `domain`, and `infra` layout instead of introducing parallel `state` or `routes` trees.
-- Rust async: prefer Tokio-based async flows and the runtime abstractions already in `slab-core/src/runtime/`.
+- Rust async: prefer Tokio-based async flows and the scheduler abstractions already in `slab-core/src/scheduler/`.
 - Do not embed model backends directly in `slab-server`; inference should flow through `GrpcGateway -> slab-runtime -> slab-core`.
 - Do not add HTTP or SQL dependencies to `slab-core` or `slab-runtime`.
 - Do not move code across crates unless the responsibility boundary truly changes.
@@ -69,6 +83,7 @@ slab-runtime  (standalone gRPC worker process)
 - Server state uses TanStack Query v5 with `openapi-fetch` and `openapi-react-query`.
 - Client state uses Zustand.
 - AI-focused UI uses Ant Design X and `antd`.
+- Chat surfaces currently use `DeepSeekChatProvider`, `useXChat`, `XRequest`, and `@ant-design/x-markdown` under `slab-app/src/pages/chat`.
 - Shared primitives live under `slab-app/src/components/ui` and follow the existing Tailwind 4 + shadcn-style patterns.
 
 ## Key Files
@@ -86,6 +101,8 @@ slab-runtime  (standalone gRPC worker process)
 - Frontend app root: `slab-app/src/App.tsx`
 - Frontend routes: `slab-app/src/routes/index.tsx`
 - Frontend API client: `slab-app/src/lib/api/index.ts`
+- Chat provider wiring: `slab-app/src/pages/chat/chat-context.ts`
+- Chat hook: `slab-app/src/pages/chat/hooks/use-chat.ts`
 - Tauri setup: `slab-app/src-tauri/src/setup.rs`
 - Tauri config: `slab-app/src-tauri/tauri.conf.json`
 
@@ -124,6 +141,7 @@ bun run api
 - Model idle eviction is handled by `slab-server/src/model_auto_unload.rs`; do not bypass it for model lifecycle management.
 - SQLx migrations live in `slab-server/migrations/` and should be append-only.
 - The workspace excludes `slab-app/src` from Cargo operations; do not assume Rust tooling covers TypeScript sources.
+- Prefer the built-in Ant Design X chat providers and current page-local chat wrappers before introducing a custom provider or a second chat state layer.
 
 ## Security and Runtime Notes
 
