@@ -34,6 +34,8 @@ pub struct SettingPropertySchema {
     pub maximum: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub pattern: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub json_schema: Option<Value>,
     #[serde(default)]
     pub default_value: Value,
     #[serde(default)]
@@ -554,6 +556,10 @@ impl SettingDefinition {
     }
 
     fn build_validation_schema(&self, allow_null_default: bool) -> Value {
+        if let Some(json_schema) = &self.schema.json_schema {
+            return json_schema.clone();
+        }
+
         match self.storage_kind {
             SettingStorageKind::ChatProviders => chat_providers_validation_schema(),
             _ => {
@@ -827,5 +833,64 @@ mod tests {
         assert_eq!(providers[0].name, "openai-main");
         assert_eq!(providers[0].api_base, "https://api.openai.com/v1");
         assert_eq!(providers[0].models[0].display_name, "gpt-4.1-mini");
+    }
+
+    #[test]
+    fn embedded_chat_provider_setting_exposes_structured_json_schema() {
+        let schema = embedded_settings_schema().expect("schema");
+        let definition = schema
+            .property(PMID.chat.providers().as_str())
+            .expect("chat providers");
+
+        let json_schema = definition
+            .schema
+            .json_schema
+            .as_ref()
+            .expect("structured json schema");
+        let provider_items = json_schema
+            .get("items")
+            .and_then(Value::as_object)
+            .expect("provider items");
+        let provider_properties = provider_items
+            .get("properties")
+            .and_then(Value::as_object)
+            .expect("provider properties");
+
+        assert!(provider_properties.contains_key("api_base"));
+        assert!(provider_properties.contains_key("models"));
+    }
+
+    #[test]
+    fn schema_rejects_invalid_custom_json_schema() {
+        let raw = r#"{
+          "schema_version": 1,
+          "sections": [
+            {
+              "id": "chat",
+              "title": "Chat",
+              "subsections": [
+                {
+                  "id": "providers",
+                  "title": "Providers",
+                  "properties": [
+                    {
+                      "pmid": "chat.providers",
+                      "label": "Chat Providers",
+                      "storage_kind": "array",
+                      "schema": {
+                        "type": "array",
+                        "default_value": [],
+                        "json_schema": { "type": 42 }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }"#;
+
+        let error = SettingsSchema::from_json_str(raw).expect_err("invalid custom json schema");
+        assert!(error.to_string().contains("runtime schema"));
     }
 }

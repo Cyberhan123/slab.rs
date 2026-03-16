@@ -195,6 +195,7 @@ fn setting_property_schema_validation_schema() -> Value {
             "minimum": { "type": "integer" },
             "maximum": { "type": "integer" },
             "pattern": { "type": "string" },
+            "json_schema": true,
             "default_value": true,
             "secret": { "type": "boolean" },
             "multiline": { "type": "boolean" },

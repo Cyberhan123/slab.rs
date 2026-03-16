@@ -9,7 +9,13 @@ export type SettingResponse =
 export type UpdateSettingRequest =
   paths['/v1/settings/{pmid}']['put']['requestBody']['content']['application/json'];
 
-export type DraftValue = boolean | string;
+export type JsonPrimitive = boolean | number | string | null;
+export type JsonValue = JsonPrimitive | JsonObject | JsonValue[];
+export type JsonObject = {
+  [key: string]: JsonValue;
+};
+
+export type DraftValue = JsonValue;
 
 export type FieldErrorState = {
   message: string;

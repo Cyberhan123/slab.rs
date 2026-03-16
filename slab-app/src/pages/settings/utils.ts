@@ -1,5 +1,6 @@
 import { getErrorMessage, isApiError } from '@/lib/api';
 
+import { isJsonObject } from './schema';
 import type {
   DraftValue,
   FieldErrorState,
@@ -142,6 +143,20 @@ export function buildRequestBody(
   }
 
   if (propertyType === 'array' || propertyType === 'object') {
+    if (propertyType === 'array' && Array.isArray(draftValue)) {
+      return {
+        op: 'set',
+        value: draftValue,
+      };
+    }
+
+    if (propertyType === 'object' && isJsonObject(draftValue)) {
+      return {
+        op: 'set',
+        value: draftValue,
+      };
+    }
+
     const trimmed = rawValue.trim();
     if (!trimmed) {
       return { op: 'unset' };

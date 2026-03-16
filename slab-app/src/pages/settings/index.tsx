@@ -1,5 +1,5 @@
 import { useDeferredValue, useMemo, useState } from 'react';
-import { Clock3, Loader2, RefreshCw, Search, TriangleAlert } from 'lucide-react';
+import { Loader2, RefreshCw, Search, TriangleAlert } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -39,7 +39,6 @@ export default function SettingsPage() {
     data,
     error,
     isLoading,
-    isRefetching,
     refetch,
   } = api.useQuery('get', '/v1/settings');
 
@@ -152,61 +151,21 @@ export default function SettingsPage() {
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-10">
-        <Card className="overflow-hidden border-border/70 bg-[linear-gradient(135deg,color-mix(in_oklab,var(--card)_92%,white),color-mix(in_oklab,var(--muted)_50%,transparent))] shadow-[0_24px_70px_-48px_color-mix(in_oklab,var(--foreground)_32%,transparent)]">
-          <CardHeader className="gap-5 border-b border-border/60">
-            <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-              <div className="space-y-2">
-                <CardTitle className="text-3xl tracking-tight">Settings</CardTitle>
-                <CardDescription className="max-w-3xl text-sm leading-6">
-                  Changes auto-save after a short pause. Use the left navigation to jump
-                  between sections and sub-sections.
-                </CardDescription>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <Badge variant="outline">{visiblePropertyCount} visible</Badge>
-                <Badge variant="outline">{totalPropertyCount} total</Badge>
-                <Badge variant="outline">schema v{data.schema_version}</Badge>
-                {statusSummary.dirty > 0 ? (
-                  <Badge variant="secondary">{statusSummary.dirty} pending</Badge>
-                ) : null}
-                {statusSummary.saving > 0 ? (
-                  <Badge variant="secondary">{statusSummary.saving} saving</Badge>
-                ) : null}
-                {statusSummary.error > 0 ? (
-                  <Badge variant="destructive">{statusSummary.error} errors</Badge>
-                ) : null}
-                <Button
-                  variant="outline"
-                  onClick={refreshSettings}
-                  disabled={isRefetching}
-                >
-                  {isRefetching ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <RefreshCw className="mr-2 h-4 w-4" />
-                  )}
-                  Refresh
-                </Button>
-              </div>
-            </div>
-
-            <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="sticky top-0 z-30 pb-2">
+          <Card className="overflow-hidden border-border/70 bg-background/90 shadow-[0_24px_70px_-48px_color-mix(in_oklab,var(--foreground)_32%,transparent)] backdrop-blur supports-[backdrop-filter]:bg-background/72">
+            <CardContent className="py-4">
               <div className="relative">
-                <Search className="pointer-events-none absolute top-1/2 left-3 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Search className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
                   value={search}
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search by PMID, label, section, or keyword"
-                  className="pl-9"
+                  placeholder="Search settings"
+                  className="h-12 rounded-2xl border-border/70 bg-background pl-11 text-base shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_8%,transparent)]"
                 />
               </div>
-              <div className="flex items-center gap-2 rounded-xl border border-border/70 bg-background/70 px-4 py-3 text-sm text-muted-foreground">
-                <Clock3 className="h-4 w-4" />
-                Auto-save is enabled
-              </div>
-            </div>
-          </CardHeader>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
 
         {data.warnings.length > 0 ? (
           <Alert>
@@ -227,7 +186,7 @@ export default function SettingsPage() {
             <CardHeader>
               <CardTitle>No settings matched</CardTitle>
               <CardDescription>
-                Clear the search query to see the full settings document.
+                Try a broader keyword or clear the search to see everything again.
               </CardDescription>
             </CardHeader>
           </Card>
@@ -235,7 +194,7 @@ export default function SettingsPage() {
 
         {filteredSections.length > 0 ? (
           <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-            <aside className="lg:sticky lg:top-4 lg:self-start">
+            <aside className="lg:sticky lg:top-32 lg:self-start">
               <SettingsNavigation
                 activeTarget={activeTarget}
                 dirtyCount={statusSummary.dirty}
@@ -251,12 +210,11 @@ export default function SettingsPage() {
                 <Card
                   key={section.id}
                   id={sectionAnchorId(section.id)}
-                  className="scroll-mt-6 overflow-hidden border-border/70 shadow-[0_20px_60px_-48px_color-mix(in_oklab,var(--foreground)_32%,transparent)]"
+                  className="scroll-mt-36 overflow-hidden border-border/70 shadow-[0_20px_60px_-48px_color-mix(in_oklab,var(--foreground)_32%,transparent)]"
                 >
                   <CardHeader className="gap-3 border-b border-border/60 bg-muted/15">
                     <div className="flex flex-wrap items-center gap-3">
                       <CardTitle className="text-2xl">{section.title}</CardTitle>
-                      <Badge variant="outline">{section.id}</Badge>
                       <Badge variant="secondary">
                         {countSectionProperties(section)} settings
                       </Badge>
@@ -272,13 +230,12 @@ export default function SettingsPage() {
                       <div
                         key={subsection.id}
                         id={subsectionAnchorId(section.id, subsection.id)}
-                        className="scroll-mt-28 space-y-5"
+                        className="scroll-mt-40 space-y-5"
                       >
                         {subsectionIndex > 0 ? <SeparatorLine /> : null}
                         <div className="space-y-2">
                           <div className="flex flex-wrap items-center gap-3">
                             <h2 className="text-lg font-semibold">{subsection.title}</h2>
-                            <Badge variant="secondary">{subsection.id}</Badge>
                             <Badge variant="outline">
                               {subsection.properties.length} fields
                             </Badge>
