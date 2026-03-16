@@ -29,6 +29,12 @@ pub struct Config {
     /// When `true`, emit log records as newline-delimited JSON.
     pub log_json: bool,
 
+    /// When `true`, log redacted outbound cloud chat HTTP request/response data.
+    ///
+    /// This is intended for short-lived debugging sessions only because it can
+    /// include full prompt/response bodies in the server logs.
+    pub cloud_http_trace: bool,
+
     /// Orchestrator submission-queue capacity (passed to slab-core).
     pub queue_capacity: usize,
 
@@ -86,6 +92,9 @@ impl Config {
             database_url: env_or("SLAB_DATABASE_URL", "sqlite://slab.db?mode=rwc"),
             log_level: env_or("SLAB_LOG", "info"),
             log_json: std::env::var("SLAB_LOG_JSON")
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false),
+            cloud_http_trace: std::env::var("SLAB_CLOUD_HTTP_TRACE")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
             queue_capacity: parse_env("SLAB_QUEUE_CAPACITY", 64),

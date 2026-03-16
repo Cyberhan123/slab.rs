@@ -132,6 +132,8 @@ async fn create_chat_completion_with_state(
             &resolved_messages,
             max_tokens,
             temperature,
+            command.reasoning_effort,
+            command.verbosity,
             command.stream,
         )
         .await?
@@ -237,6 +239,8 @@ mod test {
             stream: false,
             max_tokens: None,
             temperature: None,
+            reasoning_effort: None,
+            verbosity: None,
             id: None,
         }
     }

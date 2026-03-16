@@ -338,7 +338,7 @@ function Chat() {
     onReload,
     activeConversation,
     handleSubmit,
-  } = useChat(curConversation, selectedModelId || 'slab-llama', ensureChatModelReady);
+  } = useChat(curConversation, selectedModelId || 'slab-llama', deepThink, ensureChatModelReady);
 
   const isPreparingModel =
     loadModelMutation.isPending ||

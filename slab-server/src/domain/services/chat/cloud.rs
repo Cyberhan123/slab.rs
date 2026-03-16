@@ -3,18 +3,21 @@ use genai::adapter::AdapterKind;
 use genai::chat::{
     ChatMessage as GenaiChatMessage, ChatOptions as GenaiChatOptions,
     ChatRequest as GenaiChatRequest, ChatStreamEvent as GenaiChatStreamEvent,
+    ReasoningEffort as GenaiReasoningEffort, Verbosity as GenaiVerbosity,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{
     Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget,
 };
-use tracing::{debug, warn};
+use serde_json::{json, Value};
+use std::collections::BTreeMap;
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatModelOption, ChatModelSource, ChatStreamChunk, CloudProviderSettingValue,
-    ConversationMessage as DomainConversationMessage,
+    ChatModelOption, ChatModelSource, ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
+    CloudProviderSettingValue, ConversationMessage as DomainConversationMessage,
 };
 use crate::error::ServerError;
 
@@ -39,6 +42,14 @@ enum CloudDelta {
 
 type CloudTokenStream =
     std::pin::Pin<Box<dyn futures::Stream<Item = Result<CloudDelta, ServerError>> + Send>>;
+
+#[derive(Debug, Clone)]
+struct CloudHttpTraceContext {
+    request_id: String,
+    request_url: String,
+    request_headers: String,
+    request_body: String,
+}
 
 pub(super) async fn list_chat_models(state: &ModelState) -> Vec<ChatModelOption> {
     let mut items = Vec::new();
@@ -74,12 +85,24 @@ pub(super) async fn create_chat_completion(
     messages: &[DomainConversationMessage],
     max_tokens: u32,
     temperature: f32,
+    reasoning_effort: Option<ChatReasoningEffort>,
+    verbosity: Option<ChatVerbosity>,
     stream: bool,
 ) -> Result<GeneratedChatOutput, ServerError> {
     let target = resolve_cloud_model(state, requested_model).await?;
+    let trace_http = state.config().cloud_http_trace;
 
     if stream {
-        let backend_stream = cloud_chat_stream(&target, messages, max_tokens, temperature).await?;
+        let backend_stream = cloud_chat_stream(
+            &target,
+            messages,
+            max_tokens,
+            temperature,
+            reasoning_effort,
+            verbosity,
+            trace_http,
+        )
+        .await?;
         let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
         let created_ts = chrono::Utc::now().timestamp();
         let model_name = requested_model.to_owned();
@@ -106,7 +129,16 @@ pub(super) async fn create_chat_completion(
         return Ok(GeneratedChatOutput::Stream(Box::pin(sse_stream)));
     }
 
-    let generated = cloud_chat_completion(&target, messages, max_tokens, temperature).await?;
+    let generated = cloud_chat_completion(
+        &target,
+        messages,
+        max_tokens,
+        temperature,
+        reasoning_effort,
+        verbosity,
+        trace_http,
+    )
+    .await?;
     Ok(GeneratedChatOutput::Text(generated))
 }
 
@@ -205,6 +237,8 @@ async fn resolve_cloud_model(
 }
 
 fn map_genai_error(action: &str, err: genai::Error) -> ServerError {
+    log_genai_error(action, &err);
+
     let detail = err.to_string();
     let lower = detail.to_ascii_lowercase();
     if lower.contains("400")
@@ -218,7 +252,7 @@ fn map_genai_error(action: &str, err: genai::Error) -> ServerError {
 }
 
 fn build_genai_client_for_target(target: &ResolvedCloudModel) -> GenaiClient {
-    let endpoint = target.api_base.clone();
+    let endpoint = ensure_genai_endpoint_base(&target.api_base);
     let api_key = target.api_key.clone();
     let remote_model = target.remote_model.clone();
 
@@ -242,10 +276,47 @@ fn build_genai_chat_request(messages: &[DomainConversationMessage]) -> GenaiChat
     GenaiChatRequest::new(mapped)
 }
 
-fn build_genai_chat_options(max_tokens: u32, temperature: f32) -> GenaiChatOptions {
-    GenaiChatOptions::default()
+fn build_genai_chat_options(
+    max_tokens: u32,
+    temperature: f32,
+    reasoning_effort: Option<ChatReasoningEffort>,
+    verbosity: Option<ChatVerbosity>,
+    capture_raw_body: bool,
+) -> GenaiChatOptions {
+    let mut options = GenaiChatOptions::default()
         .with_max_tokens(max_tokens)
-        .with_temperature(f64::from(temperature))
+        .with_temperature(f64::from(temperature));
+
+    if let Some(reasoning_effort) = reasoning_effort {
+        options = options.with_reasoning_effort(map_reasoning_effort(reasoning_effort));
+    }
+    if let Some(verbosity) = verbosity {
+        options = options.with_verbosity(map_verbosity(verbosity));
+    }
+
+    if capture_raw_body {
+        options.with_capture_raw_body(true)
+    } else {
+        options
+    }
+}
+
+fn map_reasoning_effort(value: ChatReasoningEffort) -> GenaiReasoningEffort {
+    match value {
+        ChatReasoningEffort::None => GenaiReasoningEffort::None,
+        ChatReasoningEffort::Low => GenaiReasoningEffort::Low,
+        ChatReasoningEffort::Medium => GenaiReasoningEffort::Medium,
+        ChatReasoningEffort::High => GenaiReasoningEffort::High,
+        ChatReasoningEffort::Minimal => GenaiReasoningEffort::Minimal,
+    }
+}
+
+fn map_verbosity(value: ChatVerbosity) -> GenaiVerbosity {
+    match value {
+        ChatVerbosity::Low => GenaiVerbosity::Low,
+        ChatVerbosity::Medium => GenaiVerbosity::Medium,
+        ChatVerbosity::High => GenaiVerbosity::High,
+    }
 }
 
 async fn cloud_chat_completion(
@@ -253,6 +324,9 @@ async fn cloud_chat_completion(
     messages: &[DomainConversationMessage],
     max_tokens: u32,
     temperature: f32,
+    reasoning_effort: Option<ChatReasoningEffort>,
+    verbosity: Option<ChatVerbosity>,
+    trace_http: bool,
 ) -> Result<String, ServerError> {
     debug!(
         provider_id = %target.provider_id,
@@ -262,14 +336,44 @@ async fn cloud_chat_completion(
         "sending cloud chat completion request via genai"
     );
 
+    let trace = trace_http.then(|| {
+        build_cloud_http_trace_context(
+            target,
+            messages,
+            max_tokens,
+            temperature,
+            reasoning_effort,
+            verbosity,
+            false,
+        )
+    });
+    if let Some(trace) = trace.as_ref() {
+        log_cloud_http_request(target, trace, false);
+    }
+
     let client = build_genai_client_for_target(target);
     let request = build_genai_chat_request(messages);
-    let options = build_genai_chat_options(max_tokens, temperature);
+    let options = build_genai_chat_options(
+        max_tokens,
+        temperature,
+        reasoning_effort,
+        verbosity,
+        trace_http,
+    );
 
     let response = client
         .exec_chat(&target.remote_model, request, Some(&options))
         .await
-        .map_err(|error| map_genai_error("chat", error))?;
+        .map_err(|error| {
+            if let Some(trace) = trace.as_ref() {
+                log_cloud_http_response_error(target, trace, &error);
+            }
+            map_genai_error("chat", error)
+        })?;
+
+    if let Some(trace) = trace.as_ref() {
+        log_cloud_http_response_success(target, trace, response.captured_raw_body.as_ref());
+    }
 
     response.first_text().map(str::to_owned).ok_or_else(|| {
         ServerError::Internal("cloud response has empty assistant content".to_owned())
@@ -281,8 +385,11 @@ async fn cloud_chat_stream(
     messages: &[DomainConversationMessage],
     max_tokens: u32,
     temperature: f32,
+    reasoning_effort: Option<ChatReasoningEffort>,
+    verbosity: Option<ChatVerbosity>,
+    trace_http: bool,
 ) -> Result<CloudTokenStream, ServerError> {
-    debug!(
+    info!(
         provider_id = %target.provider_id,
         provider_name = %target.provider_name,
         remote_model = %target.remote_model,
@@ -290,15 +397,37 @@ async fn cloud_chat_stream(
         "opening cloud chat stream via genai"
     );
 
+    let trace = trace_http.then(|| {
+        build_cloud_http_trace_context(
+            target,
+            messages,
+            max_tokens,
+            temperature,
+            reasoning_effort,
+            verbosity,
+            true,
+        )
+    });
+    if let Some(trace) = trace.as_ref() {
+        log_cloud_http_request(target, trace, true);
+    }
+
     let client = build_genai_client_for_target(target);
     let request = build_genai_chat_request(messages);
-    let options = build_genai_chat_options(max_tokens, temperature);
+    let options =
+        build_genai_chat_options(max_tokens, temperature, reasoning_effort, verbosity, false);
     let response = client
         .exec_chat_stream(&target.remote_model, request, Some(&options))
         .await
-        .map_err(|error| map_genai_error("chat_stream", error))?;
+        .map_err(|error| {
+            if let Some(trace) = trace.as_ref() {
+                log_cloud_http_response_error(target, trace, &error);
+            }
+            map_genai_error("chat_stream", error)
+        })?;
 
-    let stream = response.stream.filter_map(|item| {
+    let trace_target = target.clone();
+    let stream = response.stream.filter_map(move |item| {
         let mapped = match item {
             Ok(GenaiChatStreamEvent::Chunk(chunk)) => {
                 let token = chunk.content;
@@ -320,7 +449,12 @@ async fn cloud_chat_stream(
             | Ok(GenaiChatStreamEvent::ThoughtSignatureChunk(_))
             | Ok(GenaiChatStreamEvent::Start)
             | Ok(GenaiChatStreamEvent::End(_)) => None,
-            Err(error) => Some(Err(map_genai_error("chat_stream", error))),
+            Err(error) => {
+                if let Some(trace) = trace.as_ref() {
+                    log_cloud_http_response_error(&trace_target, trace, &error);
+                }
+                Some(Err(map_genai_error("chat_stream", error)))
+            }
         };
         futures::future::ready(mapped)
     });
@@ -328,12 +462,402 @@ async fn cloud_chat_stream(
     Ok(Box::pin(stream))
 }
 
+fn ensure_genai_endpoint_base(api_base: &str) -> String {
+    match api_base.trim().split_once('?') {
+        Some((base, query)) => format!("{}/?{query}", base.trim_end_matches('/')),
+        None => format!("{}/", api_base.trim().trim_end_matches('/')),
+    }
+}
+
+fn build_openai_chat_completions_url(api_base: &str) -> String {
+    match api_base.trim().split_once('?') {
+        Some((base, query)) => format!("{}/chat/completions?{query}", base.trim_end_matches('/')),
+        None => format!("{}/chat/completions", api_base.trim().trim_end_matches('/')),
+    }
+}
+
+fn build_cloud_http_trace_context(
+    target: &ResolvedCloudModel,
+    messages: &[DomainConversationMessage],
+    max_tokens: u32,
+    temperature: f32,
+    reasoning_effort: Option<ChatReasoningEffort>,
+    verbosity: Option<ChatVerbosity>,
+    stream: bool,
+) -> CloudHttpTraceContext {
+    let request_headers = redact_headers(build_cloud_http_request_headers(target));
+    let request_body = serde_json::to_string_pretty(&build_cloud_http_request_body(
+        target,
+        messages,
+        max_tokens,
+        temperature,
+        reasoning_effort,
+        verbosity,
+        stream,
+    ))
+    .unwrap_or_else(|_| "<failed to serialize request body>".to_owned());
+
+    CloudHttpTraceContext {
+        request_id: Uuid::new_v4().to_string(),
+        request_url: build_openai_chat_completions_url(&target.api_base),
+        request_headers: serde_json::to_string_pretty(&request_headers)
+            .unwrap_or_else(|_| "<failed to serialize request headers>".to_owned()),
+        request_body,
+    }
+}
+
+fn build_cloud_http_request_headers(target: &ResolvedCloudModel) -> BTreeMap<String, String> {
+    BTreeMap::from([
+        (
+            "authorization".to_owned(),
+            format!("Bearer {}", target.api_key),
+        ),
+        ("content-type".to_owned(), "application/json".to_owned()),
+    ])
+}
+
+fn build_cloud_http_request_body(
+    target: &ResolvedCloudModel,
+    messages: &[DomainConversationMessage],
+    max_tokens: u32,
+    temperature: f32,
+    reasoning_effort: Option<ChatReasoningEffort>,
+    verbosity: Option<ChatVerbosity>,
+    stream: bool,
+) -> Value {
+    let mut payload = json!({
+        "model": target.remote_model,
+        "messages": messages
+            .iter()
+            .map(|message| {
+                json!({
+                    "role": normalize_openai_role(&message.role),
+                    "content": message.content,
+                })
+            })
+            .collect::<Vec<_>>(),
+        "stream": stream,
+        "max_tokens": max_tokens,
+        "temperature": f64::from(temperature),
+    });
+
+    if let Some(reasoning_effort) = reasoning_effort {
+        payload["reasoning_effort"] = json!(reasoning_effort.as_str());
+    }
+    if let Some(verbosity) = verbosity {
+        payload["verbosity"] = json!(verbosity.as_str());
+    }
+
+    payload
+}
+
+fn normalize_openai_role(role: &str) -> &str {
+    match role {
+        "system" | "assistant" | "user" => role,
+        _ => "user",
+    }
+}
+
+fn log_cloud_http_request(
+    target: &ResolvedCloudModel,
+    trace: &CloudHttpTraceContext,
+    stream: bool,
+) {
+    info!(
+        cloud_http_trace = true,
+        request_id = %trace.request_id,
+        provider_id = %target.provider_id,
+        provider_name = %target.provider_name,
+        remote_model = %target.remote_model,
+        request_method = "POST",
+        request_url = %trace.request_url,
+        request_stream = stream,
+        request_headers = %trace.request_headers,
+        request_body = %trace.request_body,
+        "cloud provider request prepared"
+    );
+}
+
+fn log_cloud_http_response_success(
+    target: &ResolvedCloudModel,
+    trace: &CloudHttpTraceContext,
+    response_body: Option<&Value>,
+) {
+    let response_body = response_body
+        .map(redact_json_value)
+        .and_then(|body| serde_json::to_string_pretty(&body).ok())
+        .unwrap_or_else(|| "<raw response body not captured by genai>".to_owned());
+
+    info!(
+        cloud_http_trace = true,
+        request_id = %trace.request_id,
+        provider_id = %target.provider_id,
+        provider_name = %target.provider_name,
+        remote_model = %target.remote_model,
+        response_body = %response_body,
+        "cloud provider response received"
+    );
+}
+
+fn log_cloud_http_response_error(
+    target: &ResolvedCloudModel,
+    trace: &CloudHttpTraceContext,
+    err: &genai::Error,
+) {
+    match err {
+        genai::Error::WebModelCall { webc_error, .. }
+        | genai::Error::WebAdapterCall { webc_error, .. } => match webc_error {
+            genai::webc::Error::ResponseFailedStatus {
+                status,
+                body,
+                headers,
+            } => {
+                let headers = redact_header_map(headers.as_ref());
+                let body = redact_text_body(body);
+                error!(
+                    cloud_http_trace = true,
+                    request_id = %trace.request_id,
+                    provider_id = %target.provider_id,
+                    provider_name = %target.provider_name,
+                    remote_model = %target.remote_model,
+                    response_status = status.as_u16(),
+                    response_headers = %headers,
+                    response_body = %body,
+                    "cloud provider request failed"
+                );
+            }
+            other => {
+                error!(
+                    cloud_http_trace = true,
+                    request_id = %trace.request_id,
+                    provider_id = %target.provider_id,
+                    provider_name = %target.provider_name,
+                    remote_model = %target.remote_model,
+                    error = %other,
+                    "cloud provider request failed before a structured HTTP response was available"
+                );
+            }
+        },
+        genai::Error::HttpError {
+            status,
+            canonical_reason,
+            body,
+        } => {
+            error!(
+                cloud_http_trace = true,
+                request_id = %trace.request_id,
+                provider_id = %target.provider_id,
+                provider_name = %target.provider_name,
+                remote_model = %target.remote_model,
+                response_status = status.as_u16(),
+                response_reason = %canonical_reason,
+                response_body = %redact_text_body(body),
+                "cloud provider stream request failed"
+            );
+        }
+        other => {
+            error!(
+                cloud_http_trace = true,
+                request_id = %trace.request_id,
+                provider_id = %target.provider_id,
+                provider_name = %target.provider_name,
+                remote_model = %target.remote_model,
+                error = %other,
+                "cloud provider request failed"
+            );
+        }
+    }
+}
+
+fn log_genai_error(action: &str, err: &genai::Error) {
+    match err {
+        genai::Error::WebModelCall {
+            model_iden,
+            webc_error,
+        } => {
+            warn!(
+                action,
+                model = %model_iden,
+                error = %webc_error,
+                "genai web model call failed"
+            );
+        }
+        genai::Error::WebAdapterCall {
+            adapter_kind,
+            webc_error,
+        } => {
+            warn!(
+                action,
+                adapter = ?adapter_kind,
+                error = %webc_error,
+                "genai web adapter call failed"
+            );
+        }
+        genai::Error::HttpError {
+            status,
+            canonical_reason,
+            body,
+        } => {
+            warn!(
+                action,
+                response_status = status.as_u16(),
+                response_reason = %canonical_reason,
+                response_body = %redact_text_body(body),
+                "genai HTTP error"
+            );
+        }
+        _ => {}
+    }
+}
+
+fn redact_headers(headers: BTreeMap<String, String>) -> BTreeMap<String, String> {
+    headers
+        .into_iter()
+        .map(|(name, value)| {
+            let redacted = redact_header_value(&name, &value);
+            (name, redacted)
+        })
+        .collect()
+}
+
+fn redact_header_map(headers: &reqwest::header::HeaderMap) -> String {
+    let redacted = headers
+        .iter()
+        .map(|(name, value)| {
+            let value = value.to_str().unwrap_or("<non-utf8>");
+            (
+                name.as_str().to_owned(),
+                redact_header_value(name.as_str(), value),
+            )
+        })
+        .collect::<BTreeMap<_, _>>();
+
+    serde_json::to_string_pretty(&redacted)
+        .unwrap_or_else(|_| "<failed to serialize response headers>".to_owned())
+}
+
+fn redact_header_value(name: &str, value: &str) -> String {
+    if !header_is_sensitive(name) {
+        return value.to_owned();
+    }
+
+    if name.eq_ignore_ascii_case("authorization") {
+        return value
+            .strip_prefix("Bearer ")
+            .map(|secret| format!("Bearer {}", redact_secret(secret)))
+            .unwrap_or_else(|| redact_secret(value));
+    }
+
+    redact_secret(value)
+}
+
+fn header_is_sensitive(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower == "authorization"
+        || lower == "proxy-authorization"
+        || lower == "cookie"
+        || lower == "set-cookie"
+        || lower.contains("api-key")
+        || lower.contains("token")
+        || lower.contains("secret")
+}
+
+fn redact_secret(value: &str) -> String {
+    if value.is_empty() {
+        return "<redacted>".to_owned();
+    }
+
+    let len = value.chars().count();
+    let prefix: String = value.chars().take(4).collect();
+    let suffix: String = value
+        .chars()
+        .rev()
+        .take(2)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
+
+    format!("{prefix}...{suffix} (redacted,len={len})")
+}
+
+fn redact_text_body(body: &str) -> String {
+    serde_json::from_str::<Value>(body)
+        .map(|value| redact_json_value(&value))
+        .and_then(|value| serde_json::to_string_pretty(&value))
+        .unwrap_or_else(|_| body.to_owned())
+}
+
+fn redact_json_value(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let redacted = map
+                .iter()
+                .map(|(key, value)| {
+                    if json_key_is_sensitive(key) {
+                        (key.clone(), Value::String(redact_secret_json(value)))
+                    } else {
+                        (key.clone(), redact_json_value(value))
+                    }
+                })
+                .collect();
+            Value::Object(redacted)
+        }
+        Value::Array(items) => Value::Array(items.iter().map(redact_json_value).collect()),
+        _ => value.clone(),
+    }
+}
+
+fn json_key_is_sensitive(key: &str) -> bool {
+    let lower = key.to_ascii_lowercase();
+    lower.contains("api_key")
+        || lower.contains("apikey")
+        || lower.contains("token")
+        || lower.contains("secret")
+        || lower == "authorization"
+}
+
+fn redact_secret_json(value: &Value) -> String {
+    match value {
+        Value::String(text) => redact_secret(text),
+        Value::Null => "<redacted>".to_owned(),
+        other => format!("<redacted:{other}>"),
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::cloud_option_id;
+    use super::{
+        build_openai_chat_completions_url, cloud_option_id, ensure_genai_endpoint_base,
+        redact_header_value,
+    };
 
     #[test]
     fn cloud_option_id_has_prefix() {
         assert_eq!(cloud_option_id("openai", "gpt-4.1"), "cloud/openai/gpt-4.1");
+    }
+
+    #[test]
+    fn ensure_genai_endpoint_base_keeps_v1_path() {
+        assert_eq!(
+            ensure_genai_endpoint_base("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/"
+        );
+    }
+
+    #[test]
+    fn build_openai_chat_completions_url_keeps_v1_path() {
+        assert_eq!(
+            build_openai_chat_completions_url("https://api.openai.com/v1"),
+            "https://api.openai.com/v1/chat/completions"
+        );
+    }
+
+    #[test]
+    fn redact_authorization_header() {
+        assert_eq!(
+            redact_header_value("authorization", "Bearer secret-token-value"),
+            "Bearer secr...ue (redacted,len=18)"
+        );
     }
 }

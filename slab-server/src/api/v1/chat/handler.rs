@@ -11,7 +11,8 @@ use utoipa::OpenApi;
 
 use crate::api::v1::chat::schema::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
-    ChatModelOption, ChatModelSource,
+    ChatModelOption, ChatModelSource, ChatReasoningEffort, ChatThinkingConfig, ChatThinkingType,
+    ChatVerbosity,
 };
 use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
@@ -28,7 +29,11 @@ use crate::error::ServerError;
         OpenAiMessage,
         ChatChoice,
         ChatModelOption,
-        ChatModelSource
+        ChatModelSource,
+        ChatThinkingConfig,
+        ChatThinkingType,
+        ChatReasoningEffort,
+        ChatVerbosity
     ))
 )]
 pub struct ChatApi;
