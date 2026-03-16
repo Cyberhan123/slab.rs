@@ -263,7 +263,7 @@ pub struct WhisperVadSegments {
 }
 
 impl Whisper {
-    pub fn new_vad_segments(&self, ptr: *mut whisper_vad_segments) -> WhisperVadSegments {
+    fn new_vad_segments(&self, ptr: *mut whisper_vad_segments) -> WhisperVadSegments {
         let segment_count = unsafe { self.lib.whisper_vad_segments_n_segments(ptr) };
         WhisperVadSegments {
             ptr,

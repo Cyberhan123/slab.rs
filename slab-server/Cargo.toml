@@ -63,7 +63,7 @@ validator = { version = "0.19", features = ["derive"] }
 # Misc
 base64    = { workspace = true }
 bytemuck  = "1"
-strum = "0.28.0"
+strum = { version = "0.28.0", features = ["derive"] }
 clap = { version = "4.5.60", features = ["derive"] }
 all-smi = "0.17"
 image     = { workspace = true }

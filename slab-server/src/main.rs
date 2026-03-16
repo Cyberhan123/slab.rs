@@ -211,6 +211,8 @@ where
     info!(database_url = %cfg.database_url, "database ready");
     let settings = Arc::new(SettingsProvider::load(cfg.settings_path.clone()).await?);
     info!(settings_path = %cfg.settings_path.display(), "settings provider ready");
+    let pmid = Arc::new(crate::domain::services::PmidService::load(Arc::clone(&settings)).await?);
+    info!("typed PMID config ready");
     let grpc = GrpcGateway::connect_from_config(&cfg)
         .await
         .context("failed to initialize shared gRPC gateway services")?;
@@ -218,11 +220,12 @@ where
     let grpc = Arc::new(grpc);
     let store = Arc::new(store.clone());
     let model_auto_unload = Arc::new(model_auto_unload::ModelAutoUnloadManager::new(
-        Arc::clone(&settings),
+        Arc::clone(&pmid),
         Arc::clone(&grpc),
     ));
     let state = Arc::new(AppState::new(
         Arc::new(cfg.clone()),
+        pmid,
         grpc,
         Arc::clone(&store),
         settings,

@@ -4,6 +4,19 @@ use crate::infra::db::entities::TaskRecord;
 use chrono::Utc;
 use std::future::Future;
 
+type TaskRow = (
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<i64>,
+    String,
+    String,
+);
+
 pub trait TaskStore: Send + Sync + 'static {
     fn insert_task(
         &self,
@@ -72,7 +85,7 @@ impl TaskStore for AnyStore {
     }
 
     async fn get_task(&self, id: &str) -> Result<Option<TaskRecord>, sqlx::Error> {
-        let row: Option<(String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, Option<i64>, String, String)> =
+        let row: Option<TaskRow> =
             sqlx::query_as(
                 "SELECT id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at \
                  FROM tasks WHERE id = ?1",
@@ -103,18 +116,7 @@ impl TaskStore for AnyStore {
     }
 
     async fn list_tasks(&self, task_type: Option<&str>) -> Result<Vec<TaskRecord>, sqlx::Error> {
-        let rows: Vec<(
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            Option<i64>,
-            String,
-            String,
-        )> = if let Some(tt) = task_type {
+        let rows: Vec<TaskRow> = if let Some(tt) = task_type {
             sqlx::query_as(
                     "SELECT id, task_type, status, model_id, input_data, result_data, error_msg, core_task_id, created_at, updated_at \
                      FROM tasks WHERE task_type = ?1 ORDER BY created_at DESC",

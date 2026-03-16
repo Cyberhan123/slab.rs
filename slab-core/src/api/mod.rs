@@ -431,7 +431,7 @@ impl GlobalBuilder {
         let rt = Self::runtime()?;
         rt.orchestrator
             .run_global_management(
-                GlobalOperationKind::InitializeAll,
+                GlobalOperationKind::Initialize,
                 Self::payload_map(payloads),
             )
             .await
@@ -444,7 +444,7 @@ impl GlobalBuilder {
         let rt = Self::runtime()?;
         rt.orchestrator
             .run_global_management(
-                GlobalOperationKind::LoadModelsAll,
+                GlobalOperationKind::LoadModels,
                 Self::payload_map(payloads),
             )
             .await
@@ -453,7 +453,7 @@ impl GlobalBuilder {
     pub async fn unload_models_all(self) -> Result<(), RuntimeError> {
         let rt = Self::runtime()?;
         rt.orchestrator
-            .run_global_management(GlobalOperationKind::UnloadModelsAll, HashMap::new())
+            .run_global_management(GlobalOperationKind::UnloadModels, HashMap::new())
             .await
     }
 

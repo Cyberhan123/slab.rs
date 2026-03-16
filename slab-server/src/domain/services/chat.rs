@@ -19,7 +19,7 @@ use crate::context::ModelState;
 use crate::domain::models::{
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
     ChatModelSource, ChatResultChoice, ChatStreamChunk, CloudProviderSettingValue,
-    ConversationMessage as DomainConversationMessage, CHAT_PROVIDERS_PMID,
+    ConversationMessage as DomainConversationMessage,
 };
 use crate::error::ServerError;
 use crate::infra::db::{ChatMessage, ChatStore, ModelStore, TaskRecord, TaskStore};
@@ -162,21 +162,14 @@ fn looks_like_env_var_name(value: &str) -> bool {
 async fn load_cloud_providers_strict(
     state: &ModelState,
 ) -> Result<Vec<CloudProviderConfig>, ServerError> {
-    state
-        .settings()
-        .get_chat_providers(CHAT_PROVIDERS_PMID)
-        .await
+    Ok(state.pmid().config().chat.providers)
 }
 
 async fn load_cloud_providers_lenient(state: &ModelState) -> Vec<CloudProviderConfig> {
     match load_cloud_providers_strict(state).await {
         Ok(v) => v,
         Err(err) => {
-            warn!(
-                error = %err,
-                pmid = CHAT_PROVIDERS_PMID,
-                "invalid chat cloud provider settings; cloud models disabled"
-            );
+            warn!(error = %err, "invalid chat cloud provider settings; cloud models disabled");
             Vec::new()
         }
     }

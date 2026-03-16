@@ -5,6 +5,7 @@ use std::sync::Arc;
 #[derive(Clone, Debug)]
 pub struct ModelState {
     config: Arc<crate::context::AppConfig>,
+    pmid: Arc<crate::domain::services::PmidService>,
     store: Arc<crate::infra::db::AnyStore>,
     settings: Arc<crate::infra::settings::SettingsProvider>,
     grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
@@ -14,6 +15,7 @@ pub struct ModelState {
 impl ModelState {
     pub fn new(
         config: Arc<crate::context::AppConfig>,
+        pmid: Arc<crate::domain::services::PmidService>,
         store: Arc<crate::infra::db::AnyStore>,
         settings: Arc<crate::infra::settings::SettingsProvider>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
@@ -21,6 +23,7 @@ impl ModelState {
     ) -> Self {
         Self {
             config,
+            pmid,
             store,
             settings,
             grpc,
@@ -30,6 +33,10 @@ impl ModelState {
 
     pub fn config(&self) -> &Arc<crate::context::AppConfig> {
         &self.config
+    }
+
+    pub fn pmid(&self) -> &Arc<crate::domain::services::PmidService> {
+        &self.pmid
     }
 
     pub fn store(&self) -> &Arc<crate::infra::db::AnyStore> {

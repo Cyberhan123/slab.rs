@@ -25,6 +25,6 @@ impl SettingsService {
         pmid: &str,
         command: UpdateSettingCommand,
     ) -> Result<SettingPropertyView, ServerError> {
-        self.state.settings().update(pmid, command).await
+        self.state.pmid().update_setting(pmid, command).await
     }
 }

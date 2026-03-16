@@ -301,7 +301,7 @@ async fn main() -> anyhow::Result<()> {
     let base_lib_path = cli
         .lib_dir
         .as_deref()
-        .unwrap_or(&Path::new("./resources/libs"));
+        .unwrap_or(Path::new("./resources/libs"));
     let llama_lib_dir = enabled.llama.then(|| base_lib_path.join("llama"));
     let whisper_lib_dir = enabled.whisper.then(|| base_lib_path.join("whisper"));
     let diffusion_lib_dir = enabled.diffusion.then(|| base_lib_path.join("diffusion"));

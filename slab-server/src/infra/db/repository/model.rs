@@ -43,9 +43,8 @@ fn parse_rfc3339_or_now(raw: String, field: &'static str) -> DateTime<Utc> {
 
 fn parse_optional_rfc3339(raw: Option<String>, field: &'static str) -> Option<DateTime<Utc>> {
     raw.and_then(|v| {
-        v.parse().map_err(|e: chrono::ParseError| {
+        v.parse().inspect_err(|e: &chrono::ParseError| {
             tracing::warn!(raw = %v, error = %e, field, "failed to parse optional model timestamp; dropping value");
-            e
         }).ok()
     })
 }
@@ -60,6 +59,18 @@ fn normalize_backend_ids(ids: &[String]) -> Vec<String> {
     out.dedup();
     out
 }
+
+type ModelCatalogRow = (
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    String,
+    String,
+);
 
 impl ModelStore for AnyStore {
     async fn insert_model(&self, record: ModelCatalogRecord) -> Result<(), sqlx::Error> {
@@ -98,17 +109,7 @@ impl ModelStore for AnyStore {
     }
 
     async fn get_model(&self, id: &str) -> Result<Option<ModelCatalogRecord>, sqlx::Error> {
-        let row: Option<(
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            String,
-            String,
-        )> = sqlx::query_as(
+        let row: Option<ModelCatalogRow> = sqlx::query_as(
             "SELECT id, display_name, repo_id, filename, local_path, last_download_task_id, last_downloaded_at, created_at, updated_at \
              FROM model_catalog WHERE id = ?1",
         )
@@ -154,17 +155,7 @@ impl ModelStore for AnyStore {
     }
 
     async fn list_models(&self) -> Result<Vec<ModelCatalogRecord>, sqlx::Error> {
-        let rows: Vec<(
-            String,
-            String,
-            String,
-            String,
-            Option<String>,
-            Option<String>,
-            Option<String>,
-            String,
-            String,
-        )> = sqlx::query_as(
+        let rows: Vec<ModelCatalogRow> = sqlx::query_as(
             "SELECT id, display_name, repo_id, filename, local_path, last_download_task_id, last_downloaded_at, created_at, updated_at \
              FROM model_catalog ORDER BY created_at DESC",
         )

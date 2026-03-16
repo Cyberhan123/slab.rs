@@ -23,7 +23,6 @@
 //!   "model_path": "/path/to/model.gguf",
 //!   "vae_path": "",
 //!   "taesd_path": "",
-//!   "lora_model_dir": "",
 //!   "flash_attn": false,
 //!   "keep_vae_on_cpu": false,
 //!   "keep_clip_on_cpu": false,

@@ -4,10 +4,7 @@ use std::time::Duration;
 
 use tracing::{debug, info, warn};
 
-use crate::domain::models::{MODEL_AUTO_UNLOAD_ENABLED_PMID, MODEL_AUTO_UNLOAD_IDLE_MINUTES_PMID};
 use crate::infra::rpc;
-
-const DEFAULT_IDLE_MINUTES: u64 = 10;
 
 #[derive(Debug, Clone)]
 pub struct LoadedModelSpec {
@@ -26,7 +23,7 @@ struct BackendRefState {
 
 #[derive(Debug)]
 pub struct ModelAutoUnloadManager {
-    settings: Arc<crate::infra::settings::SettingsProvider>,
+    pmid: Arc<crate::domain::services::PmidService>,
     grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
     states: tokio::sync::Mutex<HashMap<String, BackendRefState>>,
 }
@@ -50,11 +47,11 @@ impl Drop for ModelUsageGuard {
 
 impl ModelAutoUnloadManager {
     pub fn new(
-        settings: Arc<crate::infra::settings::SettingsProvider>,
+        pmid: Arc<crate::domain::services::PmidService>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
     ) -> Self {
         Self {
-            settings,
+            pmid,
             grpc,
             states: tokio::sync::Mutex::new(HashMap::new()),
         }
@@ -300,37 +297,13 @@ impl ModelAutoUnloadManager {
             return None;
         }
 
-        let raw_minutes = match self
-            .settings
-            .get_optional_u32(MODEL_AUTO_UNLOAD_IDLE_MINUTES_PMID)
-            .await
-        {
-            Ok(v) => v.map(u64::from),
-            Err(error) => {
-                warn!(
-                    error = %error,
-                    "failed to read model auto-unload idle minutes setting"
-                );
-                None
-            }
-        };
-
-        let minutes = raw_minutes.unwrap_or(DEFAULT_IDLE_MINUTES);
+        let minutes = u64::from(self.pmid.config().runtime.model_auto_unload.idle_minutes);
 
         Some(Duration::from_secs(minutes.saturating_mul(60)))
     }
 
     async fn auto_unload_enabled(&self) -> bool {
-        match self.settings.get_bool(MODEL_AUTO_UNLOAD_ENABLED_PMID).await {
-            Ok(v) => v,
-            Err(error) => {
-                warn!(
-                    error = %error,
-                    "failed to read model auto-unload enabled setting"
-                );
-                false
-            }
-        }
+        self.pmid.config().runtime.model_auto_unload.enabled
     }
 }
 

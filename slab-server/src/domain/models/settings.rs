@@ -10,53 +10,16 @@ use super::settings_jsonschema::{
 };
 use crate::error::ServerError;
 
-pub const MODEL_CACHE_DIR_PMID: &str = "runtime.model_cache_dir";
-pub const LLAMA_NUM_WORKERS_PMID: &str = "runtime.llama.num_workers";
-pub const WHISPER_NUM_WORKERS_PMID: &str = "runtime.whisper.num_workers";
-pub const DIFFUSION_NUM_WORKERS_PMID: &str = "runtime.diffusion.num_workers";
-pub const LLAMA_CONTEXT_LENGTH_PMID: &str = "runtime.llama.context_length";
-pub const MODEL_AUTO_UNLOAD_ENABLED_PMID: &str = "runtime.model_auto_unload.enabled";
-pub const MODEL_AUTO_UNLOAD_IDLE_MINUTES_PMID: &str = "runtime.model_auto_unload.idle_minutes";
-pub const CHAT_PROVIDERS_PMID: &str = "chat.providers";
-pub const DIFFUSION_MODEL_PATH_PMID: &str = "diffusion.paths.model";
-pub const DIFFUSION_VAE_PATH_PMID: &str = "diffusion.paths.vae";
-pub const DIFFUSION_TAESD_PATH_PMID: &str = "diffusion.paths.taesd";
-pub const DIFFUSION_LORA_MODEL_DIR_PMID: &str = "diffusion.paths.lora_model_dir";
-pub const DIFFUSION_CLIP_L_PATH_PMID: &str = "diffusion.paths.clip_l";
-pub const DIFFUSION_CLIP_G_PATH_PMID: &str = "diffusion.paths.clip_g";
-pub const DIFFUSION_T5XXL_PATH_PMID: &str = "diffusion.paths.t5xxl";
-pub const DIFFUSION_FLASH_ATTN_PMID: &str = "diffusion.performance.flash_attn";
-pub const DIFFUSION_KEEP_VAE_ON_CPU_PMID: &str = "diffusion.performance.keep_vae_on_cpu";
-pub const DIFFUSION_KEEP_CLIP_ON_CPU_PMID: &str = "diffusion.performance.keep_clip_on_cpu";
-pub const DIFFUSION_OFFLOAD_PARAMS_TO_CPU_PMID: &str =
-    "diffusion.performance.offload_params_to_cpu";
-
 // ── Setup / first-run PMIDs ──────────────────────────────────────────────────
-pub const SETUP_INITIALIZED_PMID: &str = "setup.initialized";
-pub const SETUP_FFMPEG_AUTO_DOWNLOAD_PMID: &str = "setup.ffmpeg.auto_download";
-pub const SETUP_FFMPEG_DIR_PMID: &str = "setup.ffmpeg.dir";
-pub const SETUP_BACKENDS_DIR_PMID: &str = "setup.backends.dir";
-pub const SETUP_BACKENDS_LLAMA_TAG_PMID: &str = "setup.backends.llama.tag";
-pub const SETUP_BACKENDS_LLAMA_ASSET_PMID: &str = "setup.backends.llama.asset";
-pub const SETUP_BACKENDS_WHISPER_TAG_PMID: &str = "setup.backends.whisper.tag";
-pub const SETUP_BACKENDS_WHISPER_ASSET_PMID: &str = "setup.backends.whisper.asset";
-pub const SETUP_BACKENDS_DIFFUSION_TAG_PMID: &str = "setup.backends.diffusion.tag";
-pub const SETUP_BACKENDS_DIFFUSION_ASSET_PMID: &str = "setup.backends.diffusion.asset";
-
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum SettingValueType {
     Boolean,
     Integer,
+    #[default]
     String,
     Array,
     Object,
-}
-
-impl Default for SettingValueType {
-    fn default() -> Self {
-        Self::String
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
@@ -770,6 +733,7 @@ fn canonicalize_chat_provider(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::models::LLAMA_CONTEXT_LENGTH_PMID;
 
     #[test]
     fn schema_rejects_duplicate_pmids() {

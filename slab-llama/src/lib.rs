@@ -118,7 +118,7 @@ fn load_ggml_backend(
         ) = unsafe { *ggml_lib.get(b"ggml_backend_load_all_from_path\0")? };
 
         unsafe { ggml_backend_load_all_from_path(c_dir.as_ptr()) };
-        return Ok(Some(Arc::new(ggml_lib)));
+        Ok(Some(Arc::new(ggml_lib)))
     }
 
     #[cfg(not(windows))]

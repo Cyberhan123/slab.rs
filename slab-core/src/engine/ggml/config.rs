@@ -33,8 +33,6 @@ pub(crate) struct DiffusionModelLoadConfig {
     #[serde(default)]
     pub taesd_path: String,
     #[serde(default)]
-    pub lora_model_dir: String,
-    #[serde(default)]
     pub clip_l_path: String,
     #[serde(default)]
     pub clip_g_path: String,

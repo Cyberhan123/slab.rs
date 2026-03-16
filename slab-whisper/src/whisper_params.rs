@@ -37,6 +37,8 @@ pub struct SegmentCallbackData {
 }
 
 type SegmentCallbackFn = Box<dyn FnMut(SegmentCallbackData)>;
+type ProgressCallbackFn = Box<dyn FnMut(i32)>;
+type AbortCallbackFn = Box<dyn FnMut() -> bool>;
 
 #[derive(Clone)]
 pub struct FullParams<'a, 'b> {
@@ -44,8 +46,8 @@ pub struct FullParams<'a, 'b> {
     phantom_lang: PhantomData<&'a str>,
     phantom_tokens: PhantomData<&'b [c_int]>,
     grammar: Option<Vec<slab_whisper_sys::whisper_grammar_element>>,
-    progress_callback_safe: Option<Arc<Box<dyn FnMut(i32)>>>,
-    abort_callback_safe: Option<Arc<Box<dyn FnMut() -> bool>>>,
+    progress_callback_safe: Option<Arc<ProgressCallbackFn>>,
+    abort_callback_safe: Option<Arc<AbortCallbackFn>>,
     segment_calllback_safe: Option<Arc<SegmentCallbackFn>>,
     instance: Whisper,
 }
@@ -437,14 +439,12 @@ impl<'a, 'b> FullParams<'a, 'b> {
             lib: Arc<slab_whisper_sys::WhisperLib>, // 把 lib 传进来
         }
 
-        extern "C" fn trampoline<F>(
+        extern "C" fn trampoline(
             _: *mut whisper_context,
             state: *mut whisper_state,
             n_new: i32,
             user_data: *mut c_void,
-        ) where
-            F: FnMut(SegmentCallbackData) + 'static,
-        {
+        ) {
             unsafe {
                 let user_data = &mut *(user_data as *mut CallbackWrapper);
 
@@ -488,7 +488,7 @@ impl<'a, 'b> FullParams<'a, 'b> {
                 let wrapper = Box::into_raw(wrapper);
 
                 self.fp.new_segment_callback_user_data = wrapper as *mut c_void;
-                self.fp.new_segment_callback = Some(trampoline::<SegmentCallbackFn>);
+                self.fp.new_segment_callback = Some(trampoline);
                 self.segment_calllback_safe = None;
             }
             None => {
@@ -519,14 +519,12 @@ impl<'a, 'b> FullParams<'a, 'b> {
             lib: Arc<slab_whisper_sys::WhisperLib>, // 把 lib 传进来
         }
 
-        extern "C" fn trampoline<F>(
+        extern "C" fn trampoline(
             _: *mut whisper_context,
             state: *mut whisper_state,
             n_new: i32,
             user_data: *mut c_void,
-        ) where
-            F: FnMut(SegmentCallbackData) + 'static,
-        {
+        ) {
             unsafe {
                 let user_data = &mut *(user_data as *mut CallbackWrapper);
                 let n_segments = user_data.lib.whisper_full_n_segments_from_state(state);
@@ -565,7 +563,7 @@ impl<'a, 'b> FullParams<'a, 'b> {
                 // Raw pointer
                 let wrapper = Box::into_raw(wrapper);
                 self.fp.new_segment_callback_user_data = wrapper as *mut c_void;
-                self.fp.new_segment_callback = Some(trampoline::<SegmentCallbackFn>);
+                self.fp.new_segment_callback = Some(trampoline);
                 self.segment_calllback_safe = None;
             }
             None => {

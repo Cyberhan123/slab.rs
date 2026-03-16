@@ -69,9 +69,9 @@ impl Orchestrator {
 
     fn global_kind_to_event(kind: GlobalOperationKind) -> (ManagementEvent, &'static str) {
         match kind {
-            GlobalOperationKind::InitializeAll => (ManagementEvent::Initialize, "lib.load"),
-            GlobalOperationKind::LoadModelsAll => (ManagementEvent::LoadModel, "model.load"),
-            GlobalOperationKind::UnloadModelsAll => (ManagementEvent::UnloadModel, "model.unload"),
+            GlobalOperationKind::Initialize => (ManagementEvent::Initialize, "lib.load"),
+            GlobalOperationKind::LoadModels => (ManagementEvent::LoadModel, "model.load"),
+            GlobalOperationKind::UnloadModels => (ManagementEvent::UnloadModel, "model.unload"),
         }
     }
 
@@ -510,7 +510,7 @@ impl Orchestrator {
         for backend_id in &backend_ids {
             let payload = payloads.get(backend_id).cloned().unwrap_or_default();
             match kind {
-                GlobalOperationKind::LoadModelsAll => {
+                GlobalOperationKind::LoadModels => {
                     self.emit_runtime_control_signal(
                         backend_id,
                         RuntimeControlSignal::GlobalLoad {
@@ -519,13 +519,13 @@ impl Orchestrator {
                         },
                     );
                 }
-                GlobalOperationKind::UnloadModelsAll => {
+                GlobalOperationKind::UnloadModels => {
                     self.emit_runtime_control_signal(
                         backend_id,
                         RuntimeControlSignal::GlobalUnload { op_id },
                     );
                 }
-                GlobalOperationKind::InitializeAll => {}
+                GlobalOperationKind::Initialize => {}
             }
             match self
                 .call_backend_management_inner(backend_id, event, op_name, payload)
@@ -546,7 +546,7 @@ impl Orchestrator {
 
         let mut cleanup_report = Vec::new();
         match kind {
-            GlobalOperationKind::LoadModelsAll => {
+            GlobalOperationKind::LoadModels => {
                 for backend_id in succeeded.iter().rev() {
                     if let Err(err) = self.unload_model_backend(backend_id).await {
                         cleanup_report.push(format!(
@@ -556,7 +556,7 @@ impl Orchestrator {
                     }
                 }
             }
-            GlobalOperationKind::UnloadModelsAll => {
+            GlobalOperationKind::UnloadModels => {
                 for (backend_id, _) in &failed {
                     if let Err(err) = self.unload_model_backend(backend_id).await {
                         cleanup_report.push(format!(
@@ -566,7 +566,7 @@ impl Orchestrator {
                     }
                 }
             }
-            GlobalOperationKind::InitializeAll => {
+            GlobalOperationKind::Initialize => {
                 for backend_id in succeeded.iter().rev() {
                     if let Err(err) = self.unload_model_backend(backend_id).await {
                         cleanup_report.push(format!(

@@ -148,10 +148,10 @@ fn log_grpc_error(rpc: &str, request_id: &str, status: &tonic::Status) {
 pub async fn chat(channel: Channel, req: pb::ChatRequest) -> anyhow::Result<String> {
     let (mut client, request_id) = llama_client(channel);
     debug!(request_id = %request_id, "sending gRPC chat request");
-    let response = client.chat(req).await.map_err(|s| {
-        log_grpc_error("chat", &request_id, &s);
-        s
-    })?;
+    let response = client
+        .chat(req)
+        .await
+        .inspect_err(|s| log_grpc_error("chat", &request_id, s))?;
     Ok(response.into_inner().text)
 }
 
@@ -161,10 +161,10 @@ pub async fn chat_stream(
 ) -> anyhow::Result<tonic::Streaming<pb::ChatStreamChunk>> {
     let (mut client, request_id) = llama_client(channel);
     debug!(request_id = %request_id, "sending gRPC chat_stream request");
-    let response = client.chat_stream(req).await.map_err(|s| {
-        log_grpc_error("chat_stream", &request_id, &s);
-        s
-    })?;
+    let response = client
+        .chat_stream(req)
+        .await
+        .inspect_err(|s| log_grpc_error("chat_stream", &request_id, s))?;
     Ok(response.into_inner())
 }
 
@@ -182,10 +182,7 @@ pub async fn transcribe(channel: Channel, req: pb::TranscribeRequest) -> anyhow:
     let response = client
         .transcribe(req)
         .await
-        .map_err(|s| {
-            log_grpc_error("transcribe", &request_id, &s);
-            s
-        })
+        .inspect_err(|s| log_grpc_error("transcribe", &request_id, s))
         .context("transcribe RPC failed")?;
     Ok(response.into_inner().text)
 }
@@ -196,10 +193,7 @@ pub async fn generate_image(channel: Channel, req: pb::ImageRequest) -> anyhow::
     let response = client
         .generate_image(req)
         .await
-        .map_err(|s| {
-            log_grpc_error("generate_image", &request_id, &s);
-            s
-        })
+        .inspect_err(|s| log_grpc_error("generate_image", &request_id, s))
         .context("generate_image RPC failed")?;
     Ok(response.into_inner().images_json)
 }
@@ -210,10 +204,7 @@ pub async fn generate_video(channel: Channel, req: pb::VideoRequest) -> anyhow::
     let response = client
         .generate_video(req)
         .await
-        .map_err(|s| {
-            log_grpc_error("generate_video", &request_id, &s);
-            s
-        })
+        .inspect_err(|s| log_grpc_error("generate_video", &request_id, s))
         .context("generate_video RPC failed")?;
     Ok(response.into_inner().frames_json)
 }
