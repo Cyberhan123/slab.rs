@@ -13,6 +13,7 @@ pub use worker_state::{OperationManager, SubmitOperation, WorkerState};
 #[derive(Clone)]
 pub struct AppContext {
     pub config: Arc<AppConfig>,
+    pub pmid: Arc<crate::domain::services::PmidService>,
     pub model_state: Arc<ModelState>,
     pub worker_state: Arc<WorkerState>,
 }
@@ -20,6 +21,7 @@ pub struct AppContext {
 impl AppContext {
     pub fn new(
         config: Arc<AppConfig>,
+        pmid: Arc<crate::domain::services::PmidService>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         store: Arc<crate::infra::db::AnyStore>,
         settings: Arc<crate::infra::settings::SettingsProvider>,
@@ -28,6 +30,7 @@ impl AppContext {
         let task_manager = Arc::new(OperationManager::new());
         let model_state = Arc::new(ModelState::new(
             Arc::clone(&config),
+            Arc::clone(&pmid),
             Arc::clone(&store),
             Arc::clone(&settings),
             Arc::clone(&grpc),
@@ -42,6 +45,7 @@ impl AppContext {
 
         Self {
             config,
+            pmid,
             model_state,
             worker_state,
         }
@@ -57,6 +61,7 @@ pub struct AppState {
 impl AppState {
     pub fn new(
         config: Arc<AppConfig>,
+        pmid: Arc<crate::domain::services::PmidService>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         store: Arc<crate::infra::db::AnyStore>,
         settings: Arc<crate::infra::settings::SettingsProvider>,
@@ -64,6 +69,7 @@ impl AppState {
     ) -> Self {
         let context = Arc::new(AppContext::new(
             config,
+            pmid,
             grpc,
             store,
             settings,
@@ -93,6 +99,12 @@ impl FromRef<Arc<AppState>> for WorkerState {
 impl FromRef<Arc<AppState>> for AppConfig {
     fn from_ref(input: &Arc<AppState>) -> Self {
         (*input.context.config).clone()
+    }
+}
+
+impl FromRef<Arc<AppState>> for crate::domain::services::PmidService {
+    fn from_ref(input: &Arc<AppState>) -> Self {
+        (*input.context.pmid).clone()
     }
 }
 

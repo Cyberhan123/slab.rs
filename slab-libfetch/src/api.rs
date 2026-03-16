@@ -217,8 +217,6 @@ impl VersionApi {
 
 #[cfg(test)]
 mod tests {
-    use std::path;
-
     use super::*;
 
     #[test]

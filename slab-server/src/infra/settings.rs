@@ -272,7 +272,7 @@ fn load_runtime_state(
                 warnings.push(format!(
                     "Dropped invalid value for '{}': {}",
                     pmid,
-                    error.to_string()
+                    error
                 ));
                 should_rewrite = true;
             }

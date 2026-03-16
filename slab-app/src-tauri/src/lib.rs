@@ -66,7 +66,7 @@ pub fn run() {
         ])
         .setup(|app| {
             setup::run_server_sidecar(app)?;
-            plugins::init(app).map_err(|e| std::io::Error::other(e))?;
+            plugins::init(app).map_err(std::io::Error::other)?;
             Ok(())
         })
         .build(tauri::generate_context!())

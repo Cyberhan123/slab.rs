@@ -8,15 +8,13 @@ use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
-    ReloadBackendLibCommand, SETUP_BACKENDS_DIFFUSION_ASSET_PMID,
-    SETUP_BACKENDS_DIFFUSION_TAG_PMID, SETUP_BACKENDS_DIR_PMID, SETUP_BACKENDS_LLAMA_ASSET_PMID,
-    SETUP_BACKENDS_LLAMA_TAG_PMID, SETUP_BACKENDS_WHISPER_ASSET_PMID,
-    SETUP_BACKENDS_WHISPER_TAG_PMID,
+    ReloadBackendLibCommand,
 };
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
 
 pub(crate) type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
+type WindowsDownloadSpec = (&'static str, &'static str, &'static str, fn(&str) -> String);
 
 #[derive(Clone)]
 pub struct BackendService {
@@ -95,53 +93,21 @@ impl BackendService {
                 ServerError::BadRequest(format!("unsupported backend_id: {backend_id}"))
             })?;
 
-        // Read settings-based overrides, falling back to the built-in spec.
-        // Log a warning on read errors so misconfigured schemas are visible.
-        let (tag_pmid, asset_pmid) = settings_pmids_for(backend_id);
-
-        let tag = match self
-            .model_state
-            .settings()
-            .get_optional_string(tag_pmid)
-            .await
-        {
-            Ok(value) => value
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| default_tag.to_owned()),
-            Err(error) => {
-                warn!(pmid = tag_pmid, error = %error, "failed to read backend tag setting; using default");
-                default_tag.to_owned()
-            }
+        let config = self.model_state.pmid().config();
+        let backend_settings = match backend_id {
+            Backend::GGMLLlama => config.setup.backends.llama,
+            Backend::GGMLWhisper => config.setup.backends.whisper,
+            Backend::GGMLDiffusion => config.setup.backends.diffusion,
         };
-
-        let asset = match self
-            .model_state
-            .settings()
-            .get_optional_string(asset_pmid)
-            .await
-        {
-            Ok(value) => value
-                .filter(|s| !s.is_empty())
-                .unwrap_or_else(|| default_asset_fn(&tag)),
-            Err(error) => {
-                warn!(pmid = asset_pmid, error = %error, "failed to read backend asset setting; using default");
-                default_asset_fn(&tag)
-            }
-        };
-
-        // Prefer the backends.dir setting over the explicit target_dir argument.
-        let backends_dir = match self
-            .model_state
-            .settings()
-            .get_optional_string(SETUP_BACKENDS_DIR_PMID)
-            .await
-        {
-            Ok(value) => value.filter(|s| !s.is_empty()),
-            Err(error) => {
-                warn!(pmid = SETUP_BACKENDS_DIR_PMID, error = %error, "failed to read backends dir setting; using request target_dir");
-                None
-            }
-        };
+        let tag = backend_settings
+            .tag
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| default_tag.to_owned());
+        let asset = backend_settings
+            .asset
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| default_asset_fn(&tag));
+        let backends_dir = config.setup.backends.dir.filter(|s| !s.is_empty());
 
         let target_dir = backends_dir.unwrap_or(req.target_dir);
 
@@ -216,7 +182,7 @@ impl BackendService {
 
 fn windows_download_spec(
     backend_id: Backend,
-) -> Option<(&'static str, &'static str, &'static str, fn(&str) -> String)> {
+) -> Option<WindowsDownloadSpec> {
     match backend_id {
         Backend::GGMLLlama => Some(("ggml-org", "llama.cpp", "b8069", |version: &str| {
             format!("llama-{version}-bin-win-cpu-x64.zip")
@@ -230,23 +196,6 @@ fn windows_download_spec(
             "master-504-636d3cb",
             |version: &str| format!("stable-diffusion-{version}-bin-win-cpu-x64.zip"),
         )),
-    }
-}
-
-fn settings_pmids_for(backend: Backend) -> (&'static str, &'static str) {
-    match backend {
-        Backend::GGMLLlama => (
-            SETUP_BACKENDS_LLAMA_TAG_PMID,
-            SETUP_BACKENDS_LLAMA_ASSET_PMID,
-        ),
-        Backend::GGMLWhisper => (
-            SETUP_BACKENDS_WHISPER_TAG_PMID,
-            SETUP_BACKENDS_WHISPER_ASSET_PMID,
-        ),
-        Backend::GGMLDiffusion => (
-            SETUP_BACKENDS_DIFFUSION_TAG_PMID,
-            SETUP_BACKENDS_DIFFUSION_ASSET_PMID,
-        ),
     }
 }
 

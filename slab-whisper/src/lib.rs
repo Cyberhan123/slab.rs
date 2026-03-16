@@ -150,7 +150,7 @@ fn load_ggml_backend(
                 whisper_dir_path.display()
             )));
         }
-        return Ok(Some(Arc::new(ggml_lib)));
+        Ok(Some(Arc::new(ggml_lib)))
     }
 
     #[cfg(not(windows))]

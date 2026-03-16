@@ -134,19 +134,14 @@ pub struct ListAvailableQuery {
     pub repo_id: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelListStatus {
     Downloaded,
     Pending,
     NotDownloaded,
+    #[default]
     All,
-}
-
-impl Default for ModelListStatus {
-    fn default() -> Self {
-        Self::All
-    }
 }
 
 /// Query parameters for listing catalog models by computed status.

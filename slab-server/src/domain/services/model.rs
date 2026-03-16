@@ -13,12 +13,6 @@ use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand,
     DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelCatalogItemView,
     ModelCatalogStatus, ModelLoadCommand, ModelStatus, UpdateModelCommand,
-    DIFFUSION_CLIP_G_PATH_PMID, DIFFUSION_CLIP_L_PATH_PMID, DIFFUSION_FLASH_ATTN_PMID,
-    DIFFUSION_KEEP_CLIP_ON_CPU_PMID, DIFFUSION_KEEP_VAE_ON_CPU_PMID, DIFFUSION_LORA_MODEL_DIR_PMID,
-    DIFFUSION_MODEL_PATH_PMID, DIFFUSION_NUM_WORKERS_PMID, DIFFUSION_OFFLOAD_PARAMS_TO_CPU_PMID,
-    DIFFUSION_T5XXL_PATH_PMID, DIFFUSION_TAESD_PATH_PMID, DIFFUSION_VAE_PATH_PMID,
-    LLAMA_CONTEXT_LENGTH_PMID, LLAMA_NUM_WORKERS_PMID, MODEL_CACHE_DIR_PMID,
-    WHISPER_NUM_WORKERS_PMID,
 };
 use crate::error::ServerError;
 use crate::infra::db::{ModelCatalogRecord, ModelStore, TaskRecord, TaskStore};
@@ -225,9 +219,10 @@ impl ModelService {
 
         let configured_model_cache_dir = self
             .model_state
-            .settings()
-            .get_optional_string(MODEL_CACHE_DIR_PMID)
-            .await?;
+            .pmid()
+            .config()
+            .runtime
+            .model_cache_dir;
         if let Some(dir) = &configured_model_cache_dir {
             validate_path("model_cache_dir", dir)?;
         }
@@ -490,15 +485,6 @@ fn resolve_backend_channel(
     Ok((canonical_backend, channel))
 }
 
-fn worker_setting_pmid_for_backend(backend_id: &str) -> Option<&'static str> {
-    match backend_id {
-        "ggml.llama" => Some(LLAMA_NUM_WORKERS_PMID),
-        "ggml.whisper" => Some(WHISPER_NUM_WORKERS_PMID),
-        "ggml.diffusion" => Some(DIFFUSION_NUM_WORKERS_PMID),
-        _ => None,
-    }
-}
-
 async fn resolve_model_workers(
     state: &ModelState,
     canonical_backend: &str,
@@ -513,12 +499,16 @@ async fn resolve_model_workers(
         return Ok((workers, "request"));
     }
 
-    let Some(setting_pmid) = worker_setting_pmid_for_backend(canonical_backend) else {
-        return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
+    let configured_workers = {
+        let config = state.pmid().config();
+        match canonical_backend {
+            "ggml.llama" => Some(config.runtime.llama.num_workers),
+            "ggml.whisper" => Some(config.runtime.whisper.num_workers),
+            "ggml.diffusion" => Some(config.runtime.diffusion.num_workers),
+            _ => None,
+        }
     };
-
-    let configured = state.settings().get_optional_u32(setting_pmid).await?;
-    let Some(workers) = configured else {
+    let Some(workers) = configured_workers else {
         return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
     };
     Ok((workers, "settings"))
@@ -532,16 +522,14 @@ async fn resolve_llama_context_length(
         return Ok((0, "not_applicable"));
     }
 
-    let configured = state
-        .settings()
-        .get_optional_u32(LLAMA_CONTEXT_LENGTH_PMID)
-        .await?;
+    let configured = state.pmid().config().runtime.llama.context_length;
     let Some(context_length) = configured else {
         return Ok((0, "default"));
     };
     Ok((context_length, "settings"))
 }
 
+#[derive(Default)]
 struct DiffusionContextParams {
     diffusion_model_path: String,
     vae_path: String,
@@ -556,24 +544,6 @@ struct DiffusionContextParams {
     offload_params_to_cpu: bool,
 }
 
-impl Default for DiffusionContextParams {
-    fn default() -> Self {
-        Self {
-            diffusion_model_path: String::new(),
-            vae_path: String::new(),
-            taesd_path: String::new(),
-            lora_model_dir: String::new(),
-            clip_l_path: String::new(),
-            clip_g_path: String::new(),
-            t5xxl_path: String::new(),
-            flash_attn: false,
-            keep_vae_on_cpu: false,
-            keep_clip_on_cpu: false,
-            offload_params_to_cpu: false,
-        }
-    }
-}
-
 async fn resolve_diffusion_context_params(
     state: &ModelState,
     canonical_backend: &str,
@@ -582,30 +552,22 @@ async fn resolve_diffusion_context_params(
         return Ok(None);
     }
 
-    async fn get_str(state: &ModelState, key: &str) -> Result<String, ServerError> {
-        Ok(state
-            .settings()
-            .get_optional_string(key)
-            .await?
-            .unwrap_or_default())
-    }
-
-    async fn get_bool(state: &ModelState, key: &str) -> Result<bool, ServerError> {
-        state.settings().get_bool(key).await
-    }
+    let config = state.pmid().config();
+    let paths = config.diffusion.paths;
+    let performance = config.diffusion.performance;
 
     Ok(Some(DiffusionContextParams {
-        diffusion_model_path: get_str(state, DIFFUSION_MODEL_PATH_PMID).await?,
-        vae_path: get_str(state, DIFFUSION_VAE_PATH_PMID).await?,
-        taesd_path: get_str(state, DIFFUSION_TAESD_PATH_PMID).await?,
-        lora_model_dir: get_str(state, DIFFUSION_LORA_MODEL_DIR_PMID).await?,
-        clip_l_path: get_str(state, DIFFUSION_CLIP_L_PATH_PMID).await?,
-        clip_g_path: get_str(state, DIFFUSION_CLIP_G_PATH_PMID).await?,
-        t5xxl_path: get_str(state, DIFFUSION_T5XXL_PATH_PMID).await?,
-        flash_attn: get_bool(state, DIFFUSION_FLASH_ATTN_PMID).await?,
-        keep_vae_on_cpu: get_bool(state, DIFFUSION_KEEP_VAE_ON_CPU_PMID).await?,
-        keep_clip_on_cpu: get_bool(state, DIFFUSION_KEEP_CLIP_ON_CPU_PMID).await?,
-        offload_params_to_cpu: get_bool(state, DIFFUSION_OFFLOAD_PARAMS_TO_CPU_PMID).await?,
+        diffusion_model_path: paths.model.unwrap_or_default(),
+        vae_path: paths.vae.unwrap_or_default(),
+        taesd_path: paths.taesd.unwrap_or_default(),
+        lora_model_dir: paths.lora_model_dir.unwrap_or_default(),
+        clip_l_path: paths.clip_l.unwrap_or_default(),
+        clip_g_path: paths.clip_g.unwrap_or_default(),
+        t5xxl_path: paths.t5xxl.unwrap_or_default(),
+        flash_attn: performance.flash_attn,
+        keep_vae_on_cpu: performance.keep_vae_on_cpu,
+        keep_clip_on_cpu: performance.keep_clip_on_cpu,
+        offload_params_to_cpu: performance.offload_params_to_cpu,
     }))
 }
 

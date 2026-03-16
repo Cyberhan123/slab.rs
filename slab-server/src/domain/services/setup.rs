@@ -8,7 +8,7 @@ use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, CompleteSetupCommand, ComponentStatus, EnvironmentStatus,
-    UpdateSettingCommand, UpdateSettingOperation, SETUP_FFMPEG_DIR_PMID, SETUP_INITIALIZED_PMID,
+    UpdateSettingCommand, UpdateSettingOperation, SETUP_INITIALIZED_PMID,
 };
 use crate::error::ServerError;
 
@@ -29,18 +29,7 @@ impl SetupService {
     /// Return the current environment status: FFmpeg presence, backend
     /// availability, and whether the setup wizard has been completed.
     pub async fn environment_status(&self) -> Result<EnvironmentStatus, ServerError> {
-        let initialized = match self
-            .model_state
-            .settings()
-            .get_bool(SETUP_INITIALIZED_PMID)
-            .await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                warn!(pmid = SETUP_INITIALIZED_PMID, error = %error, "failed to read setup initialized flag; defaulting to false");
-                false
-            }
-        };
+        let initialized = self.model_state.pmid().config().setup.initialized;
 
         // `ffmpeg_is_installed` is a blocking check — run it off the async executor.
         let ffmpeg_installed =
@@ -83,18 +72,7 @@ impl SetupService {
     /// accepted-operation handle.  The caller should poll the task via the
     /// tasks API to track progress.
     pub async fn download_ffmpeg(&self) -> Result<AcceptedOperation, ServerError> {
-        let ffmpeg_dir = match self
-            .model_state
-            .settings()
-            .get_optional_string(SETUP_FFMPEG_DIR_PMID)
-            .await
-        {
-            Ok(value) => value,
-            Err(error) => {
-                warn!(pmid = SETUP_FFMPEG_DIR_PMID, error = %error, "failed to read ffmpeg dir setting; using default");
-                None
-            }
-        };
+        let ffmpeg_dir = self.model_state.pmid().config().setup.ffmpeg.dir;
 
         let operation_id = self
             .worker_state
@@ -115,8 +93,8 @@ impl SetupService {
         cmd: CompleteSetupCommand,
     ) -> Result<EnvironmentStatus, ServerError> {
         self.model_state
-            .settings()
-            .update(
+            .pmid()
+            .update_setting(
                 SETUP_INITIALIZED_PMID,
                 UpdateSettingCommand {
                     op: UpdateSettingOperation::Set,

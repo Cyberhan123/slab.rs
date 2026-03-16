@@ -1,16 +1,14 @@
-#[cfg(test)]
-mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
-    use crate::scheduler::backend::admission::{ResourceManager, ResourceManagerConfig};
-    use crate::scheduler::backend::protocol::{BackendOp, BackendReply};
-    use crate::scheduler::orchestrator::Orchestrator;
-    use crate::scheduler::pipeline::PipelineBuilder;
-    use crate::scheduler::types::{
-        FailedGlobalOperation, GlobalOperationKind, Payload, RuntimeError, TaskStatus,
-    };
+        use crate::scheduler::backend::admission::{ResourceManager, ResourceManagerConfig};
+        use crate::scheduler::backend::protocol::{BackendOp, BackendReply};
+        use crate::scheduler::orchestrator::Orchestrator;
+        use crate::scheduler::pipeline::PipelineBuilder;
+        use crate::scheduler::types::{
+            FailedGlobalOperation, GlobalOperationKind, Payload, RuntimeError, TaskStatus,
+        };
 
     fn text_payload(s: &str) -> Payload {
         Payload::Text(Arc::from(s))
@@ -262,7 +260,7 @@ mod tests {
             .expect("submit should succeed");
 
         // Wait for SucceededStreaming.
-        let _ = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
             loop {
                 let view = orchestrator
                     .get_status(task_id)
@@ -520,7 +518,7 @@ mod tests {
                 vec!["gate-backend".to_owned()],
                 vec!["forced inconsistent state for test".to_owned()],
                 FailedGlobalOperation {
-                    kind: GlobalOperationKind::LoadModelsAll,
+                    kind: GlobalOperationKind::LoadModels,
                     payloads: HashMap::new(),
                 },
             )
@@ -575,7 +573,7 @@ mod tests {
                 vec!["gate-backend".to_owned()],
                 vec!["forced inconsistent state for test".to_owned()],
                 FailedGlobalOperation {
-                    kind: GlobalOperationKind::LoadModelsAll,
+                    kind: GlobalOperationKind::LoadModels,
                     payloads: HashMap::new(),
                 },
             )
@@ -693,7 +691,7 @@ mod tests {
         );
 
         orchestrator
-            .run_global_management(GlobalOperationKind::LoadModelsAll, payloads)
+            .run_global_management(GlobalOperationKind::LoadModels, payloads)
             .await
             .expect("global management call should succeed");
 
@@ -900,4 +898,3 @@ mod tests {
         // cancellation had been lost the backend would block forever and the
         // test would time out.
     }
-}

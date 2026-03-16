@@ -4,6 +4,7 @@ mod chat;
 mod ffmpeg;
 mod image;
 mod model;
+pub mod pmid;
 mod session;
 mod settings;
 mod settings_jsonschema;
@@ -27,12 +28,7 @@ pub use model::{
     DownloadModelCommand, ListModelsFilter, ModelCatalogItemView, ModelCatalogStatus,
     ModelLoadCommand, ModelStatus, UpdateModelCommand,
 };
-pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
-pub use settings::{
-    embedded_settings_schema, CloudProviderModelSettingValue, CloudProviderSettingValue,
-    SettingDefinition, SettingPropertySchema, SettingPropertyView, SettingValidationErrorData,
-    SettingValueType, SettingsDocumentView, SettingsSchema, SettingsSectionView,
-    SettingsSubsectionView, SettingsValuesFile, UpdateSettingCommand, UpdateSettingOperation,
+pub use pmid::{
     CHAT_PROVIDERS_PMID, DIFFUSION_CLIP_G_PATH_PMID, DIFFUSION_CLIP_L_PATH_PMID,
     DIFFUSION_FLASH_ATTN_PMID, DIFFUSION_KEEP_CLIP_ON_CPU_PMID, DIFFUSION_KEEP_VAE_ON_CPU_PMID,
     DIFFUSION_LORA_MODEL_DIR_PMID, DIFFUSION_MODEL_PATH_PMID, DIFFUSION_NUM_WORKERS_PMID,
@@ -44,6 +40,13 @@ pub use settings::{
     SETUP_BACKENDS_WHISPER_ASSET_PMID, SETUP_BACKENDS_WHISPER_TAG_PMID,
     SETUP_FFMPEG_AUTO_DOWNLOAD_PMID, SETUP_FFMPEG_DIR_PMID, SETUP_INITIALIZED_PMID,
     WHISPER_NUM_WORKERS_PMID,
+};
+pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
+pub use settings::{
+    embedded_settings_schema, CloudProviderModelSettingValue, CloudProviderSettingValue,
+    SettingDefinition, SettingPropertySchema, SettingPropertyView, SettingValidationErrorData,
+    SettingValueType, SettingsDocumentView, SettingsSchema, SettingsSectionView,
+    SettingsSubsectionView, SettingsValuesFile, UpdateSettingCommand, UpdateSettingOperation,
 };
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};

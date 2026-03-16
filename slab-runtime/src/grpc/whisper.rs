@@ -26,7 +26,7 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
             return Err(Status::invalid_argument("audio file path is empty"));
         }
 
-        let op_options = build_whisper_inference_options(&req)?;
+        let op_options = build_whisper_inference_options(&req).map_err(Status::invalid_argument)?;
         let vad_enabled = req.vad.as_ref().is_some_and(|v| v.enabled);
         let decode_configured = req.decode.is_some();
 
@@ -103,16 +103,14 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
 
 fn build_whisper_inference_options(
     req: &pb::TranscribeRequest,
-) -> Result<serde_json::Value, Status> {
+) -> Result<serde_json::Value, String> {
     let mut options = serde_json::Map::new();
 
     if let Some(vad) = req.vad.as_ref() {
         if vad.enabled {
             let model_path = vad.model_path.trim();
             if model_path.is_empty() {
-                return Err(Status::invalid_argument(
-                    "vad.model_path is required when VAD is enabled",
-                ));
+                return Err("vad.model_path is required when VAD is enabled".to_owned());
             }
 
             let mut vad_json = serde_json::Map::new();
@@ -124,9 +122,7 @@ fn build_whisper_inference_options(
             if let Some(params) = vad.params.as_ref() {
                 if let Some(threshold) = params.threshold {
                     if !(0.0..=1.0).contains(&threshold) {
-                        return Err(Status::invalid_argument(
-                            "vad.threshold must be between 0.0 and 1.0",
-                        ));
+                        return Err("vad.threshold must be between 0.0 and 1.0".to_owned());
                     }
                     vad_json.insert("threshold".to_owned(), serde_json::json!(threshold));
                 }
@@ -141,7 +137,7 @@ fn build_whisper_inference_options(
                 ] {
                     if let Some(v) = value {
                         if v < 0 {
-                            return Err(Status::invalid_argument(format!("{name} must be >= 0")));
+                            return Err(format!("{name} must be >= 0"));
                         }
                         vad_json.insert(
                             name.trim_start_matches("vad.").to_owned(),
@@ -152,9 +148,7 @@ fn build_whisper_inference_options(
 
                 if let Some(max_speech_duration_s) = params.max_speech_duration_s {
                     if max_speech_duration_s <= 0.0 {
-                        return Err(Status::invalid_argument(
-                            "vad.max_speech_duration_s must be > 0.0",
-                        ));
+                        return Err("vad.max_speech_duration_s must be > 0.0".to_owned());
                     }
                     vad_json.insert(
                         "max_speech_duration_s".to_owned(),
@@ -164,9 +158,7 @@ fn build_whisper_inference_options(
 
                 if let Some(samples_overlap) = params.samples_overlap {
                     if samples_overlap < 0.0 {
-                        return Err(Status::invalid_argument(
-                            "vad.samples_overlap must be >= 0.0",
-                        ));
+                        return Err("vad.samples_overlap must be >= 0.0".to_owned());
                     }
                     vad_json.insert(
                         "samples_overlap".to_owned(),
@@ -190,7 +182,7 @@ fn build_whisper_inference_options(
         ] {
             if let Some(v) = value {
                 if v < 0 {
-                    return Err(Status::invalid_argument(format!("{name} must be >= 0")));
+                    return Err(format!("{name} must be >= 0"));
                 }
                 decode_json.insert(
                     name.trim_start_matches("decode.").to_owned(),
@@ -201,9 +193,7 @@ fn build_whisper_inference_options(
 
         if let Some(word_thold) = decode.word_thold {
             if !(0.0..=1.0).contains(&word_thold) {
-                return Err(Status::invalid_argument(
-                    "decode.word_thold must be between 0.0 and 1.0",
-                ));
+                return Err("decode.word_thold must be between 0.0 and 1.0".to_owned());
             }
             decode_json.insert("word_thold".to_owned(), serde_json::json!(word_thold));
         }
@@ -214,7 +204,7 @@ fn build_whisper_inference_options(
         ] {
             if let Some(v) = value {
                 if v < 0.0 {
-                    return Err(Status::invalid_argument(format!("{name} must be >= 0.0")));
+                    return Err(format!("{name} must be >= 0.0"));
                 }
                 decode_json.insert(
                     name.trim_start_matches("decode.").to_owned(),

@@ -136,7 +136,7 @@ impl GGMLWhisperEngine {
 
     fn build_engine(normalized_path: &Path) -> Result<Self, engine::EngineError> {
         info!("current whisper path is: {}", normalized_path.display());
-        let whisper = Whisper::new(normalized_path.to_path_buf()).map_err(|source| {
+        let whisper = Whisper::new(normalized_path).map_err(|source| {
             GGMLWhisperEngineError::InitializeDynamicLibrary {
                 path: normalized_path.to_path_buf(),
                 source,
@@ -296,7 +296,7 @@ impl GGMLWhisperEngine {
             .create_state()
             .map_err(|source| GGMLWhisperEngineError::CreateInferenceState { source })?;
         state
-            .full(params, &audio_data[..])
+            .full(params, audio_data)
             .map_err(|source| GGMLWhisperEngineError::InferenceFailed { source })?;
 
         let srt_entries: Vec<SubtitleEntry> = state

@@ -39,9 +39,9 @@ pub enum GlobalConsistencyState {
 /// Global management operation kind stored for retry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GlobalOperationKind {
-    InitializeAll,
-    LoadModelsAll,
-    UnloadModelsAll,
+    Initialize,
+    LoadModels,
+    UnloadModels,
 }
 
 /// Snapshot of a failed global operation used for retry.
