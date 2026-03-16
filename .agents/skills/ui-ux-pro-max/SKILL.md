@@ -14,7 +14,7 @@ Use this skill for UI design, implementation, polish, or review tasks.
 - Reviewing UI quality, interaction polish, or information hierarchy
 - Generating a design direction before coding
 
-If the task is specifically a standards or accessibility review, also use `web-design-guidelines`.
+If the task is specifically a review in this repo, start with `slab-ui-review` and use this skill for deeper design direction or remediation ideas.
 
 ## Repo-Specific Defaults
 
@@ -90,5 +90,5 @@ python .agents/skills/ui-ux-pro-max/scripts/search.py "desktop AI workspace calm
 ## Notes
 
 - The old `skills/ui-ux-pro-max/...` examples are not valid in this repo; always use `.agents/skills/ui-ux-pro-max/...`.
-- If the user asks for a review rather than a redesign, prefer `web-design-guidelines` for the review baseline and use this skill only to deepen design direction or remediation ideas.
+- If the user asks for a review rather than a redesign, prefer `slab-ui-review` for the review baseline and use this skill only to deepen design direction or remediation ideas.
 - Keep results aligned with the actual app stack instead of replacing React Query, Zustand, Ant Design X, or the shared UI primitives without a clear reason.

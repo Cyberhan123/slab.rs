@@ -1,6 +1,6 @@
 ---
 name: slab-frontend-page
-description: Build or refactor routed frontend pages in slab-app. Use for work in slab-app/src/pages, routes, layouts, and page-local hooks/components. Routes to the right design, performance, and Tauri guidance for this repository.
+description: Build or refactor routed frontend pages in slab-app. Use for work in slab-app/src/pages, routes, layouts, and page-local hooks/components, including chat screens that compose Ant Design X surfaces with local hooks in this repository.
 ---
 
 # Slab Frontend Page
@@ -29,7 +29,12 @@ Use this skill for page work in `slab-app`, especially:
 5. If you want structured design-system guidance first, also open `../ui-ux-pro-max/SKILL.md`.
 6. If the task touches shared UI primitives, forms, or theme variables, also open `../slab-ui-primitives/SKILL.md`.
 7. If the task touches IPC, permissions, plugins, sidecars, or desktop-only behavior, also open `../slab-tauri-app/SKILL.md`.
-8. After implementation, use `../vercel-react-best-practices/SKILL.md` for a repo-compatible React performance pass.
+8. If the task touches `slab-app/src/pages/chat/**`, also open:
+   - `../use-x-chat/SKILL.md` for `useXChat` or `useXConversations`
+   - `../x-request/SKILL.md` for `XRequest` and streaming transport changes
+   - `../x-markdown/SKILL.md` for assistant Markdown rendering
+   - `../x-chat-provider/SKILL.md` only when the current built-in provider shape no longer fits
+9. Before finishing, do a repo-compatible React pass: keep state local, preserve existing Query and Zustand boundaries, and avoid new abstractions that do not earn their weight.
 
 ## Avoid
 
@@ -37,6 +42,7 @@ Use this skill for page work in `slab-app`, especially:
 - Do not introduce Server Actions, RSC-only patterns, or `next/dynamic`.
 - Do not replace React Query, Zustand, Ant Design X, or the shared UI primitives without a clear reason.
 - Do not create duplicate component systems when a page-local component or shared primitive already fits.
+- Do not duplicate Ant Design X chat state in another store when the existing page-local hooks already cover the flow.
 
 ## Useful Files
 
@@ -46,6 +52,8 @@ Use this skill for page work in `slab-app`, especially:
 - `slab-app/src/store/useAppStore.ts`
 - `slab-app/src/styles/globals.css`
 - `slab-app/src/components/ui/**`
+- `slab-app/src/pages/chat/chat-context.ts`
+- `slab-app/src/pages/chat/hooks/use-chat.ts`
 - `slab-app/src/pages/chat/**`
 
 ## Done When

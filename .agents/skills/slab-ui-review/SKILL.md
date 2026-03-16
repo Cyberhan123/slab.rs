@@ -9,16 +9,17 @@ Use this skill for reviewing `slab-app` UI code.
 
 ## Workflow
 
-1. Read `../web-design-guidelines/REVIEW-CHECKLIST.md`.
-2. Review the requested files or UI area.
-3. Check project-specific concerns first:
+1. Read the requested files or UI area and the nearest route or layout.
+2. Check project-specific concerns first:
    - desktop window constraints
    - long chat or task lists
    - loading, empty, and error states
    - keyboard and focus behavior
    - theme and contrast consistency
-4. If the user explicitly asks for the latest upstream guidance, also open `../web-design-guidelines/SKILL.md` and include that comparison.
-5. If runtime performance is part of the review, also open `../vercel-react-best-practices/SKILL.md` and apply only repo-compatible React rules.
+   - streaming Markdown, code blocks, and scroll anchoring on chat surfaces
+3. If the review touches `slab-app/src/pages/chat/**`, also open `../use-x-chat/SKILL.md`, `../x-request/SKILL.md`, or `../x-markdown/SKILL.md` as needed.
+4. If the user wants remediation ideas or a stronger design direction after the review, also open `../ui-ux-pro-max/SKILL.md`.
+5. Keep React and Tauri feedback repo-compatible: prefer state locality, stable route behavior, and explicit desktop interactions over framework-agnostic advice.
 
 ## Output Style
 
