@@ -1,0 +1,95 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UnifiedModel",
+  "description": "Unified schema for both local and cloud AI models managed by slab-server.",
+  "type": "object",
+  "required": ["id", "display_name", "provider", "status", "spec"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique identifier for the model."
+    },
+    "display_name": {
+      "type": "string",
+      "description": "Human-readable display name of the model."
+    },
+    "provider": {
+      "type": "string",
+      "description": "Provider identifier, e.g. 'cloud.openai', 'cloud.google', 'local.ggml.llama', 'local.candle.whisper'."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["ready", "not_downloaded", "downloading", "error"],
+      "description": "Current status of the model. Cloud models default to 'ready'. Local models start as 'not_downloaded'."
+    },
+    "spec": {
+      "type": "object",
+      "description": "Provider-specific model configuration.",
+      "properties": {
+        "remote_model_id": {
+          "type": "string",
+          "description": "Remote model identifier (cloud models), e.g. 'gpt-4o'."
+        },
+        "endpoint": {
+          "type": "string",
+          "format": "uri",
+          "description": "API endpoint for cloud models, e.g. 'https://api.openai.com/v1'."
+        },
+        "pricing": {
+          "type": "object",
+          "description": "Optional pricing info for cost tracking.",
+          "properties": {
+            "input": {
+              "type": "number",
+              "description": "Cost per 1K input tokens in USD."
+            },
+            "output": {
+              "type": "number",
+              "description": "Cost per 1K output tokens in USD."
+            }
+          },
+          "required": ["input", "output"],
+          "additionalProperties": false
+        },
+        "repo_id": {
+          "type": "string",
+          "description": "HuggingFace repo ID for local models, e.g. 'bartowski/Llama-3-8B-Instruct-GGUF'."
+        },
+        "filename": {
+          "type": "string",
+          "description": "Model filename within the HuggingFace repo, e.g. 'Llama-3-8B-Instruct.Q4_K_M.gguf'."
+        },
+        "local_path": {
+          "type": "string",
+          "description": "Absolute path to the downloaded model file on disk (populated after download)."
+        },
+        "context_window": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum context window size in tokens."
+        }
+      },
+      "additionalProperties": false
+    },
+    "runtime_presets": {
+      "type": "object",
+      "description": "Default runtime parameters applied when this model is used for inference.",
+      "properties": {
+        "temperature": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 2.0,
+          "description": "Sampling temperature."
+        },
+        "top_p": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Top-p nucleus sampling probability."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
