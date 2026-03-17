@@ -1,6 +1,8 @@
 pub mod ggml;
 //todo
 pub mod candle;
+#[cfg(feature = "onnx")]
+pub mod onnx;
 
 /// Engine-layer error type alias.
 ///
@@ -31,3 +33,12 @@ impl_ggml_from!(
     ggml::llama::GGMLLlamaEngineError,
     ggml::diffusion::GGMLDiffusionEngineError,
 );
+
+// ── From impls: ONNX error types → CoreError ─────────────────────────────────
+
+#[cfg(feature = "onnx")]
+impl From<onnx::OnnxEngineError> for crate::base::error::CoreError {
+    fn from(e: onnx::OnnxEngineError) -> Self {
+        crate::base::error::CoreError::GGMLEngine(e.to_string())
+    }
+}
