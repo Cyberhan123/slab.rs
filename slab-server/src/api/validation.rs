@@ -92,18 +92,6 @@ pub fn validate_backend_id(value: &str) -> Result<(), ValidationError> {
         .map_err(|_| ValidationError::new("backend_id"))
 }
 
-pub fn validate_backend_ids(values: &[String]) -> Result<(), ValidationError> {
-    if values.is_empty() {
-        return Err(ValidationError::new("backend_ids"));
-    }
-
-    for value in values {
-        validate_backend_id(value)?;
-    }
-
-    Ok(())
-}
-
 pub fn validate_chat_role(value: &str) -> Result<(), ValidationError> {
     validate_non_blank(value)?;
 
