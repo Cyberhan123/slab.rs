@@ -312,6 +312,7 @@ async fn main() -> anyhow::Result<()> {
         llama_lib_dir,
         whisper_lib_dir,
         diffusion_lib_dir,
+        ..Default::default()
     })
     .context("failed to initialize slab-core runtime")?;
 

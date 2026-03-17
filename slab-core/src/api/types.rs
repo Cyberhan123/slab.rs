@@ -25,10 +25,21 @@ pub enum Event {
 
 #[derive(Debug, Clone, Copy, Display, EnumString, EnumIter, PartialEq)]
 pub enum Backend {
+    // ── GGML backends (dynamically-linked) ────────────────────────────────────
     #[strum(serialize = "ggml.llama")]
     GGMLLlama,
     #[strum(serialize = "ggml.whisper")]
     GGMLWhisper,
     #[strum(serialize = "ggml.diffusion")]
     GGMLDiffusion,
+    // ── Candle backends (statically-linked Rust) ──────────────────────────────
+    /// Candle-powered LLaMA / quantised-LLM inference.
+    #[strum(serialize = "candle.llama")]
+    CandleLlama,
+    /// Candle-powered Whisper speech recognition.
+    #[strum(serialize = "candle.whisper")]
+    CandleWhisper,
+    /// Candle-powered Stable Diffusion image generation.
+    #[strum(serialize = "candle.diffusion")]
+    CandleDiffusion,
 }
