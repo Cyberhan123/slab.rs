@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -11,11 +10,11 @@ use tracing::{info, warn};
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand,
-    DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelCatalogItemView,
-    ModelCatalogStatus, ModelLoadCommand, ModelStatus, UpdateModelCommand,
+    DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelStatus,
+    UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
 };
 use crate::error::ServerError;
-use crate::infra::db::{ModelCatalogRecord, ModelStore, TaskRecord, TaskStore};
+use crate::infra::db::{ModelStore, UnifiedModelRecord};
 use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::LoadedModelSpec;
 
@@ -38,19 +37,37 @@ impl ModelService {
     pub async fn create_model(
         &self,
         req: CreateModelCommand,
-    ) -> Result<ModelCatalogItemView, ServerError> {
-        let backend_ids = normalize_backend_ids(&req.backend_ids)?;
+    ) -> Result<UnifiedModel, ServerError> {
+        let provider = req.provider.trim().to_owned();
+        if provider.is_empty() {
+            return Err(ServerError::BadRequest("provider must not be empty".into()));
+        }
+
+        let status = req.status.unwrap_or_else(|| {
+            if provider.starts_with("cloud.") {
+                UnifiedModelStatus::Ready
+            } else {
+                UnifiedModelStatus::NotDownloaded
+            }
+        });
+
+        let spec_json = serde_json::to_string(&req.spec)
+            .map_err(|e| ServerError::Internal(format!("failed to serialize spec: {e}")))?;
+        let runtime_presets_json = req
+            .runtime_presets
+            .as_ref()
+            .map(|p| serde_json::to_string(p))
+            .transpose()
+            .map_err(|e| ServerError::Internal(format!("failed to serialize runtime_presets: {e}")))?;
 
         let now = Utc::now();
-        let record = ModelCatalogRecord {
+        let record = UnifiedModelRecord {
             id: uuid::Uuid::new_v4().to_string(),
             display_name: req.display_name.trim().to_owned(),
-            repo_id: req.repo_id.trim().to_owned(),
-            filename: req.filename.trim().to_owned(),
-            backend_ids,
-            local_path: None,
-            last_download_task_id: None,
-            last_downloaded_at: None,
+            provider,
+            status: status.as_str().to_owned(),
+            spec: spec_json,
+            runtime_presets: runtime_presets_json,
             created_at: now,
             updated_at: now,
         };
@@ -59,36 +76,73 @@ impl ModelService {
             .store()
             .insert_model(record.clone())
             .await?;
-        Ok(ModelCatalogItemView::from((record, None)))
+
+        record
+            .try_into()
+            .map_err(|e: String| ServerError::Internal(e))
+    }
+
+    pub async fn get_model(&self, id: &str) -> Result<UnifiedModel, ServerError> {
+        let record = self
+            .model_state
+            .store()
+            .get_model(id)
+            .await?
+            .ok_or_else(|| ServerError::NotFound(format!("model {id} not found")))?;
+
+        record
+            .try_into()
+            .map_err(|e: String| ServerError::Internal(e))
     }
 
     pub async fn update_model(
         &self,
         id: &str,
         req: UpdateModelCommand,
-    ) -> Result<ModelCatalogItemView, ServerError> {
-        let existing = self
+    ) -> Result<UnifiedModel, ServerError> {
+        let existing_record = self
             .model_state
             .store()
             .get_model(id)
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("model {id} not found")))?;
+
+        let existing_model: UnifiedModel = existing_record
+            .try_into()
+            .map_err(|e: String| ServerError::Internal(e))?;
+
         let display_name = req
             .display_name
-            .unwrap_or(existing.display_name)
+            .unwrap_or(existing_model.display_name)
             .trim()
             .to_owned();
-        let repo_id = req.repo_id.unwrap_or(existing.repo_id).trim().to_owned();
-        let filename = req.filename.unwrap_or(existing.filename).trim().to_owned();
-        let backend_ids = if let Some(ids) = req.backend_ids {
-            normalize_backend_ids(&ids)?
-        } else {
-            existing.backend_ids
-        };
+        let provider = req
+            .provider
+            .unwrap_or(existing_model.provider)
+            .trim()
+            .to_owned();
+        let status = req.status.unwrap_or(existing_model.status);
+        let spec = req.spec.unwrap_or(existing_model.spec);
+        let runtime_presets = req.runtime_presets.or(existing_model.runtime_presets);
+
+        let spec_json = serde_json::to_string(&spec)
+            .map_err(|e| ServerError::Internal(format!("failed to serialize spec: {e}")))?;
+        let runtime_presets_json = runtime_presets
+            .as_ref()
+            .map(|p| serde_json::to_string(p))
+            .transpose()
+            .map_err(|e| ServerError::Internal(format!("failed to serialize runtime_presets: {e}")))?;
 
         self.model_state
             .store()
-            .update_model_metadata(id, &display_name, &repo_id, &filename, &backend_ids)
+            .update_model(
+                id,
+                &display_name,
+                &provider,
+                status.as_str(),
+                &spec_json,
+                runtime_presets_json.as_deref(),
+            )
             .await?;
 
         let updated = self
@@ -97,9 +151,10 @@ impl ModelService {
             .get_model(id)
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("model {id} not found after update")))?;
-        let pending_task = latest_pending_download_task_for_model(&self.model_state, id).await?;
 
-        Ok(ModelCatalogItemView::from((updated, pending_task.as_ref())))
+        updated
+            .try_into()
+            .map_err(|e: String| ServerError::Internal(e))
     }
 
     pub async fn delete_model(&self, id: &str) -> Result<DeletedModelView, ServerError> {
@@ -107,7 +162,6 @@ impl ModelService {
         if exists.is_none() {
             return Err(ServerError::NotFound(format!("model {id} not found")));
         }
-
         self.model_state.store().delete_model(id).await?;
         Ok(DeletedModelView {
             id: id.to_owned(),
@@ -117,31 +171,21 @@ impl ModelService {
 
     pub async fn list_models(
         &self,
-        query: ListModelsFilter,
-    ) -> Result<Vec<ModelCatalogItemView>, ServerError> {
-        let models = self.model_state.store().list_models().await?;
-        let download_tasks = self
-            .model_state
-            .store()
-            .list_tasks(Some("model_download"))
-            .await?;
-        let pending_by_model = pending_download_map(download_tasks);
-
-        let mut items = Vec::with_capacity(models.len());
-        for model in models {
-            let pending_task = pending_by_model.get(&model.id);
-            let item = ModelCatalogItemView::from((model, pending_task));
-
-            let include = match query.status {
-                ModelCatalogStatus::All => true,
-                _ => query.status == item.status,
-            };
-            if include {
-                items.push(item);
-            }
-        }
-
-        Ok(items)
+        _query: ListModelsFilter,
+    ) -> Result<Vec<UnifiedModel>, ServerError> {
+        let records = self.model_state.store().list_models().await?;
+        let models: Vec<UnifiedModel> = records
+            .into_iter()
+            .filter_map(|record| {
+                record
+                    .try_into()
+                    .map_err(|e: String| {
+                        warn!(error = %e, "failed to deserialize model record; skipping");
+                    })
+                    .ok()
+            })
+            .collect();
+        Ok(models)
     }
 
     pub async fn load_model(&self, command: ModelLoadCommand) -> Result<ModelStatus, ServerError> {
@@ -214,40 +258,52 @@ impl ModelService {
         &self,
         req: DownloadModelCommand,
     ) -> Result<AcceptedOperation, ServerError> {
-        let model_id = req.model_id.trim();
-        let backend_id = req.backend_id.trim();
+        let model_id = req.model_id.trim().to_owned();
 
         let configured_model_cache_dir = self.model_state.pmid().config().runtime.model_cache_dir;
         if let Some(dir) = &configured_model_cache_dir {
             validate_path("model_cache_dir", dir)?;
         }
 
-        let backend = Backend::from_str(backend_id)
-            .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {backend_id}")))?;
-        let canonical_backend_id = backend.to_string();
-
-        let model = self
+        let record = self
             .model_state
             .store()
-            .get_model(model_id)
+            .get_model(&model_id)
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("model {model_id} not found")))?;
 
-        if !model
-            .backend_ids
-            .iter()
-            .any(|value| value == &canonical_backend_id)
-        {
-            return Err(ServerError::BadRequest(format!(
-                "backend_id '{canonical_backend_id}' is not configured for model {model_id}"
-            )));
-        }
+        let model: UnifiedModel = record
+            .try_into()
+            .map_err(|e: String| ServerError::Internal(e))?;
+
+        // Derive backend from provider. Only local models can be downloaded.
+        let backend_id = backend_id_from_provider(&model.provider).ok_or_else(|| {
+            ServerError::BadRequest(format!(
+                "model provider '{}' does not support download (only providers with prefix \"local.\" support download)",
+                model.provider
+            ))
+        })?;
+
+        let canonical_backend_id = Backend::from_str(&backend_id)
+            .map(|b| b.to_string())
+            .unwrap_or(backend_id.clone());
+
+        let repo_id = model.spec.repo_id.clone().ok_or_else(|| {
+            ServerError::BadRequest(format!(
+                "model {model_id} spec is missing repo_id required for download"
+            ))
+        })?;
+        let filename = model.spec.filename.clone().ok_or_else(|| {
+            ServerError::BadRequest(format!(
+                "model {model_id} spec is missing filename required for download"
+            ))
+        })?;
 
         let input_data = serde_json::json!({
             "model_id": model.id,
             "backend_id": canonical_backend_id,
-            "repo_id": model.repo_id,
-            "filename": model.filename,
+            "repo_id": repo_id,
+            "filename": filename,
             "model_cache_dir": configured_model_cache_dir,
         })
         .to_string();
@@ -258,7 +314,7 @@ impl ModelService {
             .submit_operation(
                 SubmitOperation::pending(
                     "model_download",
-                    Some(model_id.to_owned()),
+                    Some(model_id.clone()),
                     Some(input_data.clone()),
                 ),
                 move |operation| async move {
@@ -320,12 +376,7 @@ impl ModelService {
                     match result {
                         Ok(Ok(local_path)) => {
                             if let Err(error) = store
-                                .mark_model_downloaded(
-                                    &model_id,
-                                    &local_path,
-                                    &operation_id,
-                                    chrono::Utc::now(),
-                                )
+                                .update_model_local_path(&model_id, &local_path, "ready")
                                 .await
                             {
                                 warn!(task_id = %operation_id, error = %error, "failed to persist downloaded model path");
@@ -381,6 +432,12 @@ impl ModelService {
     }
 }
 
+/// Derive the gRPC backend id from a local provider string.
+/// e.g. `"local.ggml.llama"` -> `"ggml.llama"`.
+fn backend_id_from_provider(provider: &str) -> Option<String> {
+    provider.strip_prefix("local.").map(str::to_owned)
+}
+
 fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
     if path.is_empty() {
         return Err(ServerError::BadRequest(format!(
@@ -416,50 +473,6 @@ fn validate_existing_model_file(path: &str) -> Result<(), ServerError> {
         )));
     }
     Ok(())
-}
-
-fn normalize_backend_ids(raw: &[String]) -> Result<Vec<String>, ServerError> {
-    if raw.is_empty() {
-        return Err(ServerError::BadRequest(
-            "backend_ids must include at least one backend".into(),
-        ));
-    }
-
-    let mut out = Vec::with_capacity(raw.len());
-    for backend_id in raw {
-        let trimmed = backend_id.trim();
-        if trimmed.is_empty() {
-            return Err(ServerError::BadRequest(
-                "backend_ids must not contain empty values".into(),
-            ));
-        }
-        let backend = Backend::from_str(trimmed)
-            .map_err(|_| ServerError::BadRequest(format!("unknown backend_id: {trimmed}")))?;
-        out.push(backend.to_string());
-    }
-    out.sort();
-    out.dedup();
-    Ok(out)
-}
-
-fn pending_download_map(tasks: Vec<TaskRecord>) -> HashMap<String, TaskRecord> {
-    let mut pending_by_model = HashMap::new();
-    for task in tasks {
-        if !matches!(task.status.as_str(), "pending" | "running") {
-            continue;
-        }
-        let Some(model_id) = task.model_id.clone() else {
-            continue;
-        };
-        let should_replace = pending_by_model
-            .get(&model_id)
-            .map(|current: &TaskRecord| task.updated_at > current.updated_at)
-            .unwrap_or(true);
-        if should_replace {
-            pending_by_model.insert(model_id, task);
-        }
-    }
-    pending_by_model
 }
 
 fn resolve_backend_channel(
@@ -592,15 +605,6 @@ fn map_grpc_model_error(action: &str, err: anyhow::Error) -> ServerError {
     }
 
     ServerError::Internal(format!("grpc {action} failed: {err:#}"))
-}
-
-async fn latest_pending_download_task_for_model(
-    state: &ModelState,
-    model_id: &str,
-) -> Result<Option<TaskRecord>, ServerError> {
-    let tasks = state.store().list_tasks(Some("model_download")).await?;
-    let mut pending_by_model = pending_download_map(tasks);
-    Ok(pending_by_model.remove(model_id))
 }
 
 async fn load_model_with_state(

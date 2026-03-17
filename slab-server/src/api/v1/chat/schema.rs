@@ -9,8 +9,7 @@ use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
-    ChatCompletionResult as DomainChatCompletionResult, ChatModelOption as DomainChatModelOption,
-    ChatModelSource as DomainChatModelSource, ChatResultChoice as DomainChatResultChoice,
+    ChatCompletionResult as DomainChatCompletionResult, ChatResultChoice as DomainChatResultChoice,
     ConversationMessage,
 };
 
@@ -158,38 +157,6 @@ pub struct ChatCompletionResponse {
     pub choices: Vec<ChatChoice>,
 }
 
-/// Chat model source type.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum ChatModelSource {
-    Local,
-    Cloud,
-}
-
-/// A selectable chat model option from `GET /v1/chat/models`.
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct ChatModelOption {
-    /// Stable option id used in `POST /v1/chat/completions`.
-    pub id: String,
-    /// User-facing display label.
-    pub display_name: String,
-    /// Whether this option is local or cloud.
-    pub source: ChatModelSource,
-    /// Cloud provider id when `source = cloud`.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub provider_id: Option<String>,
-    /// Cloud provider name when `source = cloud`.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub provider_name: Option<String>,
-    /// Backend id when `source = local`, e.g. `ggml.llama`.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub backend_id: Option<String>,
-    /// Whether model artifacts are already downloaded locally.
-    pub downloaded: bool,
-    /// Whether a model download task is running.
-    pub pending: bool,
-}
-
 impl From<ConversationMessage> for ChatMessage {
     fn from(message: ConversationMessage) -> Self {
         Self {
@@ -217,30 +184,6 @@ impl From<DomainChatCompletionResult> for ChatCompletionResponse {
             created: result.created,
             model: result.model,
             choices: result.choices.into_iter().map(Into::into).collect(),
-        }
-    }
-}
-
-impl From<DomainChatModelSource> for ChatModelSource {
-    fn from(source: DomainChatModelSource) -> Self {
-        match source {
-            DomainChatModelSource::Local => Self::Local,
-            DomainChatModelSource::Cloud => Self::Cloud,
-        }
-    }
-}
-
-impl From<DomainChatModelOption> for ChatModelOption {
-    fn from(option: DomainChatModelOption) -> Self {
-        Self {
-            id: option.id,
-            display_name: option.display_name,
-            source: option.source.into(),
-            provider_id: option.provider_id,
-            provider_name: option.provider_name,
-            backend_id: option.backend_id,
-            downloaded: option.downloaded,
-            pending: option.pending,
         }
     }
 }

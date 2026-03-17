@@ -3,43 +3,11 @@ use futures::{stream, StreamExt};
 use uuid::Uuid;
 
 use crate::context::ModelState;
-use crate::domain::models::{
-    ChatModelOption, ChatModelSource, ChatStreamChunk,
-    ConversationMessage as DomainConversationMessage,
-};
+use crate::domain::models::{ChatStreamChunk, ConversationMessage as DomainConversationMessage};
 use crate::error::ServerError;
-use crate::infra::db::{ModelStore, TaskRecord, TaskStore};
 use crate::infra::rpc::{self, pb};
 
 use super::GeneratedChatOutput;
-
-pub(super) async fn list_chat_models(
-    state: &ModelState,
-) -> Result<Vec<ChatModelOption>, ServerError> {
-    let local_models = state.store().list_models().await?;
-    let download_tasks = state.store().list_tasks(Some("model_download")).await?;
-    let pending_by_model = pending_download_map(download_tasks);
-
-    Ok(local_models
-        .into_iter()
-        .filter(|model| {
-            model
-                .backend_ids
-                .iter()
-                .any(|backend| backend == super::LLAMA_BACKEND_ID)
-        })
-        .map(|model| ChatModelOption {
-            id: model.id.clone(),
-            display_name: model.display_name,
-            source: ChatModelSource::Local,
-            provider_id: None,
-            provider_name: None,
-            backend_id: Some(super::LLAMA_BACKEND_ID.to_owned()),
-            downloaded: model.local_path.is_some(),
-            pending: pending_by_model.contains_key(&model.id),
-        })
-        .collect())
-}
 
 pub(super) async fn create_chat_completion(
     state: &ModelState,
@@ -120,29 +88,6 @@ pub(super) async fn create_chat_completion(
         .map_err(|error| ServerError::Internal(format!("grpc chat failed: {error}")))?;
 
     Ok(GeneratedChatOutput::Text(generated))
-}
-
-fn pending_download_map(tasks: Vec<TaskRecord>) -> std::collections::HashMap<String, TaskRecord> {
-    let mut pending_by_model: std::collections::HashMap<String, TaskRecord> =
-        std::collections::HashMap::new();
-    for task in tasks {
-        if !matches!(task.status.as_str(), "pending" | "running") {
-            continue;
-        }
-
-        let Some(model_id) = task.model_id.clone() else {
-            continue;
-        };
-
-        let replace = pending_by_model
-            .get(&model_id)
-            .map(|current| task.updated_at > current.updated_at)
-            .unwrap_or(true);
-        if replace {
-            pending_by_model.insert(model_id, task);
-        }
-    }
-    pending_by_model
 }
 
 /// Build the local llama prompt from merged message history.

@@ -16,7 +16,7 @@ use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatModelOption, ChatModelSource, ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
+    ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
     CloudProviderSettingValue, ConversationMessage as DomainConversationMessage,
 };
 use crate::error::ServerError;
@@ -49,28 +49,6 @@ struct CloudHttpTraceContext {
     request_url: String,
     request_headers: String,
     request_body: String,
-}
-
-pub(super) async fn list_chat_models(state: &ModelState) -> Vec<ChatModelOption> {
-    let mut items = Vec::new();
-
-    for provider in load_cloud_providers_lenient(state).await {
-        for model in provider.models {
-            items.push(ChatModelOption {
-                id: cloud_option_id(&provider.id, &model.id),
-                display_name: model.display_name,
-                source: ChatModelSource::Cloud,
-                provider_id: Some(provider.id.clone()),
-                provider_name: Some(provider.name.clone()),
-                backend_id: None,
-                downloaded: true,
-                pending: false,
-            });
-        }
-    }
-
-    items.sort_by(|left, right| left.display_name.cmp(&right.display_name));
-    items
 }
 
 pub(super) fn is_cloud_model_option_id(model_id: &str) -> bool {
@@ -159,16 +137,6 @@ async fn load_cloud_providers_strict(
     state: &ModelState,
 ) -> Result<Vec<CloudProviderConfig>, ServerError> {
     Ok(state.pmid().config().chat.providers)
-}
-
-async fn load_cloud_providers_lenient(state: &ModelState) -> Vec<CloudProviderConfig> {
-    match load_cloud_providers_strict(state).await {
-        Ok(providers) => providers,
-        Err(error) => {
-            warn!(error = %error, "invalid chat cloud provider settings; cloud models disabled");
-            Vec::new()
-        }
-    }
 }
 
 fn resolve_provider_api_key(provider: &CloudProviderConfig) -> Result<String, ServerError> {
