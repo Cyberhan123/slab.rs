@@ -74,6 +74,10 @@ pub enum CoreError {
     /// An error raised by a GGML engine backend.
     #[error("GGML engine error: {0}")]
     GGMLEngine(String),
+
+    /// An error raised by a Candle engine backend.
+    #[error("Candle engine error: {0}")]
+    CandleEngine(String),
 }
 
 impl From<std::io::Error> for CoreError {
