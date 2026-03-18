@@ -95,9 +95,13 @@ impl BackendService {
 
         let config = self.model_state.pmid().config();
         let backend_settings = match backend_id {
-            Backend::GGMLLlama => config.setup.backends.llama,
-            Backend::GGMLWhisper => config.setup.backends.whisper,
-            Backend::GGMLDiffusion => config.setup.backends.diffusion,
+            Backend::GGMLLlama => config.setup.backends.ggml_llama,
+            Backend::GGMLWhisper => config.setup.backends.ggml_whisper,
+            Backend::GGMLDiffusion => config.setup.backends.ggml_diffusion,
+            Backend::CandleLlama => config.setup.backends.candle_llama,
+            Backend::CandleWhisper => config.setup.backends.candle_whisper,
+            Backend::CandleDiffusion => config.setup.backends.candle_diffusion,
+            Backend::Onnx => config.setup.backends.onnx,
         };
         let tag = backend_settings
             .tag
@@ -194,6 +198,12 @@ fn windows_download_spec(backend_id: Backend) -> Option<WindowsDownloadSpec> {
             "master-504-636d3cb",
             |version: &str| format!("stable-diffusion-{version}-bin-win-cpu-x64.zip"),
         )),
+        Backend::CandleDiffusion | Backend::CandleLlama | Backend::CandleWhisper | Backend::Onnx =>  Some((
+            "slab",
+            "slab-buildin",
+            "v0.1.0",
+            |version: &str| format!("slab-buildin-{version}-bin-win-x64.zip"),
+        )), // no download specs for candle backends or onnx
     }
 }
 

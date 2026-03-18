@@ -80,7 +80,7 @@
         {
           "id": "backends",
           "title": "AI Backend Libraries",
-          "description_md": "Settings for automatic download of AI backend shared libraries (llama, whisper, diffusion).",
+          "description_md": "Settings for automatic download of GGML backend libraries and bundled Candle/ONNX backend packages.",
           "order": 30,
           "properties": [
             {
@@ -103,11 +103,12 @@
               }
             },
             {
-              "pmid": "setup.backends.llama.tag",
-              "label": "Llama Release Tag",
-              "description_md": "GitHub release tag for the llama.cpp prebuilt library. Leave empty to use the default bundled version.",
+              "pmid": "setup.backends.ggml.llama.tag",
+              "label": "GGML Llama Release Tag",
+              "description_md": "GitHub release tag for the GGML llama.cpp prebuilt library. Leave empty to use the default bundled version.",
               "editable": true,
               "search_terms": [
+                "ggml",
                 "llama",
                 "version",
                 "tag",
@@ -122,11 +123,12 @@
               }
             },
             {
-              "pmid": "setup.backends.llama.asset",
-              "label": "Llama Asset Name",
-              "description_md": "GitHub release asset filename for the llama.cpp library. Leave empty to use the platform-default asset.",
+              "pmid": "setup.backends.ggml.llama.asset",
+              "label": "GGML Llama Asset Name",
+              "description_md": "GitHub release asset filename for the GGML llama.cpp library. Leave empty to use the platform-default asset.",
               "editable": true,
               "search_terms": [
+                "ggml",
                 "llama",
                 "asset",
                 "filename",
@@ -140,11 +142,12 @@
               }
             },
             {
-              "pmid": "setup.backends.whisper.tag",
-              "label": "Whisper Release Tag",
-              "description_md": "GitHub release tag for the whisper.cpp prebuilt library. Leave empty to use the default bundled version.",
+              "pmid": "setup.backends.ggml.whisper.tag",
+              "label": "GGML Whisper Release Tag",
+              "description_md": "GitHub release tag for the GGML whisper.cpp prebuilt library. Leave empty to use the default bundled version.",
               "editable": true,
               "search_terms": [
+                "ggml",
                 "whisper",
                 "version",
                 "tag",
@@ -159,11 +162,12 @@
               }
             },
             {
-              "pmid": "setup.backends.whisper.asset",
-              "label": "Whisper Asset Name",
-              "description_md": "GitHub release asset filename for the whisper.cpp library. Leave empty to use the platform-default asset.",
+              "pmid": "setup.backends.ggml.whisper.asset",
+              "label": "GGML Whisper Asset Name",
+              "description_md": "GitHub release asset filename for the GGML whisper.cpp library. Leave empty to use the platform-default asset.",
               "editable": true,
               "search_terms": [
+                "ggml",
                 "whisper",
                 "asset",
                 "filename",
@@ -177,11 +181,12 @@
               }
             },
             {
-              "pmid": "setup.backends.diffusion.tag",
-              "label": "Diffusion Release Tag",
-              "description_md": "GitHub release tag for the stable-diffusion.cpp prebuilt library. Leave empty to use the default bundled version.",
+              "pmid": "setup.backends.ggml.diffusion.tag",
+              "label": "GGML Diffusion Release Tag",
+              "description_md": "GitHub release tag for the GGML stable-diffusion.cpp prebuilt library. Leave empty to use the default bundled version.",
               "editable": true,
               "search_terms": [
+                "ggml",
                 "diffusion",
                 "version",
                 "tag",
@@ -196,11 +201,12 @@
               }
             },
             {
-              "pmid": "setup.backends.diffusion.asset",
-              "label": "Diffusion Asset Name",
-              "description_md": "GitHub release asset filename for the stable-diffusion.cpp library. Leave empty to use the platform-default asset.",
+              "pmid": "setup.backends.ggml.diffusion.asset",
+              "label": "GGML Diffusion Asset Name",
+              "description_md": "GitHub release asset filename for the GGML stable-diffusion.cpp library. Leave empty to use the platform-default asset.",
               "editable": true,
               "search_terms": [
+                "ggml",
                 "diffusion",
                 "asset",
                 "filename",
@@ -211,6 +217,160 @@
                 "type": "string",
                 "default_value": "",
                 "order": 70
+              }
+            },
+            {
+              "pmid": "setup.backends.candle.llama.tag",
+              "label": "Candle Llama Release Tag",
+              "description_md": "GitHub release tag for the bundled Candle llama backend package. Leave empty to use the default bundled version.",
+              "editable": true,
+              "search_terms": [
+                "candle",
+                "llama",
+                "version",
+                "tag",
+                "release",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 80
+              }
+            },
+            {
+              "pmid": "setup.backends.candle.llama.asset",
+              "label": "Candle Llama Asset Name",
+              "description_md": "GitHub release asset filename for the bundled Candle llama backend package. Leave empty to use the platform-default asset.",
+              "editable": true,
+              "search_terms": [
+                "candle",
+                "llama",
+                "asset",
+                "filename",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 90
+              }
+            },
+            {
+              "pmid": "setup.backends.candle.whisper.tag",
+              "label": "Candle Whisper Release Tag",
+              "description_md": "GitHub release tag for the bundled Candle whisper backend package. Leave empty to use the default bundled version.",
+              "editable": true,
+              "search_terms": [
+                "candle",
+                "whisper",
+                "version",
+                "tag",
+                "release",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 100
+              }
+            },
+            {
+              "pmid": "setup.backends.candle.whisper.asset",
+              "label": "Candle Whisper Asset Name",
+              "description_md": "GitHub release asset filename for the bundled Candle whisper backend package. Leave empty to use the platform-default asset.",
+              "editable": true,
+              "search_terms": [
+                "candle",
+                "whisper",
+                "asset",
+                "filename",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 110
+              }
+            },
+            {
+              "pmid": "setup.backends.candle.diffusion.tag",
+              "label": "Candle Diffusion Release Tag",
+              "description_md": "GitHub release tag for the bundled Candle diffusion backend package. Leave empty to use the default bundled version.",
+              "editable": true,
+              "search_terms": [
+                "candle",
+                "diffusion",
+                "version",
+                "tag",
+                "release",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 120
+              }
+            },
+            {
+              "pmid": "setup.backends.candle.diffusion.asset",
+              "label": "Candle Diffusion Asset Name",
+              "description_md": "GitHub release asset filename for the bundled Candle diffusion backend package. Leave empty to use the platform-default asset.",
+              "editable": true,
+              "search_terms": [
+                "candle",
+                "diffusion",
+                "asset",
+                "filename",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 130
+              }
+            },
+            {
+              "pmid": "setup.backends.onnx.tag",
+              "label": "ONNX Release Tag",
+              "description_md": "GitHub release tag for the bundled ONNX backend package. Leave empty to use the default bundled version.",
+              "editable": true,
+              "search_terms": [
+                "onnx",
+                "version",
+                "tag",
+                "release",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 140
+              }
+            },
+            {
+              "pmid": "setup.backends.onnx.asset",
+              "label": "ONNX Asset Name",
+              "description_md": "GitHub release asset filename for the bundled ONNX backend package. Leave empty to use the platform-default asset.",
+              "editable": true,
+              "search_terms": [
+                "onnx",
+                "asset",
+                "filename",
+                "download"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 150
               }
             }
           ]

@@ -58,12 +58,20 @@ impl PmidCatalog {
             self.setup.ffmpeg.auto_download(),
             self.setup.ffmpeg.dir(),
             self.setup.backends.dir(),
-            self.setup.backends.llama.tag(),
-            self.setup.backends.llama.asset(),
-            self.setup.backends.whisper.tag(),
-            self.setup.backends.whisper.asset(),
-            self.setup.backends.diffusion.tag(),
-            self.setup.backends.diffusion.asset(),
+            self.setup.backends.ggml_llama.tag(),
+            self.setup.backends.ggml_llama.asset(),
+            self.setup.backends.ggml_whisper.tag(),
+            self.setup.backends.ggml_whisper.asset(),
+            self.setup.backends.ggml_diffusion.tag(),
+            self.setup.backends.ggml_diffusion.asset(),
+            self.setup.backends.candle_llama.tag(),
+            self.setup.backends.candle_llama.asset(),
+            self.setup.backends.candle_whisper.tag(),
+            self.setup.backends.candle_whisper.asset(),
+            self.setup.backends.candle_diffusion.tag(),
+            self.setup.backends.candle_diffusion.asset(),
+            self.setup.backends.onnx.tag(),
+            self.setup.backends.onnx.asset(),
             self.runtime.model_cache_dir(),
             self.runtime.llama.num_workers(),
             self.runtime.llama.context_length(),
@@ -139,17 +147,25 @@ impl SetupFfmpegPmids {
 
 #[derive(Debug, Clone, Copy)]
 pub struct SetupBackendPmids {
-    pub llama: SetupBackendReleasePmids,
-    pub whisper: SetupBackendReleasePmids,
-    pub diffusion: SetupBackendReleasePmids,
+    pub ggml_llama: SetupBackendReleasePmids,
+    pub ggml_whisper: SetupBackendReleasePmids,
+    pub ggml_diffusion: SetupBackendReleasePmids,
+    pub candle_llama: SetupBackendReleasePmids,
+    pub candle_whisper: SetupBackendReleasePmids,
+    pub candle_diffusion: SetupBackendReleasePmids,
+    pub onnx: SetupBackendReleasePmids,
 }
 
 impl SetupBackendPmids {
     pub const fn new() -> Self {
         Self {
-            llama: SetupBackendReleasePmids::new("llama"),
-            whisper: SetupBackendReleasePmids::new("whisper"),
-            diffusion: SetupBackendReleasePmids::new("diffusion"),
+            ggml_llama: SetupBackendReleasePmids::new("ggml.llama"),
+            ggml_whisper: SetupBackendReleasePmids::new("ggml.whisper"),
+            ggml_diffusion: SetupBackendReleasePmids::new("ggml.diffusion"),
+            candle_llama: SetupBackendReleasePmids::new("candle.llama"),
+            candle_whisper: SetupBackendReleasePmids::new("candle.whisper"),
+            candle_diffusion: SetupBackendReleasePmids::new("candle.diffusion"),
+            onnx: SetupBackendReleasePmids::new("onnx"),
         }
     }
 
@@ -365,8 +381,8 @@ mod tests {
     #[test]
     fn nested_builder_generates_expected_pmid() {
         assert_eq!(
-            PMID.setup.backends.llama.tag().as_str(),
-            "setup.backends.llama.tag"
+            PMID.setup.backends.ggml_llama.tag().as_str(),
+            "setup.backends.ggml.llama.tag"
         );
         assert_eq!(
             PMID.runtime.model_auto_unload.idle_minutes().as_str(),
