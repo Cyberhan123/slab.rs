@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import api from '@/lib/api';
+import { toCatalogModelList } from '@/lib/api/models';
 
 const DIFFUSION_BACKEND_ID = 'ggml.diffusion';
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
@@ -13,14 +14,6 @@ export type ImageModelOption = {
   downloaded: boolean;
   pending: boolean;
   local_path: string | null;
-};
-
-const pendingTaskIdOf = (model: unknown): string | null => {
-  if (typeof model !== 'object' || model === null) return null;
-  const pendingTaskId = (model as { pending_task_id?: string | null }).pending_task_id;
-  if (typeof pendingTaskId !== 'string') return null;
-  const trimmed = pendingTaskId.trim();
-  return trimmed.length > 0 ? trimmed : null;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -49,14 +42,15 @@ export function useImageModelPreparation() {
   const switchModelMutation = api.useMutation('post', '/v1/models/switch');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
+  const normalizedCatalogModels = useMemo(
+    () => toCatalogModelList(catalogModels),
+    [catalogModels],
+  );
+
   const diffusionModels = useMemo(
     () =>
-      (catalogModels ?? []).filter(
-        (model) =>
-          Array.isArray(model.backend_ids) &&
-          model.backend_ids.includes(DIFFUSION_BACKEND_ID),
-      ),
-    [catalogModels],
+      normalizedCatalogModels.filter((model) => model.backend_id === DIFFUSION_BACKEND_ID),
+    [normalizedCatalogModels],
   );
 
   const modelOptions = useMemo<ImageModelOption[]>(
@@ -65,7 +59,7 @@ export function useImageModelPreparation() {
         id: model.id,
         label: model.display_name,
         downloaded: Boolean(model.local_path),
-        pending: Boolean(pendingTaskIdOf(model)),
+        pending: model.pending,
         local_path: model.local_path ?? null,
       })),
     [diffusionModels],
@@ -108,7 +102,7 @@ export function useImageModelPreparation() {
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
     const refreshed = await refetchCatalogModels();
-    const models = refreshed.data ?? [];
+    const models = toCatalogModelList(refreshed.data);
     return models.find((model) => model.id === modelId);
   };
 
@@ -125,7 +119,7 @@ export function useImageModelPreparation() {
       throw new Error('Selected model does not exist in catalog');
     }
 
-    if (!model.backend_ids.includes(DIFFUSION_BACKEND_ID)) {
+    if (model.backend_id !== DIFFUSION_BACKEND_ID) {
       throw new Error(`Selected model does not support ${DIFFUSION_BACKEND_ID}`);
     }
 
@@ -133,16 +127,12 @@ export function useImageModelPreparation() {
       return { modelPath: model.local_path, downloadedNow: false };
     }
 
-    let taskId = pendingTaskIdOf(model);
-    if (!taskId) {
-      const downloadResponse = await downloadModelMutation.mutateAsync({
-        body: {
-          backend_id: DIFFUSION_BACKEND_ID,
-          model_id: modelId,
-        },
-      });
-      taskId = extractTaskId(downloadResponse);
-    }
+    const downloadResponse = await downloadModelMutation.mutateAsync({
+      body: {
+        model_id: modelId,
+      },
+    });
+    const taskId = extractTaskId(downloadResponse);
 
     if (!taskId) {
       throw new Error('Failed to start model download task');

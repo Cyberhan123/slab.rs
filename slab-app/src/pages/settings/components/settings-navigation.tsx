@@ -18,7 +18,12 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 
 import type { SettingsSectionResponse } from '../types';
-import { countSectionProperties, subsectionAnchorId, sectionAnchorId } from '../utils';
+import {
+  countSectionProperties,
+  sectionAnchorId,
+  shouldCollapseSubsectionHeading,
+  subsectionAnchorId,
+} from '../utils';
 
 type SettingsNavigationProps = {
   activeTarget: string | null;
@@ -113,6 +118,9 @@ export function SettingsNavigation({
           <div className="flex flex-col gap-1 p-3">
             {sections.map((section) => {
               const sectionTargetId = sectionAnchorId(section.id);
+              const visibleSubsections = section.subsections.filter(
+                (subsection) => !shouldCollapseSubsectionHeading(section, subsection),
+              );
               const hasActiveSubsection = section.subsections.some(
                 (subsection) => subsectionAnchorId(section.id, subsection.id) === activeTarget,
               );
@@ -151,34 +159,36 @@ export function SettingsNavigation({
                       </Button>
                     </CollapsibleTrigger>
 
-                    <CollapsibleContent className="overflow-hidden">
-                      <div className="mt-1 ml-5 border-l border-sidebar-border/60 pl-2">
-                        {section.subsections.map((subsection) => {
-                          const subsectionTargetId = subsectionAnchorId(section.id, subsection.id);
+                    {visibleSubsections.length > 0 ? (
+                      <CollapsibleContent className="overflow-hidden">
+                        <div className="mt-1 ml-5 border-l border-sidebar-border/60 pl-2">
+                          {visibleSubsections.map((subsection) => {
+                            const subsectionTargetId = subsectionAnchorId(section.id, subsection.id);
 
-                          return (
-                            <Button
-                              key={subsection.id}
-                              variant="ghost"
-                              size="sm"
-                              className={cn(
-                                'h-auto w-full justify-start gap-2 rounded-xl px-2 py-1.5 text-left text-sidebar-foreground transition-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
-                                activeTarget === subsectionTargetId &&
-                                  'bg-sidebar-accent text-sidebar-accent-foreground',
-                              )}
-                              onClick={() => onJump(subsectionTargetId)}
-                            >
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate">{subsection.title}</p>
-                                <p className="text-xs text-sidebar-foreground/65">
-                                  {subsection.properties.length} fields
-                                </p>
-                              </div>
-                            </Button>
-                          );
-                        })}
-                      </div>
-                    </CollapsibleContent>
+                            return (
+                              <Button
+                                key={subsection.id}
+                                variant="ghost"
+                                size="sm"
+                                className={cn(
+                                  'h-auto w-full justify-start gap-2 rounded-xl px-2 py-1.5 text-left text-sidebar-foreground transition-none hover:bg-sidebar-accent hover:text-sidebar-accent-foreground',
+                                  activeTarget === subsectionTargetId &&
+                                    'bg-sidebar-accent text-sidebar-accent-foreground',
+                                )}
+                                onClick={() => onJump(subsectionTargetId)}
+                              >
+                                <div className="min-w-0 flex-1">
+                                  <p className="truncate">{subsection.title}</p>
+                                  <p className="text-xs text-sidebar-foreground/65">
+                                    {subsection.properties.length} fields
+                                  </p>
+                                </div>
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      </CollapsibleContent>
+                    ) : null}
                   </div>
                 </Collapsible>
               );

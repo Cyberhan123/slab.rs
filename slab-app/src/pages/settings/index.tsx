@@ -26,6 +26,7 @@ import {
   matchesSearch,
   sectionAnchorId,
   subsectionAnchorId,
+  shouldCollapseSubsectionHeading,
 } from './utils';
 
 export default function SettingsPage() {
@@ -233,19 +234,27 @@ export default function SettingsPage() {
                         className="scroll-mt-40 space-y-5"
                       >
                         {subsectionIndex > 0 ? <SeparatorLine /> : null}
-                        <div className="space-y-2">
-                          <div className="flex flex-wrap items-center gap-3">
-                            <h2 className="text-lg font-semibold">{subsection.title}</h2>
-                            <Badge variant="outline">
-                              {subsection.properties.length} fields
-                            </Badge>
-                          </div>
-                          {subsection.description_md ? (
+                        {shouldCollapseSubsectionHeading(section, subsection) ? (
+                          subsection.description_md ? (
                             <p className="text-sm leading-6 text-muted-foreground">
                               {subsection.description_md}
                             </p>
-                          ) : null}
-                        </div>
+                          ) : null
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="flex flex-wrap items-center gap-3">
+                              <h2 className="text-lg font-semibold">{subsection.title}</h2>
+                              <Badge variant="outline">
+                                {subsection.properties.length} fields
+                              </Badge>
+                            </div>
+                            {subsection.description_md ? (
+                              <p className="text-sm leading-6 text-muted-foreground">
+                                {subsection.description_md}
+                              </p>
+                            ) : null}
+                          </div>
+                        )}
 
                         <div className="space-y-4">
                           {subsection.properties.map((property) => (

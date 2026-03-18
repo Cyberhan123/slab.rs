@@ -557,21 +557,21 @@
       ]
     },
     {
-      "id": "chat",
-      "title": "Chat",
-      "description_md": "Cloud provider configuration used by cloud chat models.",
+      "id": "cloud",
+      "title": "Cloud Providers",
+      "description_md": "Global cloud provider configuration used by cloud model entries.",
       "order": 20,
       "subsections": [
         {
           "id": "providers",
-          "title": "Providers",
+          "title": "Cloud Providers",
           "description_md": "OpenAI-compatible cloud provider configuration stored as JSON.",
           "order": 10,
           "properties": [
             {
               "pmid": "chat.providers",
-              "label": "Chat Providers",
-              "description_md": "OpenAI-compatible cloud providers referenced by cloud model entries.",
+              "label": "Cloud Providers",
+              "description_md": "OpenAI-compatible cloud providers referenced by cloud model entries across the app.",
               "editable": true,
               "search_terms": [
                 "chat",
@@ -587,7 +587,7 @@
                 "json_schema": {
                   "$schema": "https://json-schema.org/draft/2020-12/schema",
                   "type": "array",
-                  "title": "Cloud providers",
+                  "title": "Cloud Providers",
                   "description": "Configure OpenAI-compatible providers referenced by cloud model entries.",
                   "items": {
                     "type": "object",
@@ -609,7 +609,7 @@
                       "name": {
                         "type": "string",
                         "title": "Display name",
-                        "description": "Friendly label shown in the chat model picker.",
+                        "description": "Friendly label shown anywhere this cloud provider is referenced.",
                         "minLength": 1,
                         "examples": ["OpenAI"]
                       },

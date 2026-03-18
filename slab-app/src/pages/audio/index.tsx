@@ -13,6 +13,7 @@ import useFile, { SelectedFile } from '@/hooks/use-file';
 import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } from './hooks/use-transcribe';
 import useIsTauri from '@/hooks/use-tauri';
 import api from '@/lib/api';
+import { inferWhisperVadModel, toCatalogModelList } from '@/lib/api/models';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
@@ -70,41 +71,24 @@ export default function Audio() {
   const loadModelMutation = api.useMutation('post', '/v1/models/load');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
-  const whisperModels = useMemo(
-    () => (catalogModels ?? []).filter((model) => model.backend_ids.includes(WHISPER_BACKEND_ID)),
-    [catalogModels]
+  const normalizedCatalogModels = useMemo(
+    () => toCatalogModelList(catalogModels),
+    [catalogModels],
   );
 
-  const isWhisperVadModel = (model: {
-    display_name: string;
-    repo_id: string;
-    filename: string;
-    is_vad_model?: boolean;
-  }): boolean => {
-    if (typeof model.is_vad_model === 'boolean') {
-      return model.is_vad_model;
-    }
-
-    const haystack = `${model.display_name} ${model.repo_id} ${model.filename}`.toLowerCase();
-    return (
-      haystack.includes(' silero') ||
-      haystack.includes('silero ') ||
-      haystack.includes('-vad') ||
-      haystack.includes('_vad') ||
-      haystack.includes(' vad') ||
-      haystack.includes('vad ') ||
-      haystack.endsWith('vad')
-    );
-  };
+  const whisperModels = useMemo(
+    () => normalizedCatalogModels.filter((model) => model.backend_id === WHISPER_BACKEND_ID),
+    [normalizedCatalogModels],
+  );
 
   const whisperTranscribeModels = useMemo(
-    () => whisperModels.filter((model) => !isWhisperVadModel(model)),
-    [whisperModels]
+    () => whisperModels.filter((model) => !inferWhisperVadModel(model)),
+    [whisperModels],
   );
 
   const whisperVadModels = useMemo(
-    () => whisperModels.filter((model) => isWhisperVadModel(model)),
-    [whisperModels]
+    () => whisperModels.filter((model) => inferWhisperVadModel(model)),
+    [whisperModels],
   );
 
   const selectedModel = useMemo(
@@ -151,14 +135,6 @@ export default function Audio() {
     }
   }, [enableVad, whisperVadModels, selectedVadModelId]);
 
-  const pendingTaskIdOf = (model: unknown): string | null => {
-    if (typeof model !== 'object' || model === null) return null;
-    const pendingTaskId = (model as { pending_task_id?: string | null }).pending_task_id;
-    if (typeof pendingTaskId !== 'string') return null;
-    const trimmed = pendingTaskId.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  };
-
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
   const extractTaskId = (payload: unknown): string | null => {
@@ -197,7 +173,7 @@ export default function Audio() {
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
     const refreshed = await refetchCatalogModels();
-    const models = refreshed.data ?? [];
+    const models = toCatalogModelList(refreshed.data);
     return models.find((model) => model.id === modelId);
   };
 
@@ -251,7 +227,7 @@ export default function Audio() {
       throw new Error('Selected model does not exist in catalog');
     }
 
-    if (!model.backend_ids.includes(WHISPER_BACKEND_ID)) {
+    if (model.backend_id !== WHISPER_BACKEND_ID) {
       throw new Error(`Selected model does not support ${WHISPER_BACKEND_ID}`);
     }
 
@@ -259,16 +235,12 @@ export default function Audio() {
       return { modelPath: model.local_path, downloadedNow: false };
     }
 
-    let taskId = pendingTaskIdOf(model);
-    if (!taskId) {
-      const downloadResponse = await downloadModelMutation.mutateAsync({
-        body: {
-          backend_id: WHISPER_BACKEND_ID,
-          model_id: modelId,
-        },
-      });
-      taskId = extractTaskId(downloadResponse);
-    }
+    const downloadResponse = await downloadModelMutation.mutateAsync({
+      body: {
+        model_id: modelId,
+      },
+    });
+    const taskId = extractTaskId(downloadResponse);
 
     if (!taskId) {
       throw new Error('Failed to start model download task');
@@ -322,7 +294,7 @@ export default function Audio() {
     if (!model) {
       throw new Error('Selected VAD model no longer exists in catalog.');
     }
-    if (!isWhisperVadModel(model)) {
+    if (!inferWhisperVadModel(model)) {
       throw new Error('Selected model is not a dedicated VAD model.');
     }
 
@@ -542,9 +514,7 @@ export default function Audio() {
               <p className="text-xs text-muted-foreground">
                 {selectedModel.local_path
                   ? 'Downloaded locally.'
-                  : pendingTaskIdOf(selectedModel)
-                    ? 'Download task is running. It will be reused automatically.'
-                    : 'Not downloaded yet. It will be downloaded automatically before transcription.'}
+                  : 'Not downloaded yet. It will be downloaded automatically before transcription.'}
               </p>
             ) : (
               <p className="text-xs text-muted-foreground">
@@ -601,9 +571,7 @@ export default function Audio() {
                     <p className="text-xs text-muted-foreground">
                       {selectedVadModel.local_path
                         ? 'Downloaded locally.'
-                        : pendingTaskIdOf(selectedVadModel)
-                          ? 'Download task is running. It will be reused automatically.'
-                          : 'Not downloaded yet. It will be downloaded automatically before transcription.'}
+                        : 'Not downloaded yet. It will be downloaded automatically before transcription.'}
                     </p>
                   ) : (
                     <p className="text-xs text-muted-foreground">
