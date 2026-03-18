@@ -1,3 +1,4 @@
+pub mod audio_utils;
 pub mod candle;
 #[cfg(feature = "ggml")]
 pub mod ggml;

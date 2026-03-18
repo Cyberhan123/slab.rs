@@ -34,6 +34,7 @@
 
 pub mod adapter;
 pub mod backend;
+pub mod capabilities;
 pub(crate) mod config;
 
 use thiserror::Error;
