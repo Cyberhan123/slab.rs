@@ -150,8 +150,11 @@ impl CandleDiffusionWorker {
         if let Some(engine) = self.engine.as_ref() {
             if !engine.is_model_loaded() {
                 let engine_clone = engine.clone();
-                let result =
-                    tokio::task::block_in_place(|| engine_clone.load_model(&model_path, None));
+                // Use v2-1 as default when broadcasting peer load (version
+                // is not carried in the PeerWorkerCommand).
+                let result = tokio::task::block_in_place(|| {
+                    engine_clone.load_model(&model_path, None, "v2-1")
+                });
                 if let Err(e) = result {
                     tracing::warn!(
                         model_path,
@@ -228,9 +231,10 @@ impl CandleDiffusionWorker {
             .clone();
         let model_path = config.model_path.clone();
         let vae_path = config.vae_path.clone();
+        let sd_version = config.sd_version.clone();
 
         let result = tokio::task::block_in_place(move || {
-            engine.load_model(&model_path, vae_path.as_deref())
+            engine.load_model(&model_path, vae_path.as_deref(), &sd_version)
         });
 
         match result {

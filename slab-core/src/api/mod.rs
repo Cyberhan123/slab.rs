@@ -107,11 +107,17 @@ pub struct Config {
     /// When `true`, register the Candle LLaMA backend.
     ///
     /// The backend accepts `model.load` requests with a GGUF weight file path
-    /// once registered.  Defaults to `true`.
+    /// once registered.  Defaults to `true` only when the `candle` crate
+    /// feature is enabled; otherwise defaults to `false` so that callers
+    /// without the feature do not register a backend that can never run.
     pub enable_candle_llama: bool,
-    /// When `true`, register the Candle Whisper backend.  Defaults to `true`.
+    /// When `true`, register the Candle Whisper backend.
+    ///
+    /// Defaults to `true` only when the `candle` feature is enabled.
     pub enable_candle_whisper: bool,
-    /// When `true`, register the Candle Stable Diffusion backend.  Defaults to `true`.
+    /// When `true`, register the Candle Stable Diffusion backend.
+    ///
+    /// Defaults to `true` only when the `candle` feature is enabled.
     pub enable_candle_diffusion: bool,
 }
 
@@ -123,9 +129,12 @@ impl Default for Config {
             llama_lib_dir: None,
             whisper_lib_dir: None,
             diffusion_lib_dir: None,
-            enable_candle_llama: true,
-            enable_candle_whisper: true,
-            enable_candle_diffusion: true,
+            // Candle backends are only meaningful when compiled with the
+            // `candle` feature; default to `false` so that callers without
+            // the feature don't register backends that can never load a model.
+            enable_candle_llama: cfg!(feature = "candle"),
+            enable_candle_whisper: cfg!(feature = "candle"),
+            enable_candle_diffusion: cfg!(feature = "candle"),
         }
     }
 }

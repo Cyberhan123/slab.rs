@@ -22,18 +22,18 @@
 //! {
 //!   "model_path": "/path/to/model.gguf",
 //!   "tokenizer_path": "/path/to/tokenizer.json",
-//!   "num_workers": 1,
-//!   "context_length": 4096,
 //!   "seed": 0
 //! }
 //! ```
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
 use crate::engine::candle::config::CandleLlamaModelLoadConfig;
 use crate::engine::candle::llama::adapter::CandleLlamaEngine;
+use crate::engine::candle::llama::errors::SessionId;
 use crate::scheduler::backend::backend_handler;
 use crate::scheduler::backend::protocol::{
     BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
@@ -47,12 +47,17 @@ use tokio::sync::broadcast;
 struct CandleLlamaWorker {
     /// Shared engine handle; `None` until `model.load` succeeds.
     engine: Option<Arc<CandleLlamaEngine>>,
+    /// Map from caller-supplied `session_key` strings to engine session IDs.
+    sessions: HashMap<String, SessionId>,
 }
 
 #[backend_handler]
 impl CandleLlamaWorker {
     fn new(engine: Option<Arc<CandleLlamaEngine>>) -> Self {
-        Self { engine }
+        Self {
+            engine,
+            sessions: HashMap::new(),
+        }
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────
@@ -123,7 +128,11 @@ impl CandleLlamaWorker {
             .and_then(|v| v.as_u64())
             .map(|v| v as usize)
             .unwrap_or(256);
-        self.handle_inference_stream(input, max_tokens, reply_tx)
+        let session_key = opts
+            .get("session_key")
+            .and_then(|s| s.as_str())
+            .map(str::to_owned);
+        self.handle_inference_stream(input, max_tokens, session_key, reply_tx)
             .await;
     }
 
@@ -131,6 +140,7 @@ impl CandleLlamaWorker {
         if let Some(engine) = self.engine.as_ref() {
             let _ = engine.unload();
         }
+        self.sessions.clear();
     }
 
     // ── Runtime / peer control ────────────────────────────────────────────────
@@ -173,11 +183,6 @@ impl CandleLlamaWorker {
             }
         };
 
-        if config.num_workers == 0 {
-            let _ = reply_tx.send(BackendReply::Error("num_workers must be > 0".into()));
-            return;
-        }
-
         let engine = Arc::new(CandleLlamaEngine::new(config.seed));
 
         let tok_path = config.tokenizer_path.as_deref();
@@ -191,6 +196,8 @@ impl CandleLlamaWorker {
 
         match result {
             Ok(()) => {
+                // Clear stale sessions from any previously loaded model.
+                self.sessions.clear();
                 self.engine = Some(engine);
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -210,6 +217,7 @@ impl CandleLlamaWorker {
             Some(engine) => {
                 let _ = engine.unload();
                 self.engine = None;
+                self.sessions.clear();
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
                 )));
@@ -224,7 +232,7 @@ impl CandleLlamaWorker {
         &mut self,
         input: Payload,
         max_tokens: usize,
-        _session_key: Option<String>,
+        session_key: Option<String>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -243,13 +251,38 @@ impl CandleLlamaWorker {
             }
         };
 
-        match engine.inference(&prompt, max_tokens, None).await {
+        // Resolve or create a session for KV-cache reuse.
+        let session_id = if let Some(ref key) = session_key {
+            match self.sessions.get(key) {
+                Some(&sid) => Some(sid),
+                None => match engine.create_session().await {
+                    Ok(sid) => {
+                        self.sessions.insert(key.clone(), sid);
+                        Some(sid)
+                    }
+                    Err(e) => {
+                        let _ = reply_tx.send(BackendReply::Error(format!(
+                            "failed to create session: {e}"
+                        )));
+                        return;
+                    }
+                },
+            }
+        } else {
+            None
+        };
+
+        match engine.inference(&prompt, max_tokens, session_id).await {
             Ok(text) => {
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(
                     text.as_bytes(),
                 ))));
             }
             Err(e) => {
+                // Drop the session on error so the next request starts fresh.
+                if let Some(key) = session_key {
+                    self.sessions.remove(&key);
+                }
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
             }
         }
@@ -259,6 +292,7 @@ impl CandleLlamaWorker {
         &mut self,
         input: Payload,
         max_tokens: usize,
+        session_key: Option<String>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -277,12 +311,36 @@ impl CandleLlamaWorker {
             }
         };
 
+        // Resolve or create a session for KV-cache reuse.
+        let existing_session_id = if let Some(ref key) = session_key {
+            match self.sessions.get(key).copied() {
+                Some(sid) => Some(sid),
+                None => match engine.create_session().await {
+                    Ok(sid) => {
+                        self.sessions.insert(key.clone(), sid);
+                        Some(sid)
+                    }
+                    Err(e) => {
+                        let _ = reply_tx.send(BackendReply::Error(format!(
+                            "failed to create session: {e}"
+                        )));
+                        return;
+                    }
+                },
+            }
+        } else {
+            None
+        };
+
         let (proto_tx, proto_rx) = mpsc::channel::<StreamChunk>(64);
         let _ = reply_tx.send(BackendReply::Stream(proto_rx));
 
         tokio::spawn(async move {
             use crate::engine::candle::llama::errors::StreamChunk as CandleChunk;
-            match engine.inference_stream(&prompt, max_tokens, None).await {
+            match engine
+                .inference_stream(&prompt, max_tokens, existing_session_id)
+                .await
+            {
                 Ok((mut llama_rx, sid)) => {
                     while let Some(chunk) = llama_rx.recv().await {
                         let mapped = match chunk {
@@ -298,9 +356,20 @@ impl CandleLlamaWorker {
                             break;
                         }
                     }
-                    let _ = engine.end_session(sid).await;
+                    // Only end the engine session when no session_key was provided
+                    // (i.e., the session is ephemeral).  Keyed sessions persist for
+                    // the lifetime of the worker so they can be reused on subsequent
+                    // requests.
+                    if existing_session_id.is_none() {
+                        let _ = engine.end_session(sid).await;
+                    }
                 }
                 Err(e) => {
+                    // If inference_stream fails after a session was created/resolved,
+                    // the session entry remains in `self.sessions` (this closure
+                    // cannot mutate the worker map).  On the next request the same
+                    // session_key will reuse the existing engine session; the engine
+                    // tolerates this and will start fresh if the session is empty.
                     let _ = proto_tx.send(StreamChunk::Error(e.to_string())).await;
                 }
             }

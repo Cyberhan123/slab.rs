@@ -125,12 +125,16 @@ impl CandleWhisperEngine {
 
     /// Load a Whisper model from `model_path`.
     ///
-    /// The model file may be a safetensors or GGUF weight file.  The tokenizer
-    /// is resolved from the same directory when `tokenizer_path` is `None`.
+    /// The model file should be a safetensors weight file.  The tokenizer is
+    /// resolved from `tokenizer_path` when provided; otherwise it is looked up
+    /// from the same directory as `model_path`.
+    ///
+    /// Returns [`CandleWhisperEngineError::ModelNotLoaded`] when compiled
+    /// without the `candle` feature.
     pub fn load_model(
         &self,
         model_path: &str,
-        _tokenizer_path: Option<&str>,
+        tokenizer_path: Option<&str>,
     ) -> Result<(), EngineError> {
         #[cfg(feature = "candle")]
         {
@@ -176,8 +180,13 @@ impl CandleWhisperEngine {
                 }
             })?;
 
-            // Load tokenizer.
-            let tok_dir = path.parent().unwrap_or(Path::new("."));
+            // Resolve tokenizer directory: prefer the explicitly provided path's
+            // parent, otherwise fall back to the model file's parent directory.
+            let tok_dir: &Path = if let Some(tp) = tokenizer_path {
+                Path::new(tp).parent().unwrap_or(Path::new("."))
+            } else {
+                path.parent().unwrap_or(Path::new("."))
+            };
             let tok = candle_transformers::models::whisper::multilingual::multilingual_tokenizer(
                 tok_dir,
                 /*language*/ "en",
@@ -194,16 +203,15 @@ impl CandleWhisperEngine {
             })?;
             state.model = Some(Box::new(WhisperModelWrapper(model)));
             state.tokenizer = Some(tok);
+
+            return Ok(());
         }
 
         #[cfg(not(feature = "candle"))]
         {
-            tracing::warn!(
-                "candle feature is not enabled; model.load is a no-op for CandleWhisperEngine"
-            );
+            let _ = (model_path, tokenizer_path);
+            return Err(CandleWhisperEngineError::ModelNotLoaded.into());
         }
-
-        Ok(())
     }
 
     /// Unload the model and free resources.
