@@ -1,5 +1,6 @@
 mod grpc;
 
+use std::fs::OpenOptions;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -11,7 +12,10 @@ use futures::StreamExt;
 use slab_proto::slab::ipc::v1 as pb;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader, ReadBuf};
 use tonic::transport::server::Connected;
-use tracing::{info, warn};
+use tracing::{error, info, warn};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "slab-runtime", version, about = "Slab gRPC runtime worker")]
@@ -28,6 +32,8 @@ struct Cli {
     backend_capacity: Option<usize>,
     #[arg(long = "lib-dir")]
     lib_dir: Option<PathBuf>,
+    #[arg(long = "log-file")]
+    log_file: Option<PathBuf>,
     #[arg(long = "enabled-backends")]
     enabled_backends: Option<String>,
     #[arg(long, default_value_t = false)]
@@ -102,6 +108,22 @@ impl EnabledBackends {
     }
 }
 
+impl std::fmt::Display for EnabledBackends {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut names = Vec::new();
+        if self.llama {
+            names.push("llama");
+        }
+        if self.whisper {
+            names.push("whisper");
+        }
+        if self.diffusion {
+            names.push("diffusion");
+        }
+        f.write_str(&names.join(","))
+    }
+}
+
 fn parse_enabled_backends(raw: Option<&str>) -> anyhow::Result<EnabledBackends> {
     let Some(raw) = raw.map(str::trim).filter(|v| !v.is_empty()) else {
         return Ok(EnabledBackends::all());
@@ -136,7 +158,11 @@ fn parse_enabled_backends(raw: Option<&str>) -> anyhow::Result<EnabledBackends> 
     Ok(enabled)
 }
 
-fn init_tracing(log_level: &str, log_json: bool) {
+fn init_tracing(
+    log_level: &str,
+    log_json: bool,
+    log_file: Option<&Path>,
+) -> anyhow::Result<Vec<WorkerGuard>> {
     let env_filter = match tracing_subscriber::EnvFilter::try_from_default_env() {
         Ok(f) => f,
         Err(_) => match log_level.parse::<tracing_subscriber::EnvFilter>() {
@@ -151,15 +177,101 @@ fn init_tracing(log_level: &str, log_json: bool) {
         },
     };
 
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_target(true)
-        .with_thread_ids(true);
-    if log_json {
-        subscriber.json().init();
+    let mut guards = Vec::new();
+
+    if let Some(path) = log_file {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create slab-runtime log directory '{}'", parent.display())
+            })?;
+        }
+
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .with_context(|| format!("failed to open slab-runtime log file '{}'", path.display()))?;
+        let (file_writer, guard) = tracing_appender::non_blocking(file);
+        guards.push(guard);
+
+        if log_json {
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_target(true)
+                        .with_thread_ids(true),
+                )
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_ansi(false)
+                        .with_target(true)
+                        .with_thread_ids(true)
+                        .with_writer(file_writer),
+                )
+                .init();
+        } else {
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_target(true)
+                        .with_thread_ids(true),
+                )
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_ansi(false)
+                        .with_target(true)
+                        .with_thread_ids(true)
+                        .with_writer(file_writer),
+                )
+                .init();
+        }
     } else {
-        subscriber.init();
+        if log_json {
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_target(true)
+                        .with_thread_ids(true),
+                )
+                .init();
+        } else {
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_target(true)
+                        .with_thread_ids(true),
+                )
+                .init();
+        }
     }
+
+    Ok(guards)
+}
+
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|panic_info| {
+        let location = panic_info
+            .location()
+            .map(|location| format!("{}:{}:{}", location.file(), location.line(), location.column()))
+            .unwrap_or_else(|| "<unknown>".to_string());
+        let payload = if let Some(msg) = panic_info.payload().downcast_ref::<&str>() {
+            (*msg).to_string()
+        } else if let Some(msg) = panic_info.payload().downcast_ref::<String>() {
+            msg.clone()
+        } else {
+            "non-string panic payload".to_string()
+        };
+
+        eprintln!("slab-runtime panic at {location}: {payload}");
+        error!(location = %location, payload = %payload, "slab-runtime panicked");
+    }));
 }
 
 async fn wait_for_stdin_shutdown_signal() {
@@ -201,6 +313,7 @@ async fn shutdown_signal(listen_stdin: bool) {
         if let Err(e) = tokio::signal::ctrl_c().await {
             warn!(error = %e, "failed to install CTRL+C signal handler");
         }
+        "ctrl_c"
     };
 
     #[cfg(unix)]
@@ -212,24 +325,27 @@ async fn shutdown_signal(listen_stdin: bool) {
             }
             Err(e) => warn!(error = %e, "failed to install SIGTERM handler"),
         }
+        "sigterm"
     };
 
     #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
+    let terminate = std::future::pending::<&'static str>();
 
     let stdin_signal = async {
         if listen_stdin {
             wait_for_stdin_shutdown_signal().await;
+            "stdin"
         } else {
-            std::future::pending::<()>().await;
+            std::future::pending::<&'static str>().await
         }
     };
 
-    tokio::select! {
-        _ = ctrl_c => {}
-        _ = terminate => {}
-        _ = stdin_signal => {}
-    }
+    let source = tokio::select! {
+        source = ctrl_c => source,
+        source = terminate => source,
+        source = stdin_signal => source,
+    };
+    info!(source, "shutdown signal received; shutting down runtime");
 }
 
 async fn serve_grpc(grpc_bind: &str, shutdown_on_stdin_close: bool) -> anyhow::Result<()> {
@@ -269,6 +385,7 @@ async fn serve_grpc(grpc_bind: &str, shutdown_on_stdin_close: bool) -> anyhow::R
             ))
             .serve_with_incoming_shutdown(incoming, shutdown_signal(shutdown_on_stdin_close))
             .await?;
+        info!(transport = "ipc", path = %ipc_path, "slab-runtime gRPC server stopped");
         return Ok(());
     }
 
@@ -288,6 +405,7 @@ async fn serve_grpc(grpc_bind: &str, shutdown_on_stdin_close: bool) -> anyhow::R
         ))
         .serve_with_shutdown(addr, shutdown_signal(shutdown_on_stdin_close))
         .await?;
+    info!(transport = "http", %addr, "slab-runtime gRPC server stopped");
     Ok(())
 }
 
@@ -295,7 +413,8 @@ async fn serve_grpc(grpc_bind: &str, shutdown_on_stdin_close: bool) -> anyhow::R
 async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
     let log_level = cli.log_level.clone().unwrap_or_else(|| "info".to_owned());
-    init_tracing(&log_level, cli.log_json);
+    let _log_guards = init_tracing(&log_level, cli.log_json, cli.log_file.as_deref())?;
+    install_panic_hook();
 
     let enabled = parse_enabled_backends(cli.enabled_backends.as_deref())?;
     let base_lib_path = cli
@@ -305,6 +424,32 @@ async fn main() -> anyhow::Result<()> {
     let llama_lib_dir = enabled.llama.then(|| base_lib_path.join("llama"));
     let whisper_lib_dir = enabled.whisper.then(|| base_lib_path.join("whisper"));
     let diffusion_lib_dir = enabled.diffusion.then(|| base_lib_path.join("diffusion"));
+
+    info!(
+        pid = std::process::id(),
+        grpc_bind = %cli.grpc_bind,
+        enabled_backends = %enabled,
+        shutdown_on_stdin_close = cli.shutdown_on_stdin_close,
+        base_lib_path = %base_lib_path.display(),
+        log_file = ?cli.log_file.as_ref().map(|path| path.display().to_string()),
+        current_dir = ?std::env::current_dir().ok(),
+        current_exe = ?std::env::current_exe().ok(),
+        "slab-runtime starting"
+    );
+    if let Some(path) = &llama_lib_dir {
+        info!(backend = "llama", lib_dir = %path.display(), exists = path.exists(), "resolved runtime backend library directory");
+    }
+    if let Some(path) = &whisper_lib_dir {
+        info!(backend = "whisper", lib_dir = %path.display(), exists = path.exists(), "resolved runtime backend library directory");
+    }
+    if let Some(path) = &diffusion_lib_dir {
+        info!(backend = "diffusion", lib_dir = %path.display(), exists = path.exists(), "resolved runtime backend library directory");
+    }
+    info!(
+        queue_capacity = cli.queue_capacity.unwrap_or(64),
+        backend_capacity = cli.backend_capacity.unwrap_or(4),
+        "initializing slab-core runtime"
+    );
 
     slab_core::api::init(slab_core::api::Config {
         queue_capacity: cli.queue_capacity.unwrap_or(64),
@@ -318,9 +463,12 @@ async fn main() -> anyhow::Result<()> {
         enable_candle_llama: false,
         enable_candle_whisper: false,
         enable_candle_diffusion: false,
+        onnx_enabled: false,
     })
     .context("failed to initialize slab-core runtime")?;
+    info!("slab-core runtime initialized");
 
+    info!(grpc_bind = %cli.grpc_bind, "starting slab-runtime gRPC server");
     serve_grpc(&cli.grpc_bind, cli.shutdown_on_stdin_close).await?;
     info!("slab-runtime stopped");
     Ok(())

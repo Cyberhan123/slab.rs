@@ -32,9 +32,13 @@ pub struct SetupFfmpegConfig {
 #[derive(Debug, Clone, Default)]
 pub struct SetupBackendsConfig {
     pub dir: Option<String>,
-    pub llama: SetupBackendReleaseConfig,
-    pub whisper: SetupBackendReleaseConfig,
-    pub diffusion: SetupBackendReleaseConfig,
+    pub ggml_llama: SetupBackendReleaseConfig,
+    pub ggml_whisper: SetupBackendReleaseConfig,
+    pub ggml_diffusion: SetupBackendReleaseConfig,
+    pub candle_llama: SetupBackendReleaseConfig,
+    pub candle_whisper: SetupBackendReleaseConfig,
+    pub candle_diffusion: SetupBackendReleaseConfig,
+    pub onnx: SetupBackendReleaseConfig,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -177,28 +181,60 @@ async fn load_config(settings: &SettingsProvider) -> Result<PmidConfig, ServerEr
                 dir: settings
                     .get_optional_string(PMID.setup.backends.dir())
                     .await?,
-                llama: SetupBackendReleaseConfig {
+                ggml_llama: SetupBackendReleaseConfig {
                     tag: settings
-                        .get_optional_string(PMID.setup.backends.llama.tag())
+                        .get_optional_string(PMID.setup.backends.ggml_llama.tag())
                         .await?,
                     asset: settings
-                        .get_optional_string(PMID.setup.backends.llama.asset())
+                        .get_optional_string(PMID.setup.backends.ggml_llama.asset())
                         .await?,
                 },
-                whisper: SetupBackendReleaseConfig {
+                ggml_whisper: SetupBackendReleaseConfig {
                     tag: settings
-                        .get_optional_string(PMID.setup.backends.whisper.tag())
+                        .get_optional_string(PMID.setup.backends.ggml_whisper.tag())
                         .await?,
                     asset: settings
-                        .get_optional_string(PMID.setup.backends.whisper.asset())
+                        .get_optional_string(PMID.setup.backends.ggml_whisper.asset())
                         .await?,
                 },
-                diffusion: SetupBackendReleaseConfig {
+                ggml_diffusion: SetupBackendReleaseConfig {
                     tag: settings
-                        .get_optional_string(PMID.setup.backends.diffusion.tag())
+                        .get_optional_string(PMID.setup.backends.ggml_diffusion.tag())
                         .await?,
                     asset: settings
-                        .get_optional_string(PMID.setup.backends.diffusion.asset())
+                        .get_optional_string(PMID.setup.backends.ggml_diffusion.asset())
+                        .await?,
+                },
+                candle_llama: SetupBackendReleaseConfig {
+                    tag: settings
+                        .get_optional_string(PMID.setup.backends.candle_llama.tag())
+                        .await?,
+                    asset: settings
+                        .get_optional_string(PMID.setup.backends.candle_llama.asset())
+                        .await?,
+                },
+                candle_whisper: SetupBackendReleaseConfig {
+                    tag: settings
+                        .get_optional_string(PMID.setup.backends.candle_whisper.tag())
+                        .await?,
+                    asset: settings
+                        .get_optional_string(PMID.setup.backends.candle_whisper.asset())
+                        .await?,
+                },
+                candle_diffusion: SetupBackendReleaseConfig {
+                    tag: settings
+                        .get_optional_string(PMID.setup.backends.candle_diffusion.tag())
+                        .await?,
+                    asset: settings
+                        .get_optional_string(PMID.setup.backends.candle_diffusion.asset())
+                        .await?,
+                },
+                onnx: SetupBackendReleaseConfig {
+                    tag: settings
+                        .get_optional_string(PMID.setup.backends.onnx.tag())
+                        .await?,
+                    asset: settings
+                        .get_optional_string(PMID.setup.backends.onnx.asset())
                         .await?,
                 },
             },

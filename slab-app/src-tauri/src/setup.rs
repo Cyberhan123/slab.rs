@@ -64,11 +64,14 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
         .path()
         .resolve("resources/lib", BaseDirectory::Resource)?;
     let lib_path_str = lib_path.to_str().ok_or("invalid lib path")?;
-    let settings_path = config_dir()
+    let config_base_dir = config_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("Slab")
-        .join("settings.json");
+        .join("Slab");
+    std::fs::create_dir_all(&config_base_dir)?;
+    let settings_path = config_base_dir.join("settings.json");
+    let database_path = config_base_dir.join("slab.db");
     let settings_path_str = settings_path.to_str().ok_or("invalid settings path")?;
+    let database_url = sqlite_database_url(&database_path);
 
     let sidecar_command = app_handle.shell().sidecar("slab-server")?.args([
         "--gateway-bind",
@@ -81,6 +84,8 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
         "ipc",
         "--lib-dir",
         lib_path_str,
+        "--database-url",
+        database_url.as_str(),
         "--settings-path",
         settings_path_str,
         "--shutdown-on-stdin-close",
@@ -121,4 +126,21 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
 
     println!("Slab sidecar started");
     Ok(())
+}
+
+fn sqlite_database_url(path: &std::path::Path) -> String {
+    let absolute = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    };
+    let normalized = absolute.to_string_lossy().replace('\\', "/");
+    let prefix = if normalized.starts_with('/') {
+        "sqlite://"
+    } else {
+        "sqlite:///"
+    };
+    format!("{prefix}{normalized}?mode=rwc")
 }

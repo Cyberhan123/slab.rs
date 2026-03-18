@@ -52,6 +52,7 @@ pub(super) fn runtime_to_status(err: slab_core::RuntimeError) -> Status {
         slab_core::RuntimeError::EngineIo(_) => Status::internal(msg),
         slab_core::RuntimeError::GGMLEngine(_) => Status::internal(msg),
         slab_core::RuntimeError::CandleEngine(_) => Status::internal(msg),
+        slab_core::CoreError::OnnxEngine(_) => Status::internal(msg)
     }
 }
 

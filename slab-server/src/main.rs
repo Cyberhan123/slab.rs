@@ -20,7 +20,7 @@ use anyhow::{anyhow, Context};
 use clap::Parser;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command as TokioCommand};
-use tracing::{info, warn};
+use tracing::{error, info, warn};
 
 use crate::config::Config;
 use crate::context::AppState;
@@ -264,12 +264,15 @@ fn spawn_backend_child(
     grpc_bind_address: &str,
     args: &SupervisorArgs,
 ) -> anyhow::Result<ManagedChild> {
+    let runtime_log_path = runtime_log_file_path(args, backend);
     let mut cmd = TokioCommand::new(runtime_exe);
     cmd.arg("--enabled-backends")
         .arg(backend)
         .arg("--grpc-bind")
         .arg(grpc_bind_address)
         .arg("--shutdown-on-stdin-close")
+        .arg("--log-file")
+        .arg(&runtime_log_path)
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .stdin(Stdio::piped());
@@ -302,6 +305,7 @@ fn spawn_backend_child(
         backend = backend,
         bind_address = grpc_bind_address,
         pid = ?child.id(),
+        log_file = %runtime_log_path.display(),
         "spawned backend child process"
     );
     Ok(ManagedChild {
@@ -310,6 +314,40 @@ fn spawn_backend_child(
         child,
         stdin,
     })
+}
+
+fn runtime_log_file_path(args: &SupervisorArgs, backend: &str) -> PathBuf {
+    let base_dir = args
+        .settings_path
+        .as_deref()
+        .and_then(Path::parent)
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::temp_dir().join("Slab"));
+    let logs_dir = base_dir.join("logs");
+    if let Err(e) = std::fs::create_dir_all(&logs_dir) {
+        warn!(
+            path = %logs_dir.display(),
+            error = %e,
+            "failed to create runtime log directory; falling back to temp dir"
+        );
+        let fallback_dir = std::env::temp_dir().join("Slab").join("logs");
+        if let Err(fallback_error) = std::fs::create_dir_all(&fallback_dir) {
+            warn!(
+                path = %fallback_dir.display(),
+                error = %fallback_error,
+                "failed to create fallback runtime log directory"
+            );
+            return std::env::temp_dir()
+                .join(format!("slab-runtime-{}-{}.log", std::process::id(), backend));
+        }
+        return fallback_dir.join(format!(
+            "slab-runtime-{}-{}.log",
+            std::process::id(),
+            backend
+        ));
+    }
+
+    logs_dir.join(format!("slab-runtime-{}-{}.log", std::process::id(), backend))
 }
 
 async fn shutdown_children(children: &mut [ManagedChild]) {
@@ -532,13 +570,13 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
 
     children.push(spawn_backend_child(
         &runtime_exe,
-        "whisper",
+        "ggml.whisper",
         &backend_endpoints.whisper,
         &args,
     )?);
     children.push(spawn_backend_child(
         &runtime_exe,
-        "llama",
+        "ggml.llama",
         &backend_endpoints.llama,
         &args,
     )?);
@@ -548,7 +586,7 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
         })?;
         children.push(spawn_backend_child(
             &runtime_exe,
-            "diffusion",
+            "ggml.diffusion",
             diffusion_endpoint,
             &args,
         )?);
@@ -602,6 +640,13 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
             gateway_res = &mut gateway_join => {
                 gateway_result_observed = true;
                 result = map_gateway_join_result(gateway_res);
+                if let Err(e) = &result {
+                    error!(
+                        error = %e,
+                        error_chain = %format_error_chain(e),
+                        "HTTP gateway task exited with error"
+                    );
+                }
                 break;
             }
             _ = tokio::time::sleep(Duration::from_millis(500)) => {
@@ -629,6 +674,7 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
                     }
                 }
                 if result.is_err() {
+                    info!("detected backend child failure; starting shutdown");
                     break;
                 }
             }
@@ -670,6 +716,15 @@ fn map_gateway_join_result(
         Ok(Err(e)) => Err(e),
         Err(e) => Err(anyhow!("gateway task join error: {e}")),
     }
+}
+
+fn format_error_chain(error: &anyhow::Error) -> String {
+    error
+        .chain()
+        .enumerate()
+        .map(|(index, cause)| format!("[{index}] {cause}"))
+        .collect::<Vec<_>>()
+        .join(" -> ")
 }
 
 async fn wait_for_stdin_shutdown_signal() {

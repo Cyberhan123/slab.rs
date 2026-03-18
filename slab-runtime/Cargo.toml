@@ -27,4 +27,5 @@ bytemuck = "1"
 clap = { version = "4.5.60", features = ["derive"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+tracing-appender = "0.2"
 parity-tokio-ipc = "0.9"
