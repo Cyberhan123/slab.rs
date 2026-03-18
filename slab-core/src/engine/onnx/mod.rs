@@ -29,7 +29,7 @@
 //! Input and output tensors are serialised as JSON objects containing:
 //! - `"shape"` – `[i64]` dimension array (e.g. `[1, 3, 224, 224]`)
 //! - `"dtype"` – one of `"float32"`, `"float64"`, `"int32"`, `"int64"`,
-//!   `"uint8"`, `"bool"`
+//!   `"uint8"`
 //! - `"data_b64"` – base-64 encoded little-endian binary tensor data
 
 pub mod adapter;

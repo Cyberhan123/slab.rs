@@ -74,6 +74,10 @@ pub enum CoreError {
     /// An error raised by a GGML engine backend.
     #[error("GGML engine error: {0}")]
     GGMLEngine(String),
+
+    /// An error raised by the ONNX Runtime engine backend.
+    #[error("ONNX engine error: {0}")]
+    OnnxEngine(String),
 }
 
 impl From<std::io::Error> for CoreError {
