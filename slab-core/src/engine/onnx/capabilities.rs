@@ -358,6 +358,17 @@ fn decode_embedding_tensor(bytes: &[u8], output_name: &str) -> Result<Vec<f32>, 
             message: format!("base64 decode failed: {e}"),
         })?;
 
+    if raw.len() % 4 != 0 {
+        return Err(CoreError::GpuStageFailed {
+            stage_name: "onnx.embed_image".into(),
+            message: format!(
+                "output tensor '{output_name}' has {} bytes which is not a multiple of 4 \
+                 (expected float32 data)",
+                raw.len()
+            ),
+        });
+    }
+
     let embedding: Vec<f32> = raw
         .chunks_exact(4)
         .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
