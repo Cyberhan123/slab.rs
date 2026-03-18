@@ -15,7 +15,6 @@
 //! This module requires the `onnx` crate feature.
 
 use std::collections::HashMap;
-use std::sync::Arc;
 
 use async_trait::async_trait;
 
@@ -171,35 +170,31 @@ impl ImageEmbeddingBackend for OnnxImageEmbeddingBackend {
 ///
 /// Suitable for lightweight seq2seq or decoder-only models exported to ONNX
 /// (e.g. GPT-2 ONNX, T5-small ONNX).  Input tokens are provided as a JSON
-/// tensor; output logits / token IDs are returned as a float32 tensor.
+/// tensor following the ONNX backend's wire format; the raw output JSON is
+/// returned as-is in [`TextGenerationResponse::text`].
 ///
 /// For conversational LLMs prefer the GGML or Candle backends which support
-/// KV-cache sessions.  This adapter is best used for classification, summarisation,
-/// or other sequence-to-sequence tasks with short contexts.
-pub struct OnnxTextGenerationBackend {
-    /// Name of the input token IDs tensor (e.g. `"input_ids"`).
-    ///
-    /// Callers that build the tensor JSON manually can pass the tensor
-    /// directly in the prompt without referencing this field.  This field is
-    /// retained for API symmetry and future tokenizer-integration helpers.
-    #[allow(dead_code)]
-    input_ids_name: String,
-    /// Name of the output logits tensor (e.g. `"logits"` or `"output"`).
-    ///
-    /// As with `input_ids_name`, this is retained for future helpers.
-    #[allow(dead_code)]
-    output_logits_name: String,
-}
+/// KV-cache sessions.  This adapter is best used for classification,
+/// summarisation, or other sequence-to-sequence tasks with short contexts.
+///
+/// # Prompt format
+///
+/// Because ONNX models operate on token IDs (not raw text), the `prompt`
+/// field of [`TextGenerationRequest`] must be a JSON-encoded tensor object
+/// following the ONNX backend's tensor wire format.  Apply a tokenizer to
+/// convert text to token IDs and encode the resulting tensor before calling
+/// [`TextGenerationBackend::generate`].
+pub struct OnnxTextGenerationBackend;
 
 impl OnnxTextGenerationBackend {
-    pub fn new(
-        input_ids_name: impl Into<String>,
-        output_logits_name: impl Into<String>,
-    ) -> Self {
-        Self {
-            input_ids_name: input_ids_name.into(),
-            output_logits_name: output_logits_name.into(),
-        }
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for OnnxTextGenerationBackend {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
