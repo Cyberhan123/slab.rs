@@ -87,6 +87,38 @@ pub struct CreateModelRequest {
     pub runtime_presets: Option<RuntimePresetsRequest>,
 }
 
+/// Request body for `POST /v1/models/import`.
+///
+/// This matches the persisted on-disk model config format. The server stores
+/// the uploaded config file under its model config directory and upserts the
+/// corresponding row in the unified `models` table.
+#[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+pub struct ImportModelConfigRequest {
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "id must not be empty"
+    ))]
+    pub id: String,
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "display_name must not be empty"
+    ))]
+    pub display_name: String,
+    #[validate(custom(
+        function = "crate::api::validation::validate_non_blank",
+        message = "provider must not be empty"
+    ))]
+    pub provider: String,
+    /// Initial status. If omitted, defaults to `"ready"` for cloud providers and
+    /// `"not_downloaded"` for local providers.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub spec: ModelSpecRequest,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub runtime_presets: Option<RuntimePresetsRequest>,
+}
+
 /// Request body for `PUT /v1/models/{id}`.
 #[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
 pub struct UpdateModelRequest {

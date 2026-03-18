@@ -15,17 +15,6 @@ export const STATUS_OPTIONS = [
   { value: 'not_downloaded', label: 'Not downloaded' },
   { value: 'error', label: 'Error' },
 ] as const;
-export const BACKEND_OPTIONS = [
-  { id: 'ggml.llama', label: 'Llama', description: 'Text and chat models' },
-  { id: 'ggml.whisper', label: 'Whisper', description: 'Speech and VAD models' },
-  { id: 'ggml.diffusion', label: 'Diffusion', description: 'Image and video models' },
-] as const;
-export const EMPTY_FORM = {
-  displayName: '',
-  repoId: '',
-  filename: '',
-  backendIds: ['ggml.llama'],
-};
 
 export type ModelFilterStatus = (typeof STATUS_OPTIONS)[number]['value'];
 export type ModelStatus = CatalogModelStatus;
@@ -43,8 +32,10 @@ export type ModelItem = {
   pending: boolean;
   updated_at: string;
 };
-export type CreateForm = typeof EMPTY_FORM;
-export type AvailableFilesResponse = { repo_id: string; files: string[] };
+
+type ImportedModelResponse = {
+  display_name?: string;
+};
 
 export function useHubModelCatalog() {
   const [status, setStatus] = useState<ModelFilterStatus>('all');
@@ -52,15 +43,11 @@ export function useHubModelCatalog() {
   const [pageSize, setPageSize] = useState<PageSize>(10);
   const [page, setPage] = useState(1);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
-  const [form, setForm] = useState<CreateForm>(EMPTY_FORM);
-  const [repoLookup, setRepoLookup] = useState<AvailableFilesResponse | null>(null);
-  const [repoLookupFilter, setRepoLookupFilter] = useState('');
-  const [repoLookupLoading, setRepoLookupLoading] = useState(false);
-  const [repoLookupSearched, setRepoLookupSearched] = useState(false);
+  const [createFile, setCreateFile] = useState<File | null>(null);
+  const [createModelPending, setCreateModelPending] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
 
   const searchQuery = useDeferredValue(search).trim().toLowerCase();
-  const repoFilterQuery = useDeferredValue(repoLookupFilter).trim().toLowerCase();
 
   const {
     data,
@@ -69,7 +56,6 @@ export function useHubModelCatalog() {
     isRefetching,
     refetch,
   } = api.useQuery('get', '/v1/models');
-  const createModelMutation = api.useMutation('post', '/v1/models');
   const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
 
   const models = useMemo<ModelItem[]>(
@@ -115,23 +101,10 @@ export function useHubModelCatalog() {
     const start = (page - 1) * pageSize;
     return filteredModels.slice(start, start + pageSize);
   }, [filteredModels, page, pageSize]);
-  const repoFiles = useMemo(() => {
-    const files = [...(repoLookup?.files ?? [])].sort((left, right) => left.localeCompare(right));
-    if (!repoFilterQuery) {
-      return files.slice(0, 200);
-    }
-    return files.filter((file) => file.toLowerCase().includes(repoFilterQuery)).slice(0, 200);
-  }, [repoLookup?.files, repoFilterQuery]);
 
   const showingFrom = filteredModels.length === 0 ? 0 : (page - 1) * pageSize + 1;
   const showingTo = Math.min(page * pageSize, filteredModels.length);
-  const canCreate = Boolean(
-    !createModelMutation.isPending &&
-      form.displayName.trim() &&
-      form.repoId.trim() &&
-      form.filename.trim() &&
-      form.backendIds.length > 0,
-  );
+  const canCreate = Boolean(createFile && !createModelPending);
 
   useEffect(() => {
     setPage(1);
@@ -140,18 +113,6 @@ export function useHubModelCatalog() {
   useEffect(() => {
     setPage((current) => Math.min(current, totalPages));
   }, [totalPages]);
-
-  useEffect(() => {
-    if (!repoLookup) {
-      return;
-    }
-
-    if (repoLookup.repo_id !== form.repoId.trim()) {
-      setRepoLookup(null);
-      setRepoLookupFilter('');
-      setRepoLookupSearched(false);
-    }
-  }, [form.repoId, repoLookup]);
 
   useEffect(() => {
     if (!models.some((model) => model.status === 'downloading')) {
@@ -166,125 +127,51 @@ export function useHubModelCatalog() {
   }, [models, refetch]);
 
   function resetCreateState() {
-    setForm(EMPTY_FORM);
-    setRepoLookup(null);
-    setRepoLookupFilter('');
-    setRepoLookupLoading(false);
-    setRepoLookupSearched(false);
+    setCreateFile(null);
   }
 
   function setCreateOpen(open: boolean) {
     setIsCreateOpen(open);
-    if (!open && !createModelMutation.isPending) {
+    if (!open && !createModelPending) {
       resetCreateState();
     }
   }
 
-  function setField<K extends keyof CreateForm>(key: K, value: CreateForm[K]) {
-    setForm((current) => ({ ...current, [key]: value }));
-  }
-
-  function toggleBackend(id: string, checked: boolean) {
-    setForm((current) => ({
-      ...current,
-      backendIds: checked
-        ? Array.from(new Set([...current.backendIds, id]))
-        : current.backendIds.filter((value) => value !== id),
-    }));
-  }
-
-  function selectRepoFile(file: string) {
-    setField('filename', file);
-    if (!form.displayName.trim()) {
-      setField('displayName', deriveDisplayName(file));
-    }
-  }
-
-  async function searchRepoFiles() {
-    const repoId = form.repoId.trim();
-    if (!repoId) {
-      toast.error('Enter a Hugging Face repo ID first.');
-      return;
-    }
-
-    setRepoLookupLoading(true);
-    setRepoLookupSearched(true);
-    try {
-      const url = new URL('/v1/models/available', API_BASE_URL);
-      url.searchParams.set('repo_id', repoId);
-      const response = await fetch(url.toString(), { method: 'GET' });
-      if (!response.ok) {
-        throw new Error((await response.text()) || `HTTP ${response.status}`);
-      }
-
-      setRepoLookup(parseAvailableFilesResponse(await response.json(), repoId));
-    } catch (lookupError) {
-      setRepoLookup(null);
-      toast.error('Failed to search repo files.', {
-        description:
-          lookupError instanceof Error ? lookupError.message : 'Unknown error',
-      });
-    } finally {
-      setRepoLookupLoading(false);
-    }
+  function updateCreateFile(file: File | null) {
+    setCreateFile(file);
   }
 
   async function createModel() {
-    const backendIds = Array.from(new Set(form.backendIds));
+    if (!createFile || createModelPending) {
+      return;
+    }
 
+    setCreateModelPending(true);
     try {
-      const results = await Promise.allSettled(
-        backendIds.map((backendId) =>
-          createModelMutation.mutateAsync({
-            body: {
-              display_name: form.displayName.trim(),
-              provider: `local.${backendId}`,
-              spec: {
-                repo_id: form.repoId.trim(),
-                filename: form.filename.trim(),
-              },
-            },
-          }),
-        ),
-      );
+      const payload = await readJsonFile(createFile);
+      const created = await importModelConfig(payload);
 
-      const created = results.flatMap((result) =>
-        result.status === 'fulfilled' ? [result.value] : [],
-      );
-      const failed = results.flatMap((result) =>
-        result.status === 'rejected' ? [result.reason] : [],
-      );
-
-      if (created.length === 0) {
-        throw failed[0]?.reason ?? new Error('Unknown model creation error');
-      }
-
-      if (failed.length === 0) {
-        toast.success(
-          created.length === 1 ? 'Model added to catalog.' : 'Models added to catalog.',
-          {
-            description:
-              created.length === 1
-                ? created[0].display_name
-                : `${created.length} backend-specific entries created.`,
-          },
-        );
-      } else {
-        toast.error('Added some model entries, but not every backend succeeded.', {
-          description: `${created.length}/${backendIds.length} entries were created. ${getErrorMessage(
-            failed[0],
-          )}`,
-        });
-      }
+      toast.success('Model config imported.', {
+        description:
+          typeof created?.display_name === 'string' && created.display_name.trim()
+            ? created.display_name
+            : createFile.name,
+      });
 
       setStatus('all');
-      setSearch(form.displayName.trim());
+      setSearch(
+        typeof created?.display_name === 'string' && created.display_name.trim()
+          ? created.display_name.trim()
+          : deriveSearchTermFromFileName(createFile.name),
+      );
       setCreateOpen(false);
       void refetch();
     } catch (createError) {
-      toast.error('Failed to add model.', {
+      toast.error('Failed to import model config.', {
         description: getErrorMessage(createError),
       });
+    } finally {
+      setCreateModelPending(false);
     }
   }
 
@@ -322,16 +209,8 @@ export function useHubModelCatalog() {
     totalPages,
     isCreateOpen,
     setCreateOpen,
-    form,
-    setField,
-    toggleBackend,
-    selectRepoFile,
-    repoLookup,
-    repoLookupFilter,
-    setRepoLookupFilter,
-    repoLookupLoading,
-    repoLookupSearched,
-    repoFiles,
+    createFileName: createFile?.name ?? null,
+    setCreateFile: updateCreateFile,
     modelToDelete,
     setModelToDelete,
     models,
@@ -348,8 +227,7 @@ export function useHubModelCatalog() {
     canCreate,
     createModel,
     deleteModel,
-    searchRepoFiles,
-    createModelPending: createModelMutation.isPending,
+    createModelPending,
     deleteModelPending: deleteModelMutation.isPending,
   };
 }
@@ -373,26 +251,73 @@ function matchesModel(model: ModelItem, query: string) {
     .includes(query);
 }
 
-function deriveDisplayName(filename: string) {
-  return (filename.split('/').at(-1) ?? filename)
-    .replace(/\.(gguf|safetensors|bin|onnx)$/i, '')
+function deriveSearchTermFromFileName(fileName: string) {
+  return (fileName.split('/').at(-1) ?? fileName)
+    .replace(/\.json$/i, '')
     .replace(/[-_]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
 
-function parseAvailableFilesResponse(payload: unknown, fallbackRepoId: string) {
-  if (typeof payload !== 'object' || payload === null) {
-    throw new Error('Invalid repo lookup response.');
+async function readJsonFile(file: File): Promise<unknown> {
+  const raw = await file.text();
+
+  try {
+    return JSON.parse(raw);
+  } catch (error) {
+    throw new Error(
+      `Invalid JSON in ${file.name}: ${error instanceof Error ? error.message : 'Unknown parse error'}`,
+    );
+  }
+}
+
+async function importModelConfig(payload: unknown): Promise<ImportedModelResponse | null> {
+  const response = await fetch(new URL('/v1/models/import', API_BASE_URL), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(parseApiError(raw, response.status));
   }
 
-  const response = payload as { repo_id?: unknown; files?: unknown };
-  if (!Array.isArray(response.files)) {
-    throw new Error('Repo lookup response did not include a file list.');
+  if (!raw.trim()) {
+    return null;
   }
 
-  return {
-    repo_id: typeof response.repo_id === 'string' ? response.repo_id : fallbackRepoId,
-    files: response.files.filter((value): value is string => typeof value === 'string'),
-  };
+  return parseImportedModelResponse(raw);
+}
+
+function parseImportedModelResponse(raw: string): ImportedModelResponse | null {
+  try {
+    const payload = JSON.parse(raw);
+    if (typeof payload !== 'object' || payload === null) {
+      return null;
+    }
+
+    return payload as ImportedModelResponse;
+  } catch {
+    return null;
+  }
+}
+
+function parseApiError(raw: string, status: number) {
+  if (!raw.trim()) {
+    return `HTTP ${status}`;
+  }
+
+  try {
+    const payload = JSON.parse(raw) as { message?: unknown };
+    if (typeof payload.message === 'string' && payload.message.trim()) {
+      return payload.message;
+    }
+  } catch {
+    // Ignore JSON parse failures and fall back to the raw response body.
+  }
+
+  return raw;
 }

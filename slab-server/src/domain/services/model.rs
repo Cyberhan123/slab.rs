@@ -11,10 +11,11 @@ use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand,
     DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec,
-    ModelStatus, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
+    ModelStatus, StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
 };
 use crate::error::ServerError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
+use crate::infra::model_configs;
 use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::LoadedModelSpec;
 
@@ -38,49 +39,14 @@ impl ModelService {
         &self,
         req: CreateModelCommand,
     ) -> Result<UnifiedModel, ServerError> {
-        let provider = req.provider.trim().to_owned();
-        if provider.is_empty() {
-            return Err(ServerError::BadRequest("provider must not be empty".into()));
-        }
-        let spec = canonicalize_model_spec(&provider, req.spec)?;
+        self.persist_model_definition(req).await
+    }
 
-        let status = req.status.unwrap_or_else(|| {
-            if provider.starts_with("cloud.") {
-                UnifiedModelStatus::Ready
-            } else {
-                UnifiedModelStatus::NotDownloaded
-            }
-        });
-
-        let spec_json = serde_json::to_string(&spec)
-            .map_err(|e| ServerError::Internal(format!("failed to serialize spec: {e}")))?;
-        let runtime_presets_json = req
-            .runtime_presets
-            .as_ref()
-            .map(|p| serde_json::to_string(p))
-            .transpose()
-            .map_err(|e| ServerError::Internal(format!("failed to serialize runtime_presets: {e}")))?;
-
-        let now = Utc::now();
-        let record = UnifiedModelRecord {
-            id: uuid::Uuid::new_v4().to_string(),
-            display_name: req.display_name.trim().to_owned(),
-            provider,
-            status: status.as_str().to_owned(),
-            spec: spec_json,
-            runtime_presets: runtime_presets_json,
-            created_at: now,
-            updated_at: now,
-        };
-
-        self.model_state
-            .store()
-            .insert_model(record.clone())
-            .await?;
-
-        record
-            .try_into()
-            .map_err(|e: String| ServerError::Internal(e))
+    pub async fn import_model_config(
+        &self,
+        req: CreateModelCommand,
+    ) -> Result<UnifiedModel, ServerError> {
+        self.persist_model_definition(req).await
     }
 
     pub async fn get_model(&self, id: &str) -> Result<UnifiedModel, ServerError> {
@@ -112,50 +78,16 @@ impl ModelService {
             .try_into()
             .map_err(|e: String| ServerError::Internal(e))?;
 
-        let display_name = req
-            .display_name
-            .unwrap_or(existing_model.display_name)
-            .trim()
-            .to_owned();
-        let provider = req
-            .provider
-            .unwrap_or(existing_model.provider)
-            .trim()
-            .to_owned();
-        let status = req.status.unwrap_or(existing_model.status);
-        let spec = canonicalize_model_spec(&provider, req.spec.unwrap_or(existing_model.spec))?;
-        let runtime_presets = req.runtime_presets.or(existing_model.runtime_presets);
+        let next = CreateModelCommand {
+            id: Some(existing_model.id),
+            display_name: req.display_name.unwrap_or(existing_model.display_name),
+            provider: req.provider.unwrap_or(existing_model.provider),
+            status: Some(req.status.unwrap_or(existing_model.status)),
+            spec: req.spec.unwrap_or(existing_model.spec),
+            runtime_presets: req.runtime_presets.or(existing_model.runtime_presets),
+        };
 
-        let spec_json = serde_json::to_string(&spec)
-            .map_err(|e| ServerError::Internal(format!("failed to serialize spec: {e}")))?;
-        let runtime_presets_json = runtime_presets
-            .as_ref()
-            .map(|p| serde_json::to_string(p))
-            .transpose()
-            .map_err(|e| ServerError::Internal(format!("failed to serialize runtime_presets: {e}")))?;
-
-        self.model_state
-            .store()
-            .update_model(
-                id,
-                &display_name,
-                &provider,
-                status.as_str(),
-                &spec_json,
-                runtime_presets_json.as_deref(),
-            )
-            .await?;
-
-        let updated = self
-            .model_state
-            .store()
-            .get_model(id)
-            .await?
-            .ok_or_else(|| ServerError::NotFound(format!("model {id} not found after update")))?;
-
-        updated
-            .try_into()
-            .map_err(|e: String| ServerError::Internal(e))
+        self.persist_model_definition(next).await
     }
 
     pub async fn delete_model(&self, id: &str) -> Result<DeletedModelView, ServerError> {
@@ -163,6 +95,8 @@ impl ModelService {
         if exists.is_none() {
             return Err(ServerError::NotFound(format!("model {id} not found")));
         }
+
+        let _ = model_configs::delete_model_config(self.model_config_dir(), id)?;
         self.model_state.store().delete_model(id).await?;
         Ok(DeletedModelView {
             id: id.to_owned(),
@@ -255,6 +189,43 @@ impl ModelService {
             .await
     }
 
+    pub async fn sync_model_configs_from_disk(&self) -> Result<(), ServerError> {
+        let config_dir = self.model_config_dir().to_path_buf();
+        let paths = model_configs::list_model_config_paths(&config_dir)?;
+        if paths.is_empty() {
+            info!(path = %config_dir.display(), "no model config files found during startup");
+            return Ok(());
+        }
+
+        let mut imported = 0usize;
+        for path in paths {
+            let config = match model_configs::read_model_config(&path) {
+                Ok(config) => config,
+                Err(error) => {
+                    warn!(path = %path.display(), error = %error, "skipping invalid model config file");
+                    continue;
+                }
+            };
+
+            match self.persist_model_definition(config.into()).await {
+                Ok(model) => {
+                    imported += 1;
+                    info!(model_id = %model.id, path = %path.display(), "initialized model from config file");
+                }
+                Err(error) => {
+                    warn!(path = %path.display(), error = %error, "failed to initialize model from config file");
+                }
+            }
+        }
+
+        info!(
+            path = %config_dir.display(),
+            imported,
+            "model config startup sync complete"
+        );
+        Ok(())
+    }
+
     pub async fn download_model(
         &self,
         req: DownloadModelCommand,
@@ -310,6 +281,7 @@ impl ModelService {
         .to_string();
 
         let store = Arc::clone(self.model_state.store());
+        let model_config_dir = self.model_config_dir().to_path_buf();
         let operation_id = self
             .worker_state
             .submit_operation(
@@ -389,6 +361,41 @@ impl ModelService {
                                 return;
                             }
 
+                            let updated_record = match store.get_model(&model_id).await {
+                                Ok(Some(record)) => record,
+                                Ok(None) => {
+                                    let message = format!(
+                                        "downloaded file but model {model_id} no longer exists after update"
+                                    );
+                                    if let Err(db_error) = operation.mark_failed(&message).await {
+                                        warn!(task_id = %operation_id, error = %db_error, "failed to persist missing model after download");
+                                    }
+                                    return;
+                                }
+                                Err(error) => {
+                                    let message = format!(
+                                        "downloaded file but failed to reload model {model_id}: {error}"
+                                    );
+                                    if let Err(db_error) = operation.mark_failed(&message).await {
+                                        warn!(task_id = %operation_id, error = %db_error, "failed to persist model reload error after download");
+                                    }
+                                    return;
+                                }
+                            };
+
+                            if let Err(error) =
+                                sync_model_config_record(&model_config_dir, updated_record)
+                            {
+                                warn!(task_id = %operation_id, error = %error, "failed to sync downloaded model config file");
+                                let message = format!(
+                                    "downloaded file but failed to sync model config: {error}"
+                                );
+                                if let Err(db_error) = operation.mark_failed(&message).await {
+                                    warn!(task_id = %operation_id, error = %db_error, "failed to persist config sync failure after download");
+                                }
+                                return;
+                            }
+
                             let result_json =
                                 serde_json::json!({ "local_path": local_path }).to_string();
                             if let Err(db_error) = operation.mark_succeeded(&result_json).await {
@@ -421,6 +428,63 @@ impl ModelService {
         );
 
         Ok(AcceptedOperation { operation_id })
+    }
+
+    fn model_config_dir(&self) -> &std::path::Path {
+        self.model_state.config().model_config_dir.as_path()
+    }
+
+    async fn persist_model_definition(
+        &self,
+        req: CreateModelCommand,
+    ) -> Result<UnifiedModel, ServerError> {
+        let model = self.build_model_definition(req).await?;
+        self.write_model_config(&model)?;
+
+        let record = model_to_record(&model)?;
+        self.model_state.store().upsert_model(record).await?;
+        Ok(model)
+    }
+
+    async fn build_model_definition(
+        &self,
+        req: CreateModelCommand,
+    ) -> Result<UnifiedModel, ServerError> {
+        let id = normalize_required_text(
+            req.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+            "id",
+        )?;
+        let display_name = normalize_required_text(req.display_name, "display_name")?;
+        let provider = normalize_required_text(req.provider, "provider")?;
+        let spec = canonicalize_model_spec(&provider, req.spec)?;
+        let runtime_presets = canonicalize_runtime_presets(req.runtime_presets);
+        let status = req
+            .status
+            .unwrap_or_else(|| default_status_for_provider(&provider));
+
+        let existing_record = self.model_state.store().get_model(&id).await?;
+        let now = Utc::now();
+        let created_at = existing_record
+            .as_ref()
+            .map(|record| record.created_at)
+            .unwrap_or(now);
+
+        Ok(UnifiedModel {
+            id,
+            display_name,
+            provider,
+            status,
+            spec,
+            runtime_presets,
+            created_at,
+            updated_at: now,
+        })
+    }
+
+    fn write_model_config(&self, model: &UnifiedModel) -> Result<(), ServerError> {
+        let config: StoredModelConfig = model.clone().into();
+        model_configs::write_model_config(self.model_config_dir(), &config)?;
+        Ok(())
     }
 
     async fn load_model_command(
@@ -473,6 +537,28 @@ fn canonicalize_model_spec(provider: &str, mut spec: ModelSpec) -> Result<ModelS
     Ok(spec)
 }
 
+fn canonicalize_runtime_presets(
+    runtime_presets: Option<crate::domain::models::RuntimePresets>,
+) -> Option<crate::domain::models::RuntimePresets> {
+    runtime_presets.filter(|presets| presets.temperature.is_some() || presets.top_p.is_some())
+}
+
+fn default_status_for_provider(provider: &str) -> UnifiedModelStatus {
+    if provider.starts_with("cloud.") {
+        UnifiedModelStatus::Ready
+    } else {
+        UnifiedModelStatus::NotDownloaded
+    }
+}
+
+fn normalize_required_text(value: String, label: &str) -> Result<String, ServerError> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(ServerError::BadRequest(format!("{label} must not be empty")));
+    }
+    Ok(trimmed.to_owned())
+}
+
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
@@ -484,10 +570,46 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
     })
 }
 
+fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord, ServerError> {
+    let spec_json = serde_json::to_string(&model.spec)
+        .map_err(|error| ServerError::Internal(format!("failed to serialize spec: {error}")))?;
+    let runtime_presets_json = model
+        .runtime_presets
+        .as_ref()
+        .map(|presets| serde_json::to_string(presets))
+        .transpose()
+        .map_err(|error| {
+            ServerError::Internal(format!("failed to serialize runtime_presets: {error}"))
+        })?;
+
+    Ok(UnifiedModelRecord {
+        id: model.id.clone(),
+        display_name: model.display_name.clone(),
+        provider: model.provider.clone(),
+        status: model.status.as_str().to_owned(),
+        spec: spec_json,
+        runtime_presets: runtime_presets_json,
+        created_at: model.created_at,
+        updated_at: model.updated_at,
+    })
+}
+
+fn sync_model_config_record(
+    config_dir: &std::path::Path,
+    record: UnifiedModelRecord,
+) -> Result<(), ServerError> {
+    let model: UnifiedModel = record
+        .try_into()
+        .map_err(|error: String| ServerError::Internal(error))?;
+    let config: StoredModelConfig = model.into();
+    model_configs::write_model_config(config_dir, &config)?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
-    use super::canonicalize_model_spec;
-    use crate::domain::models::ModelSpec;
+    use super::{canonicalize_model_spec, canonicalize_runtime_presets, normalize_required_text};
+    use crate::domain::models::{ModelSpec, RuntimePresets};
 
     #[test]
     fn cloud_models_require_remote_model_and_provider_reference() {
@@ -516,6 +638,23 @@ mod tests {
 
         assert_eq!(spec.provider_id.as_deref(), Some("openai-main"));
         assert_eq!(spec.remote_model_id.as_deref(), Some("gpt-4.1-mini"));
+    }
+
+    #[test]
+    fn empty_runtime_presets_are_dropped() {
+        let presets = canonicalize_runtime_presets(Some(RuntimePresets {
+            temperature: None,
+            top_p: None,
+        }));
+
+        assert!(presets.is_none());
+    }
+
+    #[test]
+    fn required_text_fields_are_trimmed() {
+        let value = normalize_required_text("  model-id  ".into(), "id").expect("trimmed value");
+
+        assert_eq!(value, "model-id");
     }
 }
 

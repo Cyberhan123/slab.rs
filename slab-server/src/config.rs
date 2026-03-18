@@ -1,7 +1,7 @@
 //! Server configuration, loaded from environment variables at startup.
 
 use dirs_next::config_dir;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Runtime configuration for slab-server.
 ///
@@ -82,6 +82,13 @@ pub struct Config {
 
     /// Absolute path of the user-managed settings values file.
     pub settings_path: PathBuf,
+
+    /// Directory containing persisted model config JSON files.
+    ///
+    /// Files in this directory are scanned during startup and upserted into the
+    /// unified `models` table so the catalog can be initialized from bundled or
+    /// user-managed config files.
+    pub model_config_dir: PathBuf,
 }
 
 impl Config {
@@ -114,6 +121,10 @@ impl Config {
                 .ok()
                 .map(PathBuf::from)
                 .unwrap_or_else(default_settings_path),
+            model_config_dir: std::env::var("SLAB_MODEL_CONFIG_DIR")
+                .ok()
+                .map(PathBuf::from)
+                .unwrap_or_else(default_model_config_dir),
         }
     }
 }
@@ -134,4 +145,16 @@ fn parse_env<T: std::str::FromStr>(key: &str, default: T) -> T {
 pub fn default_settings_path() -> PathBuf {
     let base_dir = config_dir().unwrap_or_else(|| PathBuf::from("."));
     base_dir.join("Slab").join("settings.json")
+}
+
+pub fn default_model_config_dir() -> PathBuf {
+    default_model_config_dir_for_settings_path(&default_settings_path())
+}
+
+pub fn default_model_config_dir_for_settings_path(settings_path: &Path) -> PathBuf {
+    settings_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("models")
 }

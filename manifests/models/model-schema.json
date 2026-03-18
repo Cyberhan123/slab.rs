@@ -3,7 +3,7 @@
   "title": "UnifiedModel",
   "description": "Unified schema for both local and cloud AI models managed by slab-server.",
   "type": "object",
-  "required": ["id", "display_name", "provider", "status", "spec"],
+  "required": ["id", "display_name", "provider", "spec"],
   "properties": {
     "id": {
       "type": "string",
@@ -20,7 +20,7 @@
     "status": {
       "type": "string",
       "enum": ["ready", "not_downloaded", "downloading", "error"],
-      "description": "Current status of the model. Cloud models default to 'ready'. Local models start as 'not_downloaded'."
+      "description": "Optional current status of the model. Cloud models default to 'ready'. Local models default to 'not_downloaded'."
     },
     "spec": {
       "type": "object",

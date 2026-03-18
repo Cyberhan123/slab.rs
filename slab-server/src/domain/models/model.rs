@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 
 use crate::api::v1::models::schema::{
-    CreateModelRequest, ListModelsQuery, LoadModelRequest, SwitchModelRequest, UpdateModelRequest,
+    CreateModelRequest, ImportModelConfigRequest, ListModelsQuery, LoadModelRequest,
+    SwitchModelRequest, UpdateModelRequest,
 };
 use crate::infra::db::UnifiedModelRecord;
 
@@ -109,11 +110,25 @@ pub struct UnifiedModel {
 
 #[derive(Debug, Clone)]
 pub struct CreateModelCommand {
+    pub id: Option<String>,
     pub display_name: String,
     pub provider: String,
     /// If `None`, the status is inferred from the provider prefix.
     pub status: Option<UnifiedModelStatus>,
     pub spec: ModelSpec,
+    pub runtime_presets: Option<RuntimePresets>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StoredModelConfig {
+    pub id: String,
+    pub display_name: String,
+    pub provider: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status: Option<UnifiedModelStatus>,
+    #[serde(default)]
+    pub spec: ModelSpec,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub runtime_presets: Option<RuntimePresets>,
 }
 
@@ -173,10 +188,24 @@ pub struct DownloadModelCommand {
 impl From<CreateModelRequest> for CreateModelCommand {
     fn from(req: CreateModelRequest) -> Self {
         Self {
+            id: None,
             display_name: req.display_name,
             provider: req.provider,
             status: req.status.and_then(|s| s.parse().ok()),
             spec: req.spec.map(Into::into).unwrap_or_default(),
+            runtime_presets: req.runtime_presets.map(Into::into),
+        }
+    }
+}
+
+impl From<ImportModelConfigRequest> for CreateModelCommand {
+    fn from(req: ImportModelConfigRequest) -> Self {
+        Self {
+            id: Some(req.id),
+            display_name: req.display_name,
+            provider: req.provider,
+            status: req.status.and_then(|s| s.parse().ok()),
+            spec: req.spec.into(),
             runtime_presets: req.runtime_presets.map(Into::into),
         }
     }
@@ -311,6 +340,32 @@ impl From<crate::api::v1::models::schema::RuntimePresetsRequest> for RuntimePres
         Self {
             temperature: req.temperature,
             top_p: req.top_p,
+        }
+    }
+}
+
+impl From<StoredModelConfig> for CreateModelCommand {
+    fn from(config: StoredModelConfig) -> Self {
+        Self {
+            id: Some(config.id),
+            display_name: config.display_name,
+            provider: config.provider,
+            status: config.status,
+            spec: config.spec,
+            runtime_presets: config.runtime_presets,
+        }
+    }
+}
+
+impl From<UnifiedModel> for StoredModelConfig {
+    fn from(model: UnifiedModel) -> Self {
+        Self {
+            id: model.id,
+            display_name: model.display_name,
+            provider: model.provider,
+            status: Some(model.status),
+            spec: model.spec,
+            runtime_presets: model.runtime_presets,
         }
     }
 }

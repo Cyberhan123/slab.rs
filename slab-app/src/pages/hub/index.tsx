@@ -38,8 +38,8 @@ export default function Hub() {
                 <div className="space-y-1">
                   <p className="text-sm font-medium">Model catalog</p>
                   <p className="text-sm text-muted-foreground">
-                    Add models from Hugging Face repositories, inspect repo files, and manage
-                    runtime-ready catalog entries in one place.
+                    Import model config JSON files and manage runtime-ready catalog entries in one
+                    place.
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -64,7 +64,7 @@ export default function Hub() {
                 </Button>
                 <Button onClick={() => hub.setCreateOpen(true)}>
                   <Plus className="mr-2 h-4 w-4" />
-                  Add model
+                  Import model
                 </Button>
               </div>
             </div>
@@ -135,12 +135,12 @@ export default function Hub() {
                     : 'No rows on this page.'}
                 </p>
                 <p className="mt-2 text-sm text-muted-foreground">
-                  Try another search term, change the status filter, or add a new model entry.
+                  Try another search term, change the status filter, or import a new model config.
                 </p>
                 <div className="mt-4 flex justify-center">
                   <Button onClick={() => hub.setCreateOpen(true)}>
                     <Plus className="mr-2 h-4 w-4" />
-                    Add model
+                    Import model
                   </Button>
                 </div>
               </div>
@@ -187,19 +187,10 @@ export default function Hub() {
       <HubCreateModelDialog
         open={hub.isCreateOpen}
         onOpenChange={hub.setCreateOpen}
-        form={hub.form}
-        setField={hub.setField}
-        toggleBackend={hub.toggleBackend}
-        repoLookupRepoId={hub.repoLookup?.repo_id}
-        repoLookupFilter={hub.repoLookupFilter}
-        setRepoLookupFilter={hub.setRepoLookupFilter}
-        repoLookupLoading={hub.repoLookupLoading}
-        repoLookupSearched={hub.repoLookupSearched}
-        repoFiles={hub.repoFiles}
+        selectedFileName={hub.createFileName}
+        setCreateFile={hub.setCreateFile}
         canCreate={hub.canCreate}
         createPending={hub.createModelPending}
-        onSearchRepoFiles={() => void hub.searchRepoFiles()}
-        onSelectRepoFile={hub.selectRepoFile}
         onCreate={() => void hub.createModel()}
       />
 
