@@ -75,6 +75,9 @@ pub enum CoreError {
     #[error("GGML engine error: {0}")]
     GGMLEngine(String),
 
+    /// An error raised by the ONNX Runtime engine backend.
+    #[error("ONNX engine error: {0}")]
+    OnnxEngine(String),
     /// An error raised by a Candle engine backend.
     #[error("Candle engine error: {0}")]
     CandleEngine(String),

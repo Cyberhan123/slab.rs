@@ -32,6 +32,12 @@ pub enum Backend {
     GGMLWhisper,
     #[strum(serialize = "ggml.diffusion")]
     GGMLDiffusion,
+    /// ONNX Runtime backend for general-purpose ONNX model inference.
+    ///
+    /// Supports classification, detection, embedding, and any other model
+    /// exported to the `.onnx` format.  Requires the `onnx` feature flag.
+    #[strum(serialize = "onnx")]
+    Onnx,
     // ── Candle backends (statically-linked Rust) ──────────────────────────────
     /// Candle-powered LLaMA / quantised-LLM inference.
     #[strum(serialize = "candle.llama")]
