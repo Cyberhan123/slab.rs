@@ -348,8 +348,11 @@ fn runtime_log_file_path(args: &SupervisorArgs, backend: &str) -> PathBuf {
                 error = %fallback_error,
                 "failed to create fallback runtime log directory"
             );
-            return std::env::temp_dir()
-                .join(format!("slab-runtime-{}-{}.log", std::process::id(), backend));
+            return std::env::temp_dir().join(format!(
+                "slab-runtime-{}-{}.log",
+                std::process::id(),
+                backend
+            ));
         }
         return fallback_dir.join(format!(
             "slab-runtime-{}-{}.log",
@@ -358,7 +361,11 @@ fn runtime_log_file_path(args: &SupervisorArgs, backend: &str) -> PathBuf {
         ));
     }
 
-    logs_dir.join(format!("slab-runtime-{}-{}.log", std::process::id(), backend))
+    logs_dir.join(format!(
+        "slab-runtime-{}-{}.log",
+        std::process::id(),
+        backend
+    ))
 }
 
 async fn shutdown_children(children: &mut [ManagedChild]) {

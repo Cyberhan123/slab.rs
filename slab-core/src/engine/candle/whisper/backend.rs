@@ -56,17 +56,17 @@ impl CandleWhisperWorker {
     /// `lib.load` is a no-op for Candle (statically linked).
     #[on_event(LoadLibrary)]
     async fn on_load_library(&mut self, req: BackendRequest) {
-        let _ = req
-            .reply_tx
-            .send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+        let _ = req.reply_tx.send(BackendReply::Value(Payload::Bytes(
+            Arc::from([] as [u8; 0]),
+        )));
     }
 
     /// `lib.reload` is a no-op for Candle (statically linked).
     #[on_event(ReloadLibrary)]
     async fn on_reload_library(&mut self, req: BackendRequest) {
-        let _ = req
-            .reply_tx
-            .send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+        let _ = req.reply_tx.send(BackendReply::Value(Payload::Bytes(
+            Arc::from([] as [u8; 0]),
+        )));
     }
 
     #[on_event(LoadModel)]
@@ -110,8 +110,7 @@ impl CandleWhisperWorker {
         if let Some(engine) = self.engine.as_ref() {
             if !engine.is_model_loaded() {
                 let engine = engine.clone();
-                let result =
-                    tokio::task::block_in_place(|| engine.load_model(&model_path, None));
+                let result = tokio::task::block_in_place(|| engine.load_model(&model_path, None));
                 if let Err(e) = result {
                     tracing::warn!(
                         model_path,
@@ -187,9 +186,8 @@ impl CandleWhisperWorker {
         let model_path = config.model_path.clone();
         let engine_clone = engine.clone();
 
-        let result = tokio::task::block_in_place(move || {
-            engine_clone.load_model(&model_path, tok_path)
-        });
+        let result =
+            tokio::task::block_in_place(move || engine_clone.load_model(&model_path, tok_path));
 
         match result {
             Ok(()) => {
@@ -296,7 +294,9 @@ pub(crate) fn spawn_backend(
         shared_ingress_rx,
         control_tx,
         count.max(1),
-        |worker_id, bc_tx| CandleWhisperWorker::new(Some(CandleWhisperEngine::new()), bc_tx, worker_id),
+        |worker_id, bc_tx| {
+            CandleWhisperWorker::new(Some(CandleWhisperEngine::new()), bc_tx, worker_id)
+        },
     );
 }
 
@@ -304,8 +304,8 @@ pub(crate) fn spawn_backend(
 mod tests {
     use super::CandleWhisperWorker;
     use crate::scheduler::backend::protocol::RuntimeControlSignal;
-    use tokio::sync::broadcast;
     use crate::scheduler::backend::protocol::WorkerCommand;
+    use tokio::sync::broadcast;
 
     fn make_worker() -> CandleWhisperWorker {
         let (bc_tx, _bc_rx) = broadcast::channel::<WorkerCommand>(8);

@@ -95,4 +95,3 @@ async fn chat_completions(
         }
     }
 }
-

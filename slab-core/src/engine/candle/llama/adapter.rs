@@ -117,27 +117,26 @@ impl CandleLlamaEngine {
 
             tracing::info!(model_path, "loading candle llama model (GGUF)");
 
-            let mut model_file = File::open(path).map_err(|e| CandleLlamaEngineError::LoadModel {
-                model_path: model_path.to_owned(),
-                message: e.to_string(),
+            let mut model_file =
+                File::open(path).map_err(|e| CandleLlamaEngineError::LoadModel {
+                    model_path: model_path.to_owned(),
+                    message: e.to_string(),
+                })?;
+
+            let gguf = gguf_file::Content::read(&mut model_file).map_err(|e| {
+                CandleLlamaEngineError::LoadModel {
+                    model_path: model_path.to_owned(),
+                    message: e.to_string(),
+                }
             })?;
 
-            let gguf =
-                gguf_file::Content::read(&mut model_file).map_err(|e| {
-                    CandleLlamaEngineError::LoadModel {
-                        model_path: model_path.to_owned(),
-                        message: e.to_string(),
-                    }
-                })?;
-
             let device = Device::Cpu;
-            let weights =
-                ModelWeights::from_gguf(gguf, &mut model_file, &device).map_err(|e| {
-                    CandleLlamaEngineError::LoadModel {
-                        model_path: model_path.to_owned(),
-                        message: e.to_string(),
-                    }
-                })?;
+            let weights = ModelWeights::from_gguf(gguf, &mut model_file, &device).map_err(|e| {
+                CandleLlamaEngineError::LoadModel {
+                    model_path: model_path.to_owned(),
+                    message: e.to_string(),
+                }
+            })?;
 
             tracing::info!(
                 tokenizer_path = %tok_path.display(),
@@ -150,11 +149,12 @@ impl CandleLlamaEngine {
                 }
             })?;
 
-            let mut state = self.inner.write().map_err(|_| {
-                CandleLlamaEngineError::LockPoisoned {
-                    operation: "write model state",
-                }
-            })?;
+            let mut state =
+                self.inner
+                    .write()
+                    .map_err(|_| CandleLlamaEngineError::LockPoisoned {
+                        operation: "write model state",
+                    })?;
             state.model = Some(weights);
             state.tokenizer = Some(tokenizer);
             state.seed = seed;
@@ -175,9 +175,12 @@ impl CandleLlamaEngine {
 
     /// Unload the current model and clear all sessions.
     pub fn unload(&self) -> Result<(), EngineError> {
-        let mut state = self.inner.write().map_err(|_| CandleLlamaEngineError::LockPoisoned {
-            operation: "write model state for unload",
-        })?;
+        let mut state = self
+            .inner
+            .write()
+            .map_err(|_| CandleLlamaEngineError::LockPoisoned {
+                operation: "write model state for unload",
+            })?;
         state.model = None;
         state.tokenizer = None;
         state.sessions.clear();
@@ -194,20 +197,28 @@ impl CandleLlamaEngine {
 
     /// Create a new session and return its ID.
     pub async fn create_session(&self) -> Result<SessionId, EngineError> {
-        let mut state = self.inner.write().map_err(|_| CandleLlamaEngineError::LockPoisoned {
-            operation: "create session",
-        })?;
+        let mut state = self
+            .inner
+            .write()
+            .map_err(|_| CandleLlamaEngineError::LockPoisoned {
+                operation: "create session",
+            })?;
         let sid = state.next_session_id;
         state.next_session_id += 1;
-        state.sessions.insert(sid, SessionState { tokens: Vec::new() });
+        state
+            .sessions
+            .insert(sid, SessionState { tokens: Vec::new() });
         Ok(sid)
     }
 
     /// End a session and release its KV cache.
     pub async fn end_session(&self, session_id: SessionId) -> Result<(), EngineError> {
-        let mut state = self.inner.write().map_err(|_| CandleLlamaEngineError::LockPoisoned {
-            operation: "end session",
-        })?;
+        let mut state = self
+            .inner
+            .write()
+            .map_err(|_| CandleLlamaEngineError::LockPoisoned {
+                operation: "end session",
+            })?;
         state.sessions.remove(&session_id);
         Ok(())
     }
@@ -374,15 +385,14 @@ impl CandleLlamaEngine {
         let mut forward_pos = all_tokens.len().saturating_sub(1);
 
         for _ in 0..max_new_tokens {
-            let input = match Tensor::new(all_tokens.as_slice(), &device)
-                .and_then(|t| t.unsqueeze(0))
-            {
-                Ok(t) => t,
-                Err(e) => {
-                    send(StreamChunk::Error(format!("tensor error: {e}")));
-                    return;
-                }
-            };
+            let input =
+                match Tensor::new(all_tokens.as_slice(), &device).and_then(|t| t.unsqueeze(0)) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        send(StreamChunk::Error(format!("tensor error: {e}")));
+                        return;
+                    }
+                };
 
             // Acquire write lock once per token for forward + decode.
             let (next_token, token_text) = {

@@ -270,15 +270,14 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
                 UnifiedModelStatus::Error
             });
 
-        let spec: ModelSpec = serde_json::from_str(&record.spec)
-            .unwrap_or_else(|e| {
-                tracing::warn!(
-                    id = %record.id,
-                    error = %e,
-                    "failed to deserialize model spec JSON; using empty spec"
-                );
-                ModelSpec::default()
-            });
+        let spec: ModelSpec = serde_json::from_str(&record.spec).unwrap_or_else(|e| {
+            tracing::warn!(
+                id = %record.id,
+                error = %e,
+                "failed to deserialize model spec JSON; using empty spec"
+            );
+            ModelSpec::default()
+        });
 
         let runtime_presets: Option<RuntimePresets> = record
             .runtime_presets
@@ -369,4 +368,3 @@ impl From<UnifiedModel> for StoredModelConfig {
         }
     }
 }
-

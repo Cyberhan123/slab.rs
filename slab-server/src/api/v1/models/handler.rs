@@ -54,7 +54,10 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/models", get(list_models).post(create_model))
         .route("/models/import", post(import_model_config))
-        .route("/models/{id}", get(get_model).put(update_model).delete(delete_model))
+        .route(
+            "/models/{id}",
+            get(get_model).put(update_model).delete(delete_model),
+        )
         .route("/models/available", get(list_available_models))
         .route("/models/load", post(load_model))
         .route("/models/unload", post(unload_model))
@@ -298,4 +301,3 @@ struct ModelIdPath {
     ))]
     id: String,
 }
-

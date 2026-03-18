@@ -304,15 +304,12 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
     if config.onnx_enabled {
         use crate::engine::onnx::backend::OnnxWorker;
 
-        rm.register_backend(
-            Backend::Onnx.to_string(),
-            move |shared_rx, control_tx| {
-                let count = worker_count.max(1);
-                spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
-                    OnnxWorker::new(bc_tx, worker_id)
-                });
-            },
-        );
+        rm.register_backend(Backend::Onnx.to_string(), move |shared_rx, control_tx| {
+            let count = worker_count.max(1);
+            spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+                OnnxWorker::new(bc_tx, worker_id)
+            });
+        });
     }
 
     // ── Candle backends (statically linked; no library load phase) ────────────
@@ -360,7 +357,6 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
 
     Ok(())
 }
-
 
 // ── Library management ─────────────────────────────────────────────────────────
 

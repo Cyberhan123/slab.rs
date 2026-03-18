@@ -5,10 +5,8 @@ use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
 use crate::domain::models::{
-    ModelSpec as DomainModelSpec,
-    ModelStatus as DomainModelStatus,
-    RuntimePresets as DomainRuntimePresets,
-    UnifiedModel as DomainUnifiedModel,
+    ModelSpec as DomainModelSpec, ModelStatus as DomainModelStatus,
+    RuntimePresets as DomainRuntimePresets, UnifiedModel as DomainUnifiedModel,
     UnifiedModelStatus as DomainUnifiedModelStatus,
 };
 
@@ -330,4 +328,3 @@ impl From<DomainUnifiedModelStatus> for String {
         status.as_str().to_owned()
     }
 }
-

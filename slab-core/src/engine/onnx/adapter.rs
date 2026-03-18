@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use base64::Engine as _;
 use ort::{
     ep::ExecutionProviderDispatch,
-    session::{Session, builder::GraphOptimizationLevel},
+    session::{builder::GraphOptimizationLevel, Session},
     value::{DynValue, Tensor, TensorElementType, ValueType},
 };
 use serde_json::{json, Value as JsonValue};
@@ -48,7 +48,10 @@ impl OnnxEngine {
     /// Load the ONNX model at `config.model_path` and create a session.
     ///
     /// Any previously loaded session is replaced.
-    pub(crate) fn load_model(&mut self, config: OnnxModelLoadConfig) -> Result<(), OnnxEngineError> {
+    pub(crate) fn load_model(
+        &mut self,
+        config: OnnxModelLoadConfig,
+    ) -> Result<(), OnnxEngineError> {
         info!(
             model = %config.model_path,
             providers = ?config.execution_providers,
@@ -110,19 +113,19 @@ impl OnnxEngine {
                 })?;
         }
 
-        builder = builder
-            .with_execution_providers(ep_list)
-            .map_err(|e| OnnxEngineError::SessionCreate {
+        builder = builder.with_execution_providers(ep_list).map_err(|e| {
+            OnnxEngineError::SessionCreate {
                 path: config.model_path.clone(),
                 source: e.into(),
-            })?;
+            }
+        })?;
 
-        let session = builder
-            .commit_from_file(&config.model_path)
-            .map_err(|e| OnnxEngineError::SessionCreate {
+        let session = builder.commit_from_file(&config.model_path).map_err(|e| {
+            OnnxEngineError::SessionCreate {
                 path: config.model_path.clone(),
                 source: e.into(),
-            })?;
+            }
+        })?;
 
         info!(model = %config.model_path, "ONNX: model loaded");
         self.session = Some(session);
@@ -265,8 +268,10 @@ fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngi
 
 /// Serialise an `ort` output value to the JSON wire format.
 fn ort_value_to_json(name: &str, value: &DynValue) -> Result<JsonValue, OnnxEngineError> {
-    let encode_err =
-        |reason: String| OnnxEngineError::TensorEncode { name: name.to_string(), reason };
+    let encode_err = |reason: String| OnnxEngineError::TensorEncode {
+        name: name.to_string(),
+        reason,
+    };
 
     // dtype() returns &ValueType directly (not Result).
     let value_type = value.dtype().clone();
@@ -274,8 +279,8 @@ fn ort_value_to_json(name: &str, value: &DynValue) -> Result<JsonValue, OnnxEngi
     match value_type {
         ValueType::Tensor { ty, shape, .. } => {
             let shape_vec: Vec<i64> = shape.to_vec();
-            let (dtype_str, data_b64) = encode_tensor_to_base64(name, value, ty)
-                .map_err(|e| encode_err(e.to_string()))?;
+            let (dtype_str, data_b64) =
+                encode_tensor_to_base64(name, value, ty).map_err(|e| encode_err(e.to_string()))?;
 
             Ok(json!({
                 "shape": shape_vec,
@@ -295,18 +300,17 @@ fn encode_tensor_to_base64(
     value: &DynValue,
     ty: TensorElementType,
 ) -> Result<(&'static str, String), OnnxEngineError> {
-    let encode_err =
-        |reason: String| OnnxEngineError::TensorEncode { name: name.to_string(), reason };
+    let encode_err = |reason: String| OnnxEngineError::TensorEncode {
+        name: name.to_string(),
+        reason,
+    };
 
     macro_rules! extract_and_encode {
         ($rust_ty:ty, $dtype_str:expr) => {{
             let (_shape, data) = value
                 .try_extract_tensor::<$rust_ty>()
                 .map_err(|e| encode_err(e.to_string()))?;
-            let bytes: Vec<u8> = data
-                .iter()
-                .flat_map(|v| v.to_le_bytes())
-                .collect();
+            let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();
             (
                 $dtype_str,
                 base64::engine::general_purpose::STANDARD.encode(&bytes),
@@ -338,4 +342,3 @@ fn encode_tensor_to_base64(
 
     Ok(result)
 }
-

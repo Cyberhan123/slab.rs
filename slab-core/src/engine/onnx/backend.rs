@@ -88,10 +88,7 @@ pub(crate) struct OnnxWorker {
 
 #[backend_handler]
 impl OnnxWorker {
-    pub(crate) fn new(
-        bc_tx: broadcast::Sender<WorkerCommand>,
-        worker_id: usize,
-    ) -> Self {
+    pub(crate) fn new(bc_tx: broadcast::Sender<WorkerCommand>, worker_id: usize) -> Self {
         Self {
             engine: OnnxEngine::new(),
             current_config: None,
@@ -144,8 +141,9 @@ impl OnnxWorker {
         let config: OnnxModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx
-                    .send(BackendReply::Error(format!("invalid model.load config: {e}")));
+                let _ = reply_tx.send(BackendReply::Error(format!(
+                    "invalid model.load config: {e}"
+                )));
                 return;
             }
         };
@@ -323,4 +321,3 @@ impl OnnxWorker {
         self.current_config = None;
     }
 }
-

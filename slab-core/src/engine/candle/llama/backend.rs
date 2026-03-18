@@ -65,17 +65,17 @@ impl CandleLlamaWorker {
     /// `lib.load` is a no-op for Candle (statically linked).
     #[on_event(LoadLibrary)]
     async fn on_load_library(&mut self, req: BackendRequest) {
-        let _ = req
-            .reply_tx
-            .send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+        let _ = req.reply_tx.send(BackendReply::Value(Payload::Bytes(
+            Arc::from([] as [u8; 0]),
+        )));
     }
 
     /// `lib.reload` is a no-op for Candle (statically linked).
     #[on_event(ReloadLibrary)]
     async fn on_reload_library(&mut self, req: BackendRequest) {
-        let _ = req
-            .reply_tx
-            .send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+        let _ = req.reply_tx.send(BackendReply::Value(Payload::Bytes(
+            Arc::from([] as [u8; 0]),
+        )));
     }
 
     #[on_event(LoadModel)]
@@ -209,10 +209,7 @@ impl CandleLlamaWorker {
         }
     }
 
-    async fn handle_unload_model(
-        &mut self,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
+    async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
         match self.engine.as_ref() {
             Some(engine) => {
                 let _ = engine.unload();
