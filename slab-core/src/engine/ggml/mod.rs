@@ -1,4 +1,5 @@
 pub(crate) mod config;
+pub mod capabilities;
 pub mod diffusion;
 pub mod llama;
 pub mod whisper;
