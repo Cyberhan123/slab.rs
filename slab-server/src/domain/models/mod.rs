@@ -27,7 +27,7 @@ pub use image::{ImageGenerationCommand, ImageGenerationMode};
 pub use model::{
     AvailableModelsQuery, AvailableModelsView, CreateModelCommand, DeletedModelView,
     DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus,
-    RuntimePresets, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
+    RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
 };
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};

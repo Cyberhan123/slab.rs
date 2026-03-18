@@ -53,6 +53,8 @@ struct SupervisorArgs {
     database_url: Option<String>,
     #[arg(long = "settings-path")]
     settings_path: Option<PathBuf>,
+    #[arg(long = "model-config-dir")]
+    model_config_dir: Option<PathBuf>,
     #[arg(long = "log")]
     log_level: Option<String>,
     #[arg(long = "log-json", action = clap::ArgAction::SetTrue)]
@@ -113,6 +115,7 @@ impl Default for SupervisorArgs {
             runtime_ipc_dir: None,
             database_url: None,
             settings_path: None,
+            model_config_dir: None,
             log_level: None,
             log_json: false,
             queue_capacity: None,
@@ -145,6 +148,9 @@ async fn main() -> anyhow::Result<()> {
     }
     if args.settings_path.is_none() {
         args.settings_path = Some(cfg.settings_path.clone());
+    }
+    if args.model_config_dir.is_none() {
+        args.model_config_dir = Some(cfg.model_config_dir.clone());
     }
     if args.queue_capacity.is_none() {
         args.queue_capacity = Some(cfg.queue_capacity);
@@ -211,6 +217,10 @@ where
     info!(database_url = %cfg.database_url, "database ready");
     let settings = Arc::new(SettingsProvider::load(cfg.settings_path.clone()).await?);
     info!(settings_path = %cfg.settings_path.display(), "settings provider ready");
+    info!(
+        model_config_dir = %cfg.model_config_dir.display(),
+        "model config directory ready"
+    );
     let pmid = Arc::new(crate::domain::services::PmidService::load(Arc::clone(&settings)).await?);
     info!("typed PMID config ready");
     let grpc = GrpcGateway::connect_from_config(&cfg)
@@ -230,6 +240,7 @@ where
         Arc::clone(&store),
         model_auto_unload,
     ));
+    state.services.model.sync_model_configs_from_disk().await?;
 
     let app = api::build(Arc::clone(&state));
     let addr: SocketAddr = cfg.bind_address.parse()?;
@@ -605,6 +616,9 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
     }
     if let Some(v) = &args.settings_path {
         gateway_cfg.settings_path = v.clone();
+    }
+    if let Some(v) = &args.model_config_dir {
+        gateway_cfg.model_config_dir = v.clone();
     }
     if let Some(v) = &args.log_level {
         gateway_cfg.log_level = v.clone();

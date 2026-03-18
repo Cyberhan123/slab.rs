@@ -4,7 +4,7 @@ use chrono::Utc;
 use std::future::Future;
 
 pub trait ModelStore: Send + Sync + 'static {
-    fn insert_model(
+    fn upsert_model(
         &self,
         record: UnifiedModelRecord,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
@@ -15,15 +15,6 @@ pub trait ModelStore: Send + Sync + 'static {
     fn list_models(
         &self,
     ) -> impl Future<Output = Result<Vec<UnifiedModelRecord>, sqlx::Error>> + Send;
-    fn update_model(
-        &self,
-        id: &str,
-        display_name: &str,
-        provider: &str,
-        status: &str,
-        spec: &str,
-        runtime_presets: Option<&str>,
-    ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
     fn delete_model(&self, id: &str) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
     /// Update a local model's `spec.local_path` and set its status after a successful download.
     fn update_model_local_path(
@@ -68,13 +59,21 @@ fn row_to_record(
 }
 
 impl ModelStore for AnyStore {
-    async fn insert_model(&self, record: UnifiedModelRecord) -> Result<(), sqlx::Error> {
+    async fn upsert_model(&self, record: UnifiedModelRecord) -> Result<(), sqlx::Error> {
         let created_at = record.created_at.to_rfc3339();
         let updated_at = record.updated_at.to_rfc3339();
         sqlx::query(
             "INSERT INTO models \
              (id, display_name, provider, status, spec, runtime_presets, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) \
+             ON CONFLICT(id) DO UPDATE SET \
+                 display_name = excluded.display_name, \
+                 provider = excluded.provider, \
+                 status = excluded.status, \
+                 spec = excluded.spec, \
+                 runtime_presets = excluded.runtime_presets, \
+                 created_at = excluded.created_at, \
+                 updated_at = excluded.updated_at",
         )
         .bind(&record.id)
         .bind(&record.display_name)
@@ -110,33 +109,6 @@ impl ModelStore for AnyStore {
         .await?;
 
         Ok(rows.into_iter().map(row_to_record).collect())
-    }
-
-    async fn update_model(
-        &self,
-        id: &str,
-        display_name: &str,
-        provider: &str,
-        status: &str,
-        spec: &str,
-        runtime_presets: Option<&str>,
-    ) -> Result<(), sqlx::Error> {
-        let updated_at = Utc::now().to_rfc3339();
-        sqlx::query(
-            "UPDATE models \
-             SET display_name = ?1, provider = ?2, status = ?3, spec = ?4, runtime_presets = ?5, updated_at = ?6 \
-             WHERE id = ?7",
-        )
-        .bind(display_name)
-        .bind(provider)
-        .bind(status)
-        .bind(spec)
-        .bind(runtime_presets)
-        .bind(&updated_at)
-        .bind(id)
-        .execute(&self.pool)
-        .await?;
-        Ok(())
     }
 
     async fn delete_model(&self, id: &str) -> Result<(), sqlx::Error> {
