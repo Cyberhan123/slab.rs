@@ -26,24 +26,17 @@ pub(crate) struct CandleModelLoadConfig {
 /// Extended model-load config for the Candle Llama backend.
 #[derive(Deserialize)]
 pub(crate) struct CandleLlamaModelLoadConfig {
-    /// Path to the primary model weight file.
+    /// Path to the primary model weight file (GGUF format).
     pub model_path: String,
     /// Optional tokenizer path; falls back to `<model_dir>/tokenizer.json`.
     #[serde(default)]
     pub tokenizer_path: Option<String>,
-    /// Inference worker count.  Defaults to `1`.
-    #[serde(default = "default_workers")]
-    pub num_workers: usize,
-    /// Maximum KV-cache context window in tokens.  `0` uses the model default.
-    #[serde(default)]
-    pub context_length: u32,
-    /// Seed for the random number generator.  `0` uses a random seed.
+    /// Seed for the random number generator.
+    ///
+    /// `0` is a valid deterministic seed.  To get non-reproducible output
+    /// generate a random `u64` before submitting the request.
     #[serde(default)]
     pub seed: u64,
-}
-
-fn default_workers() -> usize {
-    1
 }
 
 /// Extended model-load config for the Candle diffusion backend.

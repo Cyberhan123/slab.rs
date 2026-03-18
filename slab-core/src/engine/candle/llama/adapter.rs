@@ -307,82 +307,72 @@ impl CandleLlamaEngine {
     ) {
         use candle_core::{Device, IndexOp};
         use candle_transformers::generation::Sampling;
-        use std::io::Write;
 
         let send = |chunk: StreamChunk| tx.blocking_send(chunk).is_ok();
 
-        // Acquire read lock to borrow model + tokenizer.
-        let state = match self.inner.read() {
-            Ok(s) => s,
-            Err(_) => {
-                send(StreamChunk::Error("lock poisoned".into()));
-                return;
-            }
-        };
+        // ── Setup phase: single write lock to tokenize + resolve session prefix ──
+        //
+        // `ModelWeights::forward` takes `&mut self`, so write access is required
+        // for the generation loop anyway.  Doing setup under the same write lock
+        // eliminates the lock-upgrade race that existed when read and write locks
+        // were acquired separately.
+        let (mut all_tokens, logits_processor, eos_token) = {
+            let mut state = match self.inner.write() {
+                Ok(s) => s,
+                Err(_) => {
+                    send(StreamChunk::Error("lock poisoned".into()));
+                    return;
+                }
+            };
 
-        let (model_ref, tokenizer_ref) = match (&state.model, &state.tokenizer) {
-            (Some(m), Some(t)) => (m, t),
-            _ => {
-                send(StreamChunk::Error("model not loaded".into()));
-                return;
-            }
-        };
+            let (model_ref, tokenizer_ref) = match (&state.model, &state.tokenizer) {
+                (Some(m), Some(t)) => (m, t),
+                _ => {
+                    send(StreamChunk::Error("model not loaded".into()));
+                    return;
+                }
+            };
 
-        // Tokenize prompt.
-        let encoding = match tokenizer_ref.encode(prompt, true) {
-            Ok(e) => e,
-            Err(e) => {
-                send(StreamChunk::Error(format!("tokenize failed: {e}")));
-                return;
-            }
-        };
-        let mut tokens: Vec<u32> = encoding.get_ids().to_vec();
+            // Tokenize prompt.
+            let encoding = match tokenizer_ref.encode(prompt, true) {
+                Ok(e) => e,
+                Err(e) => {
+                    send(StreamChunk::Error(format!("tokenize failed: {e}")));
+                    return;
+                }
+            };
+            let mut tokens: Vec<u32> = encoding.get_ids().to_vec();
 
-        // Retrieve any prefix tokens already in the session's KV cache.
-        drop(state); // release read lock before acquiring write lock
-        {
-            if let Ok(mut state) = self.inner.write() {
-                if let Some(sess) = state.sessions.get(&session_id) {
-                    // Only append the new tokens (delta after cached prefix).
-                    let cached = &sess.tokens;
-                    if tokens.starts_with(cached) && tokens.len() > cached.len() {
-                        tokens = tokens[cached.len()..].to_vec();
-                    }
+            // Apply incremental-input delta if the session already has a cached prefix.
+            if let Some(sess) = state.sessions.get(&session_id) {
+                let cached = &sess.tokens;
+                if tokens.starts_with(cached) && tokens.len() > cached.len() {
+                    tokens = tokens[cached.len()..].to_vec();
                 }
             }
-        }
 
-        // Re-acquire read lock for inference.
-        let state = match self.inner.read() {
-            Ok(s) => s,
-            Err(_) => {
-                send(StreamChunk::Error("lock poisoned during inference".into()));
-                return;
-            }
-        };
-        let (model, tokenizer) = match (&state.model, &state.tokenizer) {
-            (Some(m), Some(t)) => (m, t),
-            _ => {
-                send(StreamChunk::Error("model not loaded".into()));
-                return;
-            }
+            let eos_token = tokenizer_ref
+                .token_to_id("</s>")
+                .or_else(|| tokenizer_ref.token_to_id("<|end_of_text|>"))
+                .or_else(|| tokenizer_ref.token_to_id("<|endoftext|>"))
+                .unwrap_or(2);
+
+            let lp = LogitsProcessor::from_sampling(state.seed, Sampling::ArgMax);
+            (tokens, lp, eos_token)
         };
 
+        // ── Generation loop ───────────────────────────────────────────────────
+        //
+        // Each iteration acquires the write lock once for:
+        //   1. model.forward() (requires &mut model)
+        //   2. EOS check
+        //   3. Token decode
+        // The lock is released before send() so channel pressure cannot cause
+        // a deadlock while the lock is held.
         let device = Device::Cpu;
-        let mut all_tokens = tokens.clone();
-        let mut logits_processor = {
-            LogitsProcessor::from_sampling(
-                state.seed,
-                Sampling::ArgMax,
-            )
-        };
-
-        // Run forward pass token-by-token.
-        // NOTE: ModelWeights::forward takes &mut self, so we need write access.
-        // Drop read lock and use write lock for the forward pass.
-        drop(state);
-
         let max_new_tokens = max_tokens.min(4096);
+        let mut forward_pos = all_tokens.len().saturating_sub(1);
+
         for _ in 0..max_new_tokens {
             let input = match Tensor::new(all_tokens.as_slice(), &device)
                 .and_then(|t| t.unsqueeze(0))
@@ -394,7 +384,8 @@ impl CandleLlamaEngine {
                 }
             };
 
-            let logits = {
+            // Acquire write lock once per token for forward + decode.
+            let (next_token, token_text) = {
                 let mut state = match self.inner.write() {
                     Ok(s) => s,
                     Err(_) => {
@@ -409,73 +400,41 @@ impl CandleLlamaEngine {
                         return;
                     }
                 };
-                match model.forward(&input, all_tokens.len() - 1) {
+                let logits = match model.forward(&input, forward_pos) {
                     Ok(l) => l,
                     Err(e) => {
                         send(StreamChunk::Error(format!("forward pass error: {e}")));
                         return;
                     }
-                }
+                };
+                let logits = match logits.squeeze(0) {
+                    Ok(l) => l,
+                    Err(e) => {
+                        send(StreamChunk::Error(format!("squeeze error: {e}")));
+                        return;
+                    }
+                };
+                let next_token = match logits_processor.sample(&logits) {
+                    Ok(t) => t,
+                    Err(e) => {
+                        send(StreamChunk::Error(format!("sampling error: {e}")));
+                        return;
+                    }
+                };
+                let token_text = state
+                    .tokenizer
+                    .as_ref()
+                    .and_then(|t| t.id_to_token(next_token).map(|s| s.replace('▁', " ")))
+                    .unwrap_or_default();
+                (next_token, token_text)
             };
-
-            let logits = match logits.squeeze(0) {
-                Ok(l) => l,
-                Err(e) => {
-                    send(StreamChunk::Error(format!("squeeze error: {e}")));
-                    return;
-                }
-            };
-
-            let next_token = match logits_processor.sample(&logits) {
-                Ok(t) => t,
-                Err(e) => {
-                    send(StreamChunk::Error(format!("sampling error: {e}")));
-                    return;
-                }
-            };
-
-            // EOS check using the tokenizer's special token.
-            let state = match self.inner.read() {
-                Ok(s) => s,
-                Err(_) => {
-                    send(StreamChunk::Error("lock poisoned".into()));
-                    return;
-                }
-            };
-            let tokenizer = match state.tokenizer.as_ref() {
-                Some(t) => t,
-                None => {
-                    send(StreamChunk::Error("tokenizer not loaded".into()));
-                    return;
-                }
-            };
-            let eos_token = tokenizer
-                .token_to_id("</s>")
-                .or_else(|| tokenizer.token_to_id("<|end_of_text|>"))
-                .or_else(|| tokenizer.token_to_id("<|endoftext|>"))
-                .unwrap_or(2);
-            drop(state);
 
             if next_token == eos_token {
                 break;
             }
 
             all_tokens.push(next_token);
-
-            // Decode the new token to text.
-            let state = match self.inner.read() {
-                Ok(s) => s,
-                Err(_) => {
-                    send(StreamChunk::Error("lock poisoned".into()));
-                    return;
-                }
-            };
-            let token_text = state
-                .tokenizer
-                .as_ref()
-                .and_then(|t| t.id_to_token(next_token).map(|s| s.replace('▁', " ")))
-                .unwrap_or_default();
-            drop(state);
+            forward_pos += 1;
 
             if !send(StreamChunk::Token(token_text)) {
                 break;
