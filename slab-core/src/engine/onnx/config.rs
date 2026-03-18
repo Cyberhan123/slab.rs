@@ -19,18 +19,17 @@ use std::collections::HashMap;
 ///   "inter_op_num_threads": 1
 /// }
 /// ```
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct OnnxModelLoadConfig {
     /// Path to the `.onnx` model file.
     pub model_path: String,
 
     /// Ordered list of ONNX Runtime execution providers to try.
     ///
-    /// Valid values include `"CUDA"`, `"TensorRT"`, `"CoreML"`,
-    /// `"DirectML"`, `"ROCm"`, `"CPU"`.  ONNX Runtime silently skips
-    /// providers that are not available in the current build and falls
-    /// back to the next one in the list.  `"CPU"` is always appended as
-    /// the final fallback if not already present.
+    /// Recognised values: `"CUDA"`, `"TensorRT"`, `"CoreML"`, `"DirectML"`,
+    /// `"CPU"`.  Unrecognised provider strings are logged as a warning and
+    /// skipped.  `"CPU"` is always appended as the final fallback if not
+    /// already present.
     #[serde(default = "default_execution_providers")]
     pub execution_providers: Vec<String>,
 
@@ -66,8 +65,7 @@ fn default_execution_providers() -> Vec<String> {
 pub(crate) struct TensorInput {
     /// Tensor shape dimensions.
     pub shape: Vec<i64>,
-    /// Element type: `"float32"`, `"float64"`, `"int32"`, `"int64"`,
-    /// `"uint8"`, or `"bool"`.
+    /// Element type: `"float32"`, `"float64"`, `"int32"`, `"int64"`, or `"uint8"`.
     pub dtype: String,
     /// Base-64 encoded little-endian binary tensor data.
     pub data_b64: String,

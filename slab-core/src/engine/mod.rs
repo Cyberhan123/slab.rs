@@ -39,6 +39,6 @@ impl_ggml_from!(
 #[cfg(feature = "onnx")]
 impl From<onnx::OnnxEngineError> for crate::base::error::CoreError {
     fn from(e: onnx::OnnxEngineError) -> Self {
-        crate::base::error::CoreError::GGMLEngine(e.to_string())
+        crate::base::error::CoreError::OnnxEngine(e.to_string())
     }
 }

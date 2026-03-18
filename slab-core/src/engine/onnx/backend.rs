@@ -76,9 +76,10 @@ use crate::scheduler::types::Payload;
 pub(crate) struct OnnxWorker {
     /// The ONNX engine.  `is_loaded() == false` when no model is loaded.
     engine: OnnxEngine,
-    /// Path of the currently loaded model, used to replicate loads in peer
-    /// workers that receive a `PeerWorkerCommand::LoadModel` broadcast.
-    current_model_path: Option<String>,
+    /// The config used to load the current model.  Stored so that peer workers
+    /// receiving a broadcast can reproduce the same session configuration
+    /// (execution providers, thread counts, etc.).
+    current_config: Option<OnnxModelLoadConfig>,
     /// Broadcast sender shared among all workers.
     bc_tx: broadcast::Sender<WorkerCommand>,
     /// Stable index used to populate `sender_id` when broadcasting.
@@ -93,7 +94,7 @@ impl OnnxWorker {
     ) -> Self {
         Self {
             engine: OnnxEngine::new(),
-            current_model_path: None,
+            current_config: None,
             bc_tx,
             worker_id,
         }
@@ -152,11 +153,12 @@ impl OnnxWorker {
         let model_path = config.model_path.clone();
 
         // Session creation is CPU / I/O-bound; run on the blocking thread pool.
-        let result = tokio::task::block_in_place(|| self.engine.load_model(config));
+        let result = tokio::task::block_in_place(|| self.engine.load_model(config.clone()));
 
         match result {
             Ok(()) => {
-                self.current_model_path = Some(model_path.clone());
+                // Store the full config so peer workers can replicate it.
+                self.current_config = Some(config);
                 // Broadcast so peer workers also load the same model.
                 let _ = self
                     .bc_tx
@@ -183,7 +185,7 @@ impl OnnxWorker {
         seq_id: u64,
     ) {
         self.engine.unload();
-        self.current_model_path = None;
+        self.current_config = None;
         // Broadcast so peer workers also drop their sessions.
         let _ = self
             .bc_tx
@@ -232,30 +234,56 @@ impl OnnxWorker {
 
     /// When another worker loads a model, replicate the load in this worker
     /// (each worker needs its own independent session).
+    ///
+    /// If the worker already has a **different** model loaded, it is
+    /// replaced.  If it already has the **same** model loaded, the call is a
+    /// no-op to avoid unnecessary session teardown.
     #[on_peer_control(LoadModel)]
     async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
         let PeerWorkerCommand::LoadModel { model_path, .. } = cmd else {
             return;
         };
-        if !self.engine.is_loaded() {
-            let config = OnnxModelLoadConfig {
+
+        // Short-circuit: same model already loaded.
+        if let Some(cfg) = &self.current_config {
+            if cfg.model_path == model_path {
+                return;
+            }
+        }
+
+        // Different model (or no model): unload current and load the new one.
+        // Reuse the execution provider / thread config from the originating
+        // worker's load call; fall back to CPU-only defaults if no config is
+        // stored yet (e.g. this is a fresh peer that never loaded a model).
+        let config = self
+            .current_config
+            .as_ref()
+            .map(|c| OnnxModelLoadConfig {
+                model_path: model_path.clone(),
+                execution_providers: c.execution_providers.clone(),
+                intra_op_num_threads: c.intra_op_num_threads,
+                inter_op_num_threads: c.inter_op_num_threads,
+            })
+            .unwrap_or_else(|| OnnxModelLoadConfig {
                 model_path: model_path.clone(),
                 execution_providers: vec!["CPU".to_string()],
                 intra_op_num_threads: 0,
                 inter_op_num_threads: 0,
-            };
-            let result = tokio::task::block_in_place(|| self.engine.load_model(config));
-            match result {
-                Ok(()) => {
-                    self.current_model_path = Some(model_path);
-                }
-                Err(e) => {
-                    warn!(
-                        model_path,
-                        error = %e,
-                        "ONNX worker: broadcast LoadModel failed"
-                    );
-                }
+            });
+
+        self.engine.unload();
+        let result = tokio::task::block_in_place(|| self.engine.load_model(config.clone()));
+        match result {
+            Ok(()) => {
+                self.current_config = Some(config);
+            }
+            Err(e) => {
+                self.current_config = None;
+                warn!(
+                    model_path,
+                    error = %e,
+                    "ONNX worker: broadcast LoadModel failed"
+                );
             }
         }
     }
@@ -264,7 +292,7 @@ impl OnnxWorker {
     #[on_peer_control(Unload)]
     async fn on_peer_unload(&mut self) {
         self.engine.unload();
-        self.current_model_path = None;
+        self.current_config = None;
     }
 
     // ── global runtime control ────────────────────────────────────────────────
@@ -276,13 +304,13 @@ impl OnnxWorker {
             RuntimeControlSignal::GlobalUnload { op_id } => {
                 tracing::debug!(op_id, "ONNX runtime global unload");
                 self.engine.unload();
-                self.current_model_path = None;
+                self.current_config = None;
             }
             RuntimeControlSignal::GlobalLoad { op_id, payload } => {
                 let _ = payload;
                 tracing::debug!(op_id, "ONNX runtime global load pre-cleanup");
                 self.engine.unload();
-                self.current_model_path = None;
+                self.current_config = None;
             }
         }
     }
@@ -292,7 +320,7 @@ impl OnnxWorker {
     #[on_control_lagged]
     async fn on_control_lagged(&mut self) {
         self.engine.unload();
-        self.current_model_path = None;
+        self.current_config = None;
     }
 }
 

@@ -11,10 +11,10 @@ use base64::Engine as _;
 use ort::{
     ep::ExecutionProviderDispatch,
     session::{Session, builder::GraphOptimizationLevel},
-    value::{DynValue, Shape, Tensor, TensorElementType, ValueType},
+    value::{DynValue, Tensor, TensorElementType, ValueType},
 };
 use serde_json::{json, Value as JsonValue};
-use tracing::info;
+use tracing::{info, warn};
 
 use super::{
     config::{OnnxInferenceInput, OnnxModelLoadConfig, TensorInput},
@@ -68,7 +68,12 @@ impl OnnxEngine {
                     has_cpu = true;
                     ep_list.push(ort::ep::CPU::default().build());
                 }
-                _ => {}
+                other => {
+                    warn!(
+                        provider = other,
+                        "ONNX: unrecognised execution provider; skipping"
+                    );
+                }
             }
         }
         // Always ensure CPU is available as final fallback.
@@ -79,12 +84,12 @@ impl OnnxEngine {
         let mut builder = Session::builder()
             .map_err(|e| OnnxEngineError::SessionCreate {
                 path: config.model_path.clone(),
-                source: e,
+                source: e.into(),
             })?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| OnnxEngineError::SessionCreate {
                 path: config.model_path.clone(),
-                source: e,
+                source: e.into(),
             })?;
 
         if config.intra_op_num_threads > 0 {
@@ -92,7 +97,16 @@ impl OnnxEngine {
                 .with_intra_threads(config.intra_op_num_threads)
                 .map_err(|e| OnnxEngineError::SessionCreate {
                     path: config.model_path.clone(),
-                    source: e,
+                    source: e.into(),
+                })?;
+        }
+
+        if config.inter_op_num_threads > 0 {
+            builder = builder
+                .with_inter_threads(config.inter_op_num_threads)
+                .map_err(|e| OnnxEngineError::SessionCreate {
+                    path: config.model_path.clone(),
+                    source: e.into(),
                 })?;
         }
 
@@ -100,14 +114,14 @@ impl OnnxEngine {
             .with_execution_providers(ep_list)
             .map_err(|e| OnnxEngineError::SessionCreate {
                 path: config.model_path.clone(),
-                source: e,
+                source: e.into(),
             })?;
 
         let session = builder
             .commit_from_file(&config.model_path)
             .map_err(|e| OnnxEngineError::SessionCreate {
                 path: config.model_path.clone(),
-                source: e,
+                source: e.into(),
             })?;
 
         info!(model = %config.model_path, "ONNX: model loaded");
@@ -151,7 +165,8 @@ impl OnnxEngine {
         // Serialise outputs to JSON wire format.
         let mut result = serde_json::Map::new();
         for (name, value) in outputs.iter() {
-            let wire = ort_value_to_json(name, value)?;
+            // ValueRef<'_> derefs to Value; pass as &DynValue.
+            let wire = ort_value_to_json(name, &*value)?;
             result.insert(name.to_string(), wire);
         }
 
@@ -160,6 +175,25 @@ impl OnnxEngine {
 }
 
 // ── Tensor helpers ────────────────────────────────────────────────────────────
+
+/// Validate and convert a shape slice from `i64` to `usize`.
+///
+/// Returns an error if any dimension is negative or exceeds `usize::MAX`.
+fn validate_shape(name: &str, shape: &[i64]) -> Result<Vec<usize>, OnnxEngineError> {
+    shape
+        .iter()
+        .enumerate()
+        .map(|(i, &d)| {
+            usize::try_from(d).map_err(|_| OnnxEngineError::TensorDecode {
+                name: name.to_string(),
+                reason: format!(
+                    "shape dimension [{}] is {} which is invalid (must be >= 0 and fit in usize)",
+                    i, d
+                ),
+            })
+        })
+        .collect()
+}
 
 /// Decode a [`TensorInput`] into an `ort::DynValue`.
 fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngineError> {
@@ -170,7 +204,7 @@ fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngi
             reason: format!("base64 decode error: {e}"),
         })?;
 
-    let shape: Vec<usize> = ti.shape.iter().map(|&d| d as usize).collect();
+    let shape = validate_shape(name, &ti.shape)?;
 
     macro_rules! make_tensor {
         ($ty:ty) => {{
@@ -224,7 +258,7 @@ fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngi
         }
         other => Err(OnnxEngineError::TensorDecode {
             name: name.to_string(),
-            reason: format!("unsupported dtype: {other}"),
+            reason: format!("unsupported dtype '{other}'; supported dtypes: float32, float64, int32, int64, uint8"),
         }),
     }
 }
@@ -234,12 +268,14 @@ fn ort_value_to_json(name: &str, value: &DynValue) -> Result<JsonValue, OnnxEngi
     let encode_err =
         |reason: String| OnnxEngineError::TensorEncode { name: name.to_string(), reason };
 
-    let value_type = value.dtype().map_err(|e| encode_err(e.to_string()))?;
+    // dtype() returns &ValueType directly (not Result).
+    let value_type = value.dtype().clone();
 
     match value_type {
         ValueType::Tensor { ty, shape, .. } => {
             let shape_vec: Vec<i64> = shape.to_vec();
-            let (dtype_str, data_b64) = encode_tensor_to_base64(name, value, ty)?;
+            let (dtype_str, data_b64) = encode_tensor_to_base64(name, value, ty)
+                .map_err(|e| encode_err(e.to_string()))?;
 
             Ok(json!({
                 "shape": shape_vec,
