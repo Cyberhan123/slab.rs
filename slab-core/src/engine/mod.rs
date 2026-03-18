@@ -1,5 +1,4 @@
 pub mod ggml;
-//todo
 pub mod candle;
 
 /// Engine-layer error type alias.
@@ -30,4 +29,25 @@ impl_ggml_from!(
     ggml::whisper::GGMLWhisperEngineError,
     ggml::llama::GGMLLlamaEngineError,
     ggml::diffusion::GGMLDiffusionEngineError,
+);
+
+// ── From impls: Candle error types → CoreError ────────────────────────────────
+
+macro_rules! impl_candle_from {
+    ($($ty:path),+ $(,)?) => {
+        $(
+            impl From<$ty> for crate::base::error::CoreError {
+                fn from(e: $ty) -> Self {
+                    crate::base::error::CoreError::CandleEngine(e.to_string())
+                }
+            }
+        )+
+    };
+}
+
+impl_candle_from!(
+    candle::CandleEngineError,
+    candle::llama::CandleLlamaEngineError,
+    candle::whisper::CandleWhisperEngineError,
+    candle::diffusion::CandleDiffusionEngineError,
 );
