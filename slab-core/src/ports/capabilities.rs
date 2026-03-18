@@ -11,11 +11,21 @@
 //! - A typed `*Response` output struct.
 //! - An `async_trait` that the concrete engine must implement.
 //!
-//! All capabilities include a `backend_options` field of type
-//! `HashMap<String, String>` that is passed verbatim to the underlying engine.
-//! Upper layers (e.g. `slab-server`) **must not** interpret this map; it exists
-//! solely as a transparent passthrough for engine-specific tuning knobs (e.g.
-//! GGML's `n_gpu_layers`, ONNX's `execution_providers`).
+//! ## `backend_options` passthrough
+//!
+//! All request structs carry a `backend_options: HashMap<String, String>` field
+//! that **must not** be interpreted by upper layers (e.g. `slab-server`).
+//! It exists as a transparent passthrough for engine-specific load-time or
+//! inference-time tuning knobs (e.g. GGML's `n_gpu_layers`, ONNX's
+//! `execution_providers`).  Each concrete adapter documents which keys it
+//! recognises.
+//!
+//! ## Advisory inference parameters
+//!
+//! Some request fields (such as `temperature`, `top_p`, `language`) represent
+//! sampling or decoding hints.  Not every backend honours every field –
+//! unsupported fields are silently ignored.  Consult the adapter's doc comment
+//! for the precise set of honoured parameters.
 //!
 //! # Example
 //!
@@ -60,9 +70,13 @@ pub struct TextGenerationRequest {
     pub prompt: String,
     /// Maximum number of tokens to generate.  Uses the backend default when `None`.
     pub max_tokens: Option<usize>,
-    /// Sampling temperature.  `0.0` = greedy/deterministic, `1.0` = fully random.
+    /// Sampling temperature (advisory).  `0.0` = greedy/deterministic, `1.0` = fully random.
+    ///
+    /// Not all backends honour this field; consult the concrete adapter's documentation.
     pub temperature: Option<f32>,
-    /// Top-p nucleus sampling cutoff.  Backend default when `None`.
+    /// Top-p nucleus sampling cutoff (advisory).  Backend default when `None`.
+    ///
+    /// Not all backends honour this field; consult the concrete adapter's documentation.
     pub top_p: Option<f32>,
     /// Opaque session key for KV-cache reuse (stateful backends only).
     ///
@@ -131,9 +145,10 @@ pub trait TextGenerationBackend: Send + Sync + 'static {
 pub struct AudioTranscriptionRequest {
     /// Filesystem path (or URI) to the audio file to transcribe.
     pub path: String,
-    /// BCP-47 language tag hint (e.g. `"en"`, `"zh"`).
+    /// BCP-47 language tag hint (e.g. `"en"`, `"zh"`) — advisory.
     ///
     /// Backends that support language detection may ignore this and auto-detect.
+    /// Not all backends honour this field; consult the concrete adapter's documentation.
     pub language: Option<String>,
     /// Transparent passthrough map for engine-specific knobs.
     pub backend_options: HashMap<String, String>,

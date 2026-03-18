@@ -165,11 +165,14 @@ impl TextGenerationBackend for GgmlTextGenerationBackend {
                     Ok(bytes) => StreamChunk::Token(String::from_utf8_lossy(&bytes).into_owned()),
                     Err(e) => StreamChunk::Error(e.to_string()),
                 };
-                let done = matches!(chunk, StreamChunk::Error(_));
-                if tx.send(chunk).await.is_err() || done {
-                    break;
+                let is_error = matches!(chunk, StreamChunk::Error(_));
+                let _ = tx.send(chunk).await;
+                // After an error chunk, stop without emitting Done.
+                if is_error {
+                    return;
                 }
             }
+            // Clean completion: signal Done.
             let _ = tx.send(StreamChunk::Done).await;
         });
 
@@ -188,10 +191,11 @@ impl TextGenerationBackend for GgmlTextGenerationBackend {
 
 /// Transcription capability adapter backed by the `ggml.whisper` worker.
 ///
-/// The caller is responsible for providing pre-decoded **f32 PCM** audio
-/// samples (16 kHz, mono) via [`AudioTranscriptionRequest::audio_pcm`].
-/// If raw audio file loading is needed, apply an FFmpeg pre-process stage
-/// before invoking this backend (see [`crate::api::CallBuilder::preprocess`]).
+/// Accepts a file path via [`AudioTranscriptionRequest::path`].  The adapter
+/// reads the file, parses it as an uncompressed PCM WAV, and submits the
+/// resulting f32 samples to the `ggml.whisper` backend.  For compressed
+/// formats (MP3, FLAC, …) apply an FFmpeg pre-process stage before calling
+/// this adapter.
 pub struct GgmlAudioTranscriptionBackend;
 
 impl GgmlAudioTranscriptionBackend {
@@ -223,14 +227,12 @@ impl AudioTranscriptionBackend for GgmlAudioTranscriptionBackend {
             .await
     }
 
-    /// Transcribe pre-decoded PCM audio.
+    /// Transcribe the audio file at [`AudioTranscriptionRequest::path`].
     ///
-    /// The [`AudioTranscriptionRequest::path`] field is used only for
-    /// informational purposes.  The GGML Whisper backend expects
-    /// `Payload::F32` (16 kHz mono PCM); this adapter reads the audio file
-    /// and converts it to f32 samples using the `hound` crate if available,
-    /// otherwise it returns [`CoreError::UnsupportedOperation`] directing
-    /// the caller to supply pre-decoded samples.
+    /// The file must be an uncompressed PCM WAV.  It is loaded, decoded to
+    /// f32 samples, and submitted to the `ggml.whisper` backend.  For
+    /// compressed formats (MP3, FLAC, …) run an FFmpeg pre-process step at
+    /// the call site before invoking this method.
     async fn transcribe(
         &self,
         request: AudioTranscriptionRequest,

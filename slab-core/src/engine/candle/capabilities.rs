@@ -133,11 +133,14 @@ impl TextGenerationBackend for CandleTextGenerationBackend {
                     Ok(bytes) => StreamChunk::Token(String::from_utf8_lossy(&bytes).into_owned()),
                     Err(e) => StreamChunk::Error(e.to_string()),
                 };
-                let done = matches!(chunk, StreamChunk::Error(_));
-                if tx.send(chunk).await.is_err() || done {
-                    break;
+                let is_error = matches!(chunk, StreamChunk::Error(_));
+                let _ = tx.send(chunk).await;
+                // After an error chunk, stop without emitting Done.
+                if is_error {
+                    return;
                 }
             }
+            // Clean completion: signal Done.
             let _ = tx.send(StreamChunk::Done).await;
         });
 
