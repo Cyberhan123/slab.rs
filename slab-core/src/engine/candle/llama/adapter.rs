@@ -316,7 +316,7 @@ impl CandleLlamaEngine {
         // for the generation loop anyway.  Doing setup under the same write lock
         // eliminates the lock-upgrade race that existed when read and write locks
         // were acquired separately.
-        let (mut all_tokens, logits_processor, eos_token) = {
+        let (mut all_tokens, mut logits_processor, eos_token) = {
             let mut state = match self.inner.write() {
                 Ok(s) => s,
                 Err(_) => {
