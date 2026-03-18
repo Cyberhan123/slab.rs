@@ -1,8 +1,135 @@
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::str::FromStr;
+
 use crate::api::v1::models::schema::{
-    CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
-    LoadModelRequest, ModelListStatus, SwitchModelRequest, UpdateModelRequest,
+    CreateModelRequest, ListModelsQuery, LoadModelRequest, SwitchModelRequest, UpdateModelRequest,
 };
-use crate::infra::db::{ModelCatalogRecord, TaskRecord};
+use crate::infra::db::UnifiedModelRecord;
+
+// ---------------------------------------------------------------------------
+// Status enum
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnifiedModelStatus {
+    Ready,
+    NotDownloaded,
+    Downloading,
+    Error,
+}
+
+impl UnifiedModelStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::NotDownloaded => "not_downloaded",
+            Self::Downloading => "downloading",
+            Self::Error => "error",
+        }
+    }
+}
+
+impl FromStr for UnifiedModelStatus {
+    type Err = String;
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "ready" => Ok(Self::Ready),
+            "not_downloaded" => Ok(Self::NotDownloaded),
+            "downloading" => Ok(Self::Downloading),
+            "error" => Ok(Self::Error),
+            other => Err(format!("unknown model status: {other}")),
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Spec and runtime presets (shared with JSON schema)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelSpec {
+    /// Remote model identifier used by cloud providers (e.g. `"gpt-4o"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_model_id: Option<String>,
+    /// Cloud API endpoint (e.g. `"https://api.openai.com/v1"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    /// Optional pricing info for cost tracking.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<Pricing>,
+    /// HuggingFace repo ID for local models.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
+    /// Filename within the HF repo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    /// Absolute path to the downloaded model file (populated after download).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
+    /// Maximum context window size in tokens.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Pricing {
+    pub input: f64,
+    pub output: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RuntimePresets {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+}
+
+// ---------------------------------------------------------------------------
+// Unified domain model view
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct UnifiedModel {
+    pub id: String,
+    pub display_name: String,
+    pub provider: String,
+    pub status: UnifiedModelStatus,
+    pub spec: ModelSpec,
+    pub runtime_presets: Option<RuntimePresets>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+// ---------------------------------------------------------------------------
+// Commands
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+pub struct CreateModelCommand {
+    pub display_name: String,
+    pub provider: String,
+    /// If `None`, the status is inferred from the provider prefix.
+    pub status: Option<UnifiedModelStatus>,
+    pub spec: ModelSpec,
+    pub runtime_presets: Option<RuntimePresets>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateModelCommand {
+    pub display_name: Option<String>,
+    pub provider: Option<String>,
+    pub status: Option<UnifiedModelStatus>,
+    pub spec: Option<ModelSpec>,
+    pub runtime_presets: Option<RuntimePresets>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ListModelsFilter {
+    // No filters currently; reserved for future use (e.g. provider prefix filter).
+}
 
 #[derive(Debug, Clone)]
 pub struct ModelLoadCommand {
@@ -18,32 +145,9 @@ pub struct ModelStatus {
 }
 
 #[derive(Debug, Clone)]
-pub struct CreateModelCommand {
-    pub display_name: String,
-    pub repo_id: String,
-    pub filename: String,
-    pub backend_ids: Vec<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct UpdateModelCommand {
-    pub display_name: Option<String>,
-    pub repo_id: Option<String>,
-    pub filename: Option<String>,
-    pub backend_ids: Option<Vec<String>>,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ModelCatalogStatus {
-    Downloaded,
-    Pending,
-    NotDownloaded,
-    All,
-}
-
-#[derive(Debug, Clone)]
-pub struct ListModelsFilter {
-    pub status: ModelCatalogStatus,
+pub struct DeletedModelView {
+    pub id: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone)]
@@ -60,48 +164,32 @@ pub struct AvailableModelsView {
 #[derive(Debug, Clone)]
 pub struct DownloadModelCommand {
     pub model_id: String,
-    pub backend_id: String,
 }
 
-#[derive(Debug, Clone)]
-pub struct ModelCatalogItemView {
-    pub id: String,
-    pub display_name: String,
-    pub repo_id: String,
-    pub filename: String,
-    pub backend_ids: Vec<String>,
-    pub is_vad_model: bool,
-    pub status: ModelCatalogStatus,
-    pub local_path: Option<String>,
-    pub last_downloaded_at: Option<String>,
-    pub pending_task_id: Option<String>,
-    pub pending_task_status: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct DeletedModelView {
-    pub id: String,
-    pub status: String,
-}
+// ---------------------------------------------------------------------------
+// Conversions from API request types
+// ---------------------------------------------------------------------------
 
 impl From<CreateModelRequest> for CreateModelCommand {
-    fn from(request: CreateModelRequest) -> Self {
+    fn from(req: CreateModelRequest) -> Self {
         Self {
-            display_name: request.display_name,
-            repo_id: request.repo_id,
-            filename: request.filename,
-            backend_ids: request.backend_ids,
+            display_name: req.display_name,
+            provider: req.provider,
+            status: req.status.and_then(|s| s.parse().ok()),
+            spec: req.spec.map(Into::into).unwrap_or_default(),
+            runtime_presets: req.runtime_presets.map(Into::into),
         }
     }
 }
 
 impl From<UpdateModelRequest> for UpdateModelCommand {
-    fn from(request: UpdateModelRequest) -> Self {
+    fn from(req: UpdateModelRequest) -> Self {
         Self {
-            display_name: request.display_name,
-            repo_id: request.repo_id,
-            filename: request.filename,
-            backend_ids: request.backend_ids,
+            display_name: req.display_name,
+            provider: req.provider,
+            status: req.status.and_then(|s| s.parse().ok()),
+            spec: req.spec.map(Into::into),
+            runtime_presets: req.runtime_presets.map(Into::into),
         }
     }
 }
@@ -126,96 +214,104 @@ impl From<SwitchModelRequest> for ModelLoadCommand {
     }
 }
 
-impl From<DownloadModelRequest> for DownloadModelCommand {
-    fn from(request: DownloadModelRequest) -> Self {
-        Self {
-            model_id: request.model_id,
-            backend_id: request.backend_id,
-        }
+impl From<ListModelsQuery> for ListModelsFilter {
+    fn from(_query: ListModelsQuery) -> Self {
+        Self::default()
     }
 }
 
-impl From<ListAvailableQuery> for AvailableModelsQuery {
-    fn from(query: ListAvailableQuery) -> Self {
+// ---------------------------------------------------------------------------
+// Conversions from/to DB record
+// ---------------------------------------------------------------------------
+
+impl TryFrom<UnifiedModelRecord> for UnifiedModel {
+    type Error = String;
+
+    fn try_from(record: UnifiedModelRecord) -> Result<Self, Self::Error> {
+        let status = record
+            .status
+            .parse::<UnifiedModelStatus>()
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    id = %record.id,
+                    raw_status = %record.status,
+                    error = %e,
+                    "failed to parse model status; defaulting to Error"
+                );
+                UnifiedModelStatus::Error
+            });
+
+        let spec: ModelSpec = serde_json::from_str(&record.spec)
+            .unwrap_or_else(|e| {
+                tracing::warn!(
+                    id = %record.id,
+                    error = %e,
+                    "failed to deserialize model spec JSON; using empty spec"
+                );
+                ModelSpec::default()
+            });
+
+        let runtime_presets: Option<RuntimePresets> = record
+            .runtime_presets
+            .as_deref()
+            .and_then(|s| serde_json::from_str(s).ok());
+
+        Ok(UnifiedModel {
+            id: record.id,
+            display_name: record.display_name,
+            provider: record.provider,
+            status,
+            spec,
+            runtime_presets,
+            created_at: record.created_at,
+            updated_at: record.updated_at,
+        })
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Spec / RuntimePresets conversion from API schema types
+// ---------------------------------------------------------------------------
+
+impl From<crate::api::v1::models::schema::ListAvailableQuery> for AvailableModelsQuery {
+    fn from(query: crate::api::v1::models::schema::ListAvailableQuery) -> Self {
         Self {
             repo_id: query.repo_id,
         }
     }
 }
 
-impl From<ModelListStatus> for ModelCatalogStatus {
-    fn from(status: ModelListStatus) -> Self {
-        match status {
-            ModelListStatus::Downloaded => Self::Downloaded,
-            ModelListStatus::Pending => Self::Pending,
-            ModelListStatus::NotDownloaded => Self::NotDownloaded,
-            ModelListStatus::All => Self::All,
-        }
-    }
-}
-
-impl From<ListModelsQuery> for ListModelsFilter {
-    fn from(query: ListModelsQuery) -> Self {
+impl From<crate::api::v1::models::schema::DownloadModelRequest> for DownloadModelCommand {
+    fn from(req: crate::api::v1::models::schema::DownloadModelRequest) -> Self {
         Self {
-            status: query.status.into(),
+            model_id: req.model_id,
         }
     }
 }
 
-impl From<(ModelCatalogRecord, Option<&TaskRecord>)> for ModelCatalogItemView {
-    fn from((model, pending_task): (ModelCatalogRecord, Option<&TaskRecord>)) -> Self {
-        let status = if model.local_path.is_some() {
-            ModelCatalogStatus::Downloaded
-        } else if pending_task.is_some() {
-            ModelCatalogStatus::Pending
-        } else {
-            ModelCatalogStatus::NotDownloaded
-        };
-
-        let is_vad_model = detect_whisper_vad_model(
-            &model.backend_ids,
-            &model.display_name,
-            &model.repo_id,
-            &model.filename,
-        );
-
+impl From<crate::api::v1::models::schema::ModelSpecRequest> for ModelSpec {
+    fn from(req: crate::api::v1::models::schema::ModelSpecRequest) -> Self {
         Self {
-            id: model.id,
-            display_name: model.display_name,
-            repo_id: model.repo_id,
-            filename: model.filename,
-            backend_ids: model.backend_ids,
-            is_vad_model,
-            status,
-            local_path: model.local_path,
-            last_downloaded_at: model.last_downloaded_at.map(|value| value.to_rfc3339()),
-            pending_task_id: pending_task.map(|task| task.id.clone()),
-            pending_task_status: pending_task.map(|task| task.status.clone()),
+            remote_model_id: req.remote_model_id,
+            endpoint: req.endpoint,
+            pricing: req.pricing.map(|p| Pricing {
+                input: p.input,
+                output: p.output,
+            }),
+            repo_id: req.repo_id,
+            filename: req.filename,
+            local_path: req.local_path,
+            context_window: req.context_window,
         }
     }
 }
 
-fn detect_whisper_vad_model(
-    backend_ids: &[String],
-    display_name: &str,
-    repo_id: &str,
-    filename: &str,
-) -> bool {
-    if !backend_ids.iter().any(|backend| backend == "ggml.whisper") {
-        return false;
+impl From<crate::api::v1::models::schema::RuntimePresetsRequest> for RuntimePresets {
+    fn from(req: crate::api::v1::models::schema::RuntimePresetsRequest) -> Self {
+        Self {
+            temperature: req.temperature,
+            top_p: req.top_p,
+        }
     }
-
-    let haystack = format!(
-        "{} {} {}",
-        display_name.to_ascii_lowercase(),
-        repo_id.to_ascii_lowercase(),
-        filename.to_ascii_lowercase()
-    );
-
-    [
-        " vad", "vad ", "-vad", "_vad", "vad-", "vad_", "silero", "fsmn-vad",
-    ]
-    .iter()
-    .any(|needle| haystack.contains(needle))
-        || haystack.ends_with("vad")
 }
+

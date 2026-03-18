@@ -1,5 +1,4 @@
 pub mod ggml;
-//todo
 pub mod candle;
 #[cfg(feature = "onnx")]
 pub mod onnx;
@@ -42,3 +41,23 @@ impl From<onnx::OnnxEngineError> for crate::base::error::CoreError {
         crate::base::error::CoreError::OnnxEngine(e.to_string())
     }
 }
+// ── From impls: Candle error types → CoreError ────────────────────────────────
+
+macro_rules! impl_candle_from {
+    ($($ty:path),+ $(,)?) => {
+        $(
+            impl From<$ty> for crate::base::error::CoreError {
+                fn from(e: $ty) -> Self {
+                    crate::base::error::CoreError::CandleEngine(e.to_string())
+                }
+            }
+        )+
+    };
+}
+
+impl_candle_from!(
+    candle::CandleEngineError,
+    candle::llama::CandleLlamaEngineError,
+    candle::whisper::CandleWhisperEngineError,
+    candle::diffusion::CandleDiffusionEngineError,
+);

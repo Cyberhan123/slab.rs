@@ -111,6 +111,21 @@ pub struct Config {
     /// is always present in the struct so callers do not need `#[cfg]` guards,
     /// but it is silently ignored when the feature is disabled.
     pub onnx_enabled: bool,
+    /// When `true`, register the Candle LLaMA backend.
+    ///
+    /// The backend accepts `model.load` requests with a GGUF weight file path
+    /// once registered.  Defaults to `true` only when the `candle` crate
+    /// feature is enabled; otherwise defaults to `false` so that callers
+    /// without the feature do not register a backend that can never run.
+    pub enable_candle_llama: bool,
+    /// When `true`, register the Candle Whisper backend.
+    ///
+    /// Defaults to `true` only when the `candle` feature is enabled.
+    pub enable_candle_whisper: bool,
+    /// When `true`, register the Candle Stable Diffusion backend.
+    ///
+    /// Defaults to `true` only when the `candle` feature is enabled.
+    pub enable_candle_diffusion: bool,
 }
 
 impl Default for Config {
@@ -122,6 +137,12 @@ impl Default for Config {
             whisper_lib_dir: None,
             diffusion_lib_dir: None,
             onnx_enabled: false,
+            // Candle backends are only meaningful when compiled with the
+            // `candle` feature; default to `false` so that callers without
+            // the feature don't register backends that can never load a model.
+            enable_candle_llama: cfg!(feature = "candle"),
+            enable_candle_whisper: cfg!(feature = "candle"),
+            enable_candle_diffusion: cfg!(feature = "candle"),
         }
     }
 }
@@ -149,21 +170,25 @@ pub fn lib_dirs() -> Option<&'static LibDirs> {
 /// `ggml.diffusion`) and starts their worker tasks.  When
 /// `config.onnx_enabled` is `true` **and** the `onnx` feature flag is active,
 /// the `onnx` backend is also registered.
+/// Registers the three GGML backends (`ggml.llama`, `ggml.whisper`,
+/// `ggml.diffusion`) and the three Candle backends (`candle.llama`,
+/// `candle.whisper`, `candle.diffusion`) and starts their worker tasks.
 ///
-/// If `lib_*_dir` fields are set in `config`, the corresponding shared
+/// If `lib_*_dir` fields are set in `config`, the corresponding GGML shared
 /// libraries are loaded **synchronously** in the calling thread before the
 /// worker tasks are spawned.  This means that when `init` returns successfully
 /// the dynamic libraries are ready for use.
 ///
-/// To load only a model after the libraries are loaded call `model.load` via
-/// [`backend`].  To replace a library at runtime call [`reload_library`].
+/// The Candle backends are always registered when their respective
+/// `enable_candle_*` flag is set (default `true`); they do not require a
+/// separate library load step because Candle is statically linked.
 ///
 /// Must be called inside a Tokio runtime.  Calling it a second time is a
 /// no-op — the first configuration wins.
 ///
 /// # Errors
 ///
-/// Returns [`RuntimeError::LibraryLoadFailed`] if any configured library
+/// Returns [`RuntimeError::LibraryLoadFailed`] if any configured GGML library
 /// cannot be resolved or opened.
 pub fn init(config: Config) -> Result<(), RuntimeError> {
     use crate::engine::ggml::{
@@ -174,7 +199,7 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
     use crate::scheduler::backend::runner::spawn_workers;
     use std::path::Path;
 
-    // ── Phase 1: load all library handles synchronously ───────────────────────
+    // ── Phase 1: load all GGML library handles synchronously ─────────────────
     //
     // No worker tasks are spawned yet.  If any library load fails here, we
     // return an error without having started any background threads.
@@ -221,6 +246,8 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
         backend_capacity: worker_count,
         ..ResourceManagerConfig::default()
     });
+
+    // ── GGML backends ─────────────────────────────────────────────────────────
 
     rm.register_backend(
         Backend::GGMLLlama.to_string(),
@@ -273,6 +300,34 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
                 spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
                     OnnxWorker::new(bc_tx, worker_id)
                 });
+    // ── Candle backends (statically linked; no library load phase) ────────────
+
+    if config.enable_candle_llama {
+        use crate::engine::candle::llama::spawn_backend_with_engine as spawn_candle_llama;
+        rm.register_backend(
+            Backend::CandleLlama.to_string(),
+            move |shared_rx, control_tx| {
+                spawn_candle_llama(shared_rx, control_tx, None);
+            },
+        );
+    }
+
+    if config.enable_candle_whisper {
+        use crate::engine::candle::whisper::spawn_backend as spawn_candle_whisper;
+        rm.register_backend(
+            Backend::CandleWhisper.to_string(),
+            move |shared_rx, control_tx| {
+                spawn_candle_whisper(shared_rx, control_tx, worker_count);
+            },
+        );
+    }
+
+    if config.enable_candle_diffusion {
+        use crate::engine::candle::diffusion::spawn_backend as spawn_candle_diffusion;
+        rm.register_backend(
+            Backend::CandleDiffusion.to_string(),
+            move |shared_rx, control_tx| {
+                spawn_candle_diffusion(shared_rx, control_tx, worker_count);
             },
         );
     }
@@ -290,6 +345,7 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
 
     Ok(())
 }
+
 
 // ── Library management ─────────────────────────────────────────────────────────
 

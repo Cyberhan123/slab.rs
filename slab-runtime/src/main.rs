@@ -312,6 +312,12 @@ async fn main() -> anyhow::Result<()> {
         llama_lib_dir,
         whisper_lib_dir,
         diffusion_lib_dir,
+        // Candle backends require the `candle` feature in slab-core.  That
+        // feature is not currently enabled for slab-runtime, so disable them
+        // explicitly rather than relying on Default (which gates on the feature).
+        enable_candle_llama: false,
+        enable_candle_whisper: false,
+        enable_candle_diffusion: false,
     })
     .context("failed to initialize slab-core runtime")?;
 
