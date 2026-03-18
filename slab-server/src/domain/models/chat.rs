@@ -18,6 +18,24 @@ pub enum ChatCompletionOutput {
     Stream(BoxStream<'static, ChatStreamChunk>),
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum ChatModelSource {
+    Local,
+    Cloud,
+}
+
+#[derive(Debug, Clone)]
+pub struct ChatModelOption {
+    pub id: String,
+    pub display_name: String,
+    pub source: ChatModelSource,
+    pub downloaded: bool,
+    pub pending: bool,
+    pub backend_id: Option<String>,
+    pub provider_id: Option<String>,
+    pub provider_name: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ConversationMessage {
     pub role: String,

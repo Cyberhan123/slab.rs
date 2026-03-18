@@ -10,8 +10,8 @@ use tracing::{info, warn};
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand,
-    DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelStatus,
-    UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
+    DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec,
+    ModelStatus, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
 };
 use crate::error::ServerError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
@@ -42,6 +42,7 @@ impl ModelService {
         if provider.is_empty() {
             return Err(ServerError::BadRequest("provider must not be empty".into()));
         }
+        let spec = canonicalize_model_spec(&provider, req.spec)?;
 
         let status = req.status.unwrap_or_else(|| {
             if provider.starts_with("cloud.") {
@@ -51,7 +52,7 @@ impl ModelService {
             }
         });
 
-        let spec_json = serde_json::to_string(&req.spec)
+        let spec_json = serde_json::to_string(&spec)
             .map_err(|e| ServerError::Internal(format!("failed to serialize spec: {e}")))?;
         let runtime_presets_json = req
             .runtime_presets
@@ -122,7 +123,7 @@ impl ModelService {
             .trim()
             .to_owned();
         let status = req.status.unwrap_or(existing_model.status);
-        let spec = req.spec.unwrap_or(existing_model.spec);
+        let spec = canonicalize_model_spec(&provider, req.spec.unwrap_or(existing_model.spec))?;
         let runtime_presets = req.runtime_presets.or(existing_model.runtime_presets);
 
         let spec_json = serde_json::to_string(&spec)
@@ -436,6 +437,86 @@ impl ModelService {
 /// e.g. `"local.ggml.llama"` -> `"ggml.llama"`.
 fn backend_id_from_provider(provider: &str) -> Option<String> {
     provider.strip_prefix("local.").map(str::to_owned)
+}
+
+fn provider_id_from_provider(provider: &str) -> Option<String> {
+    provider
+        .strip_prefix("cloud.")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+}
+
+fn canonicalize_model_spec(provider: &str, mut spec: ModelSpec) -> Result<ModelSpec, ServerError> {
+    spec.provider_id = normalize_optional_text(spec.provider_id);
+    spec.remote_model_id = normalize_optional_text(spec.remote_model_id);
+    spec.repo_id = normalize_optional_text(spec.repo_id);
+    spec.filename = normalize_optional_text(spec.filename);
+    spec.local_path = normalize_optional_text(spec.local_path);
+
+    if provider.starts_with("cloud.") {
+        if spec.provider_id.is_none() {
+            spec.provider_id = provider_id_from_provider(provider);
+        }
+        if spec.provider_id.is_none() {
+            return Err(ServerError::BadRequest(
+                "cloud models must set spec.provider_id to a configured chat provider".into(),
+            ));
+        }
+        if spec.remote_model_id.is_none() {
+            return Err(ServerError::BadRequest(
+                "cloud models must set spec.remote_model_id".into(),
+            ));
+        }
+    }
+
+    Ok(spec)
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::canonicalize_model_spec;
+    use crate::domain::models::ModelSpec;
+
+    #[test]
+    fn cloud_models_require_remote_model_and_provider_reference() {
+        let error = canonicalize_model_spec("cloud.openai", ModelSpec::default())
+            .expect_err("missing cloud fields");
+
+        assert!(
+            error
+                .to_string()
+                .contains("cloud models must set spec.remote_model_id"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn cloud_models_trim_provider_and_remote_model() {
+        let spec = canonicalize_model_spec(
+            "cloud.openai",
+            ModelSpec {
+                provider_id: Some(" openai-main ".into()),
+                remote_model_id: Some(" gpt-4.1-mini ".into()),
+                ..ModelSpec::default()
+            },
+        )
+        .expect("cloud spec");
+
+        assert_eq!(spec.provider_id.as_deref(), Some("openai-main"));
+        assert_eq!(spec.remote_model_id.as_deref(), Some("gpt-4.1-mini"));
+    }
 }
 
 fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {

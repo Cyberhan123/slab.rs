@@ -50,12 +50,12 @@ impl FromStr for UnifiedModelStatus {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelSpec {
+    /// Cloud provider settings id from `chat.providers` (e.g. `"openai-main"`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
     /// Remote model identifier used by cloud providers (e.g. `"gpt-4o"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub remote_model_id: Option<String>,
-    /// Cloud API endpoint (e.g. `"https://api.openai.com/v1"`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub endpoint: Option<String>,
     /// Optional pricing info for cost tracking.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing: Option<Pricing>,
@@ -292,8 +292,8 @@ impl From<crate::api::v1::models::schema::DownloadModelRequest> for DownloadMode
 impl From<crate::api::v1::models::schema::ModelSpecRequest> for ModelSpec {
     fn from(req: crate::api::v1::models::schema::ModelSpecRequest) -> Self {
         Self {
+            provider_id: req.provider_id,
             remote_model_id: req.remote_model_id,
-            endpoint: req.endpoint,
             pricing: req.pricing.map(|p| Pricing {
                 input: p.input,
                 output: p.output,

@@ -59,27 +59,13 @@ pub(crate) fn chat_providers_validation_schema() -> Value {
         "items": {
             "type": "object",
             "additionalProperties": false,
-            "required": ["id", "name", "api_base", "models"],
+            "required": ["id", "name", "api_base"],
             "properties": {
                 "id": { "type": "string", "minLength": 1 },
                 "name": { "type": "string", "minLength": 1 },
                 "api_base": { "type": "string", "minLength": 1 },
                 "api_key": { "type": ["string", "null"] },
-                "api_key_env": { "type": ["string", "null"] },
-                "models": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": {
-                        "type": "object",
-                        "additionalProperties": false,
-                        "required": ["id", "display_name"],
-                        "properties": {
-                            "id": { "type": "string", "minLength": 1 },
-                            "display_name": { "type": "string", "minLength": 1 },
-                            "remote_model": { "type": ["string", "null"] }
-                        }
-                    }
-                }
+                "api_key_env": { "type": ["string", "null"] }
             }
         }
     })

@@ -43,6 +43,16 @@ type ChatModelApiItem = {
   provider_name?: string | null;
 };
 
+type UnifiedModelApiItem = {
+  id: string;
+  display_name: string;
+  provider: string;
+  status: string;
+  spec?: {
+    local_path?: string | null;
+  } | null;
+};
+
 function isChatModelApiItem(value: unknown): value is ChatModelApiItem {
   if (typeof value !== 'object' || value === null) return false;
   const obj = value as Record<string, unknown>;
@@ -53,6 +63,40 @@ function isChatModelApiItem(value: unknown): value is ChatModelApiItem {
     typeof obj.downloaded === 'boolean' &&
     typeof obj.pending === 'boolean'
   );
+}
+
+function isUnifiedModelApiItem(value: unknown): value is UnifiedModelApiItem {
+  if (typeof value !== 'object' || value === null) return false;
+  const obj = value as Record<string, unknown>;
+  if (
+    typeof obj.id !== 'string' ||
+    typeof obj.display_name !== 'string' ||
+    typeof obj.provider !== 'string' ||
+    typeof obj.status !== 'string'
+  ) {
+    return false;
+  }
+
+  if (obj.spec === undefined || obj.spec === null) {
+    return true;
+  }
+
+  if (typeof obj.spec !== 'object' || Array.isArray(obj.spec)) {
+    return false;
+  }
+
+  const spec = obj.spec as Record<string, unknown>;
+  return (
+    spec.local_path === undefined ||
+    spec.local_path === null ||
+    typeof spec.local_path === 'string'
+  );
+}
+
+function toUnifiedModelList(payload: unknown): UnifiedModelApiItem[] {
+  return Array.isArray(payload)
+    ? payload.filter((item): item is UnifiedModelApiItem => isUnifiedModelApiItem(item))
+    : [];
 }
 
 function Chat() {
@@ -105,8 +149,8 @@ function Chat() {
           label: item.provider_name
             ? `${item.provider_name} / ${item.display_name}`
             : item.display_name,
-          downloaded: true,
-          pending: false,
+          downloaded: item.downloaded,
+          pending: item.pending,
           source: 'cloud',
         }));
 
@@ -125,26 +169,26 @@ function Chat() {
     void loadCloudModels();
   }, [loadCloudModels]);
 
-  const llamaModels = useMemo(
-    () => (catalogModels ?? []).filter((model) => model.backend_ids.includes(LLAMA_BACKEND_ID)),
+  const parsedCatalogModels = useMemo(
+    () => toUnifiedModelList(catalogModels),
     [catalogModels],
   );
 
-  const pendingTaskIdOf = (model: unknown): string | null => {
-    if (typeof model !== 'object' || model === null) return null;
-    const pendingTaskId = (model as { pending_task_id?: string | null }).pending_task_id;
-    if (typeof pendingTaskId !== 'string') return null;
-    const trimmed = pendingTaskId.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  };
+  const llamaModels = useMemo(
+    () =>
+      parsedCatalogModels.filter(
+        (model) => model.provider === `local.${LLAMA_BACKEND_ID}`,
+      ),
+    [parsedCatalogModels],
+  );
 
   const localModelOptions = useMemo<ModelOption[]>(
     () =>
       llamaModels.map((model) => ({
         id: model.id,
         label: model.display_name,
-        downloaded: Boolean(model.local_path),
-        pending: Boolean(pendingTaskIdOf(model)),
+        downloaded: Boolean(model.spec?.local_path),
+        pending: model.status === 'downloading',
         source: 'local',
       })),
     [llamaModels],
@@ -203,7 +247,7 @@ function Chat() {
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
     const refreshed = await refetchCatalogModels();
-    const models = refreshed.data ?? [];
+    const models = toUnifiedModelList(refreshed.data);
     return models.find((model) => model.id === modelId);
   };
 
@@ -220,24 +264,21 @@ function Chat() {
       throw new Error('Selected model does not exist in catalog');
     }
 
-    if (!model.backend_ids.includes(LLAMA_BACKEND_ID)) {
+    if (model.provider !== `local.${LLAMA_BACKEND_ID}`) {
       throw new Error(`Selected model does not support ${LLAMA_BACKEND_ID}`);
     }
 
-    if (model.local_path && !forceDownload) {
-      return { modelPath: model.local_path, downloadedNow: false };
+    if (model.spec?.local_path && !forceDownload) {
+      return { modelPath: model.spec.local_path, downloadedNow: false };
     }
 
-    let taskId = pendingTaskIdOf(model);
-    if (!taskId) {
-      const downloadResponse = await downloadModelMutation.mutateAsync({
-        body: {
-          backend_id: LLAMA_BACKEND_ID,
-          model_id: modelId,
-        },
-      });
-      taskId = extractTaskId(downloadResponse);
-    }
+    const downloadResponse = await downloadModelMutation.mutateAsync({
+      body: {
+        backend_id: LLAMA_BACKEND_ID,
+        model_id: modelId,
+      },
+    });
+    const taskId = extractTaskId(downloadResponse);
 
     if (!taskId) {
       throw new Error('Failed to start model download task');
@@ -246,11 +287,11 @@ function Chat() {
     await waitForTaskToFinish(taskId);
 
     const refreshedModel = await refreshCatalogAndFindModel(modelId);
-    if (!refreshedModel?.local_path) {
+    if (!refreshedModel?.spec?.local_path) {
       throw new Error('Model download completed, but local_path is empty');
     }
 
-    return { modelPath: refreshedModel.local_path, downloadedNow: true };
+    return { modelPath: refreshedModel.spec.local_path, downloadedNow: true };
   };
 
   const loadOrSwitchSelectedModel = async (modelPath: string) => {

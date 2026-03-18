@@ -28,12 +28,12 @@ pub struct PricingRequest {
 /// Provider-specific model configuration (request).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 pub struct ModelSpecRequest {
+    /// Cloud provider settings id from `chat.providers` (e.g. `"openai-main"`).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub provider_id: Option<String>,
     /// Remote model identifier for cloud providers (e.g. `"gpt-4o"`).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub remote_model_id: Option<String>,
-    /// API endpoint for cloud models (e.g. `"https://api.openai.com/v1"`).
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub endpoint: Option<String>,
     /// Optional pricing info.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub pricing: Option<PricingRequest>,
@@ -199,9 +199,9 @@ pub struct PricingResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ModelSpecResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub remote_model_id: Option<String>,
+    pub provider_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub endpoint: Option<String>,
+    pub remote_model_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pricing: Option<PricingResponse>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -255,8 +255,8 @@ impl From<DomainModelStatus> for ModelStatusResponse {
 impl From<DomainModelSpec> for ModelSpecResponse {
     fn from(spec: DomainModelSpec) -> Self {
         Self {
+            provider_id: spec.provider_id,
             remote_model_id: spec.remote_model_id,
-            endpoint: spec.endpoint,
             pricing: spec.pricing.map(|p| PricingResponse {
                 input: p.input,
                 output: p.output,
