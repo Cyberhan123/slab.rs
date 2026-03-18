@@ -104,6 +104,13 @@ pub struct Config {
     pub whisper_lib_dir: Option<PathBuf>,
     /// Optional filesystem directory that contains the diffusion shared library.
     pub diffusion_lib_dir: Option<PathBuf>,
+    /// When `true`, the ONNX Runtime backend (`onnx`) is registered and
+    /// available to accept `model.load` / `inference` calls.
+    ///
+    /// Requires the `onnx` feature flag on the `slab-core` crate.  The field
+    /// is always present in the struct so callers do not need `#[cfg]` guards,
+    /// but it is silently ignored when the feature is disabled.
+    pub onnx_enabled: bool,
     /// When `true`, register the Candle LLaMA backend.
     ///
     /// The backend accepts `model.load` requests with a GGUF weight file path
@@ -129,6 +136,7 @@ impl Default for Config {
             llama_lib_dir: None,
             whisper_lib_dir: None,
             diffusion_lib_dir: None,
+            onnx_enabled: false,
             // Candle backends are only meaningful when compiled with the
             // `candle` feature; default to `false` so that callers without
             // the feature don't register backends that can never load a model.
@@ -158,6 +166,10 @@ pub fn lib_dirs() -> Option<&'static LibDirs> {
 
 /// Initialize the API runtime.
 ///
+/// Registers the three ggml backends (`ggml.llama`, `ggml.whisper`,
+/// `ggml.diffusion`) and starts their worker tasks.  When
+/// `config.onnx_enabled` is `true` **and** the `onnx` feature flag is active,
+/// the `onnx` backend is also registered.
 /// Registers the three GGML backends (`ggml.llama`, `ggml.whisper`,
 /// `ggml.diffusion`) and the three Candle backends (`candle.llama`,
 /// `candle.whisper`, `candle.diffusion`) and starts their worker tasks.
@@ -276,6 +288,18 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
         },
     );
 
+    // ── ONNX backend (feature-gated) ──────────────────────────────────────────
+    #[cfg(feature = "onnx")]
+    if config.onnx_enabled {
+        use crate::engine::onnx::backend::OnnxWorker;
+
+        rm.register_backend(
+            Backend::Onnx.to_string(),
+            move |shared_rx, control_tx| {
+                let count = worker_count.max(1);
+                spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+                    OnnxWorker::new(bc_tx, worker_id)
+                });
     // ── Candle backends (statically linked; no library load phase) ────────────
 
     if config.enable_candle_llama {
