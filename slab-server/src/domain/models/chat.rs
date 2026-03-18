@@ -25,12 +25,6 @@ pub struct ConversationMessage {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub enum ChatModelSource {
-    Local,
-    Cloud,
-}
-
-#[derive(Debug, Clone, Copy)]
 pub enum ChatReasoningEffort {
     None,
     Low,
@@ -66,18 +60,6 @@ impl ChatVerbosity {
             Self::High => "high",
         }
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct ChatModelOption {
-    pub id: String,
-    pub display_name: String,
-    pub source: ChatModelSource,
-    pub provider_id: Option<String>,
-    pub provider_name: Option<String>,
-    pub backend_id: Option<String>,
-    pub downloaded: bool,
-    pub pending: bool,
 }
 
 #[derive(Debug, Clone)]

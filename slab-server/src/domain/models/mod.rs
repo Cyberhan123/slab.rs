@@ -18,16 +18,15 @@ pub use backend::{
     BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand, ReloadBackendLibCommand,
 };
 pub use chat::{
-    ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
-    ChatModelSource, ChatReasoningEffort, ChatResultChoice, ChatStreamChunk, ChatVerbosity,
-    ConversationMessage,
+    ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatReasoningEffort,
+    ChatResultChoice, ChatStreamChunk, ChatVerbosity, ConversationMessage,
 };
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{ImageGenerationCommand, ImageGenerationMode};
 pub use model::{
     AvailableModelsQuery, AvailableModelsView, CreateModelCommand, DeletedModelView,
-    DownloadModelCommand, ListModelsFilter, ModelCatalogItemView, ModelCatalogStatus,
-    ModelLoadCommand, ModelStatus, UpdateModelCommand,
+    DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus,
+    RuntimePresets, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
 };
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};

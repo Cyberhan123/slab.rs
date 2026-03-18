@@ -25,6 +25,7 @@ pub enum Event {
 
 #[derive(Debug, Clone, Copy, Display, EnumString, EnumIter, PartialEq)]
 pub enum Backend {
+    // ── GGML backends (dynamically-linked) ────────────────────────────────────
     #[strum(serialize = "ggml.llama")]
     GGMLLlama,
     #[strum(serialize = "ggml.whisper")]
@@ -37,4 +38,14 @@ pub enum Backend {
     /// exported to the `.onnx` format.  Requires the `onnx` feature flag.
     #[strum(serialize = "onnx")]
     Onnx,
+    // ── Candle backends (statically-linked Rust) ──────────────────────────────
+    /// Candle-powered LLaMA / quantised-LLM inference.
+    #[strum(serialize = "candle.llama")]
+    CandleLlama,
+    /// Candle-powered Whisper speech recognition.
+    #[strum(serialize = "candle.whisper")]
+    CandleWhisper,
+    /// Candle-powered Stable Diffusion image generation.
+    #[strum(serialize = "candle.diffusion")]
+    CandleDiffusion,
 }

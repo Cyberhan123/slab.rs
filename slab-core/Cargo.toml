@@ -12,6 +12,14 @@ license = "AGPL-3.0-only"
 slab-libfetch = { workspace = true }
 
 
+[features]
+candle = [
+    "dep:candle-core",
+    "dep:candle-nn",
+    "dep:candle-transformers",
+    "dep:tokenizers",
+]
+
 [dependencies]
 slab-core-macros = { path = "../slab-core-macros", version = "0.0.1" }
 libloading = { workspace = true }
@@ -43,3 +51,7 @@ ort = { workspace = true, optional = true }
 
 [features]
 onnx = ["dep:ort"]
+candle-core = { version = "0.9.2", optional = true }
+candle-nn = { version = "0.9.2", optional = true }
+candle-transformers = { version = "0.9.2", optional = true }
+tokenizers = { version = "0.22.2", optional = true }

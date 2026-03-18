@@ -5,9 +5,66 @@ use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
 use crate::domain::models::{
-    ModelCatalogItemView as DomainModelCatalogItemView,
-    ModelCatalogStatus as DomainModelCatalogStatus, ModelStatus as DomainModelStatus,
+    ModelSpec as DomainModelSpec,
+    ModelStatus as DomainModelStatus,
+    RuntimePresets as DomainRuntimePresets,
+    UnifiedModel as DomainUnifiedModel,
+    UnifiedModelStatus as DomainUnifiedModelStatus,
 };
+
+// ---------------------------------------------------------------------------
+// Nested request schemas
+// ---------------------------------------------------------------------------
+
+/// Pricing info for cost tracking.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct PricingRequest {
+    /// Cost per 1K input tokens in USD.
+    pub input: f64,
+    /// Cost per 1K output tokens in USD.
+    pub output: f64,
+}
+
+/// Provider-specific model configuration (request).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+pub struct ModelSpecRequest {
+    /// Remote model identifier for cloud providers (e.g. `"gpt-4o"`).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub remote_model_id: Option<String>,
+    /// API endpoint for cloud models (e.g. `"https://api.openai.com/v1"`).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub endpoint: Option<String>,
+    /// Optional pricing info.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub pricing: Option<PricingRequest>,
+    /// HuggingFace repo ID for local models.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub repo_id: Option<String>,
+    /// Filename within the HF repo.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub filename: Option<String>,
+    /// Absolute path to the downloaded model file (populated after download).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub local_path: Option<String>,
+    /// Maximum context window size in tokens.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub context_window: Option<u32>,
+}
+
+/// Default runtime parameters (request).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+pub struct RuntimePresetsRequest {
+    /// Sampling temperature.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub temperature: Option<f32>,
+    /// Top-p nucleus sampling probability.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub top_p: Option<f32>,
+}
+
+// ---------------------------------------------------------------------------
+// CRUD request schemas
+// ---------------------------------------------------------------------------
 
 /// Request body for `POST /v1/models`.
 #[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
@@ -19,19 +76,15 @@ pub struct CreateModelRequest {
     pub display_name: String,
     #[validate(custom(
         function = "crate::api::validation::validate_non_blank",
-        message = "repo_id must not be empty"
+        message = "provider must not be empty"
     ))]
-    pub repo_id: String,
-    #[validate(custom(
-        function = "crate::api::validation::validate_non_blank",
-        message = "filename must not be empty"
-    ))]
-    pub filename: String,
-    #[validate(custom(
-        function = "crate::api::validation::validate_backend_ids",
-        message = "backend_ids must contain valid backend ids"
-    ))]
-    pub backend_ids: Vec<String>,
+    pub provider: String,
+    /// Initial status. If omitted, defaults to `"ready"` for cloud providers and
+    /// `"not_downloaded"` for local providers.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub status: Option<String>,
+    pub spec: Option<ModelSpecRequest>,
+    pub runtime_presets: Option<RuntimePresetsRequest>,
 }
 
 /// Request body for `PUT /v1/models/{id}`.
@@ -42,22 +95,15 @@ pub struct UpdateModelRequest {
         message = "display_name must not be empty"
     ))]
     pub display_name: Option<String>,
-    #[validate(custom(
-        function = "crate::api::validation::validate_non_blank",
-        message = "repo_id must not be empty"
-    ))]
-    pub repo_id: Option<String>,
-    #[validate(custom(
-        function = "crate::api::validation::validate_non_blank",
-        message = "filename must not be empty"
-    ))]
-    pub filename: Option<String>,
-    #[validate(custom(
-        function = "crate::api::validation::validate_backend_ids",
-        message = "backend_ids must contain valid backend ids"
-    ))]
-    pub backend_ids: Option<Vec<String>>,
+    pub provider: Option<String>,
+    pub status: Option<String>,
+    pub spec: Option<ModelSpecRequest>,
+    pub runtime_presets: Option<RuntimePresetsRequest>,
 }
+
+// ---------------------------------------------------------------------------
+// Load / unload request schemas (unchanged)
+// ---------------------------------------------------------------------------
 
 /// Request body for `POST /v1/models/load`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
@@ -74,7 +120,7 @@ pub struct LoadModelRequest {
         message = "model_path must be an absolute path without '..'"
     ))]
     pub model_path: String,
-    /// Optional worker override. If omitted, server uses global config by backend.
+    /// Optional worker override.
     #[serde(default)]
     #[validate(range(min = 1, message = "num_workers must be at least 1"))]
     pub num_workers: Option<u32>,
@@ -83,12 +129,13 @@ pub struct LoadModelRequest {
 /// Response body for load / status endpoints.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ModelStatusResponse {
-    /// Backend identifier, e.g. `"ggml.llama"`.
+    /// Backend identifier.
     pub backend: String,
     /// Human-readable status string.
     pub status: String,
 }
 
+/// Request body for `POST /v1/models/switch`.
 #[derive(Debug, Deserialize, ToSchema, Validate)]
 pub struct SwitchModelRequest {
     #[validate(custom(
@@ -101,32 +148,25 @@ pub struct SwitchModelRequest {
         message = "backend_id is invalid"
     ))]
     pub backend_id: String,
-    /// Optional worker override. If omitted, server uses global config by backend.
     #[serde(default)]
     #[validate(range(min = 1, message = "num_workers must be at least 1"))]
     pub num_workers: Option<u32>,
 }
 
+/// Request body for `POST /v1/models/download`.
 #[derive(Debug, Deserialize, ToSchema, Validate)]
 pub struct DownloadModelRequest {
-    /// Model catalog entry ID from `/v1/models`.
+    /// Model ID from `/v1/models`.
     #[validate(custom(
         function = "crate::api::validation::validate_non_blank",
         message = "model_id must not be empty"
     ))]
     pub model_id: String,
-    /// Backend identifier to use for this download.
-    #[validate(custom(
-        function = "crate::api::validation::validate_backend_id",
-        message = "backend_id is invalid"
-    ))]
-    pub backend_id: String,
 }
 
 /// Query parameters for listing files in a HuggingFace repo.
 #[derive(Debug, IntoParams, Deserialize, ToSchema, Validate)]
 pub struct ListAvailableQuery {
-    /// HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`.
     #[validate(custom(
         function = "crate::api::validation::validate_non_blank",
         message = "repo_id must not be empty"
@@ -134,39 +174,74 @@ pub struct ListAvailableQuery {
     pub repo_id: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, ToSchema, Default)]
-#[serde(rename_all = "snake_case")]
-pub enum ModelListStatus {
-    Downloaded,
-    Pending,
-    NotDownloaded,
-    #[default]
-    All,
-}
+// ---------------------------------------------------------------------------
+// List query
+// ---------------------------------------------------------------------------
 
-/// Query parameters for listing catalog models by computed status.
-#[derive(Debug, Clone, Deserialize, IntoParams, ToSchema)]
+/// Query parameters for `GET /v1/models`.
+#[derive(Debug, Clone, Deserialize, IntoParams, ToSchema, Default)]
 pub struct ListModelsQuery {
-    #[serde(default)]
-    pub status: ModelListStatus,
+    // Reserved for future filtering (e.g. by provider prefix or status).
 }
 
-/// Model catalog entry response with computed download status.
+// ---------------------------------------------------------------------------
+// Response schemas
+// ---------------------------------------------------------------------------
+
+/// Pricing info in API responses.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct ModelCatalogItemResponse {
+pub struct PricingResponse {
+    pub input: f64,
+    pub output: f64,
+}
+
+/// Provider-specific model configuration (response).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelSpecResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub remote_model_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub endpoint: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<PricingResponse>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+}
+
+/// Default runtime parameters (response).
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct RuntimePresetsResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
+}
+
+/// Unified model response returned by `/v1/models`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct UnifiedModelResponse {
     pub id: String,
     pub display_name: String,
-    pub repo_id: String,
-    pub filename: String,
-    pub backend_ids: Vec<String>,
-    /// Whether this catalog entry is recognized as a Whisper VAD model candidate.
-    pub is_vad_model: bool,
-    pub status: ModelListStatus,
-    pub local_path: Option<String>,
-    pub last_downloaded_at: Option<String>,
-    pub pending_task_id: Option<String>,
-    pub pending_task_status: Option<String>,
+    /// Provider identifier, e.g. `"cloud.openai"`, `"local.ggml.llama"`.
+    pub provider: String,
+    /// Status: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`.
+    pub status: String,
+    pub spec: ModelSpecResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub runtime_presets: Option<RuntimePresetsResponse>,
+    pub created_at: String,
+    pub updated_at: String,
 }
+
+// ---------------------------------------------------------------------------
+// From impls
+// ---------------------------------------------------------------------------
 
 impl From<DomainModelStatus> for ModelStatusResponse {
     fn from(status: DomainModelStatus) -> Self {
@@ -177,31 +252,50 @@ impl From<DomainModelStatus> for ModelStatusResponse {
     }
 }
 
-impl From<DomainModelCatalogStatus> for ModelListStatus {
-    fn from(status: DomainModelCatalogStatus) -> Self {
-        match status {
-            DomainModelCatalogStatus::Downloaded => Self::Downloaded,
-            DomainModelCatalogStatus::Pending => Self::Pending,
-            DomainModelCatalogStatus::NotDownloaded => Self::NotDownloaded,
-            DomainModelCatalogStatus::All => Self::All,
+impl From<DomainModelSpec> for ModelSpecResponse {
+    fn from(spec: DomainModelSpec) -> Self {
+        Self {
+            remote_model_id: spec.remote_model_id,
+            endpoint: spec.endpoint,
+            pricing: spec.pricing.map(|p| PricingResponse {
+                input: p.input,
+                output: p.output,
+            }),
+            repo_id: spec.repo_id,
+            filename: spec.filename,
+            local_path: spec.local_path,
+            context_window: spec.context_window,
         }
     }
 }
 
-impl From<DomainModelCatalogItemView> for ModelCatalogItemResponse {
-    fn from(item: DomainModelCatalogItemView) -> Self {
+impl From<DomainRuntimePresets> for RuntimePresetsResponse {
+    fn from(presets: DomainRuntimePresets) -> Self {
         Self {
-            id: item.id,
-            display_name: item.display_name,
-            repo_id: item.repo_id,
-            filename: item.filename,
-            backend_ids: item.backend_ids,
-            is_vad_model: item.is_vad_model,
-            status: item.status.into(),
-            local_path: item.local_path,
-            last_downloaded_at: item.last_downloaded_at,
-            pending_task_id: item.pending_task_id,
-            pending_task_status: item.pending_task_status,
+            temperature: presets.temperature,
+            top_p: presets.top_p,
         }
     }
 }
+
+impl From<DomainUnifiedModel> for UnifiedModelResponse {
+    fn from(model: DomainUnifiedModel) -> Self {
+        Self {
+            id: model.id,
+            display_name: model.display_name,
+            provider: model.provider,
+            status: model.status.as_str().to_owned(),
+            spec: model.spec.into(),
+            runtime_presets: model.runtime_presets.map(Into::into),
+            created_at: model.created_at.to_rfc3339(),
+            updated_at: model.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+impl From<DomainUnifiedModelStatus> for String {
+    fn from(status: DomainUnifiedModelStatus) -> Self {
+        status.as_str().to_owned()
+    }
+}
+
