@@ -632,8 +632,7 @@ mod tests {
                         {
                             "id": "openai-main",
                             "name": "OpenAI",
-                            "api_base": "https://api.openai.com/v1",
-                            "models": [{ "id": "gpt-4.1-mini", "display_name": "GPT-4.1 mini" }]
+                            "api_base": "https://api.openai.com/v1"
                         }
                     ])),
                 },

@@ -10,8 +10,8 @@ use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatResultChoice,
-    ChatStreamChunk, ConversationMessage as DomainConversationMessage,
+    ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
+    ChatResultChoice, ChatStreamChunk, ConversationMessage as DomainConversationMessage,
 };
 use crate::error::ServerError;
 use crate::infra::db::{ChatMessage, ChatStore};
@@ -35,6 +35,10 @@ pub struct ChatService {
 impl ChatService {
     pub fn new(state: ModelState) -> Self {
         Self { state }
+    }
+
+    pub async fn list_chat_models(&self) -> Result<Vec<ChatModelOption>, ServerError> {
+        cloud::list_chat_models(&self.state).await
     }
 
     pub async fn create_chat_completion(
@@ -119,7 +123,7 @@ async fn create_chat_completion_with_state(
             );
     }
 
-    let generated = if cloud::is_cloud_model_option_id(&command.model) {
+    let generated = if cloud::should_route_to_cloud(&state, &command.model).await? {
         cloud::create_chat_completion(
             &state,
             &command.model,

@@ -4,14 +4,14 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::response::sse::{Event, Sse};
 use axum::response::{IntoResponse, Response};
-use axum::routing::post;
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures::StreamExt;
 use utoipa::OpenApi;
 
 use crate::api::v1::chat::schema::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatMessage as OpenAiMessage,
-    ChatReasoningEffort, ChatThinkingConfig, ChatThinkingType,
+    ChatModelOption, ChatModelSource, ChatReasoningEffort, ChatThinkingConfig, ChatThinkingType,
     ChatVerbosity,
 };
 use crate::api::validation::ValidatedJson;
@@ -22,10 +22,12 @@ use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(chat_completions),
+    paths(chat_completions, list_chat_models),
     components(schemas(
         ChatCompletionRequest,
         ChatCompletionResponse,
+        ChatModelOption,
+        ChatModelSource,
         OpenAiMessage,
         ChatChoice,
         ChatThinkingConfig,
@@ -38,7 +40,29 @@ pub struct ChatApi;
 
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
+        .route("/chat/models", get(list_chat_models))
         .route("/chat/completions", post(chat_completions))
+}
+
+#[utoipa::path(
+    get,
+    path = "/v1/chat/models",
+    tag = "chat",
+    responses(
+        (status = 200, description = "Selectable chat model options", body = [ChatModelOption]),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn list_chat_models(
+    State(service): State<ChatService>,
+) -> Result<Json<Vec<ChatModelOption>>, ServerError> {
+    let items = service
+        .list_chat_models()
+        .await?
+        .into_iter()
+        .map(Into::into)
+        .collect();
+    Ok(Json(items))
 }
 
 #[utoipa::path(

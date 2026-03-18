@@ -18,8 +18,9 @@ pub use backend::{
     BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand, ReloadBackendLibCommand,
 };
 pub use chat::{
-    ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatReasoningEffort,
-    ChatResultChoice, ChatStreamChunk, ChatVerbosity, ConversationMessage,
+    ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
+    ChatModelSource, ChatReasoningEffort, ChatResultChoice, ChatStreamChunk, ChatVerbosity,
+    ConversationMessage,
 };
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{ImageGenerationCommand, ImageGenerationMode};
@@ -31,10 +32,10 @@ pub use model::{
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
 pub use settings::{
-    embedded_settings_schema, CloudProviderModelSettingValue, CloudProviderSettingValue,
-    SettingDefinition, SettingPropertySchema, SettingPropertyView, SettingValidationErrorData,
-    SettingValueType, SettingsDocumentView, SettingsSchema, SettingsSectionView,
-    SettingsSubsectionView, SettingsValuesFile, UpdateSettingCommand, UpdateSettingOperation,
+    embedded_settings_schema, CloudProviderSettingValue, SettingDefinition, SettingPropertySchema,
+    SettingPropertyView, SettingValidationErrorData, SettingValueType, SettingsDocumentView,
+    SettingsSchema, SettingsSectionView, SettingsSubsectionView, SettingsValuesFile,
+    UpdateSettingCommand, UpdateSettingOperation,
 };
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};

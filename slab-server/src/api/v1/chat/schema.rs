@@ -9,7 +9,8 @@ use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
-    ChatCompletionResult as DomainChatCompletionResult, ChatResultChoice as DomainChatResultChoice,
+    ChatCompletionResult as DomainChatCompletionResult, ChatModelOption as DomainChatModelOption,
+    ChatModelSource as DomainChatModelSource, ChatResultChoice as DomainChatResultChoice,
     ConversationMessage,
 };
 
@@ -60,6 +61,14 @@ pub enum ChatThinkingType {
     Disabled,
 }
 
+/// Chat model source type.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum ChatModelSource {
+    Local,
+    Cloud,
+}
+
 /// Thinking settings accepted by `POST /v1/chat/completions`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ChatThinkingConfig {
@@ -89,9 +98,8 @@ pub struct ChatCompletionRequest {
         message = "id must not be empty"
     ))]
     pub id: Option<String>,
-    /// The model identifier to use. It can be:
-    /// - local model id from `/v1/models`
-    /// - cloud model option id from `GET /v1/chat/models`
+    /// Unified model identifier from `/v1/models`.
+    /// `GET /v1/chat/models` returns picker options that reuse the same ids.
     #[validate(custom(
         function = "crate::api::validation::validate_non_blank",
         message = "model must not be empty"
@@ -157,6 +165,30 @@ pub struct ChatCompletionResponse {
     pub choices: Vec<ChatChoice>,
 }
 
+/// A selectable chat model option from `GET /v1/chat/models`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatModelOption {
+    /// Stable option id used in `POST /v1/chat/completions`.
+    pub id: String,
+    /// User-facing display label.
+    pub display_name: String,
+    /// Whether this option is local or cloud.
+    pub source: ChatModelSource,
+    /// Whether model artifacts are already downloaded locally.
+    pub downloaded: bool,
+    /// Whether a model download task is running.
+    pub pending: bool,
+    /// Backend id when `source = local`, e.g. `"ggml.llama"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_id: Option<String>,
+    /// Cloud provider id when `source = cloud`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_id: Option<String>,
+    /// Cloud provider name when `source = cloud`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provider_name: Option<String>,
+}
+
 impl From<ConversationMessage> for ChatMessage {
     fn from(message: ConversationMessage) -> Self {
         Self {
@@ -184,6 +216,30 @@ impl From<DomainChatCompletionResult> for ChatCompletionResponse {
             created: result.created,
             model: result.model,
             choices: result.choices.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<DomainChatModelSource> for ChatModelSource {
+    fn from(value: DomainChatModelSource) -> Self {
+        match value {
+            DomainChatModelSource::Local => Self::Local,
+            DomainChatModelSource::Cloud => Self::Cloud,
+        }
+    }
+}
+
+impl From<DomainChatModelOption> for ChatModelOption {
+    fn from(value: DomainChatModelOption) -> Self {
+        Self {
+            id: value.id,
+            display_name: value.display_name,
+            source: value.source.into(),
+            downloaded: value.downloaded,
+            pending: value.pending,
+            backend_id: value.backend_id,
+            provider_id: value.provider_id,
+            provider_name: value.provider_name,
         }
     }
 }

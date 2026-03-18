@@ -122,21 +122,6 @@ pub struct CloudProviderSettingValue {
     pub api_key: Option<String>,
     #[serde(default, alias = "apiKeyEnv", skip_serializing_if = "Option::is_none")]
     pub api_key_env: Option<String>,
-    pub models: Vec<CloudProviderModelSettingValue>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CloudProviderModelSettingValue {
-    #[serde(alias = "model", alias = "model_id", alias = "modelId")]
-    pub id: String,
-    #[serde(default, alias = "displayName")]
-    pub display_name: String,
-    #[serde(
-        default,
-        alias = "remoteModel",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub remote_model: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -703,35 +688,6 @@ fn canonicalize_chat_provider(
             provider.id
         ));
     }
-    if provider.models.is_empty() {
-        return Err(format!(
-            "cloud provider '{}' must define at least one model",
-            provider.id
-        ));
-    }
-
-    let mut model_ids = BTreeSet::new();
-    for model in &mut provider.models {
-        model.id = model.id.trim().to_owned();
-        model.display_name = model.display_name.trim().to_owned();
-        model.remote_model = normalize_optional_text(model.remote_model.as_deref());
-
-        if model.id.is_empty() {
-            return Err(format!(
-                "cloud provider '{}' contains model with empty id",
-                provider.id
-            ));
-        }
-        if model.display_name.is_empty() {
-            model.display_name = model.id.clone();
-        }
-        if !model_ids.insert(model.id.clone()) {
-            return Err(format!(
-                "cloud provider '{}' contains duplicate model id '{}'",
-                provider.id, model.id
-            ));
-        }
-    }
 
     Ok(provider)
 }
@@ -832,7 +788,26 @@ mod tests {
         assert_eq!(providers[0].id, "openai-main");
         assert_eq!(providers[0].name, "openai-main");
         assert_eq!(providers[0].api_base, "https://api.openai.com/v1");
-        assert_eq!(providers[0].models[0].display_name, "gpt-4.1-mini");
+        assert_eq!(providers[0].api_key, None);
+    }
+
+    #[test]
+    fn chat_provider_payload_without_models_is_canonicalized() {
+        let providers = canonicalize_chat_providers_from_value(&json!([
+            {
+                "id": " openai-main ",
+                "name": "",
+                "api_base": "https://api.openai.com/v1/",
+                "api_key_env": " OPENAI_API_KEY "
+            }
+        ]))
+        .expect("providers");
+
+        assert_eq!(providers[0].id, "openai-main");
+        assert_eq!(providers[0].name, "openai-main");
+        assert_eq!(providers[0].api_base, "https://api.openai.com/v1");
+        assert_eq!(providers[0].api_key_env.as_deref(), Some("OPENAI_API_KEY"));
+        assert_eq!(providers[0].api_key, None);
     }
 
     #[test]
@@ -857,7 +832,8 @@ mod tests {
             .expect("provider properties");
 
         assert!(provider_properties.contains_key("api_base"));
-        assert!(provider_properties.contains_key("models"));
+        assert!(provider_properties.contains_key("api_key_env"));
+        assert!(!provider_properties.contains_key("models"));
     }
 
     #[test]

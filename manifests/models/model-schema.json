@@ -15,7 +15,7 @@
     },
     "provider": {
       "type": "string",
-      "description": "Provider identifier, e.g. 'cloud.openai', 'cloud.google', 'local.ggml.llama', 'local.candle.whisper'."
+      "description": "Provider family identifier, e.g. 'cloud.openai', 'cloud.openrouter', 'local.ggml.llama', 'local.candle.whisper'."
     },
     "status": {
       "type": "string",
@@ -30,10 +30,9 @@
           "type": "string",
           "description": "Remote model identifier (cloud models), e.g. 'gpt-4o'."
         },
-        "endpoint": {
+        "provider_id": {
           "type": "string",
-          "format": "uri",
-          "description": "API endpoint for cloud models, e.g. 'https://api.openai.com/v1'."
+          "description": "Cloud provider configuration id from chat.providers used to resolve API base URL and credentials."
         },
         "pricing": {
           "type": "object",
@@ -91,5 +90,24 @@
       "additionalProperties": false
     }
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "provider": {
+            "type": "string",
+            "pattern": "^cloud\\."
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "spec": {
+            "required": ["provider_id", "remote_model_id"]
+          }
+        }
+      }
+    }
+  ],
   "additionalProperties": false
 }

@@ -11,9 +11,9 @@ use crate::api::middleware::auth;
 use crate::api::validation::validate;
 use crate::context::AppState;
 use crate::domain::models::{
-    CloudProviderModelSettingValue, CloudProviderSettingValue, SettingPropertySchema,
-    SettingPropertyView, SettingValidationErrorData, SettingValueType, SettingsDocumentView,
-    SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand, UpdateSettingOperation,
+    SettingPropertySchema, SettingPropertyView, SettingValidationErrorData, SettingValueType,
+    SettingsDocumentView, SettingsSectionView, SettingsSubsectionView, UpdateSettingCommand,
+    UpdateSettingOperation,
 };
 use crate::domain::services::SettingsService;
 use crate::error::ServerError;
@@ -39,9 +39,7 @@ struct SettingPmidPath {
         SettingValueType,
         UpdateSettingCommand,
         UpdateSettingOperation,
-        SettingValidationErrorData,
-        CloudProviderSettingValue,
-        CloudProviderModelSettingValue
+        SettingValidationErrorData
     ))
 )]
 pub struct SettingsApi;
