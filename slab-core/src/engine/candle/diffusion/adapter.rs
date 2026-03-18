@@ -4,13 +4,13 @@
 //! generation from a text prompt.  When the `candle` feature is disabled all
 //! public methods return [`CandleDiffusionEngineError::ModelNotLoaded`].
 //!
-//! ## Performance note
+//! ## Model loading
 //!
-//! Model tensors are loaded from disk once at `model.load` time and stored in
-//! memory as `Arc<HashMap<String, Tensor>>`.  Each inference call rebuilds the
-//! UNet, VAE, and scheduler from the pre-loaded tensors (no additional disk
-//! I/O), and CLIP is loaded from disk once per call because the CLIP API does
-//! not yet provide a stateful handle that is easily stored across calls.
+//! `load_model` validates that the provided weight files exist, then builds and
+//! caches the UNet, VAE, and CLIP text-encoder in `InnerState`.  The scheduler
+//! is rebuilt per inference call because the number of denoising steps can vary
+//! per request.  All subsequent `inference` calls re-use the cached models
+//! without any disk I/O, so latency after the first load is minimal.
 
 use std::path::Path;
 use std::sync::{Arc, RwLock};
@@ -73,18 +73,31 @@ impl Default for GenImageParams {
 // ── Inner state ────────────────────────────────────────────────────────────────
 
 struct InnerState {
-    /// Pre-loaded UNet tensors; avoids disk I/O on every inference call.
+    /// Path to the UNet model weights file (kept for diagnostics / reload).
     #[cfg(feature = "candle")]
-    unet_tensors: Option<std::collections::HashMap<String, candle_core::Tensor>>,
-    /// Pre-loaded VAE tensors.
+    model_path: Option<std::path::PathBuf>,
+    /// Path to the VAE weight file (may equal `model_path`).
     #[cfg(feature = "candle")]
-    vae_tensors: Option<std::collections::HashMap<String, candle_core::Tensor>>,
+    vae_path: Option<std::path::PathBuf>,
     /// SD config baked at load time from the requested version.
+    /// Kept so the per-inference scheduler can be built from it.
     #[cfg(feature = "candle")]
     sd_config: Option<candle_transformers::models::stable_diffusion::StableDiffusionConfig>,
     /// The tokenizer directory used for CLIP.
     #[cfg(feature = "candle")]
     tokenizer_dir: Option<std::path::PathBuf>,
+    /// Cached UNet model built during `load_model`.
+    #[cfg(feature = "candle")]
+    unet: Option<candle_transformers::models::stable_diffusion::unet_2d::UNet2DConditionModel>,
+    /// Cached VAE model built during `load_model`.
+    #[cfg(feature = "candle")]
+    vae: Option<candle_transformers::models::stable_diffusion::vae::AutoEncoderKL>,
+    /// Cached CLIP text-encoder built during `load_model`.
+    #[cfg(feature = "candle")]
+    clip: Option<candle_transformers::models::stable_diffusion::clip::ClipTextTransformer>,
+    /// Cached CLIP tokenizer built during `load_model`.
+    #[cfg(feature = "candle")]
+    tokenizer: Option<tokenizers::Tokenizer>,
 
     #[cfg(not(feature = "candle"))]
     _loaded: bool,
@@ -94,13 +107,21 @@ impl Default for InnerState {
     fn default() -> Self {
         Self {
             #[cfg(feature = "candle")]
-            unet_tensors: None,
+            model_path: None,
             #[cfg(feature = "candle")]
-            vae_tensors: None,
+            vae_path: None,
             #[cfg(feature = "candle")]
             sd_config: None,
             #[cfg(feature = "candle")]
             tokenizer_dir: None,
+            #[cfg(feature = "candle")]
+            unet: None,
+            #[cfg(feature = "candle")]
+            vae: None,
+            #[cfg(feature = "candle")]
+            clip: None,
+            #[cfg(feature = "candle")]
+            tokenizer: None,
             #[cfg(not(feature = "candle"))]
             _loaded: false,
         }
@@ -123,13 +144,13 @@ impl CandleDiffusionEngine {
         }
     }
 
-    /// Returns `true` when model tensors are currently loaded.
+    /// Returns `true` when models are currently loaded and ready for inference.
     pub fn is_model_loaded(&self) -> bool {
         #[cfg(feature = "candle")]
         {
             self.inner
                 .read()
-                .map(|s| s.unet_tensors.is_some())
+                .map(|s| s.unet.is_some())
                 .unwrap_or(false)
         }
         #[cfg(not(feature = "candle"))]
@@ -151,12 +172,38 @@ impl CandleDiffusionEngine {
     ) -> Result<(), EngineError> {
         #[cfg(feature = "candle")]
         {
-            use candle_core::Device;
+            use candle_core::{DType, Device};
             use candle_transformers::models::stable_diffusion;
 
             tracing::info!(model_path, sd_version, "loading candle diffusion model");
 
+            let model_file = Path::new(model_path);
+            let vae_file_path: std::path::PathBuf;
+            let vae_file = if let Some(vp) = vae_path {
+                vae_file_path = Path::new(vp).to_path_buf();
+                vae_file_path.as_path()
+            } else {
+                model_file
+            };
+
+            // ── Validate that files exist before touching model state ──────────
+            if !model_file.exists() {
+                return Err(CandleDiffusionEngineError::LoadModel {
+                    model_path: model_path.to_owned(),
+                    message: "UNet weight file not found".into(),
+                }
+                .into());
+            }
+            if !vae_file.exists() {
+                return Err(CandleDiffusionEngineError::LoadModel {
+                    model_path: vae_file.display().to_string(),
+                    message: "VAE weight file not found".into(),
+                }
+                .into());
+            }
+
             let device = Device::Cpu;
+            let dtype = DType::F32;
 
             // Select SD config based on version string.
             let sd_config = match sd_version {
@@ -164,40 +211,65 @@ impl CandleDiffusionEngine {
                 _ => stable_diffusion::StableDiffusionConfig::v2_1(None, None, None),
             };
 
-            // Load UNet tensors from disk once.
-            let unet_tensors =
-                candle_core::safetensors::load(model_path, &device).map_err(|e| {
-                    CandleDiffusionEngineError::LoadModel {
-                        model_path: model_path.to_owned(),
-                        message: format!("UNet load failed: {e}"),
-                    }
-                })?;
-
-            // Load VAE tensors from disk once (may be the same file).
-            let vae_file = vae_path.unwrap_or(model_path);
-            let vae_tensors =
-                candle_core::safetensors::load(vae_file, &device).map_err(|e| {
-                    CandleDiffusionEngineError::LoadModel {
-                        model_path: vae_file.to_owned(),
-                        message: format!("VAE load failed: {e}"),
-                    }
-                })?;
-
             // Derive tokenizer directory from the model path.
-            let tokenizer_dir = Path::new(model_path)
+            let tokenizer_dir = model_file
                 .parent()
                 .unwrap_or(Path::new("."))
                 .join("tokenizer");
+
+            // Load and cache CLIP tokenizer + text-encoder.
+            let tokenizer_json = tokenizer_dir.join("tokenizer.json");
+            let tokenizer =
+                tokenizers::Tokenizer::from_file(&tokenizer_json).map_err(|e| {
+                    CandleDiffusionEngineError::LoadModel {
+                        model_path: tokenizer_json.display().to_string(),
+                        message: format!("failed to load CLIP tokenizer: {e}"),
+                    }
+                })?;
+
+            let clip_weights = tokenizer_dir
+                .parent()
+                .unwrap_or(&tokenizer_dir)
+                .join("text_encoder/model.safetensors");
+            let clip = stable_diffusion::build_clip_transformer(
+                &sd_config.clip,
+                &clip_weights,
+                &device,
+                dtype,
+            )
+            .map_err(|e| CandleDiffusionEngineError::LoadModel {
+                model_path: clip_weights.display().to_string(),
+                message: format!("failed to build CLIP transformer: {e}"),
+            })?;
+
+            // Build and cache UNet and VAE.
+            let unet = sd_config
+                .build_unet(model_file, &device, 4, false, dtype)
+                .map_err(|e| CandleDiffusionEngineError::LoadModel {
+                    model_path: model_path.to_owned(),
+                    message: format!("failed to build UNet: {e}"),
+                })?;
+
+            let vae = sd_config
+                .build_vae(vae_file, &device, dtype)
+                .map_err(|e| CandleDiffusionEngineError::LoadModel {
+                    model_path: vae_file.display().to_string(),
+                    message: format!("failed to build VAE: {e}"),
+                })?;
 
             let mut state = self.inner.write().map_err(|_| {
                 CandleDiffusionEngineError::LockPoisoned {
                     operation: "write diffusion model state",
                 }
             })?;
-            state.unet_tensors = Some(unet_tensors);
-            state.vae_tensors = Some(vae_tensors);
+            state.model_path = Some(model_file.to_path_buf());
+            state.vae_path = vae_path.map(|p| Path::new(p).to_path_buf());
             state.sd_config = Some(sd_config);
             state.tokenizer_dir = Some(tokenizer_dir);
+            state.unet = Some(unet);
+            state.vae = Some(vae);
+            state.clip = Some(clip);
+            state.tokenizer = Some(tokenizer);
 
             return Ok(());
         }
@@ -214,10 +286,14 @@ impl CandleDiffusionEngine {
         if let Ok(mut state) = self.inner.write() {
             #[cfg(feature = "candle")]
             {
-                state.unet_tensors = None;
-                state.vae_tensors = None;
+                state.model_path = None;
+                state.vae_path = None;
                 state.sd_config = None;
                 state.tokenizer_dir = None;
+                state.unet = None;
+                state.vae = None;
+                state.clip = None;
+                state.tokenizer = None;
             }
             #[cfg(not(feature = "candle"))]
             {
@@ -261,88 +337,76 @@ impl CandleDiffusionEngine {
 
     #[cfg(feature = "candle")]
     fn run_inference(&self, params: &GenImageParams) -> Result<Vec<u8>, EngineError> {
-        use candle_core::{DType, Device, Tensor};
-        use candle_nn::VarBuilder;
-        use candle_transformers::models::stable_diffusion;
+        use candle_core::{DType, Device, IndexOp, Tensor};
 
         let device = Device::Cpu;
-        let dtype = DType::F32;
+        let _ = DType::F32; // dtype only needed when building models (done at load_model time)
 
-        // Acquire read lock to borrow pre-loaded tensors.
+        // Acquire read lock to borrow cached models and config.
         let state = self.inner.read().map_err(|_| CandleDiffusionEngineError::LockPoisoned {
             operation: "read diffusion state for inference",
         })?;
 
-        let (unet_tensors, vae_tensors, sd_config, tokenizer_dir) =
-            match (&state.unet_tensors, &state.vae_tensors, &state.sd_config, &state.tokenizer_dir) {
-                (Some(u), Some(v), Some(c), Some(d)) => (u, v, c, d),
-                _ => return Err(CandleDiffusionEngineError::ModelNotLoaded.into()),
-            };
+        let (sd_config, unet, vae, clip, tokenizer) = match (
+            &state.sd_config,
+            &state.unet,
+            &state.vae,
+            &state.clip,
+            &state.tokenizer,
+        ) {
+            (Some(c), Some(u), Some(v), Some(cl), Some(t)) => (c, u, v, cl, t),
+            _ => return Err(CandleDiffusionEngineError::ModelNotLoaded.into()),
+        };
 
-        // Build model components from pre-loaded tensors (no disk I/O here).
-        let tok_path = tokenizer_dir.join("tokenizer.json");
-        let tokenizer = stable_diffusion::build_clip_transformer(
-            &sd_config.clip,
-            tok_path.to_str().unwrap_or(""),
-            &device,
-            dtype,
-        )
-        .map_err(|e| CandleDiffusionEngineError::Inference {
-            message: format!("CLIP load failed: {e}"),
-        })?;
+        // Encode prompt and negative prompt via CLIP tokenizer.
+        let encode_text = |text: &str| -> Result<Tensor, CandleDiffusionEngineError> {
+            let enc = tokenizer.encode(text, true).map_err(|e| {
+                CandleDiffusionEngineError::Inference {
+                    message: format!("tokenize failed: {e}"),
+                }
+            })?;
+            let ids: Vec<i64> = enc.get_ids().iter().map(|&id| id as i64).collect();
+            Tensor::new(ids.as_slice(), &device)
+                .and_then(|t| t.unsqueeze(0))
+                .map_err(|e| CandleDiffusionEngineError::Inference {
+                    message: format!("token tensor: {e}"),
+                })
+        };
 
-        let unet_vb = VarBuilder::from_tensors(unet_tensors.clone(), dtype, &device);
-        let unet = sd_config
-            .build_unet(unet_vb, 4)
-            .map_err(|e| CandleDiffusionEngineError::Inference {
-                message: format!("UNet build failed: {e}"),
+        let prompt_ids = encode_text(&params.prompt)?;
+        let uncond_ids = encode_text(&params.negative_prompt)?;
+
+        // Generate text embeddings via cached CLIP encoder.
+        let prompt_embeds =
+            clip.forward_with_mask(&prompt_ids, prompt_ids.dim(1).unwrap_or(0))
+                .map_err(|e| CandleDiffusionEngineError::Inference {
+                    message: format!("CLIP forward (prompt): {e}"),
+                })?;
+        let uncond_embeds =
+            clip.forward_with_mask(&uncond_ids, uncond_ids.dim(1).unwrap_or(0))
+                .map_err(|e| CandleDiffusionEngineError::Inference {
+                    message: format!("CLIP forward (uncond): {e}"),
+                })?;
+        let text_embeddings =
+            Tensor::cat(&[uncond_embeds, prompt_embeds], 0).map_err(|e| {
+                CandleDiffusionEngineError::Inference {
+                    message: format!("embed cat: {e}"),
+                }
             })?;
 
-        let vae_vb = VarBuilder::from_tensors(vae_tensors.clone(), dtype, &device);
-        let vae = sd_config
-            .build_vae(vae_vb, &device, dtype)
-            .map_err(|e| CandleDiffusionEngineError::Inference {
-                message: format!("VAE build failed: {e}"),
-            })?;
-
-        let scheduler =
+        // Build the scheduler (depends on params.steps which varies per call).
+        let mut scheduler =
             sd_config
                 .build_scheduler(params.steps)
                 .map_err(|e| CandleDiffusionEngineError::Inference {
                     message: format!("Scheduler build failed: {e}"),
                 })?;
 
-        // Encode text embeddings.
-        let prompt_ids =
-            stable_diffusion::get_text_embeddings(&params.prompt, &tokenizer, 0, 100, false)
-                .map_err(|e| CandleDiffusionEngineError::Inference {
-                    message: format!("text embed failed: {e}"),
-                })?;
-        let uncond_ids = stable_diffusion::get_text_embeddings(
-            &params.negative_prompt,
-            &tokenizer,
-            0,
-            100,
-            false,
-        )
-        .map_err(|e| CandleDiffusionEngineError::Inference {
-            message: format!("uncond embed failed: {e}"),
-        })?;
-        let text_embeddings = Tensor::cat(&[uncond_ids, prompt_ids], 0).map_err(|e| {
-            CandleDiffusionEngineError::Inference {
-                message: format!("embed cat: {e}"),
-            }
-        })?;
-
         // Noise initialisation with seed-derived deterministic RNG.
         let bsize = 1usize;
-        let latent_h = (params.height / 8) as usize; // already validated as mult of 8
+        let latent_h = (params.height / 8) as usize;
         let latent_w = (params.width / 8) as usize;
 
-        // Seed the candle device RNG for deterministic output.
-        // seed=0 is a valid deterministic seed; callers that want a random
-        // (non-reproducible) result should generate a random u64 themselves
-        // before submitting the request.
         device.set_seed(params.seed).map_err(|e| CandleDiffusionEngineError::Inference {
             message: format!("failed to seed RNG: {e}"),
         })?;
@@ -361,8 +425,12 @@ impl CandleDiffusionEngine {
             message: format!("scale noise: {e}"),
         })?;
 
+        // Collect timesteps first to avoid simultaneous mut/immut borrows on scheduler.
+        let timesteps: Vec<usize> = scheduler.timesteps().to_vec();
+        let total_steps = timesteps.len();
+
         // Denoising loop.
-        for (idx, t) in scheduler.timesteps().iter().enumerate() {
+        for (idx, t) in timesteps.iter().enumerate() {
             let latent_model_input = Tensor::cat(&[&latents, &latents], 0).map_err(|e| {
                 CandleDiffusionEngineError::Inference {
                     message: format!("latent cat: {e}"),

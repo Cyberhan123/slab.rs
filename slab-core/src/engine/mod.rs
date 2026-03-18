@@ -1,3 +1,4 @@
+#[cfg(feature = "ggml")]
 pub mod ggml;
 pub mod candle;
 #[cfg(feature = "onnx")]
@@ -14,6 +15,7 @@ pub use crate::base::error::CoreError as EngineError;
 // Kept here (not in `base`) so that the base domain layer remains
 // free of any dependency on engine-specific types.
 
+#[cfg(feature = "ggml")]
 macro_rules! impl_ggml_from {
     ($($ty:path),+ $(,)?) => {
         $(
@@ -26,6 +28,7 @@ macro_rules! impl_ggml_from {
     };
 }
 
+#[cfg(feature = "ggml")]
 impl_ggml_from!(
     ggml::GGMLEngineError,
     ggml::whisper::GGMLWhisperEngineError,
