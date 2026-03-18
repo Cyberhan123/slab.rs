@@ -1,6 +1,6 @@
+pub mod candle;
 #[cfg(feature = "ggml")]
 pub mod ggml;
-pub mod candle;
 #[cfg(feature = "onnx")]
 pub mod onnx;
 

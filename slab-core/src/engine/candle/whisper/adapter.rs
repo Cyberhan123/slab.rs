@@ -173,14 +173,16 @@ impl CandleWhisperEngine {
             // fall back to a unit bank and warn.
             let n_fft_half = whisper::N_FFT / 2 + 1;
             let n_mels = config.num_mel_bins;
-            let filters_path =
-                path.parent().unwrap_or(Path::new(".")).join("mel_filters.npz");
+            let filters_path = path
+                .parent()
+                .unwrap_or(Path::new("."))
+                .join("mel_filters.npz");
             let mel_filters: Vec<f32> = if filters_path.exists() {
                 match candle_core::npy::NpzTensors::new(&filters_path).and_then(|npz| {
                     let key = format!("mel_{n_mels}");
-                    npz.get(&key)?.ok_or_else(|| candle_core::Error::Msg(
-                        format!("mel_filters.npz missing key '{key}'"),
-                    ))
+                    npz.get(&key)?.ok_or_else(|| {
+                        candle_core::Error::Msg(format!("mel_filters.npz missing key '{key}'"))
+                    })
                 }) {
                     Ok(tensor) => tensor
                         .flatten_all()
@@ -207,11 +209,12 @@ impl CandleWhisperEngine {
                 vec![1.0f32 / n_fft_half as f32; n_mels * n_fft_half]
             };
 
-            let mut state = self.inner.write().map_err(|_| {
-                CandleWhisperEngineError::LockPoisoned {
-                    operation: "write whisper model state",
-                }
-            })?;
+            let mut state =
+                self.inner
+                    .write()
+                    .map_err(|_| CandleWhisperEngineError::LockPoisoned {
+                        operation: "write whisper model state",
+                    })?;
             state.model = Some(model);
             state.tokenizer = Some(tok);
             state.config = Some(config);
@@ -262,16 +265,23 @@ impl CandleWhisperEngine {
 
             // Borrow the stored config and mel filter bank.
             let (n_mels, n_fft_half, mel_filters_clone) = {
-                let s = self.inner.read().map_err(|_| CandleWhisperEngineError::LockPoisoned {
-                    operation: "read whisper state for config",
-                })?;
+                let s = self
+                    .inner
+                    .read()
+                    .map_err(|_| CandleWhisperEngineError::LockPoisoned {
+                        operation: "read whisper state for config",
+                    })?;
                 if s.model.is_none() {
                     return Err(CandleWhisperEngineError::ModelNotLoaded.into());
                 }
-                let cfg = s.config.as_ref().ok_or(CandleWhisperEngineError::ModelNotLoaded)?;
+                let cfg = s
+                    .config
+                    .as_ref()
+                    .ok_or(CandleWhisperEngineError::ModelNotLoaded)?;
                 let n_mels = cfg.num_mel_bins;
                 let n_fft_half = whisper::N_FFT / 2 + 1;
-                let filters = s.mel_filters
+                let filters = s
+                    .mel_filters
                     .as_ref()
                     .cloned()
                     .unwrap_or_else(|| vec![1.0f32 / n_fft_half as f32; n_mels * n_fft_half]);
@@ -281,25 +291,33 @@ impl CandleWhisperEngine {
 
             // Acquire a borrow of the stored config for pcm_to_mel.
             let cfg_clone = {
-                let s = self.inner.read().map_err(|_| CandleWhisperEngineError::LockPoisoned {
-                    operation: "read whisper config for mel",
-                })?;
-                s.config.clone().ok_or(CandleWhisperEngineError::ModelNotLoaded)?
+                let s = self
+                    .inner
+                    .read()
+                    .map_err(|_| CandleWhisperEngineError::LockPoisoned {
+                        operation: "read whisper config for mel",
+                    })?;
+                s.config
+                    .clone()
+                    .ok_or(CandleWhisperEngineError::ModelNotLoaded)?
             };
 
             let mel_data = audio::pcm_to_mel(&cfg_clone, samples, &mel_filters_clone);
             let n_frames = mel_data.len() / n_mels;
 
-            let mel = Tensor::from_vec(mel_data, (1usize, n_mels, n_frames), &device)
-                .map_err(|e| CandleWhisperEngineError::Inference {
-                    message: format!("mel tensor: {e}"),
+            let mel =
+                Tensor::from_vec(mel_data, (1usize, n_mels, n_frames), &device).map_err(|e| {
+                    CandleWhisperEngineError::Inference {
+                        message: format!("mel tensor: {e}"),
+                    }
                 })?;
 
-            let mut state = self.inner.write().map_err(|_| {
-                CandleWhisperEngineError::LockPoisoned {
-                    operation: "lock whisper state for inference",
-                }
-            })?;
+            let mut state =
+                self.inner
+                    .write()
+                    .map_err(|_| CandleWhisperEngineError::LockPoisoned {
+                        operation: "lock whisper state for inference",
+                    })?;
 
             // Pre-extract special token IDs and clone the tokenizer to avoid
             // holding an immutable borrow of `state.tokenizer` simultaneously
@@ -312,23 +330,38 @@ impl CandleWhisperEngine {
                 (
                     tok.token_to_id(whisper::SOT_TOKEN).unwrap_or(50258u32),
                     tok.token_to_id(whisper::EOT_TOKEN).unwrap_or(50256u32),
-                    tok.token_to_id(whisper::TRANSCRIBE_TOKEN).unwrap_or(50359u32),
-                    tok.token_to_id(whisper::NO_TIMESTAMPS_TOKEN).unwrap_or(50363u32),
+                    tok.token_to_id(whisper::TRANSCRIBE_TOKEN)
+                        .unwrap_or(50359u32),
+                    tok.token_to_id(whisper::NO_TIMESTAMPS_TOKEN)
+                        .unwrap_or(50363u32),
                     tok.clone(),
                 )
             };
 
-            let model = state.model.as_mut().ok_or(CandleWhisperEngineError::ModelNotLoaded)?;
+            let model = state
+                .model
+                .as_mut()
+                .ok_or(CandleWhisperEngineError::ModelNotLoaded)?;
 
             // Encode audio.
-            let audio_features = model.encoder.forward(&mel.squeeze(0).map_err(|e| {
-                CandleWhisperEngineError::Inference { message: format!("squeeze: {e}") }
-            })?, true).map_err(|e| CandleWhisperEngineError::Inference {
-                message: format!("encode: {e}"),
-            })?;
-            let audio_features = audio_features.unsqueeze(0).map_err(|e| {
-                CandleWhisperEngineError::Inference { message: format!("unsqueeze: {e}") }
-            })?;
+            let audio_features = model
+                .encoder
+                .forward(
+                    &mel.squeeze(0)
+                        .map_err(|e| CandleWhisperEngineError::Inference {
+                            message: format!("squeeze: {e}"),
+                        })?,
+                    true,
+                )
+                .map_err(|e| CandleWhisperEngineError::Inference {
+                    message: format!("encode: {e}"),
+                })?;
+            let audio_features =
+                audio_features
+                    .unsqueeze(0)
+                    .map_err(|e| CandleWhisperEngineError::Inference {
+                        message: format!("unsqueeze: {e}"),
+                    })?;
 
             // Greedy decode using special token IDs.
             let mut tokens: Vec<u32> = vec![sot, transcribe_tok, no_ts];
@@ -336,7 +369,11 @@ impl CandleWhisperEngine {
 
             for _ in 0..256u32 {
                 let ids_tensor = Tensor::new(
-                    tokens.iter().map(|&t| t as i64).collect::<Vec<_>>().as_slice(),
+                    tokens
+                        .iter()
+                        .map(|&t| t as i64)
+                        .collect::<Vec<_>>()
+                        .as_slice(),
                     &device,
                 )
                 .map_err(|e| CandleWhisperEngineError::Inference {
@@ -353,11 +390,11 @@ impl CandleWhisperEngine {
                     .map_err(|e| CandleWhisperEngineError::Inference {
                         message: format!("decode: {e}"),
                     })?;
-                let last_logits = logits
-                    .i((.., tokens.len() - 1, ..))
-                    .map_err(|e| CandleWhisperEngineError::Inference {
+                let last_logits = logits.i((.., tokens.len() - 1, ..)).map_err(|e| {
+                    CandleWhisperEngineError::Inference {
                         message: format!("index logits: {e}"),
-                    })?;
+                    }
+                })?;
                 let vocab_logits = model.decoder.final_linear(&last_logits).map_err(|e| {
                     CandleWhisperEngineError::Inference {
                         message: format!("final_linear: {e}"),

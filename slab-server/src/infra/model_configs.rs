@@ -64,10 +64,7 @@ pub fn read_model_config(path: &Path) -> Result<StoredModelConfig, ServerError> 
     })
 }
 
-pub fn write_model_config(
-    dir: &Path,
-    config: &StoredModelConfig,
-) -> Result<PathBuf, ServerError> {
+pub fn write_model_config(dir: &Path, config: &StoredModelConfig) -> Result<PathBuf, ServerError> {
     ensure_model_config_dir(dir)?;
 
     let path = model_config_file_path(dir, &config.id);

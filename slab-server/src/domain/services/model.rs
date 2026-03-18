@@ -35,10 +35,7 @@ impl ModelService {
         }
     }
 
-    pub async fn create_model(
-        &self,
-        req: CreateModelCommand,
-    ) -> Result<UnifiedModel, ServerError> {
+    pub async fn create_model(&self, req: CreateModelCommand) -> Result<UnifiedModel, ServerError> {
         self.persist_model_definition(req).await
     }
 
@@ -554,7 +551,9 @@ fn default_status_for_provider(provider: &str) -> UnifiedModelStatus {
 fn normalize_required_text(value: String, label: &str) -> Result<String, ServerError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        return Err(ServerError::BadRequest(format!("{label} must not be empty")));
+        return Err(ServerError::BadRequest(format!(
+            "{label} must not be empty"
+        )));
     }
     Ok(trimmed.to_owned())
 }

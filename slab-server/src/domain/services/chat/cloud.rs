@@ -267,7 +267,8 @@ fn provider_id_from_provider_string(provider: &str) -> Option<String> {
 }
 
 fn referenced_provider_id(model: &UnifiedModel) -> Option<String> {
-    model.spec
+    model
+        .spec
         .provider_id
         .as_deref()
         .map(str::trim)

@@ -65,11 +65,21 @@ struct GenImageInput {
     seed: u64,
 }
 
-fn default_width() -> u32 { 512 }
-fn default_height() -> u32 { 512 }
-fn default_steps() -> usize { 20 }
-fn default_cfg_scale() -> f64 { 7.5 }
-fn default_seed() -> u64 { 42 }
+fn default_width() -> u32 {
+    512
+}
+fn default_height() -> u32 {
+    512
+}
+fn default_steps() -> usize {
+    20
+}
+fn default_cfg_scale() -> f64 {
+    7.5
+}
+fn default_seed() -> u64 {
+    42
+}
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -96,17 +106,17 @@ impl CandleDiffusionWorker {
     /// `lib.load` is a no-op for Candle (statically linked).
     #[on_event(LoadLibrary)]
     async fn on_load_library(&mut self, req: BackendRequest) {
-        let _ = req
-            .reply_tx
-            .send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+        let _ = req.reply_tx.send(BackendReply::Value(Payload::Bytes(
+            Arc::from([] as [u8; 0]),
+        )));
     }
 
     /// `lib.reload` is a no-op for Candle (statically linked).
     #[on_event(ReloadLibrary)]
     async fn on_reload_library(&mut self, req: BackendRequest) {
-        let _ = req
-            .reply_tx
-            .send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+        let _ = req.reply_tx.send(BackendReply::Value(Payload::Bytes(
+            Arc::from([] as [u8; 0]),
+        )));
     }
 
     #[on_event(LoadModel)]

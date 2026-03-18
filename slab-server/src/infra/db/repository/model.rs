@@ -33,14 +33,14 @@ fn parse_rfc3339_or_now(raw: String, field: &'static str) -> chrono::DateTime<Ut
 }
 
 type ModelRow = (
-    String, // id
-    String, // display_name
-    String, // provider
-    String, // status
-    String, // spec
+    String,         // id
+    String,         // display_name
+    String,         // provider
+    String,         // status
+    String,         // spec
     Option<String>, // runtime_presets
-    String, // created_at
-    String, // updated_at
+    String,         // created_at
+    String,         // updated_at
 );
 
 fn row_to_record(

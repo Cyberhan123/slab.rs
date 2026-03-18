@@ -182,7 +182,10 @@ fn init_tracing(
     if let Some(path) = log_file {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create slab-runtime log directory '{}'", parent.display())
+                format!(
+                    "failed to create slab-runtime log directory '{}'",
+                    parent.display()
+                )
             })?;
         }
 
@@ -190,7 +193,9 @@ fn init_tracing(
             .create(true)
             .append(true)
             .open(path)
-            .with_context(|| format!("failed to open slab-runtime log file '{}'", path.display()))?;
+            .with_context(|| {
+                format!("failed to open slab-runtime log file '{}'", path.display())
+            })?;
         let (file_writer, guard) = tracing_appender::non_blocking(file);
         guards.push(guard);
 
@@ -259,7 +264,14 @@ fn install_panic_hook() {
     std::panic::set_hook(Box::new(|panic_info| {
         let location = panic_info
             .location()
-            .map(|location| format!("{}:{}:{}", location.file(), location.line(), location.column()))
+            .map(|location| {
+                format!(
+                    "{}:{}:{}",
+                    location.file(),
+                    location.line(),
+                    location.column()
+                )
+            })
             .unwrap_or_else(|| "<unknown>".to_string());
         let payload = if let Some(msg) = panic_info.payload().downcast_ref::<&str>() {
             (*msg).to_string()

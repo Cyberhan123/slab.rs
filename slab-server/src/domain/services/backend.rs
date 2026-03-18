@@ -198,12 +198,12 @@ fn windows_download_spec(backend_id: Backend) -> Option<WindowsDownloadSpec> {
             "master-504-636d3cb",
             |version: &str| format!("stable-diffusion-{version}-bin-win-cpu-x64.zip"),
         )),
-        Backend::CandleDiffusion | Backend::CandleLlama | Backend::CandleWhisper | Backend::Onnx =>  Some((
-            "slab",
-            "slab-buildin",
-            "v0.1.0",
-            |version: &str| format!("slab-buildin-{version}-bin-win-x64.zip"),
-        )), // no download specs for candle backends or onnx
+        Backend::CandleDiffusion
+        | Backend::CandleLlama
+        | Backend::CandleWhisper
+        | Backend::Onnx => Some(("slab", "slab-buildin", "v0.1.0", |version: &str| {
+            format!("slab-buildin-{version}-bin-win-x64.zip")
+        })), // no download specs for candle backends or onnx
     }
 }
 
