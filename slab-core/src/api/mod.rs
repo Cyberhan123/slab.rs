@@ -99,10 +99,18 @@ pub struct Config {
     /// Maximum concurrent in-flight requests per backend.  Defaults to `4`.
     pub backend_capacity: usize,
     /// Optional filesystem directory that contains the llama shared library.
+    ///
+    /// Requires the `ggml` feature flag on the `slab-core` crate.  The field
+    /// is always present in the struct so callers do not need `#[cfg]` guards,
+    /// but it is silently ignored when the feature is disabled.
     pub llama_lib_dir: Option<PathBuf>,
     /// Optional filesystem directory that contains the whisper shared library.
+    ///
+    /// Silently ignored when the `ggml` feature is disabled.
     pub whisper_lib_dir: Option<PathBuf>,
     /// Optional filesystem directory that contains the diffusion shared library.
+    ///
+    /// Silently ignored when the `ggml` feature is disabled.
     pub diffusion_lib_dir: Option<PathBuf>,
     /// When `true`, the ONNX Runtime backend (`onnx`) is registered and
     /// available to accept `model.load` / `inference` calls.
@@ -166,22 +174,20 @@ pub fn lib_dirs() -> Option<&'static LibDirs> {
 
 /// Initialize the API runtime.
 ///
-/// Registers the three ggml backends (`ggml.llama`, `ggml.whisper`,
-/// `ggml.diffusion`) and starts their worker tasks.  When
-/// `config.onnx_enabled` is `true` **and** the `onnx` feature flag is active,
-/// the `onnx` backend is also registered.
-/// Registers the three GGML backends (`ggml.llama`, `ggml.whisper`,
-/// `ggml.diffusion`) and the three Candle backends (`candle.llama`,
-/// `candle.whisper`, `candle.diffusion`) and starts their worker tasks.
+/// When the `ggml` feature is active, registers the three GGML backends
+/// (`ggml.llama`, `ggml.whisper`, `ggml.diffusion`) and starts their worker
+/// tasks.  If `lib_*_dir` fields are set in `config`, the corresponding GGML
+/// shared libraries are loaded **synchronously** in the calling thread before
+/// the worker tasks are spawned.  This means that when `init` returns
+/// successfully the dynamic libraries are ready for use.
 ///
-/// If `lib_*_dir` fields are set in `config`, the corresponding GGML shared
-/// libraries are loaded **synchronously** in the calling thread before the
-/// worker tasks are spawned.  This means that when `init` returns successfully
-/// the dynamic libraries are ready for use.
+/// When `config.onnx_enabled` is `true` **and** the `onnx` feature flag is
+/// active, the `onnx` backend is also registered.
 ///
 /// The Candle backends are always registered when their respective
-/// `enable_candle_*` flag is set (default `true`); they do not require a
-/// separate library load step because Candle is statically linked.
+/// `enable_candle_*` flag is set (default `true` when the `candle` feature is
+/// active); they do not require a separate library load step because Candle is
+/// statically linked.
 ///
 /// Must be called inside a Tokio runtime.  Calling it a second time is a
 /// no-op — the first configuration wins.
@@ -191,54 +197,7 @@ pub fn lib_dirs() -> Option<&'static LibDirs> {
 /// Returns [`RuntimeError::LibraryLoadFailed`] if any configured GGML library
 /// cannot be resolved or opened.
 pub fn init(config: Config) -> Result<(), RuntimeError> {
-    use crate::engine::ggml::{
-        diffusion::{DiffusionWorker, GGMLDiffusionEngine},
-        llama::{spawn_backend_with_engine as spawn_llama, GGMLLlamaEngine},
-        whisper::{GGMLWhisperEngine, WhisperWorker},
-    };
     use crate::scheduler::backend::runner::spawn_workers;
-    use std::path::Path;
-
-    // ── Phase 1: load all GGML library handles synchronously ─────────────────
-    //
-    // No worker tasks are spawned yet.  If any library load fails here, we
-    // return an error without having started any background threads.
-    let llama_engine = config
-        .llama_lib_dir
-        .as_deref()
-        .map(|p| {
-            GGMLLlamaEngine::from_path(Path::new(p)).map_err(|e| RuntimeError::LibraryLoadFailed {
-                backend: "ggml.llama".into(),
-                message: e.to_string(),
-            })
-        })
-        .transpose()?;
-
-    let whisper_engine = config
-        .whisper_lib_dir
-        .as_deref()
-        .map(|p| {
-            GGMLWhisperEngine::from_path(Path::new(p)).map_err(|e| {
-                RuntimeError::LibraryLoadFailed {
-                    backend: "ggml.whisper".into(),
-                    message: e.to_string(),
-                }
-            })
-        })
-        .transpose()?;
-
-    let diffusion_engine = config
-        .diffusion_lib_dir
-        .as_deref()
-        .map(|p| {
-            GGMLDiffusionEngine::from_path(Path::new(p)).map_err(|e| {
-                RuntimeError::LibraryLoadFailed {
-                    backend: "ggml.diffusion".into(),
-                    message: e.to_string(),
-                }
-            })
-        })
-        .transpose()?;
 
     // ── Phase 2: all loads succeeded; spawn worker tasks ──────────────────────
     let worker_count = config.backend_capacity;
@@ -247,46 +206,98 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
         ..ResourceManagerConfig::default()
     });
 
-    // ── GGML backends ─────────────────────────────────────────────────────────
+    // ── GGML backends (feature-gated) ─────────────────────────────────────────
+    #[cfg(feature = "ggml")]
+    {
+        use crate::engine::ggml::{
+            diffusion::{DiffusionWorker, GGMLDiffusionEngine},
+            llama::{spawn_backend_with_engine as spawn_llama, GGMLLlamaEngine},
+            whisper::{GGMLWhisperEngine, WhisperWorker},
+        };
+        use std::path::Path;
 
-    rm.register_backend(
-        Backend::GGMLLlama.to_string(),
-        move |shared_rx, control_tx| {
-            spawn_llama(shared_rx, control_tx, llama_engine);
-        },
-    );
+        // ── Phase 1: load all GGML library handles synchronously ─────────────
+        //
+        // No worker tasks are spawned yet.  If any library load fails here, we
+        // return an error without having started any background threads.
+        let llama_engine = config
+            .llama_lib_dir
+            .as_deref()
+            .map(|p| {
+                GGMLLlamaEngine::from_path(Path::new(p)).map_err(|e| {
+                    RuntimeError::LibraryLoadFailed {
+                        backend: "ggml.llama".into(),
+                        message: e.to_string(),
+                    }
+                })
+            })
+            .transpose()?;
 
-    rm.register_backend(
-        Backend::GGMLWhisper.to_string(),
-        move |shared_rx, control_tx| {
-            let count = worker_count.max(1);
-            let mut worker_engines: Vec<Option<GGMLWhisperEngine>> = (1..count)
-                .map(|_| whisper_engine.as_ref().map(|e| e.fork_library()))
-                .collect();
-            worker_engines.insert(0, whisper_engine);
-            let mut worker_engines = worker_engines.into_iter();
-            spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
-                let worker_engine = worker_engines.next().unwrap_or(None);
-                WhisperWorker::new(worker_engine, bc_tx, worker_id)
-            });
-        },
-    );
+        let whisper_engine = config
+            .whisper_lib_dir
+            .as_deref()
+            .map(|p| {
+                GGMLWhisperEngine::from_path(Path::new(p)).map_err(|e| {
+                    RuntimeError::LibraryLoadFailed {
+                        backend: "ggml.whisper".into(),
+                        message: e.to_string(),
+                    }
+                })
+            })
+            .transpose()?;
 
-    rm.register_backend(
-        Backend::GGMLDiffusion.to_string(),
-        move |shared_rx, control_tx| {
-            let count = worker_count.max(1);
-            let mut worker_engines: Vec<Option<GGMLDiffusionEngine>> = (1..count)
-                .map(|_| diffusion_engine.as_ref().map(|e| e.fork_library()))
-                .collect();
-            worker_engines.insert(0, diffusion_engine);
-            let mut worker_engines = worker_engines.into_iter();
-            spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
-                let worker_engine = worker_engines.next().unwrap_or(None);
-                DiffusionWorker::new(worker_engine, bc_tx, worker_id)
-            });
-        },
-    );
+        let diffusion_engine = config
+            .diffusion_lib_dir
+            .as_deref()
+            .map(|p| {
+                GGMLDiffusionEngine::from_path(Path::new(p)).map_err(|e| {
+                    RuntimeError::LibraryLoadFailed {
+                        backend: "ggml.diffusion".into(),
+                        message: e.to_string(),
+                    }
+                })
+            })
+            .transpose()?;
+
+        rm.register_backend(
+            Backend::GGMLLlama.to_string(),
+            move |shared_rx, control_tx| {
+                spawn_llama(shared_rx, control_tx, llama_engine);
+            },
+        );
+
+        rm.register_backend(
+            Backend::GGMLWhisper.to_string(),
+            move |shared_rx, control_tx| {
+                let count = worker_count.max(1);
+                let mut worker_engines: Vec<Option<GGMLWhisperEngine>> = (1..count)
+                    .map(|_| whisper_engine.as_ref().map(|e| e.fork_library()))
+                    .collect();
+                worker_engines.insert(0, whisper_engine);
+                let mut worker_engines = worker_engines.into_iter();
+                spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+                    let worker_engine = worker_engines.next().unwrap_or(None);
+                    WhisperWorker::new(worker_engine, bc_tx, worker_id)
+                });
+            },
+        );
+
+        rm.register_backend(
+            Backend::GGMLDiffusion.to_string(),
+            move |shared_rx, control_tx| {
+                let count = worker_count.max(1);
+                let mut worker_engines: Vec<Option<GGMLDiffusionEngine>> = (1..count)
+                    .map(|_| diffusion_engine.as_ref().map(|e| e.fork_library()))
+                    .collect();
+                worker_engines.insert(0, diffusion_engine);
+                let mut worker_engines = worker_engines.into_iter();
+                spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+                    let worker_engine = worker_engines.next().unwrap_or(None);
+                    DiffusionWorker::new(worker_engine, bc_tx, worker_id)
+                });
+            },
+        );
+    }
 
     // ── ONNX backend (feature-gated) ──────────────────────────────────────────
     #[cfg(feature = "onnx")]
@@ -300,6 +311,10 @@ pub fn init(config: Config) -> Result<(), RuntimeError> {
                 spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
                     OnnxWorker::new(bc_tx, worker_id)
                 });
+            },
+        );
+    }
+
     // ── Candle backends (statically linked; no library load phase) ────────────
 
     if config.enable_candle_llama {

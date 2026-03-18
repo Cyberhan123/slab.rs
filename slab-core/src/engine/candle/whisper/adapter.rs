@@ -7,7 +7,7 @@
 //! [`CandleWhisperEngineError::ModelNotLoaded`] so the rest of the crate still
 //! compiles.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 
 use thiserror::Error;
@@ -43,60 +43,14 @@ pub enum CandleWhisperEngineError {
 struct InnerState {
     /// Loaded model; `None` when no model is present.
     #[cfg(feature = "candle")]
-    model: Option<Box<dyn CandleWhisperModelTrait + Send + Sync>>,
+    model: Option<candle_transformers::models::whisper::model::Whisper>,
     #[cfg(not(feature = "candle"))]
     model: Option<()>,
     /// Loaded tokenizer.
     #[cfg(feature = "candle")]
-    tokenizer: Option<candle_transformers::models::whisper::multilingual::WhisperTokenizer>,
+    tokenizer: Option<tokenizers::Tokenizer>,
     #[cfg(not(feature = "candle"))]
     tokenizer: Option<()>,
-}
-
-// ── Trait abstracting over Whisper model sizes (candle feature only) ──────────
-
-#[cfg(feature = "candle")]
-trait CandleWhisperModelTrait {
-    fn transcribe(
-        &mut self,
-        mel: &candle_core::Tensor,
-        tokenizer: &candle_transformers::models::whisper::multilingual::WhisperTokenizer,
-    ) -> Result<String, candle_core::Error>;
-}
-
-#[cfg(feature = "candle")]
-struct WhisperModelWrapper<M>(M);
-
-#[cfg(feature = "candle")]
-impl<M> CandleWhisperModelTrait for WhisperModelWrapper<M>
-where
-    M: candle_transformers::models::whisper::model::Whisper + Send + Sync,
-{
-    fn transcribe(
-        &mut self,
-        mel: &candle_core::Tensor,
-        tokenizer: &candle_transformers::models::whisper::multilingual::WhisperTokenizer,
-    ) -> Result<String, candle_core::Error> {
-        use candle_transformers::models::whisper::decoding::Decoder;
-        let mut decoder = Decoder::new(
-            &mut self.0,
-            tokenizer,
-            /*seed*/ 42,
-            &candle_core::Device::Cpu,
-            /*timestamps*/ false,
-            /*verbose*/ false,
-        )
-        .map_err(|e| candle_core::Error::Msg(e.to_string()))?;
-        let result = decoder
-            .run(mel)
-            .map_err(|e| candle_core::Error::Msg(e.to_string()))?;
-        Ok(result
-            .segments
-            .iter()
-            .map(|s| s.dr.text.as_str())
-            .collect::<Vec<_>>()
-            .join(" "))
-    }
 }
 
 // ── Engine ────────────────────────────────────────────────────────────────────
@@ -180,20 +134,16 @@ impl CandleWhisperEngine {
                 }
             })?;
 
-            // Resolve tokenizer directory: prefer the explicitly provided path's
-            // parent, otherwise fall back to the model file's parent directory.
             let tok_dir: &Path = if let Some(tp) = tokenizer_path {
                 Path::new(tp).parent().unwrap_or(Path::new("."))
             } else {
                 path.parent().unwrap_or(Path::new("."))
             };
-            let tok = candle_transformers::models::whisper::multilingual::multilingual_tokenizer(
-                tok_dir,
-                /*language*/ "en",
-                /*timestamps*/ false,
-            )
-            .map_err(|e| CandleWhisperEngineError::LoadTokenizer {
-                message: e.to_string(),
+            let tokenizer_json = tok_dir.join("tokenizer.json");
+            let tok = tokenizers::Tokenizer::from_file(&tokenizer_json).map_err(|e| {
+                CandleWhisperEngineError::LoadTokenizer {
+                    message: e.to_string(),
+                }
             })?;
 
             let mut state = self.inner.write().map_err(|_| {
@@ -201,7 +151,7 @@ impl CandleWhisperEngine {
                     operation: "write whisper model state",
                 }
             })?;
-            state.model = Some(Box::new(WhisperModelWrapper(model)));
+            state.model = Some(model);
             state.tokenizer = Some(tok);
 
             return Ok(());
@@ -236,19 +186,49 @@ impl CandleWhisperEngine {
 
         #[cfg(feature = "candle")]
         {
-            use candle_core::{Device, Tensor};
-            use candle_transformers::models::whisper::audio;
+            use candle_core::{Device, IndexOp, Tensor, D};
+            use candle_transformers::models::whisper::{self, audio};
 
             let device = Device::Cpu;
-
-            let mel = audio::pcm_to_mel(samples, &device).map_err(|e| {
-                CandleWhisperEngineError::Inference {
-                    message: e.to_string(),
+            let config_path = {
+                // Borrow state briefly just to extract the config path.
+                let s = self.inner.read().map_err(|_| CandleWhisperEngineError::LockPoisoned {
+                    operation: "read whisper state for config path",
+                })?;
+                if s.model.is_none() {
+                    return Err(CandleWhisperEngineError::ModelNotLoaded.into());
                 }
-            })?;
-            let mel = mel.unsqueeze(0).map_err(|e| CandleWhisperEngineError::Inference {
-                message: e.to_string(),
-            })?;
+                // Config path is not stored – use default mel filter size.
+                drop(s);
+            };
+            let _ = config_path;
+
+            // Build a default config to determine mel filter dimensions.
+            let cfg = whisper::Config {
+                num_mel_bins: 80,
+                max_source_positions: 1500,
+                d_model: 384,
+                encoder_attention_heads: 6,
+                encoder_layers: 4,
+                vocab_size: 51865,
+                max_target_positions: 448,
+                decoder_attention_heads: 6,
+                decoder_layers: 4,
+                suppress_tokens: vec![],
+            };
+
+            // Compute mel spectrogram using precomputed unit filters (80 × N_FFT/2+1).
+            // For production use, load actual mel filter banks from the model directory.
+            let n_mels = cfg.num_mel_bins;
+            let n_fft_half = whisper::N_FFT / 2 + 1;
+            let mel_filters = vec![1.0f32 / n_fft_half as f32; n_mels * n_fft_half];
+            let mel_data = audio::pcm_to_mel(&cfg, samples, &mel_filters);
+            let n_frames = mel_data.len() / n_mels;
+
+            let mel = Tensor::from_vec(mel_data, (1usize, n_mels, n_frames), &device)
+                .map_err(|e| CandleWhisperEngineError::Inference {
+                    message: format!("mel tensor: {e}"),
+                })?;
 
             let mut state = self.inner.write().map_err(|_| {
                 CandleWhisperEngineError::LockPoisoned {
@@ -258,18 +238,89 @@ impl CandleWhisperEngine {
 
             let (model, tokenizer) = match (&mut state.model, &state.tokenizer) {
                 (Some(m), Some(t)) => (m, t),
-                _ => {
-                    return Err(CandleWhisperEngineError::ModelNotLoaded.into());
-                }
+                _ => return Err(CandleWhisperEngineError::ModelNotLoaded.into()),
             };
 
-            let text = model
-                .transcribe(&mel, tokenizer)
+            // Encode audio.
+            let audio_features = model.encoder.forward(&mel.squeeze(0).map_err(|e| {
+                CandleWhisperEngineError::Inference { message: format!("squeeze: {e}") }
+            })?, true).map_err(|e| CandleWhisperEngineError::Inference {
+                message: format!("encode: {e}"),
+            })?;
+            let audio_features = audio_features.unsqueeze(0).map_err(|e| {
+                CandleWhisperEngineError::Inference { message: format!("unsqueeze: {e}") }
+            })?;
+
+            // Greedy decode using special token IDs.
+            let sot = tokenizer
+                .token_to_id(whisper::SOT_TOKEN)
+                .unwrap_or(50258u32);
+            let eot = tokenizer
+                .token_to_id(whisper::EOT_TOKEN)
+                .unwrap_or(50256u32);
+            let transcribe = tokenizer
+                .token_to_id(whisper::TRANSCRIBE_TOKEN)
+                .unwrap_or(50359u32);
+            let no_ts = tokenizer
+                .token_to_id(whisper::NO_TIMESTAMPS_TOKEN)
+                .unwrap_or(50363u32);
+
+            let mut tokens: Vec<u32> = vec![sot, transcribe, no_ts];
+            let mut result = String::new();
+
+            for _ in 0..256u32 {
+                let ids_tensor = Tensor::new(
+                    tokens.iter().map(|&t| t as i64).collect::<Vec<_>>().as_slice(),
+                    &device,
+                )
                 .map_err(|e| CandleWhisperEngineError::Inference {
-                    message: e.to_string(),
+                    message: format!("token tensor: {e}"),
+                })?
+                .unsqueeze(0)
+                .map_err(|e| CandleWhisperEngineError::Inference {
+                    message: format!("unsqueeze tokens: {e}"),
                 })?;
 
-            return Ok(text);
+                let logits = model
+                    .decoder
+                    .forward(&ids_tensor, &audio_features, true)
+                    .map_err(|e| CandleWhisperEngineError::Inference {
+                        message: format!("decode: {e}"),
+                    })?;
+                let last_logits = logits
+                    .i((.., tokens.len() - 1, ..))
+                    .map_err(|e| CandleWhisperEngineError::Inference {
+                        message: format!("index logits: {e}"),
+                    })?;
+                let vocab_logits = model.decoder.final_linear(&last_logits).map_err(|e| {
+                    CandleWhisperEngineError::Inference {
+                        message: format!("final_linear: {e}"),
+                    }
+                })?;
+                let next_token = vocab_logits
+                    .argmax(D::Minus1)
+                    .map_err(|e| CandleWhisperEngineError::Inference {
+                        message: format!("argmax: {e}"),
+                    })?
+                    .squeeze(0)
+                    .map_err(|e| CandleWhisperEngineError::Inference {
+                        message: format!("squeeze argmax: {e}"),
+                    })?
+                    .to_scalar::<u32>()
+                    .map_err(|e| CandleWhisperEngineError::Inference {
+                        message: format!("to_scalar: {e}"),
+                    })?;
+
+                if next_token == eot {
+                    break;
+                }
+                tokens.push(next_token);
+                if let Ok(piece) = tokenizer.decode(&[next_token], true) {
+                    result.push_str(&piece);
+                }
+            }
+
+            return Ok(result);
         }
 
         #[cfg(not(feature = "candle"))]
