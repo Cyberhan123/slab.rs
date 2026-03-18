@@ -27,6 +27,16 @@ export function countSectionProperties(section: SettingsSectionResponse): number
   return countProperties([section]);
 }
 
+export function shouldCollapseSubsectionHeading(
+  section: SettingsSectionResponse,
+  subsection: SettingsSubsectionResponse,
+): boolean {
+  return (
+    section.subsections.length === 1 &&
+    normalizeSettingsHeading(section.title) === normalizeSettingsHeading(subsection.title)
+  );
+}
+
 export function matchesSearch(
   section: SettingsSectionResponse,
   subsection: SettingsSubsectionResponse,
@@ -206,4 +216,8 @@ export function subsectionAnchorId(sectionId: string, subsectionId: string): str
 
 export function fallbackErrorMessage(error: unknown): string {
   return getErrorMessage(error);
+}
+
+function normalizeSettingsHeading(value: string): string {
+  return value.trim().toLowerCase();
 }

@@ -2,6 +2,7 @@ import { useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import api, { getErrorMessage } from '@/lib/api';
+import { inferWhisperVadModel, toCatalogModelList, type CatalogModelStatus } from '@/lib/api/models';
 
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
@@ -9,9 +10,10 @@ const API_BASE_URL =
 export const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
 export const STATUS_OPTIONS = [
   { value: 'all', label: 'All statuses' },
-  { value: 'downloaded', label: 'Downloaded' },
-  { value: 'pending', label: 'Pending' },
+  { value: 'ready', label: 'Ready' },
+  { value: 'downloading', label: 'Downloading' },
   { value: 'not_downloaded', label: 'Not downloaded' },
+  { value: 'error', label: 'Error' },
 ] as const;
 export const BACKEND_OPTIONS = [
   { id: 'ggml.llama', label: 'Llama', description: 'Text and chat models' },
@@ -25,25 +27,27 @@ export const EMPTY_FORM = {
   backendIds: ['ggml.llama'],
 };
 
-export type ModelStatus = (typeof STATUS_OPTIONS)[number]['value'];
+export type ModelFilterStatus = (typeof STATUS_OPTIONS)[number]['value'];
+export type ModelStatus = CatalogModelStatus;
 export type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 export type ModelItem = {
   id: string;
   display_name: string;
+  provider: string;
   repo_id: string;
   filename: string;
   backend_ids: string[];
   is_vad_model: boolean;
   status: ModelStatus;
-  local_path?: string | null;
-  last_downloaded_at?: string | null;
-  pending_task_id?: string | null;
+  local_path: string | null;
+  pending: boolean;
+  updated_at: string;
 };
 export type CreateForm = typeof EMPTY_FORM;
 export type AvailableFilesResponse = { repo_id: string; files: string[] };
 
 export function useHubModelCatalog() {
-  const [status, setStatus] = useState<ModelStatus>('all');
+  const [status, setStatus] = useState<ModelFilterStatus>('all');
   const [search, setSearch] = useState('');
   const [pageSize, setPageSize] = useState<PageSize>(10);
   const [page, setPage] = useState(1);
@@ -64,23 +68,46 @@ export function useHubModelCatalog() {
     isLoading,
     isRefetching,
     refetch,
-  } = api.useQuery('get', '/v1/models', {
-    params: { query: { status } },
-  });
+  } = api.useQuery('get', '/v1/models');
   const createModelMutation = api.useMutation('post', '/v1/models');
   const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
 
-  const models = useMemo<ModelItem[]>(() => (Array.isArray(data) ? data : []), [data]);
+  const models = useMemo<ModelItem[]>(
+    () =>
+      toCatalogModelList(data)
+        .filter((model) => model.backend_id !== null)
+        .map((model) => ({
+          id: model.id,
+          display_name: model.display_name,
+          provider: model.provider,
+          repo_id: model.repo_id,
+          filename: model.filename,
+          backend_ids: model.backend_ids,
+          is_vad_model: model.backend_id === 'ggml.whisper' && inferWhisperVadModel(model),
+          status: model.status,
+          local_path: model.local_path,
+          pending: model.pending,
+          updated_at: model.updated_at,
+        })),
+    [data],
+  );
   const filteredModels = useMemo(
-    () => models.filter((model) => matchesModel(model, searchQuery)),
-    [models, searchQuery],
+    () =>
+      models.filter((model) => {
+        if (status !== 'all' && model.status !== status) {
+          return false;
+        }
+
+        return matchesModel(model, searchQuery);
+      }),
+    [models, searchQuery, status],
   );
   const downloadedCount = useMemo(
-    () => models.filter((model) => model.status === 'downloaded').length,
+    () => models.filter((model) => Boolean(model.local_path)).length,
     [models],
   );
   const pendingCount = useMemo(
-    () => models.filter((model) => model.status === 'pending').length,
+    () => models.filter((model) => model.status === 'downloading').length,
     [models],
   );
   const totalPages = Math.max(1, Math.ceil(filteredModels.length / pageSize));
@@ -127,7 +154,7 @@ export function useHubModelCatalog() {
   }, [form.repoId, repoLookup]);
 
   useEffect(() => {
-    if (!models.some((model) => model.status === 'pending')) {
+    if (!models.some((model) => model.status === 'downloading')) {
       return;
     }
 
@@ -203,21 +230,55 @@ export function useHubModelCatalog() {
   }
 
   async function createModel() {
-    try {
-      const created = await createModelMutation.mutateAsync({
-        body: {
-          display_name: form.displayName.trim(),
-          repo_id: form.repoId.trim(),
-          filename: form.filename.trim(),
-          backend_ids: form.backendIds,
-        },
-      });
+    const backendIds = Array.from(new Set(form.backendIds));
 
-      toast.success('Model added to catalog.', {
-        description: created.display_name,
-      });
+    try {
+      const results = await Promise.allSettled(
+        backendIds.map((backendId) =>
+          createModelMutation.mutateAsync({
+            body: {
+              display_name: form.displayName.trim(),
+              provider: `local.${backendId}`,
+              spec: {
+                repo_id: form.repoId.trim(),
+                filename: form.filename.trim(),
+              },
+            },
+          }),
+        ),
+      );
+
+      const created = results.flatMap((result) =>
+        result.status === 'fulfilled' ? [result.value] : [],
+      );
+      const failed = results.flatMap((result) =>
+        result.status === 'rejected' ? [result.reason] : [],
+      );
+
+      if (created.length === 0) {
+        throw failed[0]?.reason ?? new Error('Unknown model creation error');
+      }
+
+      if (failed.length === 0) {
+        toast.success(
+          created.length === 1 ? 'Model added to catalog.' : 'Models added to catalog.',
+          {
+            description:
+              created.length === 1
+                ? created[0].display_name
+                : `${created.length} backend-specific entries created.`,
+          },
+        );
+      } else {
+        toast.error('Added some model entries, but not every backend succeeded.', {
+          description: `${created.length}/${backendIds.length} entries were created. ${getErrorMessage(
+            failed[0],
+          )}`,
+        });
+      }
+
       setStatus('all');
-      setSearch(created.display_name);
+      setSearch(form.displayName.trim());
       setCreateOpen(false);
       void refetch();
     } catch (createError) {
@@ -300,11 +361,11 @@ function matchesModel(model: ModelItem, query: string) {
 
   return [
     model.display_name,
+    model.provider,
     model.repo_id,
     model.filename,
     model.status,
     model.local_path ?? '',
-    model.pending_task_id ?? '',
     ...model.backend_ids,
   ]
     .join(' ')

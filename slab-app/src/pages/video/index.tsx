@@ -11,6 +11,7 @@ import { Separator } from '@/components/ui/separator';
 import { toast } from 'sonner';
 import { ChevronDown, ChevronUp, Download, Film, Loader2, Upload, X } from 'lucide-react';
 import api from '@/lib/api';
+import { toCatalogModelList } from '@/lib/api/models';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
@@ -100,13 +101,8 @@ export default function VideoPage() {
   const { data: catalogModels, isLoading: catalogLoading } = api.useQuery('get', '/v1/models');
 
   useEffect(() => {
-    const models = Array.isArray(catalogModels) ? catalogModels : [];
-    const diffusionModels = models
-      .filter(
-        (m) =>
-          Array.isArray(m.backend_ids) &&
-          m.backend_ids.includes(DIFFUSION_BACKEND_ID),
-      )
+    const diffusionModels = toCatalogModelList(catalogModels)
+      .filter((model) => model.backend_id === DIFFUSION_BACKEND_ID)
       .map<ModelOption>((m) => ({
         id: m.id,
         label: m.display_name,
@@ -114,7 +110,13 @@ export default function VideoPage() {
         local_path: m.local_path ?? null,
       }));
     setModelOptions(diffusionModels);
-    if (diffusionModels.length > 0 && !selectedModelId) {
+    if (diffusionModels.length === 0) {
+      setSelectedModelId('');
+      return;
+    }
+
+    const exists = diffusionModels.some((model) => model.id === selectedModelId);
+    if (!selectedModelId || !exists) {
       const downloaded = diffusionModels.find((m) => m.downloaded);
       setSelectedModelId(downloaded?.id ?? diffusionModels[0].id);
     }

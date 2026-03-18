@@ -815,7 +815,7 @@ mod tests {
         let schema = embedded_settings_schema().expect("schema");
         let definition = schema
             .property(PMID.chat.providers().as_str())
-            .expect("chat providers");
+            .expect("cloud providers");
 
         let json_schema = definition
             .schema
@@ -842,16 +842,16 @@ mod tests {
           "schema_version": 1,
           "sections": [
             {
-              "id": "chat",
-              "title": "Chat",
+              "id": "cloud",
+              "title": "Cloud Providers",
               "subsections": [
                 {
                   "id": "providers",
-                  "title": "Providers",
+                  "title": "Cloud Providers",
                   "properties": [
                     {
                       "pmid": "chat.providers",
-                      "label": "Chat Providers",
+                      "label": "Cloud Providers",
                       "storage_kind": "array",
                       "schema": {
                         "type": "array",

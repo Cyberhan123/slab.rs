@@ -272,7 +272,7 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: operations["get_model"];
         put: operations["update_model"];
         post?: never;
         delete: operations["delete_model"];
@@ -354,6 +354,60 @@ export interface paths {
         };
         get: operations["get_setting"];
         put: operations["update_setting"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/setup/complete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Mark the one-time setup as complete (or reset it). */
+        post: operations["complete_setup"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/setup/ffmpeg/download": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Kick off an FFmpeg download task.  Returns immediately with a task ID;
+         *     poll `GET /v1/tasks/{id}` to track progress.
+         */
+        post: operations["download_ffmpeg"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/setup/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Return the current environment status (FFmpeg, backends, initialized flag). */
+        get: operations["setup_status"];
+        put?: never;
         post?: never;
         delete?: never;
         options?: never;
@@ -517,11 +571,11 @@ export interface components {
             /** @description Conversation history; the last user message is used as the prompt. */
             messages: components["schemas"]["ChatMessage"][];
             /**
-             * @description The model identifier to use. It can be:
-             *     - local model id from `/v1/models`
-             *     - cloud model option id from `GET /v1/chat/models`
+             * @description Unified model identifier from `/v1/models`.
+             *     `GET /v1/chat/models` returns picker options that reuse the same ids.
              */
             model: string;
+            reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
             /** @description When `true`, the response is streamed token-by-token using SSE. */
             stream?: boolean;
             /**
@@ -529,12 +583,8 @@ export interface components {
              * @description Sampling temperature in [0, 2].
              */
             temperature?: number | null;
-            /** @description Optional client-side thinking toggle. Accepted for compatibility with Ant Design X providers. */
-            thinking?: components["schemas"]["ChatThinkingConfig"] | null;
-            /** @description Optional provider reasoning effort override. */
-            reasoning_effort?: components["schemas"]["ChatReasoningEffort"] | null;
-            /** @description Optional provider verbosity override. */
-            verbosity?: components["schemas"]["ChatVerbosity"] | null;
+            thinking?: null | components["schemas"]["ChatThinkingConfig"];
+            verbosity?: null | components["schemas"]["ChatVerbosity"];
         };
         /** @description Response body for `POST /v1/chat/completions`. */
         ChatCompletionResponse: {
@@ -559,33 +609,9 @@ export interface components {
             /** @description The role of the message author (`"system"`, `"user"`, `"assistant"`). */
             role: string;
         };
-        /**
-         * @description Reasoning effort hint for cloud chat providers that support thinking control.
-         * @enum {string}
-         */
-        ChatReasoningEffort: "none" | "low" | "medium" | "high" | "minimal";
-        /** @description Thinking settings accepted by `POST /v1/chat/completions`. */
-        ChatThinkingConfig: {
-            /** @description Whether server-side reasoning should be enabled for this request. */
-            type: components["schemas"]["ChatThinkingType"];
-            /** @description Optional reasoning effort override when `type = enabled`. */
-            reasoning_effort?: components["schemas"]["ChatReasoningEffort"] | null;
-            /** @description Optional verbosity override when `type = enabled`. */
-            verbosity?: components["schemas"]["ChatVerbosity"] | null;
-        };
-        /**
-         * @description High-level thinking toggle used by chat clients.
-         * @enum {string}
-         */
-        ChatThinkingType: "enabled" | "disabled";
-        /**
-         * @description Verbosity hint for cloud chat providers that support thinking control.
-         * @enum {string}
-         */
-        ChatVerbosity: "low" | "medium" | "high";
         /** @description A selectable chat model option from `GET /v1/chat/models`. */
         ChatModelOption: {
-            /** @description Backend id when `source = local`, e.g. `ggml.llama`. */
+            /** @description Backend id when `source = local`, e.g. `"ggml.llama"`. */
             backend_id?: string | null;
             /** @description User-facing display label. */
             display_name: string;
@@ -607,24 +633,44 @@ export interface components {
          * @enum {string}
          */
         ChatModelSource: "local" | "cloud";
-        CloudProviderModelSettingValue: {
-            display_name?: string;
-            id: string;
-            remote_model?: string | null;
+        /**
+         * @description Reasoning effort hint for cloud chat providers that support thinking control.
+         * @enum {string}
+         */
+        ChatReasoningEffort: "none" | "low" | "medium" | "high" | "minimal";
+        /** @description Thinking settings accepted by `POST /v1/chat/completions`. */
+        ChatThinkingConfig: {
+            reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
+            /** @description Whether server-side reasoning should be enabled for this request. */
+            type: components["schemas"]["ChatThinkingType"];
+            verbosity?: null | components["schemas"]["ChatVerbosity"];
         };
-        CloudProviderSettingValue: {
-            api_base: string;
-            api_key?: string | null;
-            api_key_env?: string | null;
-            id: string;
-            models: components["schemas"]["CloudProviderModelSettingValue"][];
-            name?: string;
+        /**
+         * @description High-level thinking toggle used by chat clients.
+         * @enum {string}
+         */
+        ChatThinkingType: "enabled" | "disabled";
+        /**
+         * @description Verbosity hint for cloud chat providers that support thinking control.
+         * @enum {string}
+         */
+        ChatVerbosity: "low" | "medium" | "high";
+        /** @description Request body for `POST /v1/setup/complete`. */
+        CompleteSetupRequest: {
+            /** @description Pass `true` to mark setup as done, `false` to reset it. */
+            initialized?: boolean;
         };
         CompletionRequest: {
             decode?: null | components["schemas"]["TranscribeDecodeRequest"];
             /** @description The audio file path to transcribe. */
             path: string;
             vad?: null | components["schemas"]["TranscribeVadRequest"];
+        };
+        /** @description Availability information for a single environment component. */
+        ComponentStatusResponse: {
+            installed: boolean;
+            name: string;
+            version?: string | null;
         };
         ConvertRequest: {
             /** @description Desired output format (e.g. `"mp3"`, `"wav"`, `"mp4"`). */
@@ -636,10 +682,15 @@ export interface components {
         };
         /** @description Request body for `POST /v1/models`. */
         CreateModelRequest: {
-            backend_ids: string[];
             display_name: string;
-            filename: string;
-            repo_id: string;
+            provider: string;
+            runtime_presets?: null | components["schemas"]["RuntimePresetsRequest"];
+            spec?: null | components["schemas"]["ModelSpecRequest"];
+            /**
+             * @description Initial status. If omitted, defaults to `"ready"` for cloud providers and
+             *     `"not_downloaded"` for local providers.
+             */
+            status?: string | null;
         };
         CreateSessionRequest: {
             name?: string | null;
@@ -650,10 +701,9 @@ export interface components {
             /** @description Absolute directory where release assets should be installed. */
             target_dir: string;
         };
+        /** @description Request body for `POST /v1/models/download`. */
         DownloadModelRequest: {
-            /** @description Backend identifier to use for this download. */
-            backend_id: string;
-            /** @description Model catalog entry ID from `/v1/models`. */
+            /** @description Model ID from `/v1/models`. */
             model_id: string;
         };
         /** @description Per-GPU snapshot from `all-smi`. */
@@ -788,13 +838,10 @@ export interface components {
         ImageMode: "txt2img" | "img2img";
         /** @description Query parameters for listing files in a HuggingFace repo. */
         ListAvailableQuery: {
-            /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
             repo_id: string;
         };
-        /** @description Query parameters for listing catalog models by computed status. */
-        ListModelsQuery: {
-            status?: components["schemas"]["ModelListStatus"];
-        };
+        /** @description Query parameters for `GET /v1/models`. */
+        ListModelsQuery: Record<string, never>;
         /** @description Request body for `POST /v1/models/load`. */
         LoadModelRequest: {
             /** @description Backend identifier, e.g. `"ggml.llama"`. */
@@ -803,7 +850,7 @@ export interface components {
             model_path: string;
             /**
              * Format: int32
-             * @description Optional worker override. If omitted, server uses global config by backend.
+             * @description Optional worker override.
              */
             num_workers?: number | null;
         };
@@ -814,26 +861,39 @@ export interface components {
             role: string;
             session_id: string;
         };
-        /** @description Model catalog entry response with computed download status. */
-        ModelCatalogItemResponse: {
-            backend_ids: string[];
-            display_name: string;
-            filename: string;
-            id: string;
-            /** @description Whether this catalog entry is recognized as a Whisper VAD model candidate. */
-            is_vad_model: boolean;
-            last_downloaded_at?: string | null;
+        /** @description Provider-specific model configuration (request). */
+        ModelSpecRequest: {
+            /**
+             * Format: int32
+             * @description Maximum context window size in tokens.
+             */
+            context_window?: number | null;
+            /** @description Filename within the HF repo. */
+            filename?: string | null;
+            /** @description Absolute path to the downloaded model file (populated after download). */
             local_path?: string | null;
-            pending_task_id?: string | null;
-            pending_task_status?: string | null;
-            repo_id: string;
-            status: components["schemas"]["ModelListStatus"];
+            pricing?: null | components["schemas"]["PricingRequest"];
+            /** @description Cloud provider settings id from `chat.providers` (e.g. `"openai-main"`). */
+            provider_id?: string | null;
+            /** @description Remote model identifier for cloud providers (e.g. `"gpt-4o"`). */
+            remote_model_id?: string | null;
+            /** @description HuggingFace repo ID for local models. */
+            repo_id?: string | null;
         };
-        /** @enum {string} */
-        ModelListStatus: "downloaded" | "pending" | "not_downloaded" | "all";
+        /** @description Provider-specific model configuration (response). */
+        ModelSpecResponse: {
+            /** Format: int32 */
+            context_window?: number | null;
+            filename?: string | null;
+            local_path?: string | null;
+            pricing?: null | components["schemas"]["PricingResponse"];
+            provider_id?: string | null;
+            remote_model_id?: string | null;
+            repo_id?: string | null;
+        };
         /** @description Response body for load / status endpoints. */
         ModelStatusResponse: {
-            /** @description Backend identifier, e.g. `"ggml.llama"`. */
+            /** @description Backend identifier. */
             backend: string;
             /** @description Human-readable status string. */
             status: string;
@@ -841,12 +901,52 @@ export interface components {
         OperationAcceptedResponse: {
             operation_id: string;
         };
+        /** @description Pricing info for cost tracking. */
+        PricingRequest: {
+            /**
+             * Format: double
+             * @description Cost per 1K input tokens in USD.
+             */
+            input: number;
+            /**
+             * Format: double
+             * @description Cost per 1K output tokens in USD.
+             */
+            output: number;
+        };
+        /** @description Pricing info in API responses. */
+        PricingResponse: {
+            /** Format: double */
+            input: number;
+            /** Format: double */
+            output: number;
+        };
         ReloadLibRequest: {
             backend_id: string;
             lib_path: string;
             model_path: string;
             /** Format: int32 */
             num_workers?: number;
+        };
+        /** @description Default runtime parameters (request). */
+        RuntimePresetsRequest: {
+            /**
+             * Format: float
+             * @description Sampling temperature.
+             */
+            temperature?: number | null;
+            /**
+             * Format: float
+             * @description Top-p nucleus sampling probability.
+             */
+            top_p?: number | null;
+        };
+        /** @description Default runtime parameters (response). */
+        RuntimePresetsResponse: {
+            /** Format: float */
+            temperature?: number | null;
+            /** Format: float */
+            top_p?: number | null;
         };
         SessionResponse: {
             created_at: string;
@@ -908,13 +1008,20 @@ export interface components {
             properties: components["schemas"]["SettingPropertyView"][];
             title: string;
         };
+        /** @description Response body for `GET /v1/setup/status`. */
+        SetupStatusResponse: {
+            /** @description AI backend library availability (one entry per backend). */
+            backends: components["schemas"]["ComponentStatusResponse"][];
+            /** @description FFmpeg binary availability. */
+            ffmpeg: components["schemas"]["ComponentStatusResponse"];
+            /** @description Whether the one-time setup wizard has been completed. */
+            initialized: boolean;
+        };
+        /** @description Request body for `POST /v1/models/switch`. */
         SwitchModelRequest: {
             backend_id: string;
             model_path: string;
-            /**
-             * Format: int32
-             * @description Optional worker override. If omitted, server uses global config by backend.
-             */
+            /** Format: int32 */
             num_workers?: number | null;
         };
         TaskResponse: {
@@ -1051,12 +1158,26 @@ export interface components {
              */
             threshold?: number | null;
         };
+        /** @description Unified model response returned by `/v1/models`. */
+        UnifiedModelResponse: {
+            created_at: string;
+            display_name: string;
+            id: string;
+            /** @description Provider identifier, e.g. `"cloud.openai"`, `"local.ggml.llama"`. */
+            provider: string;
+            runtime_presets?: null | components["schemas"]["RuntimePresetsResponse"];
+            spec: components["schemas"]["ModelSpecResponse"];
+            /** @description Status: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`. */
+            status: string;
+            updated_at: string;
+        };
         /** @description Request body for `PUT /v1/models/{id}`. */
         UpdateModelRequest: {
-            backend_ids?: string[] | null;
             display_name?: string | null;
-            filename?: string | null;
-            repo_id?: string | null;
+            provider?: string | null;
+            runtime_presets?: null | components["schemas"]["RuntimePresetsRequest"];
+            spec?: null | components["schemas"]["ModelSpecRequest"];
+            status?: string | null;
         };
         UpdateSettingCommand: {
             op: components["schemas"]["UpdateSettingOperation"];
@@ -1379,7 +1500,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description Selectable chat models (local + cloud providers) */
+            /** @description Selectable chat model options */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1475,22 +1596,20 @@ export interface operations {
     };
     list_models: {
         parameters: {
-            query?: {
-                status?: components["schemas"]["ModelListStatus"];
-            };
+            query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description List model catalog entries by download status */
+            /** @description List all models (local and cloud) */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ModelCatalogItemResponse"][];
+                    "application/json": components["schemas"]["UnifiedModelResponse"][];
                 };
             };
             /** @description Bad request */
@@ -1522,13 +1641,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Model catalog entry created */
+            /** @description Model created */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ModelCatalogItemResponse"];
+                    "application/json": components["schemas"]["UnifiedModelResponse"];
                 };
             };
             /** @description Bad request */
@@ -1552,14 +1671,13 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description HuggingFace repo id, e.g. `"bartowski/Qwen2.5-0.5B-Instruct-GGUF"`. */
                 repo_id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description List of available files */
+            /** @description List of available files in a HuggingFace repo */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -1613,7 +1731,7 @@ export interface operations {
                 };
                 content?: never;
             };
-            /** @description Model catalog entry not found */
+            /** @description Model not found */
             404: {
                 headers: {
                     [name: string]: unknown;
@@ -1743,12 +1861,49 @@ export interface operations {
             };
         };
     };
+    get_model: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Model ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model details */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnifiedModelResponse"];
+                };
+            };
+            /** @description Model not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
     update_model: {
         parameters: {
             query?: never;
             header?: never;
             path: {
-                /** @description Model catalog entry ID */
+                /** @description Model ID */
                 id: string;
             };
             cookie?: never;
@@ -1759,13 +1914,13 @@ export interface operations {
             };
         };
         responses: {
-            /** @description Model catalog entry updated */
+            /** @description Model updated */
             200: {
                 headers: {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ModelCatalogItemResponse"];
+                    "application/json": components["schemas"]["UnifiedModelResponse"];
                 };
             };
             /** @description Bad request */
@@ -1796,14 +1951,14 @@ export interface operations {
             query?: never;
             header?: never;
             path: {
-                /** @description Model catalog entry ID */
+                /** @description Model ID */
                 id: string;
             };
             cookie?: never;
         };
         requestBody?: never;
         responses: {
-            /** @description Model catalog entry deleted */
+            /** @description Model deleted */
             200: {
                 headers: {
                     [name: string]: unknown;
@@ -2071,6 +2226,98 @@ export interface operations {
             };
             /** @description Setting not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    complete_setup: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompleteSetupRequest"];
+            };
+        };
+        responses: {
+            /** @description Setup state saved; returns updated environment status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupStatusResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    download_ffmpeg: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description FFmpeg download task accepted */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OperationAcceptedResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    setup_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Current environment status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SetupStatusResponse"];
+                };
+            };
+            /** @description Internal error */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -77,9 +77,9 @@ export function HubCatalogTable({
 
                 <TableCell className="align-top whitespace-normal">
                   <StatusBadge status={model.status} />
-                  {model.pending_task_id ? (
-                    <p className="mt-2 font-mono text-xs text-muted-foreground">
-                      task {model.pending_task_id}
+                  {model.pending ? (
+                    <p className="mt-2 text-xs text-muted-foreground">
+                      Download is running...
                     </p>
                   ) : null}
                   <p
@@ -89,7 +89,7 @@ export function HubCatalogTable({
                     {model.local_path ?? 'Not downloaded yet'}
                   </p>
                   <p className="mt-2 text-xs text-muted-foreground">
-                    Last download: {formatDateTime(model.last_downloaded_at)}
+                    Updated: {formatDateTime(model.updated_at)}
                   </p>
                 </TableCell>
 
@@ -129,7 +129,7 @@ function formatBackend(id: string) {
 
 function formatDateTime(value?: string | null) {
   if (!value) {
-    return 'Never';
+    return 'Unknown';
   }
 
   const parsed = new Date(value);

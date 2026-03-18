@@ -45,7 +45,7 @@ export default function Hub() {
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="outline">{hub.models.length} total</Badge>
                   <Badge variant="outline">{hub.downloadedCount} downloaded</Badge>
-                  <Badge variant="outline">{hub.pendingCount} pending</Badge>
+                  <Badge variant="outline">{hub.pendingCount} downloading</Badge>
                 </div>
               </div>
 
@@ -75,7 +75,7 @@ export default function Hub() {
                 <Input
                   value={hub.search}
                   onChange={(event) => hub.setSearch(event.target.value)}
-                  placeholder="Search by model name, repo, filename, backend, or task"
+                  placeholder="Search by model name, repo, filename, backend, or status"
                   className="pl-9"
                 />
               </div>
