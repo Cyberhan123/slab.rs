@@ -38,11 +38,6 @@ impl OnnxEngine {
         Self { session: None }
     }
 
-    /// Return `true` if a model session is currently loaded.
-    pub(crate) fn is_loaded(&self) -> bool {
-        self.session.is_some()
-    }
-
     // ── model lifecycle ───────────────────────────────────────────────────────
 
     /// Load the ONNX model at `config.model_path` and create a session.

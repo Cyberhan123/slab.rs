@@ -34,12 +34,12 @@ use tokio::sync::mpsc;
 use crate::internal::engine::candle::config::CandleLlamaModelLoadConfig;
 use crate::internal::engine::candle::llama::adapter::CandleLlamaEngine;
 use crate::internal::engine::candle::llama::errors::SessionId;
-use slab_core_macros::backend_handler;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
 };
 use crate::internal::scheduler::backend::runner::{spawn_runtime_worker, SharedIngressRx};
 use crate::internal::scheduler::types::Payload;
+use slab_core_macros::backend_handler;
 use tokio::sync::broadcast;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
@@ -102,9 +102,7 @@ impl CandleLlamaWorker {
             }
         };
         let BackendRequest {
-            input,
-            reply_tx,
-            ..
+            input, reply_tx, ..
         } = req;
         let opts = invocation.options.to_serde_value();
         let max_tokens = opts
@@ -130,9 +128,7 @@ impl CandleLlamaWorker {
             }
         };
         let BackendRequest {
-            input,
-            reply_tx,
-            ..
+            input, reply_tx, ..
         } = req;
         let opts = invocation.options.to_serde_value();
         let max_tokens = opts

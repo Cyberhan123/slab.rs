@@ -34,12 +34,12 @@ use tokio::sync::{broadcast, mpsc};
 use crate::internal::engine::ggml::config::LibLoadConfig;
 use crate::internal::engine::ggml::llama::adapter::GGMLLlamaEngine;
 use crate::internal::engine::ggml::llama::errors::SessionId;
-use slab_core_macros::backend_handler;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
 };
 use crate::internal::scheduler::backend::runner::{spawn_runtime_worker, SharedIngressRx};
 use crate::internal::scheduler::types::Payload;
+use slab_core_macros::backend_handler;
 
 // ── Configurations ────────────────────────────────────────────────────────────
 
@@ -198,9 +198,7 @@ impl LlamaWorker {
             }
         };
         let BackendRequest {
-            input,
-            reply_tx,
-            ..
+            input, reply_tx, ..
         } = req;
         let opts = invocation.options.to_serde_value();
         let max_tokens = opts
@@ -226,9 +224,7 @@ impl LlamaWorker {
             }
         };
         let BackendRequest {
-            input,
-            reply_tx,
-            ..
+            input, reply_tx, ..
         } = req;
         let opts = invocation.options.to_serde_value();
         let max_tokens = opts
@@ -730,8 +726,8 @@ impl LlamaWorker {
 
 /// Spawn a llama backend worker with a pre-loaded engine handle.
 ///
-/// Used by `api::init` to separate library loading (phase 1) from worker
-/// spawning (phase 2) so that no tasks are started if any library fails.
+/// Used by runtime construction to separate library loading (phase 1) from
+/// worker spawning (phase 2) so that no tasks are started if any library fails.
 pub(crate) fn spawn_backend_with_engine(
     shared_ingress_rx: SharedIngressRx,
     control_tx: broadcast::Sender<WorkerCommand>,

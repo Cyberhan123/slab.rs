@@ -231,7 +231,7 @@ mod tests {
         RuntimeControlSignal, SyncMessage, WorkerCommand,
     };
     use crate::internal::scheduler::backend::runner::{
-        shared_ingress, spawn_runtime_worker, RuntimeWorkerHandler, SharedIngressRx,
+        shared_ingress, spawn_runtime_worker, RuntimeWorkerHandler,
     };
     use crate::internal::scheduler::types::Payload;
 

@@ -17,10 +17,6 @@ pub(crate) struct CandleModelLoadConfig {
     /// directory as `model_path`.
     #[serde(default)]
     pub tokenizer_path: Option<String>,
-    /// Optional revision / branch to fetch from HuggingFace Hub when a model
-    /// ID is given instead of a local file path.  Ignored for local paths.
-    #[serde(default)]
-    pub revision: Option<String>,
 }
 
 /// Extended model-load config for the Candle Llama backend.

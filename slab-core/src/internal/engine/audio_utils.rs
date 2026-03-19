@@ -58,8 +58,7 @@ pub fn parse_wav_pcm(data: &[u8]) -> Option<Vec<f32>> {
     while pos + 8 <= data.len() {
         let chunk_id = &data[pos..pos + 4];
         // Bounds-check the chunk size field itself.
-        let chunk_size =
-            u32::from_le_bytes(data[pos + 4..pos + 8].try_into().ok()?) as usize;
+        let chunk_size = u32::from_le_bytes(data[pos + 4..pos + 8].try_into().ok()?) as usize;
         pos += 8;
 
         // Bounds-check the chunk body before slicing into it.
@@ -76,15 +75,12 @@ pub fn parse_wav_pcm(data: &[u8]) -> Option<Vec<f32>> {
             //   8-11 byte_rate
             //   12-13 block_align
             //   14-15 bits_per_sample
-            let audio_format =
-                u16::from_le_bytes(data[pos..pos + 2].try_into().ok()?);
+            let audio_format = u16::from_le_bytes(data[pos..pos + 2].try_into().ok()?);
             if audio_format != 1 {
                 return None; // Not PCM
             }
-            num_channels =
-                u16::from_le_bytes(data[pos + 2..pos + 4].try_into().ok()?);
-            bits_per_sample =
-                u16::from_le_bytes(data[pos + 14..pos + 16].try_into().ok()?);
+            num_channels = u16::from_le_bytes(data[pos + 2..pos + 4].try_into().ok()?);
+            bits_per_sample = u16::from_le_bytes(data[pos + 14..pos + 16].try_into().ok()?);
         } else if chunk_id == b"data" {
             data_start = pos;
             data_len = chunk_size;

@@ -24,13 +24,13 @@ use tokio::sync::broadcast;
 
 use crate::internal::engine::candle::config::CandleModelLoadConfig;
 use crate::internal::engine::candle::whisper::adapter::CandleWhisperEngine;
-use slab_core_macros::backend_handler;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
 use crate::internal::scheduler::backend::runner::spawn_workers;
 use crate::internal::scheduler::types::Payload;
+use slab_core_macros::backend_handler;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 

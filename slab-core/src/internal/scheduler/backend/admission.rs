@@ -4,15 +4,14 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use tokio::sync::{
-    broadcast, mpsc, Mutex, OwnedMutexGuard, OwnedRwLockReadGuard, OwnedRwLockWriteGuard,
-    OwnedSemaphorePermit, Semaphore,
+    broadcast, mpsc, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, OwnedSemaphorePermit, Semaphore,
 };
 use tracing::warn;
 
 use crate::internal::scheduler::backend::protocol::{BackendRequest, WorkerCommand};
 use crate::internal::scheduler::backend::runner::{shared_ingress, SharedIngressRx};
 use crate::internal::scheduler::types::{
-    BackendLifecycleState, FailedGlobalOperation, GlobalConsistencyState, RuntimeError,
+    BackendLifecycleState, GlobalConsistencyState, RuntimeError,
 };
 
 /// Inference lease: blocks management mutations and holds compute quota.
@@ -45,6 +44,7 @@ impl std::fmt::Debug for ManagementLease {
 struct BackendHandle {
     semaphore: Arc<Semaphore>,
     ingress_tx: Option<mpsc::Sender<BackendRequest>>,
+    #[cfg_attr(not(test), allow(dead_code))]
     control_tx: Option<broadcast::Sender<WorkerCommand>>,
     management_lock: Arc<tokio::sync::RwLock<()>>,
     lifecycle: Arc<tokio::sync::RwLock<BackendLifecycleState>>,
@@ -76,9 +76,7 @@ pub struct ResourceManager {
     config: ResourceManagerConfig,
     backends: Arc<RwLock<HashMap<String, BackendHandle>>>,
     global_state: Arc<tokio::sync::RwLock<GlobalConsistencyState>>,
-    failed_global: Arc<tokio::sync::RwLock<Option<FailedGlobalOperation>>>,
-    global_management: Arc<Mutex<()>>,
-    generation: Arc<AtomicU64>,
+    #[cfg_attr(not(test), allow(dead_code))]
     next_global_op_id: Arc<AtomicU64>,
 }
 
@@ -109,12 +107,7 @@ impl ResourceManager {
         Self {
             config,
             backends: Arc::new(RwLock::new(HashMap::new())),
-            global_state: Arc::new(tokio::sync::RwLock::new(
-                GlobalConsistencyState::Consistent { generation: 0 },
-            )),
-            failed_global: Arc::new(tokio::sync::RwLock::new(None)),
-            global_management: Arc::new(Mutex::new(())),
-            generation: Arc::new(AtomicU64::new(0)),
+            global_state: Arc::new(tokio::sync::RwLock::new(GlobalConsistencyState::Consistent)),
             next_global_op_id: Arc::new(AtomicU64::new(1)),
         }
     }
@@ -154,6 +147,7 @@ impl ResourceManager {
     }
 
     /// List registered backends in deterministic order.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn backend_ids(&self) -> Vec<String> {
         let mut ids: Vec<String> = self
             .backends
@@ -178,6 +172,7 @@ impl ResourceManager {
     }
 
     /// Clone backend control sender.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn control_tx(
         &self,
         backend_id: &str,
@@ -237,21 +232,6 @@ impl ResourceManager {
         Ok(ManagementLease { mgmt_guard })
     }
 
-    /// Lock global management pipeline (serialize global ops).
-    pub async fn lock_global_management(&self) -> OwnedMutexGuard<()> {
-        Arc::clone(&self.global_management).lock_owned().await
-    }
-
-    /// Return backend lifecycle state.
-    pub async fn backend_state(
-        &self,
-        backend_id: &str,
-    ) -> Result<BackendLifecycleState, RuntimeError> {
-        let handle = self.handle(backend_id)?;
-        let state = handle.lifecycle.read().await.clone();
-        Ok(state)
-    }
-
     /// Set backend lifecycle state.
     pub async fn set_backend_state(
         &self,
@@ -263,60 +243,37 @@ impl ResourceManager {
         Ok(())
     }
 
-    /// Current global consistency state.
-    pub async fn global_state(&self) -> GlobalConsistencyState {
-        self.global_state.read().await.clone()
-    }
-
     /// If inconsistent, reject inference submission.
     pub async fn ensure_inference_allowed(&self) -> Result<(), RuntimeError> {
         let guard = self.global_state.read().await;
-        if let GlobalConsistencyState::Inconsistent { op_id, .. } = *guard {
+        if let GlobalConsistencyState::Inconsistent { op_id } = *guard {
             return Err(RuntimeError::GlobalStateInconsistent { op_id });
         }
         Ok(())
     }
 
     /// Transition to reconciling state and return operation id.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn begin_global_reconcile(&self) -> u64 {
         let op_id = self.next_global_op_id.fetch_add(1, Ordering::Relaxed);
-        *self.global_state.write().await = GlobalConsistencyState::Reconciling {
-            op_id,
-            started_at: std::time::SystemTime::now(),
-        };
+        *self.global_state.write().await = GlobalConsistencyState::Reconciling;
         op_id
     }
 
-    /// Mark system globally consistent and clear failed operation snapshot.
+    /// Mark system globally consistent.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn mark_global_consistent(&self) {
-        let generation = self.generation.fetch_add(1, Ordering::Relaxed) + 1;
-        *self.global_state.write().await = GlobalConsistencyState::Consistent { generation };
-        *self.failed_global.write().await = None;
+        *self.global_state.write().await = GlobalConsistencyState::Consistent;
     }
 
-    /// Mark system inconsistent and store failed operation snapshot.
-    pub async fn mark_global_inconsistent(
-        &self,
-        op_id: u64,
-        failed_backends: Vec<String>,
-        cleanup_report: Vec<String>,
-        failed_op: FailedGlobalOperation,
-    ) {
-        *self.global_state.write().await = GlobalConsistencyState::Inconsistent {
-            op_id,
-            failed_backends,
-            cleanup_report,
-            since: std::time::SystemTime::now(),
-        };
-        *self.failed_global.write().await = Some(failed_op);
-    }
-
-    /// Retrieve failed global operation snapshot for retry.
-    pub async fn failed_global_operation(&self) -> Option<FailedGlobalOperation> {
-        self.failed_global.read().await.clone()
+    /// Mark system inconsistent so test submissions are rejected.
+    #[cfg_attr(not(test), allow(dead_code))]
+    pub async fn mark_global_inconsistent(&self, op_id: u64) {
+        *self.global_state.write().await = GlobalConsistencyState::Inconsistent { op_id };
     }
 
     /// Operator override to recover from inconsistent state.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn manual_mark_consistent(&self, reason: &str) {
         warn!(%reason, "manual global consistency override requested");
         self.mark_global_consistent().await;

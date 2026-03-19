@@ -21,20 +21,6 @@ pub enum RequestRoute {
     InferenceImage,
 }
 
-impl RequestRoute {
-    pub fn as_op_name(self) -> &'static str {
-        match self {
-            Self::LoadLibrary => "lib.load",
-            Self::ReloadLibrary => "lib.reload",
-            Self::LoadModel => "model.load",
-            Self::UnloadModel => "model.unload",
-            Self::Inference => "inference",
-            Self::InferenceStream => "inference.stream",
-            Self::InferenceImage => "inference.image",
-        }
-    }
-}
-
 impl FromStr for RequestRoute {
     type Err = String;
 
@@ -55,7 +41,6 @@ impl FromStr for RequestRoute {
 /// Canonical management events supported by the runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ManagementEvent {
-    Initialize,
     LoadModel,
     UnloadModel,
 }
@@ -63,6 +48,7 @@ pub enum ManagementEvent {
 /// Typed inference request metadata derived from a [`BackendRequest`].
 #[derive(Debug, Clone)]
 pub struct Invocation {
+    #[cfg(test)]
     pub route: RequestRoute,
     pub options: Payload,
 }
@@ -77,14 +63,6 @@ pub struct DeploymentSnapshot {
 }
 
 impl DeploymentSnapshot {
-    pub fn generation(generation: u64) -> Self {
-        Self {
-            generation,
-            library: None,
-            model: None,
-        }
-    }
-
     pub fn with_library(generation: u64, payload: Payload) -> Self {
         Self {
             generation,
@@ -187,6 +165,7 @@ impl PeerWorkerCommand {
 }
 
 /// Runtime-issued control signals sharing the same backend control bus.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Clone, Debug)]
 pub enum RuntimeControlSignal {
     /// Runtime asks the backend to (re)load state using the provided payload.
@@ -197,55 +176,13 @@ pub enum RuntimeControlSignal {
     GlobalUnload { op_id: u64 },
 }
 
-impl RuntimeControlSignal {
-    pub fn generation(&self) -> u64 {
-        match self {
-            Self::GlobalLoad { op_id, .. } | Self::GlobalUnload { op_id } => *op_id,
-        }
-    }
-
-    pub fn deployment(&self) -> Option<DeploymentSnapshot> {
-        match self {
-            Self::GlobalLoad { op_id, payload } => {
-                Some(DeploymentSnapshot::with_model(*op_id, payload.clone()))
-            }
-            Self::GlobalUnload { .. } => None,
-        }
-    }
-}
-
-/// Higher-level typed view over runtime control.
-#[derive(Clone, Debug)]
-pub enum DriverControl {
-    GlobalLoad {
-        op_id: u64,
-        deployment: DeploymentSnapshot,
-    },
-    GlobalUnload {
-        op_id: u64,
-        sync: SyncMessage,
-    },
-}
-
-impl From<RuntimeControlSignal> for DriverControl {
-    fn from(value: RuntimeControlSignal) -> Self {
-        match value {
-            RuntimeControlSignal::GlobalLoad { op_id, payload } => Self::GlobalLoad {
-                op_id,
-                deployment: DeploymentSnapshot::with_model(op_id, payload),
-            },
-            RuntimeControlSignal::GlobalUnload { op_id } => Self::GlobalUnload {
-                op_id,
-                sync: SyncMessage::Generation { generation: op_id },
-            },
-        }
-    }
-}
+impl RuntimeControlSignal {}
 
 /// Unified control-bus command type for backend worker control channels.
 #[derive(Clone, Debug)]
 pub enum WorkerCommand {
     Peer(PeerWorkerCommand),
+    #[cfg_attr(not(test), allow(dead_code))]
     Runtime(RuntimeControlSignal),
 }
 
@@ -265,14 +202,12 @@ pub enum BackendRequestKind {
     Management(ManagementEvent),
 }
 
+#[cfg(test)]
 /// Higher-level typed view over backend ingress requests.
 #[derive(Debug, Clone)]
 pub enum DriverRequestKind {
     Inference(Invocation),
-    Management {
-        event: ManagementEvent,
-        route: RequestRoute,
-    },
+    Management { event: ManagementEvent },
 }
 
 /// A request sent by the orchestrator to a backend worker via its ingress queue.
@@ -297,25 +232,29 @@ impl BackendRequest {
         RequestRoute::from_str(&self.op.name)
     }
 
+    #[cfg(test)]
     pub fn driver_kind(&self) -> Result<DriverRequestKind, String> {
         let route = self.route()?;
         Ok(match self.kind {
             BackendRequestKind::Inference => DriverRequestKind::Inference(Invocation {
+                #[cfg(test)]
                 route,
                 options: self.op.options.clone(),
             }),
-            BackendRequestKind::Management(event) => DriverRequestKind::Management { event, route },
+            BackendRequestKind::Management(event) => DriverRequestKind::Management { event },
         })
     }
 
     pub fn invocation(&self) -> Result<Invocation, String> {
-        match self.driver_kind()? {
-            DriverRequestKind::Inference(invocation) => Ok(invocation),
-            DriverRequestKind::Management { route, .. } => Ok(Invocation {
-                route,
-                options: self.op.options.clone(),
-            }),
-        }
+        #[cfg(test)]
+        let route = self.route()?;
+        #[cfg(not(test))]
+        let _ = self.route()?;
+        Ok(Invocation {
+            #[cfg(test)]
+            route,
+            options: self.op.options.clone(),
+        })
     }
 }
 

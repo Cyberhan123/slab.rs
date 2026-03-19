@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use crate::base::types::{Payload, TaskId, TaskStatus};
 use crate::internal::scheduler::orchestrator::Orchestrator;
-use crate::internal::scheduler::stage::Stage;
 use crate::internal::scheduler::types::RuntimeError;
 
 /// Default wait timeout used by the model-first runtime facade.
@@ -21,19 +20,6 @@ pub struct ExecutionKernel {
 impl ExecutionKernel {
     pub fn new(orchestrator: Orchestrator) -> Self {
         Self { orchestrator }
-    }
-
-    pub fn orchestrator(&self) -> &Orchestrator {
-        &self.orchestrator
-    }
-
-    /// Submit an execution plan already compiled into internal scheduler stages.
-    pub async fn submit(
-        &self,
-        stages: Vec<Stage>,
-        initial_payload: Payload,
-    ) -> Result<TaskId, RuntimeError> {
-        self.orchestrator.submit(stages, initial_payload).await
     }
 
     pub async fn snapshot(

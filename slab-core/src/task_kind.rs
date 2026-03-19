@@ -1,6 +1,4 @@
-pub(crate) use crate::api::model::{
-    Capability, DriverHints as DispatchHints, ModelFamily, ModelSource, ModelSpec,
-};
+pub(crate) use crate::model::{Capability, DriverHints as DispatchHints, ModelSpec};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub(crate) enum TaskKind {

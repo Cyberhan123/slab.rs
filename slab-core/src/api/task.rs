@@ -10,8 +10,7 @@ use crate::internal::scheduler::kernel::{
     ExecutionKernel, DEFAULT_WAIT_TIMEOUT, STREAM_INIT_TIMEOUT,
 };
 use crate::internal::scheduler::storage::TaskStatusView;
-
-use super::model::Capability;
+use crate::model::Capability;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskState {
@@ -144,16 +143,18 @@ where
         let handle = self.kernel.wait_stream(self.task_id, timeout).await?;
         let codec = Arc::clone(&self.codec);
 
-        Ok(stream::unfold((handle, codec), |(mut rx, codec)| async move {
-            match rx.recv().await {
-                Some(chunk) => match codec.decode_chunk(chunk) {
-                    Ok(Some(decoded)) => Some((Ok(decoded), (rx, codec))),
-                    Ok(None) => None,
-                    Err(error) => Some((Err(error), (rx, codec))),
-                },
-                None => None,
-            }
-        })
-        .boxed())
+        Ok(
+            stream::unfold((handle, codec), |(mut rx, codec)| async move {
+                match rx.recv().await {
+                    Some(chunk) => match codec.decode_chunk(chunk) {
+                        Ok(Some(decoded)) => Some((Ok(decoded), (rx, codec))),
+                        Ok(None) => None,
+                        Err(error) => Some((Err(error), (rx, codec))),
+                    },
+                    None => None,
+                }
+            })
+            .boxed(),
+        )
     }
 }
