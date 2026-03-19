@@ -339,7 +339,7 @@ async fn worker_broadcast_unload_clears_all_worker_contexts() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::{broadcast, mpsc, oneshot};
 
-    use crate::scheduler::backend::protocol::{PeerWorkerCommand, WorkerCommand};
+    use crate::scheduler::backend::protocol::{PeerWorkerCommand, SyncMessage, WorkerCommand};
 
     const NUM_WORKERS: usize = 3;
 
@@ -415,7 +415,7 @@ async fn worker_broadcast_unload_clears_all_worker_contexts() {
     bc_tx
         .send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
             sender_id: usize::MAX,
-            seq_id: 1,
+            sync: SyncMessage::Generation { generation: 1 },
         }))
         .expect("broadcast should reach at least one subscriber");
 
@@ -440,7 +440,7 @@ async fn worker_broadcast_unload_clears_all_worker_contexts() {
 async fn stale_broadcast_sequence_is_ignored() {
     use tokio::sync::broadcast;
 
-    use crate::scheduler::backend::protocol::{PeerWorkerCommand, WorkerCommand};
+    use crate::scheduler::backend::protocol::{PeerWorkerCommand, SyncMessage, WorkerCommand};
 
     let (bc_tx, mut bc_rx) = broadcast::channel::<WorkerCommand>(16);
     let applied = Arc::new(tokio::sync::Mutex::new(Vec::<u64>::new()));
@@ -450,7 +450,8 @@ async fn stale_broadcast_sequence_is_ignored() {
         let mut last_applied_seq = 0u64;
         loop {
             match bc_rx.recv().await {
-                Ok(WorkerCommand::Peer(PeerWorkerCommand::Unload { seq_id, .. })) => {
+                Ok(WorkerCommand::Peer(cmd @ PeerWorkerCommand::Unload { .. })) => {
+                    let seq_id = cmd.seq_id();
                     if seq_id <= last_applied_seq {
                         continue;
                     }
@@ -467,7 +468,7 @@ async fn stale_broadcast_sequence_is_ignored() {
     for seq_id in [1u64, 1, 0, 2, 2, 3, 1] {
         let _ = bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
             sender_id: usize::MAX,
-            seq_id,
+            sync: SyncMessage::Generation { generation: seq_id },
         }));
     }
     drop(bc_tx);

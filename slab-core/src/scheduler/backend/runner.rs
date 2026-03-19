@@ -4,10 +4,9 @@ use std::{future::Future, pin::Pin};
 use async_trait::async_trait;
 use tokio::sync::{broadcast, mpsc, Mutex};
 
-use crate::api::Event;
 use crate::scheduler::backend::protocol::BackendReply;
 use crate::scheduler::backend::protocol::{
-    BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
+    BackendRequest, PeerWorkerCommand, RequestRoute, RuntimeControlSignal, WorkerCommand,
 };
 
 /// Shared ingress receiver consumed competitively by multiple worker runners.
@@ -53,8 +52,8 @@ pub type PeerDispatchFn<T> = for<'a> fn(&'a mut T, PeerWorkerCommand) -> Handler
 pub type LaggedDispatchFn<T> = for<'a> fn(&'a mut T) -> HandlerFuture<'a>;
 
 /// Thin request route entry used by macro-generated `#[backend_handler]` code.
-pub struct EventRoute<T> {
-    pub matches: fn(&Event) -> bool,
+pub struct RequestRouteMatcher<T> {
+    pub matches: fn(RequestRoute) -> bool,
     pub handle: RequestDispatchFn<T>,
 }
 
@@ -70,18 +69,18 @@ pub struct PeerRoute<T> {
     pub handle: PeerDispatchFn<T>,
 }
 
-/// Dispatch request by `Event` using a macro-provided route table.
+/// Dispatch request by typed request route using a macro-provided route table.
 pub async fn dispatch_backend_request<T>(
     handler: &mut T,
     req: BackendRequest,
-    routes: &[EventRoute<T>],
+    routes: &[RequestRouteMatcher<T>],
 ) {
     let cancelled = *req.cancel_rx.borrow();
     tracing::trace!(op = %req.op.name, kind = ?req.kind, cancelled, "dispatch backend request");
-    match <Event as std::str::FromStr>::from_str(&req.op.name) {
-        Ok(event) => {
+    match req.route() {
+        Ok(route_key) => {
             for route in routes {
-                if (route.matches)(&event) {
+                if (route.matches)(route_key) {
                     (route.handle)(handler, req).await;
                     return;
                 }
@@ -229,7 +228,7 @@ mod tests {
 
     use crate::scheduler::backend::protocol::{
         BackendOp, BackendReply, BackendRequest, BackendRequestKind, PeerWorkerCommand,
-        RuntimeControlSignal, WorkerCommand,
+        RuntimeControlSignal, SyncMessage, WorkerCommand,
     };
     use crate::scheduler::backend::runner::{
         shared_ingress, spawn_runtime_worker, RuntimeWorkerHandler,
@@ -282,24 +281,24 @@ mod tests {
         );
 
         let _ = control_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+            sync: SyncMessage::Generation { generation: 1 },
             sender_id: 9,
-            seq_id: 1,
         }));
         let _ = control_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+            sync: SyncMessage::Generation { generation: 1 },
             sender_id: 9,
-            seq_id: 1,
         }));
         let _ = control_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+            sync: SyncMessage::Generation { generation: 2 },
             sender_id: 7,
-            seq_id: 2,
         }));
         let _ = control_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+            sync: SyncMessage::Generation { generation: 2 },
             sender_id: 9,
-            seq_id: 2,
         }));
         let _ = control_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+            sync: SyncMessage::Generation { generation: 3 },
             sender_id: 9,
-            seq_id: 3,
         }));
         let _ = control_tx.send(WorkerCommand::Runtime(RuntimeControlSignal::GlobalUnload {
             op_id: 11,

@@ -1,7 +1,56 @@
+use std::str::FromStr;
+
 use tokio::sync::oneshot;
 
 use crate::base::types::Payload;
 pub use crate::base::types::{StreamChunk, StreamHandle};
+
+/// Typed request route understood by backend workers.
+///
+/// The scheduler still constructs requests from legacy op strings today, but
+/// workers no longer depend on `crate::api::Event` or string matching after
+/// the ingress boundary.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RequestRoute {
+    LoadLibrary,
+    ReloadLibrary,
+    LoadModel,
+    UnloadModel,
+    Inference,
+    InferenceStream,
+    InferenceImage,
+}
+
+impl RequestRoute {
+    pub fn as_op_name(self) -> &'static str {
+        match self {
+            Self::LoadLibrary => "lib.load",
+            Self::ReloadLibrary => "lib.reload",
+            Self::LoadModel => "model.load",
+            Self::UnloadModel => "model.unload",
+            Self::Inference => "inference",
+            Self::InferenceStream => "inference.stream",
+            Self::InferenceImage => "inference.image",
+        }
+    }
+}
+
+impl FromStr for RequestRoute {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "lib.load" => Ok(Self::LoadLibrary),
+            "lib.reload" => Ok(Self::ReloadLibrary),
+            "model.load" => Ok(Self::LoadModel),
+            "model.unload" => Ok(Self::UnloadModel),
+            "inference" => Ok(Self::Inference),
+            "inference.stream" => Ok(Self::InferenceStream),
+            "inference.image" => Ok(Self::InferenceImage),
+            other => Err(format!("unknown backend op: {other}")),
+        }
+    }
+}
 
 /// Canonical management events supported by the runtime.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -11,54 +60,100 @@ pub enum ManagementEvent {
     UnloadModel,
 }
 
+/// Typed inference request metadata derived from a [`BackendRequest`].
+#[derive(Debug, Clone)]
+pub struct Invocation {
+    pub route: RequestRoute,
+    pub options: Payload,
+}
+
+/// Complete deployment state that can be broadcast to peer workers or exposed
+/// as a typed runtime-control view.
+#[derive(Clone, Debug, Default)]
+pub struct DeploymentSnapshot {
+    pub generation: u64,
+    pub library: Option<Payload>,
+    pub model: Option<Payload>,
+}
+
+impl DeploymentSnapshot {
+    pub fn generation(generation: u64) -> Self {
+        Self {
+            generation,
+            library: None,
+            model: None,
+        }
+    }
+
+    pub fn with_library(generation: u64, payload: Payload) -> Self {
+        Self {
+            generation,
+            library: Some(payload),
+            model: None,
+        }
+    }
+
+    pub fn with_model(generation: u64, payload: Payload) -> Self {
+        Self {
+            generation,
+            library: None,
+            model: Some(payload),
+        }
+    }
+
+    pub fn with_library_and_model(generation: u64, library: Payload, model: Payload) -> Self {
+        Self {
+            generation,
+            library: Some(library),
+            model: Some(model),
+        }
+    }
+
+    pub fn library_config<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
+        self.library
+            .as_ref()
+            .ok_or_else(|| "deployment snapshot missing library config".to_owned())?
+            .to_json()
+    }
+
+    pub fn model_config<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
+        self.model
+            .as_ref()
+            .ok_or_else(|| "deployment snapshot missing model config".to_owned())?
+            .to_json()
+    }
+}
+
+/// Typed synchronization payload on the backend control bus.
+#[derive(Clone, Debug)]
+pub enum SyncMessage {
+    Deployment(DeploymentSnapshot),
+    Generation { generation: u64 },
+}
+
+impl SyncMessage {
+    pub fn generation(&self) -> u64 {
+        match self {
+            Self::Deployment(snapshot) => snapshot.generation,
+            Self::Generation { generation } => *generation,
+        }
+    }
+
+    pub fn deployment(&self) -> Option<&DeploymentSnapshot> {
+        match self {
+            Self::Deployment(snapshot) => Some(snapshot),
+            Self::Generation { .. } => None,
+        }
+    }
+}
+
 /// Peer-synchronization commands broadcast between workers of the same backend.
-///
-/// Unlike [`BackendRequest`] (which is competitive – only one worker
-/// handles each message), these commands are delivered to every worker
-/// simultaneously via a `tokio::sync::broadcast` channel.
-///
-/// Each variant carries a `sender_id` field identifying the worker that sent
-/// the command. Every worker **skips** commands whose `sender_id` matches its
-/// own ID because it already performed the operation while handling the
-/// original mpsc request — re-processing the command would cause duplicate
-/// operations on the sender.
 #[derive(Clone, Debug)]
 pub enum PeerWorkerCommand {
-    /// Load the library from `lib_path` if not already loaded.
-    ///
-    /// Sent after a `lib.load` request so that peer workers (which did not
-    /// handle the original mpsc message) also acquire the library handle.
-    LoadLibrary {
-        lib_path: String,
-        sender_id: usize,
-        seq_id: u64,
-    },
-
-    /// Drop the current library+model and reload from `lib_path`.
-    ///
-    /// Sent after a `lib.reload` request so that all workers switch to the
-    /// new library together.
-    ReloadLibrary {
-        lib_path: String,
-        sender_id: usize,
-        seq_id: u64,
-    },
-
-    /// Load the model from `model_path` if not already loaded.
-    ///
-    /// Sent after a `model.load` request so that peer workers also have a
-    /// model context ready for inference.
-    LoadModel {
-        model_path: String,
-        sender_id: usize,
-        seq_id: u64,
-    },
-
-    /// Drop the current model context on every worker.
-    ///
-    /// Sent after a `model.unload` request is processed by one worker so
-    /// that all other workers also clear their (possibly stale) contexts.
-    Unload { sender_id: usize, seq_id: u64 },
+    LoadLibrary { sync: SyncMessage, sender_id: usize },
+    ReloadLibrary { sync: SyncMessage, sender_id: usize },
+    LoadModel { sync: SyncMessage, sender_id: usize },
+    Unload { sync: SyncMessage, sender_id: usize },
 }
 
 impl PeerWorkerCommand {
@@ -74,19 +169,24 @@ impl PeerWorkerCommand {
 
     /// Monotonic sequence number assigned by runtime management path.
     pub fn seq_id(&self) -> u64 {
+        self.sync().generation()
+    }
+
+    pub fn sync(&self) -> &SyncMessage {
         match self {
-            Self::LoadLibrary { seq_id, .. }
-            | Self::ReloadLibrary { seq_id, .. }
-            | Self::LoadModel { seq_id, .. }
-            | Self::Unload { seq_id, .. } => *seq_id,
+            Self::LoadLibrary { sync, .. }
+            | Self::ReloadLibrary { sync, .. }
+            | Self::LoadModel { sync, .. }
+            | Self::Unload { sync, .. } => sync,
         }
+    }
+
+    pub fn deployment(&self) -> Option<&DeploymentSnapshot> {
+        self.sync().deployment()
     }
 }
 
 /// Runtime-issued control signals sharing the same backend control bus.
-///
-/// These are emitted by orchestrator-level global operations, not by peer
-/// workers.
 #[derive(Clone, Debug)]
 pub enum RuntimeControlSignal {
     /// Runtime asks the backend to (re)load state using the provided payload.
@@ -95,6 +195,51 @@ pub enum RuntimeControlSignal {
     GlobalLoad { op_id: u64, payload: Payload },
     /// Runtime asks the backend to unload all runtime-managed model state.
     GlobalUnload { op_id: u64 },
+}
+
+impl RuntimeControlSignal {
+    pub fn generation(&self) -> u64 {
+        match self {
+            Self::GlobalLoad { op_id, .. } | Self::GlobalUnload { op_id } => *op_id,
+        }
+    }
+
+    pub fn deployment(&self) -> Option<DeploymentSnapshot> {
+        match self {
+            Self::GlobalLoad { op_id, payload } => {
+                Some(DeploymentSnapshot::with_model(*op_id, payload.clone()))
+            }
+            Self::GlobalUnload { .. } => None,
+        }
+    }
+}
+
+/// Higher-level typed view over runtime control.
+#[derive(Clone, Debug)]
+pub enum DriverControl {
+    GlobalLoad {
+        op_id: u64,
+        deployment: DeploymentSnapshot,
+    },
+    GlobalUnload {
+        op_id: u64,
+        sync: SyncMessage,
+    },
+}
+
+impl From<RuntimeControlSignal> for DriverControl {
+    fn from(value: RuntimeControlSignal) -> Self {
+        match value {
+            RuntimeControlSignal::GlobalLoad { op_id, payload } => Self::GlobalLoad {
+                op_id,
+                deployment: DeploymentSnapshot::with_model(op_id, payload),
+            },
+            RuntimeControlSignal::GlobalUnload { op_id } => Self::GlobalUnload {
+                op_id,
+                sync: SyncMessage::Generation { generation: op_id },
+            },
+        }
+    }
 }
 
 /// Unified control-bus command type for backend worker control channels.
@@ -120,6 +265,16 @@ pub enum BackendRequestKind {
     Management(ManagementEvent),
 }
 
+/// Higher-level typed view over backend ingress requests.
+#[derive(Debug, Clone)]
+pub enum DriverRequestKind {
+    Inference(Invocation),
+    Management {
+        event: ManagementEvent,
+        route: RequestRoute,
+    },
+}
+
 /// A request sent by the orchestrator to a backend worker via its ingress queue.
 #[derive(Debug)]
 pub struct BackendRequest {
@@ -135,6 +290,33 @@ pub struct BackendRequest {
     pub broadcast_seq: Option<u64>,
     /// Channel on which the backend sends its single reply.
     pub reply_tx: oneshot::Sender<BackendReply>,
+}
+
+impl BackendRequest {
+    pub fn route(&self) -> Result<RequestRoute, String> {
+        RequestRoute::from_str(&self.op.name)
+    }
+
+    pub fn driver_kind(&self) -> Result<DriverRequestKind, String> {
+        let route = self.route()?;
+        Ok(match self.kind {
+            BackendRequestKind::Inference => DriverRequestKind::Inference(Invocation {
+                route,
+                options: self.op.options.clone(),
+            }),
+            BackendRequestKind::Management(event) => DriverRequestKind::Management { event, route },
+        })
+    }
+
+    pub fn invocation(&self) -> Result<Invocation, String> {
+        match self.driver_kind()? {
+            DriverRequestKind::Inference(invocation) => Ok(invocation),
+            DriverRequestKind::Management { route, .. } => Ok(Invocation {
+                route,
+                options: self.op.options.clone(),
+            }),
+        }
+    }
 }
 
 /// Reply sent back from a backend worker to the orchestrator.

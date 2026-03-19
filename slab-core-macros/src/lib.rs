@@ -52,7 +52,7 @@ fn strip_helper_attrs(attrs: &mut Vec<Attribute>) {
 fn normalize_event_path(path: Path) -> Path {
     if path.leading_colon.is_none() && path.segments.len() == 1 {
         let ident = path.segments[0].ident.clone();
-        parse_quote!(crate::api::Event::#ident)
+        parse_quote!(crate::scheduler::backend::protocol::RequestRoute::#ident)
     } else {
         path
     }
@@ -260,8 +260,8 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let pattern = &route.pattern;
         let method = &route.method;
         quote! {
-            fn #matcher(ev: &crate::api::Event) -> bool {
-                matches!(ev, #pattern)
+            fn #matcher(route: crate::scheduler::backend::protocol::RequestRoute) -> bool {
+                matches!(route, #pattern)
             }
             fn #caller<'a>(
                 &'a mut self,
@@ -278,7 +278,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let matcher = format_ident!("__backend_handler_match_event_{}", idx);
         let caller = format_ident!("__backend_handler_call_event_{}", idx);
         quote! {
-            crate::scheduler::backend::runner::EventRoute {
+            crate::scheduler::backend::runner::RequestRouteMatcher {
                 matches: Self::#matcher,
                 handle: Self::#caller,
             }

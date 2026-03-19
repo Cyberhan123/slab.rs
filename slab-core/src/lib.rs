@@ -1,25 +1,34 @@
-pub mod base;
-pub mod engine;
+mod api;
+mod base;
+mod dispatch;
+mod engine;
+mod ports;
+pub mod model;
+pub mod runtime;
 mod scheduler;
-
-pub mod api;
-pub mod ports;
+mod spec;
+pub mod task;
 
 pub use base::error::CoreError;
-pub use base::types::{Payload, TaskId, TaskStatus};
-pub use scheduler::storage::TaskStatusView;
+pub use base::types::TaskId;
+pub use model::{
+    AutoModel, AutoModelForAudioTranscription, AutoModelForImageEmbedding,
+    AutoModelForImageGeneration, AutoModelForTextGeneration, ModelDeployment,
+};
+pub use runtime::{BuiltinDriversConfig, Runtime, RuntimeBuilder};
+pub use spec::*;
+pub use task::{
+    AudioTranscriptionPipeline, ImageEmbeddingPipeline, ImageGenerationPipeline, Pipeline,
+    PipelineModelInput, TaskHandle, TaskSnapshot, TaskStageState, TaskState,
+    TextGenerationPipeline,
+};
 
-/// Re-export all high-level capability types and traits so that callers can
-/// write `use slab_core::capabilities::TextGenerationBackend` without knowing
-/// the internal module path.
-pub mod capabilities {
-    pub use crate::ports::capabilities::{
-        AudioTranscriptionBackend, AudioTranscriptionRequest, AudioTranscriptionResponse,
-        ImageEmbeddingBackend, ImageEmbeddingRequest, ImageEmbeddingResponse,
-        ImageGenerationBackend, ImageGenerationRequest, ImageGenerationResponse,
-        TextGenerationBackend, TextGenerationRequest, TextGenerationResponse,
-    };
-}
-
-/// Backward-compatible alias: `RuntimeError` is now [`CoreError`].
 pub type RuntimeError = CoreError;
+
+pub fn pipeline(
+    runtime: &Runtime,
+    task_kind: TaskKind,
+    model: impl Into<PipelineModelInput>,
+) -> Result<Pipeline, CoreError> {
+    task::pipeline(runtime, task_kind, model)
+}
