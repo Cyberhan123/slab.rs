@@ -16,6 +16,7 @@
 //! correctly without extra metadata.
 
 /// Flat data payload for a [`Tensor`].
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) enum TensorData {
     /// Unsigned 32-bit integers, typically token IDs fed into the model.
@@ -41,12 +42,14 @@ impl TensorData {
 /// same convention as NumPy: `shape[0]` is the outermost dimension, and
 /// `shape[shape.len()-1]` is the innermost.  The product of `shape` values
 /// equals `data.len()`.
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub(crate) struct Tensor {
     data: TensorData,
     shape: Vec<usize>,
 }
 
+#[allow(dead_code)]
 impl Tensor {
     // ── Constructors ──────────────────────────────────────────────────────────
 

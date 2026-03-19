@@ -11,7 +11,7 @@ use tracing::warn;
 use crate::internal::scheduler::backend::protocol::{BackendRequest, WorkerCommand};
 use crate::internal::scheduler::backend::runner::{shared_ingress, SharedIngressRx};
 use crate::internal::scheduler::types::{
-    BackendLifecycleState, GlobalConsistencyState, RuntimeError,
+    BackendLifecycleState, CoreError, GlobalConsistencyState,
 };
 
 /// Inference lease: blocks management mutations and holds compute quota.
@@ -135,13 +135,13 @@ impl ResourceManager {
         );
     }
 
-    fn handle(&self, backend_id: &str) -> Result<BackendHandle, RuntimeError> {
+    fn handle(&self, backend_id: &str) -> Result<BackendHandle, CoreError> {
         self.backends
             .read()
             .expect("backend map poisoned")
             .get(backend_id)
             .cloned()
-            .ok_or_else(|| RuntimeError::Busy {
+            .ok_or_else(|| CoreError::Busy {
                 backend_id: backend_id.to_owned(),
             })
     }
@@ -164,9 +164,9 @@ impl ResourceManager {
     pub fn ingress_tx(
         &self,
         backend_id: &str,
-    ) -> Result<mpsc::Sender<BackendRequest>, RuntimeError> {
+    ) -> Result<mpsc::Sender<BackendRequest>, CoreError> {
         let handle = self.handle(backend_id)?;
-        handle.ingress_tx.ok_or_else(|| RuntimeError::Busy {
+        handle.ingress_tx.ok_or_else(|| CoreError::Busy {
             backend_id: backend_id.to_owned(),
         })
     }
@@ -176,15 +176,15 @@ impl ResourceManager {
     pub fn control_tx(
         &self,
         backend_id: &str,
-    ) -> Result<broadcast::Sender<WorkerCommand>, RuntimeError> {
+    ) -> Result<broadcast::Sender<WorkerCommand>, CoreError> {
         let handle = self.handle(backend_id)?;
-        handle.control_tx.ok_or_else(|| RuntimeError::Busy {
+        handle.control_tx.ok_or_else(|| CoreError::Busy {
             backend_id: backend_id.to_owned(),
         })
     }
 
     /// Monotonic management sequence id per backend stream.
-    pub fn next_seq(&self, backend_id: &str) -> Result<u64, RuntimeError> {
+    pub fn next_seq(&self, backend_id: &str) -> Result<u64, CoreError> {
         let handle = self.handle(backend_id)?;
         Ok(handle.next_seq.fetch_add(1, Ordering::Relaxed))
     }
@@ -194,11 +194,11 @@ impl ResourceManager {
         handle: &BackendHandle,
         backend_id: &str,
         timeout: Duration,
-    ) -> Result<OwnedSemaphorePermit, RuntimeError> {
+    ) -> Result<OwnedSemaphorePermit, CoreError> {
         tokio::time::timeout(timeout, Arc::clone(&handle.semaphore).acquire_owned())
             .await
-            .map_err(|_| RuntimeError::Timeout)?
-            .map_err(|_| RuntimeError::Busy {
+            .map_err(|_| CoreError::Timeout)?
+            .map_err(|_| CoreError::Busy {
                 backend_id: backend_id.to_owned(),
             })
     }
@@ -208,7 +208,7 @@ impl ResourceManager {
         &self,
         backend_id: &str,
         timeout: Duration,
-    ) -> Result<InferenceLease, RuntimeError> {
+    ) -> Result<InferenceLease, CoreError> {
         self.ensure_inference_allowed().await?;
         let handle = self.handle(backend_id)?;
         let compute_permit = self
@@ -226,7 +226,7 @@ impl ResourceManager {
     pub async fn acquire_management_lease(
         &self,
         backend_id: &str,
-    ) -> Result<ManagementLease, RuntimeError> {
+    ) -> Result<ManagementLease, CoreError> {
         let handle = self.handle(backend_id)?;
         let mgmt_guard = Arc::clone(&handle.management_lock).write_owned().await;
         Ok(ManagementLease { mgmt_guard })
@@ -237,17 +237,17 @@ impl ResourceManager {
         &self,
         backend_id: &str,
         state: BackendLifecycleState,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), CoreError> {
         let handle = self.handle(backend_id)?;
         *handle.lifecycle.write().await = state;
         Ok(())
     }
 
     /// If inconsistent, reject inference submission.
-    pub async fn ensure_inference_allowed(&self) -> Result<(), RuntimeError> {
+    pub async fn ensure_inference_allowed(&self) -> Result<(), CoreError> {
         let guard = self.global_state.read().await;
         if let GlobalConsistencyState::Inconsistent { op_id } = *guard {
-            return Err(RuntimeError::GlobalStateInconsistent { op_id });
+            return Err(CoreError::GlobalStateInconsistent { op_id });
         }
         Ok(())
     }

@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
 use tokio::sync::mpsc;
 use tracing::{info, warn};
@@ -11,9 +12,15 @@ use crate::internal::scheduler::backend::protocol::{
 use crate::internal::scheduler::stage::Stage;
 use crate::internal::scheduler::storage::ResultStorage;
 use crate::internal::scheduler::types::{
-    BackendLifecycleState, GlobalOperationKind, Payload, RuntimeError, StageStatus, TaskId,
+    BackendLifecycleState, CoreError, GlobalOperationKind, Payload, StageStatus, TaskId,
     TaskStatus,
 };
+
+/// Default wait timeout used when blocking until a task result is ready.
+pub const DEFAULT_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
+
+/// Timeout for waiting until a streaming task exposes its stream handle.
+pub const STREAM_INIT_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// Maximum time to wait for a GPU admission permit before giving up.
 ///
@@ -74,7 +81,7 @@ impl Orchestrator {
         event: ManagementEvent,
         op_name: &str,
         input: Payload,
-    ) -> Result<Payload, RuntimeError> {
+    ) -> Result<Payload, CoreError> {
         let _mgmt_lease = self
             .resource_manager
             .acquire_management_lease(backend_id)
@@ -104,15 +111,15 @@ impl Orchestrator {
         ingress_tx.try_send(req).map_err(|e| {
             let cap = ingress_tx.max_capacity();
             match e {
-                mpsc::error::TrySendError::Full(_) => RuntimeError::QueueFull {
+                mpsc::error::TrySendError::Full(_) => CoreError::QueueFull {
                     queue: backend_id.to_owned(),
                     capacity: cap,
                 },
-                mpsc::error::TrySendError::Closed(_) => RuntimeError::BackendShutdown,
+                mpsc::error::TrySendError::Closed(_) => CoreError::BackendShutdown,
             }
         })?;
 
-        let reply = reply_rx.await.map_err(|_| RuntimeError::BackendShutdown)?;
+        let reply = reply_rx.await.map_err(|_| CoreError::BackendShutdown)?;
         match reply {
             BackendReply::Value(payload) => {
                 let state = match event {
@@ -128,12 +135,12 @@ impl Orchestrator {
                 self.resource_manager
                     .set_backend_state(backend_id, BackendLifecycleState::Error)
                     .await?;
-                Err(RuntimeError::GpuStageFailed {
+                Err(CoreError::GpuStageFailed {
                     stage_name: op_name.to_owned(),
                     message: msg,
                 })
             }
-            BackendReply::Stream(_) => Err(RuntimeError::GpuStageFailed {
+            BackendReply::Stream(_) => Err(CoreError::GpuStageFailed {
                 stage_name: op_name.to_owned(),
                 message: "unexpected stream reply on management call".into(),
             }),
@@ -360,13 +367,13 @@ impl Orchestrator {
     /// Submit a pipeline for execution.
     ///
     /// Returns a [`TaskId`] immediately; execution happens in the background.
-    /// Returns [`RuntimeError::OrchestratorQueueFull`] if the submission queue
+    /// Returns [`CoreError::OrchestratorQueueFull`] if the submission queue
     /// is saturated.
     pub async fn submit(
         &self,
         stages: Vec<Stage>,
         initial_payload: Payload,
-    ) -> Result<TaskId, RuntimeError> {
+    ) -> Result<TaskId, CoreError> {
         // Gate GPU-bearing submissions early when global state is inconsistent.
         // This prevents queueing work that is guaranteed to be rejected later.
         if stages
@@ -388,13 +395,13 @@ impl Orchestrator {
                 let cap = self.storage.submit_tx().max_capacity();
                 match e {
                     mpsc::error::TrySendError::Full(_) => {
-                        RuntimeError::OrchestratorQueueFull { capacity: cap }
+                        CoreError::OrchestratorQueueFull { capacity: cap }
                     }
-                    mpsc::error::TrySendError::Closed(_) => RuntimeError::BackendShutdown,
+                    mpsc::error::TrySendError::Closed(_) => CoreError::BackendShutdown,
                 }
             })?;
 
-        reply_rx.await.map_err(|_| RuntimeError::BackendShutdown)
+        reply_rx.await.map_err(|_| CoreError::BackendShutdown)
     }
 
     /// Request best-effort cancellation of a task.
@@ -415,7 +422,7 @@ impl Orchestrator {
     /// `cancel_tx`, leaving the task running indefinitely.
     ///
     /// After signalling cancellation the record is removed; subsequent
-    /// status/result calls will return [`RuntimeError::TaskNotFound`].
+    /// status/result calls will return [`CoreError::TaskNotFound`].
     pub async fn cancel_and_purge(&self, task_id: TaskId) {
         // Signal cancellation directly so that execute_task sees the watch
         // flag set before the record is removed from storage.
@@ -430,7 +437,7 @@ impl Orchestrator {
         &self,
         backend_id: &str,
         input: Payload,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), CoreError> {
         self.call_backend_management_inner(
             backend_id,
             ManagementEvent::LoadModel,
@@ -442,7 +449,7 @@ impl Orchestrator {
     }
 
     /// Unload model for a backend under backend-scoped management lock.
-    pub async fn unload_model_backend(&self, backend_id: &str) -> Result<(), RuntimeError> {
+    pub async fn unload_model_backend(&self, backend_id: &str) -> Result<(), CoreError> {
         self.call_backend_management_inner(
             backend_id,
             ManagementEvent::UnloadModel,
@@ -459,7 +466,7 @@ impl Orchestrator {
         &self,
         kind: GlobalOperationKind,
         payloads: HashMap<String, Payload>,
-    ) -> Result<(), RuntimeError> {
+    ) -> Result<(), CoreError> {
         let op_id = self.resource_manager.begin_global_reconcile().await;
         let backend_ids = self.resource_manager.backend_ids();
         let mut succeeded: Vec<String> = Vec::new();
@@ -510,18 +517,18 @@ impl Orchestrator {
         }
 
         self.resource_manager.mark_global_inconsistent(op_id).await;
-        Err(RuntimeError::GlobalStateInconsistent { op_id })
+        Err(CoreError::GlobalStateInconsistent { op_id })
     }
 
     /// Return a snapshot of the task's current status.
     pub async fn get_status(
         &self,
         task_id: TaskId,
-    ) -> Result<crate::internal::scheduler::storage::TaskStatusView, RuntimeError> {
+    ) -> Result<crate::internal::scheduler::storage::TaskStatusView, CoreError> {
         self.storage
             .get_status(task_id)
             .await
-            .ok_or(RuntimeError::TaskNotFound { task_id })
+            .ok_or(CoreError::TaskNotFound { task_id })
     }
 
     /// Consume and return the completed payload for a non-streaming task.
@@ -550,5 +557,97 @@ impl Orchestrator {
     /// This is a no-op if `task_id` is not found (e.g. already purged).
     pub async fn purge_task(&self, task_id: TaskId) {
         self.storage.remove_task(task_id).await;
+    }
+
+    /// Poll until the task reaches a terminal state or `timeout` expires.
+    ///
+    /// On timeout the task is cancelled and purged before returning
+    /// [`CoreError::Timeout`].
+    pub async fn wait_terminal(
+        &self,
+        task_id: TaskId,
+        timeout: Duration,
+    ) -> Result<TaskStatus, CoreError> {
+        let wait_result = tokio::time::timeout(timeout, async {
+            loop {
+                let view = self.get_status(task_id).await?;
+                match view.status.clone() {
+                    status if status.is_terminal() => return Ok(status),
+                    _ => tokio::time::sleep(Duration::from_millis(5)).await,
+                }
+            }
+        })
+        .await;
+
+        match wait_result {
+            Ok(status) => status,
+            Err(_) => {
+                self.cancel_and_purge(task_id).await;
+                Err(CoreError::Timeout)
+            }
+        }
+    }
+
+    /// Wait for a non-streaming task to complete and return its payload.
+    pub async fn wait_result(
+        &self,
+        task_id: TaskId,
+        timeout: Duration,
+    ) -> Result<Payload, CoreError> {
+        match self.wait_terminal(task_id, timeout).await? {
+            TaskStatus::Succeeded { .. } => self
+                .get_result(task_id)
+                .await
+                .ok_or(CoreError::TaskNotFound { task_id }),
+            TaskStatus::ResultConsumed => Err(CoreError::GpuStageFailed {
+                stage_name: "result".into(),
+                message: "task result has already been consumed".into(),
+            }),
+            TaskStatus::Failed { error } => Err(error),
+            TaskStatus::Cancelled => Err(CoreError::BackendShutdown),
+            TaskStatus::SucceededStreaming => Err(CoreError::GpuStageFailed {
+                stage_name: "result".into(),
+                message: "streaming task has no unary result".into(),
+            }),
+            TaskStatus::Pending | TaskStatus::Running { .. } => Err(CoreError::Timeout),
+        }
+    }
+
+    /// Wait for a streaming task to expose its stream handle.
+    pub async fn wait_stream(
+        &self,
+        task_id: TaskId,
+        timeout: Duration,
+    ) -> Result<crate::internal::scheduler::backend::protocol::StreamHandle, CoreError> {
+        let wait_result = tokio::time::timeout(timeout, async {
+            loop {
+                let view = self.get_status(task_id).await?;
+                match view.status {
+                    TaskStatus::SucceededStreaming => return Ok(()),
+                    TaskStatus::Succeeded { .. } | TaskStatus::ResultConsumed => {
+                        return Err(CoreError::GpuStageFailed {
+                            stage_name: "stream".into(),
+                            message: "non-streaming task has no stream".into(),
+                        });
+                    }
+                    TaskStatus::Failed { error } => return Err(error),
+                    TaskStatus::Cancelled => return Err(CoreError::BackendShutdown),
+                    _ => tokio::time::sleep(Duration::from_millis(5)).await,
+                }
+            }
+        })
+        .await;
+
+        match wait_result {
+            Ok(Ok(())) => self
+                .take_stream(task_id)
+                .await
+                .ok_or(CoreError::TaskNotFound { task_id }),
+            Ok(Err(error)) => Err(error),
+            Err(_) => {
+                self.cancel_and_purge(task_id).await;
+                Err(CoreError::Timeout)
+            }
+        }
     }
 }

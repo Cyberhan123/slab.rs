@@ -6,7 +6,7 @@ use crate::internal::scheduler::backend::admission::{ResourceManager, ResourceMa
 use crate::internal::scheduler::backend::protocol::{BackendOp, BackendReply};
 use crate::internal::scheduler::orchestrator::Orchestrator;
 use crate::internal::scheduler::pipeline::PipelineBuilder;
-use crate::internal::scheduler::types::{GlobalOperationKind, Payload, RuntimeError, TaskStatus};
+use crate::internal::scheduler::types::{GlobalOperationKind, Payload, CoreError, TaskStatus};
 
 fn text_payload(s: &str) -> Payload {
     Payload::Text(Arc::from(s))
@@ -45,7 +45,7 @@ async fn inference_lease_acquired_and_released() {
         matches!(
             rm.acquire_inference_lease("test-backend", std::time::Duration::from_millis(20))
                 .await,
-            Err(RuntimeError::Timeout)
+            Err(CoreError::Timeout)
         ),
         "third lease should time out while capacity is exhausted"
     );
@@ -68,7 +68,7 @@ async fn inference_lease_unknown_backend_returns_busy() {
     assert!(
         matches!(
             err,
-            crate::internal::scheduler::types::RuntimeError::Busy { .. }
+            crate::internal::scheduler::types::CoreError::Busy { .. }
         ),
         "expected Busy error"
     );
@@ -169,7 +169,7 @@ async fn gpu_stage_dispatches_and_receives_reply() {
 async fn gpu_stage_busy_error_when_no_permits() {
     // Register backend with capacity 0 so that no permit is ever available.
     // The orchestrator will wait up to GPU_ACQUIRE_TIMEOUT (very short in
-    // test builds) and then fail the task with RuntimeError::Timeout.
+    // test builds) and then fail the task with CoreError::Timeout.
     let mut rm = ResourceManager::with_config(ResourceManagerConfig {
         backend_capacity: 0,
         ..ResourceManagerConfig::default()
@@ -532,7 +532,7 @@ async fn inconsistent_global_state_blocks_inference_submission() {
         .await;
 
     assert!(
-            matches!(result, Err(RuntimeError::GlobalStateInconsistent { op_id: seen }) if seen == op_id),
+            matches!(result, Err(CoreError::GlobalStateInconsistent { op_id: seen }) if seen == op_id),
             "inference submission should be rejected while global state is inconsistent, got {result:?}"
         );
 }
@@ -581,7 +581,7 @@ async fn manual_override_clears_inference_gate() {
     .run()
     .await;
     assert!(
-        matches!(blocked, Err(RuntimeError::GlobalStateInconsistent { .. })),
+        matches!(blocked, Err(CoreError::GlobalStateInconsistent { .. })),
         "submission should be blocked before manual override"
     );
 
@@ -756,7 +756,7 @@ async fn purge_task_removes_record() {
     assert!(
         matches!(
             orchestrator.get_status(task_id).await,
-            Err(RuntimeError::TaskNotFound { .. })
+            Err(CoreError::TaskNotFound { .. })
         ),
         "record should be gone after purge"
     );
@@ -802,7 +802,7 @@ async fn purge_task_removes_failed_record() {
     assert!(
         matches!(
             orchestrator.get_status(task_id).await,
-            Err(RuntimeError::TaskNotFound { .. })
+            Err(CoreError::TaskNotFound { .. })
         ),
         "failed task record should be gone after purge"
     );
@@ -876,7 +876,7 @@ async fn cancel_and_purge_signals_before_removing_record() {
     assert!(
         matches!(
             orchestrator.get_status(task_id).await,
-            Err(RuntimeError::TaskNotFound { .. })
+            Err(CoreError::TaskNotFound { .. })
         ),
         "record should be gone after cancel_and_purge"
     );

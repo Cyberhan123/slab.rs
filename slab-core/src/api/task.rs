@@ -6,8 +6,8 @@ use futures::StreamExt;
 
 use crate::base::error::CoreError;
 use crate::base::types::{Payload, StreamChunk, TaskId, TaskStatus};
-use crate::internal::scheduler::kernel::{
-    ExecutionKernel, DEFAULT_WAIT_TIMEOUT, STREAM_INIT_TIMEOUT,
+use crate::internal::scheduler::orchestrator::{
+    Orchestrator, DEFAULT_WAIT_TIMEOUT, STREAM_INIT_TIMEOUT,
 };
 use crate::internal::scheduler::storage::TaskStatusView;
 use crate::model::Capability;
@@ -69,7 +69,7 @@ pub(crate) trait TaskCodec<R, C>: Send + Sync + 'static {
 
 #[derive(Clone)]
 pub struct TaskHandle<R, C> {
-    kernel: ExecutionKernel,
+    orchestrator: Orchestrator,
     task_id: TaskId,
     codec: Arc<dyn TaskCodec<R, C>>,
     _types: PhantomData<(R, C)>,
@@ -90,12 +90,12 @@ where
     C: Send + 'static,
 {
     pub(crate) fn new(
-        kernel: ExecutionKernel,
+        orchestrator: Orchestrator,
         task_id: TaskId,
         codec: Arc<dyn TaskCodec<R, C>>,
     ) -> Self {
         Self {
-            kernel,
+            orchestrator,
             task_id,
             codec,
             _types: PhantomData,
@@ -107,20 +107,20 @@ where
     }
 
     pub async fn status(&self) -> Result<TaskSnapshot, CoreError> {
-        let view = self.kernel.snapshot(self.task_id).await?;
+        let view = self.orchestrator.get_status(self.task_id).await?;
         Ok(TaskSnapshot::from_view(self.codec.capability(), view))
     }
 
     pub fn cancel(&self) {
-        self.kernel.cancel(self.task_id);
+        self.orchestrator.cancel(self.task_id);
     }
 
     pub async fn cancel_and_purge(&self) {
-        self.kernel.cancel_and_purge(self.task_id).await;
+        self.orchestrator.cancel_and_purge(self.task_id).await;
     }
 
     pub async fn purge(&self) {
-        self.kernel.purge(self.task_id).await;
+        self.orchestrator.purge_task(self.task_id).await;
     }
 
     pub async fn result(&self) -> Result<R, CoreError> {
@@ -128,7 +128,7 @@ where
     }
 
     pub async fn result_timeout(&self, timeout: std::time::Duration) -> Result<R, CoreError> {
-        let payload = self.kernel.wait_result(self.task_id, timeout).await?;
+        let payload = self.orchestrator.wait_result(self.task_id, timeout).await?;
         self.codec.decode_result(payload)
     }
 
@@ -140,7 +140,7 @@ where
         &self,
         timeout: std::time::Duration,
     ) -> Result<BoxStream<'static, Result<C, CoreError>>, CoreError> {
-        let handle = self.kernel.wait_stream(self.task_id, timeout).await?;
+        let handle = self.orchestrator.wait_stream(self.task_id, timeout).await?;
         let codec = Arc::clone(&self.codec);
 
         Ok(

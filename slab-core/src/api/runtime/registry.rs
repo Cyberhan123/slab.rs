@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use crate::base::error::CoreError;
 use crate::internal::dispatch::DriverResolver;
-use crate::internal::scheduler::kernel::ExecutionKernel;
 use crate::internal::scheduler::orchestrator::Orchestrator;
 use crate::model::ModelSpec;
 
@@ -46,10 +45,6 @@ impl Runtime {
 
     pub(crate) fn orchestrator(&self) -> Orchestrator {
         self.inner.orchestrator.clone()
-    }
-
-    pub(crate) fn kernel(&self) -> ExecutionKernel {
-        ExecutionKernel::new(self.inner.orchestrator.clone())
     }
 
     pub(crate) fn resolver(&self) -> &DriverResolver {
