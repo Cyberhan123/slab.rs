@@ -1,6 +1,8 @@
+use crate::base::error::CoreError;
 use crate::internal::scheduler::stage::CpuStage;
 use crate::internal::scheduler::types::Payload;
-use crate::spec::{Capability, ModelFamily, TaskKind};
+use crate::model::{Capability, ModelFamily};
+use crate::task_kind::TaskKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModelSourceKind {
@@ -33,27 +35,141 @@ pub(crate) struct ResolvedDriver {
     pub backend_id: String,
     pub family: ModelFamily,
     pub capability: Capability,
-    pub task_kind: TaskKind,
-    pub op_name: String,
     pub supports_streaming: bool,
     pub load_style: DriverLoadStyle,
 }
 
+impl ResolvedDriver {
+    pub(crate) fn invocation(
+        &self,
+        task_kind: TaskKind,
+        streaming: bool,
+    ) -> Result<ResolvedInvocation, CoreError> {
+        validate_invocation(self, task_kind, streaming)?;
+
+        Ok(ResolvedInvocation {
+            driver: self.clone(),
+            op_name: op_name_for(task_kind, streaming).to_owned(),
+        })
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct ResolvedInvocation {
+    pub driver: ResolvedDriver,
+    pub op_name: String,
+}
+
 #[derive(Clone)]
 pub(crate) struct InvocationPlan {
-    pub resolved: ResolvedDriver,
+    pub invocation: ResolvedInvocation,
     pub initial_payload: Payload,
     pub preprocess_stages: Vec<CpuStage>,
     pub op_options: Payload,
     pub streaming: bool,
 }
 
+impl InvocationPlan {
+    pub(crate) fn new(
+        resolved: ResolvedDriver,
+        task_kind: TaskKind,
+        streaming: bool,
+        initial_payload: Payload,
+        preprocess_stages: Vec<CpuStage>,
+        op_options: Payload,
+    ) -> Result<Self, CoreError> {
+        Ok(Self {
+            invocation: resolved.invocation(task_kind, streaming)?,
+            initial_payload,
+            preprocess_stages,
+            op_options,
+            streaming,
+        })
+    }
+}
+
 impl std::fmt::Debug for InvocationPlan {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("InvocationPlan")
-            .field("resolved", &self.resolved)
+            .field("invocation", &self.invocation)
             .field("preprocess_stage_count", &self.preprocess_stages.len())
             .field("streaming", &self.streaming)
             .finish()
+    }
+}
+
+fn validate_invocation(
+    resolved: &ResolvedDriver,
+    task_kind: TaskKind,
+    streaming: bool,
+) -> Result<(), CoreError> {
+    if resolved.capability != task_kind.capability() {
+        return Err(CoreError::UnsupportedCapability {
+            family: format!("{:?}", resolved.family),
+            capability: format!("{:?}", task_kind.capability()),
+        });
+    }
+
+    if streaming && !resolved.supports_streaming {
+        return Err(CoreError::UnsupportedOperation {
+            backend: resolved.driver_id.clone(),
+            op: "stream".to_owned(),
+        });
+    }
+
+    Ok(())
+}
+
+fn op_name_for(task_kind: TaskKind, streaming: bool) -> &'static str {
+    match (task_kind, streaming) {
+        (TaskKind::TextGeneration, true) => "inference.stream",
+        (TaskKind::ImageGeneration, _) => "inference.image",
+        (TaskKind::TextGeneration, false)
+        | (TaskKind::AudioTranscription, _)
+        | (TaskKind::ImageEmbedding, _) => "inference",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolved_driver_builds_streaming_invocation_route() {
+        let resolved = ResolvedDriver {
+            driver_id: "candle.llama".to_owned(),
+            backend_id: "candle.llama".to_owned(),
+            family: ModelFamily::Llama,
+            capability: Capability::TextGeneration,
+            supports_streaming: true,
+            load_style: DriverLoadStyle::ModelOnly,
+        };
+
+        let invocation = resolved
+            .invocation(TaskKind::TextGeneration, true)
+            .expect("streaming invocation should resolve");
+
+        assert_eq!(invocation.op_name, "inference.stream");
+    }
+
+    #[test]
+    fn resolved_driver_rejects_unsupported_streaming_invocation() {
+        let resolved = ResolvedDriver {
+            driver_id: "onnx.text".to_owned(),
+            backend_id: "onnx".to_owned(),
+            family: ModelFamily::Onnx,
+            capability: Capability::TextGeneration,
+            supports_streaming: false,
+            load_style: DriverLoadStyle::ModelOnly,
+        };
+
+        let error = resolved
+            .invocation(TaskKind::TextGeneration, true)
+            .expect_err("non-streaming driver should reject stream invocation");
+
+        assert!(matches!(
+            error,
+            CoreError::UnsupportedOperation { ref op, .. } if op == "stream"
+        ));
     }
 }

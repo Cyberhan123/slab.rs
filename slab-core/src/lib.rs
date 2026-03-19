@@ -1,5 +1,7 @@
 mod base;
 mod internal;
-mod spec;
+mod task_kind;
 
 pub mod api;
+pub mod inference;
+pub mod model;

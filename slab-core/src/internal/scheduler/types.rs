@@ -1,7 +1,5 @@
-use std::time::SystemTime;
-
-// Re-export base types so existing scheduler-internal `use crate::scheduler::types::*`
-// imports continue to resolve.
+// Re-export base types so scheduler-internal modules can share a compact
+// `types::*` import surface without pulling from `base` directly at each call site.
 pub use crate::base::error::CoreError;
 pub use crate::base::types::{Payload, StageStatus, TaskId, TaskStatus};
 
@@ -19,34 +17,17 @@ pub enum BackendLifecycleState {
 }
 
 /// Cluster-wide consistency state used to gate inference after failed global operations.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone)]
 pub enum GlobalConsistencyState {
-    Consistent {
-        generation: u64,
-    },
-    Reconciling {
-        op_id: u64,
-        started_at: SystemTime,
-    },
-    Inconsistent {
-        op_id: u64,
-        failed_backends: Vec<String>,
-        cleanup_report: Vec<String>,
-        since: SystemTime,
-    },
+    Consistent,
+    Reconciling,
+    Inconsistent { op_id: u64 },
 }
 
-/// Global management operation kind stored for retry.
+/// Global management operation kind exercised by the internal scheduler tests.
+#[cfg_attr(not(test), allow(dead_code))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GlobalOperationKind {
-    Initialize,
     LoadModels,
-    UnloadModels,
-}
-
-/// Snapshot of a failed global operation used for retry.
-#[derive(Debug, Clone)]
-pub struct FailedGlobalOperation {
-    pub kind: GlobalOperationKind,
-    pub payloads: std::collections::HashMap<String, Payload>,
 }

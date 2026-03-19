@@ -6,9 +6,7 @@ use crate::internal::scheduler::backend::admission::{ResourceManager, ResourceMa
 use crate::internal::scheduler::backend::protocol::{BackendOp, BackendReply};
 use crate::internal::scheduler::orchestrator::Orchestrator;
 use crate::internal::scheduler::pipeline::PipelineBuilder;
-use crate::internal::scheduler::types::{
-    FailedGlobalOperation, GlobalOperationKind, Payload, RuntimeError, TaskStatus,
-};
+use crate::internal::scheduler::types::{GlobalOperationKind, Payload, RuntimeError, TaskStatus};
 
 fn text_payload(s: &str) -> Payload {
     Payload::Text(Arc::from(s))
@@ -68,7 +66,10 @@ async fn inference_lease_unknown_backend_returns_busy() {
         .await
         .unwrap_err();
     assert!(
-        matches!(err, crate::internal::scheduler::types::RuntimeError::Busy { .. }),
+        matches!(
+            err,
+            crate::internal::scheduler::types::RuntimeError::Busy { .. }
+        ),
         "expected Busy error"
     );
 }
@@ -282,7 +283,9 @@ async fn streaming_pipeline_returns_stream_handle() {
     let mut tokens = String::new();
     while let Some(chunk) = handle.recv().await {
         match chunk {
-            crate::internal::scheduler::backend::protocol::StreamChunk::Token(t) => tokens.push_str(&t),
+            crate::internal::scheduler::backend::protocol::StreamChunk::Token(t) => {
+                tokens.push_str(&t)
+            }
             crate::internal::scheduler::backend::protocol::StreamChunk::Done => break,
             crate::internal::scheduler::backend::protocol::StreamChunk::Error(e) => {
                 panic!("stream error: {e}")
@@ -339,7 +342,9 @@ async fn worker_broadcast_unload_clears_all_worker_contexts() {
     use std::sync::atomic::{AtomicBool, Ordering};
     use tokio::sync::{broadcast, mpsc, oneshot};
 
-    use crate::internal::scheduler::backend::protocol::{PeerWorkerCommand, SyncMessage, WorkerCommand};
+    use crate::internal::scheduler::backend::protocol::{
+        PeerWorkerCommand, SyncMessage, WorkerCommand,
+    };
 
     const NUM_WORKERS: usize = 3;
 
@@ -440,7 +445,9 @@ async fn worker_broadcast_unload_clears_all_worker_contexts() {
 async fn stale_broadcast_sequence_is_ignored() {
     use tokio::sync::broadcast;
 
-    use crate::internal::scheduler::backend::protocol::{PeerWorkerCommand, SyncMessage, WorkerCommand};
+    use crate::internal::scheduler::backend::protocol::{
+        PeerWorkerCommand, SyncMessage, WorkerCommand,
+    };
 
     let (bc_tx, mut bc_rx) = broadcast::channel::<WorkerCommand>(16);
     let applied = Arc::new(tokio::sync::Mutex::new(Vec::<u64>::new()));
@@ -512,17 +519,7 @@ async fn inconsistent_global_state_blocks_inference_submission() {
     let orchestrator = Orchestrator::start(rm, 64);
 
     let op_id = 42;
-    rm_state
-        .mark_global_inconsistent(
-            op_id,
-            vec!["gate-backend".to_owned()],
-            vec!["forced inconsistent state for test".to_owned()],
-            FailedGlobalOperation {
-                kind: GlobalOperationKind::LoadModels,
-                payloads: HashMap::new(),
-            },
-        )
-        .await;
+    rm_state.mark_global_inconsistent(op_id).await;
 
     let op = BackendOp {
         name: "echo".to_owned(),
@@ -567,17 +564,7 @@ async fn manual_override_clears_inference_gate() {
     let orchestrator = Orchestrator::start(rm, 64);
 
     let op_id = 99;
-    rm_state
-        .mark_global_inconsistent(
-            op_id,
-            vec!["gate-backend".to_owned()],
-            vec!["forced inconsistent state for test".to_owned()],
-            FailedGlobalOperation {
-                kind: GlobalOperationKind::LoadModels,
-                payloads: HashMap::new(),
-            },
-        )
-        .await;
+    rm_state.mark_global_inconsistent(op_id).await;
 
     let blocked = PipelineBuilder::new(
         orchestrator.clone(),

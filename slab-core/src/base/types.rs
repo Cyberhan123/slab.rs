@@ -1,4 +1,3 @@
-use std::any::Any;
 use std::sync::Arc;
 
 use crate::base::error::CoreError;
@@ -22,8 +21,6 @@ pub enum Payload {
     Text(Arc<str>),
     /// Structured JSON metadata.  Not zero-copy but allowed for small objects.
     Json(serde_json::Value),
-    /// Escape hatch for arbitrary typed data. Discouraged in core pipelines.
-    Any(Arc<dyn Any + Send + Sync>),
 }
 
 impl Payload {
@@ -41,14 +38,6 @@ impl Payload {
 
     pub fn text(s: impl Into<Arc<str>>) -> Self {
         Payload::Text(s.into())
-    }
-
-    pub fn bytes(b: impl Into<Arc<[u8]>>) -> Self {
-        Payload::Bytes(b.into())
-    }
-
-    pub fn f32_slice(f: impl Into<Arc<[f32]>>) -> Self {
-        Payload::F32(f.into())
     }
 
     pub fn json(j: impl Into<serde_json::Value>) -> Self {
@@ -69,23 +58,9 @@ impl Payload {
         }
     }
 
-    pub fn to_text_string(&self) -> Result<String, String> {
-        match self {
-            Payload::Text(t) => Ok(t.to_string()),
-            _ => Err(format!("Type error: expected Text variant, got {:?}", self)),
-        }
-    }
-
     pub fn to_f32_arc(&self) -> Result<Arc<[f32]>, String> {
         match self {
             Payload::F32(f) => Ok(Arc::clone(f)),
-            _ => Err(format!("Type error: expected F32 variant, got {:?}", self)),
-        }
-    }
-
-    pub fn to_f32_slice(&self) -> Result<&[f32], String> {
-        match self {
-            Payload::F32(f) => Ok(f),
             _ => Err(format!("Type error: expected F32 variant, got {:?}", self)),
         }
     }
@@ -95,16 +70,6 @@ impl Payload {
             Payload::Json(v) => serde_json::from_value(v.clone())
                 .map_err(|e| format!("JSON Deserialize error: {e}")),
             _ => Err(format!("Type error: expected Json variant, got {:?}", self)),
-        }
-    }
-
-    pub fn to_bytes(&self) -> Result<bytes::Bytes, String> {
-        match self {
-            Payload::Bytes(b) => Ok(bytes::Bytes::copy_from_slice(b)),
-            _ => Err(format!(
-                "Type error: expected Bytes variant, got {:?}",
-                self
-            )),
         }
     }
 }
@@ -135,7 +100,7 @@ impl From<serde_json::Value> for Payload {
 
 /// High-level lifecycle state of a task managed by the [`Orchestrator`].
 ///
-/// [`Orchestrator`]: crate::scheduler::orchestrator::Orchestrator
+/// [`Orchestrator`]: crate::internal::scheduler::orchestrator::Orchestrator
 #[derive(Debug, Clone)]
 pub enum TaskStatus {
     /// Task has been accepted but not yet started.
@@ -174,19 +139,6 @@ impl TaskStatus {
                 | TaskStatus::SucceededStreaming
                 | TaskStatus::Failed { .. }
                 | TaskStatus::Cancelled
-        )
-    }
-
-    /// Returns `true` if the task completed with a success outcome.
-    ///
-    /// This covers [`TaskStatus::Succeeded`], [`TaskStatus::ResultConsumed`]
-    /// (succeeded but payload already taken), and [`TaskStatus::SucceededStreaming`].
-    pub fn is_succeeded(&self) -> bool {
-        matches!(
-            self,
-            TaskStatus::Succeeded { .. }
-                | TaskStatus::ResultConsumed
-                | TaskStatus::SucceededStreaming
         )
     }
 }

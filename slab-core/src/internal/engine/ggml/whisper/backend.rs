@@ -31,12 +31,12 @@ use crate::internal::engine::ggml::config::{LibLoadConfig, ModelLoadConfig};
 use crate::internal::engine::ggml::whisper::adapter::{
     GGMLWhisperEngine, WhisperDecodeConfig, WhisperVadConfig,
 };
-use slab_core_macros::backend_handler;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
 use crate::internal::scheduler::types::Payload;
+use slab_core_macros::backend_handler;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -264,9 +264,7 @@ impl WhisperWorker {
             }
         };
         let BackendRequest {
-            input,
-            reply_tx,
-            ..
+            input, reply_tx, ..
         } = req;
         let options = match parse_inference_options(&invocation.options) {
             Ok(options) => options,

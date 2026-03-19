@@ -101,7 +101,6 @@ impl ResultStorage {
         Some(TaskStatusView {
             task_id,
             status: record.status.clone(),
-            stage_statuses: record.stage_statuses.clone(),
         })
     }
 
@@ -152,7 +151,9 @@ impl ResultStorage {
     }
 
     /// Return a clone of the submit sender (used by pipeline builder).
-    pub fn submit_tx(&self) -> mpsc::Sender<crate::internal::scheduler::orchestrator::OrchestratorCommand> {
+    pub fn submit_tx(
+        &self,
+    ) -> mpsc::Sender<crate::internal::scheduler::orchestrator::OrchestratorCommand> {
         self.submit_tx.clone()
     }
 }
@@ -162,5 +163,4 @@ impl ResultStorage {
 pub struct TaskStatusView {
     pub task_id: TaskId,
     pub status: TaskStatus,
-    pub stage_statuses: Vec<StageStatus>,
 }

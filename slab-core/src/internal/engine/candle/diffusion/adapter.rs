@@ -423,8 +423,6 @@ impl CandleDiffusionEngine {
 
         // Collect timesteps first to avoid simultaneous mut/immut borrows on scheduler.
         let timesteps: Vec<usize> = scheduler.timesteps().to_vec();
-        let total_steps = timesteps.len();
-
         // Denoising loop.
         for (idx, t) in timesteps.iter().enumerate() {
             let latent_model_input = Tensor::cat(&[&latents, &latents], 0).map_err(|e| {

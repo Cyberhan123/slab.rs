@@ -7,14 +7,13 @@ use serde_json::{Map, Value};
 
 use crate::base::error::CoreError;
 use crate::base::types::{Payload, StreamChunk};
-use crate::internal::dispatch::{DriverLoadStyle, ResolvedDriver};
-
-use super::inference::{
+use crate::inference::{
     AudioTranscriptionRequest, AudioTranscriptionResponse, ImageEmbeddingRequest,
     ImageEmbeddingResponse, ImageGenerationRequest, ImageGenerationResponse, JsonOptions,
     TextGenerationChunk, TextGenerationRequest, TextGenerationResponse,
 };
-use super::model::{ModelFamily, ModelSource, ModelSpec};
+use crate::internal::dispatch::{DriverLoadStyle, ResolvedDriver};
+use crate::model::{ModelFamily, ModelSource, ModelSpec};
 
 pub(crate) fn encode_load_payload(
     spec: &ModelSpec,
@@ -90,11 +89,12 @@ pub(crate) fn encode_text_generation_request(
     resolved: &ResolvedDriver,
 ) -> Result<(Payload, Payload), CoreError> {
     let input = if matches!(resolved.family, ModelFamily::Onnx) {
-        let value: Value =
-            serde_json::from_str(&request.prompt).map_err(|error| CoreError::ResultDecodeFailed {
+        let value: Value = serde_json::from_str(&request.prompt).map_err(|error| {
+            CoreError::ResultDecodeFailed {
                 task_kind: "text_generation".to_owned(),
                 message: format!("ONNX text generation prompt must be JSON tensor input: {error}"),
-            })?;
+            }
+        })?;
         Payload::json(value)
     } else {
         Payload::text(match &request.system_prompt {
@@ -388,21 +388,27 @@ fn string_option(spec: &ModelSpec, key: &str) -> Option<String> {
 }
 
 fn bool_option(spec: &ModelSpec, key: &str) -> Option<bool> {
-    spec.load_options.get(key).and_then(Value::as_bool).or_else(|| {
-        spec.load_options
-            .get(key)
-            .and_then(Value::as_str)
-            .and_then(|value| value.parse().ok())
-    })
+    spec.load_options
+        .get(key)
+        .and_then(Value::as_bool)
+        .or_else(|| {
+            spec.load_options
+                .get(key)
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse().ok())
+        })
 }
 
 fn u64_option(spec: &ModelSpec, key: &str) -> Option<u64> {
-    spec.load_options.get(key).and_then(Value::as_u64).or_else(|| {
-        spec.load_options
-            .get(key)
-            .and_then(Value::as_str)
-            .and_then(|value| value.parse().ok())
-    })
+    spec.load_options
+        .get(key)
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            spec.load_options
+                .get(key)
+                .and_then(Value::as_str)
+                .and_then(|value| value.parse().ok())
+        })
 }
 
 fn usize_option(spec: &ModelSpec, key: &str) -> Option<usize> {
@@ -441,12 +447,12 @@ fn decode_image_generation_json(value: &Value) -> Result<Vec<Vec<u8>>, CoreError
                         message: "image entry missing b64 field".to_owned(),
                     })
                     .and_then(|b64| {
-                        base64::engine::general_purpose::STANDARD.decode(b64).map_err(|error| {
-                            CoreError::ResultDecodeFailed {
+                        base64::engine::general_purpose::STANDARD
+                            .decode(b64)
+                            .map_err(|error| CoreError::ResultDecodeFailed {
                                 task_kind: "image_generation".to_owned(),
                                 message: format!("failed to decode image payload: {error}"),
-                            }
-                        })
+                            })
                     }),
                 _ => Err(CoreError::ResultDecodeFailed {
                     task_kind: "image_generation".to_owned(),
@@ -463,10 +469,11 @@ fn decode_image_generation_json(value: &Value) -> Result<Vec<Vec<u8>>, CoreError
 }
 
 fn encode_image_tensor(image_bytes: &[u8], input_name: &str) -> Result<Value, CoreError> {
-    let img = image::load_from_memory(image_bytes).map_err(|error| CoreError::ResultDecodeFailed {
-        task_kind: "image_embedding".to_owned(),
-        message: format!("image decode failed: {error}"),
-    })?;
+    let img =
+        image::load_from_memory(image_bytes).map_err(|error| CoreError::ResultDecodeFailed {
+            task_kind: "image_embedding".to_owned(),
+            message: format!("image decode failed: {error}"),
+        })?;
 
     let img: DynamicImage = img.resize_exact(224, 224, FilterType::Lanczos3);
 

@@ -59,12 +59,12 @@ use tokio::sync::broadcast;
 
 use crate::internal::engine::ggml::config::{DiffusionModelLoadConfig, LibLoadConfig};
 use crate::internal::engine::ggml::diffusion::adapter::GGMLDiffusionEngine;
-use slab_core_macros::backend_handler;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
 use crate::internal::scheduler::types::Payload;
+use slab_core_macros::backend_handler;
 
 // ── Configurations ────────────────────────────────────────────────────────────
 

@@ -154,7 +154,7 @@ impl GpuStage {
 /// A streaming GPU stage; must be the **final** stage in its pipeline.
 ///
 /// Instead of returning a `Payload`, it returns a `StreamHandle` (an `mpsc`
-/// receiver) that yields [`crate::scheduler::backend::protocol::StreamChunk`]
+/// receiver) that yields [`crate::base::types::StreamChunk`]
 /// items.
 #[derive(Clone, Debug)]
 pub struct GpuStreamStage {

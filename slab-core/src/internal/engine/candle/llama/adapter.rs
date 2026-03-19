@@ -13,7 +13,7 @@
 #[cfg(feature = "candle")]
 use candle_core::{Device, Tensor};
 #[cfg(feature = "candle")]
-use candle_transformers::generation::{LogitsProcessor, Sampling};
+use candle_transformers::generation::LogitsProcessor;
 #[cfg(feature = "candle")]
 use candle_transformers::models::quantized_llama::ModelWeights;
 
@@ -187,14 +187,6 @@ impl CandleLlamaEngine {
         Ok(())
     }
 
-    /// Returns `true` when a model is currently loaded.
-    pub fn is_model_loaded(&self) -> bool {
-        self.inner
-            .read()
-            .map(|s| s.model.is_some())
-            .unwrap_or(false)
-    }
-
     /// Create a new session and return its ID.
     pub async fn create_session(&self) -> Result<SessionId, EngineError> {
         let mut state = self
@@ -316,7 +308,7 @@ impl CandleLlamaEngine {
         session_id: SessionId,
         tx: tokio::sync::mpsc::Sender<StreamChunk>,
     ) {
-        use candle_core::{Device, IndexOp};
+        use candle_core::Device;
         use candle_transformers::generation::Sampling;
 
         let send = |chunk: StreamChunk| tx.blocking_send(chunk).is_ok();
@@ -328,7 +320,7 @@ impl CandleLlamaEngine {
         // eliminates the lock-upgrade race that existed when read and write locks
         // were acquired separately.
         let (mut all_tokens, mut logits_processor, eos_token) = {
-            let mut state = match self.inner.write() {
+            let state = match self.inner.write() {
                 Ok(s) => s,
                 Err(_) => {
                     send(StreamChunk::Error("lock poisoned".into()));
@@ -336,8 +328,8 @@ impl CandleLlamaEngine {
                 }
             };
 
-            let (model_ref, tokenizer_ref) = match (&state.model, &state.tokenizer) {
-                (Some(m), Some(t)) => (m, t),
+            let tokenizer_ref = match (&state.model, &state.tokenizer) {
+                (Some(_), Some(t)) => t,
                 _ => {
                     send(StreamChunk::Error("model not loaded".into()));
                     return;

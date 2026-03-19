@@ -38,8 +38,8 @@ pub enum CoreError {
     #[error("orchestrator queue full (capacity {capacity})")]
     OrchestratorQueueFull { capacity: usize },
 
-    /// `api::init` was not called before using the API.
-    #[error("api runtime not initialized; call api::init first")]
+    /// The runtime was used before it was fully initialized.
+    #[error("runtime not initialized")]
     NotInitialized,
 
     /// A timed wait exceeded its deadline.
@@ -76,17 +76,11 @@ pub enum CoreError {
 
     /// None of the registered drivers can satisfy the model and capability.
     #[error("no viable driver for family '{family}' and capability '{capability}'")]
-    NoViableDriver {
-        family: String,
-        capability: String,
-    },
+    NoViableDriver { family: String, capability: String },
 
     /// The model does not expose the requested capability.
     #[error("model family '{family}' does not support capability '{capability}'")]
-    UnsupportedCapability {
-        family: String,
-        capability: String,
-    },
+    UnsupportedCapability { family: String, capability: String },
 
     /// The requested driver is not registered in the runtime.
     #[error("driver not registered: {driver_id}")]
@@ -94,10 +88,7 @@ pub enum CoreError {
 
     /// Preparing or loading a deployment failed before task execution began.
     #[error("deployment failed for driver '{driver_id}': {message}")]
-    DeploymentFailed {
-        driver_id: String,
-        message: String,
-    },
+    DeploymentFailed { driver_id: String, message: String },
 
     /// A model-scoped operation was attempted before the model had a live deployment.
     #[error("model is not loaded")]
@@ -105,10 +96,7 @@ pub enum CoreError {
 
     /// A task result could not be decoded back into the typed public API response.
     #[error("result decode failed for '{task_kind}': {message}")]
-    ResultDecodeFailed {
-        task_kind: String,
-        message: String,
-    },
+    ResultDecodeFailed { task_kind: String, message: String },
 
     // ── Engine errors ────────────────────────────────────────────────────────
     /// An I/O error raised by an engine backend.

@@ -54,12 +54,12 @@ use tracing::warn;
 
 use crate::internal::engine::onnx::adapter::OnnxEngine;
 use crate::internal::engine::onnx::config::{OnnxInferenceInput, OnnxModelLoadConfig};
-use slab_core_macros::backend_handler;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
 use crate::internal::scheduler::types::Payload;
+use slab_core_macros::backend_handler;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 

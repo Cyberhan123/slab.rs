@@ -11,8 +11,8 @@ use crate::internal::scheduler::backend::protocol::{
 use crate::internal::scheduler::stage::Stage;
 use crate::internal::scheduler::storage::ResultStorage;
 use crate::internal::scheduler::types::{
-    BackendLifecycleState, FailedGlobalOperation, GlobalConsistencyState, GlobalOperationKind,
-    Payload, RuntimeError, StageStatus, TaskId, TaskStatus,
+    BackendLifecycleState, GlobalOperationKind, Payload, RuntimeError, StageStatus, TaskId,
+    TaskStatus,
 };
 
 /// Maximum time to wait for a GPU admission permit before giving up.
@@ -60,19 +60,12 @@ pub struct Orchestrator {
 }
 
 impl Orchestrator {
+    #[cfg_attr(not(test), allow(dead_code))]
     fn emit_runtime_control_signal(&self, backend_id: &str, signal: RuntimeControlSignal) {
         let Ok(control_tx) = self.resource_manager.control_tx(backend_id) else {
             return;
         };
         let _ = control_tx.send(WorkerCommand::Runtime(signal));
-    }
-
-    fn global_kind_to_event(kind: GlobalOperationKind) -> (ManagementEvent, &'static str) {
-        match kind {
-            GlobalOperationKind::Initialize => (ManagementEvent::Initialize, "lib.load"),
-            GlobalOperationKind::LoadModels => (ManagementEvent::LoadModel, "model.load"),
-            GlobalOperationKind::UnloadModels => (ManagementEvent::UnloadModel, "model.unload"),
-        }
     }
 
     async fn call_backend_management_inner(
@@ -123,7 +116,6 @@ impl Orchestrator {
         match reply {
             BackendReply::Value(payload) => {
                 let state = match event {
-                    ManagementEvent::Initialize => BackendLifecycleState::Initialized,
                     ManagementEvent::LoadModel => BackendLifecycleState::ModelLoaded,
                     ManagementEvent::UnloadModel => BackendLifecycleState::Initialized,
                 };
@@ -433,38 +425,6 @@ impl Orchestrator {
         self.storage.remove_task(task_id).await;
     }
 
-    /// Run backend initialization (`lib.load`) under backend-scoped management lock.
-    pub async fn initialize_backend(
-        &self,
-        backend_id: &str,
-        input: Payload,
-    ) -> Result<(), RuntimeError> {
-        self.call_backend_management_inner(
-            backend_id,
-            ManagementEvent::Initialize,
-            "lib.load",
-            input,
-        )
-        .await
-        .map(|_| ())
-    }
-
-    /// Reload backend dynamic library (`lib.reload`) under backend-scoped management lock.
-    pub async fn reload_library_backend(
-        &self,
-        backend_id: &str,
-        input: Payload,
-    ) -> Result<(), RuntimeError> {
-        self.call_backend_management_inner(
-            backend_id,
-            ManagementEvent::Initialize,
-            "lib.reload",
-            input,
-        )
-        .await
-        .map(|_| ())
-    }
-
     /// Load model for a backend under backend-scoped management lock.
     pub async fn load_model_backend(
         &self,
@@ -494,18 +454,16 @@ impl Orchestrator {
     }
 
     /// Execute a global management operation with all-or-fail semantics.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn run_global_management(
         &self,
         kind: GlobalOperationKind,
         payloads: HashMap<String, Payload>,
     ) -> Result<(), RuntimeError> {
-        let _global_guard = self.resource_manager.lock_global_management().await;
         let op_id = self.resource_manager.begin_global_reconcile().await;
-
-        let (event, op_name) = Self::global_kind_to_event(kind);
         let backend_ids = self.resource_manager.backend_ids();
         let mut succeeded: Vec<String> = Vec::new();
-        let mut failed: Vec<(String, RuntimeError)> = Vec::new();
+        let mut failed = false;
 
         for backend_id in &backend_ids {
             let payload = payloads.get(backend_id).cloned().unwrap_or_default();
@@ -519,104 +477,40 @@ impl Orchestrator {
                         },
                     );
                 }
-                GlobalOperationKind::UnloadModels => {
-                    self.emit_runtime_control_signal(
-                        backend_id,
-                        RuntimeControlSignal::GlobalUnload { op_id },
-                    );
-                }
-                GlobalOperationKind::Initialize => {}
             }
             match self
-                .call_backend_management_inner(backend_id, event, op_name, payload)
+                .call_backend_management_inner(
+                    backend_id,
+                    ManagementEvent::LoadModel,
+                    "model.load",
+                    payload,
+                )
                 .await
             {
                 Ok(_) => succeeded.push(backend_id.clone()),
                 Err(err) => {
-                    failed.push((backend_id.clone(), err));
+                    let _ = err;
+                    failed = true;
                     break;
                 }
             }
         }
 
-        if failed.is_empty() {
+        if !failed {
             self.resource_manager.mark_global_consistent().await;
             return Ok(());
         }
 
-        let mut cleanup_report = Vec::new();
         match kind {
             GlobalOperationKind::LoadModels => {
                 for backend_id in succeeded.iter().rev() {
-                    if let Err(err) = self.unload_model_backend(backend_id).await {
-                        cleanup_report.push(format!(
-                            "cleanup unload failed for backend '{}': {}",
-                            backend_id, err
-                        ));
-                    }
-                }
-            }
-            GlobalOperationKind::UnloadModels => {
-                for (backend_id, _) in &failed {
-                    if let Err(err) = self.unload_model_backend(backend_id).await {
-                        cleanup_report.push(format!(
-                            "unload retry failed for backend '{}': {}",
-                            backend_id, err
-                        ));
-                    }
-                }
-            }
-            GlobalOperationKind::Initialize => {
-                for backend_id in succeeded.iter().rev() {
-                    if let Err(err) = self.unload_model_backend(backend_id).await {
-                        cleanup_report.push(format!(
-                            "best-effort initialize cleanup failed for backend '{}': {}",
-                            backend_id, err
-                        ));
-                    }
+                    let _ = self.unload_model_backend(backend_id).await;
                 }
             }
         }
 
-        let failed_backends: Vec<String> = failed.iter().map(|(id, _)| id.clone()).collect();
-        self.resource_manager
-            .mark_global_inconsistent(
-                op_id,
-                failed_backends,
-                cleanup_report,
-                FailedGlobalOperation { kind, payloads },
-            )
-            .await;
+        self.resource_manager.mark_global_inconsistent(op_id).await;
         Err(RuntimeError::GlobalStateInconsistent { op_id })
-    }
-
-    /// Retry the most recent failed global operation.
-    pub async fn retry_last_failed_global(&self) -> Result<(), RuntimeError> {
-        let failed = self
-            .resource_manager
-            .failed_global_operation()
-            .await
-            .ok_or(RuntimeError::NoFailedGlobalOperation)?;
-        self.run_global_management(failed.kind, failed.payloads)
-            .await
-    }
-
-    /// Read current global consistency state.
-    pub async fn consistency_status(&self) -> GlobalConsistencyState {
-        self.resource_manager.global_state().await
-    }
-
-    /// Read backend lifecycle state from the resource manager.
-    pub async fn backend_state(
-        &self,
-        backend_id: &str,
-    ) -> Result<BackendLifecycleState, RuntimeError> {
-        self.resource_manager.backend_state(backend_id).await
-    }
-
-    /// Manual operator override for inconsistency gate.
-    pub async fn manual_mark_consistent(&self, reason: &str) {
-        self.resource_manager.manual_mark_consistent(reason).await;
     }
 
     /// Return a snapshot of the task's current status.
