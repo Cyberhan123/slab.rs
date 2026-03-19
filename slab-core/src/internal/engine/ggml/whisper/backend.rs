@@ -262,7 +262,7 @@ impl WhisperWorker {
             Some(e) => e,
             None => {
                 let _ = reply_tx.send(BackendReply::Error(
-                    "library not loaded; call lib.load first".into(),
+                    "engine not initialized".into(),
                 ));
                 return;
             }
@@ -331,7 +331,7 @@ impl WhisperWorker {
             }
             None => {
                 let _ = reply_tx.send(BackendReply::Error(
-                    "library not loaded; call lib.load first".into(),
+                    "engine not initialized".into(),
                 ));
             }
         }
@@ -350,7 +350,7 @@ impl WhisperWorker {
             Some(e) => e,
             None => {
                 let _ = reply_tx.send(BackendReply::Error(
-                    "whisper backend not ready: library or model not loaded. Call lib.load and model.load first".into(),
+                    "whisper backend not ready: model not loaded. Call model.load first".into(),
                 ));
                 return;
             }
@@ -416,62 +416,11 @@ impl WhisperWorker {
         }
     }
 
-    #[on_peer_control(LoadLibrary)]
-    async fn on_peer_load_library(&mut self, cmd: PeerWorkerCommand) {
-        let Some(snapshot) = cmd.deployment() else {
-            return;
-        };
-        let config: LibLoadConfig = match snapshot.library_config() {
-            Ok(config) => config,
-            Err(error) => {
-                tracing::warn!(error = %error, "whisper worker: invalid library deployment snapshot");
-                return;
-            }
-        };
-        let lib_path = config.lib_path;
-        if self.engine.is_none() {
-            if let Ok(engine) = GGMLWhisperEngine::from_path(&lib_path) {
-                self.engine = Some(engine);
-            }
-        }
-        self.last_lib_config = snapshot.library.clone();
-    }
-
-    #[on_peer_control(ReloadLibrary)]
-    async fn on_peer_reload_library(&mut self, cmd: PeerWorkerCommand) {
-        let Some(snapshot) = cmd.deployment() else {
-            return;
-        };
-        let config: LibLoadConfig = match snapshot.library_config() {
-            Ok(config) => config,
-            Err(error) => {
-                tracing::warn!(error = %error, "whisper worker: invalid library deployment snapshot");
-                return;
-            }
-        };
-        let lib_path = config.lib_path;
-        self.engine = None;
-        if let Ok(engine) = GGMLWhisperEngine::from_path(&lib_path) {
-            self.engine = Some(engine);
-        }
-        self.last_lib_config = snapshot.library.clone();
-        self.last_model_config = None;
-    }
-
     #[on_peer_control(LoadModel)]
     async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
         let Some(snapshot) = cmd.deployment() else {
             return;
         };
-        if self.engine.is_none() {
-            if let Some(lib_payload) = snapshot.library.as_ref() {
-                if let Ok(config) = lib_payload.to_json::<LibLoadConfig>() {
-                    if let Ok(engine) = GGMLWhisperEngine::from_path(&config.lib_path) {
-                        self.engine = Some(engine);
-                    }
-                }
-            }
-        }
         let config: ModelLoadConfig = match snapshot.model_config() {
             Ok(config) => config,
             Err(error) => {
@@ -496,9 +445,6 @@ impl WhisperWorker {
                 }
             }
         }
-        if snapshot.library.is_some() {
-            self.last_lib_config = snapshot.library.clone();
-        }
         self.last_model_config = snapshot.model.clone();
     }
 
@@ -519,7 +465,6 @@ impl WhisperWorker {
                 if let Some(engine) = self.engine.as_mut() {
                     engine.unload();
                 }
-                self.last_lib_config = None;
                 self.last_model_config = None;
             }
             RuntimeControlSignal::GlobalLoad { op_id, payload } => {
@@ -528,7 +473,6 @@ impl WhisperWorker {
                 if let Some(engine) = self.engine.as_mut() {
                     engine.unload();
                 }
-                self.last_lib_config = None;
                 self.last_model_config = None;
             }
         }
@@ -539,7 +483,6 @@ impl WhisperWorker {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
-        self.last_lib_config = None;
         self.last_model_config = None;
     }
 }

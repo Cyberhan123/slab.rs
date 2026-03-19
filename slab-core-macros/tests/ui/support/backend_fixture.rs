@@ -6,8 +6,6 @@ mod internal {
             pub mod protocol {
                 #[derive(Clone, Copy)]
                 pub enum RequestRoute {
-                    LoadLibrary,
-                    ReloadLibrary,
                     LoadModel,
                     UnloadModel,
                     Inference,
@@ -26,8 +24,6 @@ mod internal {
 
                 #[derive(Clone)]
                 pub enum PeerWorkerCommand {
-                    LoadLibrary {},
-                    ReloadLibrary {},
                     LoadModel {},
                     Unload {},
                 }
