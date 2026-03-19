@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use tracing::info;
 
+use crate::api::traits::{CausalLM, ModelLoadConfig, ModelLoader};
+use crate::base::error::CoreError;
+use crate::inference::{TextGenerationChunk, TextGenerationRequest, TextGenerationResponse};
+
 use super::engine::LlamaInferenceEngine;
 use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 
@@ -329,5 +333,154 @@ impl GGMLLlamaEngine {
                 })?;
         *model_write_lock = None;
         Ok(())
+    }
+}
+
+// ── ModelLoader / CausalLM ────────────────────────────────────────────────────
+
+/// Load-time configuration for the GGML LLaMA engine.
+///
+/// Used as `<GGMLLlamaEngine as ModelLoader>::LoadConfig`.
+pub struct GgmlLlamaLoadConfig {
+    /// Path to the GGUF model file.
+    pub model_path: String,
+    /// Number of parallel inference workers (≥ 1).
+    ///
+    /// Values below 1 are clamped to 1 during [`ModelLoader::load`].
+    pub num_workers: usize,
+    /// KV-cache context window in tokens; `0` means use the backend default.
+    pub context_length: u32,
+}
+
+impl Default for GgmlLlamaLoadConfig {
+    fn default() -> Self {
+        Self {
+            model_path: String::new(),
+            num_workers: 1,
+            context_length: 0,
+        }
+    }
+}
+
+impl ModelLoadConfig for GgmlLlamaLoadConfig {}
+
+impl ModelLoader for GGMLLlamaEngine {
+    type LoadConfig = GgmlLlamaLoadConfig;
+
+    /// Load the GGML LLaMA model.
+    ///
+    /// Applies `context_length` to `n_ctx`, `n_batch`, and `n_ubatch` when
+    /// non-zero, matching the behaviour of the backend worker's `model.load`
+    /// handler.  `num_workers` is clamped to a minimum of 1.
+    ///
+    /// Replacement: `load_model_with_workers` clears both the inference engine
+    /// and the loaded model handle before activating the new model, so any
+    /// previously loaded model is safely replaced.
+    fn load(&self, config: GgmlLlamaLoadConfig) -> Result<(), CoreError> {
+        let mut ctx_params = LlamaContextParams::default();
+        if config.context_length > 0 {
+            let ctx_len = config.context_length;
+            ctx_params.n_ctx = ctx_len;
+            if ctx_params.n_batch > ctx_len {
+                ctx_params.n_batch = ctx_len;
+            }
+            if ctx_params.n_ubatch > ctx_len {
+                ctx_params.n_ubatch = ctx_len;
+            }
+        }
+        let num_workers = config.num_workers.max(1);
+        self.load_model_with_workers(
+            &config.model_path,
+            LlamaModelParams::default(),
+            ctx_params,
+            num_workers,
+        )
+    }
+
+    fn unload(&self) -> Result<(), CoreError> {
+        let mut write_lock =
+            self.inference_engine
+                .write()
+                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+                    operation: "lock llama engine state",
+                })?;
+        *write_lock = None;
+        let mut model_write_lock =
+            self.loaded_model
+                .write()
+                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+                    operation: "lock loaded llama model state",
+                })?;
+        *model_write_lock = None;
+        Ok(())
+    }
+
+    fn is_loaded(&self) -> bool {
+        self.loaded_model
+            .read()
+            .map(|g| g.is_some())
+            .unwrap_or(false)
+    }
+}
+
+#[async_trait::async_trait]
+impl CausalLM for GGMLLlamaEngine {
+    async fn generate(
+        &self,
+        request: &TextGenerationRequest,
+    ) -> Result<TextGenerationResponse, CoreError> {
+        let max_tokens = request.max_tokens.unwrap_or(4096) as usize;
+        let text = self.inference(&request.prompt, max_tokens, None).await?;
+        Ok(TextGenerationResponse {
+            text,
+            finish_reason: Some("stop".to_owned()),
+            ..Default::default()
+        })
+    }
+
+    async fn generate_stream(
+        &self,
+        request: &TextGenerationRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<TextGenerationChunk>, CoreError> {
+        use crate::api::traits::{done_chunk, error_chunk};
+
+        let max_tokens = request.max_tokens.unwrap_or(4096) as usize;
+        let (mut engine_rx, sid) =
+            self.inference_stream(&request.prompt, max_tokens, None).await?;
+
+        // Clone the LlamaInferenceEngine (wraps Arc<mpsc::Sender>) so the
+        // background task can end the session after the stream completes.
+        let engine_inner = self.require_engine()?;
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<TextGenerationChunk>(64);
+        tokio::spawn(async move {
+            loop {
+                match engine_rx.recv().await {
+                    Some(StreamChunk::Token(delta)) => {
+                        if tx
+                            .send(TextGenerationChunk {
+                                delta,
+                                done: false,
+                                ..Default::default()
+                            })
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Some(StreamChunk::Done) | None => {
+                        let _ = tx.send(done_chunk()).await;
+                        break;
+                    }
+                    Some(StreamChunk::Error(e)) => {
+                        let _ = tx.send(error_chunk(e)).await;
+                        break;
+                    }
+                }
+            }
+            let _ = engine_inner.end_session(sid).await;
+        });
+        Ok(rx)
     }
 }

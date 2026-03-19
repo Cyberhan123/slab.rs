@@ -21,6 +21,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use super::errors::{CandleLlamaEngineError, SessionId, StreamChunk, StreamHandle};
+use crate::api::traits::{CausalLM, ModelLoadConfig, ModelLoader};
+use crate::base::error::CoreError;
+use crate::inference::{TextGenerationChunk, TextGenerationRequest, TextGenerationResponse};
 use crate::internal::engine::EngineError;
 
 // ── Session state ─────────────────────────────────────────────────────────────
@@ -451,5 +454,120 @@ impl CandleLlamaEngine {
         }
 
         send(StreamChunk::Done);
+    }
+}
+
+// ── ModelLoader / CausalLM ────────────────────────────────────────────────────
+
+/// Load-time configuration for the Candle LLaMA engine.
+///
+/// Used as `<CandleLlamaEngine as ModelLoader>::LoadConfig`.
+pub struct CandleLlamaLoadConfig {
+    /// Path to the GGUF model weight file.
+    pub model_path: String,
+    /// Optional path to a tokenizer JSON file.
+    ///
+    /// When `None` the engine looks for `tokenizer.json` in the same
+    /// directory as `model_path`.
+    pub tokenizer_path: Option<String>,
+    /// Seed for the random-number generator used during sampling.
+    pub seed: u64,
+}
+
+impl ModelLoadConfig for CandleLlamaLoadConfig {}
+
+impl ModelLoader for CandleLlamaEngine {
+    type LoadConfig = CandleLlamaLoadConfig;
+
+    /// Load the Candle LLaMA model.
+    ///
+    /// Replacement: `load_model` writes the new weights and tokenizer into the
+    /// shared state under a write lock, overwriting any previously loaded
+    /// model and clearing all existing sessions.
+    fn load(&self, config: CandleLlamaLoadConfig) -> Result<(), CoreError> {
+        let tok_path = config.tokenizer_path.as_deref();
+        self.load_model(&config.model_path, tok_path, config.seed)
+    }
+
+    fn unload(&self) -> Result<(), CoreError> {
+        let mut state =
+            self.inner
+                .write()
+                .map_err(|_| CandleLlamaEngineError::LockPoisoned {
+                    operation: "write model state for unload",
+                })?;
+        state.model = None;
+        state.tokenizer = None;
+        state.sessions.clear();
+        Ok(())
+    }
+
+    fn is_loaded(&self) -> bool {
+        self.inner
+            .read()
+            .map(|s| s.model.is_some())
+            .unwrap_or(false)
+    }
+}
+
+#[async_trait::async_trait]
+impl CausalLM for CandleLlamaEngine {
+    async fn generate(
+        &self,
+        request: &TextGenerationRequest,
+    ) -> Result<TextGenerationResponse, CoreError> {
+        let max_tokens = request.max_tokens.unwrap_or(4096) as usize;
+        let text = self.inference(&request.prompt, max_tokens, None).await?;
+        Ok(TextGenerationResponse {
+            text,
+            finish_reason: Some("stop".to_owned()),
+            ..Default::default()
+        })
+    }
+
+    async fn generate_stream(
+        &self,
+        request: &TextGenerationRequest,
+    ) -> Result<tokio::sync::mpsc::Receiver<TextGenerationChunk>, CoreError> {
+        use crate::api::traits::{done_chunk, error_chunk};
+
+        let max_tokens = request.max_tokens.unwrap_or(4096) as usize;
+        let (mut candle_rx, sid) =
+            self.inference_stream(&request.prompt, max_tokens, None).await?;
+
+        // Clone the engine handle (Arc-backed) for session cleanup in the
+        // background task.
+        let engine = self.clone();
+
+        let (tx, rx) = tokio::sync::mpsc::channel::<TextGenerationChunk>(64);
+        tokio::spawn(async move {
+            loop {
+                match candle_rx.recv().await {
+                    Some(StreamChunk::Token(delta)) => {
+                        if tx
+                            .send(TextGenerationChunk {
+                                delta,
+                                done: false,
+                                ..Default::default()
+                            })
+                            .await
+                            .is_err()
+                        {
+                            break;
+                        }
+                    }
+                    Some(StreamChunk::Done) | None => {
+                        let _ = tx.send(done_chunk()).await;
+                        break;
+                    }
+                    Some(StreamChunk::Error(e)) => {
+                        let _ = tx.send(error_chunk(e)).await;
+                        break;
+                    }
+                }
+            }
+            let _ = engine.end_session(sid).await;
+        });
+        Ok(rx)
     }
 }
