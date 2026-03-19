@@ -3,9 +3,6 @@
 pub use crate::base::error::CoreError;
 pub use crate::base::types::{Payload, StageStatus, TaskId, TaskStatus};
 
-/// Backward-compatible alias used throughout the scheduler layer.
-pub type RuntimeError = CoreError;
-
 /// Backend lifecycle state tracked centrally by the resource manager.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BackendLifecycleState {

@@ -4,7 +4,7 @@ use crate::internal::scheduler::backend::admission::ResourceManager;
 use crate::internal::scheduler::backend::protocol::{
     BackendOp, BackendReply, BackendRequest, BackendRequestKind,
 };
-use crate::internal::scheduler::types::{Payload, RuntimeError};
+use crate::internal::scheduler::types::{CoreError, Payload};
 
 /// Type alias for the boxed synchronous CPU work closure.
 ///
@@ -69,16 +69,16 @@ impl CpuStage {
     }
 
     /// Execute this stage inside `spawn_blocking`, returning the new payload.
-    pub async fn run(&self, input: Payload) -> Result<Payload, RuntimeError> {
+    pub async fn run(&self, input: Payload) -> Result<Payload, CoreError> {
         let work = Arc::clone(&self.work);
         let name = self.name.clone();
         tokio::task::spawn_blocking(move || work(input))
             .await
-            .map_err(|_| RuntimeError::CpuStageFailed {
+            .map_err(|_| CoreError::CpuStageFailed {
                 stage_name: name.clone(),
                 message: "spawn_blocking task panicked".into(),
             })?
-            .map_err(|message| RuntimeError::CpuStageFailed {
+            .map_err(|message| CoreError::CpuStageFailed {
                 stage_name: name,
                 message,
             })
@@ -111,7 +111,7 @@ impl GpuStage {
         input: Payload,
         cancel_rx: tokio::sync::watch::Receiver<bool>,
         rm: &ResourceManager,
-    ) -> Result<Payload, RuntimeError> {
+    ) -> Result<Payload, CoreError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let ingress_tx = rm.ingress_tx(&self.backend_id)?;
         let req = BackendRequest {
@@ -126,22 +126,22 @@ impl GpuStage {
         ingress_tx.try_send(req).map_err(|e| {
             let cap = ingress_tx.max_capacity();
             match e {
-                tokio::sync::mpsc::error::TrySendError::Full(_) => RuntimeError::QueueFull {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => CoreError::QueueFull {
                     queue: self.backend_id.clone(),
                     capacity: cap,
                 },
-                tokio::sync::mpsc::error::TrySendError::Closed(_) => RuntimeError::BackendShutdown,
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => CoreError::BackendShutdown,
             }
         })?;
 
-        let reply = reply_rx.await.map_err(|_| RuntimeError::BackendShutdown)?;
+        let reply = reply_rx.await.map_err(|_| CoreError::BackendShutdown)?;
         match reply {
             BackendReply::Value(payload) => Ok(payload),
-            BackendReply::Error(msg) => Err(RuntimeError::GpuStageFailed {
+            BackendReply::Error(msg) => Err(CoreError::GpuStageFailed {
                 stage_name: self.name.clone(),
                 message: msg,
             }),
-            BackendReply::Stream(_) => Err(RuntimeError::GpuStageFailed {
+            BackendReply::Stream(_) => Err(CoreError::GpuStageFailed {
                 stage_name: self.name.clone(),
                 message: "unexpected stream reply on non-streaming stage".into(),
             }),
@@ -176,7 +176,7 @@ impl GpuStreamStage {
         input: Payload,
         cancel_rx: tokio::sync::watch::Receiver<bool>,
         rm: &ResourceManager,
-    ) -> Result<crate::internal::scheduler::backend::protocol::StreamHandle, RuntimeError> {
+    ) -> Result<crate::internal::scheduler::backend::protocol::StreamHandle, CoreError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let ingress_tx = rm.ingress_tx(&self.backend_id)?;
         let req = BackendRequest {
@@ -191,22 +191,22 @@ impl GpuStreamStage {
         ingress_tx.try_send(req).map_err(|e| {
             let cap = ingress_tx.max_capacity();
             match e {
-                tokio::sync::mpsc::error::TrySendError::Full(_) => RuntimeError::QueueFull {
+                tokio::sync::mpsc::error::TrySendError::Full(_) => CoreError::QueueFull {
                     queue: self.backend_id.clone(),
                     capacity: cap,
                 },
-                tokio::sync::mpsc::error::TrySendError::Closed(_) => RuntimeError::BackendShutdown,
+                tokio::sync::mpsc::error::TrySendError::Closed(_) => CoreError::BackendShutdown,
             }
         })?;
 
-        let reply = reply_rx.await.map_err(|_| RuntimeError::BackendShutdown)?;
+        let reply = reply_rx.await.map_err(|_| CoreError::BackendShutdown)?;
         match reply {
             BackendReply::Stream(handle) => Ok(handle),
-            BackendReply::Error(msg) => Err(RuntimeError::GpuStageFailed {
+            BackendReply::Error(msg) => Err(CoreError::GpuStageFailed {
                 stage_name: self.name.clone(),
                 message: msg,
             }),
-            BackendReply::Value(_) => Err(RuntimeError::GpuStageFailed {
+            BackendReply::Value(_) => Err(CoreError::GpuStageFailed {
                 stage_name: self.name.clone(),
                 message: "expected stream reply but got value".into(),
             }),

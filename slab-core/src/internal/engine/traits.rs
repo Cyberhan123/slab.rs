@@ -31,6 +31,7 @@ use crate::internal::engine::tensor::Tensor;
 ///
 /// Implement on any struct passed to [`ModelLoader::load`].  The trait has no
 /// required methods; it exists as a documentation and type-safety aid.
+#[allow(dead_code)]
 pub(crate) trait ModelLoadConfig: Send + Sync {}
 
 // ── ModelLoader ───────────────────────────────────────────────────────────────
@@ -49,6 +50,7 @@ pub(crate) trait ModelLoadConfig: Send + Sync {}
 /// [`load`]: ModelLoader::load
 /// [`unload`]: ModelLoader::unload
 /// [`is_loaded`]: ModelLoader::is_loaded
+#[allow(dead_code)]
 pub(crate) trait ModelLoader: Send + Sync {
     /// The load-time configuration type accepted by this backend.
     type LoadConfig: ModelLoadConfig;
@@ -90,6 +92,7 @@ pub(crate) trait ModelLoader: Send + Sync {
 /// * `input_ids` must not be empty.
 ///
 /// [`forward`]: CausalLM::forward
+#[allow(dead_code)]
 pub(crate) trait CausalLM: ModelLoader + Send + Sync {
     /// Run a single stateless forward pass and return per-vocabulary logits.
     ///

@@ -3,7 +3,7 @@ use std::marker::PhantomData;
 use crate::internal::scheduler::backend::protocol::BackendOp;
 use crate::internal::scheduler::orchestrator::Orchestrator;
 use crate::internal::scheduler::stage::{CpuStage, GpuStage, GpuStreamStage, Stage};
-use crate::internal::scheduler::types::{Payload, RuntimeError, TaskId};
+use crate::internal::scheduler::types::{CoreError, Payload, TaskId};
 
 // ─── Typestate markers ────────────────────────────────────────────────────────
 
@@ -94,7 +94,7 @@ impl PipelineBuilder<NoStream> {
     }
 
     /// Submit the pipeline for execution and return the allocated [`TaskId`].
-    pub async fn run(self) -> Result<TaskId, RuntimeError> {
+    pub async fn run(self) -> Result<TaskId, CoreError> {
         self.orchestrator
             .submit(self.stages, self.initial_payload)
             .await
@@ -107,7 +107,7 @@ impl PipelineBuilder<HasStream> {
     /// After the task transitions to `SucceededStreaming`, call
     /// [`Orchestrator::take_stream`] with the returned [`TaskId`] to obtain the
     /// stream handle.
-    pub async fn run_stream(self) -> Result<TaskId, RuntimeError> {
+    pub async fn run_stream(self) -> Result<TaskId, CoreError> {
         self.orchestrator
             .submit(self.stages, self.initial_payload)
             .await
