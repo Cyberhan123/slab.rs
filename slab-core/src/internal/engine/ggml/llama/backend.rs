@@ -7,17 +7,10 @@
 //!
 //! | Op string            | Event variant    | Description                                    |
 //! |----------------------|------------------|------------------------------------------------|
-//! | `"lib.load"`         | `LoadLibrary`    | Load (skip if already loaded) the llama dylib. |
-//! | `"lib.reload"`       | `ReloadLibrary`  | Replace the library, discarding current model. |
-//! | `"model.load"`       | `LoadModel`      | Load a GGUF model from the pre-loaded library. |
+//! | `"model.load"`       | `LoadModel`      | Load a GGUF model from the engine.             |
 //! | `"model.unload"`     | `UnloadModel`    | Drop the model handle; call model.load to restore. |
 //! | `"inference"`        | `Inference`      | Unary text generation; input is UTF-8 prompt.  |
 //! | `"inference.stream"` | `InferenceStream`| Streaming text generation.                     |
-//!
-//! ### `lib.load` / `lib.reload` input JSON
-//! ```json
-//! { "lib_path": "/path/to/libllama.so" }
-//! ```
 //!
 //! ### `model.load` input JSON
 //! ```json
@@ -31,7 +24,6 @@ use serde::Deserialize;
 use slab_llama::ChatMessage as LlamaChatMessage;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::internal::engine::ggml::config::LibLoadConfig;
 use crate::internal::engine::ggml::llama::adapter::GGMLLlamaEngine;
 use crate::internal::engine::ggml::llama::errors::SessionId;
 use crate::internal::scheduler::backend::protocol::{
@@ -156,22 +148,6 @@ impl LlamaWorker {
             engine,
             sessions: HashMap::new(),
         }
-    }
-
-    #[on_event(LoadLibrary)]
-    async fn on_load_library(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
-        self.handle_load_library(input, reply_tx).await;
-    }
-
-    #[on_event(ReloadLibrary)]
-    async fn on_reload_library(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
-        self.handle_reload_library(input, reply_tx).await;
     }
 
     #[on_event(LoadModel)]
@@ -342,76 +318,6 @@ impl LlamaWorker {
         self.cleanup_runtime_state();
     }
 
-    // ── lib.load ──────────────────────────────────────────────────────────────
-
-    async fn handle_load_library(
-        &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
-        if self.engine.is_some() {
-            // Library already loaded; skip silently.
-            let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                Arc::from([] as [u8; 0]),
-            )));
-            return;
-        }
-
-        let config: LibLoadConfig = match input.to_json() {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("invalid lib.load config: {e}")));
-                return;
-            }
-        };
-
-        match GGMLLlamaEngine::from_path(&config.lib_path) {
-            Ok(engine) => {
-                self.engine = Some(engine);
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
-            }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
-        }
-    }
-
-    // ── lib.reload ────────────────────────────────────────────────────────────
-
-    async fn handle_reload_library(
-        &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
-        let config: LibLoadConfig = match input.to_json() {
-            Ok(c) => c,
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "invalid lib.reload config: {e}"
-                )));
-                return;
-            }
-        };
-
-        // Drop current engine (releases model and inference OS threads).
-        self.engine = None;
-        self.sessions.clear();
-
-        match GGMLLlamaEngine::from_path(&config.lib_path) {
-            Ok(engine) => {
-                self.engine = Some(engine);
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
-            }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
-        }
-    }
-
     // ── model.load ────────────────────────────────────────────────────────────
 
     async fn handle_load_model(
@@ -423,7 +329,7 @@ impl LlamaWorker {
             Some(e) => Arc::clone(e),
             None => {
                 let _ = reply_tx.send(BackendReply::Error(
-                    "library not loaded; call lib.load first".into(),
+                    "engine not initialized".into(),
                 ));
                 return;
             }
@@ -490,7 +396,7 @@ impl LlamaWorker {
             Some(e) => Arc::clone(e),
             None => {
                 let _ = reply_tx.send(BackendReply::Error(
-                    "library not loaded; call lib.load first".into(),
+                    "engine not initialized".into(),
                 ));
                 return;
             }
