@@ -16,7 +16,6 @@ use crate::internal::scheduler::backend::protocol::BackendOp;
 use crate::internal::scheduler::pipeline::PipelineBuilder;
 use crate::internal::scheduler::stage::CpuStage;
 use crate::model::{Capability, ModelSpec};
-use crate::task_kind::TaskKind;
 
 use super::codec::{
     decode_audio_transcription_response, decode_image_embedding_response,
@@ -60,7 +59,7 @@ impl Pipeline {
     pub async fn load(&self) -> Result<(), CoreError> {
         let _ = self
             .ensure_loaded_for(
-                self.spec.task_kind(),
+                self.spec.capability,
                 self.spec.driver_hints.require_streaming,
             )
             .await?;
@@ -110,13 +109,13 @@ impl Pipeline {
     ) -> Result<TaskHandle<TextGenerationResponse, TextGenerationChunk>, CoreError> {
         self.require_capability(Capability::TextGeneration)?;
         let deployment = self
-            .ensure_loaded_for(TaskKind::TextGeneration, request.stream)
+            .ensure_loaded_for(Capability::TextGeneration, request.stream)
             .await?;
         let resolved = deployment.resolved.clone();
         let (input, op_options) = encode_text_generation_request(&request, &resolved)?;
         let plan = InvocationPlan::new(
             resolved,
-            TaskKind::TextGeneration,
+            Capability::TextGeneration,
             request.stream,
             input,
             Vec::new(),
@@ -141,13 +140,13 @@ impl Pipeline {
     ) -> Result<TaskHandle<AudioTranscriptionResponse, Infallible>, CoreError> {
         self.require_capability(Capability::AudioTranscription)?;
         let deployment = self
-            .ensure_loaded_for(TaskKind::AudioTranscription, false)
+            .ensure_loaded_for(Capability::AudioTranscription, false)
             .await?;
         let resolved = deployment.resolved.clone();
         let path = request.audio_path.clone();
         let plan = InvocationPlan::new(
             resolved,
-            TaskKind::AudioTranscription,
+            Capability::AudioTranscription,
             false,
             Payload::None,
             vec![CpuStage::new("audio.decode.wav", move |_| {
@@ -180,13 +179,13 @@ impl Pipeline {
     ) -> Result<TaskHandle<ImageGenerationResponse, Infallible>, CoreError> {
         self.require_capability(Capability::ImageGeneration)?;
         let deployment = self
-            .ensure_loaded_for(TaskKind::ImageGeneration, false)
+            .ensure_loaded_for(Capability::ImageGeneration, false)
             .await?;
         let resolved = deployment.resolved.clone();
         let (input, op_options) = encode_image_generation_request(&request, &resolved)?;
         let plan = InvocationPlan::new(
             resolved,
-            TaskKind::ImageGeneration,
+            Capability::ImageGeneration,
             false,
             input,
             Vec::new(),
@@ -208,7 +207,7 @@ impl Pipeline {
     ) -> Result<TaskHandle<ImageEmbeddingResponse, Infallible>, CoreError> {
         self.require_capability(Capability::ImageEmbedding)?;
         let deployment = self
-            .ensure_loaded_for(TaskKind::ImageEmbedding, false)
+            .ensure_loaded_for(Capability::ImageEmbedding, false)
             .await?;
         let resolved = deployment.resolved.clone();
         let input_name = image_embedding_input_name(self.spec.as_ref());
@@ -216,7 +215,7 @@ impl Pipeline {
         let (input, op_options) = encode_image_embedding_request(&request, &input_name)?;
         let plan = InvocationPlan::new(
             resolved,
-            TaskKind::ImageEmbedding,
+            Capability::ImageEmbedding,
             false,
             input,
             Vec::new(),
@@ -227,7 +226,7 @@ impl Pipeline {
 
     async fn ensure_loaded_for(
         &self,
-        task_kind: TaskKind,
+        capability: Capability,
         streaming: bool,
     ) -> Result<LoadedDeployment, CoreError> {
         {
@@ -239,10 +238,10 @@ impl Pipeline {
                         op: "stream".to_owned(),
                     });
                 }
-                if existing.resolved.capability != task_kind.capability() {
+                if existing.resolved.capability != capability {
                     return Err(CoreError::UnsupportedCapability {
                         family: format!("{:?}", existing.resolved.family),
-                        capability: format!("{:?}", task_kind.capability()),
+                        capability: format!("{:?}", capability),
                     });
                 }
                 return Ok(existing.clone());
@@ -252,7 +251,7 @@ impl Pipeline {
         let resolved = self
             .runtime
             .resolver()
-            .resolve(self.spec.as_ref(), task_kind, streaming)?;
+            .resolve(self.spec.as_ref(), capability, streaming)?;
         let payload = encode_load_payload(self.spec.as_ref(), &resolved)?;
         self.runtime
             .orchestrator()
@@ -356,7 +355,7 @@ where
     C: Send + 'static,
 {
     let task_id = submit_invocation_plan(runtime, plan).await?;
-    Ok(TaskHandle::new(runtime.kernel(), task_id, Arc::new(codec)))
+    Ok(TaskHandle::new(runtime.orchestrator(), task_id, Arc::new(codec)))
 }
 
 async fn submit_invocation_plan(runtime: &Runtime, plan: InvocationPlan) -> Result<u64, CoreError> {

@@ -2,7 +2,6 @@ use crate::base::error::CoreError;
 use crate::internal::scheduler::stage::CpuStage;
 use crate::internal::scheduler::types::Payload;
 use crate::model::{Capability, ModelFamily};
-use crate::task_kind::TaskKind;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ModelSourceKind {
@@ -42,14 +41,14 @@ pub(crate) struct ResolvedDriver {
 impl ResolvedDriver {
     pub(crate) fn invocation(
         &self,
-        task_kind: TaskKind,
+        capability: Capability,
         streaming: bool,
     ) -> Result<ResolvedInvocation, CoreError> {
-        validate_invocation(self, task_kind, streaming)?;
+        validate_invocation(self, capability, streaming)?;
 
         Ok(ResolvedInvocation {
             driver: self.clone(),
-            op_name: op_name_for(task_kind, streaming).to_owned(),
+            op_name: op_name_for(capability, streaming).to_owned(),
         })
     }
 }
@@ -72,14 +71,14 @@ pub(crate) struct InvocationPlan {
 impl InvocationPlan {
     pub(crate) fn new(
         resolved: ResolvedDriver,
-        task_kind: TaskKind,
+        capability: Capability,
         streaming: bool,
         initial_payload: Payload,
         preprocess_stages: Vec<CpuStage>,
         op_options: Payload,
     ) -> Result<Self, CoreError> {
         Ok(Self {
-            invocation: resolved.invocation(task_kind, streaming)?,
+            invocation: resolved.invocation(capability, streaming)?,
             initial_payload,
             preprocess_stages,
             op_options,
@@ -100,13 +99,13 @@ impl std::fmt::Debug for InvocationPlan {
 
 fn validate_invocation(
     resolved: &ResolvedDriver,
-    task_kind: TaskKind,
+    capability: Capability,
     streaming: bool,
 ) -> Result<(), CoreError> {
-    if resolved.capability != task_kind.capability() {
+    if resolved.capability != capability {
         return Err(CoreError::UnsupportedCapability {
             family: format!("{:?}", resolved.family),
-            capability: format!("{:?}", task_kind.capability()),
+            capability: format!("{:?}", capability),
         });
     }
 
@@ -120,13 +119,13 @@ fn validate_invocation(
     Ok(())
 }
 
-fn op_name_for(task_kind: TaskKind, streaming: bool) -> &'static str {
-    match (task_kind, streaming) {
-        (TaskKind::TextGeneration, true) => "inference.stream",
-        (TaskKind::ImageGeneration, _) => "inference.image",
-        (TaskKind::TextGeneration, false)
-        | (TaskKind::AudioTranscription, _)
-        | (TaskKind::ImageEmbedding, _) => "inference",
+fn op_name_for(capability: Capability, streaming: bool) -> &'static str {
+    match (capability, streaming) {
+        (Capability::TextGeneration, true) => "inference.stream",
+        (Capability::ImageGeneration, _) => "inference.image",
+        (Capability::TextGeneration, false)
+        | (Capability::AudioTranscription, _)
+        | (Capability::ImageEmbedding, _) => "inference",
     }
 }
 
@@ -146,7 +145,7 @@ mod tests {
         };
 
         let invocation = resolved
-            .invocation(TaskKind::TextGeneration, true)
+            .invocation(Capability::TextGeneration, true)
             .expect("streaming invocation should resolve");
 
         assert_eq!(invocation.op_name, "inference.stream");
@@ -164,7 +163,7 @@ mod tests {
         };
 
         let error = resolved
-            .invocation(TaskKind::TextGeneration, true)
+            .invocation(Capability::TextGeneration, true)
             .expect_err("non-streaming driver should reject stream invocation");
 
         assert!(matches!(

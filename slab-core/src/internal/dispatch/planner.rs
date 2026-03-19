@@ -1,8 +1,7 @@
 use std::cmp::Ordering;
 
 use crate::base::error::CoreError;
-use crate::model::ModelSource;
-use crate::task_kind::{DispatchHints, ModelSpec, TaskKind};
+use crate::model::{Capability, DriverHints as DispatchHints, ModelSource, ModelSpec};
 
 use super::plan::{DriverDescriptor, ModelSourceKind, ResolvedDriver};
 
@@ -23,13 +22,13 @@ impl DriverResolver {
     pub(crate) fn resolve(
         &self,
         spec: &ModelSpec,
-        task_kind: TaskKind,
+        capability: Capability,
         streaming: bool,
     ) -> Result<ResolvedDriver, CoreError> {
-        if spec.capability != task_kind.capability() {
+        if spec.capability != capability {
             return Err(CoreError::UnsupportedCapability {
                 family: format!("{:?}", spec.family),
-                capability: format!("{:?}", task_kind.capability()),
+                capability: format!("{:?}", capability),
             });
         }
 
@@ -159,7 +158,7 @@ mod tests {
         );
 
         let resolved = resolver
-            .resolve(&spec, TaskKind::TextGeneration, false)
+            .resolve(&spec, Capability::TextGeneration, false)
             .expect("llama local path should resolve");
 
         assert_eq!(resolved.driver_id, "candle.llama");
@@ -201,7 +200,7 @@ mod tests {
         };
 
         let resolved = resolver
-            .resolve(&spec, TaskKind::TextGeneration, false)
+            .resolve(&spec, Capability::TextGeneration, false)
             .expect("preferred driver should win");
 
         assert_eq!(resolved.driver_id, "ggml.llama");
@@ -227,7 +226,7 @@ mod tests {
         );
 
         let error = resolver
-            .resolve(&spec, TaskKind::AudioTranscription, false)
+            .resolve(&spec, Capability::AudioTranscription, false)
             .expect_err("resolver should reject unsupported family");
 
         assert!(matches!(error, CoreError::NoViableDriver { .. }));
@@ -253,7 +252,7 @@ mod tests {
         );
 
         let error = resolver
-            .resolve(&spec, TaskKind::TextGeneration, true)
+            .resolve(&spec, Capability::TextGeneration, true)
             .expect_err("non-streaming driver should fail before dispatch");
 
         assert!(matches!(
