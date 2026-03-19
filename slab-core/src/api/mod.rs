@@ -3,7 +3,6 @@ mod codec;
 pub mod pipeline;
 pub mod runtime;
 pub mod task;
-pub mod traits;
 
 pub use crate::base::error::CoreError;
 pub use crate::inference::{
