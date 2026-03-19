@@ -53,6 +53,14 @@ pub struct AudioTranscriptionRequest {
     pub prompt: Option<String>,
     #[serde(default)]
     pub options: JsonOptions,
+    /// Pre-loaded PCM samples (f32, mono, 16 kHz).
+    ///
+    /// When set the pipeline bypasses the WAV-file loading CPU stage and uses
+    /// this data directly as input.  Callers that need to support non-WAV
+    /// audio (e.g. the gRPC runtime handler using ffmpeg) can populate this
+    /// field instead of writing a temporary WAV file.
+    #[serde(skip)]
+    pub pcm_samples: Option<std::sync::Arc<[f32]>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]

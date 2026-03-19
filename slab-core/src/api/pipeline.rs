@@ -143,19 +143,34 @@ impl Pipeline {
             .ensure_loaded_for(Capability::AudioTranscription, false)
             .await?;
         let resolved = deployment.resolved.clone();
-        let path = request.audio_path.clone();
-        let plan = InvocationPlan::new(
-            resolved,
-            Capability::AudioTranscription,
-            false,
-            Payload::None,
-            vec![CpuStage::new("audio.decode.wav", move |_| {
-                crate::internal::engine::audio_utils::load_pcm_from_wav(&path.to_string_lossy())
+        let plan = if let Some(pcm) = request.pcm_samples.clone() {
+            // Pre-loaded PCM supplied by the caller (e.g. the gRPC handler
+            // after running ffmpeg).  Skip the WAV-loading CPU stage.
+            InvocationPlan::new(
+                resolved,
+                Capability::AudioTranscription,
+                false,
+                Payload::F32(pcm),
+                vec![],
+                encode_audio_transcription_options(&request),
+            )?
+        } else {
+            let path = request.audio_path.clone();
+            InvocationPlan::new(
+                resolved,
+                Capability::AudioTranscription,
+                false,
+                Payload::None,
+                vec![CpuStage::new("audio.decode.wav", move |_| {
+                    crate::internal::engine::audio_utils::load_pcm_from_wav(
+                        &path.to_string_lossy(),
+                    )
                     .map(Payload::from)
                     .map_err(|error| error.to_string())
-            })],
-            encode_audio_transcription_options(&request),
-        )?;
+                })],
+                encode_audio_transcription_options(&request),
+            )?
+        };
         submit_plan(
             &self.runtime,
             plan,
