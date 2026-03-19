@@ -1,5 +1,4 @@
 pub mod backend;
-pub mod kernel;
 pub mod orchestrator;
 pub mod pipeline;
 pub mod stage;
