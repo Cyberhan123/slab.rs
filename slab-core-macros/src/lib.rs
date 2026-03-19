@@ -52,7 +52,7 @@ fn strip_helper_attrs(attrs: &mut Vec<Attribute>) {
 fn normalize_event_path(path: Path) -> Path {
     if path.leading_colon.is_none() && path.segments.len() == 1 {
         let ident = path.segments[0].ident.clone();
-        parse_quote!(crate::scheduler::backend::protocol::RequestRoute::#ident)
+        parse_quote!(crate::internal::scheduler::backend::protocol::RequestRoute::#ident)
     } else {
         path
     }
@@ -61,7 +61,7 @@ fn normalize_event_path(path: Path) -> Path {
 fn normalize_runtime_control_path(path: Path) -> Path {
     if path.leading_colon.is_none() && path.segments.len() == 1 {
         let ident = path.segments[0].ident.clone();
-        parse_quote!(crate::scheduler::backend::protocol::RuntimeControlSignal::#ident)
+        parse_quote!(crate::internal::scheduler::backend::protocol::RuntimeControlSignal::#ident)
     } else {
         path
     }
@@ -70,7 +70,7 @@ fn normalize_runtime_control_path(path: Path) -> Path {
 fn normalize_peer_control_path(path: Path) -> Path {
     if path.leading_colon.is_none() && path.segments.len() == 1 {
         let ident = path.segments[0].ident.clone();
-        parse_quote!(crate::scheduler::backend::protocol::PeerWorkerCommand::#ident)
+        parse_quote!(crate::internal::scheduler::backend::protocol::PeerWorkerCommand::#ident)
     } else {
         path
     }
@@ -260,13 +260,13 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let pattern = &route.pattern;
         let method = &route.method;
         quote! {
-            fn #matcher(route: crate::scheduler::backend::protocol::RequestRoute) -> bool {
+            fn #matcher(route: crate::internal::scheduler::backend::protocol::RequestRoute) -> bool {
                 matches!(route, #pattern)
             }
             fn #caller<'a>(
                 &'a mut self,
-                req: crate::scheduler::backend::protocol::BackendRequest,
-            ) -> crate::scheduler::backend::runner::HandlerFuture<'a> {
+                req: crate::internal::scheduler::backend::protocol::BackendRequest,
+            ) -> crate::internal::scheduler::backend::runner::HandlerFuture<'a> {
                 Box::pin(async move {
                     self.#method(req).await;
                 })
@@ -278,7 +278,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let matcher = format_ident!("__backend_handler_match_event_{}", idx);
         let caller = format_ident!("__backend_handler_call_event_{}", idx);
         quote! {
-            crate::scheduler::backend::runner::RequestRouteMatcher {
+            crate::internal::scheduler::backend::runner::RequestRouteMatcher {
                 matches: Self::#matcher,
                 handle: Self::#caller,
             }
@@ -296,13 +296,13 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
             quote! { self.#method().await; }
         };
         quote! {
-            fn #matcher(sig: &crate::scheduler::backend::protocol::RuntimeControlSignal) -> bool {
+            fn #matcher(sig: &crate::internal::scheduler::backend::protocol::RuntimeControlSignal) -> bool {
                 matches!(sig, #pattern { .. })
             }
             fn #caller<'a>(
                 &'a mut self,
-                signal: crate::scheduler::backend::protocol::RuntimeControlSignal,
-            ) -> crate::scheduler::backend::runner::HandlerFuture<'a> {
+                signal: crate::internal::scheduler::backend::protocol::RuntimeControlSignal,
+            ) -> crate::internal::scheduler::backend::runner::HandlerFuture<'a> {
                 Box::pin(async move {
                     #call
                 })
@@ -314,7 +314,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let matcher = format_ident!("__backend_handler_match_runtime_{}", idx);
         let caller = format_ident!("__backend_handler_call_runtime_{}", idx);
         quote! {
-            crate::scheduler::backend::runner::RuntimeRoute {
+            crate::internal::scheduler::backend::runner::RuntimeRoute {
                 matches: Self::#matcher,
                 handle: Self::#caller,
             }
@@ -332,13 +332,13 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
             quote! { self.#method().await; }
         };
         quote! {
-            fn #matcher(cmd: &crate::scheduler::backend::protocol::PeerWorkerCommand) -> bool {
+            fn #matcher(cmd: &crate::internal::scheduler::backend::protocol::PeerWorkerCommand) -> bool {
                 matches!(cmd, #pattern { .. })
             }
             fn #caller<'a>(
                 &'a mut self,
-                cmd: crate::scheduler::backend::protocol::PeerWorkerCommand,
-            ) -> crate::scheduler::backend::runner::HandlerFuture<'a> {
+                cmd: crate::internal::scheduler::backend::protocol::PeerWorkerCommand,
+            ) -> crate::internal::scheduler::backend::runner::HandlerFuture<'a> {
                 Box::pin(async move {
                     #call
                 })
@@ -350,7 +350,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let matcher = format_ident!("__backend_handler_match_peer_{}", idx);
         let caller = format_ident!("__backend_handler_call_peer_route_{}", idx);
         quote! {
-            crate::scheduler::backend::runner::PeerRoute {
+            crate::internal::scheduler::backend::runner::PeerRoute {
                 matches: Self::#matcher,
                 handle: Self::#caller,
             }
@@ -366,8 +366,8 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         quote! {
             fn __backend_handler_call_peer<'a>(
                 &'a mut self,
-                cmd: crate::scheduler::backend::protocol::PeerWorkerCommand,
-            ) -> crate::scheduler::backend::runner::HandlerFuture<'a> {
+                cmd: crate::internal::scheduler::backend::protocol::PeerWorkerCommand,
+            ) -> crate::internal::scheduler::backend::runner::HandlerFuture<'a> {
                 Box::pin(async move {
                     #call
                 })
@@ -378,7 +378,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
     };
 
     let peer_fallback_route = if peer_fallback_method.is_some() {
-        quote! { Some(Self::__backend_handler_call_peer as crate::scheduler::backend::runner::PeerDispatchFn<Self>) }
+        quote! { Some(Self::__backend_handler_call_peer as crate::internal::scheduler::backend::runner::PeerDispatchFn<Self>) }
     } else {
         quote! { None }
     };
@@ -387,7 +387,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         quote! {
             fn __backend_handler_call_lagged<'a>(
                 &'a mut self,
-            ) -> crate::scheduler::backend::runner::HandlerFuture<'a> {
+            ) -> crate::internal::scheduler::backend::runner::HandlerFuture<'a> {
                 Box::pin(async move {
                     self.#method().await;
                 })
@@ -398,7 +398,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
     };
 
     let lagged_route = if control_lagged_method.is_some() {
-        quote! { Some(Self::__backend_handler_call_lagged as crate::scheduler::backend::runner::LaggedDispatchFn<Self>) }
+        quote! { Some(Self::__backend_handler_call_lagged as crate::internal::scheduler::backend::runner::LaggedDispatchFn<Self>) }
     } else {
         quote! { None }
     };
@@ -418,9 +418,9 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         }
 
         #[async_trait::async_trait]
-        impl #impl_generics crate::scheduler::backend::runner::RuntimeWorkerHandler for #self_ty #where_clause {
-            async fn handle_request(&mut self, req: crate::scheduler::backend::protocol::BackendRequest) {
-                crate::scheduler::backend::runner::dispatch_backend_request(
+        impl #impl_generics crate::internal::scheduler::backend::runner::RuntimeWorkerHandler for #self_ty #where_clause {
+            async fn handle_request(&mut self, req: crate::internal::scheduler::backend::protocol::BackendRequest) {
+                crate::internal::scheduler::backend::runner::dispatch_backend_request(
                     self,
                     req,
                     &[#(#event_table_entries),*],
@@ -429,9 +429,9 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
 
             async fn handle_peer_control(
                 &mut self,
-                cmd: crate::scheduler::backend::protocol::PeerWorkerCommand,
+                cmd: crate::internal::scheduler::backend::protocol::PeerWorkerCommand,
             ) {
-                crate::scheduler::backend::runner::dispatch_peer_control(
+                crate::internal::scheduler::backend::runner::dispatch_peer_control(
                     self,
                     cmd,
                     #peer_fallback_route,
@@ -441,9 +441,9 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
 
             async fn handle_runtime_control(
                 &mut self,
-                signal: crate::scheduler::backend::protocol::RuntimeControlSignal,
+                signal: crate::internal::scheduler::backend::protocol::RuntimeControlSignal,
             ) {
-                crate::scheduler::backend::runner::dispatch_runtime_control(
+                crate::internal::scheduler::backend::runner::dispatch_runtime_control(
                     self,
                     signal,
                     &[#(#runtime_table_entries),*],
@@ -451,7 +451,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
             }
 
             async fn handle_control_lagged(&mut self) {
-                crate::scheduler::backend::runner::dispatch_control_lagged(self, #lagged_route).await;
+                crate::internal::scheduler::backend::runner::dispatch_control_lagged(self, #lagged_route).await;
             }
         }
     };
