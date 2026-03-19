@@ -61,7 +61,8 @@ use crate::engine::ggml::config::{DiffusionModelLoadConfig, LibLoadConfig};
 use crate::engine::ggml::diffusion::adapter::GGMLDiffusionEngine;
 use crate::scheduler::backend::backend_handler;
 use crate::scheduler::backend::protocol::{
-    BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
+    BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
+    SyncMessage, WorkerCommand,
 };
 use crate::scheduler::types::Payload;
 
@@ -215,6 +216,8 @@ pub(crate) struct DiffusionWorker {
     bc_tx: broadcast::Sender<WorkerCommand>,
     /// Stable index used to populate `sender_id` when broadcasting.
     worker_id: usize,
+    last_lib_config: Option<Payload>,
+    last_model_config: Option<Payload>,
 }
 
 #[backend_handler]
@@ -228,6 +231,8 @@ impl DiffusionWorker {
             engine,
             bc_tx,
             worker_id,
+            last_lib_config: None,
+            last_model_config: None,
         }
     }
 
@@ -294,6 +299,7 @@ impl DiffusionWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
         seq_id: u64,
     ) {
+        let deployment = DeploymentSnapshot::with_library(seq_id, input.clone());
         if self.engine.is_some() {
             let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                 Arc::from([] as [u8; 0]),
@@ -312,13 +318,14 @@ impl DiffusionWorker {
         match GGMLDiffusionEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
+                self.last_lib_config = Some(input);
+                self.last_model_config = None;
                 // Broadcast so peer workers also load the same library.
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::LoadLibrary {
-                        lib_path: config.lib_path,
+                        sync: SyncMessage::Deployment(deployment),
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -338,6 +345,7 @@ impl DiffusionWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
         seq_id: u64,
     ) {
+        let deployment = DeploymentSnapshot::with_library(seq_id, input.clone());
         let config: LibLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
@@ -354,13 +362,14 @@ impl DiffusionWorker {
         match GGMLDiffusionEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
+                self.last_lib_config = Some(input);
+                self.last_model_config = None;
                 // Broadcast so peer workers drop their old engine and reload too.
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::ReloadLibrary {
-                        lib_path: config.lib_path,
+                        sync: SyncMessage::Deployment(deployment),
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -423,16 +432,20 @@ impl DiffusionWorker {
             engine.new_context(&ctx_params)
         });
 
-        let model_path = config.model_path;
         match result {
             Ok(()) => {
+                self.last_model_config = Some(input.clone());
+                let deployment = if let Some(library) = self.last_lib_config.clone() {
+                    DeploymentSnapshot::with_library_and_model(seq_id, library, input)
+                } else {
+                    DeploymentSnapshot::with_model(seq_id, input)
+                };
                 // Broadcast so peer workers also load the same model.
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                        model_path,
+                        sync: SyncMessage::Deployment(deployment),
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -454,13 +467,14 @@ impl DiffusionWorker {
         match self.engine.as_mut() {
             Some(e) => {
                 e.unload();
+                self.last_model_config = None;
                 // Broadcast so every peer worker also drops its context.
                 // Ignore errors: no receivers simply means no other workers.
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+                        sync: SyncMessage::Generation { generation: seq_id },
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -595,37 +609,89 @@ impl DiffusionWorker {
 
     #[on_peer_control(LoadLibrary)]
     async fn on_peer_load_library(&mut self, cmd: PeerWorkerCommand) {
-        let PeerWorkerCommand::LoadLibrary { lib_path, .. } = cmd else {
+        let Some(snapshot) = cmd.deployment() else {
             return;
         };
+        let config: LibLoadConfig = match snapshot.library_config() {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::warn!(error = %error, "diffusion worker: invalid library deployment snapshot");
+                return;
+            }
+        };
+        let lib_path = config.lib_path;
         if self.engine.is_none() {
             if let Ok(engine) = GGMLDiffusionEngine::from_path(&lib_path) {
                 self.engine = Some(engine);
             }
         }
+        self.last_lib_config = snapshot.library.clone();
     }
 
     #[on_peer_control(ReloadLibrary)]
     async fn on_peer_reload_library(&mut self, cmd: PeerWorkerCommand) {
-        let PeerWorkerCommand::ReloadLibrary { lib_path, .. } = cmd else {
+        let Some(snapshot) = cmd.deployment() else {
             return;
         };
+        let config: LibLoadConfig = match snapshot.library_config() {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::warn!(error = %error, "diffusion worker: invalid library deployment snapshot");
+                return;
+            }
+        };
+        let lib_path = config.lib_path;
         self.engine = None;
         if let Ok(engine) = GGMLDiffusionEngine::from_path(&lib_path) {
             self.engine = Some(engine);
         }
+        self.last_lib_config = snapshot.library.clone();
+        self.last_model_config = None;
     }
 
     #[on_peer_control(LoadModel)]
     async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
-        let PeerWorkerCommand::LoadModel { model_path, .. } = cmd else {
+        let Some(snapshot) = cmd.deployment() else {
             return;
         };
+        if self.engine.is_none() {
+            if let Some(lib_payload) = snapshot.library.as_ref() {
+                if let Ok(config) = lib_payload.to_json::<LibLoadConfig>() {
+                    if let Ok(engine) = GGMLDiffusionEngine::from_path(&config.lib_path) {
+                        self.engine = Some(engine);
+                    }
+                }
+            }
+        }
+        let config: DiffusionModelLoadConfig = match snapshot.model_config() {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::warn!(error = %error, "diffusion worker: invalid model deployment snapshot");
+                return;
+            }
+        };
+        let model_path = config.model_path.clone();
         if let Some(engine) = self.engine.as_mut() {
             if !engine.is_model_loaded() {
                 let result = tokio::task::block_in_place(|| {
                     use slab_diffusion::SdContextParams;
-                    let ctx_params = SdContextParams::with_model(&model_path);
+                    let mut ctx_params = SdContextParams::with_model(&model_path);
+                    ctx_params.diffusion_model_path = config.diffusion_model_path.clone();
+                    ctx_params.vae_path = config.vae_path.clone();
+                    ctx_params.taesd_path = config.taesd_path.clone();
+                    ctx_params.clip_l_path = config.clip_l_path.clone();
+                    ctx_params.clip_g_path = config.clip_g_path.clone();
+                    ctx_params.t5xxl_path = config.t5xxl_path.clone();
+                    ctx_params.clip_vision_path = config.clip_vision_path.clone();
+                    ctx_params.control_net_path = config.control_net_path.clone();
+                    ctx_params.flash_attn = config.flash_attn;
+                    ctx_params.keep_vae_on_cpu = config.keep_vae_on_cpu;
+                    ctx_params.keep_clip_on_cpu = config.keep_clip_on_cpu;
+                    ctx_params.offload_params_to_cpu = config.offload_params_to_cpu;
+                    ctx_params.enable_mmap = config.enable_mmap;
+                    if config.n_threads != 0 {
+                        ctx_params.n_threads = config.n_threads;
+                    }
                     engine.new_context(&ctx_params)
                 });
                 if let Err(e) = result {
@@ -637,6 +703,10 @@ impl DiffusionWorker {
                 }
             }
         }
+        if snapshot.library.is_some() {
+            self.last_lib_config = snapshot.library.clone();
+        }
+        self.last_model_config = snapshot.model.clone();
     }
 
     #[on_peer_control(Unload)]
@@ -644,6 +714,7 @@ impl DiffusionWorker {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
+        self.last_model_config = None;
     }
 
     #[on_runtime_control(GlobalUnload)]
@@ -655,6 +726,8 @@ impl DiffusionWorker {
                 if let Some(engine) = self.engine.as_mut() {
                     engine.unload();
                 }
+                self.last_lib_config = None;
+                self.last_model_config = None;
             }
             RuntimeControlSignal::GlobalLoad { op_id, payload } => {
                 let _ = payload;
@@ -662,6 +735,8 @@ impl DiffusionWorker {
                 if let Some(engine) = self.engine.as_mut() {
                     engine.unload();
                 }
+                self.last_lib_config = None;
+                self.last_model_config = None;
             }
         }
     }
@@ -671,5 +746,7 @@ impl DiffusionWorker {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
+        self.last_lib_config = None;
+        self.last_model_config = None;
     }
 }

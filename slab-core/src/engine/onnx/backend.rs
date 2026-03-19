@@ -56,7 +56,8 @@ use crate::engine::onnx::adapter::OnnxEngine;
 use crate::engine::onnx::config::{OnnxInferenceInput, OnnxModelLoadConfig};
 use crate::scheduler::backend::backend_handler;
 use crate::scheduler::backend::protocol::{
-    BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
+    BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
+    SyncMessage, WorkerCommand,
 };
 use crate::scheduler::types::Payload;
 
@@ -138,6 +139,7 @@ impl OnnxWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
         seq_id: u64,
     ) {
+        let deployment = DeploymentSnapshot::with_model(seq_id, input.clone());
         let config: OnnxModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
@@ -147,8 +149,6 @@ impl OnnxWorker {
                 return;
             }
         };
-
-        let model_path = config.model_path.clone();
 
         // Session creation is CPU / I/O-bound; run on the blocking thread pool.
         let result = tokio::task::block_in_place(|| self.engine.load_model(config.clone()));
@@ -161,9 +161,8 @@ impl OnnxWorker {
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                        model_path,
+                        sync: SyncMessage::Deployment(deployment),
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -188,8 +187,8 @@ impl OnnxWorker {
         let _ = self
             .bc_tx
             .send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+                sync: SyncMessage::Generation { generation: seq_id },
                 sender_id: self.worker_id,
-                seq_id,
             }));
         let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
             Arc::from([] as [u8; 0]),
@@ -238,9 +237,17 @@ impl OnnxWorker {
     /// no-op to avoid unnecessary session teardown.
     #[on_peer_control(LoadModel)]
     async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
-        let PeerWorkerCommand::LoadModel { model_path, .. } = cmd else {
+        let Some(snapshot) = cmd.deployment() else {
             return;
         };
+        let config: OnnxModelLoadConfig = match snapshot.model_config() {
+            Ok(config) => config,
+            Err(error) => {
+                warn!(error = %error, "ONNX worker: invalid deployment snapshot");
+                return;
+            }
+        };
+        let model_path = config.model_path.clone();
 
         // Short-circuit: same model already loaded.
         if let Some(cfg) = &self.current_config {
@@ -248,26 +255,6 @@ impl OnnxWorker {
                 return;
             }
         }
-
-        // Different model (or no model): unload current and load the new one.
-        // Reuse the execution provider / thread config from the originating
-        // worker's load call; fall back to CPU-only defaults if no config is
-        // stored yet (e.g. this is a fresh peer that never loaded a model).
-        let config = self
-            .current_config
-            .as_ref()
-            .map(|c| OnnxModelLoadConfig {
-                model_path: model_path.clone(),
-                execution_providers: c.execution_providers.clone(),
-                intra_op_num_threads: c.intra_op_num_threads,
-                inter_op_num_threads: c.inter_op_num_threads,
-            })
-            .unwrap_or_else(|| OnnxModelLoadConfig {
-                model_path: model_path.clone(),
-                execution_providers: vec!["CPU".to_string()],
-                intra_op_num_threads: 0,
-                inter_op_num_threads: 0,
-            });
 
         self.engine.unload();
         let result = tokio::task::block_in_place(|| self.engine.load_model(config.clone()));

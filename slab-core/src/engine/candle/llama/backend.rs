@@ -94,13 +94,19 @@ impl CandleLlamaWorker {
 
     #[on_event(Inference)]
     async fn on_inference(&mut self, req: BackendRequest) {
+        let invocation = match req.invocation() {
+            Ok(invocation) => invocation,
+            Err(error) => {
+                let _ = req.reply_tx.send(BackendReply::Error(error));
+                return;
+            }
+        };
         let BackendRequest {
-            op,
             input,
             reply_tx,
             ..
         } = req;
-        let opts = op.options.to_serde_value();
+        let opts = invocation.options.to_serde_value();
         let max_tokens = opts
             .get("max_tokens")
             .and_then(|v| v.as_u64())
@@ -116,13 +122,19 @@ impl CandleLlamaWorker {
 
     #[on_event(InferenceStream)]
     async fn on_inference_stream(&mut self, req: BackendRequest) {
+        let invocation = match req.invocation() {
+            Ok(invocation) => invocation,
+            Err(error) => {
+                let _ = req.reply_tx.send(BackendReply::Error(error));
+                return;
+            }
+        };
         let BackendRequest {
-            op,
             input,
             reply_tx,
             ..
         } = req;
-        let opts = op.options.to_serde_value();
+        let opts = invocation.options.to_serde_value();
         let max_tokens = opts
             .get("max_tokens")
             .and_then(|v| v.as_u64())

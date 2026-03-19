@@ -41,6 +41,7 @@ slab-whisper-sys = { path = "./slab-whisper-sys", package = "slab-whisper-sys", 
 slab-libfetch = { path = "./slab-libfetch", package = "slab-libfetch", version = "0.0.1" }
 slab-core-macros = { path = "./slab-core-macros", version = "0.0.1" }
 
+
 anyhow = "1.0.101"
 bindgen = "0.72.1"
 flate2 = "1.1.9"

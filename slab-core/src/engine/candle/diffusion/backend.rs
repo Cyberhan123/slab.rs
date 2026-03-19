@@ -41,7 +41,8 @@ use crate::engine::candle::config::CandleDiffusionModelLoadConfig;
 use crate::engine::candle::diffusion::adapter::{CandleDiffusionEngine, GenImageParams};
 use crate::scheduler::backend::backend_handler;
 use crate::scheduler::backend::protocol::{
-    BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
+    BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
+    SyncMessage, WorkerCommand,
 };
 use crate::scheduler::backend::runner::spawn_workers;
 use crate::scheduler::types::Payload;
@@ -154,16 +155,27 @@ impl CandleDiffusionWorker {
 
     #[on_peer_control(LoadModel)]
     async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
-        let PeerWorkerCommand::LoadModel { model_path, .. } = cmd else {
+        let Some(snapshot) = cmd.deployment() else {
+            return;
+        };
+        let config: CandleDiffusionModelLoadConfig = match snapshot.model_config() {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::warn!(error = %error, "candle.diffusion worker: invalid deployment snapshot");
+                return;
+            }
+        };
+        let model_path = config.model_path;
+        let vae_path = config.vae_path;
+        let sd_version = config.sd_version;
+        let PeerWorkerCommand::LoadModel { .. } = cmd else {
             return;
         };
         if let Some(engine) = self.engine.as_ref() {
             if !engine.is_model_loaded() {
                 let engine_clone = engine.clone();
-                // Use v2-1 as default when broadcasting peer load (version
-                // is not carried in the PeerWorkerCommand).
                 let result = tokio::task::block_in_place(|| {
-                    engine_clone.load_model(&model_path, None, "v2-1")
+                    engine_clone.load_model(&model_path, vae_path.as_deref(), &sd_version)
                 });
                 if let Err(e) = result {
                     tracing::warn!(
@@ -225,6 +237,7 @@ impl CandleDiffusionWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
         seq_id: u64,
     ) {
+        let deployment = DeploymentSnapshot::with_model(seq_id, input.clone());
         let config: CandleDiffusionModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
@@ -252,9 +265,8 @@ impl CandleDiffusionWorker {
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                        model_path: config.model_path,
+                        sync: SyncMessage::Deployment(deployment),
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -277,8 +289,8 @@ impl CandleDiffusionWorker {
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+                        sync: SyncMessage::Generation { generation: seq_id },
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),

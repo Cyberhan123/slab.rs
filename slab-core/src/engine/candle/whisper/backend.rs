@@ -26,7 +26,8 @@ use crate::engine::candle::config::CandleModelLoadConfig;
 use crate::engine::candle::whisper::adapter::CandleWhisperEngine;
 use crate::scheduler::backend::backend_handler;
 use crate::scheduler::backend::protocol::{
-    BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
+    BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
+    SyncMessage, WorkerCommand,
 };
 use crate::scheduler::backend::runner::spawn_workers;
 use crate::scheduler::types::Payload;
@@ -104,13 +105,27 @@ impl CandleWhisperWorker {
 
     #[on_peer_control(LoadModel)]
     async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
-        let PeerWorkerCommand::LoadModel { model_path, .. } = cmd else {
+        let Some(snapshot) = cmd.deployment() else {
+            return;
+        };
+        let config: CandleModelLoadConfig = match snapshot.model_config() {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::warn!(error = %error, "candle.whisper worker: invalid deployment snapshot");
+                return;
+            }
+        };
+        let model_path = config.model_path;
+        let tokenizer_path = config.tokenizer_path;
+        let PeerWorkerCommand::LoadModel { .. } = cmd else {
             return;
         };
         if let Some(engine) = self.engine.as_ref() {
             if !engine.is_model_loaded() {
                 let engine = engine.clone();
-                let result = tokio::task::block_in_place(|| engine.load_model(&model_path, None));
+                let result = tokio::task::block_in_place(|| {
+                    engine.load_model(&model_path, tokenizer_path.as_deref())
+                });
                 if let Err(e) = result {
                     tracing::warn!(
                         model_path,
@@ -171,6 +186,7 @@ impl CandleWhisperWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
         seq_id: u64,
     ) {
+        let deployment = DeploymentSnapshot::with_model(seq_id, input.clone());
         let config: CandleModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
@@ -194,9 +210,8 @@ impl CandleWhisperWorker {
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                        model_path: config.model_path,
+                        sync: SyncMessage::Deployment(deployment),
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -219,8 +234,8 @@ impl CandleWhisperWorker {
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+                        sync: SyncMessage::Generation { generation: seq_id },
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),

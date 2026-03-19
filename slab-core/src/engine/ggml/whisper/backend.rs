@@ -33,7 +33,8 @@ use crate::engine::ggml::whisper::adapter::{
 };
 use crate::scheduler::backend::backend_handler;
 use crate::scheduler::backend::protocol::{
-    BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, WorkerCommand,
+    BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
+    SyncMessage, WorkerCommand,
 };
 use crate::scheduler::types::Payload;
 
@@ -59,6 +60,8 @@ pub(crate) struct WhisperWorker {
     bc_tx: broadcast::Sender<WorkerCommand>,
     /// Stable index used to populate `sender_id` when broadcasting.
     worker_id: usize,
+    last_lib_config: Option<Payload>,
+    last_model_config: Option<Payload>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -199,6 +202,8 @@ impl WhisperWorker {
             engine,
             bc_tx,
             worker_id,
+            last_lib_config: None,
+            last_model_config: None,
         }
     }
 
@@ -251,13 +256,19 @@ impl WhisperWorker {
 
     #[on_event(Inference)]
     async fn on_inference(&mut self, req: BackendRequest) {
+        let invocation = match req.invocation() {
+            Ok(invocation) => invocation,
+            Err(error) => {
+                let _ = req.reply_tx.send(BackendReply::Error(error));
+                return;
+            }
+        };
         let BackendRequest {
-            op,
             input,
             reply_tx,
             ..
         } = req;
-        let options = match parse_inference_options(&op.options) {
+        let options = match parse_inference_options(&invocation.options) {
             Ok(options) => options,
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e));
@@ -281,6 +292,7 @@ impl WhisperWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
         seq_id: u64,
     ) {
+        let deployment = DeploymentSnapshot::with_library(seq_id, input.clone());
         if self.engine.is_some() {
             let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                 Arc::from([] as [u8; 0]),
@@ -299,13 +311,14 @@ impl WhisperWorker {
         match GGMLWhisperEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
+                self.last_lib_config = Some(input);
+                self.last_model_config = None;
                 // Broadcast so peer workers also load the same library.
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::LoadLibrary {
-                        lib_path: config.lib_path,
+                        sync: SyncMessage::Deployment(deployment),
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -325,6 +338,7 @@ impl WhisperWorker {
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
         seq_id: u64,
     ) {
+        let deployment = DeploymentSnapshot::with_library(seq_id, input.clone());
         let config: LibLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
@@ -341,13 +355,14 @@ impl WhisperWorker {
         match GGMLWhisperEngine::from_path(&config.lib_path) {
             Ok(engine) => {
                 self.engine = Some(engine);
+                self.last_lib_config = Some(input);
+                self.last_model_config = None;
                 // Broadcast so peer workers drop their old engine and reload too.
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::ReloadLibrary {
-                        lib_path: config.lib_path,
+                        sync: SyncMessage::Deployment(deployment),
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -396,13 +411,18 @@ impl WhisperWorker {
 
         match result {
             Ok(()) => {
+                self.last_model_config = Some(input.clone());
+                let deployment = if let Some(library) = self.last_lib_config.clone() {
+                    DeploymentSnapshot::with_library_and_model(seq_id, library, input)
+                } else {
+                    DeploymentSnapshot::with_model(seq_id, input)
+                };
                 // Broadcast so peer workers also load the same model.
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                        model_path: config.model_path,
+                        sync: SyncMessage::Deployment(deployment),
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -424,13 +444,14 @@ impl WhisperWorker {
         match self.engine.as_mut() {
             Some(e) => {
                 e.unload();
+                self.last_model_config = None;
                 // Broadcast so every peer worker also drops its context.
                 // Ignore errors: no receivers simply means no other workers.
                 let _ = self
                     .bc_tx
                     .send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+                        sync: SyncMessage::Generation { generation: seq_id },
                         sender_id: self.worker_id,
-                        seq_id,
                     }));
                 let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
                     Arc::from([] as [u8; 0]),
@@ -525,32 +546,68 @@ impl WhisperWorker {
 
     #[on_peer_control(LoadLibrary)]
     async fn on_peer_load_library(&mut self, cmd: PeerWorkerCommand) {
-        let PeerWorkerCommand::LoadLibrary { lib_path, .. } = cmd else {
+        let Some(snapshot) = cmd.deployment() else {
             return;
         };
+        let config: LibLoadConfig = match snapshot.library_config() {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::warn!(error = %error, "whisper worker: invalid library deployment snapshot");
+                return;
+            }
+        };
+        let lib_path = config.lib_path;
         if self.engine.is_none() {
             if let Ok(engine) = GGMLWhisperEngine::from_path(&lib_path) {
                 self.engine = Some(engine);
             }
         }
+        self.last_lib_config = snapshot.library.clone();
     }
 
     #[on_peer_control(ReloadLibrary)]
     async fn on_peer_reload_library(&mut self, cmd: PeerWorkerCommand) {
-        let PeerWorkerCommand::ReloadLibrary { lib_path, .. } = cmd else {
+        let Some(snapshot) = cmd.deployment() else {
             return;
         };
+        let config: LibLoadConfig = match snapshot.library_config() {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::warn!(error = %error, "whisper worker: invalid library deployment snapshot");
+                return;
+            }
+        };
+        let lib_path = config.lib_path;
         self.engine = None;
         if let Ok(engine) = GGMLWhisperEngine::from_path(&lib_path) {
             self.engine = Some(engine);
         }
+        self.last_lib_config = snapshot.library.clone();
+        self.last_model_config = None;
     }
 
     #[on_peer_control(LoadModel)]
     async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
-        let PeerWorkerCommand::LoadModel { model_path, .. } = cmd else {
+        let Some(snapshot) = cmd.deployment() else {
             return;
         };
+        if self.engine.is_none() {
+            if let Some(lib_payload) = snapshot.library.as_ref() {
+                if let Ok(config) = lib_payload.to_json::<LibLoadConfig>() {
+                    if let Ok(engine) = GGMLWhisperEngine::from_path(&config.lib_path) {
+                        self.engine = Some(engine);
+                    }
+                }
+            }
+        }
+        let config: ModelLoadConfig = match snapshot.model_config() {
+            Ok(config) => config,
+            Err(error) => {
+                tracing::warn!(error = %error, "whisper worker: invalid model deployment snapshot");
+                return;
+            }
+        };
+        let model_path = config.model_path;
         if let Some(engine) = self.engine.as_mut() {
             if !engine.is_model_loaded() {
                 let result = tokio::task::block_in_place(|| {
@@ -567,6 +624,10 @@ impl WhisperWorker {
                 }
             }
         }
+        if snapshot.library.is_some() {
+            self.last_lib_config = snapshot.library.clone();
+        }
+        self.last_model_config = snapshot.model.clone();
     }
 
     #[on_peer_control(Unload)]
@@ -574,6 +635,7 @@ impl WhisperWorker {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
+        self.last_model_config = None;
     }
 
     #[on_runtime_control(GlobalUnload)]
@@ -585,6 +647,8 @@ impl WhisperWorker {
                 if let Some(engine) = self.engine.as_mut() {
                     engine.unload();
                 }
+                self.last_lib_config = None;
+                self.last_model_config = None;
             }
             RuntimeControlSignal::GlobalLoad { op_id, payload } => {
                 let _ = payload;
@@ -592,6 +656,8 @@ impl WhisperWorker {
                 if let Some(engine) = self.engine.as_mut() {
                     engine.unload();
                 }
+                self.last_lib_config = None;
+                self.last_model_config = None;
             }
         }
     }
@@ -601,5 +667,7 @@ impl WhisperWorker {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
+        self.last_lib_config = None;
+        self.last_model_config = None;
     }
 }
