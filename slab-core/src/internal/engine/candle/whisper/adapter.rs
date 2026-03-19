@@ -220,7 +220,7 @@ impl CandleWhisperEngine {
             state.config = Some(config);
             state.mel_filters = Some(mel_filters);
 
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(not(feature = "candle"))]
@@ -423,7 +423,7 @@ impl CandleWhisperEngine {
                 }
             }
 
-            return Ok(result);
+            Ok(result)
         }
 
         #[cfg(not(feature = "candle"))]

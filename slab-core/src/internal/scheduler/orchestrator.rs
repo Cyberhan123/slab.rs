@@ -223,7 +223,7 @@ impl Orchestrator {
             // Check cancellation before each stage.
             if *cancel_rx.borrow() {
                 storage
-                    .set_stage_status(task_id, idx, StageStatus::StageCancelled)
+                    .set_stage_status(task_id, idx, StageStatus::Cancelled)
                     .await;
                 storage.set_status(task_id, TaskStatus::Cancelled).await;
                 info!(task_id, stage_index = idx, "task cancelled before stage");
@@ -240,20 +240,20 @@ impl Orchestrator {
                 )
                 .await;
             storage
-                .set_stage_status(task_id, idx, StageStatus::StageRunning)
+                .set_stage_status(task_id, idx, StageStatus::Running)
                 .await;
 
             match stage {
                 Stage::Cpu(cpu_stage) => match cpu_stage.run(payload).await {
                     Ok(next_payload) => {
                         storage
-                            .set_stage_status(task_id, idx, StageStatus::StageCompleted)
+                            .set_stage_status(task_id, idx, StageStatus::Completed)
                             .await;
                         payload = next_payload;
                     }
                     Err(err) => {
                         storage
-                            .set_stage_status(task_id, idx, StageStatus::StageFailed)
+                            .set_stage_status(task_id, idx, StageStatus::Failed)
                             .await;
                         storage
                             .set_status(task_id, TaskStatus::Failed { error: err })
@@ -270,7 +270,7 @@ impl Orchestrator {
                         Ok(lease) => lease,
                         Err(err) => {
                             storage
-                                .set_stage_status(task_id, idx, StageStatus::StageFailed)
+                                .set_stage_status(task_id, idx, StageStatus::Failed)
                                 .await;
                             storage
                                 .set_status(task_id, TaskStatus::Failed { error: err })
@@ -285,13 +285,13 @@ impl Orchestrator {
                     match result {
                         Ok(next_payload) => {
                             storage
-                                .set_stage_status(task_id, idx, StageStatus::StageCompleted)
+                                .set_stage_status(task_id, idx, StageStatus::Completed)
                                 .await;
                             payload = next_payload;
                         }
                         Err(err) => {
                             storage
-                                .set_stage_status(task_id, idx, StageStatus::StageFailed)
+                                .set_stage_status(task_id, idx, StageStatus::Failed)
                                 .await;
                             storage
                                 .set_status(task_id, TaskStatus::Failed { error: err })
@@ -310,7 +310,7 @@ impl Orchestrator {
                         Ok(lease) => lease,
                         Err(err) => {
                             storage
-                                .set_stage_status(task_id, idx, StageStatus::StageFailed)
+                                .set_stage_status(task_id, idx, StageStatus::Failed)
                                 .await;
                             storage
                                 .set_status(task_id, TaskStatus::Failed { error: err })
@@ -325,7 +325,7 @@ impl Orchestrator {
                     match result {
                         Ok(handle) => {
                             storage
-                                .set_stage_status(task_id, idx, StageStatus::StageCompleted)
+                                .set_stage_status(task_id, idx, StageStatus::Completed)
                                 .await;
                             storage
                                 .set_status(task_id, TaskStatus::SucceededStreaming)
@@ -335,7 +335,7 @@ impl Orchestrator {
                         }
                         Err(err) => {
                             storage
-                                .set_stage_status(task_id, idx, StageStatus::StageFailed)
+                                .set_stage_status(task_id, idx, StageStatus::Failed)
                                 .await;
                             storage
                                 .set_status(task_id, TaskStatus::Failed { error: err })

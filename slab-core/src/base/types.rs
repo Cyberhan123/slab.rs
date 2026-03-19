@@ -146,11 +146,11 @@ impl TaskStatus {
 /// Fine-grained execution status of a single pipeline stage.
 #[derive(Debug, Clone)]
 pub enum StageStatus {
-    StagePending,
-    StageRunning,
-    StageCompleted,
-    StageFailed,
-    StageCancelled,
+    Pending,
+    Running,
+    Completed,
+    Failed,
+    Cancelled,
 }
 
 /// A single chunk emitted by a streaming backend.
