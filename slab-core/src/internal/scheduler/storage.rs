@@ -50,7 +50,7 @@ impl ResultStorage {
 
         let record = TaskRecord {
             status: TaskStatus::Pending,
-            stage_statuses: vec![StageStatus::StagePending; num_stages],
+            stage_statuses: vec![StageStatus::Pending; num_stages],
             stream_handle: None,
             cancel_tx: Arc::new(cancel_tx),
         };

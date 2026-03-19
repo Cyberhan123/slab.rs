@@ -82,7 +82,7 @@ impl OnnxEngine {
         let mut builder = Session::builder()
             .map_err(|e| OnnxEngineError::SessionCreate {
                 path: config.model_path.clone(),
-                source: e.into(),
+                source: e,
             })?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| OnnxEngineError::SessionCreate {
@@ -118,7 +118,7 @@ impl OnnxEngine {
         let session = builder.commit_from_file(&config.model_path).map_err(|e| {
             OnnxEngineError::SessionCreate {
                 path: config.model_path.clone(),
-                source: e.into(),
+                source: e,
             }
         })?;
 
@@ -164,7 +164,7 @@ impl OnnxEngine {
         let mut result = serde_json::Map::new();
         for (name, value) in outputs.iter() {
             // ValueRef<'_> derefs to Value; pass as &DynValue.
-            let wire = ort_value_to_json(name, &*value)?;
+            let wire = ort_value_to_json(name, &value)?;
             result.insert(name.to_string(), wire);
         }
 

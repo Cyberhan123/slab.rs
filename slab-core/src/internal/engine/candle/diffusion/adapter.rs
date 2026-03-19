@@ -72,6 +72,7 @@ impl Default for GenImageParams {
 
 // ── Inner state ────────────────────────────────────────────────────────────────
 
+#[derive(Default)]
 struct InnerState {
     /// Path to the UNet model weights file (kept for diagnostics / reload).
     #[cfg(feature = "candle")]
@@ -103,30 +104,6 @@ struct InnerState {
     _loaded: bool,
 }
 
-impl Default for InnerState {
-    fn default() -> Self {
-        Self {
-            #[cfg(feature = "candle")]
-            model_path: None,
-            #[cfg(feature = "candle")]
-            vae_path: None,
-            #[cfg(feature = "candle")]
-            sd_config: None,
-            #[cfg(feature = "candle")]
-            tokenizer_dir: None,
-            #[cfg(feature = "candle")]
-            unet: None,
-            #[cfg(feature = "candle")]
-            vae: None,
-            #[cfg(feature = "candle")]
-            clip: None,
-            #[cfg(feature = "candle")]
-            tokenizer: None,
-            #[cfg(not(feature = "candle"))]
-            _loaded: false,
-        }
-    }
-}
 
 // ── Engine ────────────────────────────────────────────────────────────────────
 
@@ -268,7 +245,7 @@ impl CandleDiffusionEngine {
             state.clip = Some(clip);
             state.tokenizer = Some(tokenizer);
 
-            return Ok(());
+            Ok(())
         }
 
         #[cfg(not(feature = "candle"))]
@@ -304,7 +281,7 @@ impl CandleDiffusionEngine {
     /// Width and height must be multiples of 8.
     pub fn inference(&self, params: &GenImageParams) -> Result<Vec<u8>, EngineError> {
         // Validate dimensions before locking.
-        if params.width % 8 != 0 || params.height % 8 != 0 {
+        if !params.width.is_multiple_of(8) || !params.height.is_multiple_of(8) {
             return Err(CandleDiffusionEngineError::InvalidParams {
                 message: format!(
                     "width ({}) and height ({}) must be multiples of 8",
