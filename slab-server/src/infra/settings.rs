@@ -8,10 +8,11 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
+use slab_types::settings::CloudProviderConfig;
+
 use crate::domain::models::{
-    embedded_settings_schema, CloudProviderSettingValue, SettingDefinition, SettingsDocumentView,
-    SettingsSchema, SettingsSectionView, SettingsSubsectionView, SettingsValuesFile,
-    UpdateSettingCommand,
+    embedded_settings_schema, SettingDefinition, SettingsDocumentView, SettingsSchema,
+    SettingsSectionView, SettingsSubsectionView, SettingsValuesFile, UpdateSettingCommand,
 };
 use crate::error::ServerError;
 
@@ -218,7 +219,7 @@ impl SettingsProvider {
     pub async fn get_chat_providers(
         &self,
         pmid: impl AsRef<str>,
-    ) -> Result<Vec<CloudProviderSettingValue>, ServerError> {
+    ) -> Result<Vec<CloudProviderConfig>, ServerError> {
         let pmid = pmid.as_ref();
         let value = self.get_effective_value(pmid).await?;
         serde_json::from_value(value).map_err(|error| {

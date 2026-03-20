@@ -1,0 +1,17 @@
+[package]
+name = "slab-types"
+version.workspace = true
+edition.workspace = true
+description = "Shared types, JSON schema definitions, and PMID catalog for slab.rs"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license = "Apache-2.0"
+
+[dependencies]
+serde       = { workspace = true }
+serde_json  = { workspace = true }
+thiserror   = { workspace = true }
+uuid        = { workspace = true }
+chrono      = { workspace = true }
+schemars    = { workspace = true }
