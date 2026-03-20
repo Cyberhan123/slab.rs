@@ -12,8 +12,6 @@ pub use crate::base::types::{StreamChunk, StreamHandle};
 /// the ingress boundary.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RequestRoute {
-    LoadLibrary,
-    ReloadLibrary,
     LoadModel,
     UnloadModel,
     Inference,
@@ -26,8 +24,6 @@ impl FromStr for RequestRoute {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value {
-            "lib.load" => Ok(Self::LoadLibrary),
-            "lib.reload" => Ok(Self::ReloadLibrary),
             "model.load" => Ok(Self::LoadModel),
             "model.unload" => Ok(Self::UnloadModel),
             "inference" => Ok(Self::Inference),
@@ -58,40 +54,15 @@ pub struct Invocation {
 #[derive(Clone, Debug, Default)]
 pub struct DeploymentSnapshot {
     pub generation: u64,
-    pub library: Option<Payload>,
     pub model: Option<Payload>,
 }
 
 impl DeploymentSnapshot {
-    pub fn with_library(generation: u64, payload: Payload) -> Self {
-        Self {
-            generation,
-            library: Some(payload),
-            model: None,
-        }
-    }
-
     pub fn with_model(generation: u64, payload: Payload) -> Self {
         Self {
             generation,
-            library: None,
             model: Some(payload),
         }
-    }
-
-    pub fn with_library_and_model(generation: u64, library: Payload, model: Payload) -> Self {
-        Self {
-            generation,
-            library: Some(library),
-            model: Some(model),
-        }
-    }
-
-    pub fn library_config<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
-        self.library
-            .as_ref()
-            .ok_or_else(|| "deployment snapshot missing library config".to_owned())?
-            .to_json()
     }
 
     pub fn model_config<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
@@ -128,8 +99,6 @@ impl SyncMessage {
 /// Peer-synchronization commands broadcast between workers of the same backend.
 #[derive(Clone, Debug)]
 pub enum PeerWorkerCommand {
-    LoadLibrary { sync: SyncMessage, sender_id: usize },
-    ReloadLibrary { sync: SyncMessage, sender_id: usize },
     LoadModel { sync: SyncMessage, sender_id: usize },
     Unload { sync: SyncMessage, sender_id: usize },
 }
@@ -138,9 +107,7 @@ impl PeerWorkerCommand {
     /// Worker id that originally emitted this peer command.
     pub fn sender_id(&self) -> usize {
         match self {
-            Self::LoadLibrary { sender_id, .. }
-            | Self::ReloadLibrary { sender_id, .. }
-            | Self::LoadModel { sender_id, .. }
+            Self::LoadModel { sender_id, .. }
             | Self::Unload { sender_id, .. } => *sender_id,
         }
     }
@@ -152,9 +119,7 @@ impl PeerWorkerCommand {
 
     pub fn sync(&self) -> &SyncMessage {
         match self {
-            Self::LoadLibrary { sync, .. }
-            | Self::ReloadLibrary { sync, .. }
-            | Self::LoadModel { sync, .. }
+            Self::LoadModel { sync, .. }
             | Self::Unload { sync, .. } => sync,
         }
     }
@@ -170,7 +135,7 @@ impl PeerWorkerCommand {
 pub enum RuntimeControlSignal {
     /// Runtime asks the backend to (re)load state using the provided payload.
     ///
-    /// The payload follows backend-specific `model.load`/`lib.load` shape.
+    /// The payload follows the backend-specific `model.load` shape.
     GlobalLoad { op_id: u64, payload: Payload },
     /// Runtime asks the backend to unload all runtime-managed model state.
     GlobalUnload { op_id: u64 },

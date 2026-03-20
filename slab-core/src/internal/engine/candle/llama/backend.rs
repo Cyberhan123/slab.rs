@@ -1,17 +1,12 @@
 //! Backend worker adapter for `candle.llama`.
 //!
 //! Unlike the GGML backend, the Candle backend does **not** load a dynamic
-//! library at runtime – Candle is a statically-linked Rust crate.  The
-//! `lib.load` and `lib.reload` operations are therefore accepted but treated
-//! as no-ops; every reply is an empty success value so that callers written
-//! for the GGML interface continue to work without modification.
+//! library at runtime – Candle is a statically-linked Rust crate.
 //!
 //! # Supported ops
 //!
 //! | Op string            | Event variant     | Description                                     |
 //! |----------------------|-------------------|-------------------------------------------------|
-//! | `"lib.load"`         | `LoadLibrary`     | No-op (Candle is statically linked).            |
-//! | `"lib.reload"`       | `ReloadLibrary`   | No-op.                                          |
 //! | `"model.load"`       | `LoadModel`       | Load GGUF model weights from disk.              |
 //! | `"model.unload"`     | `UnloadModel`     | Drop model weights from memory.                 |
 //! | `"inference"`        | `Inference`       | Unary text generation; input is UTF-8 prompt.   |
@@ -61,22 +56,6 @@ impl CandleLlamaWorker {
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────
-
-    /// `lib.load` is a no-op for Candle (statically linked).
-    #[on_event(LoadLibrary)]
-    async fn on_load_library(&mut self, req: BackendRequest) {
-        let _ = req.reply_tx.send(BackendReply::Value(Payload::Bytes(
-            Arc::from([] as [u8; 0]),
-        )));
-    }
-
-    /// `lib.reload` is a no-op for Candle (statically linked).
-    #[on_event(ReloadLibrary)]
-    async fn on_reload_library(&mut self, req: BackendRequest) {
-        let _ = req.reply_tx.send(BackendReply::Value(Payload::Bytes(
-            Arc::from([] as [u8; 0]),
-        )));
-    }
 
     #[on_event(LoadModel)]
     async fn on_load_model(&mut self, req: BackendRequest) {
