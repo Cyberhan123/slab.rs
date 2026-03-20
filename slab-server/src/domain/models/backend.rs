@@ -1,4 +1,23 @@
 use crate::api::v1::backend::schema::{BackendTypeQuery, DownloadLibRequest, ReloadLibRequest};
+use strum::{Display, EnumIter, EnumString};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Display, EnumIter, EnumString)]
+pub enum BackendId {
+    #[strum(serialize = "ggml.llama", serialize = "llama")]
+    GgmlLlama,
+    #[strum(serialize = "ggml.whisper", serialize = "whisper")]
+    GgmlWhisper,
+    #[strum(serialize = "ggml.diffusion", serialize = "diffusion")]
+    GgmlDiffusion,
+    #[strum(serialize = "candle.llama")]
+    CandleLlama,
+    #[strum(serialize = "candle.whisper")]
+    CandleWhisper,
+    #[strum(serialize = "candle.diffusion")]
+    CandleDiffusion,
+    #[strum(serialize = "onnx")]
+    Onnx,
+}
 
 #[derive(Debug, Clone)]
 pub struct BackendStatusQuery {

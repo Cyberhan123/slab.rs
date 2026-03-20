@@ -360,7 +360,11 @@ async fn shutdown_signal(listen_stdin: bool) {
     info!(source, "shutdown signal received; shutting down runtime");
 }
 
-async fn serve_grpc(grpc_bind: &str, shutdown_on_stdin_close: bool) -> anyhow::Result<()> {
+async fn serve_grpc(
+    grpc_bind: &str,
+    shutdown_on_stdin_close: bool,
+    grpc_service: grpc::GrpcServiceImpl,
+) -> anyhow::Result<()> {
     if let Some(raw_ipc_path) = grpc_bind.strip_prefix("ipc://") {
         let ipc_path = raw_ipc_path.trim();
         if ipc_path.is_empty() {
@@ -387,13 +391,13 @@ async fn serve_grpc(grpc_bind: &str, shutdown_on_stdin_close: bool) -> anyhow::R
 
         tonic::transport::Server::builder()
             .add_service(pb::llama_service_server::LlamaServiceServer::new(
-                grpc::GrpcServiceImpl,
+                grpc_service.clone(),
             ))
             .add_service(pb::whisper_service_server::WhisperServiceServer::new(
-                grpc::GrpcServiceImpl,
+                grpc_service.clone(),
             ))
             .add_service(pb::diffusion_service_server::DiffusionServiceServer::new(
-                grpc::GrpcServiceImpl,
+                grpc_service.clone(),
             ))
             .serve_with_incoming_shutdown(incoming, shutdown_signal(shutdown_on_stdin_close))
             .await?;
@@ -407,13 +411,13 @@ async fn serve_grpc(grpc_bind: &str, shutdown_on_stdin_close: bool) -> anyhow::R
     info!(transport = "http", %addr, "slab-runtime gRPC listening");
     tonic::transport::Server::builder()
         .add_service(pb::llama_service_server::LlamaServiceServer::new(
-            grpc::GrpcServiceImpl,
+            grpc_service.clone(),
         ))
         .add_service(pb::whisper_service_server::WhisperServiceServer::new(
-            grpc::GrpcServiceImpl,
+            grpc_service.clone(),
         ))
         .add_service(pb::diffusion_service_server::DiffusionServiceServer::new(
-            grpc::GrpcServiceImpl,
+            grpc_service,
         ))
         .serve_with_shutdown(addr, shutdown_signal(shutdown_on_stdin_close))
         .await?;
@@ -463,25 +467,26 @@ async fn main() -> anyhow::Result<()> {
         "initializing slab-core runtime"
     );
 
-    slab_core::api::init(slab_core::api::Config {
-        queue_capacity: cli.queue_capacity.unwrap_or(64),
-        backend_capacity: cli.backend_capacity.unwrap_or(4),
+    let drivers = slab_core::api::DriversConfig {
         llama_lib_dir,
         whisper_lib_dir,
         diffusion_lib_dir,
-        // Candle backends require the `candle` feature in slab-core.  That
-        // feature is not currently enabled for slab-runtime, so disable them
-        // explicitly rather than relying on Default (which gates on the feature).
         enable_candle_llama: false,
         enable_candle_whisper: false,
         enable_candle_diffusion: false,
         onnx_enabled: false,
-    })
+    };
+    let runtime = slab_core::api::RuntimeBuilder::new()
+        .queue_capacity(cli.queue_capacity.unwrap_or(64))
+        .backend_capacity(cli.backend_capacity.unwrap_or(4))
+        .drivers(drivers.clone())
+        .build()
     .context("failed to initialize slab-core runtime")?;
     info!("slab-core runtime initialized");
 
+    let grpc_service = grpc::GrpcServiceImpl::new(runtime, drivers, enabled);
     info!(grpc_bind = %cli.grpc_bind, "starting slab-runtime gRPC server");
-    serve_grpc(&cli.grpc_bind, cli.shutdown_on_stdin_close).await?;
+    serve_grpc(&cli.grpc_bind, cli.shutdown_on_stdin_close, grpc_service).await?;
     info!("slab-runtime stopped");
     Ok(())
 }

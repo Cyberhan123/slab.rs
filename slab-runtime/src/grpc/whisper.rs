@@ -1,14 +1,14 @@
+use std::path::PathBuf;
+use std::sync::Arc;
+
 use bytemuck::cast_slice;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, instrument, warn};
 
-use slab_core::api::Backend;
+use slab_core::api::{AudioTranscriptionRequest, JsonOptions};
 use slab_proto::slab::ipc::v1 as pb;
 
-use super::{
-    extract_request_id, load_model_for_backend, reload_library_for_backend, runtime_to_status,
-    unload_model_for_backend, GrpcServiceImpl,
-};
+use super::{extract_request_id, runtime_to_status, BackendKind, GrpcServiceImpl};
 
 #[tonic::async_trait]
 impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
@@ -21,12 +21,12 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         let req = request.into_inner();
-        if req.path.is_empty() {
+        if req.path.trim().is_empty() {
             warn!("transcribe rejected: audio file path is empty");
             return Err(Status::invalid_argument("audio file path is empty"));
         }
 
-        let op_options = build_whisper_inference_options(&req).map_err(Status::invalid_argument)?;
+        let options = build_whisper_inference_options(&req).map_err(Status::invalid_argument)?;
         let vad_enabled = req.vad.as_ref().is_some_and(|v| v.enabled);
         let decode_configured = req.decode.is_some();
 
@@ -37,28 +37,31 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
             "whisper transcribe request received"
         );
 
-        // Capture the current span so it can be entered inside the
-        // spawn_blocking closure used by the CpuStage; without this the
-        // preprocess logs would lose the per-request request_id/backend fields.
-        let preprocess_span = tracing::Span::current();
-        let output = slab_core::api::backend(Backend::GGMLWhisper)
-            .inference()
-            .options(slab_core::Payload::Json(op_options))
-            .input(slab_core::Payload::Text(req.path.into()))
-            .preprocess("ffmpeg.to_pcm_f32le", move |payload| {
-                let _guard = preprocess_span.enter();
-                convert_to_pcm_f32le(payload)
-            })
-            .run_wait()
+        let path = req.path.clone();
+        let pcm_samples = tokio::task::spawn_blocking(move || convert_file_to_pcm_f32le(&path))
             .await
-            .map_err(|e| {
-                error!(error = %e, "whisper inference failed");
-                runtime_to_status(e)
+            .map_err(|error| Status::internal(format!("ffmpeg worker failed: {error}")))?
+            .map_err(Status::internal)?;
+
+        let pipeline = self.pipeline_for_backend(BackendKind::Whisper).await?;
+        let response = pipeline
+            .run_audio_transcription(AudioTranscriptionRequest {
+                audio_path: PathBuf::from(req.path),
+                pcm_samples: Some(pcm_samples),
+                language: None,
+                prompt: None,
+                options,
+            })
+            .await
+            .map_err(|error| {
+                error!(error = %error, "whisper transcription failed");
+                runtime_to_status(error)
             })?;
 
-        let text = String::from_utf8_lossy(&output).into_owned();
-        info!(output_len = text.len(), "whisper transcription completed");
-        Ok(Response::new(pb::TranscribeResponse { text }))
+        info!(output_len = response.text.len(), "whisper transcription completed");
+        Ok(Response::new(pb::TranscribeResponse {
+            text: response.text,
+        }))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "ggml.whisper"))]
@@ -70,7 +73,9 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         debug!("whisper load_model request received");
-        let status = load_model_for_backend(Backend::GGMLWhisper, request.into_inner()).await?;
+        let status = self
+            .load_model_for_backend(BackendKind::Whisper, request.into_inner())
+            .await?;
         Ok(Response::new(status))
     }
 
@@ -83,7 +88,8 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         debug!("whisper unload_model request received");
-        let status = unload_model_for_backend(Backend::GGMLWhisper).await?;
+        let _ = request.into_inner();
+        let status = self.unload_model_for_backend(BackendKind::Whisper).await?;
         Ok(Response::new(status))
     }
 
@@ -96,14 +102,16 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         debug!("whisper reload_library request received");
-        let status = reload_library_for_backend(Backend::GGMLWhisper, request.into_inner()).await?;
+        let status = self
+            .reload_library_for_backend(BackendKind::Whisper, request.into_inner())
+            .await?;
         Ok(Response::new(status))
     }
 }
 
 fn build_whisper_inference_options(
     req: &pb::TranscribeRequest,
-) -> Result<serde_json::Value, String> {
+) -> Result<JsonOptions, String> {
     let mut options = serde_json::Map::new();
 
     if let Some(vad) = req.vad.as_ref() {
@@ -135,13 +143,13 @@ fn build_whisper_inference_options(
                     ),
                     ("vad.speech_pad_ms", params.speech_pad_ms),
                 ] {
-                    if let Some(v) = value {
-                        if v < 0 {
+                    if let Some(value) = value {
+                        if value < 0 {
                             return Err(format!("{name} must be >= 0"));
                         }
                         vad_json.insert(
                             name.trim_start_matches("vad.").to_owned(),
-                            serde_json::json!(v),
+                            serde_json::json!(value),
                         );
                     }
                 }
@@ -180,13 +188,13 @@ fn build_whisper_inference_options(
             ("decode.max_len", decode.max_len),
             ("decode.max_tokens", decode.max_tokens),
         ] {
-            if let Some(v) = value {
-                if v < 0 {
+            if let Some(value) = value {
+                if value < 0 {
                     return Err(format!("{name} must be >= 0"));
                 }
                 decode_json.insert(
                     name.trim_start_matches("decode.").to_owned(),
-                    serde_json::json!(v),
+                    serde_json::json!(value),
                 );
             }
         }
@@ -202,13 +210,13 @@ fn build_whisper_inference_options(
             ("decode.temperature", decode.temperature),
             ("decode.temperature_inc", decode.temperature_inc),
         ] {
-            if let Some(v) = value {
-                if v < 0.0 {
+            if let Some(value) = value {
+                if value < 0.0 {
                     return Err(format!("{name} must be >= 0.0"));
                 }
                 decode_json.insert(
                     name.trim_start_matches("decode.").to_owned(),
-                    serde_json::json!(v),
+                    serde_json::json!(value),
                 );
             }
         }
@@ -221,10 +229,10 @@ fn build_whisper_inference_options(
             ("decode.suppress_nst", decode.suppress_nst),
             ("decode.tdrz_enable", decode.tdrz_enable),
         ] {
-            if let Some(v) = value {
+            if let Some(value) = value {
                 decode_json.insert(
                     name.trim_start_matches("decode.").to_owned(),
-                    serde_json::json!(v),
+                    serde_json::json!(value),
                 );
             }
         }
@@ -234,10 +242,10 @@ fn build_whisper_inference_options(
             ("decode.logprob_thold", decode.logprob_thold),
             ("decode.no_speech_thold", decode.no_speech_thold),
         ] {
-            if let Some(v) = value {
+            if let Some(value) = value {
                 decode_json.insert(
                     name.trim_start_matches("decode.").to_owned(),
-                    serde_json::json!(v),
+                    serde_json::json!(value),
                 );
             }
         }
@@ -247,14 +255,10 @@ fn build_whisper_inference_options(
         }
     }
 
-    Ok(serde_json::Value::Object(options))
+    Ok(options.into_iter().collect())
 }
 
-fn convert_to_pcm_f32le(payload: slab_core::Payload) -> Result<slab_core::Payload, String> {
-    let path = payload
-        .to_str()
-        .map_err(|e| format!("invalid payload for preprocess: {e}"))?;
-
+fn convert_file_to_pcm_f32le(path: &str) -> Result<Arc<[f32]>, String> {
     debug!(audio_path = %path, "running ffmpeg PCM conversion");
 
     let output = std::process::Command::new("ffmpeg")
@@ -273,17 +277,17 @@ fn convert_to_pcm_f32le(payload: slab_core::Payload) -> Result<slab_core::Payloa
             "-",
         ])
         .output()
-        .map_err(|e| format!("ffmpeg start failed: {e}"))?;
+        .map_err(|error| format!("ffmpeg start failed: {error}"))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        let msg = format!(
+        let message = format!(
             "ffmpeg failed with status {}: {}",
             output.status.code().unwrap_or(-1),
             stderr.trim()
         );
-        warn!(audio_path = %path, "{}", msg);
-        return Err(msg);
+        warn!(audio_path = %path, "{message}");
+        return Err(message);
     }
 
     let pcm_bytes = output.stdout;
@@ -293,7 +297,5 @@ fn convert_to_pcm_f32le(payload: slab_core::Payload) -> Result<slab_core::Payloa
 
     let samples: Vec<f32> = cast_slice::<u8, f32>(&pcm_bytes).to_vec();
     debug!(samples = samples.len(), "ffmpeg PCM conversion succeeded");
-    Ok(slab_core::Payload::F32(std::sync::Arc::from(
-        samples.as_slice(),
-    )))
+    Ok(Arc::from(samples))
 }

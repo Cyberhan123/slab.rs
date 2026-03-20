@@ -1,10 +1,10 @@
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{FromRequest, FromRequestParts, Json, Query, Request};
 use serde::de::DeserializeOwned;
-use slab_core::api::Backend;
 use std::str::FromStr;
 use validator::{Validate, ValidationError};
 
+use crate::domain::models::BackendId;
 use crate::error::ServerError;
 
 const ALLOWED_FFMPEG_OUTPUT_FORMATS: &[&str] = &[
@@ -87,7 +87,7 @@ pub fn validate_absolute_path(value: &str) -> Result<(), ValidationError> {
 }
 pub fn validate_backend_id(value: &str) -> Result<(), ValidationError> {
     validate_non_blank(value)?;
-    Backend::from_str(value)
+    BackendId::from_str(value)
         .map(|_| ())
         .map_err(|_| ValidationError::new("backend_id"))
 }

@@ -4,13 +4,10 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, instrument, warn, Instrument};
 
-use slab_core::api::Backend;
+use slab_core::api::TextGenerationRequest;
 use slab_proto::slab::ipc::v1 as pb;
 
-use super::{
-    extract_request_id, load_model_for_backend, reload_library_for_backend, runtime_to_status,
-    unload_model_for_backend, GrpcServiceImpl,
-};
+use super::{extract_request_id, runtime_to_status, BackendKind, GrpcServiceImpl};
 
 #[tonic::async_trait]
 impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
@@ -29,34 +26,28 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
             "llama chat request received"
         );
 
-        let options = serde_json::json!({
-            "max_tokens": req.max_tokens,
-            "temperature": req.temperature,
-            "session_key": if req.session_key.is_empty() {
-                serde_json::Value::Null
-            } else {
-                serde_json::Value::String(req.session_key)
-            }
-        });
-
-        let output = slab_core::api::backend(Backend::GGMLLlama)
-            .inference()
-            .input(slab_core::Payload::Text(req.prompt.into()))
-            .options(slab_core::Payload::Json(options))
-            .run_wait()
+        let pipeline = self.pipeline_for_backend(BackendKind::Llama).await?;
+        let response = pipeline
+            .run_text_generation(TextGenerationRequest {
+                prompt: req.prompt,
+                system_prompt: None,
+                max_tokens: Some(req.max_tokens),
+                temperature: Some(req.temperature),
+                top_p: None,
+                session_key: (!req.session_key.is_empty()).then_some(req.session_key),
+                stream: false,
+                options: Default::default(),
+            })
             .await
-            .map_err(|e| {
-                error!(error = %e, "llama inference failed");
-                runtime_to_status(e)
+            .map_err(|error| {
+                error!(error = %error, "llama text generation failed");
+                runtime_to_status(error)
             })?;
 
-        let text = String::from_utf8(output.to_vec()).map_err(|e| {
-            error!(error = %e, "backend returned invalid UTF-8");
-            Status::internal(format!("backend returned invalid UTF-8: {e}"))
-        })?;
-
-        info!(output_len = text.len(), "llama chat completed");
-        Ok(Response::new(pb::ChatResponse { text }))
+        info!(output_len = response.text.len(), "llama chat completed");
+        Ok(Response::new(pb::ChatResponse {
+            text: response.text,
+        }))
     }
 
     type ChatStreamStream = ReceiverStream<Result<pb::ChatStreamChunk, Status>>;
@@ -76,28 +67,23 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
             "llama chat_stream request received"
         );
 
-        let options = serde_json::json!({
-            "max_tokens": req.max_tokens,
-            "temperature": req.temperature,
-            "session_key": if req.session_key.is_empty() {
-                serde_json::Value::Null
-            } else {
-                serde_json::Value::String(req.session_key)
-            }
-        });
-
-        let backend_stream = slab_core::api::backend(Backend::GGMLLlama)
-            .inference_stream()
-            .input(slab_core::Payload::Text(req.prompt.into()))
-            .options(slab_core::Payload::Json(options))
-            .stream()
+        let pipeline = self.pipeline_for_backend(BackendKind::Llama).await?;
+        let backend_stream = pipeline
+            .stream_text_generation(TextGenerationRequest {
+                prompt: req.prompt,
+                system_prompt: None,
+                max_tokens: Some(req.max_tokens),
+                temperature: Some(req.temperature),
+                top_p: None,
+                session_key: (!req.session_key.is_empty()).then_some(req.session_key),
+                stream: true,
+                options: Default::default(),
+            })
             .await
-            .map_err(|e| {
-                error!(error = %e, "llama inference_stream setup failed");
-                runtime_to_status(e)
+            .map_err(|error| {
+                error!(error = %error, "llama text generation stream setup failed");
+                runtime_to_status(error)
             })?;
-
-        info!("llama chat_stream started; spawning token relay task");
 
         let (tx, rx) = mpsc::channel(32);
         tokio::spawn(
@@ -105,29 +91,31 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
                 tokio::pin!(backend_stream);
                 let mut token_count = 0usize;
                 while let Some(chunk) = backend_stream.next().await {
-                    let msg = match chunk {
-                        Ok(bytes) => {
+                    let message = match chunk {
+                        Ok(chunk) => {
                             token_count += 1;
                             pb::ChatStreamChunk {
-                                token: String::from_utf8_lossy(&bytes).into_owned(),
+                                token: chunk.delta,
                                 error: String::new(),
                                 done: false,
                             }
                         }
-                        Err(e) => {
-                            warn!(error = %e, "error in llama stream chunk");
+                        Err(error) => {
+                            warn!(error = %error, "error in llama stream chunk");
                             pb::ChatStreamChunk {
                                 token: String::new(),
-                                error: e.to_string(),
+                                error: error.to_string(),
                                 done: false,
                             }
                         }
                     };
-                    if tx.send(Ok(msg)).await.is_err() {
+
+                    if tx.send(Ok(message)).await.is_err() {
                         debug!("llama stream receiver dropped; stopping relay");
                         return;
                     }
                 }
+
                 debug!(token_count, "llama chat_stream relay finished");
                 let _ = tx
                     .send(Ok(pb::ChatStreamChunk {
@@ -152,7 +140,9 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         debug!("llama load_model request received");
-        let status = load_model_for_backend(Backend::GGMLLlama, request.into_inner()).await?;
+        let status = self
+            .load_model_for_backend(BackendKind::Llama, request.into_inner())
+            .await?;
         Ok(Response::new(status))
     }
 
@@ -165,7 +155,8 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         debug!("llama unload_model request received");
-        let status = unload_model_for_backend(Backend::GGMLLlama).await?;
+        let _ = request.into_inner();
+        let status = self.unload_model_for_backend(BackendKind::Llama).await?;
         Ok(Response::new(status))
     }
 
@@ -178,7 +169,9 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         debug!("llama reload_library request received");
-        let status = reload_library_for_backend(Backend::GGMLLlama, request.into_inner()).await?;
+        let status = self
+            .reload_library_for_backend(BackendKind::Llama, request.into_inner())
+            .await?;
         Ok(Response::new(status))
     }
 }

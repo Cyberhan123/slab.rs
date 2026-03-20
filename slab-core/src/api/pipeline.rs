@@ -143,17 +143,27 @@ impl Pipeline {
             .ensure_loaded_for(Capability::AudioTranscription, false)
             .await?;
         let resolved = deployment.resolved.clone();
-        let path = request.audio_path.clone();
-        let plan = InvocationPlan::new(
-            resolved,
-            Capability::AudioTranscription,
-            false,
-            Payload::None,
+        let input = request
+            .pcm_samples
+            .clone()
+            .map(Payload::F32)
+            .unwrap_or(Payload::None);
+        let stages = if request.pcm_samples.is_some() {
+            Vec::new()
+        } else {
+            let path = request.audio_path.clone();
             vec![CpuStage::new("audio.decode.wav", move |_| {
                 crate::internal::engine::audio_utils::load_pcm_from_wav(&path.to_string_lossy())
                     .map(Payload::from)
                     .map_err(|error| error.to_string())
-            })],
+            })]
+        };
+        let plan = InvocationPlan::new(
+            resolved,
+            Capability::AudioTranscription,
+            false,
+            input,
+            stages,
             encode_audio_transcription_options(&request),
         )?;
         submit_plan(
@@ -896,6 +906,7 @@ mod tests {
         let response = pipeline
             .run_audio_transcription(AudioTranscriptionRequest {
                 audio_path: audio_path.clone(),
+                pcm_samples: None,
                 language: Some("zh".to_owned()),
                 prompt: None,
                 options: Default::default(),
@@ -907,6 +918,28 @@ mod tests {
 
         assert_eq!(response.text, "decoded 4 samples");
         assert_eq!(response.language.as_deref(), Some("zh"));
+    }
+
+    #[tokio::test]
+    async fn pipeline_runs_audio_transcription_with_preloaded_pcm() {
+        let runtime = test_runtime();
+        let pipeline = runtime
+            .pipeline(audio_spec())
+            .expect("pipeline should build");
+
+        let response = pipeline
+            .run_audio_transcription(AudioTranscriptionRequest {
+                audio_path: std::path::PathBuf::from("fixtures/nonexistent.wav"),
+                pcm_samples: Some(std::sync::Arc::<[f32]>::from(vec![0.0, 0.5, -0.5, 1.0])),
+                language: Some("en".to_owned()),
+                prompt: None,
+                options: Default::default(),
+            })
+            .await
+            .expect("audio transcription with preloaded PCM should succeed");
+
+        assert_eq!(response.text, "decoded 4 samples");
+        assert_eq!(response.language.as_deref(), Some("en"));
     }
 
     #[tokio::test]

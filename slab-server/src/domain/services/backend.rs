@@ -1,14 +1,13 @@
 use std::str::FromStr;
 
-use slab_core::api::Backend;
 use strum::IntoEnumIterator;
 use tracing::{info, warn};
 
 use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
-    AcceptedOperation, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
-    ReloadBackendLibCommand,
+    AcceptedOperation, BackendId, BackendStatusQuery, BackendStatusView,
+    DownloadBackendLibCommand, ReloadBackendLibCommand,
 };
 use crate::error::ServerError;
 use crate::infra::rpc::{self, pb};
@@ -34,7 +33,7 @@ impl BackendService {
         &self,
         query: BackendStatusQuery,
     ) -> Result<BackendStatusView, ServerError> {
-        let backend = Backend::from_str(&query.backend_id).map_err(|_| {
+        let backend = BackendId::from_str(&query.backend_id).map_err(|_| {
             ServerError::BadRequest(format!("unknown backend_id: {}", query.backend_id))
         })?;
         let canonical_backend = backend.to_string();
@@ -50,7 +49,7 @@ impl BackendService {
     }
 
     pub async fn list_backends(&self) -> Result<Vec<BackendStatusView>, ServerError> {
-        let backends = Backend::iter()
+        let backends = BackendId::iter()
             .map(|name| {
                 let backend_str = name.to_string();
                 let status = if self.model_state.grpc().has_backend(&backend_str) {
@@ -84,7 +83,7 @@ impl BackendService {
             ));
         }
 
-        let backend_id = Backend::from_str(&req.backend_id).map_err(|_| {
+        let backend_id = BackendId::from_str(&req.backend_id).map_err(|_| {
             ServerError::BadRequest(format!("unknown backend_id: {}", req.backend_id))
         })?;
 
@@ -95,13 +94,13 @@ impl BackendService {
 
         let config = self.model_state.pmid().config();
         let backend_settings = match backend_id {
-            Backend::GGMLLlama => config.setup.backends.ggml_llama,
-            Backend::GGMLWhisper => config.setup.backends.ggml_whisper,
-            Backend::GGMLDiffusion => config.setup.backends.ggml_diffusion,
-            Backend::CandleLlama => config.setup.backends.candle_llama,
-            Backend::CandleWhisper => config.setup.backends.candle_whisper,
-            Backend::CandleDiffusion => config.setup.backends.candle_diffusion,
-            Backend::Onnx => config.setup.backends.onnx,
+            BackendId::GgmlLlama => config.setup.backends.ggml_llama,
+            BackendId::GgmlWhisper => config.setup.backends.ggml_whisper,
+            BackendId::GgmlDiffusion => config.setup.backends.ggml_diffusion,
+            BackendId::CandleLlama => config.setup.backends.candle_llama,
+            BackendId::CandleWhisper => config.setup.backends.candle_whisper,
+            BackendId::CandleDiffusion => config.setup.backends.candle_diffusion,
+            BackendId::Onnx => config.setup.backends.onnx,
         };
         let tag = backend_settings
             .tag
@@ -151,7 +150,7 @@ impl BackendService {
 
         info!(backend = %backend_id, lib_path = %req.lib_path, "reloading lib");
 
-        let backend = Backend::from_str(&backend_id)
+        let backend = BackendId::from_str(&backend_id)
             .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
         let canonical_backend = backend.to_string();
         let channel = self
@@ -184,24 +183,24 @@ impl BackendService {
 
 // ── static download specs (fallback defaults) ────────────────────────────────
 
-fn windows_download_spec(backend_id: Backend) -> Option<WindowsDownloadSpec> {
+fn windows_download_spec(backend_id: BackendId) -> Option<WindowsDownloadSpec> {
     match backend_id {
-        Backend::GGMLLlama => Some(("ggml-org", "llama.cpp", "b8069", |version: &str| {
+        BackendId::GgmlLlama => Some(("ggml-org", "llama.cpp", "b8069", |version: &str| {
             format!("llama-{version}-bin-win-cpu-x64.zip")
         })),
-        Backend::GGMLWhisper => Some(("ggml-org", "whisper.cpp", "v1.8.3", |_| {
+        BackendId::GgmlWhisper => Some(("ggml-org", "whisper.cpp", "v1.8.3", |_| {
             "whisper-cublas-12.4.0-bin-x64.zip".to_string()
         })),
-        Backend::GGMLDiffusion => Some((
+        BackendId::GgmlDiffusion => Some((
             "leejet",
             "stable-diffusion.cpp",
             "master-504-636d3cb",
             |version: &str| format!("stable-diffusion-{version}-bin-win-cpu-x64.zip"),
         )),
-        Backend::CandleDiffusion
-        | Backend::CandleLlama
-        | Backend::CandleWhisper
-        | Backend::Onnx => Some(("slab", "slab-buildin", "v0.1.0", |version: &str| {
+        BackendId::CandleDiffusion
+        | BackendId::CandleLlama
+        | BackendId::CandleWhisper
+        | BackendId::Onnx => Some(("slab", "slab-buildin", "v0.1.0", |version: &str| {
             format!("slab-buildin-{version}-bin-win-x64.zip")
         })), // no download specs for candle backends or onnx
     }
@@ -288,7 +287,7 @@ mod test {
     #[test]
     fn windows_download_spec_llama() {
         let (owner, repo, tag, asset) =
-            windows_download_spec(Backend::GGMLLlama).expect("llama preset");
+            windows_download_spec(BackendId::GgmlLlama).expect("llama preset");
         assert_eq!(owner, "ggml-org");
         assert_eq!(repo, "llama.cpp");
         assert_eq!(tag, "b8069");
@@ -298,7 +297,7 @@ mod test {
     #[test]
     fn windows_download_spec_whisper() {
         let (owner, repo, tag, asset) =
-            windows_download_spec(Backend::GGMLWhisper).expect("whisper preset");
+            windows_download_spec(BackendId::GgmlWhisper).expect("whisper preset");
         assert_eq!(owner, "ggml-org");
         assert_eq!(repo, "whisper.cpp");
         assert_eq!(tag, "v1.8.3");
@@ -308,7 +307,7 @@ mod test {
     #[test]
     fn windows_download_spec_diffusion() {
         let (owner, repo, tag, asset) =
-            windows_download_spec(Backend::GGMLDiffusion).expect("diffusion preset");
+            windows_download_spec(BackendId::GgmlDiffusion).expect("diffusion preset");
         assert_eq!(owner, "leejet");
         assert_eq!(repo, "stable-diffusion.cpp");
         assert_eq!(tag, "master-504-636d3cb");
