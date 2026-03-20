@@ -13,6 +13,7 @@ members = [
     "slab-whisper-sys",
     "slab-core-macros",
     "slab-core",
+    "slab-types",
     "slab-server",
 ]
 
@@ -32,6 +33,7 @@ license = "Apache-2.0"
 [workspace.dependencies]
 slab-core = { path = "./slab-core", package = "slab-core", version = "0.0.1" }
 slab-proto = { path = "./slab-proto", package = "slab-proto", version = "0.0.1" }
+slab-types = { path = "./slab-types", package = "slab-types", version = "0.0.1" }
 slab-diffusion-sys = { path = "./slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.0.1" }
 slab-diffusion = { path = "./slab-diffusion", package = "slab-diffusion", version = "0.0.1" }
 slab-llama = { path = "./slab-llama", package = "slab-llama", version = "0.0.1" }
@@ -68,3 +70,4 @@ candle-core = "0.9.2"
 candle-nn = "0.9.2"
 candle-transformers = "0.9.2"
 tokenizers = "0.22.2"
+schemars = { version = "1.0", features = ["uuid1", "chrono04"] }

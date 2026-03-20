@@ -1,107 +1,16 @@
 use std::sync::{Arc, RwLock};
 
+use slab_types::settings::{
+    ChatConfig, DiffusionConfig, DiffusionPathsConfig, DiffusionPerformanceConfig, PmidConfig,
+    RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig, RuntimeWorkerConfig,
+    SetupBackendReleaseConfig, SetupBackendsConfig, SetupConfig, SetupFfmpegConfig,
+};
+
 use crate::domain::models::{
-    CloudProviderSettingValue, SettingPropertyView, SettingsDocumentView, UpdateSettingCommand,
-    UpdateSettingOperation, PMID,
+    SettingPropertyView, SettingsDocumentView, UpdateSettingCommand, UpdateSettingOperation, PMID,
 };
 use crate::error::ServerError;
 use crate::infra::settings::SettingsProvider;
-
-#[derive(Debug, Clone, Default)]
-pub struct PmidConfig {
-    pub setup: SetupConfig,
-    pub runtime: RuntimeConfig,
-    pub chat: ChatConfig,
-    pub diffusion: DiffusionConfig,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SetupConfig {
-    pub initialized: bool,
-    pub ffmpeg: SetupFfmpegConfig,
-    pub backends: SetupBackendsConfig,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SetupFfmpegConfig {
-    #[allow(dead_code)]
-    pub auto_download: bool,
-    pub dir: Option<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SetupBackendsConfig {
-    pub dir: Option<String>,
-    pub ggml_llama: SetupBackendReleaseConfig,
-    pub ggml_whisper: SetupBackendReleaseConfig,
-    pub ggml_diffusion: SetupBackendReleaseConfig,
-    pub candle_llama: SetupBackendReleaseConfig,
-    pub candle_whisper: SetupBackendReleaseConfig,
-    pub candle_diffusion: SetupBackendReleaseConfig,
-    pub onnx: SetupBackendReleaseConfig,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct SetupBackendReleaseConfig {
-    pub tag: Option<String>,
-    pub asset: Option<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct RuntimeConfig {
-    pub model_cache_dir: Option<String>,
-    pub llama: RuntimeLlamaConfig,
-    pub whisper: RuntimeWorkerConfig,
-    pub diffusion: RuntimeWorkerConfig,
-    pub model_auto_unload: RuntimeModelAutoUnloadConfig,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct RuntimeLlamaConfig {
-    pub num_workers: u32,
-    pub context_length: Option<u32>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct RuntimeWorkerConfig {
-    pub num_workers: u32,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct RuntimeModelAutoUnloadConfig {
-    pub enabled: bool,
-    pub idle_minutes: u32,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct ChatConfig {
-    pub providers: Vec<CloudProviderSettingValue>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct DiffusionConfig {
-    pub paths: DiffusionPathsConfig,
-    pub performance: DiffusionPerformanceConfig,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct DiffusionPathsConfig {
-    pub model: Option<String>,
-    pub vae: Option<String>,
-    pub taesd: Option<String>,
-    pub lora_model_dir: Option<String>,
-    pub clip_l: Option<String>,
-    pub clip_g: Option<String>,
-    pub t5xxl: Option<String>,
-}
-
-#[derive(Debug, Clone, Default)]
-pub struct DiffusionPerformanceConfig {
-    pub flash_attn: bool,
-    pub keep_vae_on_cpu: bool,
-    pub keep_clip_on_cpu: bool,
-    pub offload_params_to_cpu: bool,
-}
 
 #[derive(Debug, Clone)]
 pub struct PmidService {
@@ -329,7 +238,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::domain::models::SettingsValuesFile;
+    use crate::domain::models::{SettingsValuesFile, PMID};
 
     fn temp_settings_path() -> PathBuf {
         let base = std::env::temp_dir().join(format!("slab-pmid-test-{}", Uuid::new_v4()));
