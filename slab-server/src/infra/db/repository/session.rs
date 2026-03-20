@@ -38,23 +38,18 @@ impl SessionStore for AnyStore {
         .await?;
         Ok(rows
             .into_iter()
-            .map(
-                |(id, name, state_path, created_at, updated_at)| ChatSession {
-                    id,
-                    name,
-                    state_path,
-                    created_at: created_at.parse().unwrap_or_else(|_| chrono::Utc::now()),
-                    updated_at: updated_at.parse().unwrap_or_else(|_| chrono::Utc::now()),
-                },
-            )
+            .map(|(id, name, state_path, created_at, updated_at)| ChatSession {
+                id,
+                name,
+                state_path,
+                created_at: created_at.parse().unwrap_or_else(|_| chrono::Utc::now()),
+                updated_at: updated_at.parse().unwrap_or_else(|_| chrono::Utc::now()),
+            })
             .collect())
     }
 
     async fn delete_session(&self, id: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM chat_sessions WHERE id = ?1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query("DELETE FROM chat_sessions WHERE id = ?1").bind(id).execute(&self.pool).await?;
         Ok(())
     }
 }

@@ -1,16 +1,19 @@
+use std::path::PathBuf;
 use std::str::FromStr;
 
+use slab_proto::convert;
+use slab_types::runtime::{RuntimeModelLoadSpec, RuntimeModelReloadSpec};
 use strum::IntoEnumIterator;
 use tracing::{info, warn};
 
 use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
-    AcceptedOperation, BackendId, BackendStatusQuery, BackendStatusView,
-    DownloadBackendLibCommand, ReloadBackendLibCommand,
+    AcceptedOperation, BackendId, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
+    ReloadBackendLibCommand,
 };
 use crate::error::ServerError;
-use crate::infra::rpc::{self, pb};
+use crate::infra::rpc;
 
 pub(crate) type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
 type WindowsDownloadSpec = (&'static str, &'static str, &'static str, fn(&str) -> String);
@@ -23,10 +26,7 @@ pub struct BackendService {
 
 impl BackendService {
     pub fn new(model_state: ModelState, worker_state: WorkerState) -> Self {
-        Self {
-            model_state,
-            worker_state,
-        }
+        Self { model_state, worker_state }
     }
 
     pub async fn backend_status(
@@ -42,10 +42,7 @@ impl BackendService {
         } else {
             "disabled"
         };
-        Ok(BackendStatusView {
-            backend: canonical_backend,
-            status: status.into(),
-        })
+        Ok(BackendStatusView { backend: canonical_backend, status: status.into() })
     }
 
     pub async fn list_backends(&self) -> Result<Vec<BackendStatusView>, ServerError> {
@@ -57,10 +54,7 @@ impl BackendService {
                 } else {
                     "disabled"
                 };
-                BackendStatusView {
-                    backend: backend_str,
-                    status: status.into(),
-                }
+                BackendStatusView { backend: backend_str, status: status.into() }
             })
             .collect();
         Ok(backends)
@@ -153,31 +147,32 @@ impl BackendService {
         let backend = BackendId::from_str(&backend_id)
             .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
         let canonical_backend = backend.to_string();
-        let channel = self
-            .model_state
-            .grpc()
-            .backend_channel(&canonical_backend)
-            .ok_or_else(|| {
+        let channel =
+            self.model_state.grpc().backend_channel(&canonical_backend).ok_or_else(|| {
                 ServerError::BackendNotReady(format!(
                     "{canonical_backend} gRPC endpoint is not configured"
                 ))
             })?;
-        let grpc_req = pb::ReloadLibraryRequest {
-            lib_path: req.lib_path,
-            model_path: req.model_path,
-            num_workers: req.num_workers,
-            context_length: 0,
+        let reload_spec = RuntimeModelReloadSpec {
+            lib_path: PathBuf::from(req.lib_path),
+            load: RuntimeModelLoadSpec {
+                model_path: PathBuf::from(req.model_path),
+                num_workers: req.num_workers,
+                context_length: None,
+                diffusion: None,
+            },
         };
-        let response = rpc::client::reload_library(channel, &canonical_backend, grpc_req)
-            .await
-            .map_err(|error| {
-                ServerError::Internal(format!("grpc reload_library failed: {error}"))
-            })?;
+        let grpc_req = convert::encode_reload_library_request(&reload_spec);
+        let response =
+            rpc::client::reload_library(channel, &canonical_backend, grpc_req).await.map_err(
+                |error| ServerError::Internal(format!("grpc reload_library failed: {error}")),
+            )?;
 
-        Ok(BackendStatusView {
-            backend: response.backend,
-            status: response.status,
-        })
+        let status = convert::decode_model_status_response(&response).map_err(|error| {
+            ServerError::Internal(format!("invalid model status response from runtime: {error}"))
+        })?;
+
+        Ok(BackendStatusView { backend: status.backend.to_string(), status: status.status })
     }
 }
 
@@ -191,12 +186,11 @@ fn windows_download_spec(backend_id: BackendId) -> Option<WindowsDownloadSpec> {
         BackendId::GgmlWhisper => Some(("ggml-org", "whisper.cpp", "v1.8.3", |_| {
             "whisper-cublas-12.4.0-bin-x64.zip".to_string()
         })),
-        BackendId::GgmlDiffusion => Some((
-            "leejet",
-            "stable-diffusion.cpp",
-            "master-504-636d3cb",
-            |version: &str| format!("stable-diffusion-{version}-bin-win-cpu-x64.zip"),
-        )),
+        BackendId::GgmlDiffusion => {
+            Some(("leejet", "stable-diffusion.cpp", "master-504-636d3cb", |version: &str| {
+                format!("stable-diffusion-{version}-bin-win-cpu-x64.zip")
+            }))
+        }
         BackendId::CandleDiffusion
         | BackendId::CandleLlama
         | BackendId::CandleWhisper
@@ -241,9 +235,8 @@ pub(crate) async fn run_libfetch_download(
     let asset_name = input["asset_name"].as_str().map(str::to_owned);
 
     if owner.is_empty() || repo.is_empty() || target_dir.is_empty() {
-        if let Err(db_error) = operation
-            .mark_failed("owner, repo, and target_dir are required")
-            .await
+        if let Err(db_error) =
+            operation.mark_failed("owner, repo, and target_dir are required").await
         {
             warn!(task_id = %operation_id, error = %db_error, "failed to persist lib download validation error");
         }
@@ -311,9 +304,6 @@ mod test {
         assert_eq!(owner, "leejet");
         assert_eq!(repo, "stable-diffusion.cpp");
         assert_eq!(tag, "master-504-636d3cb");
-        assert_eq!(
-            asset(tag),
-            "stable-diffusion-master-504-636d3cb-bin-win-cpu-x64.zip"
-        );
+        assert_eq!(asset(tag), "stable-diffusion-master-504-636d3cb-bin-win-cpu-x64.zip");
     }
 }

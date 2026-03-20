@@ -1,11 +1,13 @@
 use chrono::Utc;
 use futures::{stream, StreamExt};
+use slab_proto::convert;
+use slab_types::inference::TextGenerationRequest;
 use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{ChatStreamChunk, ConversationMessage as DomainConversationMessage};
 use crate::error::ServerError;
-use crate::infra::rpc::{self, pb};
+use crate::infra::rpc;
 
 use super::GeneratedChatOutput;
 
@@ -19,28 +21,29 @@ pub(super) async fn create_chat_completion(
     stream: bool,
 ) -> Result<GeneratedChatOutput, ServerError> {
     let prompt = build_prompt(messages);
-    let request = pb::ChatRequest {
+    let request = TextGenerationRequest {
         prompt,
-        model: model.to_owned(),
-        max_tokens,
-        temperature,
-        session_key: session_id.unwrap_or_default().to_owned(),
+        system_prompt: None,
+        max_tokens: Some(max_tokens),
+        temperature: Some(temperature),
+        top_p: None,
+        session_key: session_id.map(str::to_owned),
+        stream,
+        options: Default::default(),
     };
+    let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
 
     let llama_channel = state.grpc().chat_channel().ok_or_else(|| {
         ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
     })?;
 
     if stream {
-        let usage_guard = state
-            .auto_unload()
-            .acquire_for_inference(super::LLAMA_BACKEND_ID)
-            .await
-            .map_err(|error| {
-                ServerError::BackendNotReady(format!("llama backend not ready: {error}"))
-            })?;
+        let usage_guard =
+            state.auto_unload().acquire_for_inference(super::LLAMA_BACKEND_ID).await.map_err(
+                |error| ServerError::BackendNotReady(format!("llama backend not ready: {error}")),
+            )?;
 
-        let backend_stream = rpc::client::chat_stream(llama_channel.clone(), request.clone())
+        let backend_stream = rpc::client::chat_stream(llama_channel.clone(), grpc_request.clone())
             .await
             .map_err(|error| ServerError::Internal(format!("grpc chat stream failed: {error}")))?;
 
@@ -63,9 +66,7 @@ pub(super) async fn create_chat_completion(
         });
 
         let sse_stream = token_stream
-            .chain(stream::once(async {
-                ChatStreamChunk::Data("[DONE]".into())
-            }))
+            .chain(stream::once(async { ChatStreamChunk::Data("[DONE]".into()) }))
             .map(move |item| {
                 // Keep the usage guard alive for the whole SSE stream lifetime.
                 let _keep_alive = &usage_guard;
@@ -75,15 +76,12 @@ pub(super) async fn create_chat_completion(
         return Ok(GeneratedChatOutput::Stream(Box::pin(sse_stream)));
     }
 
-    let _usage_guard = state
-        .auto_unload()
-        .acquire_for_inference(super::LLAMA_BACKEND_ID)
-        .await
-        .map_err(|error| {
-            ServerError::BackendNotReady(format!("llama backend not ready: {error}"))
-        })?;
+    let _usage_guard =
+        state.auto_unload().acquire_for_inference(super::LLAMA_BACKEND_ID).await.map_err(
+            |error| ServerError::BackendNotReady(format!("llama backend not ready: {error}")),
+        )?;
 
-    let generated = rpc::client::chat(llama_channel, request)
+    let generated = rpc::client::chat(llama_channel, grpc_request)
         .await
         .map_err(|error| ServerError::Internal(format!("grpc chat failed: {error}")))?;
 

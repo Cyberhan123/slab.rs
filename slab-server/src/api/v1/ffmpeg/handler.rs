@@ -14,10 +14,7 @@ use crate::domain::services::FfmpegService;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
-#[openapi(
-    paths(convert),
-    components(schemas(ConvertRequest, OperationAcceptedResponse))
-)]
+#[openapi(paths(convert), components(schemas(ConvertRequest, OperationAcceptedResponse)))]
 pub struct FfmpegApi;
 
 pub fn router() -> Router<Arc<AppState>> {
@@ -39,10 +36,7 @@ async fn convert(
     State(service): State<FfmpegService>,
     ValidatedJson(req): ValidatedJson<ConvertRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
-    if !tokio::fs::try_exists(&req.source_path)
-        .await
-        .unwrap_or(false)
-    {
+    if !tokio::fs::try_exists(&req.source_path).await.unwrap_or(false) {
         return Err(ServerError::BadRequest(format!(
             "source_path '{}' does not exist or is not accessible",
             req.source_path

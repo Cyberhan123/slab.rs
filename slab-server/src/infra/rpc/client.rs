@@ -148,10 +148,8 @@ fn log_grpc_error(rpc: &str, request_id: &str, status: &tonic::Status) {
 pub async fn chat(channel: Channel, req: pb::ChatRequest) -> anyhow::Result<String> {
     let (mut client, request_id) = llama_client(channel);
     debug!(request_id = %request_id, "sending gRPC chat request");
-    let response = client
-        .chat(req)
-        .await
-        .inspect_err(|s| log_grpc_error("chat", &request_id, s))?;
+    let response =
+        client.chat(req).await.inspect_err(|s| log_grpc_error("chat", &request_id, s))?;
     Ok(response.into_inner().text)
 }
 
@@ -285,22 +283,10 @@ pub async fn reload_library(
             grpc_call!("reload_library", llama_client, channel, reload_library, req)
         }
         BackendKind::Whisper => {
-            grpc_call!(
-                "reload_library",
-                whisper_client,
-                channel,
-                reload_library,
-                req
-            )
+            grpc_call!("reload_library", whisper_client, channel, reload_library, req)
         }
         BackendKind::Diffusion => {
-            grpc_call!(
-                "reload_library",
-                diffusion_client,
-                channel,
-                reload_library,
-                req
-            )
+            grpc_call!("reload_library", diffusion_client, channel, reload_library, req)
         }
     };
 

@@ -23,9 +23,7 @@ where
     type Rejection = ServerError;
 
     async fn from_request(req: Request, state: &S) -> Result<Self, Self::Rejection> {
-        let Json(value) = Json::<T>::from_request(req, state)
-            .await
-            .map_err(map_json_rejection)?;
+        let Json(value) = Json::<T>::from_request(req, state).await.map_err(map_json_rejection)?;
         Ok(Self(validate(value)?))
     }
 }
@@ -44,9 +42,8 @@ where
         parts: &mut axum::http::request::Parts,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let Query(value) = Query::<T>::from_request_parts(parts, state)
-            .await
-            .map_err(map_query_rejection)?;
+        let Query(value) =
+            Query::<T>::from_request_parts(parts, state).await.map_err(map_query_rejection)?;
         Ok(Self(validate(value)?))
     }
 }
@@ -76,10 +73,7 @@ pub fn validate_absolute_path(value: &str) -> Result<(), ValidationError> {
         return Err(ValidationError::new("absolute_path"));
     }
 
-    if path
-        .components()
-        .any(|component| component == std::path::Component::ParentDir)
-    {
+    if path.components().any(|component| component == std::path::Component::ParentDir) {
         return Err(ValidationError::new("path_traversal"));
     }
 
@@ -87,9 +81,7 @@ pub fn validate_absolute_path(value: &str) -> Result<(), ValidationError> {
 }
 pub fn validate_backend_id(value: &str) -> Result<(), ValidationError> {
     validate_non_blank(value)?;
-    BackendId::from_str(value)
-        .map(|_| ())
-        .map_err(|_| ValidationError::new("backend_id"))
+    BackendId::from_str(value).map(|_| ()).map_err(|_| ValidationError::new("backend_id"))
 }
 
 pub fn validate_chat_role(value: &str) -> Result<(), ValidationError> {

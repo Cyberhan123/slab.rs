@@ -18,10 +18,7 @@ pub struct SetupService {
 
 impl SetupService {
     pub fn new(model_state: ModelState, worker_state: WorkerState) -> Self {
-        Self {
-            model_state,
-            worker_state,
-        }
+        Self { model_state, worker_state }
     }
 
     /// Return the current environment status: FFmpeg presence, backend
@@ -47,11 +44,7 @@ impl SetupService {
             .map(|b| {
                 let name = b.to_string();
                 let available = self.model_state.grpc().has_backend(&name);
-                ComponentStatus {
-                    name,
-                    installed: available,
-                    version: None,
-                }
+                ComponentStatus { name, installed: available, version: None }
             })
             .collect();
 
@@ -90,10 +83,7 @@ impl SetupService {
         &self,
         cmd: CompleteSetupCommand,
     ) -> Result<EnvironmentStatus, ServerError> {
-        self.model_state
-            .pmid()
-            .set_setup_initialized(cmd.initialized)
-            .await?;
+        self.model_state.pmid().set_setup_initialized(cmd.initialized).await?;
 
         info!(initialized = cmd.initialized, "setup state persisted");
         self.environment_status().await
@@ -112,10 +102,8 @@ async fn run_ffmpeg_download(operation: OperationContext, ffmpeg_dir: Option<Str
 
     // Resolve destination: use settings-configured dir or fall back to the
     // sidecar directory (next to the server executable).
-    let destination: Option<PathBuf> = ffmpeg_dir
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(PathBuf::from);
+    let destination: Option<PathBuf> =
+        ffmpeg_dir.as_deref().filter(|s| !s.is_empty()).map(PathBuf::from);
 
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<PathBuf> {
         // Skip if already installed (idempotent).

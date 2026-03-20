@@ -34,11 +34,7 @@ impl TryFrom<VideoGenerationRequest> for VideoGenerationCommand {
     type Error = ServerError;
 
     fn try_from(request: VideoGenerationRequest) -> Result<Self, Self::Error> {
-        let init_image = request
-            .init_image
-            .as_deref()
-            .map(decode_init_image)
-            .transpose()?;
+        let init_image = request.init_image.as_deref().map(decode_init_image).transpose()?;
 
         Ok(Self {
             model: request.model,
@@ -66,19 +62,12 @@ fn decode_init_image(data_uri: &str) -> Result<DecodedVideoInitImage, ServerErro
     } else {
         data_uri
     };
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(b64)
-        .map_err(|error| {
-            ServerError::BadRequest(format!("init_image base64 decode failed: {error}"))
-        })?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|error| {
+        ServerError::BadRequest(format!("init_image base64 decode failed: {error}"))
+    })?;
     let image = image::load_from_memory(&bytes)
         .map_err(|error| ServerError::BadRequest(format!("init_image decode failed: {error}")))?;
     let rgb = image.to_rgb8();
     let (width, height) = rgb.dimensions();
-    Ok(DecodedVideoInitImage {
-        data: rgb.into_raw(),
-        width,
-        height,
-        channels: 3,
-    })
+    Ok(DecodedVideoInitImage { data: rgb.into_raw(), width, height, channels: 3 })
 }

@@ -44,10 +44,7 @@ pub(crate) fn base_property_validation_schema(
     };
 
     let mut schema = Map::new();
-    schema.insert(
-        "$schema".to_owned(),
-        json!("https://json-schema.org/draft/2020-12/schema"),
-    );
+    schema.insert("$schema".to_owned(), json!("https://json-schema.org/draft/2020-12/schema"));
     schema.insert("type".to_owned(), type_value);
     schema
 }

@@ -48,10 +48,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
         .route("/settings", get(list_settings))
         .route("/settings/{pmid}", get(get_setting).put(update_setting))
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::auth_middleware,
-        ))
+        .route_layer(middleware::from_fn_with_state(state.clone(), auth::auth_middleware))
         .with_state(state)
 }
 

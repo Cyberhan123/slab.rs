@@ -39,11 +39,7 @@ fn default_true() -> bool {
 
 impl From<ComponentStatus> for ComponentStatusResponse {
     fn from(s: ComponentStatus) -> Self {
-        Self {
-            name: s.name,
-            installed: s.installed,
-            version: s.version,
-        }
+        Self { name: s.name, installed: s.installed, version: s.version }
     }
 }
 
@@ -59,8 +55,6 @@ impl From<EnvironmentStatus> for SetupStatusResponse {
 
 impl From<CompleteSetupRequest> for CompleteSetupCommand {
     fn from(r: CompleteSetupRequest) -> Self {
-        Self {
-            initialized: r.initialized,
-        }
+        Self { initialized: r.initialized }
     }
 }

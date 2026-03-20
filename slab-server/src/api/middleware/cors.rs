@@ -10,22 +10,13 @@ pub fn cors_layer(state: Arc<AppState>) -> CorsLayer {
             .filter_map(|s| s.trim().parse::<axum::http::HeaderValue>().ok())
             .collect();
         if origins.is_empty() {
-            CorsLayer::new()
-                .allow_origin(Any)
-                .allow_headers(Any)
-                .allow_methods(Any)
+            CorsLayer::new().allow_origin(Any).allow_headers(Any).allow_methods(Any)
         } else {
-            CorsLayer::new()
-                .allow_origin(origins)
-                .allow_headers(Any)
-                .allow_methods(Any)
+            CorsLayer::new().allow_origin(origins).allow_headers(Any).allow_methods(Any)
         }
     } else {
         // Wildcard – suitable for development; set SLAB_CORS_ORIGINS in production.
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_headers(Any)
-            .allow_methods(Any)
+        CorsLayer::new().allow_origin(Any).allow_headers(Any).allow_methods(Any)
     };
     cors
 }

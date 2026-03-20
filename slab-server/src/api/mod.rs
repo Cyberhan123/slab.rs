@@ -21,9 +21,7 @@ use utoipa_swagger_ui::SwaggerUi;
 
 /// Build the HTTP gateway router used by supervisor mode.
 pub fn build(state: Arc<AppState>) -> Router {
-    let api_router = Router::new()
-        .merge(health::router())
-        .nest("/v1", v1::router(state.clone()));
+    let api_router = Router::new().merge(health::router()).nest("/v1", v1::router(state.clone()));
 
     let mut app = Router::new().merge(api_router);
     let api_doc = doc::get_docs();
@@ -33,9 +31,6 @@ pub fn build(state: Arc<AppState>) -> Router {
     }
 
     app.layer(ServiceBuilder::new().layer(cors::cors_layer(state.clone())))
-        .layer(axum_middleware::from_fn_with_state(
-            state.clone(),
-            trace::trace_middleware,
-        ))
+        .layer(axum_middleware::from_fn_with_state(state.clone(), trace::trace_middleware))
         .with_state(state)
 }

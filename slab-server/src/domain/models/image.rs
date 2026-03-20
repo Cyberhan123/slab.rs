@@ -56,11 +56,9 @@ impl TryFrom<ImageGenerationRequest> for ImageGenerationCommand {
         let mode = ImageGenerationMode::from(request.mode);
         let init_image = match mode {
             ImageGenerationMode::Txt2Img => None,
-            ImageGenerationMode::Img2Img => request
-                .init_image
-                .as_deref()
-                .map(decode_init_image)
-                .transpose()?,
+            ImageGenerationMode::Img2Img => {
+                request.init_image.as_deref().map(decode_init_image).transpose()?
+            }
         };
 
         Ok(Self {
@@ -92,21 +90,14 @@ fn decode_init_image(data_uri: &str) -> Result<DecodedImageInput, ServerError> {
         data_uri
     };
 
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(b64)
-        .map_err(|error| {
-            ServerError::BadRequest(format!("init_image base64 decode failed: {error}"))
-        })?;
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|error| {
+        ServerError::BadRequest(format!("init_image base64 decode failed: {error}"))
+    })?;
 
     let image = image::load_from_memory(&bytes)
         .map_err(|error| ServerError::BadRequest(format!("init_image decode failed: {error}")))?;
 
     let rgb = image.to_rgb8();
     let (width, height) = rgb.dimensions();
-    Ok(DecodedImageInput {
-        data: rgb.into_raw(),
-        width,
-        height,
-        channels: 3,
-    })
+    Ok(DecodedImageInput { data: rgb.into_raw(), width, height, channels: 3 })
 }

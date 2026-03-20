@@ -19,13 +19,7 @@ impl ModelState {
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
-        Self {
-            config,
-            pmid,
-            store,
-            grpc,
-            model_auto_unload,
-        }
+        Self { config, pmid, store, grpc, model_auto_unload }
     }
 
     pub fn config(&self) -> &Arc<crate::context::AppConfig> {

@@ -37,10 +37,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/backends/status", get(backend_status))
         .route("/backends/download", post(download_lib))
         .route("/backends/reload", post(reload_lib))
-        .route_layer(middleware::from_fn_with_state(
-            state.clone(),
-            auth::auth_middleware,
-        ))
+        .route_layer(middleware::from_fn_with_state(state.clone(), auth::auth_middleware))
         .with_state(state)
 }
 
@@ -74,12 +71,7 @@ async fn backend_status(
 async fn list_backends(
     State(service): State<BackendService>,
 ) -> Result<Json<BackendListResponse>, ServerError> {
-    let backends = service
-        .list_backends()
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    let backends = service.list_backends().await?.into_iter().map(Into::into).collect();
     Ok(Json(BackendListResponse { backends }))
 }
 

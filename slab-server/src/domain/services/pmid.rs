@@ -21,17 +21,11 @@ pub struct PmidService {
 impl PmidService {
     pub async fn load(settings: Arc<SettingsProvider>) -> Result<Self, ServerError> {
         let config = load_config(&settings).await?;
-        Ok(Self {
-            settings,
-            config: Arc::new(RwLock::new(config)),
-        })
+        Ok(Self { settings, config: Arc::new(RwLock::new(config)) })
     }
 
     pub fn config(&self) -> PmidConfig {
-        self.config
-            .read()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .clone()
+        self.config.read().unwrap_or_else(|poisoned| poisoned.into_inner()).clone()
     }
 
     pub async fn document(&self) -> SettingsDocumentView {
@@ -44,10 +38,7 @@ impl PmidService {
 
     pub async fn refresh(&self) -> Result<PmidConfig, ServerError> {
         let next = load_config(&self.settings).await?;
-        *self
-            .config
-            .write()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = next.clone();
+        *self.config.write().unwrap_or_else(|poisoned| poisoned.into_inner()) = next.clone();
         Ok(next)
     }
 
@@ -82,18 +73,12 @@ async fn load_config(settings: &SettingsProvider) -> Result<PmidConfig, ServerEr
             initialized: settings.get_bool(PMID.setup.initialized()).await?,
             ffmpeg: SetupFfmpegConfig {
                 auto_download: settings.get_bool(PMID.setup.ffmpeg.auto_download()).await?,
-                dir: settings
-                    .get_optional_string(PMID.setup.ffmpeg.dir())
-                    .await?,
+                dir: settings.get_optional_string(PMID.setup.ffmpeg.dir()).await?,
             },
             backends: SetupBackendsConfig {
-                dir: settings
-                    .get_optional_string(PMID.setup.backends.dir())
-                    .await?,
+                dir: settings.get_optional_string(PMID.setup.backends.dir()).await?,
                 ggml_llama: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.ggml_llama.tag())
-                        .await?,
+                    tag: settings.get_optional_string(PMID.setup.backends.ggml_llama.tag()).await?,
                     asset: settings
                         .get_optional_string(PMID.setup.backends.ggml_llama.asset())
                         .await?,
@@ -139,19 +124,13 @@ async fn load_config(settings: &SettingsProvider) -> Result<PmidConfig, ServerEr
                         .await?,
                 },
                 onnx: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.onnx.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.onnx.asset())
-                        .await?,
+                    tag: settings.get_optional_string(PMID.setup.backends.onnx.tag()).await?,
+                    asset: settings.get_optional_string(PMID.setup.backends.onnx.asset()).await?,
                 },
             },
         },
         runtime: RuntimeConfig {
-            model_cache_dir: settings
-                .get_optional_string(PMID.runtime.model_cache_dir())
-                .await?,
+            model_cache_dir: settings.get_optional_string(PMID.runtime.model_cache_dir()).await?,
             llama: RuntimeLlamaConfig {
                 num_workers: required_u32(settings, PMID.runtime.llama.num_workers()).await?,
                 context_length: settings
@@ -165,44 +144,26 @@ async fn load_config(settings: &SettingsProvider) -> Result<PmidConfig, ServerEr
                 num_workers: required_u32(settings, PMID.runtime.diffusion.num_workers()).await?,
             },
             model_auto_unload: RuntimeModelAutoUnloadConfig {
-                enabled: settings
-                    .get_bool(PMID.runtime.model_auto_unload.enabled())
-                    .await?,
+                enabled: settings.get_bool(PMID.runtime.model_auto_unload.enabled()).await?,
                 idle_minutes: required_u32(settings, PMID.runtime.model_auto_unload.idle_minutes())
                     .await?,
             },
         },
-        chat: ChatConfig {
-            providers: settings.get_chat_providers(PMID.chat.providers()).await?,
-        },
+        chat: ChatConfig { providers: settings.get_chat_providers(PMID.chat.providers()).await? },
         diffusion: DiffusionConfig {
             paths: DiffusionPathsConfig {
-                model: settings
-                    .get_optional_string(PMID.diffusion.paths.model())
-                    .await?,
-                vae: settings
-                    .get_optional_string(PMID.diffusion.paths.vae())
-                    .await?,
-                taesd: settings
-                    .get_optional_string(PMID.diffusion.paths.taesd())
-                    .await?,
+                model: settings.get_optional_string(PMID.diffusion.paths.model()).await?,
+                vae: settings.get_optional_string(PMID.diffusion.paths.vae()).await?,
+                taesd: settings.get_optional_string(PMID.diffusion.paths.taesd()).await?,
                 lora_model_dir: settings
                     .get_optional_string(PMID.diffusion.paths.lora_model_dir())
                     .await?,
-                clip_l: settings
-                    .get_optional_string(PMID.diffusion.paths.clip_l())
-                    .await?,
-                clip_g: settings
-                    .get_optional_string(PMID.diffusion.paths.clip_g())
-                    .await?,
-                t5xxl: settings
-                    .get_optional_string(PMID.diffusion.paths.t5xxl())
-                    .await?,
+                clip_l: settings.get_optional_string(PMID.diffusion.paths.clip_l()).await?,
+                clip_g: settings.get_optional_string(PMID.diffusion.paths.clip_g()).await?,
+                t5xxl: settings.get_optional_string(PMID.diffusion.paths.t5xxl()).await?,
             },
             performance: DiffusionPerformanceConfig {
-                flash_attn: settings
-                    .get_bool(PMID.diffusion.performance.flash_attn())
-                    .await?,
+                flash_attn: settings.get_bool(PMID.diffusion.performance.flash_attn()).await?,
                 keep_vae_on_cpu: settings
                     .get_bool(PMID.diffusion.performance.keep_vae_on_cpu())
                     .await?,
@@ -248,11 +209,7 @@ mod tests {
     #[tokio::test]
     async fn loads_typed_snapshot_from_settings_provider() {
         let path = temp_settings_path();
-        let settings = Arc::new(
-            SettingsProvider::load(path.clone())
-                .await
-                .expect("provider"),
-        );
+        let settings = Arc::new(SettingsProvider::load(path.clone()).await.expect("provider"));
 
         settings
             .update(
@@ -265,9 +222,7 @@ mod tests {
             .await
             .expect("set ffmpeg dir");
 
-        let service = PmidService::load(Arc::clone(&settings))
-            .await
-            .expect("pmid service");
+        let service = PmidService::load(Arc::clone(&settings)).await.expect("pmid service");
         let config = service.config();
 
         assert_eq!(config.setup.ffmpeg.dir.as_deref(), Some("C:/ffmpeg"));
@@ -278,22 +233,13 @@ mod tests {
     #[tokio::test]
     async fn update_setting_refreshes_cached_snapshot() {
         let path = temp_settings_path();
-        let settings = Arc::new(
-            SettingsProvider::load(path.clone())
-                .await
-                .expect("provider"),
-        );
-        let service = PmidService::load(Arc::clone(&settings))
-            .await
-            .expect("pmid service");
+        let settings = Arc::new(SettingsProvider::load(path.clone()).await.expect("provider"));
+        let service = PmidService::load(Arc::clone(&settings)).await.expect("pmid service");
 
         service
             .update_setting(
                 PMID.setup.initialized(),
-                UpdateSettingCommand {
-                    op: UpdateSettingOperation::Set,
-                    value: Some(json!(true)),
-                },
+                UpdateSettingCommand { op: UpdateSettingOperation::Set, value: Some(json!(true)) },
             )
             .await
             .expect("update");
@@ -302,10 +248,7 @@ mod tests {
 
         let file: SettingsValuesFile =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
-        assert_eq!(
-            file.values.get(PMID.setup.initialized().as_str()),
-            Some(&json!(true))
-        );
+        assert_eq!(file.values.get(PMID.setup.initialized().as_str()), Some(&json!(true)));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
@@ -313,14 +256,8 @@ mod tests {
     #[tokio::test]
     async fn refresh_picks_up_external_settings_changes() {
         let path = temp_settings_path();
-        let settings = Arc::new(
-            SettingsProvider::load(path.clone())
-                .await
-                .expect("provider"),
-        );
-        let _service = PmidService::load(Arc::clone(&settings))
-            .await
-            .expect("pmid service");
+        let settings = Arc::new(SettingsProvider::load(path.clone()).await.expect("provider"));
+        let _service = PmidService::load(Arc::clone(&settings)).await.expect("pmid service");
 
         fs::write(
             &path,
@@ -337,16 +274,11 @@ mod tests {
 
         let reloaded_settings =
             Arc::new(SettingsProvider::load(path.clone()).await.expect("reload"));
-        let refreshed_service = PmidService::load(reloaded_settings)
-            .await
-            .expect("reloaded pmid service");
+        let refreshed_service =
+            PmidService::load(reloaded_settings).await.expect("reloaded pmid service");
 
         assert_eq!(
-            refreshed_service
-                .config()
-                .runtime
-                .model_cache_dir
-                .as_deref(),
+            refreshed_service.config().runtime.model_cache_dir.as_deref(),
             Some("C:/models")
         );
 
@@ -356,28 +288,16 @@ mod tests {
     #[tokio::test]
     async fn set_setup_initialized_refreshes_cached_snapshot() {
         let path = temp_settings_path();
-        let settings = Arc::new(
-            SettingsProvider::load(path.clone())
-                .await
-                .expect("provider"),
-        );
-        let service = PmidService::load(Arc::clone(&settings))
-            .await
-            .expect("pmid service");
+        let settings = Arc::new(SettingsProvider::load(path.clone()).await.expect("provider"));
+        let service = PmidService::load(Arc::clone(&settings)).await.expect("pmid service");
 
-        service
-            .set_setup_initialized(true)
-            .await
-            .expect("set setup initialized");
+        service.set_setup_initialized(true).await.expect("set setup initialized");
 
         assert!(service.config().setup.initialized);
 
         let file: SettingsValuesFile =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
-        assert_eq!(
-            file.values.get(PMID.setup.initialized().as_str()),
-            Some(&json!(true))
-        );
+        assert_eq!(file.values.get(PMID.setup.initialized().as_str()), Some(&json!(true)));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
@@ -385,22 +305,13 @@ mod tests {
     #[tokio::test]
     async fn update_setting_uses_provider_not_found_for_unknown_pmid() {
         let path = temp_settings_path();
-        let settings = Arc::new(
-            SettingsProvider::load(path.clone())
-                .await
-                .expect("provider"),
-        );
-        let service = PmidService::load(Arc::clone(&settings))
-            .await
-            .expect("pmid service");
+        let settings = Arc::new(SettingsProvider::load(path.clone()).await.expect("provider"));
+        let service = PmidService::load(Arc::clone(&settings)).await.expect("pmid service");
 
         let error = service
             .update_setting(
                 "missing.setting",
-                UpdateSettingCommand {
-                    op: UpdateSettingOperation::Set,
-                    value: Some(json!(true)),
-                },
+                UpdateSettingCommand { op: UpdateSettingOperation::Set, value: Some(json!(true)) },
             )
             .await
             .expect_err("missing pmid should fail");

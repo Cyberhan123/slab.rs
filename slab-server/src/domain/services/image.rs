@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use serde::Deserialize;
+use base64::Engine as _;
+use slab_proto::convert;
+use slab_types::diffusion::DiffusionImageRequest;
+use slab_types::media::RawImageInput;
 use tracing::{debug, warn};
 
 use crate::context::{SubmitOperation, WorkerState};
@@ -15,16 +18,6 @@ pub struct ImageService {
     state: WorkerState,
 }
 
-#[derive(Deserialize)]
-struct DiffusionImagePayload {
-    images: Vec<DiffusionImageEntry>,
-}
-
-#[derive(Deserialize)]
-struct DiffusionImageEntry {
-    image: String,
-}
-
 impl ImageService {
     pub fn new(state: WorkerState) -> Self {
         Self { state }
@@ -34,23 +27,10 @@ impl ImageService {
         &self,
         req: ImageGenerationCommand,
     ) -> Result<AcceptedOperation, ServerError> {
-        let effective_init_image = if req.mode == ImageGenerationMode::Img2Img {
-            req.init_image.clone()
-        } else {
-            None
-        };
-        let effective_strength = if req.mode == ImageGenerationMode::Img2Img {
-            req.strength
-        } else {
-            None
-        };
-
-        let (init_image_bytes, init_image_width, init_image_height, init_image_channels) =
-            if let Some(image) = effective_init_image {
-                (image.data, image.width, image.height, image.channels)
-            } else {
-                (Vec::new(), 0u32, 0u32, 3u32)
-            };
+        let effective_init_image =
+            if req.mode == ImageGenerationMode::Img2Img { req.init_image.clone() } else { None };
+        let effective_strength =
+            if req.mode == ImageGenerationMode::Img2Img { req.strength } else { None };
 
         debug!(
             model = %req.model,
@@ -87,27 +67,30 @@ impl ImageService {
         })
         .to_string();
 
-        let grpc_req = pb::ImageRequest {
-            model: req.model.clone(),
+        let shared_request = DiffusionImageRequest {
             prompt: req.prompt.clone(),
-            negative_prompt: req.negative_prompt.clone().unwrap_or_default(),
-            n: req.n,
+            negative_prompt: req.negative_prompt.clone(),
+            count: req.n,
             width: req.width,
             height: req.height,
-            cfg_scale: req.cfg_scale.unwrap_or(7.0),
-            guidance: req.guidance.unwrap_or(3.5),
-            sample_steps: req.steps.unwrap_or(20),
-            seed: req.seed.unwrap_or(42),
-            sample_method: req.sample_method.clone().unwrap_or_default(),
-            scheduler: req.scheduler.clone().unwrap_or_default(),
-            clip_skip: req.clip_skip.unwrap_or(0),
-            strength: effective_strength.unwrap_or(0.75),
-            eta: req.eta.unwrap_or(0.0),
-            init_image_data: init_image_bytes,
-            init_image_width,
-            init_image_height,
-            init_image_channels,
+            cfg_scale: req.cfg_scale,
+            guidance: req.guidance,
+            steps: req.steps,
+            seed: req.seed,
+            sample_method: req.sample_method.clone(),
+            scheduler: req.scheduler.clone(),
+            clip_skip: req.clip_skip,
+            strength: effective_strength,
+            eta: req.eta,
+            init_image: effective_init_image.map(|image| RawImageInput {
+                data: image.data,
+                width: image.width,
+                height: image.height,
+                channels: image.channels.clamp(1, u8::MAX as u32) as u8,
+            }),
+            options: Default::default(),
         };
+        let grpc_req = convert::encode_diffusion_image_request(req.model.clone(), &shared_request);
 
         let model_auto_unload = Arc::clone(self.state.auto_unload());
         let generate_image_channel_for_spawn = generate_image_channel;
@@ -137,24 +120,33 @@ impl ImageService {
 
                     match rpc_result {
                         Ok(images_json) => {
-                            let payload: DiffusionImagePayload =
-                                match serde_json::from_slice(&images_json) {
-                                    Ok(value) => value,
-                                    Err(error) => {
-                                        let message =
-                                            format!("invalid JSON from diffusion backend: {error}");
-                                        debug!(task_id = %operation_id, error = %error, "failed to parse image JSON from backend");
-                                        if let Err(db_error) = operation.mark_failed(&message).await {
-                                            warn!(task_id = %operation_id, error = %db_error, "failed to update task status after JSON parse error");
-                                        }
-                                        return;
+                            let payload = match convert::decode_diffusion_image_response(
+                                &pb::ImageResponse { images_json },
+                            ) {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    let message = format!(
+                                        "invalid diffusion image response payload: {error}"
+                                    );
+                                    debug!(task_id = %operation_id, error = %error, "failed to decode image response from backend");
+                                    if let Err(db_error) = operation.mark_failed(&message).await {
+                                        warn!(task_id = %operation_id, error = %db_error, "failed to update task status after image decode error");
                                     }
-                                };
+                                    return;
+                                }
+                            };
 
                             let data_uris: Vec<String> = payload
                                 .images
                                 .into_iter()
-                                .map(|image| format!("data:image/png;base64,{}", image.image))
+                                .map(|image| {
+                                    format!(
+                                        "data:image/png;base64,{}",
+                                        base64::engine::general_purpose::STANDARD.encode(
+                                            image.bytes
+                                        )
+                                    )
+                                })
                                 .collect();
 
                             if data_uris.is_empty() {

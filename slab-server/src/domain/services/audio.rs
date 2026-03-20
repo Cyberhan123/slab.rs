@@ -38,11 +38,7 @@ impl AudioService {
             ServerError::BackendNotReady("whisper gRPC endpoint is not configured".into())
         })?;
 
-        let grpc_req = pb::TranscribeRequest {
-            path: req.path.clone(),
-            vad,
-            decode,
-        };
+        let grpc_req = pb::TranscribeRequest { path: req.path.clone(), vad, decode };
 
         let model_auto_unload = Arc::clone(self.state.auto_unload());
         let transcribe_channel_for_spawn = transcribe_channel;
@@ -126,11 +122,7 @@ fn build_vad_request(
         samples_overlap: vad.samples_overlap,
     });
 
-    Ok(Some(pb::TranscribeVadOptions {
-        enabled: true,
-        model_path: model_path.to_owned(),
-        params,
-    }))
+    Ok(Some(pb::TranscribeVadOptions { enabled: true, model_path: model_path.to_owned(), params }))
 }
 
 fn build_decode_request(

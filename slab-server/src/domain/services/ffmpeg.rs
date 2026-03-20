@@ -115,10 +115,7 @@ mod test {
         let output_path = std::env::temp_dir()
             .join(format!(
                 "{}.{}",
-                source_path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .unwrap_or("output"),
+                source_path.file_stem().and_then(|stem| stem.to_str()).unwrap_or("output"),
                 output_format
             ))
             .to_string_lossy()

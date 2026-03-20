@@ -54,10 +54,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/models", get(list_models).post(create_model))
         .route("/models/import", post(import_model_config))
-        .route(
-            "/models/{id}",
-            get(get_model).put(update_model).delete(delete_model),
-        )
+        .route("/models/{id}", get(get_model).put(update_model).delete(delete_model))
         .route("/models/available", get(list_available_models))
         .route("/models/load", post(load_model))
         .route("/models/unload", post(unload_model))
@@ -143,9 +140,7 @@ async fn update_model(
     ValidatedJson(req): ValidatedJson<UpdateModelRequest>,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
     let params = validate(params)?;
-    Ok(Json(
-        service.update_model(&params.id, req.into()).await?.into(),
-    ))
+    Ok(Json(service.update_model(&params.id, req.into()).await?.into()))
 }
 
 #[utoipa::path(
@@ -188,12 +183,7 @@ async fn list_models(
     State(service): State<ModelService>,
     Query(query): Query<ListModelsQuery>,
 ) -> Result<Json<Vec<UnifiedModelResponse>>, ServerError> {
-    let items = service
-        .list_models(query.into())
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    let items = service.list_models(query.into()).await?.into_iter().map(Into::into).collect();
     Ok(Json(items))
 }
 

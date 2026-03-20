@@ -56,12 +56,7 @@ pub fn router() -> Router<Arc<AppState>> {
 async fn list_chat_models(
     State(service): State<ChatService>,
 ) -> Result<Json<Vec<ChatModelOption>>, ServerError> {
-    let items = service
-        .list_chat_models()
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    let items = service.list_chat_models().await?.into_iter().map(Into::into).collect();
     Ok(Json(items))
 }
 

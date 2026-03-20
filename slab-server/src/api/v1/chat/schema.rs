@@ -76,11 +76,7 @@ pub struct ChatThinkingConfig {
     #[serde(rename = "type")]
     pub mode: ChatThinkingType,
     /// Optional reasoning effort override when `type = enabled`.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        default,
-        alias = "reasoningEffort"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default, alias = "reasoningEffort")]
     pub reasoning_effort: Option<ChatReasoningEffort>,
     /// Optional verbosity override when `type = enabled`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -118,21 +114,13 @@ pub struct ChatCompletionRequest {
     pub max_tokens: Option<u32>,
     /// Sampling temperature in [0, 2].
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(
-        min = 0.0,
-        max = 2.0,
-        message = "temperature must be between 0.0 and 2.0"
-    ))]
+    #[validate(range(min = 0.0, max = 2.0, message = "temperature must be between 0.0 and 2.0"))]
     pub temperature: Option<f32>,
     /// Optional client-side thinking toggle. Accepted for compatibility with Ant Design X providers.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub thinking: Option<ChatThinkingConfig>,
     /// Optional provider reasoning effort override.
-    #[serde(
-        skip_serializing_if = "Option::is_none",
-        default,
-        alias = "reasoningEffort"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none", default, alias = "reasoningEffort")]
     pub reasoning_effort: Option<ChatReasoningEffort>,
     /// Optional provider verbosity override.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -191,10 +179,7 @@ pub struct ChatModelOption {
 
 impl From<ConversationMessage> for ChatMessage {
     fn from(message: ConversationMessage) -> Self {
-        Self {
-            role: message.role,
-            content: message.content,
-        }
+        Self { role: message.role, content: message.content }
     }
 }
 

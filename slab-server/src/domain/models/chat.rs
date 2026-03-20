@@ -110,19 +110,13 @@ pub struct ChatCompletionResult {
 
 impl From<ChatMessage> for ConversationMessage {
     fn from(message: ChatMessage) -> Self {
-        Self {
-            role: message.role,
-            content: message.content,
-        }
+        Self { role: message.role, content: message.content }
     }
 }
 
 impl From<db::ChatMessage> for ConversationMessage {
     fn from(message: db::ChatMessage) -> Self {
-        Self {
-            role: message.role,
-            content: message.content,
-        }
+        Self { role: message.role, content: message.content }
     }
 }
 
@@ -138,12 +132,10 @@ impl From<&ConversationMessage> for GenaiChatMessage {
 
 impl From<ChatCompletionRequest> for ChatCompletionCommand {
     fn from(request: ChatCompletionRequest) -> Self {
-        let reasoning_effort = request.reasoning_effort.map(Into::into).or_else(|| {
-            request
-                .thinking
-                .as_ref()
-                .and_then(reasoning_effort_from_thinking)
-        });
+        let reasoning_effort = request
+            .reasoning_effort
+            .map(Into::into)
+            .or_else(|| request.thinking.as_ref().and_then(reasoning_effort_from_thinking));
         let verbosity = request
             .verbosity
             .map(Into::into)
@@ -188,10 +180,9 @@ fn reasoning_effort_from_thinking(thinking: &ApiChatThinkingConfig) -> Option<Ch
     match thinking.mode {
         ApiChatThinkingType::Disabled => Some(ChatReasoningEffort::None),
         // Default enabled thinking to `medium` so a plain toggle still has effect.
-        ApiChatThinkingType::Enabled => thinking
-            .reasoning_effort
-            .map(Into::into)
-            .or(Some(ChatReasoningEffort::Medium)),
+        ApiChatThinkingType::Enabled => {
+            thinking.reasoning_effort.map(Into::into).or(Some(ChatReasoningEffort::Medium))
+        }
     }
 }
 
@@ -213,10 +204,7 @@ mod test {
         ChatCompletionRequest {
             id: None,
             model: "cloud/provider/model".to_owned(),
-            messages: vec![ChatMessage {
-                role: "user".to_owned(),
-                content: "hello".to_owned(),
-            }],
+            messages: vec![ChatMessage { role: "user".to_owned(), content: "hello".to_owned() }],
             stream: true,
             max_tokens: None,
             temperature: None,
@@ -237,10 +225,7 @@ mod test {
 
         let command = ChatCompletionCommand::from(request);
 
-        assert!(matches!(
-            command.reasoning_effort,
-            Some(ChatReasoningEffort::None)
-        ));
+        assert!(matches!(command.reasoning_effort, Some(ChatReasoningEffort::None)));
     }
 
     #[test]
@@ -254,10 +239,7 @@ mod test {
 
         let command = ChatCompletionCommand::from(request);
 
-        assert!(matches!(
-            command.reasoning_effort,
-            Some(ChatReasoningEffort::Medium)
-        ));
+        assert!(matches!(command.reasoning_effort, Some(ChatReasoningEffort::Medium)));
     }
 
     #[test]
@@ -273,10 +255,7 @@ mod test {
 
         let command = ChatCompletionCommand::from(request);
 
-        assert!(matches!(
-            command.reasoning_effort,
-            Some(ChatReasoningEffort::High)
-        ));
+        assert!(matches!(command.reasoning_effort, Some(ChatReasoningEffort::High)));
         assert!(matches!(command.verbosity, Some(ChatVerbosity::Low)));
     }
 }

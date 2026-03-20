@@ -1,3 +1,5 @@
+pub mod convert;
+
 pub mod slab {
     pub mod ipc {
         pub mod v1 {
