@@ -209,20 +209,16 @@ fn init_tracing(
                 )
                 .init();
         }
+    } else if log_json {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true))
+            .init();
     } else {
-        if log_json {
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(
-                    tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true),
-                )
-                .init();
-        } else {
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
-                .init();
-        }
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
+            .init();
     }
 
     Ok(guards)

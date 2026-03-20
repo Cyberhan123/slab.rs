@@ -1,17 +1,11 @@
 use crate::internal::engine;
 use slab_llama::Llama;
-use slab_llama::{
-    ChatMessage, LlamaBatch, LlamaContextParams, LlamaModel, LlamaModelParams, LlamaToken,
-};
+use slab_llama::{ChatMessage, LlamaContextParams, LlamaModel, LlamaModelParams};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use tracing::info;
-
-use crate::base::error::CoreError;
-use crate::internal::engine::tensor::Tensor;
-use crate::internal::engine::traits::{CausalLM, ModelLoadConfig, ModelLoader};
 
 use super::engine::LlamaInferenceEngine;
 use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
@@ -305,130 +299,5 @@ impl GGMLLlamaEngine {
     /// Unload the current model and stop all inference workers.
     pub fn unload(&self) -> Result<(), engine::EngineError> {
         Ok(self.do_unload()?)
-    }
-}
-
-// ── ModelLoader / CausalLM ────────────────────────────────────────────────────
-
-/// Load-time configuration for the GGML LLaMA engine.
-///
-/// Used as `<GGMLLlamaEngine as ModelLoader>::LoadConfig`.
-pub(crate) struct GgmlLlamaLoadConfig {
-    /// Path to the GGUF model file.
-    pub(crate) model_path: String,
-    /// Number of parallel inference workers (≥ 1).
-    ///
-    /// Values below 1 are clamped to 1 during [`ModelLoader::load`].
-    pub(crate) num_workers: usize,
-    /// KV-cache context window in tokens; `0` means use the backend default.
-    pub(crate) context_length: u32,
-}
-
-impl Default for GgmlLlamaLoadConfig {
-    fn default() -> Self {
-        Self { model_path: String::new(), num_workers: 1, context_length: 0 }
-    }
-}
-
-impl ModelLoadConfig for GgmlLlamaLoadConfig {}
-
-impl ModelLoader for GGMLLlamaEngine {
-    type LoadConfig = GgmlLlamaLoadConfig;
-
-    /// Load the GGML LLaMA model.
-    ///
-    /// Applies `context_length` to `n_ctx`, `n_batch`, and `n_ubatch` when
-    /// non-zero, matching the behaviour of the backend worker's `model.load`
-    /// handler.  `num_workers` is clamped to a minimum of 1.
-    ///
-    /// Replacement: `load_model_with_workers` clears both the inference engine
-    /// and the loaded model handle before activating the new model, so any
-    /// previously loaded model is safely replaced.
-    fn load(&self, config: GgmlLlamaLoadConfig) -> Result<(), CoreError> {
-        let mut ctx_params = LlamaContextParams::default();
-        if config.context_length > 0 {
-            let ctx_len = config.context_length;
-            ctx_params.n_ctx = ctx_len;
-            if ctx_params.n_batch > ctx_len {
-                ctx_params.n_batch = ctx_len;
-            }
-            if ctx_params.n_ubatch > ctx_len {
-                ctx_params.n_ubatch = ctx_len;
-            }
-        }
-        let num_workers = config.num_workers.max(1);
-        self.load_model_with_workers(
-            &config.model_path,
-            LlamaModelParams::default(),
-            ctx_params,
-            num_workers,
-        )
-    }
-
-    /// Delegates to the shared `do_unload` helper to avoid code duplication
-    /// with the inherent `unload` method.
-    fn unload(&self) -> Result<(), CoreError> {
-        Ok(self.do_unload()?)
-    }
-
-    fn is_loaded(&self) -> bool {
-        self.loaded_model.read().map(|g| g.is_some()).unwrap_or(false)
-    }
-}
-
-impl CausalLM for GGMLLlamaEngine {
-    /// Run a single stateless forward pass through the GGML LLaMA model.
-    ///
-    /// Creates a minimal temporary [`slab_llama::LlamaContext`] (KV cache sized
-    /// just large enough for `input_ids`), decodes the batch, reads the logits
-    /// for the last token via `get_logits_ith`, then drops the context.  This
-    /// is deliberately stateless: no session or KV cache state persists between
-    /// calls.
-    fn forward(&self, input_ids: &Tensor) -> Result<Tensor, CoreError> {
-        let token_ids =
-            input_ids.as_token_ids().ok_or_else(|| CoreError::UnsupportedOperation {
-                backend: "ggml.llama".into(),
-                op: "forward: expected token-ID (U32) tensor".into(),
-            })?;
-
-        if token_ids.is_empty() {
-            return Err(CoreError::InvalidModelSpec {
-                message: "forward requires at least one input token".into(),
-            });
-        }
-
-        let model = self.require_model()?;
-
-        let n = token_ids.len();
-
-        // Create a minimal temporary context: KV cache just large enough to
-        // hold the input tokens plus one generation slot.
-        let ctx_len = (n as u32).saturating_add(1).max(8);
-        let mut ctx_params = LlamaContextParams::default();
-        ctx_params.n_ctx = ctx_len;
-        if ctx_params.n_batch > ctx_len {
-            ctx_params.n_batch = ctx_len;
-        }
-        if ctx_params.n_ubatch > ctx_len {
-            ctx_params.n_ubatch = ctx_len;
-        }
-
-        let mut ctx = model
-            .new_context(ctx_params)
-            .map_err(|source| GGMLLlamaEngineError::CreateContext { source })?;
-
-        // Sequence ID 0: this context is ephemeral, so any ID works.
-        let mut batch = LlamaBatch::new(n);
-        for (i, &tid) in token_ids.iter().enumerate() {
-            batch
-                .add(tid as LlamaToken, i as i32, &[0], i == n - 1)
-                .expect("batch was created with capacity n and we add exactly n tokens");
-        }
-
-        ctx.decode(&mut batch).map_err(|source| GGMLLlamaEngineError::TokenizeFailed { source })?;
-
-        // Return logits for the last token in the batch.
-        let logits = ctx.get_logits_ith((n - 1) as i32).to_vec();
-        Ok(Tensor::from_logits(logits))
     }
 }

@@ -35,6 +35,15 @@ struct ResolvedCloudModel {
     remote_model: String,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CloudChatRequestConfig {
+    pub(super) max_tokens: u32,
+    pub(super) temperature: f32,
+    pub(super) reasoning_effort: Option<ChatReasoningEffort>,
+    pub(super) verbosity: Option<ChatVerbosity>,
+    pub(super) stream: bool,
+}
+
 #[derive(Debug)]
 enum CloudDelta {
     Content(String),
@@ -114,26 +123,13 @@ pub(super) async fn create_chat_completion(
     state: &ModelState,
     requested_model: &str,
     messages: &[DomainConversationMessage],
-    max_tokens: u32,
-    temperature: f32,
-    reasoning_effort: Option<ChatReasoningEffort>,
-    verbosity: Option<ChatVerbosity>,
-    stream: bool,
+    config: CloudChatRequestConfig,
 ) -> Result<GeneratedChatOutput, ServerError> {
     let target = resolve_cloud_model(state, requested_model).await?;
     let trace_http = state.config().cloud_http_trace;
 
-    if stream {
-        let backend_stream = cloud_chat_stream(
-            &target,
-            messages,
-            max_tokens,
-            temperature,
-            reasoning_effort,
-            verbosity,
-            trace_http,
-        )
-        .await?;
+    if config.stream {
+        let backend_stream = cloud_chat_stream(&target, messages, config, trace_http).await?;
         let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
         let created_ts = chrono::Utc::now().timestamp();
         let model_name = requested_model.to_owned();
@@ -159,16 +155,7 @@ pub(super) async fn create_chat_completion(
         return Ok(GeneratedChatOutput::Stream(Box::pin(sse_stream)));
     }
 
-    let generated = cloud_chat_completion(
-        &target,
-        messages,
-        max_tokens,
-        temperature,
-        reasoning_effort,
-        verbosity,
-        trace_http,
-    )
-    .await?;
+    let generated = cloud_chat_completion(&target, messages, config, trace_http).await?;
     Ok(GeneratedChatOutput::Text(generated))
 }
 
@@ -481,20 +468,17 @@ fn build_genai_chat_request(messages: &[DomainConversationMessage]) -> GenaiChat
 }
 
 fn build_genai_chat_options(
-    max_tokens: u32,
-    temperature: f32,
-    reasoning_effort: Option<ChatReasoningEffort>,
-    verbosity: Option<ChatVerbosity>,
+    config: CloudChatRequestConfig,
     capture_raw_body: bool,
 ) -> GenaiChatOptions {
     let mut options = GenaiChatOptions::default()
-        .with_max_tokens(max_tokens)
-        .with_temperature(f64::from(temperature));
+        .with_max_tokens(config.max_tokens)
+        .with_temperature(f64::from(config.temperature));
 
-    if let Some(reasoning_effort) = reasoning_effort {
+    if let Some(reasoning_effort) = config.reasoning_effort {
         options = options.with_reasoning_effort(map_reasoning_effort(reasoning_effort));
     }
-    if let Some(verbosity) = verbosity {
+    if let Some(verbosity) = config.verbosity {
         options = options.with_verbosity(map_verbosity(verbosity));
     }
 
@@ -526,10 +510,7 @@ fn map_verbosity(value: ChatVerbosity) -> GenaiVerbosity {
 async fn cloud_chat_completion(
     target: &ResolvedCloudModel,
     messages: &[DomainConversationMessage],
-    max_tokens: u32,
-    temperature: f32,
-    reasoning_effort: Option<ChatReasoningEffort>,
-    verbosity: Option<ChatVerbosity>,
+    config: CloudChatRequestConfig,
     trace_http: bool,
 ) -> Result<String, ServerError> {
     debug!(
@@ -540,25 +521,14 @@ async fn cloud_chat_completion(
         "sending cloud chat completion request via genai"
     );
 
-    let trace = trace_http.then(|| {
-        build_cloud_http_trace_context(
-            target,
-            messages,
-            max_tokens,
-            temperature,
-            reasoning_effort,
-            verbosity,
-            false,
-        )
-    });
+    let trace = trace_http.then(|| build_cloud_http_trace_context(target, messages, config));
     if let Some(trace) = trace.as_ref() {
         log_cloud_http_request(target, trace, false);
     }
 
     let client = build_genai_client_for_target(target);
     let request = build_genai_chat_request(messages);
-    let options =
-        build_genai_chat_options(max_tokens, temperature, reasoning_effort, verbosity, trace_http);
+    let options = build_genai_chat_options(config, trace_http);
 
     let response =
         client.exec_chat(&target.remote_model, request, Some(&options)).await.map_err(|error| {
@@ -580,10 +550,7 @@ async fn cloud_chat_completion(
 async fn cloud_chat_stream(
     target: &ResolvedCloudModel,
     messages: &[DomainConversationMessage],
-    max_tokens: u32,
-    temperature: f32,
-    reasoning_effort: Option<ChatReasoningEffort>,
-    verbosity: Option<ChatVerbosity>,
+    config: CloudChatRequestConfig,
     trace_http: bool,
 ) -> Result<CloudTokenStream, ServerError> {
     info!(
@@ -594,25 +561,14 @@ async fn cloud_chat_stream(
         "opening cloud chat stream via genai"
     );
 
-    let trace = trace_http.then(|| {
-        build_cloud_http_trace_context(
-            target,
-            messages,
-            max_tokens,
-            temperature,
-            reasoning_effort,
-            verbosity,
-            true,
-        )
-    });
+    let trace = trace_http.then(|| build_cloud_http_trace_context(target, messages, config));
     if let Some(trace) = trace.as_ref() {
         log_cloud_http_request(target, trace, true);
     }
 
     let client = build_genai_client_for_target(target);
     let request = build_genai_chat_request(messages);
-    let options =
-        build_genai_chat_options(max_tokens, temperature, reasoning_effort, verbosity, false);
+    let options = build_genai_chat_options(config, false);
     let response = client
         .exec_chat_stream(&target.remote_model, request, Some(&options))
         .await
@@ -676,23 +632,12 @@ fn build_openai_chat_completions_url(api_base: &str) -> String {
 fn build_cloud_http_trace_context(
     target: &ResolvedCloudModel,
     messages: &[DomainConversationMessage],
-    max_tokens: u32,
-    temperature: f32,
-    reasoning_effort: Option<ChatReasoningEffort>,
-    verbosity: Option<ChatVerbosity>,
-    stream: bool,
+    config: CloudChatRequestConfig,
 ) -> CloudHttpTraceContext {
     let request_headers = redact_headers(build_cloud_http_request_headers(target));
-    let request_body = serde_json::to_string_pretty(&build_cloud_http_request_body(
-        target,
-        messages,
-        max_tokens,
-        temperature,
-        reasoning_effort,
-        verbosity,
-        stream,
-    ))
-    .unwrap_or_else(|_| "<failed to serialize request body>".to_owned());
+    let request_body =
+        serde_json::to_string_pretty(&build_cloud_http_request_body(target, messages, config))
+            .unwrap_or_else(|_| "<failed to serialize request body>".to_owned());
 
     CloudHttpTraceContext {
         request_id: Uuid::new_v4().to_string(),
@@ -713,11 +658,7 @@ fn build_cloud_http_request_headers(target: &ResolvedCloudModel) -> BTreeMap<Str
 fn build_cloud_http_request_body(
     target: &ResolvedCloudModel,
     messages: &[DomainConversationMessage],
-    max_tokens: u32,
-    temperature: f32,
-    reasoning_effort: Option<ChatReasoningEffort>,
-    verbosity: Option<ChatVerbosity>,
-    stream: bool,
+    config: CloudChatRequestConfig,
 ) -> Value {
     let mut payload = json!({
         "model": target.remote_model,
@@ -730,15 +671,15 @@ fn build_cloud_http_request_body(
                 })
             })
             .collect::<Vec<_>>(),
-        "stream": stream,
-        "max_tokens": max_tokens,
-        "temperature": f64::from(temperature),
+        "stream": config.stream,
+        "max_tokens": config.max_tokens,
+        "temperature": f64::from(config.temperature),
     });
 
-    if let Some(reasoning_effort) = reasoning_effort {
+    if let Some(reasoning_effort) = config.reasoning_effort {
         payload["reasoning_effort"] = json!(reasoning_effort.as_str());
     }
-    if let Some(verbosity) = verbosity {
+    if let Some(verbosity) = config.verbosity {
         payload["verbosity"] = json!(verbosity.as_str());
     }
 

@@ -432,40 +432,6 @@ fn decode_image_generation_json(value: &Value) -> Result<Vec<Vec<u8>>, CoreError
     })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use serde_json::json;
-
-    #[test]
-    fn decode_image_generation_response_accepts_unified_image_entries() {
-        let encoded = base64::engine::general_purpose::STANDARD.encode(b"mock-image");
-
-        let response = decode_image_generation_response(Payload::Json(json!({
-            "images": [{ "image": encoded }]
-        })))
-        .expect("image response should decode");
-
-        assert_eq!(response.images, vec![b"mock-image".to_vec()]);
-    }
-
-    #[test]
-    fn decode_image_generation_response_rejects_legacy_image_entries() {
-        let error = decode_image_generation_response(Payload::Json(json!({
-            "images": ["legacy-image"]
-        })))
-        .expect_err("legacy image entry shape should be rejected");
-
-        match error {
-            CoreError::ResultDecodeFailed { task_kind, message } => {
-                assert_eq!(task_kind, "image_generation");
-                assert_eq!(message, "unsupported image entry shape");
-            }
-            other => panic!("unexpected error: {other:?}"),
-        }
-    }
-}
-
 fn encode_image_tensor(image_bytes: &[u8], input_name: &str) -> Result<Value, CoreError> {
     let img =
         image::load_from_memory(image_bytes).map_err(|error| CoreError::ResultDecodeFailed {
@@ -534,4 +500,38 @@ fn decode_embedding_tensor(value: &Value, output_name: &str) -> Result<Vec<f32>,
         .chunks_exact(4)
         .map(|chunk| f32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]))
         .collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn decode_image_generation_response_accepts_unified_image_entries() {
+        let encoded = base64::engine::general_purpose::STANDARD.encode(b"mock-image");
+
+        let response = decode_image_generation_response(Payload::Json(json!({
+            "images": [{ "image": encoded }]
+        })))
+        .expect("image response should decode");
+
+        assert_eq!(response.images, vec![b"mock-image".to_vec()]);
+    }
+
+    #[test]
+    fn decode_image_generation_response_rejects_legacy_image_entries() {
+        let error = decode_image_generation_response(Payload::Json(json!({
+            "images": ["legacy-image"]
+        })))
+        .expect_err("legacy image entry shape should be rejected");
+
+        match error {
+            CoreError::ResultDecodeFailed { task_kind, message } => {
+                assert_eq!(task_kind, "image_generation");
+                assert_eq!(message, "unsupported image entry shape");
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+    }
 }

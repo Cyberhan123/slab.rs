@@ -542,12 +542,8 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
 fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord, ServerError> {
     let spec_json = serde_json::to_string(&model.spec)
         .map_err(|error| ServerError::Internal(format!("failed to serialize spec: {error}")))?;
-    let runtime_presets_json = model
-        .runtime_presets
-        .as_ref()
-        .map(|presets| serde_json::to_string(presets))
-        .transpose()
-        .map_err(|error| {
+    let runtime_presets_json =
+        model.runtime_presets.as_ref().map(serde_json::to_string).transpose().map_err(|error| {
             ServerError::Internal(format!("failed to serialize runtime_presets: {error}"))
         })?;
 
@@ -572,54 +568,6 @@ fn sync_model_config_record(
     let config: StoredModelConfig = model.into();
     model_configs::write_model_config(config_dir, &config)?;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{canonicalize_model_spec, canonicalize_runtime_presets, normalize_required_text};
-    use crate::domain::models::{ModelSpec, RuntimePresets};
-
-    #[test]
-    fn cloud_models_require_remote_model_and_provider_reference() {
-        let error = canonicalize_model_spec("cloud.openai", ModelSpec::default())
-            .expect_err("missing cloud fields");
-
-        assert!(
-            error.to_string().contains("cloud models must set spec.remote_model_id"),
-            "unexpected error: {error}"
-        );
-    }
-
-    #[test]
-    fn cloud_models_trim_provider_and_remote_model() {
-        let spec = canonicalize_model_spec(
-            "cloud.openai",
-            ModelSpec {
-                provider_id: Some(" openai-main ".into()),
-                remote_model_id: Some(" gpt-4.1-mini ".into()),
-                ..ModelSpec::default()
-            },
-        )
-        .expect("cloud spec");
-
-        assert_eq!(spec.provider_id.as_deref(), Some("openai-main"));
-        assert_eq!(spec.remote_model_id.as_deref(), Some("gpt-4.1-mini"));
-    }
-
-    #[test]
-    fn empty_runtime_presets_are_dropped() {
-        let presets =
-            canonicalize_runtime_presets(Some(RuntimePresets { temperature: None, top_p: None }));
-
-        assert!(presets.is_none());
-    }
-
-    #[test]
-    fn required_text_fields_are_trimmed() {
-        let value = normalize_required_text("  model-id  ".into(), "id").expect("trimmed value");
-
-        assert_eq!(value, "model-id");
-    }
 }
 
 fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
@@ -807,4 +755,52 @@ async fn load_model_with_state(
     state.auto_unload().notify_model_loaded(&canonical_backend, load_spec).await;
 
     decode_model_status(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{canonicalize_model_spec, canonicalize_runtime_presets, normalize_required_text};
+    use crate::domain::models::{ModelSpec, RuntimePresets};
+
+    #[test]
+    fn cloud_models_require_remote_model_and_provider_reference() {
+        let error = canonicalize_model_spec("cloud.openai", ModelSpec::default())
+            .expect_err("missing cloud fields");
+
+        assert!(
+            error.to_string().contains("cloud models must set spec.remote_model_id"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn cloud_models_trim_provider_and_remote_model() {
+        let spec = canonicalize_model_spec(
+            "cloud.openai",
+            ModelSpec {
+                provider_id: Some(" openai-main ".into()),
+                remote_model_id: Some(" gpt-4.1-mini ".into()),
+                ..ModelSpec::default()
+            },
+        )
+        .expect("cloud spec");
+
+        assert_eq!(spec.provider_id.as_deref(), Some("openai-main"));
+        assert_eq!(spec.remote_model_id.as_deref(), Some("gpt-4.1-mini"));
+    }
+
+    #[test]
+    fn empty_runtime_presets_are_dropped() {
+        let presets =
+            canonicalize_runtime_presets(Some(RuntimePresets { temperature: None, top_p: None }));
+
+        assert!(presets.is_none());
+    }
+
+    #[test]
+    fn required_text_fields_are_trimmed() {
+        let value = normalize_required_text("  model-id  ".into(), "id").expect("trimmed value");
+
+        assert_eq!(value, "model-id");
+    }
 }
