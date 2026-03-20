@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
@@ -47,6 +48,8 @@ pub struct TextGenerationChunk {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct AudioTranscriptionRequest {
     pub audio_path: PathBuf,
+    #[serde(default, skip_serializing, skip_deserializing)]
+    pub pcm_samples: Option<Arc<[f32]>>,
     #[serde(default)]
     pub language: Option<String>,
     #[serde(default)]

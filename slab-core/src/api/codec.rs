@@ -234,10 +234,18 @@ pub(crate) fn encode_image_generation_request(
     insert_option(&mut object, "seed", request.seed.unwrap_or(-1));
 
     match resolved.driver_id.as_str() {
-        "candle.diffusion" => insert_option(&mut object, "cfg_scale", f64::from(request.guidance)),
+        "candle.diffusion" => {
+            if !object.contains_key("cfg_scale") {
+                insert_option(&mut object, "cfg_scale", f64::from(request.guidance));
+            }
+        }
         _ => {
-            insert_option(&mut object, "cfg_scale", request.guidance);
-            insert_option(&mut object, "guidance", request.guidance);
+            if !object.contains_key("cfg_scale") {
+                insert_option(&mut object, "cfg_scale", request.guidance);
+            }
+            if !object.contains_key("guidance") {
+                insert_option(&mut object, "guidance", request.guidance);
+            }
         }
     }
 

@@ -7633,6 +7633,7 @@ dependencies = [
  "bytemuck",
  "clap",
  "futures",
+ "image 0.25.9",
  "parity-tokio-ipc",
  "serde_json",
  "slab-core",

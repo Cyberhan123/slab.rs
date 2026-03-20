@@ -1,13 +1,12 @@
 use std::path::PathBuf;
 
-use slab_core::api::Backend;
 use strum::IntoEnumIterator;
 use tracing::{info, warn};
 
 use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
-    AcceptedOperation, CompleteSetupCommand, ComponentStatus, EnvironmentStatus,
+    AcceptedOperation, BackendId, CompleteSetupCommand, ComponentStatus, EnvironmentStatus,
 };
 use crate::error::ServerError;
 
@@ -44,7 +43,7 @@ impl SetupService {
             None
         };
 
-        let backends: Vec<ComponentStatus> = Backend::iter()
+        let backends: Vec<ComponentStatus> = BackendId::iter()
             .map(|b| {
                 let name = b.to_string();
                 let available = self.model_state.grpc().has_backend(&name);

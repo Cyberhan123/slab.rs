@@ -15,7 +15,8 @@ mod video;
 
 pub use audio::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
 pub use backend::{
-    BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand, ReloadBackendLibCommand,
+    BackendId, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
+    ReloadBackendLibCommand,
 };
 pub use chat::{
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,

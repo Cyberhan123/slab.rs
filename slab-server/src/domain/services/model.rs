@@ -3,13 +3,12 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use hf_hub::api::sync::{Api, ApiBuilder};
-use slab_core::api::Backend;
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
-    AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand,
+    AcceptedOperation, AvailableModelsQuery, AvailableModelsView, BackendId, CreateModelCommand,
     DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec,
     ModelStatus, StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
 };
@@ -253,7 +252,7 @@ impl ModelService {
             ))
         })?;
 
-        let canonical_backend_id = Backend::from_str(&backend_id)
+        let canonical_backend_id = BackendId::from_str(&backend_id)
             .map(|b| b.to_string())
             .unwrap_or(backend_id.clone());
 
@@ -497,7 +496,10 @@ impl ModelService {
 /// Derive the gRPC backend id from a local provider string.
 /// e.g. `"local.ggml.llama"` -> `"ggml.llama"`.
 fn backend_id_from_provider(provider: &str) -> Option<String> {
-    provider.strip_prefix("local.").map(str::to_owned)
+    provider
+        .strip_prefix("local.")
+        .and_then(|backend| BackendId::from_str(backend).ok())
+        .map(|backend| backend.to_string())
 }
 
 fn provider_id_from_provider(provider: &str) -> Option<String> {
@@ -698,7 +700,7 @@ fn resolve_backend_channel(
     state: &ModelState,
     backend_id: &str,
 ) -> Result<(String, Channel), ServerError> {
-    let backend = Backend::from_str(backend_id)
+    let backend = BackendId::from_str(backend_id)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
     let canonical_backend = backend.to_string();
     let channel = state
