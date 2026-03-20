@@ -17,15 +17,14 @@ use uuid::Uuid;
 use crate::context::ModelState;
 use crate::domain::models::{
     ChatModelOption, ChatModelSource, ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
-    CloudProviderSettingValue, ConversationMessage as DomainConversationMessage, UnifiedModel,
-    UnifiedModelStatus,
+    ConversationMessage as DomainConversationMessage, UnifiedModel, UnifiedModelStatus,
 };
 use crate::error::ServerError;
 use crate::infra::db::ModelStore;
 
 use super::GeneratedChatOutput;
 
-type CloudProviderConfig = CloudProviderSettingValue;
+type CloudProviderConfig = slab_types::settings::CloudProviderConfig;
 
 #[derive(Debug, Clone)]
 struct ResolvedCloudModel {
