@@ -22,7 +22,7 @@ candle = [
     "dep:tokenizers",
 ]
 onnx = ["dep:ort"]
-ggml = ["dep:slab-whisper", "dep:slab-llama", "dep:slab-diffusion", "dep:slab-diffusion-sys"]
+ggml = ["dep:slab-whisper", "dep:slab-llama", "dep:slab-diffusion"]
 
 [dependencies]
 slab-core-macros = { workspace = true }
@@ -31,7 +31,6 @@ libloading = { workspace = true }
 slab-whisper = { workspace = true, optional = true }
 slab-llama = { workspace = true, optional = true }
 slab-diffusion = { workspace = true, optional = true }
-slab-diffusion-sys = { workspace = true, optional = true }
 tokio = { workspace = true }
 slab-libfetch = { workspace = true }
 hf-hub = { workspace = true }
