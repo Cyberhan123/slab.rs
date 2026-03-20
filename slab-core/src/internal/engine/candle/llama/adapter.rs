@@ -21,9 +21,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
 use super::errors::{CandleLlamaEngineError, SessionId, StreamChunk, StreamHandle};
-use crate::base::error::CoreError;
-use crate::internal::engine::tensor::Tensor;
-use crate::internal::engine::traits::{CausalLM, ModelLoadConfig, ModelLoader};
 use crate::internal::engine::EngineError;
 
 // ── Session state ─────────────────────────────────────────────────────────────
@@ -445,107 +442,5 @@ impl CandleLlamaEngine {
         }
 
         send(StreamChunk::Done);
-    }
-}
-
-// ── ModelLoader / CausalLM ────────────────────────────────────────────────────
-
-/// Load-time configuration for the Candle LLaMA engine.
-///
-/// Used as `<CandleLlamaEngine as ModelLoader>::LoadConfig`.
-pub(crate) struct CandleLlamaLoadConfig {
-    /// Path to the GGUF model weight file.
-    pub(crate) model_path: String,
-    /// Optional path to a tokenizer JSON file.
-    ///
-    /// When `None` the engine looks for `tokenizer.json` in the same
-    /// directory as `model_path`.
-    pub(crate) tokenizer_path: Option<String>,
-    /// Seed for the random-number generator used during sampling.
-    pub(crate) seed: u64,
-}
-
-impl ModelLoadConfig for CandleLlamaLoadConfig {}
-
-impl ModelLoader for CandleLlamaEngine {
-    type LoadConfig = CandleLlamaLoadConfig;
-
-    /// Load the Candle LLaMA model.
-    ///
-    /// `load_model` writes the new weights and tokenizer into the shared state
-    /// under a write lock, overwriting any previously loaded model and clearing
-    /// all existing sessions.
-    fn load(&self, config: CandleLlamaLoadConfig) -> Result<(), CoreError> {
-        let tok_path = config.tokenizer_path.as_deref();
-        self.load_model(&config.model_path, tok_path, config.seed)
-    }
-
-    /// Delegates to the shared `do_unload` helper to avoid code duplication
-    /// with the inherent `unload` method.
-    fn unload(&self) -> Result<(), CoreError> {
-        Ok(self.do_unload()?)
-    }
-
-    fn is_loaded(&self) -> bool {
-        self.inner.read().map(|s| s.model.is_some()).unwrap_or(false)
-    }
-}
-
-impl CausalLM for CandleLlamaEngine {
-    /// Run a single stateless forward pass through the Candle LLaMA model.
-    ///
-    /// Acquires the write lock on the engine state (because
-    /// [`candle_transformers::models::quantized_llama::ModelWeights::forward`]
-    /// takes `&mut self`), passes `input_ids` as a `[1, seq_len]` tensor at
-    /// position 0, squeezes the output to `[vocab_size]`, and returns the
-    /// logits as a flat `F32` [`Tensor`].
-    ///
-    /// This is stateless: no KV-cache state is accumulated between calls.
-    fn forward(&self, input_ids: &Tensor) -> Result<Tensor, CoreError> {
-        #[cfg(feature = "candle")]
-        {
-            use candle_core::Device;
-
-            let token_ids =
-                input_ids.as_token_ids().ok_or_else(|| CoreError::UnsupportedOperation {
-                    backend: "candle.llama".into(),
-                    op: "forward: expected token-ID (U32) tensor".into(),
-                })?;
-
-            if token_ids.is_empty() {
-                return Err(CoreError::InvalidModelSpec {
-                    message: "forward requires at least one input token".into(),
-                });
-            }
-
-            let device = Device::Cpu;
-            // `CandleTensor::from_vec` requires an owned Vec; the copy is
-            // unavoidable because the Candle API takes ownership of the data.
-            let input_t = CandleTensor::from_vec(token_ids.to_vec(), (1, token_ids.len()), &device)
-                .map_err(|e| CandleLlamaEngineError::Inference { message: e.to_string() })?;
-
-            let mut state = self
-                .inner
-                .write()
-                .map_err(|_| CandleLlamaEngineError::LockPoisoned { operation: "forward" })?;
-            let model = state.model.as_mut().ok_or(CandleLlamaEngineError::ModelNotLoaded)?;
-
-            // Position 0: stateless pass — no KV cache from prior calls.
-            let logits_t = model
-                .forward(&input_t, 0)
-                .map_err(|e| CandleLlamaEngineError::Inference { message: e.to_string() })?;
-
-            let logits_t = logits_t
-                .squeeze(0)
-                .map_err(|e| CandleLlamaEngineError::Inference { message: e.to_string() })?;
-
-            Tensor::from_candle_logits(&logits_t)
-        }
-
-        #[cfg(not(feature = "candle"))]
-        {
-            let _ = input_ids;
-            Err(CoreError::ModelNotLoaded)
-        }
     }
 }

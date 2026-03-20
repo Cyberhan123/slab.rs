@@ -32,6 +32,9 @@ struct RuntimeState {
     pipelines: HashMap<BackendKind, Pipeline>,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct BackendDisabled(BackendKind);
+
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(super) enum BackendKind {
     Llama,
@@ -63,7 +66,7 @@ impl GrpcServiceImpl {
         backend: BackendKind,
     ) -> Result<Pipeline, Status> {
         let state = self.state.read().await;
-        state.ensure_enabled(backend)?;
+        state.ensure_enabled(backend).map_err(Status::from)?;
         state
             .pipelines
             .get(&backend)
@@ -80,7 +83,7 @@ impl GrpcServiceImpl {
         let load_spec = convert::decode_model_load_request(&request).map_err(proto_to_status)?;
 
         let mut state = self.state.write().await;
-        state.ensure_enabled(backend)?;
+        state.ensure_enabled(backend).map_err(Status::from)?;
 
         let spec = build_model_spec(backend, &load_spec);
         let pipeline = state.runtime.pipeline(spec).map_err(runtime_to_status)?;
@@ -96,7 +99,7 @@ impl GrpcServiceImpl {
         backend: BackendKind,
     ) -> Result<pb::ModelStatusResponse, Status> {
         let mut state = self.state.write().await;
-        state.ensure_enabled(backend)?;
+        state.ensure_enabled(backend).map_err(Status::from)?;
 
         let pipeline = state
             .pipelines
@@ -117,7 +120,7 @@ impl GrpcServiceImpl {
             convert::decode_reload_library_request(&request).map_err(proto_to_status)?;
 
         let mut state = self.state.write().await;
-        state.ensure_enabled(backend)?;
+        state.ensure_enabled(backend).map_err(Status::from)?;
 
         let mut drivers = state.drivers.clone();
         backend.set_library_path(&mut drivers, reload_spec.lib_path.clone());
@@ -151,12 +154,18 @@ impl GrpcServiceImpl {
 }
 
 impl RuntimeState {
-    fn ensure_enabled(&self, backend: BackendKind) -> Result<(), Status> {
+    fn ensure_enabled(&self, backend: BackendKind) -> Result<(), BackendDisabled> {
         if backend.is_enabled(&self.enabled_backends) {
             Ok(())
         } else {
-            Err(Status::unavailable(format!("{} backend is disabled", backend.canonical_id())))
+            Err(BackendDisabled(backend))
         }
+    }
+}
+
+impl From<BackendDisabled> for Status {
+    fn from(value: BackendDisabled) -> Self {
+        Status::unavailable(format!("{} backend is disabled", value.0.canonical_id()))
     }
 }
 

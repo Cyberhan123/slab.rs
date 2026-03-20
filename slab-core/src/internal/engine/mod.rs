@@ -4,8 +4,6 @@ pub mod candle;
 pub mod ggml;
 #[cfg(feature = "onnx")]
 pub mod onnx;
-pub(crate) mod tensor;
-pub(crate) mod traits;
 
 /// Engine-layer error type alias.
 ///

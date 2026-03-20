@@ -676,7 +676,8 @@ mod tests {
         let bits_per_sample = 16u16;
         let block_align = num_channels * (bits_per_sample / 8);
         let byte_rate = sample_rate * u32::from(block_align);
-        let data_len = (samples.len() * std::mem::size_of::<i16>()) as u32;
+        let data_len = u32::try_from(std::mem::size_of_val(samples))
+            .expect("test wav data length should fit in u32");
         let riff_len = 36 + data_len;
 
         let mut bytes = Vec::with_capacity((44 + data_len) as usize);

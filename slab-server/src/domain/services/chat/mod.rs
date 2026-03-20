@@ -128,11 +128,13 @@ async fn create_chat_completion_with_state(
             &state,
             &command.model,
             &resolved_messages,
-            max_tokens,
-            temperature,
-            command.reasoning_effort,
-            command.verbosity,
-            command.stream,
+            cloud::CloudChatRequestConfig {
+                max_tokens,
+                temperature,
+                reasoning_effort: command.reasoning_effort,
+                verbosity: command.verbosity,
+                stream: command.stream,
+            },
         )
         .await?
     } else {

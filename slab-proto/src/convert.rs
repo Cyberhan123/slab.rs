@@ -1,4 +1,4 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use image::GenericImageView;
@@ -572,7 +572,7 @@ fn non_empty_path(value: &str) -> Option<PathBuf> {
     (!value.trim().is_empty()).then(|| PathBuf::from(value))
 }
 
-fn path_to_string(path: &PathBuf) -> String {
+fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
