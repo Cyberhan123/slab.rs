@@ -1,4 +1,4 @@
-// Re-export PMID types from the shared slab-types crate.
+// Re-export the shared structured PMID constant from the slab-types crate.
 pub use slab_types::settings::PMID;
 
 #[cfg(test)]
