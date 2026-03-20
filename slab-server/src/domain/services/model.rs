@@ -1,8 +1,10 @@
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::Utc;
 use hf_hub::api::sync::{Api, ApiBuilder};
+use slab_types::runtime::DiffusionLoadOptions;
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
@@ -16,7 +18,7 @@ use crate::error::ServerError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
 use crate::infra::model_configs;
 use crate::infra::rpc::{self, pb};
-use crate::model_auto_unload::LoadedModelSpec;
+use crate::model_auto_unload::{build_model_load_request, LoadedModelSpec};
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 
@@ -758,25 +760,10 @@ async fn resolve_llama_context_length(
     Ok((context_length, "settings"))
 }
 
-#[derive(Default)]
-struct DiffusionContextParams {
-    diffusion_model_path: String,
-    vae_path: String,
-    taesd_path: String,
-    lora_model_dir: String,
-    clip_l_path: String,
-    clip_g_path: String,
-    t5xxl_path: String,
-    flash_attn: bool,
-    keep_vae_on_cpu: bool,
-    keep_clip_on_cpu: bool,
-    offload_params_to_cpu: bool,
-}
-
 async fn resolve_diffusion_context_params(
     state: &ModelState,
     canonical_backend: &str,
-) -> Result<Option<DiffusionContextParams>, ServerError> {
+) -> Result<Option<DiffusionLoadOptions>, ServerError> {
     if canonical_backend != "ggml.diffusion" {
         return Ok(None);
     }
@@ -785,14 +772,14 @@ async fn resolve_diffusion_context_params(
     let paths = config.diffusion.paths;
     let performance = config.diffusion.performance;
 
-    Ok(Some(DiffusionContextParams {
-        diffusion_model_path: paths.model.unwrap_or_default(),
-        vae_path: paths.vae.unwrap_or_default(),
-        taesd_path: paths.taesd.unwrap_or_default(),
-        lora_model_dir: paths.lora_model_dir.unwrap_or_default(),
-        clip_l_path: paths.clip_l.unwrap_or_default(),
-        clip_g_path: paths.clip_g.unwrap_or_default(),
-        t5xxl_path: paths.t5xxl.unwrap_or_default(),
+    Ok(Some(DiffusionLoadOptions {
+        diffusion_model_path: paths.model.map(PathBuf::from),
+        vae_path: paths.vae.map(PathBuf::from),
+        taesd_path: paths.taesd.map(PathBuf::from),
+        lora_model_dir: paths.lora_model_dir.map(PathBuf::from),
+        clip_l_path: paths.clip_l.map(PathBuf::from),
+        clip_g_path: paths.clip_g.map(PathBuf::from),
+        t5xxl_path: paths.t5xxl.map(PathBuf::from),
         flash_attn: performance.flash_attn,
         keep_vae_on_cpu: performance.keep_vae_on_cpu,
         keep_clip_on_cpu: performance.keep_clip_on_cpu,
@@ -855,39 +842,19 @@ async fn load_model_with_state(
         "{log_message}"
     );
 
-    let diffusion_ctx = resolve_diffusion_context_params(&state, &canonical_backend)
-        .await?
-        .unwrap_or_default();
-
-    let grpc_req = pb::ModelLoadRequest {
-        model_path: command.model_path.clone(),
+    let load_spec = LoadedModelSpec {
+        model_path: PathBuf::from(command.model_path.clone()),
         num_workers,
-        context_length,
-        diffusion_model_path: diffusion_ctx.diffusion_model_path,
-        vae_path: diffusion_ctx.vae_path,
-        taesd_path: diffusion_ctx.taesd_path,
-        lora_model_dir: diffusion_ctx.lora_model_dir,
-        clip_l_path: diffusion_ctx.clip_l_path,
-        clip_g_path: diffusion_ctx.clip_g_path,
-        t5xxl_path: diffusion_ctx.t5xxl_path,
-        flash_attn: diffusion_ctx.flash_attn,
-        keep_vae_on_cpu: diffusion_ctx.keep_vae_on_cpu,
-        keep_clip_on_cpu: diffusion_ctx.keep_clip_on_cpu,
-        offload_params_to_cpu: diffusion_ctx.offload_params_to_cpu,
+        context_length: (context_length > 0).then_some(context_length),
+        diffusion: resolve_diffusion_context_params(&state, &canonical_backend).await?,
     };
+    let grpc_req = build_model_load_request(&load_spec);
     let response = rpc::client::load_model(channel, &canonical_backend, grpc_req)
         .await
         .map_err(|error| map_grpc_model_error(action, error))?;
     state
         .auto_unload()
-        .notify_model_loaded(
-            &canonical_backend,
-            LoadedModelSpec {
-                model_path: command.model_path,
-                num_workers,
-                context_length,
-            },
-        )
+        .notify_model_loaded(&canonical_backend, load_spec)
         .await;
 
     Ok(ModelStatus {

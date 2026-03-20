@@ -913,6 +913,8 @@ mod tests {
                 pcm_samples: None,
                 language: Some("zh".to_owned()),
                 prompt: None,
+                vad: None,
+                decode: None,
                 options: Default::default(),
             })
             .await
@@ -937,6 +939,8 @@ mod tests {
                 pcm_samples: Some(std::sync::Arc::<[f32]>::from(vec![0.0, 0.5, -0.5, 1.0])),
                 language: Some("en".to_owned()),
                 prompt: None,
+                vad: None,
+                decode: None,
                 options: Default::default(),
             })
             .await
