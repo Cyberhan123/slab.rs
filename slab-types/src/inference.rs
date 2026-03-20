@@ -51,6 +51,10 @@ pub struct TextGenerationChunk {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AudioTranscriptionRequest {
     pub audio_path: PathBuf,
+    /// In-process PCM audio samples populated by the runtime after audio decoding.
+    /// This field is intentionally skipped during serde serialization/deserialization
+    /// because it is never transported over wire (HTTP/gRPC); it is only used
+    /// in-process within slab-runtime after the audio file has been decoded.
     #[serde(default, skip_serializing, skip_deserializing)]
     #[schemars(skip)]
     pub pcm_samples: Option<Arc<[f32]>>,
@@ -75,6 +79,10 @@ pub struct AudioTranscriptionResponse {
     pub metadata: JsonOptions,
 }
 
+/// High-level image generation request. This is the transport-layer counterpart to
+/// [`crate::diffusion::DiffusionImageRequest`]; prefer `DiffusionImageRequest` for
+/// richer diffusion-specific options. The numeric types here (`steps: Option<i32>`,
+/// `guidance: Option<f32>`) are intentionally aligned with those of `DiffusionImageRequest`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ImageGenerationRequest {
     pub prompt: String,
@@ -82,8 +90,10 @@ pub struct ImageGenerationRequest {
     pub negative_prompt: Option<String>,
     pub width: u32,
     pub height: u32,
-    pub steps: u32,
-    pub guidance: f32,
+    #[serde(default)]
+    pub steps: Option<i32>,
+    #[serde(default)]
+    pub guidance: Option<f32>,
     #[serde(default)]
     pub seed: Option<i64>,
     #[serde(default)]
@@ -97,8 +107,8 @@ impl Default for ImageGenerationRequest {
             negative_prompt: None,
             width: 512,
             height: 512,
-            steps: 20,
-            guidance: 7.5,
+            steps: Some(20),
+            guidance: Some(7.5),
             seed: None,
             options: JsonOptions::default(),
         }
