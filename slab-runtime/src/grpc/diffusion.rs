@@ -169,8 +169,8 @@ fn build_image_generation_request(req: &DiffusionImageRequest) -> ImageGeneratio
         negative_prompt: req.negative_prompt.clone(),
         width: req.width.max(1),
         height: req.height.max(1),
-        steps: req.steps.unwrap_or_default().max(1) as u32,
-        guidance: req.guidance.unwrap_or_default(),
+        steps: req.steps.map(|s| s.max(1)),
+        guidance: req.guidance,
         seed: req.seed,
         options,
     }
@@ -200,8 +200,8 @@ fn build_video_generation_request(req: &DiffusionVideoRequest) -> ImageGeneratio
         negative_prompt: req.negative_prompt.clone(),
         width: req.width.max(1),
         height: req.height.max(1),
-        steps: req.steps.unwrap_or_default().max(1) as u32,
-        guidance: req.guidance.unwrap_or_default(),
+        steps: req.steps.map(|s| s.max(1)),
+        guidance: req.guidance,
         seed: req.seed,
         options,
     }
