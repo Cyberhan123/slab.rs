@@ -1,14 +1,11 @@
 //! Backend worker for `candle.whisper`.
 //!
-//! Mirrors the `ggml.whisper` backend contract.  The `lib.load` / `lib.reload`
-//! ops are accepted as no-ops since the Candle crate is statically linked.
+//! Mirrors the `ggml.whisper` backend contract.
 //!
 //! # Supported ops
 //!
 //! | Op string        | Event variant | Description                                    |
 //! |------------------|---------------|------------------------------------------------|
-//! | `"lib.load"`     | `LoadLibrary` | No-op (Candle is statically linked).           |
-//! | `"lib.reload"`   | `ReloadLibrary` | No-op.                                       |
 //! | `"model.load"`   | `LoadModel`   | Load Whisper model weights from disk.          |
 //! | `"model.unload"` | `UnloadModel` | Drop model weights from memory.                |
 //! | `"inference"`    | `Inference`   | Transcribe f32 PCM audio; returns SRT-style.   |
@@ -52,22 +49,6 @@ impl CandleWhisperWorker {
             bc_tx,
             worker_id,
         }
-    }
-
-    /// `lib.load` is a no-op for Candle (statically linked).
-    #[on_event(LoadLibrary)]
-    async fn on_load_library(&mut self, req: BackendRequest) {
-        let _ = req.reply_tx.send(BackendReply::Value(Payload::Bytes(
-            Arc::from([] as [u8; 0]),
-        )));
-    }
-
-    /// `lib.reload` is a no-op for Candle (statically linked).
-    #[on_event(ReloadLibrary)]
-    async fn on_reload_library(&mut self, req: BackendRequest) {
-        let _ = req.reply_tx.send(BackendReply::Value(Payload::Bytes(
-            Arc::from([] as [u8; 0]),
-        )));
     }
 
     #[on_event(LoadModel)]
@@ -143,13 +124,6 @@ impl CandleWhisperWorker {
             e.unload();
         }
     }
-
-    // No-op peer handlers for lib load/reload (Candle has no dylib).
-    #[on_peer_control(LoadLibrary)]
-    async fn on_peer_load_library(&mut self, _cmd: PeerWorkerCommand) {}
-
-    #[on_peer_control(ReloadLibrary)]
-    async fn on_peer_reload_library(&mut self, _cmd: PeerWorkerCommand) {}
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
