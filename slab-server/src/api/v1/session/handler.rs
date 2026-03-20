@@ -58,12 +58,7 @@ async fn create_session(
 async fn list_sessions(
     State(service): State<SessionService>,
 ) -> Result<Json<Vec<SessionResponse>>, ServerError> {
-    let sessions = service
-        .list_sessions()
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    let sessions = service.list_sessions().await?.into_iter().map(Into::into).collect();
     Ok(Json(sessions))
 }
 
@@ -100,12 +95,8 @@ async fn list_session_messages(
     Path(params): Path<SessionIdPath>,
 ) -> Result<Json<Vec<MessageResponse>>, ServerError> {
     let params = validate(params)?;
-    let messages = service
-        .list_session_messages(&params.id)
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    let messages =
+        service.list_session_messages(&params.id).await?.into_iter().map(Into::into).collect();
     Ok(Json(messages))
 }
 

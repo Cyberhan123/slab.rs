@@ -44,12 +44,8 @@ async fn list_tasks(
     State(service): State<TaskApplicationService>,
     ValidatedQuery(q): ValidatedQuery<TaskTypeQuery>,
 ) -> Result<Json<Vec<TaskResponse>>, ServerError> {
-    let tasks = service
-        .list_tasks(q.task_type.as_deref())
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect();
+    let tasks =
+        service.list_tasks(q.task_type.as_deref()).await?.into_iter().map(Into::into).collect();
     Ok(Json(tasks))
 }
 
@@ -140,9 +136,7 @@ async fn restart_task(
     let params = validate(params)?;
     service.validate_restartable(&params.id).await?;
 
-    Err(ServerError::NotImplemented(
-        "task restart is not yet implemented".to_owned(),
-    ))
+    Err(ServerError::NotImplemented("task restart is not yet implemented".to_owned()))
 }
 
 #[derive(Debug, Deserialize, Validate)]

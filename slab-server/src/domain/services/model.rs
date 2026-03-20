@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use hf_hub::api::sync::{Api, ApiBuilder};
+use slab_proto::convert;
 use slab_types::runtime::DiffusionLoadOptions;
 use tonic::transport::Channel;
 use tracing::{info, warn};
@@ -30,10 +31,7 @@ pub struct ModelService {
 
 impl ModelService {
     pub fn new(model_state: ModelState, worker_state: WorkerState) -> Self {
-        Self {
-            model_state,
-            worker_state,
-        }
+        Self { model_state, worker_state }
     }
 
     pub async fn create_model(&self, req: CreateModelCommand) -> Result<UnifiedModel, ServerError> {
@@ -55,9 +53,7 @@ impl ModelService {
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("model {id} not found")))?;
 
-        record
-            .try_into()
-            .map_err(|e: String| ServerError::Internal(e))
+        record.try_into().map_err(|e: String| ServerError::Internal(e))
     }
 
     pub async fn update_model(
@@ -72,9 +68,8 @@ impl ModelService {
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("model {id} not found")))?;
 
-        let existing_model: UnifiedModel = existing_record
-            .try_into()
-            .map_err(|e: String| ServerError::Internal(e))?;
+        let existing_model: UnifiedModel =
+            existing_record.try_into().map_err(|e: String| ServerError::Internal(e))?;
 
         let next = CreateModelCommand {
             id: Some(existing_model.id),
@@ -96,10 +91,7 @@ impl ModelService {
 
         let _ = model_configs::delete_model_config(self.model_config_dir(), id)?;
         self.model_state.store().delete_model(id).await?;
-        Ok(DeletedModelView {
-            id: id.to_owned(),
-            status: "deleted".to_owned(),
-        })
+        Ok(DeletedModelView { id: id.to_owned(), status: "deleted".to_owned() })
     }
 
     pub async fn list_models(
@@ -122,8 +114,7 @@ impl ModelService {
     }
 
     pub async fn load_model(&self, command: ModelLoadCommand) -> Result<ModelStatus, ServerError> {
-        self.load_model_command("load_model", "loading model", command)
-            .await
+        self.load_model_command("load_model", "loading model", command).await
     }
 
     pub async fn unload_model(
@@ -140,15 +131,9 @@ impl ModelService {
                 .map_err(|error| {
                     ServerError::Internal(format!("grpc unload_model failed: {error}"))
                 })?;
-        self.model_state
-            .auto_unload()
-            .notify_model_unloaded(&canonical_backend)
-            .await;
+        self.model_state.auto_unload().notify_model_unloaded(&canonical_backend).await;
 
-        Ok(ModelStatus {
-            backend: response.backend,
-            status: response.status,
-        })
+        decode_model_status(response)
     }
 
     pub async fn list_available_models(
@@ -159,32 +144,22 @@ impl ModelService {
         let files: Vec<String> = tokio::task::spawn_blocking(move || {
             let api = Api::new().map_err(|error| format!("hf-hub init failed: {error}"))?;
             let repo = api.model(repo_id);
-            let info = repo
-                .info()
-                .map_err(|error| format!("hf-hub info failed: {error}"))?;
-            let names = info
-                .siblings
-                .into_iter()
-                .map(|item| item.rfilename)
-                .collect();
+            let info = repo.info().map_err(|error| format!("hf-hub info failed: {error}"))?;
+            let names = info.siblings.into_iter().map(|item| item.rfilename).collect();
             Ok::<Vec<String>, String>(names)
         })
         .await
         .map_err(|error| ServerError::Internal(format!("spawn_blocking panicked: {error}")))?
         .map_err(ServerError::Internal)?;
 
-        Ok(AvailableModelsView {
-            repo_id: query.repo_id,
-            files,
-        })
+        Ok(AvailableModelsView { repo_id: query.repo_id, files })
     }
 
     pub async fn switch_model(
         &self,
         command: ModelLoadCommand,
     ) -> Result<ModelStatus, ServerError> {
-        self.load_model_command("switch_model", "switching model", command)
-            .await
+        self.load_model_command("switch_model", "switching model", command).await
     }
 
     pub async fn sync_model_configs_from_disk(&self) -> Result<(), ServerError> {
@@ -242,9 +217,8 @@ impl ModelService {
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("model {model_id} not found")))?;
 
-        let model: UnifiedModel = record
-            .try_into()
-            .map_err(|e: String| ServerError::Internal(e))?;
+        let model: UnifiedModel =
+            record.try_into().map_err(|e: String| ServerError::Internal(e))?;
 
         // Derive backend from provider. Only local models can be downloaded.
         let backend_id = backend_id_from_provider(&model.provider).ok_or_else(|| {
@@ -254,9 +228,8 @@ impl ModelService {
             ))
         })?;
 
-        let canonical_backend_id = BackendId::from_str(&backend_id)
-            .map(|b| b.to_string())
-            .unwrap_or(backend_id.clone());
+        let canonical_backend_id =
+            BackendId::from_str(&backend_id).map(|b| b.to_string()).unwrap_or(backend_id.clone());
 
         let repo_id = model.spec.repo_id.clone().ok_or_else(|| {
             ServerError::BadRequest(format!(
@@ -456,16 +429,11 @@ impl ModelService {
         let provider = normalize_required_text(req.provider, "provider")?;
         let spec = canonicalize_model_spec(&provider, req.spec)?;
         let runtime_presets = canonicalize_runtime_presets(req.runtime_presets);
-        let status = req
-            .status
-            .unwrap_or_else(|| default_status_for_provider(&provider));
+        let status = req.status.unwrap_or_else(|| default_status_for_provider(&provider));
 
         let existing_record = self.model_state.store().get_model(&id).await?;
         let now = Utc::now();
-        let created_at = existing_record
-            .as_ref()
-            .map(|record| record.created_at)
-            .unwrap_or(now);
+        let created_at = existing_record.as_ref().map(|record| record.created_at).unwrap_or(now);
 
         Ok(UnifiedModel {
             id,
@@ -555,9 +523,7 @@ fn default_status_for_provider(provider: &str) -> UnifiedModelStatus {
 fn normalize_required_text(value: String, label: &str) -> Result<String, ServerError> {
     let trimmed = value.trim();
     if trimmed.is_empty() {
-        return Err(ServerError::BadRequest(format!(
-            "{label} must not be empty"
-        )));
+        return Err(ServerError::BadRequest(format!("{label} must not be empty")));
     }
     Ok(trimmed.to_owned())
 }
@@ -601,9 +567,8 @@ fn sync_model_config_record(
     config_dir: &std::path::Path,
     record: UnifiedModelRecord,
 ) -> Result<(), ServerError> {
-    let model: UnifiedModel = record
-        .try_into()
-        .map_err(|error: String| ServerError::Internal(error))?;
+    let model: UnifiedModel =
+        record.try_into().map_err(|error: String| ServerError::Internal(error))?;
     let config: StoredModelConfig = model.into();
     model_configs::write_model_config(config_dir, &config)?;
     Ok(())
@@ -620,9 +585,7 @@ mod tests {
             .expect_err("missing cloud fields");
 
         assert!(
-            error
-                .to_string()
-                .contains("cloud models must set spec.remote_model_id"),
+            error.to_string().contains("cloud models must set spec.remote_model_id"),
             "unexpected error: {error}"
         );
     }
@@ -645,10 +608,8 @@ mod tests {
 
     #[test]
     fn empty_runtime_presets_are_dropped() {
-        let presets = canonicalize_runtime_presets(Some(RuntimePresets {
-            temperature: None,
-            top_p: None,
-        }));
+        let presets =
+            canonicalize_runtime_presets(Some(RuntimePresets { temperature: None, top_p: None }));
 
         assert!(presets.is_none());
     }
@@ -663,9 +624,7 @@ mod tests {
 
 fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
     if path.is_empty() {
-        return Err(ServerError::BadRequest(format!(
-            "{label} must not be empty"
-        )));
+        return Err(ServerError::BadRequest(format!("{label} must not be empty")));
     }
     if !std::path::Path::new(path).is_absolute() {
         return Err(ServerError::BadRequest(format!(
@@ -676,9 +635,7 @@ fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
         .components()
         .any(|component| component == std::path::Component::ParentDir);
     if has_traversal {
-        return Err(ServerError::BadRequest(format!(
-            "{label} must not contain '..' components"
-        )));
+        return Err(ServerError::BadRequest(format!("{label} must not contain '..' components")));
     }
     Ok(())
 }
@@ -686,14 +643,10 @@ fn validate_path(label: &str, path: &str) -> Result<(), ServerError> {
 fn validate_existing_model_file(path: &str) -> Result<(), ServerError> {
     let model_path = std::path::Path::new(path);
     if !model_path.exists() {
-        return Err(ServerError::BadRequest(format!(
-            "model_path does not exist: {path}"
-        )));
+        return Err(ServerError::BadRequest(format!("model_path does not exist: {path}")));
     }
     if !model_path.is_file() {
-        return Err(ServerError::BadRequest(format!(
-            "model_path is not a file: {path}"
-        )));
+        return Err(ServerError::BadRequest(format!("model_path is not a file: {path}")));
     }
     Ok(())
 }
@@ -705,14 +658,9 @@ fn resolve_backend_channel(
     let backend = BackendId::from_str(backend_id)
         .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
     let canonical_backend = backend.to_string();
-    let channel = state
-        .grpc()
-        .backend_channel(&canonical_backend)
-        .ok_or_else(|| {
-            ServerError::BackendNotReady(format!(
-                "{canonical_backend} gRPC endpoint is not configured"
-            ))
-        })?;
+    let channel = state.grpc().backend_channel(&canonical_backend).ok_or_else(|| {
+        ServerError::BackendNotReady(format!("{canonical_backend} gRPC endpoint is not configured"))
+    })?;
     Ok((canonical_backend, channel))
 }
 
@@ -723,9 +671,7 @@ async fn resolve_model_workers(
 ) -> Result<(u32, &'static str), ServerError> {
     if let Some(workers) = requested_workers {
         if workers == 0 {
-            return Err(ServerError::BadRequest(
-                "num_workers must be at least 1".into(),
-            ));
+            return Err(ServerError::BadRequest("num_workers must be at least 1".into()));
         }
         return Ok((workers, "request"));
     }
@@ -795,10 +741,16 @@ fn grpc_status_message(status: &tonic::Status) -> String {
     status.to_string()
 }
 
+fn decode_model_status(response: pb::ModelStatusResponse) -> Result<ModelStatus, ServerError> {
+    let status = convert::decode_model_status_response(&response).map_err(|error| {
+        ServerError::Internal(format!("invalid model status response from runtime: {error}"))
+    })?;
+
+    Ok(ModelStatus { backend: status.backend.to_string(), status: status.status })
+}
+
 fn map_grpc_model_error(action: &str, err: anyhow::Error) -> ServerError {
-    let grpc_status = err
-        .chain()
-        .find_map(|cause| cause.downcast_ref::<tonic::Status>());
+    let grpc_status = err.chain().find_map(|cause| cause.downcast_ref::<tonic::Status>());
 
     if let Some(status) = grpc_status {
         let detail = grpc_status_message(status);
@@ -852,13 +804,7 @@ async fn load_model_with_state(
     let response = rpc::client::load_model(channel, &canonical_backend, grpc_req)
         .await
         .map_err(|error| map_grpc_model_error(action, error))?;
-    state
-        .auto_unload()
-        .notify_model_loaded(&canonical_backend, load_spec)
-        .await;
+    state.auto_unload().notify_model_loaded(&canonical_backend, load_spec).await;
 
-    Ok(ModelStatus {
-        backend: response.backend,
-        status: response.status,
-    })
+    decode_model_status(response)
 }

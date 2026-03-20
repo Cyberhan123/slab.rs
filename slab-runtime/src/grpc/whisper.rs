@@ -61,9 +61,7 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
             })?;
 
         info!(output_len = response.text.len(), "whisper transcription completed");
-        Ok(Response::new(pb::TranscribeResponse {
-            text: response.text,
-        }))
+        Ok(Response::new(pb::TranscribeResponse { text: response.text }))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "ggml.whisper"))]
@@ -75,9 +73,8 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         debug!("whisper load_model request received");
-        let status = self
-            .load_model_for_backend(BackendKind::Whisper, request.into_inner())
-            .await?;
+        let status =
+            self.load_model_for_backend(BackendKind::Whisper, request.into_inner()).await?;
         Ok(Response::new(status))
     }
 
@@ -104,16 +101,13 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         debug!("whisper reload_library request received");
-        let status = self
-            .reload_library_for_backend(BackendKind::Whisper, request.into_inner())
-            .await?;
+        let status =
+            self.reload_library_for_backend(BackendKind::Whisper, request.into_inner()).await?;
         Ok(Response::new(status))
     }
 }
 
-fn build_whisper_inference_options(
-    req: &pb::TranscribeRequest,
-) -> Result<JsonOptions, String> {
+fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<JsonOptions, String> {
     let mut options = serde_json::Map::new();
 
     if let Some(vad) = req.vad.as_ref() {
@@ -124,10 +118,8 @@ fn build_whisper_inference_options(
             }
 
             let mut vad_json = serde_json::Map::new();
-            vad_json.insert(
-                "model_path".to_owned(),
-                serde_json::Value::String(model_path.to_owned()),
-            );
+            vad_json
+                .insert("model_path".to_owned(), serde_json::Value::String(model_path.to_owned()));
 
             if let Some(params) = vad.params.as_ref() {
                 if let Some(threshold) = params.threshold {
@@ -139,10 +131,7 @@ fn build_whisper_inference_options(
 
                 for (name, value) in [
                     ("vad.min_speech_duration_ms", params.min_speech_duration_ms),
-                    (
-                        "vad.min_silence_duration_ms",
-                        params.min_silence_duration_ms,
-                    ),
+                    ("vad.min_silence_duration_ms", params.min_silence_duration_ms),
                     ("vad.speech_pad_ms", params.speech_pad_ms),
                 ] {
                     if let Some(value) = value {
@@ -170,10 +159,8 @@ fn build_whisper_inference_options(
                     if samples_overlap < 0.0 {
                         return Err("vad.samples_overlap must be >= 0.0".to_owned());
                     }
-                    vad_json.insert(
-                        "samples_overlap".to_owned(),
-                        serde_json::json!(samples_overlap),
-                    );
+                    vad_json
+                        .insert("samples_overlap".to_owned(), serde_json::json!(samples_overlap));
                 }
             }
 
@@ -266,18 +253,7 @@ fn convert_file_to_pcm_f32le(path: &str) -> Result<Arc<[f32]>, String> {
     let output = std::process::Command::new("ffmpeg")
         .arg("-i")
         .arg(path)
-        .args([
-            "-vn",
-            "-f",
-            "f32le",
-            "-acodec",
-            "pcm_f32le",
-            "-ar",
-            "16000",
-            "-ac",
-            "1",
-            "-",
-        ])
+        .args(["-vn", "-f", "f32le", "-acodec", "pcm_f32le", "-ar", "16000", "-ac", "1", "-"])
         .output()
         .map_err(|error| format!("ffmpeg start failed: {error}"))?;
 

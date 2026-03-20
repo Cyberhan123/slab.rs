@@ -62,12 +62,7 @@ async fn download_ffmpeg(
     State(service): State<SetupService>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
     let op = service.download_ffmpeg().await?;
-    Ok((
-        StatusCode::ACCEPTED,
-        Json(OperationAcceptedResponse {
-            operation_id: op.operation_id,
-        }),
-    ))
+    Ok((StatusCode::ACCEPTED, Json(OperationAcceptedResponse { operation_id: op.operation_id })))
 }
 
 /// Mark the one-time setup as complete (or reset it).

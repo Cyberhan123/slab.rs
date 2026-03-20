@@ -32,18 +32,9 @@ impl std::fmt::Debug for GrpcGateway {
         backends.sort_unstable();
         f.debug_struct("GrpcGateway")
             .field("chat", &self.backend_channels.contains_key(BACKEND_LLAMA))
-            .field(
-                "chat_stream",
-                &self.backend_channels.contains_key(BACKEND_LLAMA),
-            )
-            .field(
-                "transcribe",
-                &self.backend_channels.contains_key(BACKEND_WHISPER),
-            )
-            .field(
-                "generate_image",
-                &self.backend_channels.contains_key(BACKEND_DIFFUSION),
-            )
+            .field("chat_stream", &self.backend_channels.contains_key(BACKEND_LLAMA))
+            .field("transcribe", &self.backend_channels.contains_key(BACKEND_WHISPER))
+            .field("generate_image", &self.backend_channels.contains_key(BACKEND_DIFFUSION))
             .field("backends", &backends)
             .finish()
     }
@@ -59,9 +50,7 @@ impl GrpcGateway {
             (BACKEND_DIFFUSION, config.diffusion_grpc_endpoint.as_deref()),
         ] {
             if let Some(channel) = connect_optional(endpoint).await? {
-                gateway
-                    .backend_channels
-                    .insert(backend_id.to_string(), channel);
+                gateway.backend_channels.insert(backend_id.to_string(), channel);
             }
         }
 
@@ -116,13 +105,9 @@ async fn connect_channel(endpoint: &str) -> anyhow::Result<Channel> {
         }
     }
 
-    let err = last_error
-        .map(|e| e.to_string())
-        .unwrap_or_else(|| "unknown connection error".to_string());
-    anyhow::bail!(
-        "failed to connect to gRPC endpoint {}: {err}",
-        endpoint.as_display()
-    );
+    let err =
+        last_error.map(|e| e.to_string()).unwrap_or_else(|| "unknown connection error".to_string());
+    anyhow::bail!("failed to connect to gRPC endpoint {}: {err}", endpoint.as_display());
 }
 
 fn canonical_backend_id(backend_id: &str) -> Option<&'static str> {

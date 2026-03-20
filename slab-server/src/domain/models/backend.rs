@@ -46,18 +46,13 @@ pub struct BackendStatusView {
 
 impl From<BackendTypeQuery> for BackendStatusQuery {
     fn from(query: BackendTypeQuery) -> Self {
-        Self {
-            backend_id: query.backend_id,
-        }
+        Self { backend_id: query.backend_id }
     }
 }
 
 impl From<DownloadLibRequest> for DownloadBackendLibCommand {
     fn from(request: DownloadLibRequest) -> Self {
-        Self {
-            backend_id: request.backend_id,
-            target_dir: request.target_dir,
-        }
+        Self { backend_id: request.backend_id, target_dir: request.target_dir }
     }
 }
 

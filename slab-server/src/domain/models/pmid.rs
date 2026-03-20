@@ -11,10 +11,7 @@ mod tests {
 
     #[test]
     fn nested_builder_generates_expected_pmid() {
-        assert_eq!(
-            PMID.setup.backends.ggml_llama.tag().as_str(),
-            "setup.backends.ggml.llama.tag"
-        );
+        assert_eq!(PMID.setup.backends.ggml_llama.tag().as_str(), "setup.backends.ggml.llama.tag");
         assert_eq!(
             PMID.runtime.model_auto_unload.idle_minutes().as_str(),
             "runtime.model_auto_unload.idle_minutes"
@@ -31,11 +28,8 @@ mod tests {
             .flat_map(|subsection| subsection.properties.iter())
             .map(|property| property.pmid.clone())
             .collect();
-        let actual: BTreeSet<String> = PMID
-            .all()
-            .into_iter()
-            .map(SettingPmid::into_string)
-            .collect();
+        let actual: BTreeSet<String> =
+            PMID.all().into_iter().map(SettingPmid::into_string).collect();
 
         assert_eq!(actual, expected);
     }

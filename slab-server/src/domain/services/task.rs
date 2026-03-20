@@ -17,10 +17,7 @@ impl TaskApplicationService {
 
     pub async fn list_tasks(&self, task_type: Option<&str>) -> Result<Vec<TaskView>, ServerError> {
         let records = self.state.store().list_tasks(task_type).await?;
-        Ok(records
-            .into_iter()
-            .map(|record| TaskView::from(&record))
-            .collect())
+        Ok(records.into_iter().map(|record| TaskView::from(&record)).collect())
     }
 
     pub async fn get_task(&self, id: &str) -> Result<TaskView, ServerError> {
@@ -53,15 +50,10 @@ impl TaskApplicationService {
                         text: Some(data),
                     })
                 })
-                .unwrap_or(TaskResult {
-                    image: None,
-                    images: None,
-                    video_path: None,
-                    text: None,
-                })),
-            status => Err(ServerError::BadRequest(format!(
-                "task is not succeeded (status: {status})"
-            ))),
+                .unwrap_or(TaskResult { image: None, images: None, video_path: None, text: None })),
+            status => {
+                Err(ServerError::BadRequest(format!("task is not succeeded (status: {status})")))
+            }
         }
     }
 
@@ -80,19 +72,14 @@ impl TaskApplicationService {
             )));
         }
 
-        self.state
-            .store()
-            .update_task_status(id, "cancelled", None, None)
-            .await?;
+        self.state.store().update_task_status(id, "cancelled", None, None).await?;
         self.state.cancel_operation(id);
 
         info!(task_id = %id, "task cancelled");
-        let updated = self
-            .state
-            .store()
-            .get_task(id)
-            .await?
-            .ok_or_else(|| ServerError::NotFound(format!("task {id} not found after cancel")))?;
+        let updated =
+            self.state.store().get_task(id).await?.ok_or_else(|| {
+                ServerError::NotFound(format!("task {id} not found after cancel"))
+            })?;
         Ok(TaskView::from(&updated))
     }
 
@@ -126,22 +113,12 @@ fn is_restartable(status: &str) -> bool {
 fn deserialize_task_result(raw: &str) -> Result<TaskResult, serde_json::Error> {
     let value: serde_json::Value = serde_json::from_str(raw)?;
     Ok(TaskResult {
-        image: value
-            .get("image")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned),
-        images: value.get("images").and_then(|v| v.as_array()).map(|arr| {
-            arr.iter()
-                .filter_map(|item| item.as_str().map(str::to_owned))
-                .collect()
-        }),
-        video_path: value
-            .get("video_path")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned),
-        text: value
-            .get("text")
-            .and_then(|v| v.as_str())
-            .map(str::to_owned),
+        image: value.get("image").and_then(|v| v.as_str()).map(str::to_owned),
+        images: value
+            .get("images")
+            .and_then(|v| v.as_array())
+            .map(|arr| arr.iter().filter_map(|item| item.as_str().map(str::to_owned)).collect()),
+        video_path: value.get("video_path").and_then(|v| v.as_str()).map(str::to_owned),
+        text: value.get("text").and_then(|v| v.as_str()).map(str::to_owned),
     })
 }

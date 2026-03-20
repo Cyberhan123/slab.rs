@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use base64::Engine as _;
+use slab_proto::convert;
+use slab_types::diffusion::DiffusionVideoRequest;
+use slab_types::media::RawImageInput;
 use tracing::{debug, info, warn};
 
 use crate::context::{SubmitOperation, WorkerState};
@@ -22,13 +24,6 @@ impl VideoService {
         &self,
         req: VideoGenerationCommand,
     ) -> Result<AcceptedOperation, ServerError> {
-        let (init_image_bytes, init_image_width, init_image_height, init_image_channels) =
-            if let Some(image) = req.init_image {
-                (image.data, image.width, image.height, image.channels)
-            } else {
-                (Vec::new(), 0u32, 0u32, 3u32)
-            };
-
         debug!(
             model = %req.model,
             prompt_len = req.prompt.len(),
@@ -53,26 +48,29 @@ impl VideoService {
         })
         .to_string();
 
-        let grpc_req = pb::VideoRequest {
-            model: req.model.clone(),
+        let grpc_request = DiffusionVideoRequest {
             prompt: req.prompt.clone(),
-            negative_prompt: req.negative_prompt.clone().unwrap_or_default(),
+            negative_prompt: req.negative_prompt.clone(),
             width: req.width,
             height: req.height,
-            cfg_scale: req.cfg_scale.unwrap_or(7.0),
-            guidance: req.guidance.unwrap_or(3.5),
-            sample_steps: req.steps.unwrap_or(20),
-            seed: req.seed.unwrap_or(42),
-            sample_method: req.sample_method.clone().unwrap_or_default(),
-            scheduler: req.scheduler.clone().unwrap_or_default(),
             video_frames: req.video_frames,
             fps: req.fps,
-            strength: req.strength.unwrap_or(0.75),
-            init_image_data: init_image_bytes,
-            init_image_width,
-            init_image_height,
-            init_image_channels,
+            cfg_scale: req.cfg_scale,
+            guidance: req.guidance,
+            steps: req.steps,
+            seed: req.seed,
+            sample_method: req.sample_method.clone(),
+            scheduler: req.scheduler.clone(),
+            strength: req.strength,
+            init_image: req.init_image.map(|image| RawImageInput {
+                data: image.data,
+                width: image.width,
+                height: image.height,
+                channels: image.channels.clamp(1, u8::MAX as u32) as u8,
+            }),
+            options: Default::default(),
         };
+        let grpc_req = convert::encode_diffusion_video_request(req.model.clone(), &grpc_request);
 
         let model_auto_unload = Arc::clone(self.state.auto_unload());
         let operation_id = self
@@ -100,7 +98,7 @@ impl VideoService {
                         return;
                     }
 
-                    let frames_json = match rpc_result {
+                    let response = match rpc_result {
                         Ok(payload) => payload,
                         Err(error) => {
                             if let Err(db_error) = operation.mark_failed(&error.to_string()).await {
@@ -110,14 +108,17 @@ impl VideoService {
                         }
                     };
 
-                    let frames: Vec<serde_json::Value> = match serde_json::from_slice(&frames_json)
-                    {
-                        Ok(value) => value,
+                    let frames = match convert::decode_diffusion_video_response(
+                        &pb::VideoResponse {
+                            frames_json: response,
+                        },
+                    ) {
+                        Ok(value) => value.frames,
                         Err(error) => {
                             let message =
-                                format!("failed to parse frames JSON from diffusion backend: {error}");
+                                format!("failed to decode frames from diffusion backend: {error}");
                             if let Err(db_error) = operation.mark_failed(&message).await {
-                                warn!(task_id = %operation_id, error = %db_error, "failed to persist frame parse error");
+                                warn!(task_id = %operation_id, error = %db_error, "failed to persist frame decode error");
                             }
                             return;
                         }
@@ -143,34 +144,18 @@ impl VideoService {
 
                     let mut written_index = 0usize;
                     for (source_index, frame) in frames.iter().enumerate() {
-                        let Some(b64) = frame["b64"].as_str() else {
-                            warn!(task_id = %operation_id, source_frame = source_index, written = written_index, "frame missing b64 field; skipping");
-                            continue;
-                        };
-                        let frame_bytes =
-                            match base64::engine::general_purpose::STANDARD.decode(b64) {
-                                Ok(bytes) => bytes,
-                                Err(error) => {
-                                    warn!(task_id = %operation_id, source_frame = source_index, written = written_index, error = %error, "failed to decode frame base64; skipping");
-                                    continue;
-                                }
-                            };
-                        let width = frame["width"].as_u64().unwrap_or(512) as u32;
-                        let height = frame["height"].as_u64().unwrap_or(512) as u32;
-                        let channels = frame["channels"].as_u64().unwrap_or(3) as u32;
-
-                        let image = if channels == 3 {
+                        let image = if frame.channels == 3 {
                             image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(
-                                width,
-                                height,
-                                frame_bytes,
+                                frame.width,
+                                frame.height,
+                                frame.data.clone(),
                             )
                             .map(image::DynamicImage::ImageRgb8)
                         } else {
                             image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-                                width,
-                                height,
-                                frame_bytes,
+                                frame.width,
+                                frame.height,
+                                frame.data.clone(),
                             )
                             .map(image::DynamicImage::ImageRgba8)
                         };

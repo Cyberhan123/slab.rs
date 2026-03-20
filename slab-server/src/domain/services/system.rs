@@ -15,27 +15,17 @@ impl SystemService {
         let snapshot = tokio::task::spawn_blocking(collect_gpu_devices).await;
 
         let (available, devices, error) = match snapshot {
-            Ok(Ok(devices)) if devices.is_empty() => (
-                false,
-                Vec::new(),
-                Some("No GPU device detected by all-smi".to_owned()),
-            ),
+            Ok(Ok(devices)) if devices.is_empty() => {
+                (false, Vec::new(), Some("No GPU device detected by all-smi".to_owned()))
+            }
             Ok(Ok(devices)) => (true, devices, None),
             Ok(Err(err)) => {
                 warn!(error = %err, "failed to refresh gpu telemetry");
-                (
-                    false,
-                    Vec::new(),
-                    Some(format!("GPU telemetry unavailable: {err}")),
-                )
+                (false, Vec::new(), Some(format!("GPU telemetry unavailable: {err}")))
             }
             Err(err) => {
                 warn!(error = %err, "gpu telemetry worker panicked");
-                (
-                    false,
-                    Vec::new(),
-                    Some("GPU telemetry worker failed".to_owned()),
-                )
+                (false, Vec::new(), Some("GPU telemetry worker failed".to_owned()))
             }
         };
 

@@ -74,9 +74,6 @@ pub struct BackendListResponse {
 
 impl From<BackendStatusView> for BackendStatusResponse {
     fn from(view: BackendStatusView) -> Self {
-        Self {
-            backend: view.backend,
-            status: view.status,
-        }
+        Self { backend: view.backend, status: view.status }
     }
 }

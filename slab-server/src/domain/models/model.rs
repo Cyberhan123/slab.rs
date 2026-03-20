@@ -257,18 +257,15 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
     type Error = String;
 
     fn try_from(record: UnifiedModelRecord) -> Result<Self, Self::Error> {
-        let status = record
-            .status
-            .parse::<UnifiedModelStatus>()
-            .unwrap_or_else(|e| {
-                tracing::warn!(
-                    id = %record.id,
-                    raw_status = %record.status,
-                    error = %e,
-                    "failed to parse model status; defaulting to Error"
-                );
-                UnifiedModelStatus::Error
-            });
+        let status = record.status.parse::<UnifiedModelStatus>().unwrap_or_else(|e| {
+            tracing::warn!(
+                id = %record.id,
+                raw_status = %record.status,
+                error = %e,
+                "failed to parse model status; defaulting to Error"
+            );
+            UnifiedModelStatus::Error
+        });
 
         let spec: ModelSpec = serde_json::from_str(&record.spec).unwrap_or_else(|e| {
             tracing::warn!(
@@ -279,10 +276,8 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             ModelSpec::default()
         });
 
-        let runtime_presets: Option<RuntimePresets> = record
-            .runtime_presets
-            .as_deref()
-            .and_then(|s| serde_json::from_str(s).ok());
+        let runtime_presets: Option<RuntimePresets> =
+            record.runtime_presets.as_deref().and_then(|s| serde_json::from_str(s).ok());
 
         Ok(UnifiedModel {
             id: record.id,
@@ -303,17 +298,13 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
 
 impl From<crate::api::v1::models::schema::ListAvailableQuery> for AvailableModelsQuery {
     fn from(query: crate::api::v1::models::schema::ListAvailableQuery) -> Self {
-        Self {
-            repo_id: query.repo_id,
-        }
+        Self { repo_id: query.repo_id }
     }
 }
 
 impl From<crate::api::v1::models::schema::DownloadModelRequest> for DownloadModelCommand {
     fn from(req: crate::api::v1::models::schema::DownloadModelRequest) -> Self {
-        Self {
-            model_id: req.model_id,
-        }
+        Self { model_id: req.model_id }
     }
 }
 
@@ -322,10 +313,7 @@ impl From<crate::api::v1::models::schema::ModelSpecRequest> for ModelSpec {
         Self {
             provider_id: req.provider_id,
             remote_model_id: req.remote_model_id,
-            pricing: req.pricing.map(|p| Pricing {
-                input: p.input,
-                output: p.output,
-            }),
+            pricing: req.pricing.map(|p| Pricing { input: p.input, output: p.output }),
             repo_id: req.repo_id,
             filename: req.filename,
             local_path: req.local_path,
@@ -336,10 +324,7 @@ impl From<crate::api::v1::models::schema::ModelSpecRequest> for ModelSpec {
 
 impl From<crate::api::v1::models::schema::RuntimePresetsRequest> for RuntimePresets {
     fn from(req: crate::api::v1::models::schema::RuntimePresetsRequest) -> Self {
-        Self {
-            temperature: req.temperature,
-            top_p: req.top_p,
-        }
+        Self { temperature: req.temperature, top_p: req.top_p }
     }
 }
 

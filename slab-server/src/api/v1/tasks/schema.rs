@@ -56,9 +56,7 @@ pub struct TaskResponse {
 
 impl From<AcceptedOperation> for OperationAcceptedResponse {
     fn from(result: AcceptedOperation) -> Self {
-        Self {
-            operation_id: result.operation_id,
-        }
+        Self { operation_id: result.operation_id }
     }
 }
 

@@ -100,11 +100,7 @@ impl<T: AsyncWrite + Unpin> AsyncWrite for IpcIo<T> {
 
 impl EnabledBackends {
     fn all() -> Self {
-        Self {
-            llama: true,
-            whisper: true,
-            diffusion: true,
-        }
+        Self { llama: true, whisper: true, diffusion: true }
     }
 }
 
@@ -129,11 +125,7 @@ fn parse_enabled_backends(raw: Option<&str>) -> anyhow::Result<EnabledBackends> 
         return Ok(EnabledBackends::all());
     };
 
-    let mut enabled = EnabledBackends {
-        llama: false,
-        whisper: false,
-        diffusion: false,
-    };
+    let mut enabled = EnabledBackends { llama: false, whisper: false, diffusion: false };
     let mut unknown = Vec::new();
 
     for token in raw.split(',').map(str::trim).filter(|v| !v.is_empty()) {
@@ -168,10 +160,7 @@ fn init_tracing(
         Err(_) => match log_level.parse::<tracing_subscriber::EnvFilter>() {
             Ok(f) => f,
             Err(e) => {
-                eprintln!(
-                    "WARN: log level '{}' is invalid ({}); fallback to info",
-                    log_level, e
-                );
+                eprintln!("WARN: log level '{}' is invalid ({}); fallback to info", log_level, e);
                 tracing_subscriber::EnvFilter::new("info")
             }
         },
@@ -182,20 +171,13 @@ fn init_tracing(
     if let Some(path) = log_file {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).with_context(|| {
-                format!(
-                    "failed to create slab-runtime log directory '{}'",
-                    parent.display()
-                )
+                format!("failed to create slab-runtime log directory '{}'", parent.display())
             })?;
         }
 
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .with_context(|| {
-                format!("failed to open slab-runtime log file '{}'", path.display())
-            })?;
+        let file = OpenOptions::new().create(true).append(true).open(path).with_context(|| {
+            format!("failed to open slab-runtime log file '{}'", path.display())
+        })?;
         let (file_writer, guard) = tracing_appender::non_blocking(file);
         guards.push(guard);
 
@@ -203,10 +185,7 @@ fn init_tracing(
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(
-                    tracing_subscriber::fmt::layer()
-                        .json()
-                        .with_target(true)
-                        .with_thread_ids(true),
+                    tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true),
                 )
                 .with(
                     tracing_subscriber::fmt::layer()
@@ -220,11 +199,7 @@ fn init_tracing(
         } else {
             tracing_subscriber::registry()
                 .with(env_filter)
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_target(true)
-                        .with_thread_ids(true),
-                )
+                .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
                 .with(
                     tracing_subscriber::fmt::layer()
                         .with_ansi(false)
@@ -239,20 +214,13 @@ fn init_tracing(
             tracing_subscriber::registry()
                 .with(env_filter)
                 .with(
-                    tracing_subscriber::fmt::layer()
-                        .json()
-                        .with_target(true)
-                        .with_thread_ids(true),
+                    tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true),
                 )
                 .init();
         } else {
             tracing_subscriber::registry()
                 .with(env_filter)
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_target(true)
-                        .with_thread_ids(true),
-                )
+                .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
                 .init();
         }
     }
@@ -265,12 +233,7 @@ fn install_panic_hook() {
         let location = panic_info
             .location()
             .map(|location| {
-                format!(
-                    "{}:{}:{}",
-                    location.file(),
-                    location.line(),
-                    location.column()
-                )
+                format!("{}:{}:{}", location.file(), location.line(), location.column())
             })
             .unwrap_or_else(|| "<unknown>".to_string());
         let payload = if let Some(msg) = panic_info.payload().downcast_ref::<&str>() {
@@ -368,10 +331,7 @@ async fn serve_grpc(
     if let Some(raw_ipc_path) = grpc_bind.strip_prefix("ipc://") {
         let ipc_path = raw_ipc_path.trim();
         if ipc_path.is_empty() {
-            anyhow::bail!(
-                "invalid IPC gRPC endpoint '{}': missing socket/pipe path",
-                grpc_bind
-            );
+            anyhow::bail!("invalid IPC gRPC endpoint '{}': missing socket/pipe path", grpc_bind);
         }
 
         #[cfg(unix)]
@@ -390,9 +350,7 @@ async fn serve_grpc(
             .map(|stream| stream.map(IpcIo::new));
 
         tonic::transport::Server::builder()
-            .add_service(pb::llama_service_server::LlamaServiceServer::new(
-                grpc_service.clone(),
-            ))
+            .add_service(pb::llama_service_server::LlamaServiceServer::new(grpc_service.clone()))
             .add_service(pb::whisper_service_server::WhisperServiceServer::new(
                 grpc_service.clone(),
             ))
@@ -410,15 +368,9 @@ async fn serve_grpc(
         .with_context(|| format!("invalid TCP gRPC bind address '{grpc_bind}'"))?;
     info!(transport = "http", %addr, "slab-runtime gRPC listening");
     tonic::transport::Server::builder()
-        .add_service(pb::llama_service_server::LlamaServiceServer::new(
-            grpc_service.clone(),
-        ))
-        .add_service(pb::whisper_service_server::WhisperServiceServer::new(
-            grpc_service.clone(),
-        ))
-        .add_service(pb::diffusion_service_server::DiffusionServiceServer::new(
-            grpc_service,
-        ))
+        .add_service(pb::llama_service_server::LlamaServiceServer::new(grpc_service.clone()))
+        .add_service(pb::whisper_service_server::WhisperServiceServer::new(grpc_service.clone()))
+        .add_service(pb::diffusion_service_server::DiffusionServiceServer::new(grpc_service))
         .serve_with_shutdown(addr, shutdown_signal(shutdown_on_stdin_close))
         .await?;
     info!(transport = "http", %addr, "slab-runtime gRPC server stopped");
@@ -433,10 +385,7 @@ async fn main() -> anyhow::Result<()> {
     install_panic_hook();
 
     let enabled = parse_enabled_backends(cli.enabled_backends.as_deref())?;
-    let base_lib_path = cli
-        .lib_dir
-        .as_deref()
-        .unwrap_or(Path::new("./resources/libs"));
+    let base_lib_path = cli.lib_dir.as_deref().unwrap_or(Path::new("./resources/libs"));
     let llama_lib_dir = enabled.llama.then(|| base_lib_path.join("llama"));
     let whisper_lib_dir = enabled.whisper.then(|| base_lib_path.join("whisper"));
     let diffusion_lib_dir = enabled.diffusion.then(|| base_lib_path.join("diffusion"));
@@ -481,7 +430,7 @@ async fn main() -> anyhow::Result<()> {
         .backend_capacity(cli.backend_capacity.unwrap_or(4))
         .drivers(drivers.clone())
         .build()
-    .context("failed to initialize slab-core runtime")?;
+        .context("failed to initialize slab-core runtime")?;
     info!("slab-core runtime initialized");
 
     let grpc_service = grpc::GrpcServiceImpl::new(runtime, drivers, enabled);

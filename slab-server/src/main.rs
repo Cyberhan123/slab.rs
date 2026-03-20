@@ -29,11 +29,7 @@ use crate::infra::rpc::gateway::GrpcGateway;
 use crate::infra::settings::SettingsProvider;
 
 #[derive(Parser, Debug, Clone)]
-#[command(
-    name = "slab-server",
-    version,
-    about = "Slab supervisor and HTTP gateway"
-)]
+#[command(name = "slab-server", version, about = "Slab supervisor and HTTP gateway")]
 struct SupervisorArgs {
     #[arg(long, default_value = "127.0.0.1:3000")]
     gateway_bind: String,
@@ -200,10 +196,7 @@ async fn run_gateway<F>(cfg: Config, shutdown: F) -> anyhow::Result<()>
 where
     F: Future<Output = ()> + Send + 'static,
 {
-    info!(
-        version = env!("CARGO_PKG_VERSION"),
-        "slab-server gateway starting"
-    );
+    info!(version = env!("CARGO_PKG_VERSION"), "slab-server gateway starting");
 
     if let Err(e) = tokio::fs::create_dir_all(&cfg.session_state_dir).await {
         warn!(
@@ -246,9 +239,7 @@ where
     let addr: SocketAddr = cfg.bind_address.parse()?;
     let listener = tokio::net::TcpListener::bind(addr).await?;
     info!(%addr, "HTTP gateway listening");
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown)
-        .await?;
+    axum::serve(listener, app).with_graceful_shutdown(shutdown).await?;
 
     if let Err(e) = store.interrupt_running_tasks().await {
         warn!(
@@ -305,11 +296,7 @@ fn spawn_backend_child(
     }
 
     let mut child = cmd.spawn().with_context(|| {
-        format!(
-            "failed to spawn slab-runtime child '{}' from {}",
-            backend,
-            runtime_exe.display()
-        )
+        format!("failed to spawn slab-runtime child '{}' from {}", backend, runtime_exe.display())
     })?;
     let stdin = child.stdin.take();
     info!(
@@ -354,18 +341,10 @@ fn runtime_log_file_path(args: &SupervisorArgs, backend: &str) -> PathBuf {
                 backend
             ));
         }
-        return fallback_dir.join(format!(
-            "slab-runtime-{}-{}.log",
-            std::process::id(),
-            backend
-        ));
+        return fallback_dir.join(format!("slab-runtime-{}-{}.log", std::process::id(), backend));
     }
 
-    logs_dir.join(format!(
-        "slab-runtime-{}-{}.log",
-        std::process::id(),
-        backend
-    ))
+    logs_dir.join(format!("slab-runtime-{}-{}.log", std::process::id(), backend))
 }
 
 async fn shutdown_children(children: &mut [ManagedChild]) {
@@ -538,29 +517,18 @@ fn build_ipc_runtime_backend_endpoints(
     let pid = std::process::id();
     let whisper = format!(r"ipc://\\.\pipe\slab-runtime-{}-whisper", pid);
     let llama = format!(r"ipc://\\.\pipe\slab-runtime-{}-llama", pid);
-    let diffusion = args
-        .include_diffusion
-        .then(|| format!(r"ipc://\\.\pipe\slab-runtime-{}-diffusion", pid));
-    Ok(RuntimeBackendEndpoints {
-        whisper,
-        llama,
-        diffusion,
-    })
+    let diffusion =
+        args.include_diffusion.then(|| format!(r"ipc://\\.\pipe\slab-runtime-{}-diffusion", pid));
+    Ok(RuntimeBackendEndpoints { whisper, llama, diffusion })
 }
 
 #[cfg(not(windows))]
 fn build_ipc_runtime_backend_endpoints(
     args: &SupervisorArgs,
 ) -> anyhow::Result<RuntimeBackendEndpoints> {
-    let base_dir = args
-        .runtime_ipc_dir
-        .clone()
-        .unwrap_or_else(std::env::temp_dir);
+    let base_dir = args.runtime_ipc_dir.clone().unwrap_or_else(std::env::temp_dir);
     std::fs::create_dir_all(&base_dir).with_context(|| {
-        format!(
-            "failed to create runtime IPC socket directory '{}'",
-            base_dir.display()
-        )
+        format!("failed to create runtime IPC socket directory '{}'", base_dir.display())
     })?;
 
     let pid = std::process::id();

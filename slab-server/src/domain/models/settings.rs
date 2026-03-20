@@ -301,11 +301,7 @@ impl SettingsSchema {
             });
         }
 
-        Ok(Self {
-            schema_version: parsed.schema_version,
-            sections,
-            property_index,
-        })
+        Ok(Self { schema_version: parsed.schema_version, sections, property_index })
     }
 
     pub fn schema_version(&self) -> u32 {
@@ -336,9 +332,7 @@ impl SettingDefinition {
         };
 
         if definition.pmid.is_empty() {
-            return Err(ServerError::Internal(
-                "settings pmid must not be empty".into(),
-            ));
+            return Err(ServerError::Internal("settings pmid must not be empty".into()));
         }
         if definition.label.is_empty() {
             return Err(ServerError::Internal(format!(
@@ -362,9 +356,8 @@ impl SettingDefinition {
     }
 
     pub fn build_view(&self, override_value: Option<&Value>) -> SettingPropertyView {
-        let effective_value = override_value
-            .cloned()
-            .unwrap_or_else(|| self.schema.default_value.clone());
+        let effective_value =
+            override_value.cloned().unwrap_or_else(|| self.schema.default_value.clone());
 
         SettingPropertyView {
             pmid: self.pmid.clone(),
@@ -444,18 +437,17 @@ impl SettingDefinition {
             };
         }
 
-        self.canonicalize_value(&self.schema.default_value, true)
-            .map_err(|error| match error {
-                ServerError::BadRequest(message) => ServerError::Internal(format!(
-                    "settings '{}' has invalid default value: {message}",
-                    self.pmid
-                )),
-                ServerError::BadRequestData { message, .. } => ServerError::Internal(format!(
-                    "settings '{}' has invalid default value: {message}",
-                    self.pmid
-                )),
-                other => other,
-            })
+        self.canonicalize_value(&self.schema.default_value, true).map_err(|error| match error {
+            ServerError::BadRequest(message) => ServerError::Internal(format!(
+                "settings '{}' has invalid default value: {message}",
+                self.pmid
+            )),
+            ServerError::BadRequestData { message, .. } => ServerError::Internal(format!(
+                "settings '{}' has invalid default value: {message}",
+                self.pmid
+            )),
+            other => other,
+        })
     }
 
     fn canonicalize_runtime_value(&self, value: &Value) -> Result<Value, ServerError> {
@@ -600,10 +592,9 @@ fn canonicalize_bool_value(value: &Value) -> Result<Value, &'static str> {
 
 fn canonicalize_integer_value(value: &Value) -> Result<Value, &'static str> {
     match value {
-        Value::Number(number) => number
-            .as_i64()
-            .map(|parsed| json!(parsed))
-            .ok_or("value must be an integer"),
+        Value::Number(number) => {
+            number.as_i64().map(|parsed| json!(parsed)).ok_or("value must be an integer")
+        }
         _ => Err("value must be an integer"),
     }
 }
@@ -671,10 +662,7 @@ fn canonicalize_chat_provider(
         provider.name = provider.id.clone();
     }
     if provider.api_base.is_empty() {
-        return Err(format!(
-            "cloud provider '{}' has empty api_base",
-            provider.id
-        ));
+        return Err(format!("cloud provider '{}' has empty api_base", provider.id));
     }
 
     Ok(provider)
@@ -724,9 +712,8 @@ mod tests {
     #[test]
     fn integer_default_can_be_null() {
         let schema = embedded_settings_schema().expect("schema");
-        let definition = schema
-            .property(PMID.runtime.llama.context_length().as_str())
-            .expect("context length");
+        let definition =
+            schema.property(PMID.runtime.llama.context_length().as_str()).expect("context length");
 
         assert!(definition.default_value().is_null());
     }
@@ -801,19 +788,11 @@ mod tests {
     #[test]
     fn embedded_chat_provider_setting_exposes_structured_json_schema() {
         let schema = embedded_settings_schema().expect("schema");
-        let definition = schema
-            .property(PMID.chat.providers().as_str())
-            .expect("cloud providers");
+        let definition = schema.property(PMID.chat.providers().as_str()).expect("cloud providers");
 
-        let json_schema = definition
-            .schema
-            .json_schema
-            .as_ref()
-            .expect("structured json schema");
-        let provider_items = json_schema
-            .get("items")
-            .and_then(Value::as_object)
-            .expect("provider items");
+        let json_schema = definition.schema.json_schema.as_ref().expect("structured json schema");
+        let provider_items =
+            json_schema.get("items").and_then(Value::as_object).expect("provider items");
         let provider_properties = provider_items
             .get("properties")
             .and_then(Value::as_object)

@@ -56,10 +56,7 @@ pub enum ServerError {
 
     /// The caller sent an invalid or malformed request with structured details.
     #[error("bad request: {message}")]
-    BadRequestData {
-        message: String,
-        data: serde_json::Value,
-    },
+    BadRequestData { message: String, data: serde_json::Value },
 
     /// Backend not initialized or ready.
     #[error("backend not ready: {0}")]
@@ -84,31 +81,22 @@ impl IntoResponse for ServerError {
                 None as Option<serde_json::Value>,
                 m.clone(),
             ),
-            ServerError::BadRequest(m) => (
-                StatusCode::BAD_REQUEST,
-                error_codes::BAD_REQUEST,
-                None,
-                m.clone(),
-            ),
+            ServerError::BadRequest(m) => {
+                (StatusCode::BAD_REQUEST, error_codes::BAD_REQUEST, None, m.clone())
+            }
             ServerError::BadRequestData { message, data } => (
                 StatusCode::BAD_REQUEST,
                 error_codes::BAD_REQUEST,
                 Some(data.clone()),
                 message.clone(),
             ),
-            ServerError::BackendNotReady(m) => (
-                StatusCode::SERVICE_UNAVAILABLE,
-                error_codes::BACKEND_NOT_READY,
-                None,
-                m.clone(),
-            ),
+            ServerError::BackendNotReady(m) => {
+                (StatusCode::SERVICE_UNAVAILABLE, error_codes::BACKEND_NOT_READY, None, m.clone())
+            }
 
-            ServerError::NotImplemented(m) => (
-                StatusCode::NOT_IMPLEMENTED,
-                error_codes::NOT_IMPLEMENTED,
-                None,
-                m.clone(),
-            ),
+            ServerError::NotImplemented(m) => {
+                (StatusCode::NOT_IMPLEMENTED, error_codes::NOT_IMPLEMENTED, None, m.clone())
+            }
 
             // Internal errors: log the full detail, return a helpful message
             // for common errors while keeping sensitive details private.
@@ -126,12 +114,7 @@ impl IntoResponse for ServerError {
                     }
                     _ => "inference backend error".to_owned()
                 };
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    error_codes::RUNTIME_ERROR,
-                    None,
-                    message,
-                )
+                (StatusCode::INTERNAL_SERVER_ERROR, error_codes::RUNTIME_ERROR, None, message)
             }
             ServerError::Database(e) => {
                 error!(error = %e, "database error");
@@ -153,11 +136,7 @@ impl IntoResponse for ServerError {
             }
         };
 
-        let error_response = ErrorResponse {
-            code,
-            data,
-            message,
-        };
+        let error_response = ErrorResponse { code, data, message };
 
         (status, Json(error_response)).into_response()
     }
@@ -196,11 +175,8 @@ fn collect_validation_messages(
     messages: &mut Vec<String>,
 ) {
     for (field, kind) in errors.errors() {
-        let field_path = if prefix.is_empty() {
-            field.to_string()
-        } else {
-            format!("{prefix}.{field}")
-        };
+        let field_path =
+            if prefix.is_empty() { field.to_string() } else { format!("{prefix}.{field}") };
 
         match kind {
             ValidationErrorsKind::Field(field_errors) => {

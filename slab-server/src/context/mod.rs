@@ -41,12 +41,7 @@ impl AppContext {
             Arc::clone(&task_manager),
         ));
 
-        Self {
-            config,
-            pmid,
-            model_state,
-            worker_state,
-        }
+        Self { config, pmid, model_state, worker_state }
     }
 }
 
@@ -64,13 +59,7 @@ impl AppState {
         store: Arc<crate::infra::db::AnyStore>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
-        let context = Arc::new(AppContext::new(
-            config,
-            pmid,
-            grpc,
-            store,
-            model_auto_unload,
-        ));
+        let context = Arc::new(AppContext::new(config, pmid, grpc, store, model_auto_unload));
         let services = Arc::new(crate::domain::services::AppServices::new(
             (*context.model_state).clone(),
             (*context.worker_state).clone(),

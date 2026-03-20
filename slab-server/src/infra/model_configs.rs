@@ -57,10 +57,7 @@ pub fn read_model_config(path: &Path) -> Result<StoredModelConfig, ServerError> 
     })?;
 
     serde_json::from_str(&raw).map_err(|error| {
-        ServerError::BadRequest(format!(
-            "invalid model config file '{}': {error}",
-            path.display()
-        ))
+        ServerError::BadRequest(format!("invalid model config file '{}': {error}", path.display()))
     })
 }
 
@@ -105,15 +102,12 @@ fn write_json_file<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), Se
     })?;
     ensure_model_config_dir(parent)?;
 
-    let file_name = path
-        .file_name()
-        .and_then(|value| value.to_str())
-        .ok_or_else(|| {
-            ServerError::Internal(format!(
-                "model config path '{}' has an invalid file name",
-                path.display()
-            ))
-        })?;
+    let file_name = path.file_name().and_then(|value| value.to_str()).ok_or_else(|| {
+        ServerError::Internal(format!(
+            "model config path '{}' has an invalid file name",
+            path.display()
+        ))
+    })?;
     let temp_path = parent.join(format!(".{}.tmp-{}", file_name, Uuid::new_v4()));
 
     let mut payload = serde_json::to_vec_pretty(value).map_err(|error| {
@@ -125,11 +119,8 @@ fn write_json_file<T: serde::Serialize>(path: &Path, value: &T) -> Result<(), Se
     payload.push(b'\n');
 
     let write_result = (|| -> Result<(), ServerError> {
-        let mut temp_file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp_path)
-            .map_err(|error| {
+        let mut temp_file =
+            OpenOptions::new().create_new(true).write(true).open(&temp_path).map_err(|error| {
                 ServerError::Internal(format!(
                     "failed to create temp model config file '{}': {error}",
                     temp_path.display()

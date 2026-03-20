@@ -34,10 +34,7 @@ impl SessionService {
 
     pub async fn list_sessions(&self) -> Result<Vec<SessionView>, ServerError> {
         let sessions = self.state.store().list_sessions().await?;
-        Ok(sessions
-            .into_iter()
-            .map(|session| SessionView::from(&session))
-            .collect())
+        Ok(sessions.into_iter().map(|session| SessionView::from(&session)).collect())
     }
 
     pub async fn delete_session(&self, id: &str) -> Result<serde_json::Value, ServerError> {
@@ -50,9 +47,6 @@ impl SessionService {
         id: &str,
     ) -> Result<Vec<SessionMessageView>, ServerError> {
         let messages = self.state.store().list_messages(id).await?;
-        Ok(messages
-            .into_iter()
-            .map(|message| SessionMessageView::from(&message))
-            .collect())
+        Ok(messages.into_iter().map(|message| SessionMessageView::from(&message)).collect())
     }
 }

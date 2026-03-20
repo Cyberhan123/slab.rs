@@ -10,10 +10,7 @@ use crate::context::AppState;
 use crate::domain::services::SystemService;
 
 #[derive(OpenApi)]
-#[openapi(
-    paths(gpu_status),
-    components(schemas(GpuStatusResponse, GpuDeviceStatus))
-)]
+#[openapi(paths(gpu_status), components(schemas(GpuStatusResponse, GpuDeviceStatus)))]
 pub struct SystemApi;
 
 pub fn router() -> Router<Arc<AppState>> {

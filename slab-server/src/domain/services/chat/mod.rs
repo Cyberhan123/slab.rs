@@ -182,10 +182,7 @@ async fn create_chat_completion_with_state(
         model: command.model,
         choices: vec![ChatResultChoice {
             index: 0,
-            message: DomainConversationMessage {
-                role: "assistant".into(),
-                content: generated,
-            },
+            message: DomainConversationMessage { role: "assistant".into(), content: generated },
             finish_reason: "stop".into(),
         }],
     };
@@ -245,24 +242,15 @@ mod test {
 
     #[test]
     fn validate_max_tokens_zero() {
-        let req = ChatCompletionCommand {
-            max_tokens: Some(0),
-            ..make_command("user", "hello")
-        };
+        let req = ChatCompletionCommand { max_tokens: Some(0), ..make_command("user", "hello") };
         assert_eq!(req.max_tokens, Some(0));
         let max_tokens = req.max_tokens.unwrap_or(512);
-        assert!(
-            max_tokens == 0 || max_tokens > 4096,
-            "should be out of range"
-        );
+        assert!(max_tokens == 0 || max_tokens > 4096, "should be out of range");
     }
 
     #[test]
     fn validate_max_tokens_too_large() {
-        let req = ChatCompletionCommand {
-            max_tokens: Some(9999),
-            ..make_command("user", "hello")
-        };
+        let req = ChatCompletionCommand { max_tokens: Some(9999), ..make_command("user", "hello") };
         let max_tokens = req.max_tokens.unwrap_or(512);
         assert!(max_tokens > 4096, "should be out of range");
     }
@@ -270,10 +258,7 @@ mod test {
     #[test]
     fn validate_temperature_out_of_range() {
         let temperature = 3.0_f32;
-        assert!(
-            !(0.0..=2.0).contains(&temperature),
-            "should be out of range"
-        );
+        assert!(!(0.0..=2.0).contains(&temperature), "should be out of range");
     }
 
     #[test]
@@ -285,11 +270,7 @@ mod test {
     #[test]
     fn no_user_message_returns_error() {
         let req = make_command("system", "you are a bot");
-        let found = req
-            .messages
-            .iter()
-            .rev()
-            .find(|message| message.role == "user");
+        let found = req.messages.iter().rev().find(|message| message.role == "user");
         assert!(found.is_none());
     }
 

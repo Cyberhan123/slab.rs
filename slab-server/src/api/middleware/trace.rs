@@ -58,11 +58,8 @@ pub async fn trace_middleware(
         let response = next.run(req).await;
 
         let (parts, body) = response.into_parts();
-        let content_type = parts
-            .headers
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
+        let content_type =
+            parts.headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
 
         // Do not buffer SSE responses; preserve streaming semantics.
         let mut response = if content_type.contains("text/event-stream") {
@@ -100,10 +97,8 @@ async fn buffer_and_log(
     headers: &header::HeaderMap,
     body: Body,
 ) -> Bytes {
-    let content_type = headers
-        .get(header::CONTENT_TYPE)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
+    let content_type =
+        headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
     let is_json = content_type.contains("application/json");
 
     let bytes = match body.collect().await {

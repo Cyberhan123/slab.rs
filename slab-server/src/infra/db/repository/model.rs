@@ -112,10 +112,7 @@ impl ModelStore for AnyStore {
     }
 
     async fn delete_model(&self, id: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("DELETE FROM models WHERE id = ?1")
-            .bind(id)
-            .execute(&self.pool)
-            .await?;
+        sqlx::query("DELETE FROM models WHERE id = ?1").bind(id).execute(&self.pool).await?;
         Ok(())
     }
 

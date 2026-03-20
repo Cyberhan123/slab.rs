@@ -48,11 +48,7 @@ impl SettingsProvider {
             ServerError::Internal(format!("settings loader task failed: {error}"))
         })??;
 
-        Ok(Self {
-            schema,
-            path,
-            state: Arc::new(RwLock::new(state)),
-        })
+        Ok(Self { schema, path, state: Arc::new(RwLock::new(state)) })
     }
 
     #[cfg(test)]
@@ -129,12 +125,7 @@ impl SettingsProvider {
             }
         }
 
-        persist_runtime_state(
-            &self.schema,
-            &self.path,
-            &next_overrides,
-            &state.unknown_values,
-        )?;
+        persist_runtime_state(&self.schema, &self.path, &next_overrides, &state.unknown_values)?;
 
         state.overrides = next_overrides;
         Ok(definition.build_view(state.overrides.get(pmid)))
@@ -147,9 +138,7 @@ impl SettingsProvider {
         let pmid = pmid.as_ref();
         let definition = self.definition(pmid)?;
         let state = self.state.read().await;
-        Ok(definition
-            .build_view(state.overrides.get(pmid))
-            .effective_value)
+        Ok(definition.build_view(state.overrides.get(pmid)).effective_value)
     }
 
     pub async fn get_optional_string(
@@ -249,10 +238,7 @@ fn load_runtime_state(
     }
 
     let raw = fs::read_to_string(path).map_err(|error| {
-        ServerError::Internal(format!(
-            "failed to read settings file '{}': {error}",
-            path.display()
-        ))
+        ServerError::Internal(format!("failed to read settings file '{}': {error}", path.display()))
     })?;
 
     let parsed: SettingsValuesFile = match serde_json::from_str(&raw) {
@@ -296,11 +282,7 @@ fn load_runtime_state(
         persist_runtime_state(schema, path, &overrides, &unknown_values)?;
     }
 
-    Ok(SettingsRuntimeState {
-        overrides,
-        unknown_values,
-        warnings,
-    })
+    Ok(SettingsRuntimeState { overrides, unknown_values, warnings })
 }
 
 fn recover_corrupt_settings_file(
@@ -310,9 +292,7 @@ fn recover_corrupt_settings_file(
 ) -> Result<String, ServerError> {
     let backup_name = format!(
         "{}.corrupt-{}",
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or("settings.json"),
+        path.file_name().and_then(|name| name.to_str()).unwrap_or("settings.json"),
         Utc::now().format("%Y%m%d%H%M%S")
     );
     let backup_path = path.with_file_name(backup_name);
@@ -326,10 +306,7 @@ fn recover_corrupt_settings_file(
 
     write_values_file(
         path,
-        &SettingsValuesFile {
-            version: schema_version,
-            values: BTreeMap::new(),
-        },
+        &SettingsValuesFile { version: schema_version, values: BTreeMap::new() },
     )?;
 
     Ok(format!(
@@ -346,13 +323,7 @@ fn persist_runtime_state(
 ) -> Result<(), ServerError> {
     let mut values = unknown_values.clone();
     values.extend(overrides.clone());
-    write_values_file(
-        path,
-        &SettingsValuesFile {
-            version: schema.schema_version(),
-            values,
-        },
-    )
+    write_values_file(path, &SettingsValuesFile { version: schema.schema_version(), values })
 }
 
 fn ensure_settings_parent_dir(path: &Path) -> Result<(), ServerError> {
@@ -383,20 +354,11 @@ fn write_values_file(path: &Path, values: &SettingsValuesFile) -> Result<(), Ser
     ensure_settings_parent_dir(path)?;
 
     let parent = path.parent().ok_or_else(|| {
-        ServerError::Internal(format!(
-            "settings path '{}' has no parent directory",
-            path.display()
-        ))
+        ServerError::Internal(format!("settings path '{}' has no parent directory", path.display()))
     })?;
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .ok_or_else(|| {
-            ServerError::Internal(format!(
-                "settings path '{}' has invalid file name",
-                path.display()
-            ))
-        })?;
+    let file_name = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
+        ServerError::Internal(format!("settings path '{}' has invalid file name", path.display()))
+    })?;
 
     let temp_path = parent.join(format!(".{}.tmp-{}", file_name, Uuid::new_v4()));
     let mut payload = serde_json::to_vec_pretty(values).map_err(|error| {
@@ -405,11 +367,8 @@ fn write_values_file(path: &Path, values: &SettingsValuesFile) -> Result<(), Ser
     payload.push(b'\n');
 
     let write_result = (|| -> Result<(), ServerError> {
-        let mut temp_file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp_path)
-            .map_err(|error| {
+        let mut temp_file =
+            OpenOptions::new().create_new(true).write(true).open(&temp_path).map_err(|error| {
                 ServerError::Internal(format!(
                     "failed to create temp settings file '{}': {error}",
                     temp_path.display()
@@ -535,9 +494,7 @@ mod tests {
     #[tokio::test]
     async fn creates_missing_values_file() {
         let path = temp_settings_path();
-        let provider = SettingsProvider::load(path.clone())
-            .await
-            .expect("provider");
+        let provider = SettingsProvider::load(path.clone()).await.expect("provider");
         let file: SettingsValuesFile =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
 
@@ -564,16 +521,11 @@ mod tests {
         )
         .expect("seed");
 
-        let provider = SettingsProvider::load(path.clone())
-            .await
-            .expect("provider");
+        let provider = SettingsProvider::load(path.clone()).await.expect("provider");
         let doc = provider.document().await;
         assert!(!doc.warnings.is_empty());
 
-        let property = provider
-            .property(PMID.runtime.llama.num_workers())
-            .await
-            .expect("property");
+        let property = provider.property(PMID.runtime.llama.num_workers()).await.expect("property");
         assert_eq!(property.effective_value, serde_json::json!(1));
         assert!(!property.is_overridden);
 
@@ -583,9 +535,7 @@ mod tests {
     #[tokio::test]
     async fn unset_removes_override_from_file() {
         let path = temp_settings_path();
-        let provider = SettingsProvider::load(path.clone())
-            .await
-            .expect("provider");
+        let provider = SettingsProvider::load(path.clone()).await.expect("provider");
 
         provider
             .update(
@@ -610,9 +560,7 @@ mod tests {
 
         let file: SettingsValuesFile =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
-        assert!(!file
-            .values
-            .contains_key(PMID.runtime.llama.context_length().as_str()));
+        assert!(!file.values.contains_key(PMID.runtime.llama.context_length().as_str()));
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
@@ -620,9 +568,7 @@ mod tests {
     #[tokio::test]
     async fn chat_provider_values_round_trip() {
         let path = temp_settings_path();
-        let provider = SettingsProvider::load(path.clone())
-            .await
-            .expect("provider");
+        let provider = SettingsProvider::load(path.clone()).await.expect("provider");
 
         provider
             .update(
@@ -641,10 +587,8 @@ mod tests {
             .await
             .expect("set");
 
-        let providers = provider
-            .get_chat_providers(PMID.chat.providers())
-            .await
-            .expect("providers");
+        let providers =
+            provider.get_chat_providers(PMID.chat.providers()).await.expect("providers");
         assert_eq!(providers.len(), 1);
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
@@ -666,9 +610,7 @@ mod tests {
         )
         .expect("seed");
 
-        let provider = SettingsProvider::load(path.clone())
-            .await
-            .expect("provider");
+        let provider = SettingsProvider::load(path.clone()).await.expect("provider");
         let document = provider.document().await;
         let found = document
             .sections
@@ -691,21 +633,14 @@ mod tests {
         ensure_settings_parent_dir(&path).expect("dir");
         fs::write(&path, "{ not valid json").expect("corrupt");
 
-        let provider = SettingsProvider::load(path.clone())
-            .await
-            .expect("provider");
+        let provider = SettingsProvider::load(path.clone()).await.expect("provider");
         let document = provider.document().await;
         let file: SettingsValuesFile =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
         let backup_exists = fs::read_dir(path.parent().expect("parent"))
             .expect("dir")
             .flatten()
-            .any(|entry| {
-                entry
-                    .file_name()
-                    .to_string_lossy()
-                    .starts_with("settings.json.corrupt-")
-            });
+            .any(|entry| entry.file_name().to_string_lossy().starts_with("settings.json.corrupt-"));
 
         assert!(file.values.is_empty());
         assert!(!document.warnings.is_empty());

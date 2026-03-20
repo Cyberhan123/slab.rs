@@ -275,10 +275,7 @@ pub struct UnifiedModelResponse {
 
 impl From<DomainModelStatus> for ModelStatusResponse {
     fn from(status: DomainModelStatus) -> Self {
-        Self {
-            backend: status.backend,
-            status: status.status,
-        }
+        Self { backend: status.backend, status: status.status }
     }
 }
 
@@ -287,10 +284,7 @@ impl From<DomainModelSpec> for ModelSpecResponse {
         Self {
             provider_id: spec.provider_id,
             remote_model_id: spec.remote_model_id,
-            pricing: spec.pricing.map(|p| PricingResponse {
-                input: p.input,
-                output: p.output,
-            }),
+            pricing: spec.pricing.map(|p| PricingResponse { input: p.input, output: p.output }),
             repo_id: spec.repo_id,
             filename: spec.filename,
             local_path: spec.local_path,
@@ -301,10 +295,7 @@ impl From<DomainModelSpec> for ModelSpecResponse {
 
 impl From<DomainRuntimePresets> for RuntimePresetsResponse {
     fn from(presets: DomainRuntimePresets) -> Self {
-        Self {
-            temperature: presets.temperature,
-            top_p: presets.top_p,
-        }
+        Self { temperature: presets.temperature, top_p: presets.top_p }
     }
 }
 

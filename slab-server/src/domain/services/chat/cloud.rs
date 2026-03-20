@@ -69,9 +69,8 @@ pub(super) async fn should_route_to_cloud(
     let Some(record) = state.store().get_model(requested_model).await? else {
         return Ok(false);
     };
-    let model: UnifiedModel = record
-        .try_into()
-        .map_err(|error: String| ServerError::Internal(error))?;
+    let model: UnifiedModel =
+        record.try_into().map_err(|error: String| ServerError::Internal(error))?;
     Ok(is_cloud_catalog_model(&model))
 }
 
@@ -154,9 +153,8 @@ pub(super) async fn create_chat_completion(
             }
         });
 
-        let sse_stream = token_stream.chain(stream::once(async {
-            ChatStreamChunk::Data("[DONE]".into())
-        }));
+        let sse_stream =
+            token_stream.chain(stream::once(async { ChatStreamChunk::Data("[DONE]".into()) }));
 
         return Ok(GeneratedChatOutput::Stream(Box::pin(sse_stream)));
     }
@@ -240,10 +238,7 @@ async fn resolve_cloud_model(
 ) -> Result<ResolvedCloudModel, ServerError> {
     let providers = load_cloud_provider_map(state).await?;
     let Some(model) = find_cloud_catalog_model(state, requested_model).await? else {
-        return Err(ServerError::BadRequest(format!(
-            "unknown cloud model '{}'",
-            requested_model
-        )));
+        return Err(ServerError::BadRequest(format!("unknown cloud model '{}'", requested_model)));
     };
 
     resolve_cloud_catalog_model(&providers, &model)
@@ -310,12 +305,8 @@ fn build_cloud_chat_model_option(
     }
 
     let provider_id = referenced_provider_id(model)?;
-    let remote_model_id = model
-        .spec
-        .remote_model_id
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
+    let remote_model_id =
+        model.spec.remote_model_id.as_deref().map(str::trim).filter(|value| !value.is_empty());
     if remote_model_id.is_none() {
         warn!(
             model_id = %model.id,
@@ -350,10 +341,7 @@ fn resolve_cloud_catalog_model(
     model: &UnifiedModel,
 ) -> Result<ResolvedCloudModel, ServerError> {
     let provider_id = referenced_provider_id(model).ok_or_else(|| {
-        ServerError::BadRequest(format!(
-            "cloud model '{}' is missing provider reference",
-            model.id
-        ))
+        ServerError::BadRequest(format!("cloud model '{}' is missing provider reference", model.id))
     })?;
     let provider = providers.get(&provider_id).ok_or_else(|| {
         ServerError::BadRequest(format!(
@@ -409,9 +397,8 @@ async fn find_cloud_catalog_model(
     let Some(record) = state.store().get_model(requested_model).await? else {
         return Ok(None);
     };
-    let model: UnifiedModel = record
-        .try_into()
-        .map_err(|error: String| ServerError::Internal(error))?;
+    let model: UnifiedModel =
+        record.try_into().map_err(|error: String| ServerError::Internal(error))?;
     if is_cloud_catalog_model(&model) {
         Ok(Some(model))
     } else {
@@ -485,9 +472,7 @@ fn build_genai_client_for_target(target: &ResolvedCloudModel) -> GenaiClient {
         },
     );
 
-    GenaiClient::builder()
-        .with_service_target_resolver(resolver)
-        .build()
+    GenaiClient::builder().with_service_target_resolver(resolver).build()
 }
 
 fn build_genai_chat_request(messages: &[DomainConversationMessage]) -> GenaiChatRequest {
@@ -572,18 +557,11 @@ async fn cloud_chat_completion(
 
     let client = build_genai_client_for_target(target);
     let request = build_genai_chat_request(messages);
-    let options = build_genai_chat_options(
-        max_tokens,
-        temperature,
-        reasoning_effort,
-        verbosity,
-        trace_http,
-    );
+    let options =
+        build_genai_chat_options(max_tokens, temperature, reasoning_effort, verbosity, trace_http);
 
-    let response = client
-        .exec_chat(&target.remote_model, request, Some(&options))
-        .await
-        .map_err(|error| {
+    let response =
+        client.exec_chat(&target.remote_model, request, Some(&options)).await.map_err(|error| {
             if let Some(trace) = trace.as_ref() {
                 log_cloud_http_response_error(target, trace, &error);
             }
@@ -727,10 +705,7 @@ fn build_cloud_http_trace_context(
 
 fn build_cloud_http_request_headers(target: &ResolvedCloudModel) -> BTreeMap<String, String> {
     BTreeMap::from([
-        (
-            "authorization".to_owned(),
-            format!("Bearer {}", target.api_key),
-        ),
+        ("authorization".to_owned(), format!("Bearer {}", target.api_key)),
         ("content-type".to_owned(), "application/json".to_owned()),
     ])
 }
@@ -826,11 +801,7 @@ fn log_cloud_http_response_error(
     match err {
         genai::Error::WebModelCall { webc_error, .. }
         | genai::Error::WebAdapterCall { webc_error, .. } => match webc_error {
-            genai::webc::Error::ResponseFailedStatus {
-                status,
-                body,
-                headers,
-            } => {
+            genai::webc::Error::ResponseFailedStatus { status, body, headers } => {
                 let headers = redact_header_map(headers.as_ref());
                 let body = redact_text_body(body);
                 error!(
@@ -857,11 +828,7 @@ fn log_cloud_http_response_error(
                 );
             }
         },
-        genai::Error::HttpError {
-            status,
-            canonical_reason,
-            body,
-        } => {
+        genai::Error::HttpError { status, canonical_reason, body } => {
             error!(
                 cloud_http_trace = true,
                 request_id = %trace.request_id,
@@ -890,10 +857,7 @@ fn log_cloud_http_response_error(
 
 fn log_genai_error(action: &str, err: &genai::Error) {
     match err {
-        genai::Error::WebModelCall {
-            model_iden,
-            webc_error,
-        } => {
+        genai::Error::WebModelCall { model_iden, webc_error } => {
             warn!(
                 action,
                 model = %model_iden,
@@ -901,10 +865,7 @@ fn log_genai_error(action: &str, err: &genai::Error) {
                 "genai web model call failed"
             );
         }
-        genai::Error::WebAdapterCall {
-            adapter_kind,
-            webc_error,
-        } => {
+        genai::Error::WebAdapterCall { adapter_kind, webc_error } => {
             warn!(
                 action,
                 adapter = ?adapter_kind,
@@ -912,11 +873,7 @@ fn log_genai_error(action: &str, err: &genai::Error) {
                 "genai web adapter call failed"
             );
         }
-        genai::Error::HttpError {
-            status,
-            canonical_reason,
-            body,
-        } => {
+        genai::Error::HttpError { status, canonical_reason, body } => {
             warn!(
                 action,
                 response_status = status.as_u16(),
@@ -944,10 +901,7 @@ fn redact_header_map(headers: &reqwest::header::HeaderMap) -> String {
         .iter()
         .map(|(name, value)| {
             let value = value.to_str().unwrap_or("<non-utf8>");
-            (
-                name.as_str().to_owned(),
-                redact_header_value(name.as_str(), value),
-            )
+            (name.as_str().to_owned(), redact_header_value(name.as_str(), value))
         })
         .collect::<BTreeMap<_, _>>();
 
@@ -988,14 +942,7 @@ fn redact_secret(value: &str) -> String {
 
     let len = value.chars().count();
     let prefix: String = value.chars().take(4).collect();
-    let suffix: String = value
-        .chars()
-        .rev()
-        .take(2)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
+    let suffix: String = value.chars().rev().take(2).collect::<String>().chars().rev().collect();
 
     format!("{prefix}...{suffix} (redacted,len={len})")
 }

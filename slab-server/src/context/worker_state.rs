@@ -24,9 +24,7 @@ impl std::fmt::Debug for OperationManager {
 
 impl OperationManager {
     pub fn new() -> Self {
-        Self {
-            handles: Mutex::new(HashMap::new()),
-        }
+        Self { handles: Mutex::new(HashMap::new()) }
     }
 
     pub fn insert(&self, id: impl Into<String>, handle: tokio::task::AbortHandle) {
@@ -80,12 +78,7 @@ impl SubmitOperation {
         model_id: Option<String>,
         input_data: Option<String>,
     ) -> Self {
-        Self {
-            task_type: task_type.into(),
-            initial_status: "pending",
-            model_id,
-            input_data,
-        }
+        Self { task_type: task_type.into(), initial_status: "pending", model_id, input_data }
     }
 
     pub fn running(
@@ -93,12 +86,7 @@ impl SubmitOperation {
         model_id: Option<String>,
         input_data: Option<String>,
     ) -> Self {
-        Self {
-            task_type: task_type.into(),
-            initial_status: "running",
-            model_id,
-            input_data,
-        }
+        Self { task_type: task_type.into(), initial_status: "running", model_id, input_data }
     }
 }
 
@@ -119,9 +107,7 @@ impl OperationContext {
         result_data: Option<&str>,
         error_msg: Option<&str>,
     ) -> Result<(), ServerError> {
-        self.store
-            .update_task_status(&self.operation_id, status, result_data, error_msg)
-            .await?;
+        self.store.update_task_status(&self.operation_id, status, result_data, error_msg).await?;
         Ok(())
     }
 
@@ -160,12 +146,7 @@ impl WorkerState {
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
         operations: Arc<OperationManager>,
     ) -> Self {
-        Self {
-            store,
-            grpc,
-            model_auto_unload,
-            operations,
-        }
+        Self { store, grpc, model_auto_unload, operations }
     }
 
     pub fn store(&self) -> &Arc<crate::infra::db::AnyStore> {
@@ -215,10 +196,8 @@ impl WorkerState {
             })
             .await?;
 
-        let context = OperationContext {
-            operation_id: operation_id.clone(),
-            store: Arc::clone(&self.store),
-        };
+        let context =
+            OperationContext { operation_id: operation_id.clone(), store: Arc::clone(&self.store) };
         self.spawn_tracked(operation_id.clone(), task(context));
         Ok(operation_id)
     }

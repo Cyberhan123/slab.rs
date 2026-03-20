@@ -168,12 +168,7 @@ fn validate_image_generation_request(
     }
 
     if request.mode == ImageMode::Img2Img
-        && request
-            .init_image
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .is_none()
+        && request.init_image.as_deref().map(str::trim).filter(|value| !value.is_empty()).is_none()
     {
         let mut error = ValidationError::new("missing_init_image");
         error.message = Some("init_image is required for img2img mode".into());

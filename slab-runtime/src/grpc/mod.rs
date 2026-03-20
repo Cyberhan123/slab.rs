@@ -6,7 +6,9 @@ use slab_core::api::{
     Capability, CoreError, DriversConfig, ModelFamily, ModelSource, ModelSpec, Pipeline, Runtime,
     RuntimeBuilder,
 };
-use slab_proto::slab::ipc::v1 as pb;
+use slab_proto::{convert, slab::ipc::v1 as pb};
+use slab_types::backend::RuntimeBackendId;
+use slab_types::runtime::{RuntimeModelLoadSpec, RuntimeModelStatus};
 use tokio::sync::RwLock;
 use tonic::Status;
 use tracing::instrument;
@@ -37,14 +39,15 @@ pub(super) enum BackendKind {
     Diffusion,
 }
 
-const BACKEND_ORDER: [BackendKind; 3] = [
-    BackendKind::Llama,
-    BackendKind::Whisper,
-    BackendKind::Diffusion,
-];
+const BACKEND_ORDER: [BackendKind; 3] =
+    [BackendKind::Llama, BackendKind::Whisper, BackendKind::Diffusion];
 
 impl GrpcServiceImpl {
-    pub fn new(runtime: Runtime, drivers: DriversConfig, enabled_backends: EnabledBackends) -> Self {
+    pub fn new(
+        runtime: Runtime,
+        drivers: DriversConfig,
+        enabled_backends: EnabledBackends,
+    ) -> Self {
         Self {
             state: Arc::new(RwLock::new(RuntimeState {
                 runtime,
@@ -74,12 +77,12 @@ impl GrpcServiceImpl {
         backend: BackendKind,
         request: pb::ModelLoadRequest,
     ) -> Result<pb::ModelStatusResponse, Status> {
-        validate_model_load_request(&request)?;
+        let load_spec = convert::decode_model_load_request(&request).map_err(proto_to_status)?;
 
         let mut state = self.state.write().await;
         state.ensure_enabled(backend)?;
 
-        let spec = build_model_spec(backend, &request);
+        let spec = build_model_spec(backend, &load_spec);
         let pipeline = state.runtime.pipeline(spec).map_err(runtime_to_status)?;
         pipeline.load().await.map_err(runtime_to_status)?;
         state.pipelines.insert(backend, pipeline);
@@ -110,18 +113,17 @@ impl GrpcServiceImpl {
         backend: BackendKind,
         request: pb::ReloadLibraryRequest,
     ) -> Result<pb::ModelStatusResponse, Status> {
-        validate_reload_library_request(&request)?;
+        let reload_spec =
+            convert::decode_reload_library_request(&request).map_err(proto_to_status)?;
 
         let mut state = self.state.write().await;
         state.ensure_enabled(backend)?;
 
         let mut drivers = state.drivers.clone();
-        backend.set_library_path(&mut drivers, PathBuf::from(&request.lib_path));
+        backend.set_library_path(&mut drivers, reload_spec.lib_path.clone());
 
-        let new_runtime = RuntimeBuilder::new()
-            .drivers(drivers.clone())
-            .build()
-            .map_err(runtime_to_status)?;
+        let new_runtime =
+            RuntimeBuilder::new().drivers(drivers.clone()).build().map_err(runtime_to_status)?;
 
         let mut specs: HashMap<BackendKind, ModelSpec> = state
             .pipelines
@@ -129,29 +131,12 @@ impl GrpcServiceImpl {
             .map(|(kind, pipeline)| (*kind, pipeline.model().clone()))
             .collect();
 
-        let load_request = pb::ModelLoadRequest {
-            model_path: request.model_path.clone(),
-            num_workers: request.num_workers,
-            context_length: request.context_length,
-            diffusion_model_path: String::new(),
-            vae_path: String::new(),
-            taesd_path: String::new(),
-            lora_model_dir: String::new(),
-            clip_l_path: String::new(),
-            clip_g_path: String::new(),
-            t5xxl_path: String::new(),
-            flash_attn: false,
-            keep_vae_on_cpu: false,
-            keep_clip_on_cpu: false,
-            offload_params_to_cpu: false,
-        };
-
         let target_spec = match specs.remove(&backend) {
             Some(mut spec) => {
-                update_model_spec_from_request(backend, &mut spec, &load_request);
+                update_model_spec_from_load_spec(backend, &mut spec, &reload_spec.load);
                 spec
             }
-            None => build_model_spec(backend, &load_request),
+            None => build_model_spec(backend, &reload_spec.load),
         };
         specs.insert(backend, target_spec);
 
@@ -170,21 +155,22 @@ impl RuntimeState {
         if backend.is_enabled(&self.enabled_backends) {
             Ok(())
         } else {
-            Err(Status::unavailable(format!(
-                "{} backend is disabled",
-                backend.canonical_id()
-            )))
+            Err(Status::unavailable(format!("{} backend is disabled", backend.canonical_id())))
         }
     }
 }
 
 impl BackendKind {
-    pub(super) fn canonical_id(self) -> &'static str {
+    fn runtime_backend_id(self) -> RuntimeBackendId {
         match self {
-            Self::Llama => "ggml.llama",
-            Self::Whisper => "ggml.whisper",
-            Self::Diffusion => "ggml.diffusion",
+            Self::Llama => RuntimeBackendId::GgmlLlama,
+            Self::Whisper => RuntimeBackendId::GgmlWhisper,
+            Self::Diffusion => RuntimeBackendId::GgmlDiffusion,
         }
+    }
+
+    pub(super) fn canonical_id(self) -> &'static str {
+        self.runtime_backend_id().canonical_id()
     }
 
     fn driver_id(self) -> &'static str {
@@ -243,13 +229,11 @@ async fn load_pipelines(
     Ok(pipelines)
 }
 
-fn build_model_spec(backend: BackendKind, request: &pb::ModelLoadRequest) -> ModelSpec {
+fn build_model_spec(backend: BackendKind, load_spec: &RuntimeModelLoadSpec) -> ModelSpec {
     let mut spec = ModelSpec::new(
         backend.family(),
         backend.capability(),
-        ModelSource::LocalPath {
-            path: PathBuf::from(&request.model_path),
-        },
+        ModelSource::LocalPath { path: load_spec.model_path.clone() },
     );
 
     spec.driver_hints.prefer_drivers.push(backend.driver_id().to_owned());
@@ -257,38 +241,44 @@ fn build_model_spec(backend: BackendKind, request: &pb::ModelLoadRequest) -> Mod
     match backend {
         BackendKind::Llama => {
             spec.load_options
-                .insert("num_workers".to_owned(), serde_json::json!(request.num_workers));
+                .insert("num_workers".to_owned(), serde_json::json!(load_spec.num_workers));
             spec.load_options.insert(
                 "context_length".to_owned(),
-                serde_json::json!(request.context_length),
+                serde_json::json!(load_spec.context_length.unwrap_or(0)),
             );
         }
         BackendKind::Diffusion => {
-            insert_non_empty_string_option(
-                &mut spec,
-                "diffusion_model_path",
-                &request.diffusion_model_path,
-            );
-            insert_non_empty_string_option(&mut spec, "vae_path", &request.vae_path);
-            insert_non_empty_string_option(&mut spec, "taesd_path", &request.taesd_path);
-            insert_non_empty_string_option(&mut spec, "lora_model_dir", &request.lora_model_dir);
-            insert_non_empty_string_option(&mut spec, "clip_l_path", &request.clip_l_path);
-            insert_non_empty_string_option(&mut spec, "clip_g_path", &request.clip_g_path);
-            insert_non_empty_string_option(&mut spec, "t5xxl_path", &request.t5xxl_path);
-            spec.load_options
-                .insert("flash_attn".to_owned(), serde_json::json!(request.flash_attn));
-            spec.load_options.insert(
-                "keep_vae_on_cpu".to_owned(),
-                serde_json::json!(request.keep_vae_on_cpu),
-            );
-            spec.load_options.insert(
-                "keep_clip_on_cpu".to_owned(),
-                serde_json::json!(request.keep_clip_on_cpu),
-            );
-            spec.load_options.insert(
-                "offload_params_to_cpu".to_owned(),
-                serde_json::json!(request.offload_params_to_cpu),
-            );
+            if let Some(diffusion) = load_spec.diffusion.as_ref() {
+                insert_opt_path_option(
+                    &mut spec,
+                    "diffusion_model_path",
+                    diffusion.diffusion_model_path.as_ref(),
+                );
+                insert_opt_path_option(&mut spec, "vae_path", diffusion.vae_path.as_ref());
+                insert_opt_path_option(&mut spec, "taesd_path", diffusion.taesd_path.as_ref());
+                insert_opt_path_option(
+                    &mut spec,
+                    "lora_model_dir",
+                    diffusion.lora_model_dir.as_ref(),
+                );
+                insert_opt_path_option(&mut spec, "clip_l_path", diffusion.clip_l_path.as_ref());
+                insert_opt_path_option(&mut spec, "clip_g_path", diffusion.clip_g_path.as_ref());
+                insert_opt_path_option(&mut spec, "t5xxl_path", diffusion.t5xxl_path.as_ref());
+                spec.load_options
+                    .insert("flash_attn".to_owned(), serde_json::json!(diffusion.flash_attn));
+                spec.load_options.insert(
+                    "keep_vae_on_cpu".to_owned(),
+                    serde_json::json!(diffusion.keep_vae_on_cpu),
+                );
+                spec.load_options.insert(
+                    "keep_clip_on_cpu".to_owned(),
+                    serde_json::json!(diffusion.keep_clip_on_cpu),
+                );
+                spec.load_options.insert(
+                    "offload_params_to_cpu".to_owned(),
+                    serde_json::json!(diffusion.offload_params_to_cpu),
+                );
+            }
         }
         BackendKind::Whisper => {}
     }
@@ -296,12 +286,12 @@ fn build_model_spec(backend: BackendKind, request: &pb::ModelLoadRequest) -> Mod
     spec
 }
 
-fn update_model_spec_from_request(
+fn update_model_spec_from_load_spec(
     backend: BackendKind,
     spec: &mut ModelSpec,
-    request: &pb::ModelLoadRequest,
+    load_spec: &RuntimeModelLoadSpec,
 ) {
-    update_model_source_primary_path(&mut spec.source, PathBuf::from(&request.model_path));
+    update_model_source_primary_path(&mut spec.source, load_spec.model_path.clone());
     spec.driver_hints.prefer_drivers = vec![backend.driver_id().to_owned()];
     spec.driver_hints.avoid_drivers.clear();
     spec.driver_hints.require_streaming = false;
@@ -309,20 +299,40 @@ fn update_model_spec_from_request(
     match backend {
         BackendKind::Llama => {
             spec.load_options
-                .insert("num_workers".to_owned(), serde_json::json!(request.num_workers));
+                .insert("num_workers".to_owned(), serde_json::json!(load_spec.num_workers));
             spec.load_options.insert(
                 "context_length".to_owned(),
-                serde_json::json!(request.context_length),
+                serde_json::json!(load_spec.context_length.unwrap_or(0)),
             );
         }
         BackendKind::Diffusion => {
-            replace_non_empty_string_option(spec, "diffusion_model_path", &request.diffusion_model_path);
-            replace_non_empty_string_option(spec, "vae_path", &request.vae_path);
-            replace_non_empty_string_option(spec, "taesd_path", &request.taesd_path);
-            replace_non_empty_string_option(spec, "lora_model_dir", &request.lora_model_dir);
-            replace_non_empty_string_option(spec, "clip_l_path", &request.clip_l_path);
-            replace_non_empty_string_option(spec, "clip_g_path", &request.clip_g_path);
-            replace_non_empty_string_option(spec, "t5xxl_path", &request.t5xxl_path);
+            if let Some(diffusion) = load_spec.diffusion.as_ref() {
+                replace_opt_path_option(
+                    spec,
+                    "diffusion_model_path",
+                    diffusion.diffusion_model_path.as_ref(),
+                );
+                replace_opt_path_option(spec, "vae_path", diffusion.vae_path.as_ref());
+                replace_opt_path_option(spec, "taesd_path", diffusion.taesd_path.as_ref());
+                replace_opt_path_option(spec, "lora_model_dir", diffusion.lora_model_dir.as_ref());
+                replace_opt_path_option(spec, "clip_l_path", diffusion.clip_l_path.as_ref());
+                replace_opt_path_option(spec, "clip_g_path", diffusion.clip_g_path.as_ref());
+                replace_opt_path_option(spec, "t5xxl_path", diffusion.t5xxl_path.as_ref());
+                spec.load_options
+                    .insert("flash_attn".to_owned(), serde_json::json!(diffusion.flash_attn));
+                spec.load_options.insert(
+                    "keep_vae_on_cpu".to_owned(),
+                    serde_json::json!(diffusion.keep_vae_on_cpu),
+                );
+                spec.load_options.insert(
+                    "keep_clip_on_cpu".to_owned(),
+                    serde_json::json!(diffusion.keep_clip_on_cpu),
+                );
+                spec.load_options.insert(
+                    "offload_params_to_cpu".to_owned(),
+                    serde_json::json!(diffusion.offload_params_to_cpu),
+                );
+            }
         }
         BackendKind::Whisper => {}
     }
@@ -337,48 +347,25 @@ fn update_model_source_primary_path(source: &mut ModelSource, path: PathBuf) {
     }
 }
 
-fn insert_non_empty_string_option(spec: &mut ModelSpec, key: &str, value: &str) {
-    if !value.trim().is_empty() {
+fn insert_opt_path_option(spec: &mut ModelSpec, key: &str, value: Option<&PathBuf>) {
+    if let Some(value) = value {
         spec.load_options
-            .insert(key.to_owned(), serde_json::json!(value));
+            .insert(key.to_owned(), serde_json::json!(value.to_string_lossy().into_owned()));
     }
 }
 
-fn replace_non_empty_string_option(spec: &mut ModelSpec, key: &str, value: &str) {
-    if !value.trim().is_empty() {
+fn replace_opt_path_option(spec: &mut ModelSpec, key: &str, value: Option<&PathBuf>) {
+    if let Some(value) = value {
         spec.load_options
-            .insert(key.to_owned(), serde_json::json!(value));
+            .insert(key.to_owned(), serde_json::json!(value.to_string_lossy().into_owned()));
     }
 }
 
 fn model_status_response(backend: BackendKind, status: &str) -> pb::ModelStatusResponse {
-    pb::ModelStatusResponse {
-        backend: backend.canonical_id().to_owned(),
+    convert::encode_model_status_response(&RuntimeModelStatus {
+        backend: backend.runtime_backend_id(),
         status: status.to_owned(),
-    }
-}
-
-fn validate_model_load_request(request: &pb::ModelLoadRequest) -> Result<(), Status> {
-    if request.model_path.trim().is_empty() {
-        return Err(Status::invalid_argument("model_path must not be empty"));
-    }
-    if request.num_workers == 0 {
-        return Err(Status::invalid_argument("num_workers must be at least 1"));
-    }
-    Ok(())
-}
-
-fn validate_reload_library_request(request: &pb::ReloadLibraryRequest) -> Result<(), Status> {
-    if request.lib_path.trim().is_empty() {
-        return Err(Status::invalid_argument("lib_path must not be empty"));
-    }
-    if request.model_path.trim().is_empty() {
-        return Err(Status::invalid_argument("model_path must not be empty"));
-    }
-    if request.num_workers == 0 {
-        return Err(Status::invalid_argument("num_workers must be at least 1"));
-    }
-    Ok(())
+    })
 }
 
 fn format_error_chain(err: &dyn std::error::Error) -> String {
@@ -399,9 +386,13 @@ pub(super) fn runtime_to_status(err: CoreError) -> Status {
         CoreError::QueueFull { .. }
         | CoreError::OrchestratorQueueFull { .. }
         | CoreError::Busy { .. } => Status::resource_exhausted(msg),
-        CoreError::TaskNotFound { .. } | CoreError::NoFailedGlobalOperation => Status::not_found(msg),
+        CoreError::TaskNotFound { .. } | CoreError::NoFailedGlobalOperation => {
+            Status::not_found(msg)
+        }
         CoreError::Timeout | CoreError::BroadcastAckTimeout => Status::deadline_exceeded(msg),
-        CoreError::BackendShutdown | CoreError::LibraryLoadFailed { .. } => Status::unavailable(msg),
+        CoreError::BackendShutdown | CoreError::LibraryLoadFailed { .. } => {
+            Status::unavailable(msg)
+        }
         CoreError::UnsupportedOperation { .. } | CoreError::UnsupportedCapability { .. } => {
             Status::unimplemented(msg)
         }
@@ -421,6 +412,10 @@ pub(super) fn runtime_to_status(err: CoreError) -> Status {
         | CoreError::OnnxEngine(_)
         | CoreError::CandleEngine(_) => Status::internal(msg),
     }
+}
+
+pub(super) fn proto_to_status(err: convert::ProtoConversionError) -> Status {
+    Status::invalid_argument(err.to_string())
 }
 
 pub(super) fn extract_request_id(metadata: &tonic::metadata::MetadataMap) -> String {
