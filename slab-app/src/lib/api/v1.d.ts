@@ -217,6 +217,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/models/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["import_model_config"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/models/load": {
         parameters: {
             query?: never;
@@ -836,6 +852,25 @@ export interface components {
          * @enum {string}
          */
         ImageMode: "txt2img" | "img2img";
+        /**
+         * @description Request body for `POST /v1/models/import`.
+         *
+         *     This matches the persisted on-disk model config format. The server stores
+         *     the uploaded config file under its model config directory and upserts the
+         *     corresponding row in the unified `models` table.
+         */
+        ImportModelConfigRequest: {
+            display_name: string;
+            id: string;
+            provider: string;
+            runtime_presets?: null | components["schemas"]["RuntimePresetsRequest"];
+            spec?: components["schemas"]["ModelSpecRequest"];
+            /**
+             * @description Initial status. If omitted, defaults to `"ready"` for cloud providers and
+             *     `"not_downloaded"` for local providers.
+             */
+            status?: string | null;
+        };
         /** @description Query parameters for listing files in a HuggingFace repo. */
         ListAvailableQuery: {
             repo_id: string;
@@ -1733,6 +1768,44 @@ export interface operations {
             };
             /** @description Model not found */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    import_model_config: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportModelConfigRequest"];
+            };
+        };
+        responses: {
+            /** @description Model config imported and stored */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnifiedModelResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };
