@@ -14,4 +14,4 @@ serde_json  = { workspace = true }
 thiserror   = { workspace = true }
 uuid        = { workspace = true }
 chrono      = { workspace = true }
-schemars    = { version = "1.0", features = ["uuid1", "chrono04"] }
+schemars    = { workspace = true }

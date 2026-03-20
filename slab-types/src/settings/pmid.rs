@@ -2,8 +2,9 @@ use std::fmt;
 
 /// A dot-separated Property-Management ID that uniquely identifies a setting.
 ///
-/// PMIDs are structured as `"section.subsection.key"` and serve as stable,
-/// machine-readable keys for the settings system.
+/// PMIDs are composed of dot-separated segments (variable depth), such as
+/// `"section.subsection.key"`, and serve as stable, machine-readable keys for
+/// the settings system.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SettingPmid(String);
 

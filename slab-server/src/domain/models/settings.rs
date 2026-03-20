@@ -110,19 +110,7 @@ pub struct SettingValidationErrorData {
     pub message: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
-pub struct CloudProviderSettingValue {
-    #[serde(alias = "provider_id", alias = "providerId")]
-    pub id: String,
-    #[serde(default, alias = "displayName", alias = "provider_name")]
-    pub name: String,
-    #[serde(alias = "apiBase", alias = "base_url", alias = "baseUrl")]
-    pub api_base: String,
-    #[serde(default, alias = "apiKey", skip_serializing_if = "Option::is_none")]
-    pub api_key: Option<String>,
-    #[serde(default, alias = "apiKeyEnv", skip_serializing_if = "Option::is_none")]
-    pub api_key_env: Option<String>,
-}
+use slab_types::settings::CloudProviderConfig;
 
 #[derive(Debug, Clone)]
 pub struct SettingsSchema {
@@ -640,19 +628,19 @@ fn normalize_optional_text(raw: Option<&str>) -> Option<String> {
 
 pub fn canonicalize_chat_providers_from_value(
     value: &Value,
-) -> Result<Vec<CloudProviderSettingValue>, String> {
+) -> Result<Vec<CloudProviderConfig>, String> {
     if value.is_null() {
         return Ok(Vec::new());
     }
 
-    let providers: Vec<CloudProviderSettingValue> = serde_json::from_value(value.clone())
+    let providers: Vec<CloudProviderConfig> = serde_json::from_value(value.clone())
         .map_err(|error| format!("value has invalid provider payload: {error}"))?;
     canonicalize_chat_providers(providers)
 }
 
 fn canonicalize_chat_providers(
-    providers: Vec<CloudProviderSettingValue>,
-) -> Result<Vec<CloudProviderSettingValue>, String> {
+    providers: Vec<CloudProviderConfig>,
+) -> Result<Vec<CloudProviderConfig>, String> {
     let mut out = Vec::with_capacity(providers.len());
     let mut provider_ids = BTreeSet::new();
 
@@ -668,8 +656,8 @@ fn canonicalize_chat_providers(
 }
 
 fn canonicalize_chat_provider(
-    mut provider: CloudProviderSettingValue,
-) -> Result<CloudProviderSettingValue, String> {
+    mut provider: CloudProviderConfig,
+) -> Result<CloudProviderConfig, String> {
     provider.id = provider.id.trim().to_owned();
     provider.name = provider.name.trim().to_owned();
     provider.api_base = provider.api_base.trim().trim_end_matches('/').to_owned();
