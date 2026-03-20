@@ -10,10 +10,7 @@ pub struct WhisperStateSegmentIterator<'a> {
 
 impl<'a> WhisperStateSegmentIterator<'a> {
     pub(super) fn new(state_ptr: &'a WhisperState) -> Self {
-        Self {
-            state_ptr,
-            current_segment: 0,
-        }
+        Self { state_ptr, current_segment: 0 }
     }
 }
 

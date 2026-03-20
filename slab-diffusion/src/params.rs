@@ -215,10 +215,7 @@ impl SdContextParams {
     /// Convenience constructor – sets only the full-model path and uses
     /// sensible defaults for everything else.
     pub fn with_model(model_path: impl Into<String>) -> Self {
-        Self {
-            model_path: model_path.into(),
-            ..Default::default()
-        }
+        Self { model_path: model_path.into(), ..Default::default() }
     }
 }
 
@@ -305,10 +302,7 @@ impl Default for SdImgGenParams {
 impl SdImgGenParams {
     /// Convenience constructor – sets only the prompt and uses sensible defaults.
     pub fn with_prompt(prompt: impl Into<String>) -> Self {
-        Self {
-            prompt: prompt.into(),
-            ..Default::default()
-        }
+        Self { prompt: prompt.into(), ..Default::default() }
     }
 }
 

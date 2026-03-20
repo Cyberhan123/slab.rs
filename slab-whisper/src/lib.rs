@@ -55,9 +55,8 @@ fn load_ggml_backend(
     path: &Path,
     whisper_lib: &slab_whisper_sys::WhisperLib,
 ) -> Result<Option<Arc<Library>>, WhisperError> {
-    let whisper_dir_path = path
-        .parent()
-        .ok_or(WhisperError::InitBackendError("Invalid path".to_string()))?;
+    let whisper_dir_path =
+        path.parent().ok_or(WhisperError::InitBackendError("Invalid path".to_string()))?;
     if !whisper_dir_path.is_dir() {
         return Err(WhisperError::InitBackendError(format!(
             "Whisper directory does not exist: {}",
@@ -76,16 +75,8 @@ fn load_ggml_backend(
     {
         unsafe { ggml_backend_load_all_from_path(c_str.as_ptr()) };
 
-        let reg_count = whisper_lib
-            .ggml_backend_reg_count
-            .as_ref()
-            .ok()
-            .map(|f| unsafe { f() });
-        let dev_count = whisper_lib
-            .ggml_backend_dev_count
-            .as_ref()
-            .ok()
-            .map(|f| unsafe { f() });
+        let reg_count = whisper_lib.ggml_backend_reg_count.as_ref().ok().map(|f| unsafe { f() });
+        let dev_count = whisper_lib.ggml_backend_dev_count.as_ref().ok().map(|f| unsafe { f() });
 
         if matches!((reg_count, dev_count), (Some(0), Some(0))) {
             return Err(WhisperError::InitBackendError(format!(
@@ -115,14 +106,12 @@ fn load_ggml_backend(
         let ggml_backend_load_all_from_path: unsafe extern "C" fn(
             dir_path: *const ::std::os::raw::c_char,
         ) = unsafe {
-            *ggml_lib
-                .get(b"ggml_backend_load_all_from_path\0")
-                .map_err(|e| {
-                    WhisperError::InitBackendError(format!(
-                        "Missing ggml symbol ggml_backend_load_all_from_path: {}",
-                        e
-                    ))
-                })?
+            *ggml_lib.get(b"ggml_backend_load_all_from_path\0").map_err(|e| {
+                WhisperError::InitBackendError(format!(
+                    "Missing ggml symbol ggml_backend_load_all_from_path: {}",
+                    e
+                ))
+            })?
         };
         let ggml_backend_reg_count: unsafe extern "C" fn() -> usize = unsafe {
             *ggml_lib.get(b"ggml_backend_reg_count\0").map_err(|e| {
@@ -181,10 +170,7 @@ impl Whisper {
             let whisper_lib = unsafe { slab_whisper_sys::WhisperLib::from_library(lib)? };
             let ggml_lib = load_ggml_backend(path.as_ref(), &whisper_lib)?;
 
-            Ok(Self {
-                lib: Arc::new(whisper_lib),
-                _ggml_lib: ggml_lib,
-            })
+            Ok(Self { lib: Arc::new(whisper_lib), _ggml_lib: ggml_lib })
         }
 
         #[cfg(not(windows))]
@@ -192,10 +178,7 @@ impl Whisper {
             let raw_lib = unsafe { libloading::Library::new(path.as_ref())? };
             let lib = unsafe { slab_whisper_sys::WhisperLib::from_library(raw_lib)? };
             let ggml_lib = load_ggml_backend(path.as_ref(), &lib)?;
-            Ok(Self {
-                lib: Arc::new(lib),
-                _ggml_lib: ggml_lib,
-            })
+            Ok(Self { lib: Arc::new(lib), _ggml_lib: ggml_lib })
         }
     }
 
@@ -238,12 +221,8 @@ mod test {
         match env::current_exe() {
             Ok(exe_path) => {
                 let whisper_lib_name = format!("{}whisper{}", DLL_PREFIX, DLL_SUFFIX);
-                let dir = exe_path
-                    .parent()
-                    .unwrap()
-                    .parent()
-                    .unwrap()
-                    .join("resources\\lib\\whisper");
+                let dir =
+                    exe_path.parent().unwrap().parent().unwrap().join("resources\\lib\\whisper");
                 let whisper_dll_path = dir.join(&whisper_lib_name);
                 println!("可执行文件目录: {:?}", dir);
                 println!("Whisper DLL 路径: {:?}", whisper_dll_path);

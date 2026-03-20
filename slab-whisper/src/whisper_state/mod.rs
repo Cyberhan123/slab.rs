@@ -238,12 +238,7 @@ impl WhisperState {
     /// # C++ equivalent
     /// `float * whisper_get_logits(struct whisper_context * ctx)`
     pub fn get_logits(&self) -> Result<&[f32], WhisperError> {
-        let ret = unsafe {
-            self.ctx
-                .instance
-                .lib
-                .whisper_get_logits_from_state(self.ptr)
-        };
+        let ret = unsafe { self.ctx.instance.lib.whisper_get_logits_from_state(self.ptr) };
         if ret.is_null() {
             return Err(WhisperError::NullPointer);
         }
@@ -328,12 +323,7 @@ impl WhisperState {
     /// # C++ equivalent
     /// `int whisper_full_n_segments(struct whisper_context * ctx)`
     pub fn full_n_segments(&self) -> c_int {
-        unsafe {
-            self.ctx
-                .instance
-                .lib
-                .whisper_full_n_segments_from_state(self.ptr)
-        }
+        unsafe { self.ctx.instance.lib.whisper_full_n_segments_from_state(self.ptr) }
     }
 
     /// Language ID associated with the provided state.
@@ -341,12 +331,7 @@ impl WhisperState {
     /// # C++ equivalent
     /// `int whisper_full_lang_id_from_state(struct whisper_state * state);`
     pub fn full_lang_id_from_state(&self) -> c_int {
-        unsafe {
-            self.ctx
-                .instance
-                .lib
-                .whisper_full_lang_id_from_state(self.ptr)
-        }
+        unsafe { self.ctx.instance.lib.whisper_full_lang_id_from_state(self.ptr) }
     }
 
     fn segment_in_bounds(&self, segment: c_int) -> bool {

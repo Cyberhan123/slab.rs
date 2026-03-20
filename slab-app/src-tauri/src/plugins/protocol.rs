@@ -106,9 +106,7 @@ pub fn handle_protocol_request<R: Runtime>(
         }
     };
 
-    let content_type = mime_guess::from_path(&asset_path)
-        .first_or_octet_stream()
-        .to_string();
+    let content_type = mime_guess::from_path(&asset_path).first_or_octet_stream().to_string();
     let csp = if content_type.starts_with("text/html") {
         Some(build_plugin_csp(&plugin.manifest.network))
     } else {
@@ -119,10 +117,7 @@ pub fn handle_protocol_request<R: Runtime>(
 }
 
 pub fn plugin_ui_url(plugin: &LoadedPlugin) -> String {
-    format!(
-        "slab-plugin://localhost/{}/{}",
-        plugin.manifest.id, plugin.ui_entry
-    )
+    format!("slab-plugin://localhost/{}/{}", plugin.manifest.id, plugin.ui_entry)
 }
 
 pub fn collect_navigation_allow_hosts(network: &PluginNetworkManifest) -> HashSet<String> {
@@ -195,9 +190,7 @@ fn build_bytes_response(
         response = response.header("Content-Security-Policy", csp_value);
     }
 
-    response
-        .body(body)
-        .unwrap_or_else(|_| http::Response::new(Vec::new()))
+    response.body(body).unwrap_or_else(|_| http::Response::new(Vec::new()))
 }
 
 fn build_text_response(

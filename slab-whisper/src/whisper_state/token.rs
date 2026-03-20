@@ -16,11 +16,7 @@ impl Whisper {
         segment: &'a WhisperSegment<'b>,
         token_idx: c_int,
     ) -> WhisperToken<'a, 'b> {
-        WhisperToken {
-            segment,
-            token_idx,
-            instance: self.clone(),
-        }
+        WhisperToken { segment, token_idx, instance: self.clone() }
     }
 }
 
@@ -141,12 +137,7 @@ impl<'a, 'b> WhisperToken<'a, 'b> {
 /// Uses [`Self::to_str_lossy`] internally.
 impl fmt::Display for WhisperToken<'_, '_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.to_str_lossy()
-                .expect("got null pointer during string write")
-        )
+        write!(f, "{}", self.to_str_lossy().expect("got null pointer during string write"))
     }
 }
 

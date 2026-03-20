@@ -27,11 +27,7 @@ pub enum WhisperGrammarElementType {
 
 impl From<slab_whisper_sys::whisper_gretype> for WhisperGrammarElementType {
     fn from(value: slab_whisper_sys::whisper_gretype) -> Self {
-        assert!(
-            (0..=6).contains(&value),
-            "Invalid WhisperGrammarElementType value: {}",
-            value
-        );
+        assert!((0..=6).contains(&value), "Invalid WhisperGrammarElementType value: {}", value);
 
         #[allow(non_upper_case_globals)] // weird place to trigger this
         match value {
@@ -65,10 +61,7 @@ pub struct WhisperGrammarElement {
 
 impl WhisperGrammarElement {
     pub fn new(element_type: WhisperGrammarElementType, value: u32) -> Self {
-        Self {
-            element_type,
-            value,
-        }
+        Self { element_type, value }
     }
 
     pub fn to_c_type(self) -> slab_whisper_sys::whisper_grammar_element {

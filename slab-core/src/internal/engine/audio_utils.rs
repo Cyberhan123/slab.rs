@@ -97,14 +97,10 @@ pub fn parse_wav_pcm(data: &[u8]) -> Option<Vec<f32>> {
 
     let raw = &data[data_start..data_start.saturating_add(data_len).min(data.len())];
     let samples: Vec<f32> = match bits_per_sample {
-        16 => raw
-            .chunks_exact(2)
-            .map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0)
-            .collect(),
-        32 => raw
-            .chunks_exact(4)
-            .map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]]))
-            .collect(),
+        16 => {
+            raw.chunks_exact(2).map(|b| i16::from_le_bytes([b[0], b[1]]) as f32 / 32768.0).collect()
+        }
+        32 => raw.chunks_exact(4).map(|b| f32::from_le_bytes([b[0], b[1], b[2], b[3]])).collect(),
         _ => return None,
     };
 
@@ -112,11 +108,6 @@ pub fn parse_wav_pcm(data: &[u8]) -> Option<Vec<f32>> {
         Some(samples)
     } else {
         let ch = num_channels as usize;
-        Some(
-            samples
-                .chunks_exact(ch)
-                .map(|frame| frame.iter().sum::<f32>() / ch as f32)
-                .collect(),
-        )
+        Some(samples.chunks_exact(ch).map(|frame| frame.iter().sum::<f32>() / ch as f32).collect())
     }
 }

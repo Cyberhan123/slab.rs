@@ -106,10 +106,7 @@ pub enum TaskStatus {
     /// Task has been accepted but not yet started.
     Pending,
     /// Task is actively executing the named stage.
-    Running {
-        stage_index: usize,
-        stage_name: String,
-    },
+    Running { stage_index: usize, stage_name: String },
     /// Task completed successfully; result is available.
     Succeeded { result: Payload },
     /// Task completed successfully and its result payload has been consumed

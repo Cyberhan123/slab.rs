@@ -43,10 +43,7 @@ impl Whisper {
         if ctx.is_null() {
             Err(WhisperError::InitError)
         } else {
-            Ok(WhisperInnerContext {
-                ctx,
-                instance: self.clone(),
-            })
+            Ok(WhisperInnerContext { ctx, instance: self.clone() })
         }
     }
 
@@ -75,10 +72,7 @@ impl Whisper {
         if ctx.is_null() {
             Err(WhisperError::InitError)
         } else {
-            Ok(WhisperInnerContext {
-                ctx,
-                instance: self.clone(),
-            })
+            Ok(WhisperInnerContext { ctx, instance: self.clone() })
         }
     }
 }
@@ -497,10 +491,8 @@ impl<'a> WhisperContextParameters<'a> {
         let mut dtw_aheads_preset =
             slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_NONE;
         let mut dtw_n_top: c_int = -1;
-        let mut dtw_aheads = slab_whisper_sys::whisper_aheads {
-            n_heads: 0,
-            heads: std::ptr::null(),
-        };
+        let mut dtw_aheads =
+            slab_whisper_sys::whisper_aheads { n_heads: 0, heads: std::ptr::null() };
 
         match &self.dtw_parameters.mode {
             DtwMode::None => {}
@@ -592,10 +584,7 @@ pub struct DtwParameters<'a> {
 
 impl Default for DtwParameters<'_> {
     fn default() -> Self {
-        Self {
-            mode: DtwMode::None,
-            dtw_mem_size: 1024 * 1024 * 128,
-        }
+        Self { mode: DtwMode::None, dtw_mem_size: 1024 * 1024 * 128 }
     }
 }
 
@@ -611,9 +600,7 @@ pub enum DtwMode<'a> {
     /// Use custom aheads, non-empty list of whisper_ahead.
     /// 0 < n_text_layer < model n_text_layer, 0 < n_head < model n_text_head for each element
     /// See details https://github.com/ggerganov/whisper.cpp/pull/1485#discussion_r1519681143
-    Custom {
-        aheads: &'a [slab_whisper_sys::whisper_ahead],
-    },
+    Custom { aheads: &'a [slab_whisper_sys::whisper_ahead] },
     /// Use predefined preset for standard models
     ModelPreset { model_preset: DtwModelPreset },
 }
@@ -648,11 +635,8 @@ mod test_with_tiny_model {
         let ctx = WhisperInnerContext::new(MODEL_PATH).expect("Download the ggml-tiny.en model using 'sys/whisper.cpp/models/download-ggml-model.sh tiny.en'");
         let text_in = " And so my fellow Americans, ask not what your country can do for you, ask what you can do for your country.";
         let tokens = ctx.tokenize(text_in, 1024).unwrap();
-        let text_out = tokens
-            .into_iter()
-            .map(|t| ctx.token_to_str(t).unwrap())
-            .collect::<Vec<_>>()
-            .join("");
+        let text_out =
+            tokens.into_iter().map(|t| ctx.token_to_str(t).unwrap()).collect::<Vec<_>>().join("");
         assert_eq!(text_in, text_out);
     }
 }

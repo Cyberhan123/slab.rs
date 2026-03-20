@@ -15,9 +15,7 @@ fn cstr_ptr_or_empty<'a>(
 ) -> *const std::os::raw::c_char {
     match cs.as_ref() {
         Some(s) => s.as_ptr(),
-        None => fallback
-            .get_or_insert_with(|| std::ffi::CString::new("").unwrap())
-            .as_ptr(),
+        None => fallback.get_or_insert_with(|| std::ffi::CString::new("").unwrap()).as_ptr(),
     }
 }
 
@@ -240,12 +238,7 @@ impl SdContext {
                         free(img.data as *mut libc::c_void);
                         owned
                     };
-                    SdImage {
-                        width: img.width,
-                        height: img.height,
-                        channel: img.channel,
-                        data,
-                    }
+                    SdImage { width: img.width, height: img.height, channel: img.channel, data }
                 })
                 .collect()
         };

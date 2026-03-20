@@ -55,20 +55,14 @@ impl Tensor {
 
     /// Build a token-ID tensor from a slice; shape = `[ids.len()]`.
     pub(crate) fn from_token_ids(ids: &[u32]) -> Self {
-        Self {
-            data: TensorData::U32(ids.to_vec()),
-            shape: vec![ids.len()],
-        }
+        Self { data: TensorData::U32(ids.to_vec()), shape: vec![ids.len()] }
     }
 
     /// Build a logit tensor from an already-computed `Vec<f32>`; shape =
     /// `[data.len()]` (i.e., a 1-D vocabulary distribution).
     pub(crate) fn from_logits(data: Vec<f32>) -> Self {
         let n = data.len();
-        Self {
-            data: TensorData::F32(data),
-            shape: vec![n],
-        }
+        Self { data: TensorData::F32(data), shape: vec![n] }
     }
 
     // ── Accessors ─────────────────────────────────────────────────────────────

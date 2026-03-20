@@ -9,6 +9,6 @@ pub use config::{
 };
 pub use pmid::{
     ChatPmids, DiffusionPathPmids, DiffusionPerformancePmids, DiffusionPmids, PmidCatalog,
-    RuntimeLlamaPmids, RuntimeModelAutoUnloadPmids, RuntimePmids, RuntimeWorkerPmids,
-    SetupBackendPmids, SetupBackendReleasePmids, SetupFfmpegPmids, SetupPmids, SettingPmid, PMID,
+    RuntimeLlamaPmids, RuntimeModelAutoUnloadPmids, RuntimePmids, RuntimeWorkerPmids, SettingPmid,
+    SetupBackendPmids, SetupBackendReleasePmids, SetupFfmpegPmids, SetupPmids, PMID,
 };

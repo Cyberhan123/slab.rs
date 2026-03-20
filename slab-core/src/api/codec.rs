@@ -71,9 +71,7 @@ pub(crate) fn encode_load_payload(
             "inter_op_num_threads": usize_option(spec, "inter_op_num_threads").unwrap_or(0),
         }),
         other => {
-            return Err(CoreError::DriverNotRegistered {
-                driver_id: other.to_owned(),
-            });
+            return Err(CoreError::DriverNotRegistered { driver_id: other.to_owned() });
         }
     };
 
@@ -158,16 +156,13 @@ pub(crate) fn decode_text_generation_chunk(
     chunk: StreamChunk,
 ) -> Result<Option<TextGenerationChunk>, CoreError> {
     match chunk {
-        StreamChunk::Token(delta) => Ok(Some(TextGenerationChunk {
-            delta,
-            done: false,
-            metadata: BTreeMap::new(),
-        })),
+        StreamChunk::Token(delta) => {
+            Ok(Some(TextGenerationChunk { delta, done: false, metadata: BTreeMap::new() }))
+        }
         StreamChunk::Done => Ok(None),
-        StreamChunk::Error(message) => Err(CoreError::ResultDecodeFailed {
-            task_kind: "text_generation".to_owned(),
-            message,
-        }),
+        StreamChunk::Error(message) => {
+            Err(CoreError::ResultDecodeFailed { task_kind: "text_generation".to_owned(), message })
+        }
         StreamChunk::Image(_) => Err(CoreError::ResultDecodeFailed {
             task_kind: "text_generation".to_owned(),
             message: "unexpected image chunk on text stream".to_owned(),
@@ -198,11 +193,7 @@ pub(crate) fn decode_audio_transcription_response(
             metadata: BTreeMap::new(),
         }),
         Payload::Json(value) => Ok(AudioTranscriptionResponse {
-            text: value
-                .get("text")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_owned(),
+            text: value.get("text").and_then(Value::as_str).unwrap_or_default().to_owned(),
             language: value
                 .get("language")
                 .and_then(Value::as_str)
@@ -272,10 +263,7 @@ pub(crate) fn decode_image_generation_response(
         }
     };
 
-    Ok(ImageGenerationResponse {
-        images,
-        metadata: BTreeMap::new(),
-    })
+    Ok(ImageGenerationResponse { images, metadata: BTreeMap::new() })
 }
 
 pub(crate) fn encode_image_embedding_request(
@@ -325,12 +313,9 @@ pub(crate) fn image_embedding_output_name(spec: &ModelSpec) -> String {
 }
 
 fn primary_model_path(spec: &ModelSpec) -> Result<String, CoreError> {
-    spec.source
-        .primary_path()
-        .map(path_to_string)
-        .ok_or_else(|| CoreError::SourceResolveFailed {
-            message: "model source does not expose a primary artifact".to_owned(),
-        })
+    spec.source.primary_path().map(path_to_string).ok_or_else(|| CoreError::SourceResolveFailed {
+        message: "model source does not expose a primary artifact".to_owned(),
+    })
 }
 
 fn path_to_string(path: &Path) -> String {
@@ -338,10 +323,7 @@ fn path_to_string(path: &Path) -> String {
 }
 
 fn artifact_or_option(spec: &ModelSpec, artifact: &str, option: &str) -> Option<String> {
-    spec.source
-        .artifact(artifact)
-        .map(path_to_string)
-        .or_else(|| string_option(spec, option))
+    spec.source.artifact(artifact).map(path_to_string).or_else(|| string_option(spec, option))
 }
 
 fn source_revision(spec: &ModelSpec) -> Option<String> {
@@ -353,11 +335,9 @@ fn source_revision(spec: &ModelSpec) -> Option<String> {
 
 fn execution_providers(spec: &ModelSpec) -> Vec<String> {
     match spec.load_options.get("execution_providers") {
-        Some(Value::Array(values)) => values
-            .iter()
-            .filter_map(Value::as_str)
-            .map(ToOwned::to_owned)
-            .collect(),
+        Some(Value::Array(values)) => {
+            values.iter().filter_map(Value::as_str).map(ToOwned::to_owned).collect()
+        }
         Some(Value::String(value)) => value
             .split(',')
             .map(str::trim)
@@ -369,10 +349,7 @@ fn execution_providers(spec: &ModelSpec) -> Vec<String> {
 }
 
 fn map_from_json_options(options: &JsonOptions) -> Map<String, Value> {
-    options
-        .iter()
-        .map(|(key, value)| (key.clone(), value.clone()))
-        .collect()
+    options.iter().map(|(key, value)| (key.clone(), value.clone())).collect()
 }
 
 fn insert_option<T>(map: &mut Map<String, Value>, key: &str, value: T)
@@ -396,27 +373,15 @@ fn string_option(spec: &ModelSpec, key: &str) -> Option<String> {
 }
 
 fn bool_option(spec: &ModelSpec, key: &str) -> Option<bool> {
-    spec.load_options
-        .get(key)
-        .and_then(Value::as_bool)
-        .or_else(|| {
-            spec.load_options
-                .get(key)
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse().ok())
-        })
+    spec.load_options.get(key).and_then(Value::as_bool).or_else(|| {
+        spec.load_options.get(key).and_then(Value::as_str).and_then(|value| value.parse().ok())
+    })
 }
 
 fn u64_option(spec: &ModelSpec, key: &str) -> Option<u64> {
-    spec.load_options
-        .get(key)
-        .and_then(Value::as_u64)
-        .or_else(|| {
-            spec.load_options
-                .get(key)
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse().ok())
-        })
+    spec.load_options.get(key).and_then(Value::as_u64).or_else(|| {
+        spec.load_options.get(key).and_then(Value::as_str).and_then(|value| value.parse().ok())
+    })
 }
 
 fn usize_option(spec: &ModelSpec, key: &str) -> Option<usize> {
@@ -429,10 +394,7 @@ fn i32_option(spec: &ModelSpec, key: &str) -> Option<i32> {
         .and_then(Value::as_i64)
         .and_then(|value| i32::try_from(value).ok())
         .or_else(|| {
-            spec.load_options
-                .get(key)
-                .and_then(Value::as_str)
-                .and_then(|value| value.parse().ok())
+            spec.load_options.get(key).and_then(Value::as_str).and_then(|value| value.parse().ok())
         })
 }
 
@@ -449,12 +411,12 @@ fn decode_image_generation_json(value: &Value) -> Result<Vec<Vec<u8>>, CoreError
                         message: "image entry missing image field".to_owned(),
                     })
                     .and_then(|image| {
-                        base64::engine::general_purpose::STANDARD
-                            .decode(image)
-                            .map_err(|error| CoreError::ResultDecodeFailed {
+                        base64::engine::general_purpose::STANDARD.decode(image).map_err(|error| {
+                            CoreError::ResultDecodeFailed {
                                 task_kind: "image_generation".to_owned(),
                                 message: format!("failed to decode image payload: {error}"),
-                            })
+                            }
+                        })
                     }),
                 _ => Err(CoreError::ResultDecodeFailed {
                     task_kind: "image_generation".to_owned(),
@@ -547,28 +509,24 @@ fn decode_embedding_tensor(value: &Value, output_name: &str) -> Result<Vec<f32>,
             message: format!("output tensor '{output_name}' not found"),
         })?;
 
-    let data_b64 = tensor
-        .get("data_b64")
-        .and_then(Value::as_str)
-        .ok_or_else(|| CoreError::ResultDecodeFailed {
+    let data_b64 = tensor.get("data_b64").and_then(Value::as_str).ok_or_else(|| {
+        CoreError::ResultDecodeFailed {
             task_kind: "image_embedding".to_owned(),
             message: "embedding tensor missing data_b64".to_owned(),
-        })?;
+        }
+    })?;
 
-    let raw = base64::engine::general_purpose::STANDARD
-        .decode(data_b64)
-        .map_err(|error| CoreError::ResultDecodeFailed {
+    let raw = base64::engine::general_purpose::STANDARD.decode(data_b64).map_err(|error| {
+        CoreError::ResultDecodeFailed {
             task_kind: "image_embedding".to_owned(),
             message: format!("failed to decode embedding bytes: {error}"),
-        })?;
+        }
+    })?;
 
     if raw.len() % 4 != 0 {
         return Err(CoreError::ResultDecodeFailed {
             task_kind: "image_embedding".to_owned(),
-            message: format!(
-                "embedding tensor byte length {} is not divisible by 4",
-                raw.len()
-            ),
+            message: format!("embedding tensor byte length {} is not divisible by 4", raw.len()),
         });
     }
 

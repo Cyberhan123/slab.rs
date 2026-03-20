@@ -59,10 +59,7 @@ pub struct DeploymentSnapshot {
 
 impl DeploymentSnapshot {
     pub fn with_model(generation: u64, payload: Payload) -> Self {
-        Self {
-            generation,
-            model: Some(payload),
-        }
+        Self { generation, model: Some(payload) }
     }
 
     pub fn model_config<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
@@ -107,8 +104,7 @@ impl PeerWorkerCommand {
     /// Worker id that originally emitted this peer command.
     pub fn sender_id(&self) -> usize {
         match self {
-            Self::LoadModel { sender_id, .. }
-            | Self::Unload { sender_id, .. } => *sender_id,
+            Self::LoadModel { sender_id, .. } | Self::Unload { sender_id, .. } => *sender_id,
         }
     }
 
@@ -119,8 +115,7 @@ impl PeerWorkerCommand {
 
     pub fn sync(&self) -> &SyncMessage {
         match self {
-            Self::LoadModel { sync, .. }
-            | Self::Unload { sync, .. } => sync,
+            Self::LoadModel { sync, .. } | Self::Unload { sync, .. } => sync,
         }
     }
 

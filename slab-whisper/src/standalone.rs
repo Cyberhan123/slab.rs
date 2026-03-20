@@ -94,9 +94,7 @@ impl Whisper {
     pub fn get_whisper_version(&self) -> &'static str {
         let ptr = unsafe { self.lib.whisper_version() };
         assert!(!ptr.is_null());
-        unsafe { CStr::from_ptr(ptr) }
-            .to_str()
-            .expect("Whisper version should be valid UTF-8")
+        unsafe { CStr::from_ptr(ptr) }.to_str().expect("Whisper version should be valid UTF-8")
     }
 
     /// Print system information.

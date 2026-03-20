@@ -184,10 +184,7 @@ impl InferenceWorkerState {
 
     fn handle_command(&mut self, cmd: WorkerCommand) {
         match cmd {
-            WorkerCommand::CreateSession {
-                session_id,
-                reply_tx,
-            } => {
+            WorkerCommand::CreateSession { session_id, reply_tx } => {
                 // Prefer a recycled sequence ID; only mint a new one when the
                 // free-list is empty, to keep the seq_id space bounded.
                 let seq_id = if let Some(reused) = self.free_seq_ids.pop() {
@@ -219,77 +216,70 @@ impl InferenceWorkerState {
                 let _ = reply_tx.send(Ok(()));
             }
 
-            WorkerCommand::AppendInput {
-                session_id,
-                text_delta,
-                reply_tx,
-            } => match self.sessions.get_mut(&session_id) {
-                None => {
-                    let _ =
-                        reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+            WorkerCommand::AppendInput { session_id, text_delta, reply_tx } => {
+                match self.sessions.get_mut(&session_id) {
+                    None => {
+                        let _ = reply_tx
+                            .send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+                    }
+                    Some(session) => {
+                        // Tokenize the delta (no BOS, parse special tokens).
+                        let result = self
+                            .model
+                            .tokenize(&text_delta, false, true)
+                            .map(|tokens| {
+                                session.pending_tokens.extend(tokens);
+                            })
+                            .map_err(|source| GGMLLlamaEngineError::TokenizeFailed { source });
+                        let _ = reply_tx.send(result);
+                    }
                 }
-                Some(session) => {
-                    // Tokenize the delta (no BOS, parse special tokens).
-                    let result = self
-                        .model
-                        .tokenize(&text_delta, false, true)
-                        .map(|tokens| {
-                            session.pending_tokens.extend(tokens);
-                        })
-                        .map_err(|source| GGMLLlamaEngineError::TokenizeFailed { source });
-                    let _ = reply_tx.send(result);
-                }
-            },
+            }
 
-            WorkerCommand::GenerateStream {
-                session_id,
-                max_new_tokens,
-                stream_tx,
-                reply_tx,
-            } => match self.sessions.get_mut(&session_id) {
-                None => {
-                    let _ =
-                        reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+            WorkerCommand::GenerateStream { session_id, max_new_tokens, stream_tx, reply_tx } => {
+                match self.sessions.get_mut(&session_id) {
+                    None => {
+                        let _ = reply_tx
+                            .send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+                    }
+                    Some(session) => {
+                        session.stream_tx = Some(stream_tx);
+                        session.remaining_tokens = max_new_tokens;
+                        session.cancelled = false;
+                        let _ = reply_tx.send(Ok(()));
+                    }
                 }
-                Some(session) => {
-                    session.stream_tx = Some(stream_tx);
-                    session.remaining_tokens = max_new_tokens;
-                    session.cancelled = false;
-                    let _ = reply_tx.send(Ok(()));
-                }
-            },
+            }
 
-            WorkerCommand::EndSession {
-                session_id,
-                reply_tx,
-            } => match self.sessions.remove(&session_id) {
-                None => {
-                    let _ =
-                        reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+            WorkerCommand::EndSession { session_id, reply_tx } => {
+                match self.sessions.remove(&session_id) {
+                    None => {
+                        let _ = reply_tx
+                            .send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+                    }
+                    Some(session) => {
+                        // Release KV cache entries for this sequence only.
+                        self.ctx.kv_cache_seq_rm(session.seq_id, 0, i32::MAX);
+                        // Return the sequence ID to the free-list so it can be
+                        // reused by a future session without exhausting the ID space.
+                        self.free_seq_ids.push(session.seq_id);
+                        let _ = reply_tx.send(Ok(()));
+                    }
                 }
-                Some(session) => {
-                    // Release KV cache entries for this sequence only.
-                    self.ctx.kv_cache_seq_rm(session.seq_id, 0, i32::MAX);
-                    // Return the sequence ID to the free-list so it can be
-                    // reused by a future session without exhausting the ID space.
-                    self.free_seq_ids.push(session.seq_id);
-                    let _ = reply_tx.send(Ok(()));
-                }
-            },
+            }
 
-            WorkerCommand::Cancel {
-                session_id,
-                reply_tx,
-            } => match self.sessions.get_mut(&session_id) {
-                None => {
-                    let _ =
-                        reply_tx.send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+            WorkerCommand::Cancel { session_id, reply_tx } => {
+                match self.sessions.get_mut(&session_id) {
+                    None => {
+                        let _ = reply_tx
+                            .send(Err(GGMLLlamaEngineError::SessionNotFound { session_id }));
+                    }
+                    Some(session) => {
+                        session.cancelled = true;
+                        let _ = reply_tx.send(Ok(()));
+                    }
                 }
-                Some(session) => {
-                    session.cancelled = true;
-                    let _ = reply_tx.send(Ok(()));
-                }
-            },
+            }
         }
     }
 
@@ -457,13 +447,7 @@ impl InferenceWorkerState {
         for &(session_id, batch_token_index) in &logit_owners {
             // Temporarily take the sampler out to avoid a simultaneous mutable
             // borrow of `self.sessions` and `self.ctx`.
-            let mut sampler = self
-                .sessions
-                .get_mut(&session_id)
-                .unwrap()
-                .sampler
-                .take()
-                .unwrap();
+            let mut sampler = self.sessions.get_mut(&session_id).unwrap().sampler.take().unwrap();
 
             let token = sampler.sample(&mut self.ctx, batch_token_index);
             sampler.accept(token);

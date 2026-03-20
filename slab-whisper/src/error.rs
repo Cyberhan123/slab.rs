@@ -42,10 +42,7 @@ pub enum WhisperError {
     InvalidThreadCount,
     /// Invalid UTF-8 detected in a string from Whisper.
     #[error("Invalid UTF-8 detected in a string from Whisper. Valid up to index {valid_up_to}, error length: {error_len:?}")]
-    InvalidUtf8 {
-        error_len: Option<usize>,
-        valid_up_to: usize,
-    },
+    InvalidUtf8 { error_len: Option<usize>, valid_up_to: usize },
     /// A null byte was detected in a user-provided string.
     #[error("A null byte was detected in a user-provided string. Index: {idx}")]
     NullByteInString { idx: usize },
@@ -80,18 +77,13 @@ pub enum WhisperError {
 
 impl From<Utf8Error> for WhisperError {
     fn from(e: Utf8Error) -> Self {
-        Self::InvalidUtf8 {
-            error_len: e.error_len(),
-            valid_up_to: e.valid_up_to(),
-        }
+        Self::InvalidUtf8 { error_len: e.error_len(), valid_up_to: e.valid_up_to() }
     }
 }
 
 impl From<NulError> for WhisperError {
     fn from(e: NulError) -> Self {
-        Self::NullByteInString {
-            idx: e.nul_position(),
-        }
+        Self::NullByteInString { idx: e.nul_position() }
     }
 }
 

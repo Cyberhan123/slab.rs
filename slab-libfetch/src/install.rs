@@ -23,18 +23,12 @@ pub struct Install {
 impl Install {
     pub fn new<P: AsRef<Path>>(repo: &str, install_path: P) -> Self {
         let path = install_path.as_ref().components().collect();
-        Self {
-            repo: repo.to_string(),
-            install_path: path,
-        }
+        Self { repo: repo.to_string(), install_path: path }
     }
 
     pub fn new_with_path<P: AsRef<Path>>(repo: &str, install_path: P) -> Self {
         let path = install_path.as_ref().components().collect();
-        Self {
-            repo: repo.to_string(),
-            install_path: path,
-        }
+        Self { repo: repo.to_string(), install_path: path }
     }
 
     fn version_file(&self) -> PathBuf {
@@ -54,10 +48,7 @@ impl Install {
     /// Write a `version.json` with the given tag and repo.
     pub fn create_version_file(&self, version: &str) -> Result<(), FetchError> {
         fs::create_dir_all(&self.install_path)?;
-        let info = VersionInfo {
-            tag_name: version.to_string(),
-            repo: self.repo.clone(),
-        };
+        let info = VersionInfo { tag_name: version.to_string(), repo: self.repo.clone() };
         let data = serde_json::to_string(&info)?;
         fs::write(self.version_file(), data)?;
         Ok(())
@@ -92,9 +83,7 @@ impl Install {
                 }
                 // Upgrade
                 self.remove_install_dir()?;
-                downloader
-                    .download_asset(asset_name, &latest, &self.install_path)
-                    .await?;
+                downloader.download_asset(asset_name, &latest, &self.install_path).await?;
                 self.create_version_file(&latest)?;
             } else {
                 // Pinned version – skip if already installed at that version.
@@ -104,9 +93,7 @@ impl Install {
                 }
                 // Different pinned version – reinstall.
                 self.remove_install_dir()?;
-                downloader
-                    .download_asset(asset_name, version, &self.install_path)
-                    .await?;
+                downloader.download_asset(asset_name, version, &self.install_path).await?;
                 self.create_version_file(version)?;
             }
 
@@ -114,9 +101,7 @@ impl Install {
         }
 
         // First install
-        downloader
-            .download_asset(asset_name, version, &self.install_path)
-            .await?;
+        downloader.download_asset(asset_name, version, &self.install_path).await?;
 
         self.create_version_file(version)?;
         Ok(self.install_path.clone())

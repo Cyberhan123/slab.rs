@@ -23,11 +23,7 @@ impl Default for RuntimeBuilder {
 
 impl RuntimeBuilder {
     pub fn new() -> Self {
-        Self {
-            queue_capacity: 64,
-            backend_capacity: 4,
-            drivers: DriversConfig::default(),
-        }
+        Self { queue_capacity: 64, backend_capacity: 4, drivers: DriversConfig::default() }
     }
 
     pub fn queue_capacity(mut self, queue_capacity: usize) -> Self {
@@ -48,11 +44,7 @@ impl RuntimeBuilder {
     pub fn build(self) -> Result<Runtime, CoreError> {
         ensure_tokio_runtime()?;
 
-        let Self {
-            queue_capacity,
-            backend_capacity,
-            drivers,
-        } = self;
+        let Self { queue_capacity, backend_capacity, drivers } = self;
 
         let worker_count = backend_capacity;
         let mut resource_manager = ResourceManager::with_config(ResourceManagerConfig {

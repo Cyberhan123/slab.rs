@@ -22,10 +22,7 @@ pub enum CandleLlamaEngineError {
     LoadModel { model_path: String, message: String },
 
     #[error("failed to load tokenizer from {tokenizer_path}: {message}")]
-    LoadTokenizer {
-        tokenizer_path: String,
-        message: String,
-    },
+    LoadTokenizer { tokenizer_path: String, message: String },
 
     #[error("tokenizer not found: no tokenizer.json in {dir}")]
     TokenizerNotFound { dir: String },

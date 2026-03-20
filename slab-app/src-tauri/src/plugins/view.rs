@@ -92,11 +92,7 @@ pub fn mount_plugin_view(
 
     view_manager.set_label(&request.plugin_id, &webview_label)?;
 
-    Ok(PluginMountViewResponse {
-        plugin_id: request.plugin_id,
-        webview_label,
-        url: plugin_url,
-    })
+    Ok(PluginMountViewResponse { plugin_id: request.plugin_id, webview_label, url: plugin_url })
 }
 
 pub fn update_plugin_view_bounds(

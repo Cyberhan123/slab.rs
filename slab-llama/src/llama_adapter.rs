@@ -60,11 +60,7 @@ impl LlamaLoraAdapter {
 
     /// Return the number of metadata key/value pairs in the adapter.
     pub fn meta_count(&self) -> i32 {
-        unsafe {
-            self.model
-                .lib
-                .llama_adapter_meta_count(self.adapter as *const _)
-        }
+        unsafe { self.model.lib.llama_adapter_meta_count(self.adapter as *const _) }
     }
 
     /// Retrieve a metadata key name by its index.
@@ -134,9 +130,7 @@ impl LlamaLoraAdapter {
     /// Returns `0` for regular LoRA adapters.
     pub fn get_alora_n_invocation_tokens(&self) -> u64 {
         unsafe {
-            self.model
-                .lib
-                .llama_adapter_get_alora_n_invocation_tokens(self.adapter as *const _)
+            self.model.lib.llama_adapter_get_alora_n_invocation_tokens(self.adapter as *const _)
         }
     }
 
@@ -149,9 +143,7 @@ impl LlamaLoraAdapter {
             return &[];
         }
         let ptr = unsafe {
-            self.model
-                .lib
-                .llama_adapter_get_alora_invocation_tokens(self.adapter as *const _)
+            self.model.lib.llama_adapter_get_alora_invocation_tokens(self.adapter as *const _)
         };
         if ptr.is_null() {
             return &[];

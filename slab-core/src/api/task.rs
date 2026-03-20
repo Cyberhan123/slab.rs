@@ -15,16 +15,11 @@ use crate::model::Capability;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskState {
     Pending,
-    Running {
-        stage_index: usize,
-        stage_name: String,
-    },
+    Running { stage_index: usize, stage_name: String },
     Succeeded,
     ResultConsumed,
     SucceededStreaming,
-    Failed {
-        message: String,
-    },
+    Failed { message: String },
     Cancelled,
 }
 
@@ -42,19 +37,13 @@ impl TaskSnapshot {
             capability,
             status: match view.status {
                 TaskStatus::Pending => TaskState::Pending,
-                TaskStatus::Running {
-                    stage_index,
-                    stage_name,
-                } => TaskState::Running {
-                    stage_index,
-                    stage_name,
-                },
+                TaskStatus::Running { stage_index, stage_name } => {
+                    TaskState::Running { stage_index, stage_name }
+                }
                 TaskStatus::Succeeded { .. } => TaskState::Succeeded,
                 TaskStatus::ResultConsumed => TaskState::ResultConsumed,
                 TaskStatus::SucceededStreaming => TaskState::SucceededStreaming,
-                TaskStatus::Failed { error } => TaskState::Failed {
-                    message: error.to_string(),
-                },
+                TaskStatus::Failed { error } => TaskState::Failed { message: error.to_string() },
                 TaskStatus::Cancelled => TaskState::Cancelled,
             },
         }
@@ -94,12 +83,7 @@ where
         task_id: TaskId,
         codec: Arc<dyn TaskCodec<R, C>>,
     ) -> Self {
-        Self {
-            orchestrator,
-            task_id,
-            codec,
-            _types: PhantomData,
-        }
+        Self { orchestrator, task_id, codec, _types: PhantomData }
     }
 
     pub fn task_id(&self) -> TaskId {
@@ -143,18 +127,16 @@ where
         let handle = self.orchestrator.wait_stream(self.task_id, timeout).await?;
         let codec = Arc::clone(&self.codec);
 
-        Ok(
-            stream::unfold((handle, codec), |(mut rx, codec)| async move {
-                match rx.recv().await {
-                    Some(chunk) => match codec.decode_chunk(chunk) {
-                        Ok(Some(decoded)) => Some((Ok(decoded), (rx, codec))),
-                        Ok(None) => None,
-                        Err(error) => Some((Err(error), (rx, codec))),
-                    },
-                    None => None,
-                }
-            })
-            .boxed(),
-        )
+        Ok(stream::unfold((handle, codec), |(mut rx, codec)| async move {
+            match rx.recv().await {
+                Some(chunk) => match codec.decode_chunk(chunk) {
+                    Ok(Some(decoded)) => Some((Ok(decoded), (rx, codec))),
+                    Ok(None) => None,
+                    Err(error) => Some((Err(error), (rx, codec))),
+                },
+                None => None,
+            }
+        })
+        .boxed())
     }
 }

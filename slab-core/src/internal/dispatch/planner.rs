@@ -50,10 +50,7 @@ impl DriverResolver {
         }
 
         if streaming {
-            if !candidates
-                .iter()
-                .any(|descriptor| descriptor.supports_streaming)
-            {
+            if !candidates.iter().any(|descriptor| descriptor.supports_streaming) {
                 return Err(CoreError::UnsupportedOperation {
                     backend: format!("{:?}", spec.family),
                     op: "stream".to_owned(),
@@ -91,18 +88,10 @@ fn compare_descriptors(
 fn driver_score(descriptor: &DriverDescriptor, hints: &DispatchHints) -> i32 {
     let mut score = 0;
 
-    if hints
-        .prefer_drivers
-        .iter()
-        .any(|id| id == &descriptor.driver_id)
-    {
+    if hints.prefer_drivers.iter().any(|id| id == &descriptor.driver_id) {
         score -= 1000;
     }
-    if hints
-        .avoid_drivers
-        .iter()
-        .any(|id| id == &descriptor.driver_id)
-    {
+    if hints.avoid_drivers.iter().any(|id| id == &descriptor.driver_id) {
         score += 1000;
     }
     if hints.require_streaming && !descriptor.supports_streaming {
@@ -152,9 +141,7 @@ mod tests {
         let spec = ModelSpec::new(
             ModelFamily::Llama,
             Capability::TextGeneration,
-            ModelSource::LocalPath {
-                path: PathBuf::from("model.gguf"),
-            },
+            ModelSource::LocalPath { path: PathBuf::from("model.gguf") },
         );
 
         let resolved = resolver
@@ -189,9 +176,7 @@ mod tests {
         let mut spec = ModelSpec::new(
             ModelFamily::Llama,
             Capability::TextGeneration,
-            ModelSource::LocalPath {
-                path: PathBuf::from("model.gguf"),
-            },
+            ModelSource::LocalPath { path: PathBuf::from("model.gguf") },
         );
         spec.driver_hints = DispatchHints {
             prefer_drivers: vec!["ggml.llama".to_owned()],
@@ -220,9 +205,7 @@ mod tests {
         let spec = ModelSpec::new(
             ModelFamily::Whisper,
             Capability::AudioTranscription,
-            ModelSource::LocalPath {
-                path: PathBuf::from("model.bin"),
-            },
+            ModelSource::LocalPath { path: PathBuf::from("model.bin") },
         );
 
         let error = resolver
@@ -246,9 +229,7 @@ mod tests {
         let spec = ModelSpec::new(
             ModelFamily::Onnx,
             Capability::TextGeneration,
-            ModelSource::LocalPath {
-                path: PathBuf::from("model.onnx"),
-            },
+            ModelSource::LocalPath { path: PathBuf::from("model.onnx") },
         );
 
         let error = resolver

@@ -37,10 +37,7 @@ impl PluginRuntimeManager {
             .build()
             .map_err(|e| format!("failed to build blocking HTTP client: {e}"))?;
 
-        Ok(Self {
-            instances: Mutex::new(HashMap::new()),
-            blocking_http_client,
-        })
+        Ok(Self { instances: Mutex::new(HashMap::new()), blocking_http_client })
     }
 
     pub fn call_plugin(
@@ -136,10 +133,8 @@ fn build_extism_plugin(
     blocking_http_client: BlockingHttpClient,
 ) -> Result<Plugin, String> {
     let mut manifest = ExtismManifest::new([Wasm::file(plugin.wasm_entry_path.clone())]);
-    manifest = manifest.with_allowed_path(
-        plugin.root_dir.to_string_lossy().to_string(),
-        plugin.root_dir.clone(),
-    );
+    manifest = manifest
+        .with_allowed_path(plugin.root_dir.to_string_lossy().to_string(), plugin.root_dir.clone());
 
     if plugin.manifest.network.mode == PluginNetworkMode::Allowlist
         && !plugin.manifest.network.allow_hosts.is_empty()
@@ -164,20 +159,9 @@ fn build_extism_plugin(
             user_data.clone(),
             slab_api_request,
         )
-        .with_function(
-            "slab.ui.emit",
-            [extism::PTR],
-            [extism::PTR],
-            user_data,
-            slab_ui_emit,
-        )
+        .with_function("slab.ui.emit", [extism::PTR], [extism::PTR], user_data, slab_ui_emit)
         .build()
-        .map_err(|e| {
-            format!(
-                "failed to initialize extism plugin `{}`: {e}",
-                plugin.manifest.id
-            )
-        })
+        .map_err(|e| format!("failed to initialize extism plugin `{}`: {e}", plugin.manifest.id))
 }
 
 pub async fn execute_plugin_api_request_async(
@@ -186,10 +170,7 @@ pub async fn execute_plugin_api_request_async(
     let method = reqwest::Method::from_bytes(request.method.as_bytes())
         .map_err(|e| format!("invalid HTTP method `{}`: {e}", request.method))?;
     let url = build_upstream_url(&request.path)?;
-    let timeout_ms = request
-        .timeout_ms
-        .unwrap_or(DEFAULT_HTTP_TIMEOUT_MS)
-        .min(MAX_HTTP_TIMEOUT_MS);
+    let timeout_ms = request.timeout_ms.unwrap_or(DEFAULT_HTTP_TIMEOUT_MS).min(MAX_HTTP_TIMEOUT_MS);
 
     let client = AsyncHttpClient::builder()
         .timeout(Duration::from_millis(timeout_ms))
@@ -202,10 +183,8 @@ pub async fn execute_plugin_api_request_async(
         request_builder = request_builder.body(body.clone());
     }
 
-    let response = request_builder
-        .send()
-        .await
-        .map_err(|e| format!("failed to request local API: {e}"))?;
+    let response =
+        request_builder.send().await.map_err(|e| format!("failed to request local API: {e}"))?;
     response_to_plugin_api_response_async(response).await
 }
 
@@ -223,9 +202,8 @@ fn execute_plugin_api_request_blocking(
         request_builder = request_builder.body(body.clone());
     }
 
-    let response = request_builder
-        .send()
-        .map_err(|e| format!("failed to request local API: {e}"))?;
+    let response =
+        request_builder.send().map_err(|e| format!("failed to request local API: {e}"))?;
     response_to_plugin_api_response_blocking(response)
 }
 
@@ -245,10 +223,8 @@ fn sanitize_request_headers(headers: &HashMap<String, String>) -> Result<HeaderM
     let mut clean = HeaderMap::new();
     for (name, value) in headers {
         let lower = name.to_ascii_lowercase();
-        if matches!(
-            lower.as_str(),
-            "host" | "connection" | "content-length" | "transfer-encoding"
-        ) {
+        if matches!(lower.as_str(), "host" | "connection" | "content-length" | "transfer-encoding")
+        {
             continue;
         }
 
@@ -266,22 +242,13 @@ async fn response_to_plugin_api_response_async(
 ) -> Result<PluginApiResponse, String> {
     let status = response.status().as_u16();
     let headers = collect_response_headers(response.headers());
-    let bytes = response
-        .bytes()
-        .await
-        .map_err(|e| format!("failed to read API response body: {e}"))?;
+    let bytes =
+        response.bytes().await.map_err(|e| format!("failed to read API response body: {e}"))?;
     if bytes.len() > MAX_API_RESPONSE_BYTES {
-        return Err(format!(
-            "API response body exceeds {} bytes limit",
-            MAX_API_RESPONSE_BYTES
-        ));
+        return Err(format!("API response body exceeds {} bytes limit", MAX_API_RESPONSE_BYTES));
     }
 
-    Ok(PluginApiResponse {
-        status,
-        headers,
-        body: String::from_utf8_lossy(&bytes).to_string(),
-    })
+    Ok(PluginApiResponse { status, headers, body: String::from_utf8_lossy(&bytes).to_string() })
 }
 
 fn response_to_plugin_api_response_blocking(
@@ -289,31 +256,20 @@ fn response_to_plugin_api_response_blocking(
 ) -> Result<PluginApiResponse, String> {
     let status = response.status().as_u16();
     let headers = collect_response_headers(response.headers());
-    let bytes = response
-        .bytes()
-        .map_err(|e| format!("failed to read API response body: {e}"))?;
+    let bytes = response.bytes().map_err(|e| format!("failed to read API response body: {e}"))?;
 
     if bytes.len() > MAX_API_RESPONSE_BYTES {
-        return Err(format!(
-            "API response body exceeds {} bytes limit",
-            MAX_API_RESPONSE_BYTES
-        ));
+        return Err(format!("API response body exceeds {} bytes limit", MAX_API_RESPONSE_BYTES));
     }
 
-    Ok(PluginApiResponse {
-        status,
-        headers,
-        body: String::from_utf8_lossy(&bytes).to_string(),
-    })
+    Ok(PluginApiResponse { status, headers, body: String::from_utf8_lossy(&bytes).to_string() })
 }
 
 fn collect_response_headers(headers: &HeaderMap) -> HashMap<String, String> {
     let mut result = HashMap::new();
     for (name, value) in headers {
-        if matches!(
-            name.as_str().to_ascii_lowercase().as_str(),
-            "connection" | "transfer-encoding"
-        ) {
+        if matches!(name.as_str().to_ascii_lowercase().as_str(), "connection" | "transfer-encoding")
+        {
             continue;
         }
 
@@ -325,10 +281,7 @@ fn collect_response_headers(headers: &HeaderMap) -> HashMap<String, String> {
 }
 
 fn now_millis() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as u64
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
 }
 
 pub fn plugin_event_name(plugin_id: &str) -> String {

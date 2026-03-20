@@ -154,9 +154,7 @@ fn parse_inference_options(raw: &Payload) -> Result<WhisperInferenceOptions, Str
             ("decode.max_tokens", decode.max_tokens),
         ] {
             if value.is_some_and(|v| v < 0) {
-                return Err(format!(
-                    "invalid whisper inference options: {name} must be >= 0"
-                ));
+                return Err(format!("invalid whisper inference options: {name} must be >= 0"));
             }
         }
 
@@ -174,9 +172,7 @@ fn parse_inference_options(raw: &Payload) -> Result<WhisperInferenceOptions, Str
             ("decode.temperature_inc", decode.temperature_inc),
         ] {
             if value.is_some_and(|v| v < 0.0) {
-                return Err(format!(
-                    "invalid whisper inference options: {name} must be >= 0.0"
-                ));
+                return Err(format!("invalid whisper inference options: {name} must be >= 0.0"));
             }
         }
     }
@@ -191,33 +187,19 @@ impl WhisperWorker {
         bc_tx: broadcast::Sender<WorkerCommand>,
         worker_id: usize,
     ) -> Self {
-        Self {
-            engine,
-            bc_tx,
-            worker_id,
-            last_model_config: None,
-        }
+        Self { engine, bc_tx, worker_id, last_model_config: None }
     }
 
     #[on_event(LoadModel)]
     async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            input,
-            broadcast_seq,
-            reply_tx,
-            ..
-        } = req;
+        let BackendRequest { input, broadcast_seq, reply_tx, .. } = req;
         let seq_id = broadcast_seq.unwrap_or(0);
         self.handle_load_model(input, reply_tx, seq_id).await;
     }
 
     #[on_event(UnloadModel)]
     async fn on_unload_model(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            broadcast_seq,
-            reply_tx,
-            ..
-        } = req;
+        let BackendRequest { broadcast_seq, reply_tx, .. } = req;
         let seq_id = broadcast_seq.unwrap_or(0);
         self.handle_unload_model(reply_tx, seq_id).await;
     }
@@ -231,9 +213,7 @@ impl WhisperWorker {
                 return;
             }
         };
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
+        let BackendRequest { input, reply_tx, .. } = req;
         let options = match parse_inference_options(&invocation.options) {
             Ok(options) => options,
             Err(e) => {
@@ -261,9 +241,7 @@ impl WhisperWorker {
         let engine = match self.engine.as_mut() {
             Some(e) => e,
             None => {
-                let _ = reply_tx.send(BackendReply::Error(
-                    "engine not initialized".into(),
-                ));
+                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
                 return;
             }
         };
@@ -271,9 +249,8 @@ impl WhisperWorker {
         let config: ModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "invalid model.load config: {e}"
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
                 return;
             }
         };
@@ -290,15 +267,12 @@ impl WhisperWorker {
                 self.last_model_config = Some(input.clone());
                 let deployment = DeploymentSnapshot::with_model(seq_id, input);
                 // Broadcast so peer workers also load the same model.
-                let _ = self
-                    .bc_tx
-                    .send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                        sync: SyncMessage::Deployment(deployment),
-                        sender_id: self.worker_id,
-                    }));
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
+                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
+                    sync: SyncMessage::Deployment(deployment),
+                    sender_id: self.worker_id,
+                }));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -319,20 +293,15 @@ impl WhisperWorker {
                 self.last_model_config = None;
                 // Broadcast so every peer worker also drops its context.
                 // Ignore errors: no receivers simply means no other workers.
-                let _ = self
-                    .bc_tx
-                    .send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
-                        sync: SyncMessage::Generation { generation: seq_id },
-                        sender_id: self.worker_id,
-                    }));
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
+                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+                    sync: SyncMessage::Generation { generation: seq_id },
+                    sender_id: self.worker_id,
+                }));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             }
             None => {
-                let _ = reply_tx.send(BackendReply::Error(
-                    "engine not initialized".into(),
-                ));
+                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
             }
         }
     }
@@ -391,9 +360,8 @@ impl WhisperWorker {
         match result {
             Err(e) => {
                 tracing::error!(error = %e, "whisper inference failed");
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "whisper inference failed: {e}"
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Error(format!("whisper inference failed: {e}")));
             }
             Ok(entries) => {
                 tracing::debug!(segment_count = entries.len(), "whisper inference succeeded");
@@ -409,9 +377,8 @@ impl WhisperWorker {
                         ));
                     }
                 }
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(
-                    out.as_bytes(),
-                ))));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(out.as_bytes()))));
             }
         }
     }

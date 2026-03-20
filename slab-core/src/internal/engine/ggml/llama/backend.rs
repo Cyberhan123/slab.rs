@@ -71,10 +71,7 @@ fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
         if !matches!(role.as_str(), "system" | "user" | "assistant") {
             return None;
         }
-        messages.push(LlamaChatMessage {
-            role,
-            content: raw_content.trim_start().to_owned(),
-        });
+        messages.push(LlamaChatMessage { role, content: raw_content.trim_start().to_owned() });
     }
 
     if messages.is_empty() {
@@ -95,10 +92,7 @@ fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
         return None;
     }
 
-    Some(ParsedChatPrompt {
-        messages,
-        add_assistant_prompt,
-    })
+    Some(ParsedChatPrompt { messages, add_assistant_prompt })
 }
 
 // ── Worker ────────────────────────────────────────────────────────────────────
@@ -130,31 +124,19 @@ struct PreparedSession {
 
 #[derive(Debug)]
 enum SessionUpdate {
-    Keep {
-        key: String,
-        sid: SessionId,
-        cached_prompt: String,
-    },
-    Drop {
-        key: String,
-        sid: SessionId,
-    },
+    Keep { key: String, sid: SessionId, cached_prompt: String },
+    Drop { key: String, sid: SessionId },
 }
 
 #[backend_handler]
 impl LlamaWorker {
     fn new(engine: Option<Arc<GGMLLlamaEngine>>) -> Self {
-        Self {
-            engine,
-            sessions: HashMap::new(),
-        }
+        Self { engine, sessions: HashMap::new() }
     }
 
     #[on_event(LoadModel)]
     async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
+        let BackendRequest { input, reply_tx, .. } = req;
         self.handle_load_model(input, reply_tx).await;
     }
 
@@ -173,21 +155,12 @@ impl LlamaWorker {
                 return;
             }
         };
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
+        let BackendRequest { input, reply_tx, .. } = req;
         let opts = invocation.options.to_serde_value();
-        let max_tokens = opts
-            .get("max_tokens")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize)
-            .unwrap_or(256);
-        let session_key = opts
-            .get("session_key")
-            .and_then(|s| s.as_str())
-            .map(str::to_owned);
-        self.handle_inference(input, max_tokens, session_key, reply_tx)
-            .await;
+        let max_tokens =
+            opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
+        let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
+        self.handle_inference(input, max_tokens, session_key, reply_tx).await;
     }
 
     #[on_event(InferenceStream)]
@@ -199,21 +172,12 @@ impl LlamaWorker {
                 return;
             }
         };
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
+        let BackendRequest { input, reply_tx, .. } = req;
         let opts = invocation.options.to_serde_value();
-        let max_tokens = opts
-            .get("max_tokens")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize)
-            .unwrap_or(256);
-        let session_key = opts
-            .get("session_key")
-            .and_then(|s| s.as_str())
-            .map(str::to_owned);
-        self.handle_inference_stream(input, max_tokens, session_key, reply_tx)
-            .await;
+        let max_tokens =
+            opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
+        let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
+        self.handle_inference_stream(input, max_tokens, session_key, reply_tx).await;
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -269,12 +233,7 @@ impl LlamaWorker {
             delta_prompt = full_prompt.clone();
         }
 
-        Ok(PreparedSession {
-            key: Some(key),
-            sid,
-            delta_prompt,
-            full_prompt,
-        })
+        Ok(PreparedSession { key: Some(key), sid, delta_prompt, full_prompt })
     }
 
     fn commit_session_success(
@@ -291,8 +250,7 @@ impl LlamaWorker {
         let mut cached_prompt = String::with_capacity(full_prompt.len() + generated.len());
         cached_prompt.push_str(full_prompt);
         cached_prompt.push_str(generated);
-        self.sessions
-            .insert(key, SessionBinding { sid, cached_prompt });
+        self.sessions.insert(key, SessionBinding { sid, cached_prompt });
     }
 
     #[on_runtime_control(GlobalUnload)]
@@ -328,9 +286,7 @@ impl LlamaWorker {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
-                let _ = reply_tx.send(BackendReply::Error(
-                    "engine not initialized".into(),
-                ));
+                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
                 return;
             }
         };
@@ -338,9 +294,8 @@ impl LlamaWorker {
         let config: LlamaModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "invalid model.load config: {e}"
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
                 return;
             }
         };
@@ -379,9 +334,8 @@ impl LlamaWorker {
 
         match result {
             Ok(()) => {
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -395,18 +349,15 @@ impl LlamaWorker {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
-                let _ = reply_tx.send(BackendReply::Error(
-                    "engine not initialized".into(),
-                ));
+                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
                 return;
             }
         };
 
         match engine.unload() {
             Ok(()) => {
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -458,21 +409,16 @@ impl LlamaWorker {
             }
         };
         let prompt = Self::apply_chat_template_if_possible(engine.as_ref(), &prompt);
-        let prepared = match self
-            .prepare_session(engine.as_ref(), session_key.as_deref(), prompt)
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e));
-                return;
-            }
-        };
+        let prepared =
+            match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt).await {
+                Ok(v) => v,
+                Err(e) => {
+                    let _ = reply_tx.send(BackendReply::Error(e));
+                    return;
+                }
+            };
 
-        match engine
-            .inference(&prepared.delta_prompt, max_tokens, prepared.sid)
-            .await
-        {
+        match engine.inference(&prepared.delta_prompt, max_tokens, prepared.sid).await {
             Ok(text) => {
                 self.commit_session_success(
                     prepared.key,
@@ -480,9 +426,8 @@ impl LlamaWorker {
                     &prepared.full_prompt,
                     &text,
                 );
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(
-                    text.as_bytes(),
-                ))));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(text.as_bytes()))));
             }
             Err(e) => {
                 if let (Some(key), Some(sid)) = (prepared.key, prepared.sid) {
@@ -519,16 +464,14 @@ impl LlamaWorker {
             }
         };
         let prompt = Self::apply_chat_template_if_possible(engine.as_ref(), prompt.as_ref());
-        let prepared = match self
-            .prepare_session(engine.as_ref(), session_key.as_deref(), prompt)
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e));
-                return;
-            }
-        };
+        let prepared =
+            match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt).await {
+                Ok(v) => v,
+                Err(e) => {
+                    let _ = reply_tx.send(BackendReply::Error(e));
+                    return;
+                }
+            };
 
         let (proto_tx, proto_rx) = mpsc::channel::<StreamChunk>(64);
         let _ = reply_tx.send(BackendReply::Stream(proto_rx));
@@ -538,17 +481,9 @@ impl LlamaWorker {
 
         tokio::spawn(async move {
             use crate::internal::engine::ggml::llama::StreamChunk as LlamaChunk;
-            let PreparedSession {
-                key,
-                sid,
-                delta_prompt,
-                full_prompt,
-            } = prepared;
+            let PreparedSession { key, sid, delta_prompt, full_prompt } = prepared;
 
-            match engine_for_spawn
-                .inference_stream(&delta_prompt, max_tokens, sid)
-                .await
-            {
+            match engine_for_spawn.inference_stream(&delta_prompt, max_tokens, sid).await {
                 Ok((mut llama_rx, new_sid)) => {
                     let mut generated = String::new();
                     let mut completed = false;
@@ -584,11 +519,7 @@ impl LlamaWorker {
                                 String::with_capacity(full_prompt.len() + generated.len());
                             cached_prompt.push_str(&full_prompt);
                             cached_prompt.push_str(&generated);
-                            Some(SessionUpdate::Keep {
-                                key,
-                                sid: new_sid,
-                                cached_prompt,
-                            })
+                            Some(SessionUpdate::Keep { key, sid: new_sid, cached_prompt })
                         } else {
                             Some(SessionUpdate::Drop { key, sid: new_sid })
                         }
@@ -611,13 +542,8 @@ impl LlamaWorker {
 
         if let Ok(Some(update)) = update_rx.await {
             match update {
-                SessionUpdate::Keep {
-                    key,
-                    sid,
-                    cached_prompt,
-                } => {
-                    self.sessions
-                        .insert(key, SessionBinding { sid, cached_prompt });
+                SessionUpdate::Keep { key, sid, cached_prompt } => {
+                    self.sessions.insert(key, SessionBinding { sid, cached_prompt });
                 }
                 SessionUpdate::Drop { key, sid } => {
                     self.sessions.remove(&key);
@@ -652,35 +578,22 @@ mod tests {
     #[tokio::test]
     async fn runtime_global_unload_clears_sessions() {
         let mut worker = LlamaWorker::new(None);
-        worker.sessions.insert(
-            "s1".to_owned(),
-            SessionBinding {
-                sid: 7,
-                cached_prompt: String::new(),
-            },
-        );
+        worker
+            .sessions
+            .insert("s1".to_owned(), SessionBinding { sid: 7, cached_prompt: String::new() });
         assert_eq!(worker.sessions.len(), 1);
 
-        worker
-            .apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 })
-            .await;
+        worker.apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 }).await;
 
-        assert!(
-            worker.sessions.is_empty(),
-            "global unload should clear llama session mappings"
-        );
+        assert!(worker.sessions.is_empty(), "global unload should clear llama session mappings");
     }
 
     #[tokio::test]
     async fn runtime_global_load_clears_sessions_before_load_attempt() {
         let mut worker = LlamaWorker::new(None);
-        worker.sessions.insert(
-            "s1".to_owned(),
-            SessionBinding {
-                sid: 9,
-                cached_prompt: String::new(),
-            },
-        );
+        worker
+            .sessions
+            .insert("s1".to_owned(), SessionBinding { sid: 9, cached_prompt: String::new() });
         assert_eq!(worker.sessions.len(), 1);
 
         worker

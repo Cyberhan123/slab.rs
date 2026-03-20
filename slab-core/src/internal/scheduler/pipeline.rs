@@ -39,12 +39,7 @@ pub struct PipelineBuilder<S = NoStream> {
 impl PipelineBuilder<NoStream> {
     /// Create a new builder bound to the given orchestrator and initial payload.
     pub fn new(orchestrator: Orchestrator, initial_payload: Payload) -> Self {
-        Self {
-            orchestrator,
-            stages: Vec::new(),
-            initial_payload,
-            _state: PhantomData,
-        }
+        Self { orchestrator, stages: Vec::new(), initial_payload, _state: PhantomData }
     }
 
     /// Append a CPU stage from a pre-built [`CpuStage`].
@@ -60,11 +55,7 @@ impl PipelineBuilder<NoStream> {
         backend_id: impl Into<String>,
         op: BackendOp,
     ) -> Self {
-        let stage = GpuStage {
-            name: name.into(),
-            backend_id: backend_id.into(),
-            op,
-        };
+        let stage = GpuStage { name: name.into(), backend_id: backend_id.into(), op };
         self.stages.push(Stage::Gpu(stage));
         self
     }
@@ -79,11 +70,7 @@ impl PipelineBuilder<NoStream> {
         backend_id: impl Into<String>,
         op: BackendOp,
     ) -> PipelineBuilder<HasStream> {
-        let stage = GpuStreamStage {
-            name: name.into(),
-            backend_id: backend_id.into(),
-            op,
-        };
+        let stage = GpuStreamStage { name: name.into(), backend_id: backend_id.into(), op };
         self.stages.push(Stage::GpuStream(stage));
         PipelineBuilder {
             orchestrator: self.orchestrator,
@@ -95,9 +82,7 @@ impl PipelineBuilder<NoStream> {
 
     /// Submit the pipeline for execution and return the allocated [`TaskId`].
     pub async fn run(self) -> Result<TaskId, CoreError> {
-        self.orchestrator
-            .submit(self.stages, self.initial_payload)
-            .await
+        self.orchestrator.submit(self.stages, self.initial_payload).await
     }
 }
 
@@ -108,8 +93,6 @@ impl PipelineBuilder<HasStream> {
     /// [`Orchestrator::take_stream`] with the returned [`TaskId`] to obtain the
     /// stream handle.
     pub async fn run_stream(self) -> Result<TaskId, CoreError> {
-        self.orchestrator
-            .submit(self.stages, self.initial_payload)
-            .await
+        self.orchestrator.submit(self.stages, self.initial_payload).await
     }
 }

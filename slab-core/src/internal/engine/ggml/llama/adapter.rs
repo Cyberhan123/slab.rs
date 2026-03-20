@@ -1,6 +1,8 @@
 use crate::internal::engine;
-use slab_llama::{ChatMessage, LlamaBatch, LlamaContextParams, LlamaModel, LlamaModelParams, LlamaToken};
 use slab_llama::Llama;
+use slab_llama::{
+    ChatMessage, LlamaBatch, LlamaContextParams, LlamaModel, LlamaModelParams, LlamaToken,
+};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -42,11 +44,7 @@ impl GGMLLlamaEngine {
         }
 
         std::fs::canonicalize(&lib_path).map_err(|source| {
-            GGMLLlamaEngineError::CanonicalizeLibraryPath {
-                path: lib_path,
-                source,
-            }
-            .into()
+            GGMLLlamaEngineError::CanonicalizeLibraryPath { path: lib_path, source }.into()
         })
     }
 
@@ -92,34 +90,22 @@ impl GGMLLlamaEngine {
             return Err(GGMLLlamaEngineError::InvalidWorkerCount { num_workers }.into());
         }
 
-        let mut write_lock =
-            self.inference_engine
-                .write()
-                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                    operation: "lock llama engine state",
-                })?;
+        let mut write_lock = self.inference_engine.write().map_err(|_| {
+            GGMLLlamaEngineError::LockPoisoned { operation: "lock llama engine state" }
+        })?;
         *write_lock = None;
-        let mut model_write_lock =
-            self.loaded_model
-                .write()
-                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                    operation: "lock loaded llama model state",
-                })?;
+        let mut model_write_lock = self.loaded_model.write().map_err(|_| {
+            GGMLLlamaEngineError::LockPoisoned { operation: "lock loaded llama model state" }
+        })?;
         *model_write_lock = None;
 
-        let path = path_to_model
-            .as_ref()
-            .to_str()
-            .ok_or(GGMLLlamaEngineError::InvalidModelPathUtf8)?;
+        let path =
+            path_to_model.as_ref().to_str().ok_or(GGMLLlamaEngineError::InvalidModelPathUtf8)?;
 
-        let model = Arc::new(
-            self.instance
-                .load_model_from_file(path, model_params)
-                .map_err(|source| GGMLLlamaEngineError::LoadModel {
-                    model_path: path.to_string(),
-                    source,
-                })?,
-        );
+        let model =
+            Arc::new(self.instance.load_model_from_file(path, model_params).map_err(|source| {
+                GGMLLlamaEngineError::LoadModel { model_path: path.to_string(), source }
+            })?);
 
         let engine = LlamaInferenceEngine::start(num_workers, Arc::clone(&model), ctx_params)?;
 
@@ -129,28 +115,19 @@ impl GGMLLlamaEngine {
     }
 
     fn require_engine(&self) -> Result<LlamaInferenceEngine, engine::EngineError> {
-        let read_lock: std::sync::RwLockReadGuard<'_, Option<LlamaInferenceEngine>> = self
-            .inference_engine
-            .read()
-            .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
+        let read_lock: std::sync::RwLockReadGuard<'_, Option<LlamaInferenceEngine>> =
+            self.inference_engine.read().map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                 operation: "lock llama engine state",
             })?;
-        let engine = read_lock
-            .as_ref()
-            .ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
+        let engine = read_lock.as_ref().ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
         Ok(engine.clone())
     }
 
     fn require_model(&self) -> Result<Arc<LlamaModel>, engine::EngineError> {
-        let read_lock =
-            self.loaded_model
-                .read()
-                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                    operation: "read loaded llama model state",
-                })?;
-        let model = read_lock
-            .as_ref()
-            .ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
+        let read_lock = self.loaded_model.read().map_err(|_| {
+            GGMLLlamaEngineError::LockPoisoned { operation: "read loaded llama model state" }
+        })?;
+        let model = read_lock.as_ref().ok_or(GGMLLlamaEngineError::ModelNotLoaded)?;
         Ok(Arc::clone(model))
     }
 
@@ -179,10 +156,7 @@ impl GGMLLlamaEngine {
         text_delta: String,
     ) -> Result<(), engine::EngineError> {
         let engine = self.require_engine()?;
-        engine
-            .append_input(session_id, text_delta)
-            .await
-            .map_err(Into::into)
+        engine.append_input(session_id, text_delta).await.map_err(Into::into)
     }
 
     /// Start streaming generation for a session.
@@ -192,10 +166,7 @@ impl GGMLLlamaEngine {
         max_new_tokens: usize,
     ) -> Result<StreamHandle, engine::EngineError> {
         let engine = self.require_engine()?;
-        engine
-            .generate_stream(session_id, max_new_tokens)
-            .await
-            .map_err(Into::into)
+        engine.generate_stream(session_id, max_new_tokens).await.map_err(Into::into)
     }
 
     /// End a session and release its KV entries.
@@ -320,19 +291,13 @@ impl GGMLLlamaEngine {
     /// Shared unload logic used by both the inherent method and the
     /// [`ModelLoader`] trait implementation.
     fn do_unload(&self) -> Result<(), GGMLLlamaEngineError> {
-        let mut write_lock =
-            self.inference_engine
-                .write()
-                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                    operation: "lock llama engine state",
-                })?;
+        let mut write_lock = self.inference_engine.write().map_err(|_| {
+            GGMLLlamaEngineError::LockPoisoned { operation: "lock llama engine state" }
+        })?;
         *write_lock = None;
-        let mut model_write_lock =
-            self.loaded_model
-                .write()
-                .map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                    operation: "lock loaded llama model state",
-                })?;
+        let mut model_write_lock = self.loaded_model.write().map_err(|_| {
+            GGMLLlamaEngineError::LockPoisoned { operation: "lock loaded llama model state" }
+        })?;
         *model_write_lock = None;
         Ok(())
     }
@@ -361,11 +326,7 @@ pub(crate) struct GgmlLlamaLoadConfig {
 
 impl Default for GgmlLlamaLoadConfig {
     fn default() -> Self {
-        Self {
-            model_path: String::new(),
-            num_workers: 1,
-            context_length: 0,
-        }
+        Self { model_path: String::new(), num_workers: 1, context_length: 0 }
     }
 }
 
@@ -411,10 +372,7 @@ impl ModelLoader for GGMLLlamaEngine {
     }
 
     fn is_loaded(&self) -> bool {
-        self.loaded_model
-            .read()
-            .map(|g| g.is_some())
-            .unwrap_or(false)
+        self.loaded_model.read().map(|g| g.is_some()).unwrap_or(false)
     }
 }
 
@@ -427,9 +385,8 @@ impl CausalLM for GGMLLlamaEngine {
     /// is deliberately stateless: no session or KV cache state persists between
     /// calls.
     fn forward(&self, input_ids: &Tensor) -> Result<Tensor, CoreError> {
-        let token_ids = input_ids
-            .as_token_ids()
-            .ok_or_else(|| CoreError::UnsupportedOperation {
+        let token_ids =
+            input_ids.as_token_ids().ok_or_else(|| CoreError::UnsupportedOperation {
                 backend: "ggml.llama".into(),
                 op: "forward: expected token-ID (U32) tensor".into(),
             })?;
@@ -468,8 +425,7 @@ impl CausalLM for GGMLLlamaEngine {
                 .expect("batch was created with capacity n and we add exactly n tokens");
         }
 
-        ctx.decode(&mut batch)
-            .map_err(|source| GGMLLlamaEngineError::TokenizeFailed { source })?;
+        ctx.decode(&mut batch).map_err(|source| GGMLLlamaEngineError::TokenizeFailed { source })?;
 
         // Return logits for the last token in the batch.
         let logits = ctx.get_logits_ith((n - 1) as i32).to_vec();

@@ -96,13 +96,7 @@ pub struct WhisperVadContextParams {
 
 impl Default for WhisperVadContextParams {
     fn default() -> Self {
-        Self {
-            params: whisper_vad_context_params {
-                n_threads: 4,
-                use_gpu: false,
-                gpu_device: 0,
-            },
-        }
+        Self { params: whisper_vad_context_params { n_threads: 4, use_gpu: false, gpu_device: 0 } }
     }
 }
 
@@ -153,17 +147,13 @@ impl Whisper {
             .expect("VAD model path contains null byte")
             .into_raw() as *const c_char;
         let ptr = unsafe {
-            self.lib
-                .whisper_vad_init_from_file_with_params(model_path, params.into_inner())
+            self.lib.whisper_vad_init_from_file_with_params(model_path, params.into_inner())
         };
 
         if ptr.is_null() {
             Err(WhisperError::NullPointer)
         } else {
-            Ok(WhisperVadContext {
-                instance: self.clone(),
-                ptr,
-            })
+            Ok(WhisperVadContext { instance: self.clone(), ptr })
         }
     }
 }
@@ -177,11 +167,8 @@ impl WhisperVadContext {
     pub fn detect_speech(&mut self, samples: &[f32]) -> Result<(), WhisperError> {
         let (samples, len) = (samples.as_ptr(), samples.len() as c_int);
 
-        let success = unsafe {
-            self.instance
-                .lib
-                .whisper_vad_detect_speech(self.ptr, samples, len)
-        };
+        let success =
+            unsafe { self.instance.lib.whisper_vad_detect_speech(self.ptr, samples, len) };
 
         if !success {
             Err(WhisperError::GenericError(-1))
@@ -208,9 +195,7 @@ impl WhisperVadContext {
         params: WhisperVadParams,
     ) -> Result<WhisperVadSegments, WhisperError> {
         let ptr = unsafe {
-            self.instance
-                .lib
-                .whisper_vad_segments_from_probs(self.ptr, params.into_inner())
+            self.instance.lib.whisper_vad_segments_from_probs(self.ptr, params.into_inner())
         };
 
         if ptr.is_null() {
@@ -265,12 +250,7 @@ pub struct WhisperVadSegments {
 impl Whisper {
     fn new_vad_segments(&self, ptr: *mut whisper_vad_segments) -> WhisperVadSegments {
         let segment_count = unsafe { self.lib.whisper_vad_segments_n_segments(ptr) };
-        WhisperVadSegments {
-            ptr,
-            segment_count,
-            iter_idx: 0,
-            instance: self.clone(),
-        }
+        WhisperVadSegments { ptr, segment_count, iter_idx: 0, instance: self.clone() }
     }
 }
 
@@ -286,11 +266,7 @@ impl WhisperVadSegments {
     /// Return the start timestamp of this segment in centiseconds (10s of milliseconds).
     pub fn get_segment_start_timestamp(&self, idx: c_int) -> Option<f32> {
         if self.index_in_bounds(idx) {
-            Some(unsafe {
-                self.instance
-                    .lib
-                    .whisper_vad_segments_get_segment_t0(self.ptr, idx)
-            })
+            Some(unsafe { self.instance.lib.whisper_vad_segments_get_segment_t0(self.ptr, idx) })
         } else {
             None
         }
@@ -299,11 +275,7 @@ impl WhisperVadSegments {
     /// Return the end timestamp of this segment in centiseconds (10s of milliseconds).
     pub fn get_segment_end_timestamp(&self, idx: c_int) -> Option<f32> {
         if self.index_in_bounds(idx) {
-            Some(unsafe {
-                self.instance
-                    .lib
-                    .whisper_vad_segments_get_segment_t1(self.ptr, idx)
-            })
+            Some(unsafe { self.instance.lib.whisper_vad_segments_get_segment_t1(self.ptr, idx) })
         } else {
             None
         }

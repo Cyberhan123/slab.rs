@@ -10,9 +10,7 @@ use tracing::warn;
 
 use crate::internal::scheduler::backend::protocol::{BackendRequest, WorkerCommand};
 use crate::internal::scheduler::backend::runner::{shared_ingress, SharedIngressRx};
-use crate::internal::scheduler::types::{
-    BackendLifecycleState, CoreError, GlobalConsistencyState,
-};
+use crate::internal::scheduler::types::{BackendLifecycleState, CoreError, GlobalConsistencyState};
 
 /// Inference lease: blocks management mutations and holds compute quota.
 pub struct InferenceLease {
@@ -62,9 +60,7 @@ impl BackendHandle {
             ingress_tx,
             control_tx,
             management_lock: Arc::new(tokio::sync::RwLock::new(())),
-            lifecycle: Arc::new(tokio::sync::RwLock::new(
-                BackendLifecycleState::Uninitialized,
-            )),
+            lifecycle: Arc::new(tokio::sync::RwLock::new(BackendLifecycleState::Uninitialized)),
             next_seq: Arc::new(AtomicU64::new(1)),
         }
     }
@@ -89,11 +85,7 @@ pub struct ResourceManagerConfig {
 
 impl Default for ResourceManagerConfig {
     fn default() -> Self {
-        Self {
-            backend_capacity: 4,
-            ingress_channel_capacity: 128,
-            control_channel_capacity: 16,
-        }
+        Self { backend_capacity: 4, ingress_channel_capacity: 128, control_channel_capacity: 16 }
     }
 }
 
@@ -127,11 +119,7 @@ impl ResourceManager {
         let key = backend_id.into();
         self.backends.write().expect("backend map poisoned").insert(
             key,
-            BackendHandle::new(
-                self.config.backend_capacity,
-                Some(ingress_tx),
-                Some(control_tx),
-            ),
+            BackendHandle::new(self.config.backend_capacity, Some(ingress_tx), Some(control_tx)),
         );
     }
 
@@ -141,34 +129,22 @@ impl ResourceManager {
             .expect("backend map poisoned")
             .get(backend_id)
             .cloned()
-            .ok_or_else(|| CoreError::Busy {
-                backend_id: backend_id.to_owned(),
-            })
+            .ok_or_else(|| CoreError::Busy { backend_id: backend_id.to_owned() })
     }
 
     /// List registered backends in deterministic order.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn backend_ids(&self) -> Vec<String> {
-        let mut ids: Vec<String> = self
-            .backends
-            .read()
-            .expect("backend map poisoned")
-            .keys()
-            .cloned()
-            .collect();
+        let mut ids: Vec<String> =
+            self.backends.read().expect("backend map poisoned").keys().cloned().collect();
         ids.sort();
         ids
     }
 
     /// Clone backend ingress sender.
-    pub fn ingress_tx(
-        &self,
-        backend_id: &str,
-    ) -> Result<mpsc::Sender<BackendRequest>, CoreError> {
+    pub fn ingress_tx(&self, backend_id: &str) -> Result<mpsc::Sender<BackendRequest>, CoreError> {
         let handle = self.handle(backend_id)?;
-        handle.ingress_tx.ok_or_else(|| CoreError::Busy {
-            backend_id: backend_id.to_owned(),
-        })
+        handle.ingress_tx.ok_or_else(|| CoreError::Busy { backend_id: backend_id.to_owned() })
     }
 
     /// Clone backend control sender.
@@ -178,9 +154,7 @@ impl ResourceManager {
         backend_id: &str,
     ) -> Result<broadcast::Sender<WorkerCommand>, CoreError> {
         let handle = self.handle(backend_id)?;
-        handle.control_tx.ok_or_else(|| CoreError::Busy {
-            backend_id: backend_id.to_owned(),
-        })
+        handle.control_tx.ok_or_else(|| CoreError::Busy { backend_id: backend_id.to_owned() })
     }
 
     /// Monotonic management sequence id per backend stream.
@@ -198,9 +172,7 @@ impl ResourceManager {
         tokio::time::timeout(timeout, Arc::clone(&handle.semaphore).acquire_owned())
             .await
             .map_err(|_| CoreError::Timeout)?
-            .map_err(|_| CoreError::Busy {
-                backend_id: backend_id.to_owned(),
-            })
+            .map_err(|_| CoreError::Busy { backend_id: backend_id.to_owned() })
     }
 
     /// Acquire inference lease: read management lock + compute quota.
@@ -211,15 +183,10 @@ impl ResourceManager {
     ) -> Result<InferenceLease, CoreError> {
         self.ensure_inference_allowed().await?;
         let handle = self.handle(backend_id)?;
-        let compute_permit = self
-            .acquire_compute_permit(&handle, backend_id, timeout)
-            .await?;
+        let compute_permit = self.acquire_compute_permit(&handle, backend_id, timeout).await?;
         let mgmt_guard = Arc::clone(&handle.management_lock).read_owned().await;
 
-        Ok(InferenceLease {
-            mgmt_guard,
-            compute_permit,
-        })
+        Ok(InferenceLease { mgmt_guard, compute_permit })
     }
 
     /// Acquire exclusive management lease for initialize/load/unload operations.

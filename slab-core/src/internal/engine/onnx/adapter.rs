@@ -67,10 +67,7 @@ impl OnnxEngine {
                     ep_list.push(ort::ep::CPU::default().build());
                 }
                 other => {
-                    warn!(
-                        provider = other,
-                        "ONNX: unrecognised execution provider; skipping"
-                    );
+                    warn!(provider = other, "ONNX: unrecognised execution provider; skipping");
                 }
             }
         }
@@ -91,35 +88,23 @@ impl OnnxEngine {
             })?;
 
         if config.intra_op_num_threads > 0 {
-            builder = builder
-                .with_intra_threads(config.intra_op_num_threads)
-                .map_err(|e| OnnxEngineError::SessionCreate {
-                    path: config.model_path.clone(),
-                    source: e.into(),
-                })?;
+            builder = builder.with_intra_threads(config.intra_op_num_threads).map_err(|e| {
+                OnnxEngineError::SessionCreate { path: config.model_path.clone(), source: e.into() }
+            })?;
         }
 
         if config.inter_op_num_threads > 0 {
-            builder = builder
-                .with_inter_threads(config.inter_op_num_threads)
-                .map_err(|e| OnnxEngineError::SessionCreate {
-                    path: config.model_path.clone(),
-                    source: e.into(),
-                })?;
+            builder = builder.with_inter_threads(config.inter_op_num_threads).map_err(|e| {
+                OnnxEngineError::SessionCreate { path: config.model_path.clone(), source: e.into() }
+            })?;
         }
 
         builder = builder.with_execution_providers(ep_list).map_err(|e| {
-            OnnxEngineError::SessionCreate {
-                path: config.model_path.clone(),
-                source: e.into(),
-            }
+            OnnxEngineError::SessionCreate { path: config.model_path.clone(), source: e.into() }
         })?;
 
         let session = builder.commit_from_file(&config.model_path).map_err(|e| {
-            OnnxEngineError::SessionCreate {
-                path: config.model_path.clone(),
-                source: e,
-            }
+            OnnxEngineError::SessionCreate { path: config.model_path.clone(), source: e }
         })?;
 
         info!(model = %config.model_path, "ONNX: model loaded");
@@ -144,10 +129,7 @@ impl OnnxEngine {
         &mut self,
         input: OnnxInferenceInput,
     ) -> Result<JsonValue, OnnxEngineError> {
-        let session = self
-            .session
-            .as_mut()
-            .ok_or(OnnxEngineError::SessionNotLoaded)?;
+        let session = self.session.as_mut().ok_or(OnnxEngineError::SessionNotLoaded)?;
 
         // Build the ort inputs map (HashMap is accepted by the session's Into<SessionInputs>).
         let mut ort_inputs: HashMap<String, DynValue> = HashMap::new();
@@ -156,9 +138,8 @@ impl OnnxEngine {
             ort_inputs.insert(name, dyn_val);
         }
 
-        let outputs = session
-            .run(ort_inputs)
-            .map_err(|e| OnnxEngineError::InferenceFailed { source: e })?;
+        let outputs =
+            session.run(ort_inputs).map_err(|e| OnnxEngineError::InferenceFailed { source: e })?;
 
         // Serialise outputs to JSON wire format.
         let mut result = serde_json::Map::new();
@@ -195,12 +176,12 @@ fn validate_shape(name: &str, shape: &[i64]) -> Result<Vec<usize>, OnnxEngineErr
 
 /// Decode a [`TensorInput`] into an `ort::DynValue`.
 fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngineError> {
-    let raw = base64::engine::general_purpose::STANDARD
-        .decode(&ti.data_b64)
-        .map_err(|e| OnnxEngineError::TensorDecode {
+    let raw = base64::engine::general_purpose::STANDARD.decode(&ti.data_b64).map_err(|e| {
+        OnnxEngineError::TensorDecode {
             name: name.to_string(),
             reason: format!("base64 decode error: {e}"),
-        })?;
+        }
+    })?;
 
     let shape = validate_shape(name, &ti.shape)?;
 
@@ -210,23 +191,16 @@ fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngi
             if raw.len() % elem_size != 0 {
                 return Err(OnnxEngineError::TensorDecode {
                     name: name.to_string(),
-                    reason: format!(
-                        "byte length {} is not a multiple of {}",
-                        raw.len(),
-                        elem_size
-                    ),
+                    reason: format!("byte length {} is not a multiple of {}", raw.len(), elem_size),
                 });
             }
             let data: Vec<$ty> = raw
                 .chunks_exact(elem_size)
                 .map(|b| <$ty>::from_le_bytes(b.try_into().unwrap()))
                 .collect();
-            Tensor::<$ty>::from_array((shape, data))
-                .map(|t| t.into_dyn())
-                .map_err(|e| OnnxEngineError::TensorDecode {
-                    name: name.to_string(),
-                    reason: e.to_string(),
-                })
+            Tensor::<$ty>::from_array((shape, data)).map(|t| t.into_dyn()).map_err(|e| {
+                OnnxEngineError::TensorDecode { name: name.to_string(), reason: e.to_string() }
+            })
         }};
     }
 
@@ -263,10 +237,8 @@ fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngi
 
 /// Serialise an `ort` output value to the JSON wire format.
 fn ort_value_to_json(name: &str, value: &DynValue) -> Result<JsonValue, OnnxEngineError> {
-    let encode_err = |reason: String| OnnxEngineError::TensorEncode {
-        name: name.to_string(),
-        reason,
-    };
+    let encode_err =
+        |reason: String| OnnxEngineError::TensorEncode { name: name.to_string(), reason };
 
     // dtype() returns &ValueType directly (not Result).
     let value_type = value.dtype().clone();
@@ -283,9 +255,7 @@ fn ort_value_to_json(name: &str, value: &DynValue) -> Result<JsonValue, OnnxEngi
                 "data_b64": data_b64,
             }))
         }
-        other => Err(encode_err(format!(
-            "unsupported output value type: {other:?}"
-        ))),
+        other => Err(encode_err(format!("unsupported output value type: {other:?}"))),
     }
 }
 
@@ -295,21 +265,15 @@ fn encode_tensor_to_base64(
     value: &DynValue,
     ty: TensorElementType,
 ) -> Result<(&'static str, String), OnnxEngineError> {
-    let encode_err = |reason: String| OnnxEngineError::TensorEncode {
-        name: name.to_string(),
-        reason,
-    };
+    let encode_err =
+        |reason: String| OnnxEngineError::TensorEncode { name: name.to_string(), reason };
 
     macro_rules! extract_and_encode {
         ($rust_ty:ty, $dtype_str:expr) => {{
-            let (_shape, data) = value
-                .try_extract_tensor::<$rust_ty>()
-                .map_err(|e| encode_err(e.to_string()))?;
+            let (_shape, data) =
+                value.try_extract_tensor::<$rust_ty>().map_err(|e| encode_err(e.to_string()))?;
             let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();
-            (
-                $dtype_str,
-                base64::engine::general_purpose::STANDARD.encode(&bytes),
-            )
+            ($dtype_str, base64::engine::general_purpose::STANDARD.encode(&bytes))
         }};
     }
 
@@ -319,19 +283,13 @@ fn encode_tensor_to_base64(
         TensorElementType::Int32 => extract_and_encode!(i32, "int32"),
         TensorElementType::Int64 => extract_and_encode!(i64, "int64"),
         TensorElementType::Uint8 => {
-            let (_shape, data) = value
-                .try_extract_tensor::<u8>()
-                .map_err(|e| encode_err(e.to_string()))?;
+            let (_shape, data) =
+                value.try_extract_tensor::<u8>().map_err(|e| encode_err(e.to_string()))?;
             let bytes: Vec<u8> = data.to_vec();
-            (
-                "uint8",
-                base64::engine::general_purpose::STANDARD.encode(&bytes),
-            )
+            ("uint8", base64::engine::general_purpose::STANDARD.encode(&bytes))
         }
         other => {
-            return Err(encode_err(format!(
-                "unsupported output tensor element type: {other:?}"
-            )))
+            return Err(encode_err(format!("unsupported output tensor element type: {other:?}")))
         }
     };
 
