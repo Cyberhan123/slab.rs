@@ -2,11 +2,11 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at http://mozilla.org/MPL/2.0/.
 
-/// This crate provides a common interface for popular subtitle formats (`.srt`, `.ssa`, `.ass`).
-///
-/// Files can be parsed, modified and saved again - some formats can be created from scratch.
-/// The focus is on non-destructive parsing, meaning that formatting and other information are preserved
-/// if not explicitely changed.
+//! This crate provides a common interface for popular subtitle formats (`.srt`, `.ssa`, `.ass`).
+//!
+//! Files can be parsed, modified and saved again - some formats can be created from scratch.
+//! The focus is on non-destructive parsing, meaning that formatting and other information are preserved
+//! if not explicitly changed.
 
 /// Error-chain generated error types.
 #[macro_use]
@@ -69,7 +69,7 @@ pub struct SubtitleEntry {
 impl SubtitleEntry {
     /// Create subtitle entry with text.
     fn new(timespan: TimeSpan, line: String) -> SubtitleEntry {
-        SubtitleEntry { timespan: timespan, line: Some(line) }
+        SubtitleEntry { timespan, line: Some(line) }
     }
 }
 

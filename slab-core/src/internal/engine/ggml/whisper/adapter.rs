@@ -7,7 +7,7 @@ use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use subparse::{
+use slab_subtitle::{
     timetypes::{TimePoint, TimeSpan},
     SubtitleEntry,
 };

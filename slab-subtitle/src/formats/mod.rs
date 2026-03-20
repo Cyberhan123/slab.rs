@@ -129,13 +129,11 @@ fn test_subtitle_format_by_extension() {
 ///
 /// `Option` is used to simplify handling with `PathBuf::extension()`.
 pub fn get_subtitle_format_by_extension(extension: Option<&OsStr>) -> Option<SubtitleFormat> {
-    let _ext_opt: Option<&OsStr> = extension.into();
-
-    if _ext_opt == Some(OsStr::new("srt")) {
+    if extension == Some(OsStr::new("srt")) {
         Some(SubtitleFormat::SubRip)
-    } else if _ext_opt == Some(OsStr::new("ssa")) || _ext_opt == Some(OsStr::new("ass")) {
+    } else if extension == Some(OsStr::new("ssa")) || extension == Some(OsStr::new("ass")) {
         Some(SubtitleFormat::SubStationAlpha)
-    } else if _ext_opt == Some(OsStr::new("idx")) {
+    } else if extension == Some(OsStr::new("idx")) {
         Some(SubtitleFormat::VobSubIdx)
     } else {
         None
