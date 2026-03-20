@@ -249,7 +249,7 @@ fn encode_png_image_payload(images: &[Vec<u8>]) -> Result<Vec<u8>, Status> {
             let channels = decoded.color().channel_count();
 
             Ok(serde_json::json!({
-                "b64": base64::engine::general_purpose::STANDARD.encode(image_bytes),
+                "image": base64::engine::general_purpose::STANDARD.encode(image_bytes),
                 "width": width,
                 "height": height,
                 "channels": channels,
@@ -257,7 +257,7 @@ fn encode_png_image_payload(images: &[Vec<u8>]) -> Result<Vec<u8>, Status> {
         })
         .collect::<Result<_, Status>>()?;
 
-    serde_json::to_vec(&encoded).map_err(|error| {
+    serde_json::to_vec(&serde_json::json!({ "images": encoded })).map_err(|error| {
         Status::internal(format!("failed to encode generated image JSON: {error}"))
     })
 }

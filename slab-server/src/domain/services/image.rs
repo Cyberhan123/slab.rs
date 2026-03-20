@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use serde::Deserialize;
 use tracing::{debug, warn};
 
 use crate::context::{SubmitOperation, WorkerState};
@@ -12,6 +13,16 @@ use crate::infra::rpc::{self, pb};
 #[derive(Clone)]
 pub struct ImageService {
     state: WorkerState,
+}
+
+#[derive(Deserialize)]
+struct DiffusionImagePayload {
+    images: Vec<DiffusionImageEntry>,
+}
+
+#[derive(Deserialize)]
+struct DiffusionImageEntry {
+    image: String,
 }
 
 impl ImageService {
@@ -126,7 +137,7 @@ impl ImageService {
 
                     match rpc_result {
                         Ok(images_json) => {
-                            let images: Vec<serde_json::Value> =
+                            let payload: DiffusionImagePayload =
                                 match serde_json::from_slice(&images_json) {
                                     Ok(value) => value,
                                     Err(error) => {
@@ -140,11 +151,19 @@ impl ImageService {
                                     }
                                 };
 
-                            let data_uris: Vec<String> = images
-                                .iter()
-                                .filter_map(|image| image["b64"].as_str())
-                                .map(|b64| format!("data:image/png;base64,{b64}"))
+                            let data_uris: Vec<String> = payload
+                                .images
+                                .into_iter()
+                                .map(|image| format!("data:image/png;base64,{}", image.image))
                                 .collect();
+
+                            if data_uris.is_empty() {
+                                let message = "diffusion returned no images".to_owned();
+                                if let Err(db_error) = operation.mark_failed(&message).await {
+                                    warn!(task_id = %operation_id, error = %db_error, "failed to update image result after empty payload");
+                                }
+                                return;
+                            }
 
                             let result = TaskResult {
                                 image: data_uris.first().cloned(),
