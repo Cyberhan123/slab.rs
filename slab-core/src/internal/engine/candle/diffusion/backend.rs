@@ -321,7 +321,11 @@ impl CandleDiffusionWorker {
         match result {
             Ok(png_bytes) => {
                 let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-                let json = serde_json::json!({ "images": [b64] });
+                let json = serde_json::json!({
+                    "images": [{
+                        "image": b64,
+                    }]
+                });
                 let _ = reply_tx.send(BackendReply::Value(Payload::Json(json)));
             }
             Err(e) => {

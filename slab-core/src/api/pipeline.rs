@@ -587,7 +587,11 @@ mod tests {
                                         let encoded = base64::engine::general_purpose::STANDARD
                                             .encode(image_bytes);
                                         let _ = req.reply_tx.send(BackendReply::Value(Payload::json(
-                                            json!({ "images": [encoded] }),
+                                            json!({
+                                                "images": [{
+                                                    "image": encoded,
+                                                }]
+                                            }),
                                         )));
                                     }
                                     other => {

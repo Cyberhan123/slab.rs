@@ -464,17 +464,15 @@ impl DiffusionWorker {
                             .ok()?;
                         let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
                         Some(serde_json::json!({
-                            "b64": b64,
+                            "image": b64,
                             "width": w,
                             "height": h,
                             "channels": channels,
                         }))
                     })
                     .collect();
-                let json_bytes = serde_json::to_vec(&encoded).unwrap_or_default();
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(
-                    json_bytes.as_slice(),
-                ))));
+                let payload = serde_json::json!({ "images": encoded });
+                let _ = reply_tx.send(BackendReply::Value(Payload::Json(payload)));
             }
         }
     }
