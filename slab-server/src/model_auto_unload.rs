@@ -1,17 +1,14 @@
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
+use slab_types::runtime::RuntimeModelLoadSpec;
 use tracing::{debug, info, warn};
 
 use crate::infra::rpc;
 
-#[derive(Debug, Clone)]
-pub struct LoadedModelSpec {
-    pub model_path: String,
-    pub num_workers: u32,
-    pub context_length: u32,
-}
+pub type LoadedModelSpec = RuntimeModelLoadSpec;
 
 #[derive(Debug, Default, Clone)]
 struct BackendRefState {
@@ -261,20 +258,15 @@ impl ModelAutoUnloadManager {
             ));
         };
 
-        let req = rpc::pb::ModelLoadRequest {
-            model_path: spec.model_path.clone(),
-            num_workers: spec.num_workers.max(1),
-            context_length: spec.context_length,
-            ..Default::default()
-        };
+        let req = build_model_load_request(&spec);
 
         match rpc::client::load_model(channel, &backend, req).await {
             Ok(_) => {
                 info!(
                     backend = %backend,
-                    model_path = %spec.model_path,
+                    model_path = %spec.model_path.display(),
                     num_workers = spec.num_workers,
-                    context_length = spec.context_length,
+                    context_length = spec.context_length.unwrap_or(0),
                     "auto-reloaded model after idle auto-unload"
                 );
                 let mut states = self.states.lock().await;
@@ -314,4 +306,34 @@ fn canonical_backend_id(backend_id: &str) -> &str {
         "diffusion" | "ggml.diffusion" => "ggml.diffusion",
         _ => backend_id,
     }
+}
+
+pub(crate) fn build_model_load_request(spec: &LoadedModelSpec) -> rpc::pb::ModelLoadRequest {
+    let diffusion = spec.diffusion.as_ref().cloned().unwrap_or_default();
+
+    rpc::pb::ModelLoadRequest {
+        model_path: path_to_string(&spec.model_path),
+        num_workers: spec.num_workers.max(1),
+        context_length: spec.context_length.unwrap_or(0),
+        diffusion_model_path: opt_path_to_string(diffusion.diffusion_model_path),
+        vae_path: opt_path_to_string(diffusion.vae_path),
+        taesd_path: opt_path_to_string(diffusion.taesd_path),
+        lora_model_dir: opt_path_to_string(diffusion.lora_model_dir),
+        clip_l_path: opt_path_to_string(diffusion.clip_l_path),
+        clip_g_path: opt_path_to_string(diffusion.clip_g_path),
+        t5xxl_path: opt_path_to_string(diffusion.t5xxl_path),
+        flash_attn: diffusion.flash_attn,
+        keep_vae_on_cpu: diffusion.keep_vae_on_cpu,
+        keep_clip_on_cpu: diffusion.keep_clip_on_cpu,
+        offload_params_to_cpu: diffusion.offload_params_to_cpu,
+    }
+}
+
+fn path_to_string(path: &PathBuf) -> String {
+    path.to_string_lossy().into_owned()
+}
+
+fn opt_path_to_string(path: Option<PathBuf>) -> String {
+    path.map(|value| value.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }

@@ -1,13 +1,29 @@
-//! `slab-types` – shared types, JSON schema definitions, and the PMID catalog.
+//! `slab-types` - shared semantic types, JSON schema definitions, and the PMID catalog.
 //!
 //! # Modules
-//! - [`common`] – universal building blocks: [`common::Id`], [`common::Timestamp`].
-//! - [`error`]  – [`error::SlabTypeError`], the crate-level error type.
-//! - [`settings`] – PMID catalog and typed configuration snapshots for the
-//!   settings system.
+//! - [`backend`] runtime-facing backend identifiers.
+//! - [`common`] universal building blocks: [`common::Id`], [`common::Timestamp`].
+//! - [`diffusion`] normalized diffusion request and response types.
+//! - [`error`] crate-level error type.
+//! - [`inference`] shared inference request and response types.
+//! - [`media`] reusable image and frame payload types.
+//! - [`runtime`] shared runtime model and load specifications.
+//! - [`settings`] PMID catalog and typed configuration snapshots for the settings system.
+//! - [`whisper`] shared whisper VAD and decode option types.
 
+pub mod backend;
 pub mod common;
+pub mod diffusion;
 pub mod error;
+pub mod inference;
+pub mod media;
+pub mod runtime;
 pub mod settings;
+pub mod whisper;
 
+pub use backend::RuntimeBackendId;
 pub use error::SlabTypeError;
+pub use runtime::{
+    Capability, DiffusionLoadOptions, DriverHints, ModelFamily, ModelSource, ModelSpec,
+    RuntimeModelLoadCommand, RuntimeModelLoadSpec, RuntimeModelReloadSpec, RuntimeModelStatus,
+};

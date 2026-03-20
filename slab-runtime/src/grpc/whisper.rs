@@ -50,6 +50,8 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
                 pcm_samples: Some(pcm_samples),
                 language: None,
                 prompt: None,
+                vad: None,
+                decode: None,
                 options,
             })
             .await

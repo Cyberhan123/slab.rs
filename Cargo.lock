@@ -7546,6 +7546,7 @@ dependencies = [
  "slab-diffusion-sys",
  "slab-libfetch",
  "slab-llama",
+ "slab-types",
  "slab-whisper",
  "strum",
  "strum_macros",
