@@ -7716,6 +7716,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-subtitle"
+version = "0.0.1"
+dependencies = [
+ "chardet",
+ "combine 4.6.7",
+ "encoding_rs",
+ "itertools 0.14.0",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "slab-types"
 version = "0.0.1"
 dependencies = [
