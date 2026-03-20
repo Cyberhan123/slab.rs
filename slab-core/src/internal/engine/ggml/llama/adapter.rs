@@ -53,6 +53,9 @@ impl GGMLLlamaEngine {
 
         llama.backend_init();
 
+        // SAFETY: `Llama` is an FFI handle that is immutable after creation. The enclosing
+        // `GGMLLlamaEngine` manually implements `Send + Sync` (see unsafe impls above).
+        #[allow(clippy::arc_with_non_send_sync)]
         Ok(Self {
             instance: Arc::new(llama),
             inference_engine: RwLock::new(None),
