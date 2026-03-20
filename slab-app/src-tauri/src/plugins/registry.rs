@@ -35,17 +35,11 @@ impl PluginRegistryState {
     pub fn new(root_dir: PathBuf) -> Result<Self, String> {
         if !root_dir.exists() {
             fs::create_dir_all(&root_dir).map_err(|e| {
-                format!(
-                    "failed to create plugins directory {}: {e}",
-                    root_dir.display()
-                )
+                format!("failed to create plugins directory {}: {e}", root_dir.display())
             })?;
         }
 
-        let registry = Self {
-            root_dir,
-            snapshot: RwLock::new(PluginRegistrySnapshot::default()),
-        };
+        let registry = Self { root_dir, snapshot: RwLock::new(PluginRegistrySnapshot::default()) };
         registry.refresh()?;
         Ok(registry)
     }
@@ -169,12 +163,8 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
     let mut loaded = HashMap::new();
     let mut invalid = HashMap::new();
 
-    let entries = fs::read_dir(root_dir).map_err(|e| {
-        format!(
-            "failed to scan plugins directory {}: {e}",
-            root_dir.display()
-        )
-    })?;
+    let entries = fs::read_dir(root_dir)
+        .map_err(|e| format!("failed to scan plugins directory {}: {e}", root_dir.display()))?;
 
     for entry in entries {
         let entry = match entry {
@@ -216,10 +206,7 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
             Err(error) => {
                 invalid.insert(
                     folder_name,
-                    format!(
-                        "failed to read plugin.json at {}: {error}",
-                        manifest_path.display()
-                    ),
+                    format!("failed to read plugin.json at {}: {error}", manifest_path.display()),
                 );
                 continue;
             }
@@ -230,10 +217,7 @@ fn scan_plugins(root_dir: &Path) -> Result<PluginRegistrySnapshot, String> {
             Err(error) => {
                 invalid.insert(
                     folder_name,
-                    format!(
-                        "invalid plugin.json at {}: {error}",
-                        manifest_path.display()
-                    ),
+                    format!("invalid plugin.json at {}: {error}", manifest_path.display()),
                 );
                 continue;
             }
@@ -289,16 +273,10 @@ fn validate_and_load_plugin(
     let wasm_entry_path = plugin_dir.join(&wasm_entry);
 
     if !ui_entry_path.is_file() {
-        return Err(format!(
-            "missing UI entry file at {}",
-            ui_entry_path.display()
-        ));
+        return Err(format!("missing UI entry file at {}", ui_entry_path.display()));
     }
     if !wasm_entry_path.is_file() {
-        return Err(format!(
-            "missing wasm entry file at {}",
-            wasm_entry_path.display()
-        ));
+        return Err(format!("missing wasm entry file at {}", wasm_entry_path.display()));
     }
 
     let mut files_sha256 = HashMap::new();
@@ -308,9 +286,7 @@ fn validate_and_load_plugin(
 
         let file_path = plugin_dir.join(&normalized_path);
         if !file_path.is_file() {
-            return Err(format!(
-                "integrity target `{normalized_path}` does not exist as a file"
-            ));
+            return Err(format!("integrity target `{normalized_path}` does not exist as a file"));
         }
 
         let computed_hash = compute_file_sha256(&file_path)?;

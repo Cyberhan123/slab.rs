@@ -104,7 +104,6 @@ struct InnerState {
     _loaded: bool,
 }
 
-
 // ── Engine ────────────────────────────────────────────────────────────────────
 
 /// Engine adapter for Candle-based Stable Diffusion image generation.
@@ -116,9 +115,7 @@ pub struct CandleDiffusionEngine {
 impl CandleDiffusionEngine {
     /// Create a new, empty engine (no model loaded).
     pub fn new() -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(InnerState::default())),
-        }
+        Self { inner: Arc::new(RwLock::new(InnerState::default())) }
     }
 
     /// Returns `true` when models are currently loaded and ready for inference.
@@ -186,10 +183,7 @@ impl CandleDiffusionEngine {
             };
 
             // Derive tokenizer directory from the model path.
-            let tokenizer_dir = model_file
-                .parent()
-                .unwrap_or(Path::new("."))
-                .join("tokenizer");
+            let tokenizer_dir = model_file.parent().unwrap_or(Path::new(".")).join("tokenizer");
 
             // Load and cache CLIP tokenizer + text-encoder.
             let tokenizer_json = tokenizer_dir.join("tokenizer.json");
@@ -216,12 +210,12 @@ impl CandleDiffusionEngine {
             })?;
 
             // Build and cache UNet and VAE.
-            let unet = sd_config
-                .build_unet(model_file, &device, 4, false, dtype)
-                .map_err(|e| CandleDiffusionEngineError::LoadModel {
+            let unet = sd_config.build_unet(model_file, &device, 4, false, dtype).map_err(|e| {
+                CandleDiffusionEngineError::LoadModel {
                     model_path: model_path.to_owned(),
                     message: format!("failed to build UNet: {e}"),
-                })?;
+                }
+            })?;
 
             let vae = sd_config.build_vae(vae_file, &device, dtype).map_err(|e| {
                 CandleDiffusionEngineError::LoadModel {
@@ -231,11 +225,9 @@ impl CandleDiffusionEngine {
             })?;
 
             let mut state =
-                self.inner
-                    .write()
-                    .map_err(|_| CandleDiffusionEngineError::LockPoisoned {
-                        operation: "write diffusion model state",
-                    })?;
+                self.inner.write().map_err(|_| CandleDiffusionEngineError::LockPoisoned {
+                    operation: "write diffusion model state",
+                })?;
             state.model_path = Some(model_file.to_path_buf());
             state.vae_path = vae_path.map(|p| Path::new(p).to_path_buf());
             state.sd_config = Some(sd_config);
@@ -317,37 +309,25 @@ impl CandleDiffusionEngine {
         let _ = DType::F32; // dtype only needed when building models (done at load_model time)
 
         // Acquire read lock to borrow cached models and config.
-        let state = self
-            .inner
-            .read()
-            .map_err(|_| CandleDiffusionEngineError::LockPoisoned {
-                operation: "read diffusion state for inference",
-            })?;
+        let state = self.inner.read().map_err(|_| CandleDiffusionEngineError::LockPoisoned {
+            operation: "read diffusion state for inference",
+        })?;
 
-        let (sd_config, unet, vae, clip, tokenizer) = match (
-            &state.sd_config,
-            &state.unet,
-            &state.vae,
-            &state.clip,
-            &state.tokenizer,
-        ) {
-            (Some(c), Some(u), Some(v), Some(cl), Some(t)) => (c, u, v, cl, t),
-            _ => return Err(CandleDiffusionEngineError::ModelNotLoaded.into()),
-        };
+        let (sd_config, unet, vae, clip, tokenizer) =
+            match (&state.sd_config, &state.unet, &state.vae, &state.clip, &state.tokenizer) {
+                (Some(c), Some(u), Some(v), Some(cl), Some(t)) => (c, u, v, cl, t),
+                _ => return Err(CandleDiffusionEngineError::ModelNotLoaded.into()),
+            };
 
         // Encode prompt and negative prompt via CLIP tokenizer.
         let encode_text = |text: &str| -> Result<Tensor, CandleDiffusionEngineError> {
             let enc = tokenizer.encode(text, true).map_err(|e| {
-                CandleDiffusionEngineError::Inference {
-                    message: format!("tokenize failed: {e}"),
-                }
+                CandleDiffusionEngineError::Inference { message: format!("tokenize failed: {e}") }
             })?;
             let ids: Vec<i64> = enc.get_ids().iter().map(|&id| id as i64).collect();
-            Tensor::new(ids.as_slice(), &device)
-                .and_then(|t| t.unsqueeze(0))
-                .map_err(|e| CandleDiffusionEngineError::Inference {
-                    message: format!("token tensor: {e}"),
-                })
+            Tensor::new(ids.as_slice(), &device).and_then(|t| t.unsqueeze(0)).map_err(|e| {
+                CandleDiffusionEngineError::Inference { message: format!("token tensor: {e}") }
+            })
         };
 
         let prompt_ids = encode_text(&params.prompt)?;
@@ -365,9 +345,7 @@ impl CandleDiffusionEngine {
                 message: format!("CLIP forward (uncond): {e}"),
             })?;
         let text_embeddings = Tensor::cat(&[uncond_embeds, prompt_embeds], 0).map_err(|e| {
-            CandleDiffusionEngineError::Inference {
-                message: format!("embed cat: {e}"),
-            }
+            CandleDiffusionEngineError::Inference { message: format!("embed cat: {e}") }
         })?;
 
         // Build the scheduler (depends on params.steps which varies per call).
@@ -382,74 +360,57 @@ impl CandleDiffusionEngine {
         let latent_h = (params.height / 8) as usize;
         let latent_w = (params.width / 8) as usize;
 
-        device
-            .set_seed(params.seed)
-            .map_err(|e| CandleDiffusionEngineError::Inference {
-                message: format!("failed to seed RNG: {e}"),
-            })?;
+        device.set_seed(params.seed).map_err(|e| CandleDiffusionEngineError::Inference {
+            message: format!("failed to seed RNG: {e}"),
+        })?;
         let mut latents = Tensor::randn(0.0f32, 1.0f32, (bsize, 4, latent_h, latent_w), &device)
             .map_err(|e| CandleDiffusionEngineError::Inference {
                 message: format!("noise tensor: {e}"),
             })?;
 
         let init_noise_sigma = scheduler.init_noise_sigma();
-        latents =
-            (latents * init_noise_sigma).map_err(|e| CandleDiffusionEngineError::Inference {
-                message: format!("scale noise: {e}"),
-            })?;
+        latents = (latents * init_noise_sigma).map_err(|e| {
+            CandleDiffusionEngineError::Inference { message: format!("scale noise: {e}") }
+        })?;
 
         // Collect timesteps first to avoid simultaneous mut/immut borrows on scheduler.
         let timesteps: Vec<usize> = scheduler.timesteps().to_vec();
         // Denoising loop.
         for (idx, t) in timesteps.iter().enumerate() {
             let latent_model_input = Tensor::cat(&[&latents, &latents], 0).map_err(|e| {
-                CandleDiffusionEngineError::Inference {
-                    message: format!("latent cat: {e}"),
-                }
+                CandleDiffusionEngineError::Inference { message: format!("latent cat: {e}") }
             })?;
-            let latent_model_input = scheduler
-                .scale_model_input(latent_model_input, *t)
-                .map_err(|e| CandleDiffusionEngineError::Inference {
-                    message: format!("scale model input: {e}"),
+            let latent_model_input =
+                scheduler.scale_model_input(latent_model_input, *t).map_err(|e| {
+                    CandleDiffusionEngineError::Inference {
+                        message: format!("scale model input: {e}"),
+                    }
                 })?;
 
-            let noise_pred = unet
-                .forward(&latent_model_input, *t as f64, &text_embeddings)
-                .map_err(|e| CandleDiffusionEngineError::Inference {
-                    message: format!("unet forward: {e}"),
+            let noise_pred =
+                unet.forward(&latent_model_input, *t as f64, &text_embeddings).map_err(|e| {
+                    CandleDiffusionEngineError::Inference { message: format!("unet forward: {e}") }
                 })?;
 
-            let noise_pred_uncond =
-                noise_pred
-                    .i(..bsize)
-                    .map_err(|e| CandleDiffusionEngineError::Inference {
-                        message: format!("slice uncond: {e}"),
-                    })?;
-            let noise_pred_text =
-                noise_pred
-                    .i(bsize..)
-                    .map_err(|e| CandleDiffusionEngineError::Inference {
-                        message: format!("slice text: {e}"),
-                    })?;
+            let noise_pred_uncond = noise_pred.i(..bsize).map_err(|e| {
+                CandleDiffusionEngineError::Inference { message: format!("slice uncond: {e}") }
+            })?;
+            let noise_pred_text = noise_pred.i(bsize..).map_err(|e| {
+                CandleDiffusionEngineError::Inference { message: format!("slice text: {e}") }
+            })?;
 
             let guided = (&noise_pred_text - &noise_pred_uncond).map_err(|e| {
-                CandleDiffusionEngineError::Inference {
-                    message: format!("guidance sub: {e}"),
-                }
+                CandleDiffusionEngineError::Inference { message: format!("guidance sub: {e}") }
             })? * params.cfg_scale;
             let guided = guided.map_err(|e| CandleDiffusionEngineError::Inference {
                 message: format!("guidance scale: {e}"),
             })?;
             let noise_pred = (&noise_pred_uncond + guided).map_err(|e| {
-                CandleDiffusionEngineError::Inference {
-                    message: format!("guidance add: {e}"),
-                }
+                CandleDiffusionEngineError::Inference { message: format!("guidance add: {e}") }
             })?;
 
             latents = scheduler.step(&noise_pred, *t, &latents).map_err(|e| {
-                CandleDiffusionEngineError::Inference {
-                    message: format!("scheduler step: {e}"),
-                }
+                CandleDiffusionEngineError::Inference { message: format!("scheduler step: {e}") }
             })?;
 
             tracing::debug!(
@@ -461,11 +422,9 @@ impl CandleDiffusionEngine {
 
         // Decode latents → image.
         let decoded = vae
-            .decode(
-                &(latents / 0.18215f64).map_err(|e| CandleDiffusionEngineError::Inference {
-                    message: format!("latent scale: {e}"),
-                })?,
-            )
+            .decode(&(latents / 0.18215f64).map_err(|e| CandleDiffusionEngineError::Inference {
+                message: format!("latent scale: {e}"),
+            })?)
             .map_err(|e| CandleDiffusionEngineError::Inference {
                 message: format!("vae decode: {e}"),
             })?;
@@ -490,12 +449,9 @@ impl CandleDiffusionEngine {
             })?;
 
         // Convert to PNG bytes.
-        let (_channels, h, w) =
-            image_u8
-                .dims3()
-                .map_err(|e| CandleDiffusionEngineError::Inference {
-                    message: format!("dims: {e}"),
-                })?;
+        let (_channels, h, w) = image_u8
+            .dims3()
+            .map_err(|e| CandleDiffusionEngineError::Inference { message: format!("dims: {e}") })?;
         let data = image_u8
             .permute((1, 2, 0))
             .map_err(|e| CandleDiffusionEngineError::Inference {
@@ -517,10 +473,7 @@ impl CandleDiffusionEngine {
             }
         })?;
         img_buffer
-            .write_to(
-                &mut std::io::Cursor::new(&mut png_bytes),
-                image::ImageFormat::Png,
-            )
+            .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
             .map_err(|e| CandleDiffusionEngineError::EncodeImage {
                 message: format!("png encode: {e}"),
             })?;

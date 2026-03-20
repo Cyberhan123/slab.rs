@@ -126,11 +126,7 @@ impl GGMLWhisperEngine {
         }
 
         std::fs::canonicalize(&lib_path).map_err(|source| {
-            GGMLWhisperEngineError::CanonicalizeLibraryPath {
-                path: lib_path,
-                source,
-            }
-            .into()
+            GGMLWhisperEngineError::CanonicalizeLibraryPath { path: lib_path, source }.into()
         })
     }
 
@@ -143,10 +139,7 @@ impl GGMLWhisperEngine {
             }
         })?;
 
-        Ok(Self {
-            instance: Arc::new(whisper),
-            ctx: None,
-        })
+        Ok(Self { instance: Arc::new(whisper), ctx: None })
     }
 
     /// Create a new engine from the library at `path` **without** registering
@@ -163,18 +156,12 @@ impl GGMLWhisperEngine {
         path_to_model: P,
         params: WhisperContextParameters,
     ) -> Result<(), engine::EngineError> {
-        let path = path_to_model
-            .as_ref()
-            .to_str()
-            .ok_or(GGMLWhisperEngineError::InvalidModelPathUtf8)?;
+        let path =
+            path_to_model.as_ref().to_str().ok_or(GGMLWhisperEngineError::InvalidModelPathUtf8)?;
 
-        let ctx = self
-            .instance
-            .new_context_with_params(path, params)
-            .map_err(|source| GGMLWhisperEngineError::CreateContext {
-                model_path: path.to_string(),
-                source,
-            })?;
+        let ctx = self.instance.new_context_with_params(path, params).map_err(|source| {
+            GGMLWhisperEngineError::CreateContext { model_path: path.to_string(), source }
+        })?;
         self.ctx = Some(ctx);
         Ok(())
     }
@@ -197,15 +184,11 @@ impl GGMLWhisperEngine {
         vad: Option<&WhisperVadConfig>,
         decode: Option<&WhisperDecodeConfig>,
     ) -> Result<Vec<SubtitleEntry>, engine::EngineError> {
-        let ctx = self
-            .ctx
-            .as_ref()
-            .ok_or(GGMLWhisperEngineError::ContextNotInitialized)?;
+        let ctx = self.ctx.as_ref().ok_or(GGMLWhisperEngineError::ContextNotInitialized)?;
 
-        let mut params = self.instance.new_full_params(SamplingStrategy::BeamSearch {
-            beam_size: 5,
-            patience: -1.0,
-        });
+        let mut params = self
+            .instance
+            .new_full_params(SamplingStrategy::BeamSearch { beam_size: 5, patience: -1.0 });
 
         if let Some(vad) = vad {
             let model_path = vad.model_path.trim();
@@ -332,9 +315,6 @@ impl GGMLWhisperEngine {
     /// `ctx` slot (loaded independently) while all workers share the same
     /// dynamic-library `Arc`.
     pub fn fork_library(&self) -> Self {
-        Self {
-            instance: Arc::clone(&self.instance),
-            ctx: None,
-        }
+        Self { instance: Arc::clone(&self.instance), ctx: None }
     }
 }

@@ -86,15 +86,11 @@ pub async fn dispatch_backend_request<T>(
                 }
             }
             let op_name = req.op.name.clone();
-            let _ = req
-                .reply_tx
-                .send(BackendReply::Error(format!("unknown op: {}", op_name)));
+            let _ = req.reply_tx.send(BackendReply::Error(format!("unknown op: {}", op_name)));
         }
         Err(_) => {
             let op_name = req.op.name.clone();
-            let _ = req
-                .reply_tx
-                .send(BackendReply::Error(format!("unknown op: {}", op_name)));
+            let _ = req.reply_tx.send(BackendReply::Error(format!("unknown op: {}", op_name)));
         }
     }
 }
@@ -275,9 +271,7 @@ mod tests {
             shared_ingress(ingress_rx),
             control_rx,
             7,
-            TestHandler {
-                observed: observed.clone(),
-            },
+            TestHandler { observed: observed.clone() },
         );
 
         let _ = control_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
@@ -300,9 +294,8 @@ mod tests {
             sync: SyncMessage::Generation { generation: 3 },
             sender_id: 9,
         }));
-        let _ = control_tx.send(WorkerCommand::Runtime(RuntimeControlSignal::GlobalUnload {
-            op_id: 11,
-        }));
+        let _ = control_tx
+            .send(WorkerCommand::Runtime(RuntimeControlSignal::GlobalUnload { op_id: 11 }));
 
         drop(control_tx);
         drop(ingress_tx);
@@ -328,9 +321,7 @@ mod tests {
             shared_ingress(ingress_rx),
             control_rx,
             0,
-            TestHandler {
-                observed: observed.clone(),
-            },
+            TestHandler { observed: observed.clone() },
         );
 
         let (cancel_tx, cancel_rx) = watch::channel(false);
@@ -339,10 +330,7 @@ mod tests {
         ingress_tx
             .send(BackendRequest {
                 kind: BackendRequestKind::Inference,
-                op: BackendOp {
-                    name: "test.op".to_owned(),
-                    options: Payload::default(),
-                },
+                op: BackendOp { name: "test.op".to_owned(), options: Payload::default() },
                 input: Payload::default(),
                 cancel_rx,
                 broadcast_seq: None,

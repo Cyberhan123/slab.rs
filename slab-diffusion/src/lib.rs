@@ -53,9 +53,7 @@ impl Diffusion {
                 )?
             };
             let diffusion_lib = unsafe { slab_diffusion_sys::DiffusionLib::from_library(lib)? };
-            Ok(Self {
-                lib: Arc::new(diffusion_lib),
-            })
+            Ok(Self { lib: Arc::new(diffusion_lib) })
         }
 
         #[cfg(not(windows))]
@@ -201,10 +199,7 @@ impl Diffusion {
             return Err(DiffusionError::ContextCreationFailed);
         }
 
-        Ok(SdContext {
-            ctx,
-            lib: self.lib.clone(),
-        })
+        Ok(SdContext { ctx, lib: self.lib.clone() })
     }
 }
 

@@ -52,9 +52,7 @@ impl Api {
     ///
     /// Proxy is automatically read from `HTTP_PROXY` / `HTTPS_PROXY` environment variables.
     pub fn new() -> Self {
-        let proxy = env::var("HTTP_PROXY")
-            .ok()
-            .or_else(|| env::var("HTTPS_PROXY").ok());
+        let proxy = env::var("HTTP_PROXY").ok().or_else(|| env::var("HTTPS_PROXY").ok());
 
         Self {
             install_dir: PathBuf::from("."),
@@ -97,32 +95,19 @@ impl Api {
 
     /// Specify the GitHub repository (`"owner/repo"`).
     pub fn repo(self, repo: impl Into<String>) -> RepoApi {
-        RepoApi {
-            api: self,
-            repo: repo.into(),
-        }
+        RepoApi { api: self, repo: repo.into() }
     }
 }
 
 impl RepoApi {
     /// Target the latest release.
     pub fn latest(self) -> VersionApi {
-        VersionApi {
-            api: self.api,
-            repo: self.repo,
-            version: String::new(),
-            is_latest: true,
-        }
+        VersionApi { api: self.api, repo: self.repo, version: String::new(), is_latest: true }
     }
 
     /// Target a specific release tag (e.g. `"v3.5.1"`).
     pub fn version(self, version: impl Into<String>) -> VersionApi {
-        VersionApi {
-            api: self.api,
-            repo: self.repo,
-            version: version.into(),
-            is_latest: false,
-        }
+        VersionApi { api: self.api, repo: self.repo, version: version.into(), is_latest: false }
     }
 
     /// Return the installed version information from `version.json`.
@@ -148,18 +133,13 @@ impl VersionApi {
         );
 
         // Resolve the version early so asset_func can use it.
-        let version = if self.is_latest {
-            downloader.latest_version().await?
-        } else {
-            self.version.clone()
-        };
+        let version =
+            if self.is_latest { downloader.latest_version().await? } else { self.version.clone() };
 
         let asset_name = asset_func(&version);
 
         let install = Install::new(&self.repo, &self.api.install_dir);
-        install
-            .install_asset(&downloader, &asset_name, &version, self.is_latest)
-            .await
+        install.install_asset(&downloader, &asset_name, &version, self.is_latest).await
     }
 
     /// Download header files from the source tarball and extract them to
@@ -202,9 +182,7 @@ impl VersionApi {
             std::fs::remove_dir_all(target_path)?;
         }
 
-        downloader
-            .download_source_headers(&version, target_path)
-            .await?;
+        downloader.download_source_headers(&version, target_path).await?;
 
         install.create_version_file(&version)?;
 

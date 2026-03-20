@@ -38,7 +38,9 @@ impl std::fmt::Display for Id {
 }
 
 /// An RFC 3339 UTC timestamp.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(transparent)]
 pub struct Timestamp(DateTime<Utc>);
 

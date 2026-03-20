@@ -121,10 +121,7 @@ pub struct SetupPmids {
 
 impl SetupPmids {
     pub const fn new() -> Self {
-        Self {
-            ffmpeg: SetupFfmpegPmids::new(),
-            backends: SetupBackendPmids::new(),
-        }
+        Self { ffmpeg: SetupFfmpegPmids::new(), backends: SetupBackendPmids::new() }
     }
 
     pub fn initialized(self) -> SettingPmid {
@@ -314,10 +311,7 @@ pub struct DiffusionPmids {
 
 impl DiffusionPmids {
     pub const fn new() -> Self {
-        Self {
-            paths: DiffusionPathPmids::new(),
-            performance: DiffusionPerformancePmids::new(),
-        }
+        Self { paths: DiffusionPathPmids::new(), performance: DiffusionPerformancePmids::new() }
     }
 }
 
@@ -395,10 +389,7 @@ mod tests {
 
     #[test]
     fn nested_builder_generates_expected_pmid() {
-        assert_eq!(
-            PMID.setup.backends.ggml_llama.tag().as_str(),
-            "setup.backends.ggml.llama.tag"
-        );
+        assert_eq!(PMID.setup.backends.ggml_llama.tag().as_str(), "setup.backends.ggml.llama.tag");
         assert_eq!(
             PMID.runtime.model_auto_unload.idle_minutes().as_str(),
             "runtime.model_auto_unload.idle_minutes"

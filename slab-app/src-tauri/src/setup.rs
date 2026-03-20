@@ -60,13 +60,9 @@ pub fn shutdown_server_sidecar<R: tauri::Runtime>(app_handle: &tauri::AppHandle<
 
 pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle();
-    let lib_path = app
-        .path()
-        .resolve("resources/lib", BaseDirectory::Resource)?;
+    let lib_path = app.path().resolve("resources/lib", BaseDirectory::Resource)?;
     let lib_path_str = lib_path.to_str().ok_or("invalid lib path")?;
-    let config_base_dir = config_dir()
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("Slab");
+    let config_base_dir = config_dir().unwrap_or_else(|| PathBuf::from(".")).join("Slab");
     std::fs::create_dir_all(&config_base_dir)?;
     let settings_path = config_base_dir.join("settings.json");
     let database_path = config_base_dir.join("slab.db");
@@ -132,15 +128,9 @@ fn sqlite_database_url(path: &std::path::Path) -> String {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {
-        std::env::current_dir()
-            .unwrap_or_else(|_| PathBuf::from("."))
-            .join(path)
+        std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")).join(path)
     };
     let normalized = absolute.to_string_lossy().replace('\\', "/");
-    let prefix = if normalized.starts_with('/') {
-        "sqlite://"
-    } else {
-        "sqlite:///"
-    };
+    let prefix = if normalized.starts_with('/') { "sqlite://" } else { "sqlite:///" };
     format!("{prefix}{normalized}?mode=rwc")
 }

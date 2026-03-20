@@ -13,12 +13,7 @@ pub struct LlamaModelParams {
 
 impl Default for LlamaModelParams {
     fn default() -> Self {
-        Self {
-            n_gpu_layers: 0,
-            vocab_only: false,
-            use_mmap: true,
-            use_mlock: false,
-        }
+        Self { n_gpu_layers: 0, vocab_only: false, use_mmap: true, use_mlock: false }
     }
 }
 

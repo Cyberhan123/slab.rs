@@ -90,44 +90,28 @@ pub(crate) struct OnnxWorker {
 #[backend_handler]
 impl OnnxWorker {
     pub(crate) fn new(bc_tx: broadcast::Sender<WorkerCommand>, worker_id: usize) -> Self {
-        Self {
-            engine: OnnxEngine::new(),
-            current_config: None,
-            bc_tx,
-            worker_id,
-        }
+        Self { engine: OnnxEngine::new(), current_config: None, bc_tx, worker_id }
     }
 
     // ── dispatch ──────────────────────────────────────────────────────────────
 
     #[on_event(LoadModel)]
     async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            input,
-            broadcast_seq,
-            reply_tx,
-            ..
-        } = req;
+        let BackendRequest { input, broadcast_seq, reply_tx, .. } = req;
         let seq_id = broadcast_seq.unwrap_or(0);
         self.handle_load_model(input, reply_tx, seq_id).await;
     }
 
     #[on_event(UnloadModel)]
     async fn on_unload_model(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            broadcast_seq,
-            reply_tx,
-            ..
-        } = req;
+        let BackendRequest { broadcast_seq, reply_tx, .. } = req;
         let seq_id = broadcast_seq.unwrap_or(0);
         self.handle_unload_model(reply_tx, seq_id).await;
     }
 
     #[on_event(Inference)]
     async fn on_inference(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
+        let BackendRequest { input, reply_tx, .. } = req;
         self.handle_inference(input, reply_tx).await;
     }
 
@@ -143,9 +127,8 @@ impl OnnxWorker {
         let config: OnnxModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "invalid model.load config: {e}"
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
                 return;
             }
         };
@@ -158,15 +141,12 @@ impl OnnxWorker {
                 // Store the full config so peer workers can replicate it.
                 self.current_config = Some(config);
                 // Broadcast so peer workers also load the same model.
-                let _ = self
-                    .bc_tx
-                    .send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                        sync: SyncMessage::Deployment(deployment),
-                        sender_id: self.worker_id,
-                    }));
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
+                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
+                    sync: SyncMessage::Deployment(deployment),
+                    sender_id: self.worker_id,
+                }));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -184,15 +164,11 @@ impl OnnxWorker {
         self.engine.unload();
         self.current_config = None;
         // Broadcast so peer workers also drop their sessions.
-        let _ = self
-            .bc_tx
-            .send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
-                sync: SyncMessage::Generation { generation: seq_id },
-                sender_id: self.worker_id,
-            }));
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-            Arc::from([] as [u8; 0]),
-        )));
+        let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+            sync: SyncMessage::Generation { generation: seq_id },
+            sender_id: self.worker_id,
+        }));
+        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
     }
 
     // ── inference ─────────────────────────────────────────────────────────────
@@ -205,9 +181,8 @@ impl OnnxWorker {
         let inference_input: OnnxInferenceInput = match input.to_json() {
             Ok(p) => p,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "invalid inference payload: {e}"
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Error(format!("invalid inference payload: {e}")));
                 return;
             }
         };

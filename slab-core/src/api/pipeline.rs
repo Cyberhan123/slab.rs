@@ -41,11 +41,7 @@ struct LoadedDeployment {
 
 impl Pipeline {
     pub(crate) fn new(runtime: Runtime, spec: ModelSpec) -> Result<Self, CoreError> {
-        Ok(Self {
-            runtime,
-            spec: Arc::new(spec),
-            deployment: Arc::new(Mutex::new(None)),
-        })
+        Ok(Self { runtime, spec: Arc::new(spec), deployment: Arc::new(Mutex::new(None)) })
     }
 
     pub fn model(&self) -> &ModelSpec {
@@ -58,10 +54,7 @@ impl Pipeline {
 
     pub async fn load(&self) -> Result<(), CoreError> {
         let _ = self
-            .ensure_loaded_for(
-                self.spec.capability,
-                self.spec.driver_hints.require_streaming,
-            )
+            .ensure_loaded_for(self.spec.capability, self.spec.driver_hints.require_streaming)
             .await?;
         Ok(())
     }
@@ -73,10 +66,7 @@ impl Pipeline {
         };
 
         if let Some(resolved) = resolved {
-            self.runtime
-                .orchestrator()
-                .unload_model_backend(&resolved.backend_id)
-                .await?;
+            self.runtime.orchestrator().unload_model_backend(&resolved.backend_id).await?;
             let mut guard = self.deployment.lock().await;
             *guard = None;
         }
@@ -97,10 +87,7 @@ impl Pipeline {
         mut request: TextGenerationRequest,
     ) -> Result<BoxStream<'static, Result<TextGenerationChunk, CoreError>>, CoreError> {
         request.stream = true;
-        self.submit_text_generation(request)
-            .await?
-            .take_stream()
-            .await
+        self.submit_text_generation(request).await?.take_stream().await
     }
 
     pub async fn submit_text_generation(
@@ -108,9 +95,7 @@ impl Pipeline {
         request: TextGenerationRequest,
     ) -> Result<TaskHandle<TextGenerationResponse, TextGenerationChunk>, CoreError> {
         self.require_capability(Capability::TextGeneration)?;
-        let deployment = self
-            .ensure_loaded_for(Capability::TextGeneration, request.stream)
-            .await?;
+        let deployment = self.ensure_loaded_for(Capability::TextGeneration, request.stream).await?;
         let resolved = deployment.resolved.clone();
         let (input, op_options) = encode_text_generation_request(&request, &resolved)?;
         let plan = InvocationPlan::new(
@@ -128,10 +113,7 @@ impl Pipeline {
         &self,
         request: AudioTranscriptionRequest,
     ) -> Result<AudioTranscriptionResponse, CoreError> {
-        self.submit_audio_transcription(request)
-            .await?
-            .result()
-            .await
+        self.submit_audio_transcription(request).await?.result().await
     }
 
     pub async fn submit_audio_transcription(
@@ -139,15 +121,9 @@ impl Pipeline {
         request: AudioTranscriptionRequest,
     ) -> Result<TaskHandle<AudioTranscriptionResponse, Infallible>, CoreError> {
         self.require_capability(Capability::AudioTranscription)?;
-        let deployment = self
-            .ensure_loaded_for(Capability::AudioTranscription, false)
-            .await?;
+        let deployment = self.ensure_loaded_for(Capability::AudioTranscription, false).await?;
         let resolved = deployment.resolved.clone();
-        let input = request
-            .pcm_samples
-            .clone()
-            .map(Payload::F32)
-            .unwrap_or(Payload::None);
+        let input = request.pcm_samples.clone().map(Payload::F32).unwrap_or(Payload::None);
         let stages = if request.pcm_samples.is_some() {
             Vec::new()
         } else {
@@ -169,9 +145,7 @@ impl Pipeline {
         submit_plan(
             &self.runtime,
             plan,
-            AudioTranscriptionTaskCodec {
-                fallback_language: request.language.clone(),
-            },
+            AudioTranscriptionTaskCodec { fallback_language: request.language.clone() },
         )
         .await
     }
@@ -188,9 +162,7 @@ impl Pipeline {
         request: ImageGenerationRequest,
     ) -> Result<TaskHandle<ImageGenerationResponse, Infallible>, CoreError> {
         self.require_capability(Capability::ImageGeneration)?;
-        let deployment = self
-            .ensure_loaded_for(Capability::ImageGeneration, false)
-            .await?;
+        let deployment = self.ensure_loaded_for(Capability::ImageGeneration, false).await?;
         let resolved = deployment.resolved.clone();
         let (input, op_options) = encode_image_generation_request(&request, &resolved)?;
         let plan = InvocationPlan::new(
@@ -216,9 +188,7 @@ impl Pipeline {
         request: ImageEmbeddingRequest,
     ) -> Result<TaskHandle<ImageEmbeddingResponse, Infallible>, CoreError> {
         self.require_capability(Capability::ImageEmbedding)?;
-        let deployment = self
-            .ensure_loaded_for(Capability::ImageEmbedding, false)
-            .await?;
+        let deployment = self.ensure_loaded_for(Capability::ImageEmbedding, false).await?;
         let resolved = deployment.resolved.clone();
         let input_name = image_embedding_input_name(self.spec.as_ref());
         let output_name = image_embedding_output_name(self.spec.as_ref());
@@ -258,15 +228,10 @@ impl Pipeline {
             }
         }
 
-        let resolved = self
-            .runtime
-            .resolver()
-            .resolve(self.spec.as_ref(), capability, streaming)?;
+        let resolved =
+            self.runtime.resolver().resolve(self.spec.as_ref(), capability, streaming)?;
         let payload = encode_load_payload(self.spec.as_ref(), &resolved)?;
-        self.runtime
-            .orchestrator()
-            .load_model_backend(&resolved.backend_id, payload)
-            .await?;
+        self.runtime.orchestrator().load_model_backend(&resolved.backend_id, payload).await?;
 
         let deployment = LoadedDeployment { resolved };
 
@@ -369,10 +334,7 @@ where
 }
 
 async fn submit_invocation_plan(runtime: &Runtime, plan: InvocationPlan) -> Result<u64, CoreError> {
-    let op = BackendOp {
-        name: plan.invocation.op_name.clone(),
-        options: plan.op_options,
-    };
+    let op = BackendOp { name: plan.invocation.op_name.clone(), options: plan.op_options };
 
     let mut builder = PipelineBuilder::new(runtime.orchestrator(), plan.initial_payload);
     for stage in plan.preprocess_stages {
@@ -390,11 +352,7 @@ async fn submit_invocation_plan(runtime: &Runtime, plan: InvocationPlan) -> Resu
             .await
     } else {
         builder
-            .gpu(
-                plan.invocation.op_name.clone(),
-                plan.invocation.driver.backend_id.clone(),
-                op,
-            )
+            .gpu(plan.invocation.op_name.clone(), plan.invocation.driver.backend_id.clone(), op)
             .run()
             .await
     }
@@ -439,9 +397,7 @@ mod tests {
         ModelSpec::new(
             ModelFamily::Llama,
             Capability::TextGeneration,
-            ModelSource::LocalPath {
-                path: PathBuf::from("fixtures/fake-model.gguf"),
-            },
+            ModelSource::LocalPath { path: PathBuf::from("fixtures/fake-model.gguf") },
         )
     }
 
@@ -449,9 +405,7 @@ mod tests {
         ModelSpec::new(
             ModelFamily::Whisper,
             Capability::AudioTranscription,
-            ModelSource::LocalPath {
-                path: PathBuf::from("fixtures/fake-model.bin"),
-            },
+            ModelSource::LocalPath { path: PathBuf::from("fixtures/fake-model.bin") },
         )
     }
 
@@ -459,9 +413,7 @@ mod tests {
         ModelSpec::new(
             ModelFamily::Diffusion,
             Capability::ImageGeneration,
-            ModelSource::LocalPath {
-                path: PathBuf::from("fixtures/fake-model.safetensors"),
-            },
+            ModelSource::LocalPath { path: PathBuf::from("fixtures/fake-model.safetensors") },
         )
     }
 
@@ -469,9 +421,7 @@ mod tests {
         ModelSpec::new(
             ModelFamily::Onnx,
             Capability::ImageEmbedding,
-            ModelSource::LocalPath {
-                path: PathBuf::from("fixtures/fake-model.onnx"),
-            },
+            ModelSource::LocalPath { path: PathBuf::from("fixtures/fake-model.onnx") },
         )
         .with_metadata("input_tensor_name", "image_input")
         .with_metadata("output_tensor_name", "embedding_out")
@@ -656,9 +606,7 @@ mod tests {
         register_mock_backend(
             &mut resource_manager,
             "test-embedding",
-            MockBackend::Embedding {
-                input_name: "image_input",
-            },
+            MockBackend::Embedding { input_name: "image_input" },
         );
 
         let supported_sources = vec![
@@ -709,11 +657,7 @@ mod tests {
             },
         ]);
 
-        Runtime::new(
-            Orchestrator::start(resource_manager, 32),
-            resolver,
-            DriversConfig::default(),
-        )
+        Runtime::new(Orchestrator::start(resource_manager, 32), resolver, DriversConfig::default())
     }
 
     fn unique_temp_path(name: &str) -> PathBuf {
@@ -721,10 +665,8 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .expect("system time should be after unix epoch")
             .as_nanos();
-        std::env::temp_dir().join(format!(
-            "slab-core-pipeline-{}-{nanos}-{name}",
-            std::process::id()
-        ))
+        std::env::temp_dir()
+            .join(format!("slab-core-pipeline-{}-{nanos}-{name}", std::process::id()))
     }
 
     fn write_test_wav(samples: &[i16]) -> PathBuf {
@@ -763,12 +705,7 @@ mod tests {
         let image = RgbImage::from_pixel(2, 2, Rgb([255, 0, 0]));
         let mut bytes = Cursor::new(Vec::new());
         image::codecs::png::PngEncoder::new(&mut bytes)
-            .write_image(
-                image.as_raw(),
-                image.width(),
-                image.height(),
-                ColorType::Rgb8.into(),
-            )
+            .write_image(image.as_raw(), image.width(), image.height(), ColorType::Rgb8.into())
             .expect("png should encode");
         bytes.into_inner()
     }
@@ -776,9 +713,7 @@ mod tests {
     #[tokio::test]
     async fn pipeline_runs_and_streams_text_generation() {
         let runtime = test_runtime();
-        let pipeline = runtime
-            .pipeline(text_spec())
-            .expect("pipeline should build");
+        let pipeline = runtime.pipeline(text_spec()).expect("pipeline should build");
 
         pipeline.load().await.expect("model should load");
 
@@ -804,20 +739,14 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("stream chunks should decode");
 
-        let combined = chunks
-            .into_iter()
-            .map(|chunk| chunk.delta)
-            .collect::<Vec<_>>()
-            .join("");
+        let combined = chunks.into_iter().map(|chunk| chunk.delta).collect::<Vec<_>>().join("");
         assert_eq!(combined, "hello stream");
     }
 
     #[tokio::test]
     async fn submit_returns_task_handle_with_lifecycle_controls() {
         let runtime = test_runtime();
-        let pipeline = runtime
-            .pipeline(text_spec())
-            .expect("pipeline should build");
+        let pipeline = runtime.pipeline(text_spec()).expect("pipeline should build");
 
         let handle = pipeline
             .submit_text_generation(TextGenerationRequest {
@@ -833,27 +762,19 @@ mod tests {
         let response = handle.result().await.expect("task should succeed");
         assert_eq!(response.text, "hello task");
 
-        let snapshot = handle
-            .status()
-            .await
-            .expect("status should still be readable after result");
+        let snapshot = handle.status().await.expect("status should still be readable after result");
         assert!(matches!(snapshot.status, TaskState::ResultConsumed));
 
         handle.purge().await;
 
-        let error = handle
-            .status()
-            .await
-            .expect_err("purged task should be gone");
+        let error = handle.status().await.expect_err("purged task should be gone");
         assert!(matches!(error, CoreError::TaskNotFound { .. }));
     }
 
     #[tokio::test]
     async fn submit_stream_exposes_stream_and_cancel_and_purge() {
         let runtime = test_runtime();
-        let pipeline = runtime
-            .pipeline(text_spec())
-            .expect("pipeline should build");
+        let pipeline = runtime.pipeline(text_spec()).expect("pipeline should build");
 
         let stream_handle = pipeline
             .submit_text_generation(TextGenerationRequest {
@@ -874,11 +795,8 @@ mod tests {
             .collect::<Result<Vec<_>, _>>()
             .expect("stream chunks should decode");
 
-        let combined = stream_chunks
-            .into_iter()
-            .map(|chunk| chunk.delta)
-            .collect::<Vec<_>>()
-            .join("");
+        let combined =
+            stream_chunks.into_iter().map(|chunk| chunk.delta).collect::<Vec<_>>().join("");
         assert_eq!(combined, "stream via task handle");
 
         let slow_handle = pipeline
@@ -892,19 +810,15 @@ mod tests {
         slow_handle.cancel();
         slow_handle.cancel_and_purge().await;
 
-        let error = slow_handle
-            .status()
-            .await
-            .expect_err("cancelled and purged task should be gone");
+        let error =
+            slow_handle.status().await.expect_err("cancelled and purged task should be gone");
         assert!(matches!(error, CoreError::TaskNotFound { .. }));
     }
 
     #[tokio::test]
     async fn pipeline_runs_audio_transcription_with_wav_preprocess() {
         let runtime = test_runtime();
-        let pipeline = runtime
-            .pipeline(audio_spec())
-            .expect("pipeline should build");
+        let pipeline = runtime.pipeline(audio_spec()).expect("pipeline should build");
         let audio_path = write_test_wav(&[0, 1024, -1024, 2048]);
 
         let response = pipeline
@@ -929,9 +843,7 @@ mod tests {
     #[tokio::test]
     async fn pipeline_runs_audio_transcription_with_preloaded_pcm() {
         let runtime = test_runtime();
-        let pipeline = runtime
-            .pipeline(audio_spec())
-            .expect("pipeline should build");
+        let pipeline = runtime.pipeline(audio_spec()).expect("pipeline should build");
 
         let response = pipeline
             .run_audio_transcription(AudioTranscriptionRequest {
@@ -953,9 +865,7 @@ mod tests {
     #[tokio::test]
     async fn pipeline_runs_image_generation() {
         let runtime = test_runtime();
-        let pipeline = runtime
-            .pipeline(image_spec())
-            .expect("pipeline should build");
+        let pipeline = runtime.pipeline(image_spec()).expect("pipeline should build");
 
         let response = pipeline
             .run_image_generation(ImageGenerationRequest {
@@ -975,9 +885,7 @@ mod tests {
     #[tokio::test]
     async fn pipeline_runs_image_embedding() {
         let runtime = test_runtime();
-        let pipeline = runtime
-            .pipeline(embedding_spec())
-            .expect("pipeline should build");
+        let pipeline = runtime.pipeline(embedding_spec()).expect("pipeline should build");
 
         let response = pipeline
             .run_image_embedding(ImageEmbeddingRequest {
@@ -993,9 +901,7 @@ mod tests {
     #[tokio::test]
     async fn result_timeout_cancels_and_purges_task() {
         let runtime = test_runtime();
-        let pipeline = runtime
-            .pipeline(text_spec())
-            .expect("pipeline should build");
+        let pipeline = runtime.pipeline(text_spec()).expect("pipeline should build");
 
         let handle = pipeline
             .submit_text_generation(TextGenerationRequest {
@@ -1011,10 +917,7 @@ mod tests {
             .expect_err("timeout should surface as a core error");
         assert!(matches!(error, CoreError::Timeout));
 
-        let status_error = handle
-            .status()
-            .await
-            .expect_err("timed out task should be purged");
+        let status_error = handle.status().await.expect_err("timed out task should be purged");
         assert!(matches!(status_error, CoreError::TaskNotFound { .. }));
     }
 }

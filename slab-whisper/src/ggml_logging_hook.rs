@@ -14,8 +14,7 @@ use crate::Whisper;
 impl Whisper {
     pub(crate) fn install_ggml_logging_hook(&self) {
         GGML_LOG_TRAMPOLINE_INSTALL.call_once(|| unsafe {
-            self.lib
-                .ggml_log_set(Some(ggml_logging_trampoline), std::ptr::null_mut())
+            self.lib.ggml_log_set(Some(ggml_logging_trampoline), std::ptr::null_mut())
         });
     }
 }
@@ -38,10 +37,7 @@ unsafe extern "C" fn ggml_logging_trampoline(
 }
 
 // this code essentially compiles down to a noop if neither feature is enabled
-#[cfg_attr(
-    not(any(feature = "log_backend", feature = "tracing_backend")),
-    allow(unused_variables)
-)]
+#[cfg_attr(not(any(feature = "log_backend", feature = "tracing_backend")), allow(unused_variables))]
 fn ggml_logging_trampoline_safe(level: GGMLLogLevel, text: Cow<str>) {
     match level {
         GGMLLogLevel::None => {

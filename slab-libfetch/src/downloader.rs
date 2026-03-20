@@ -32,10 +32,7 @@ impl Downloader {
                     builder = builder.proxy(p);
                 }
                 Err(e) => {
-                    eprintln!(
-                        "slab-libfetch: ignoring invalid proxy URL {:?}: {}",
-                        proxy_url, e
-                    );
+                    eprintln!("slab-libfetch: ignoring invalid proxy URL {:?}: {}", proxy_url, e);
                 }
             }
         }
@@ -51,23 +48,15 @@ impl Downloader {
             }
         };
 
-        Self {
-            repo: repo.to_string(),
-            retry_count,
-            retry_delay_secs,
-            proxy,
-            show_progress,
-            client,
-        }
+        Self { repo: repo.to_string(), retry_count, retry_delay_secs, proxy, show_progress, client }
     }
 
     /// Fetch the latest release tag from GitHub for the configured repo.
     pub async fn latest_version(&self) -> Result<String, FetchError> {
         let api_url = format!("https://api.github.com/repos/{}/releases/latest", self.repo);
 
-        let mut last_err: FetchError = FetchError::InvalidResponse {
-            message: "unable to fetch latest version".to_string(),
-        };
+        let mut last_err: FetchError =
+            FetchError::InvalidResponse { message: "unable to fetch latest version".to_string() };
         for attempt in 0..self.retry_count {
             match self.get_latest_version_once(&api_url).await {
                 Ok(v) => return Ok(v),
@@ -103,10 +92,7 @@ impl Downloader {
 
     /// Build the download URL for a release asset.
     pub fn asset_url(&self, asset_name: &str, version: &str) -> String {
-        format!(
-            "https://github.com/{}/releases/download/{}/{}",
-            self.repo, version, asset_name
-        )
+        format!("https://github.com/{}/releases/download/{}/{}", self.repo, version, asset_name)
     }
 
     /// Download and extract a release asset into `dest`.
@@ -122,14 +108,7 @@ impl Downloader {
             println!("🚀 正在从 {} 下载...", url);
         }
 
-        let bytes = self
-            .client
-            .get(&url)
-            .send()
-            .await?
-            .error_for_status()?
-            .bytes()
-            .await?;
+        let bytes = self.client.get(&url).send().await?.error_for_status()?.bytes().await?;
 
         std::fs::create_dir_all(dest)?;
 
@@ -157,23 +136,14 @@ impl Downloader {
         version: &str,
         dest: &Path,
     ) -> Result<(), FetchError> {
-        let tarball_url = format!(
-            "https://github.com/{}/archive/refs/tags/{}.tar.gz",
-            self.repo, version
-        );
+        let tarball_url =
+            format!("https://github.com/{}/archive/refs/tags/{}.tar.gz", self.repo, version);
 
         if self.show_progress {
             println!("🚀 正在从 {} 下载...", tarball_url);
         }
 
-        let bytes = self
-            .client
-            .get(&tarball_url)
-            .send()
-            .await?
-            .error_for_status()?
-            .bytes()
-            .await?;
+        let bytes = self.client.get(&tarball_url).send().await?.error_for_status()?.bytes().await?;
 
         std::fs::create_dir_all(dest)?;
         extract_source_headers(&bytes, dest, self.show_progress)?;

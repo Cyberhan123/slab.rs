@@ -42,9 +42,7 @@ impl ResultStorage {
 
     /// Allocate a new `TaskId` and insert a `Pending` record.
     pub async fn create_task(&self, num_stages: usize) -> TaskId {
-        let task_id = self
-            .next_id
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let task_id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 
         let (cancel_tx, _cancel_rx) = tokio::sync::watch::channel(false);
 
@@ -87,21 +85,14 @@ impl ResultStorage {
         &self,
         task_id: TaskId,
     ) -> Option<Arc<tokio::sync::watch::Sender<bool>>> {
-        self.inner
-            .read()
-            .await
-            .get(&task_id)
-            .map(|r| Arc::clone(&r.cancel_tx))
+        self.inner.read().await.get(&task_id).map(|r| Arc::clone(&r.cancel_tx))
     }
 
     /// Return a snapshot of the task status.
     pub async fn get_status(&self, task_id: TaskId) -> Option<TaskStatusView> {
         let guard = self.inner.read().await;
         let record = guard.get(&task_id)?;
-        Some(TaskStatusView {
-            task_id,
-            status: record.status.clone(),
-        })
+        Some(TaskStatusView { task_id, status: record.status.clone() })
     }
 
     /// Consume and return the payload for a completed task.
@@ -129,12 +120,7 @@ impl ResultStorage {
 
     /// Consume and return the `StreamHandle` for a streaming task.
     pub async fn take_stream(&self, task_id: TaskId) -> Option<StreamHandle> {
-        self.inner
-            .write()
-            .await
-            .get_mut(&task_id)?
-            .stream_handle
-            .take()
+        self.inner.write().await.get_mut(&task_id)?.stream_handle.take()
     }
 
     /// Remove a task record from storage.

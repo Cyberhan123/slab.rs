@@ -50,10 +50,7 @@ async fn make_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
 async fn test_llama_inference() {
     let service = make_service(1).await;
 
-    let result = service
-        .inference("Hello, my name is", 64, None)
-        .await
-        .expect("inference failed");
+    let result = service.inference("Hello, my name is", 64, None).await.expect("inference failed");
 
     println!("Generated: {result}");
     assert!(!result.is_empty(), "expected non-empty output");
@@ -66,19 +63,10 @@ async fn test_llama_inference() {
 async fn test_service_basic_generation() {
     let service = make_service(1).await;
 
-    let sid = service
-        .create_session()
-        .await
-        .expect("create_session failed");
-    service
-        .append_input(sid, "Hello, my name is".to_string())
-        .await
-        .expect("append_input failed");
+    let sid = service.create_session().await.expect("create_session failed");
+    service.append_input(sid, "Hello, my name is".to_string()).await.expect("append_input failed");
 
-    let mut stream = service
-        .generate_stream(sid, 32)
-        .await
-        .expect("generate_stream failed");
+    let mut stream = service.generate_stream(sid, 32).await.expect("generate_stream failed");
 
     let mut output = String::new();
     while let Some(chunk) = stream.recv().await {
@@ -102,10 +90,7 @@ async fn test_service_basic_generation() {
 async fn test_service_session_not_found() {
     let service = make_service(1).await;
 
-    let _err = service
-        .append_input(9999, "hello".to_string())
-        .await
-        .unwrap_err();
+    let _err = service.append_input(9999, "hello".to_string()).await.unwrap_err();
 
     // todo: fix this test once error variants are stable and can be matched on directly
     // assert!(
@@ -127,19 +112,10 @@ async fn test_service_session_not_found() {
 async fn test_service_kv_reuse_multiturn() {
     let service = make_service(1).await;
 
-    let sid = service
-        .create_session()
-        .await
-        .expect("create_session failed");
+    let sid = service.create_session().await.expect("create_session failed");
 
-    service
-        .append_input(sid, "What is 1+1?".to_string())
-        .await
-        .expect("first append failed");
-    let mut stream = service
-        .generate_stream(sid, 16)
-        .await
-        .expect("first generate_stream failed");
+    service.append_input(sid, "What is 1+1?".to_string()).await.expect("first append failed");
+    let mut stream = service.generate_stream(sid, 16).await.expect("first generate_stream failed");
     let mut turn1 = String::new();
     while let Some(chunk) = stream.recv().await {
         match chunk {
@@ -150,14 +126,9 @@ async fn test_service_kv_reuse_multiturn() {
     }
     assert!(!turn1.is_empty(), "first turn should produce output");
 
-    service
-        .append_input(sid, " And what is 2+2?".to_string())
-        .await
-        .expect("second append failed");
-    let mut stream2 = service
-        .generate_stream(sid, 16)
-        .await
-        .expect("second generate_stream failed");
+    service.append_input(sid, " And what is 2+2?".to_string()).await.expect("second append failed");
+    let mut stream2 =
+        service.generate_stream(sid, 16).await.expect("second generate_stream failed");
     let mut turn2 = String::new();
     while let Some(chunk) = stream2.recv().await {
         match chunk {
@@ -180,19 +151,10 @@ async fn test_service_kv_reuse_multiturn() {
 async fn test_service_cancel_and_resume() {
     let service = make_service(1).await;
 
-    let sid = service
-        .create_session()
-        .await
-        .expect("create_session failed");
-    service
-        .append_input(sid, "Count to one hundred:".to_string())
-        .await
-        .expect("append failed");
+    let sid = service.create_session().await.expect("create_session failed");
+    service.append_input(sid, "Count to one hundred:".to_string()).await.expect("append failed");
 
-    let mut stream = service
-        .generate_stream(sid, 512)
-        .await
-        .expect("generate_stream failed");
+    let mut stream = service.generate_stream(sid, 512).await.expect("generate_stream failed");
 
     let mut tokens_before_cancel = 0usize;
     loop {
@@ -214,10 +176,7 @@ async fn test_service_cancel_and_resume() {
         .append_input(sid, " Just say done.".to_string())
         .await
         .expect("append after cancel failed");
-    let mut stream2 = service
-        .generate_stream(sid, 8)
-        .await
-        .expect("generate after cancel failed");
+    let mut stream2 = service.generate_stream(sid, 8).await.expect("generate after cancel failed");
     let mut post_cancel = String::new();
     while let Some(chunk) = stream2.recv().await {
         match chunk {
@@ -240,14 +199,8 @@ async fn test_service_seq_id_reuse() {
 
     for _ in 0..4 {
         let sid = service.create_session().await.expect("create_session");
-        service
-            .append_input(sid, "hi".to_string())
-            .await
-            .expect("append");
-        let mut stream = service
-            .generate_stream(sid, 4)
-            .await
-            .expect("generate_stream");
+        service.append_input(sid, "hi".to_string()).await.expect("append");
+        let mut stream = service.generate_stream(sid, 4).await.expect("generate_stream");
         while let Some(chunk) = stream.recv().await {
             match chunk {
                 StreamChunk::Done => break,

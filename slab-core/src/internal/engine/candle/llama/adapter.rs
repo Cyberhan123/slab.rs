@@ -94,10 +94,7 @@ impl CandleLlamaEngine {
         if candidate.exists() {
             Ok(candidate)
         } else {
-            Err(CandleLlamaEngineError::TokenizerNotFound {
-                dir: dir.display().to_string(),
-            }
-            .into())
+            Err(CandleLlamaEngineError::TokenizerNotFound { dir: dir.display().to_string() }.into())
         }
     }
 
@@ -152,12 +149,9 @@ impl CandleLlamaEngine {
                 }
             })?;
 
-            let mut state =
-                self.inner
-                    .write()
-                    .map_err(|_| CandleLlamaEngineError::LockPoisoned {
-                        operation: "write model state",
-                    })?;
+            let mut state = self.inner.write().map_err(|_| {
+                CandleLlamaEngineError::LockPoisoned { operation: "write model state" }
+            })?;
             state.model = Some(weights);
             state.tokenizer = Some(tokenizer);
             state.seed = seed;
@@ -179,12 +173,9 @@ impl CandleLlamaEngine {
     /// Shared unload logic used by both the inherent method and the
     /// [`ModelLoader`] trait implementation.
     fn do_unload(&self) -> Result<(), CandleLlamaEngineError> {
-        let mut state = self
-            .inner
-            .write()
-            .map_err(|_| CandleLlamaEngineError::LockPoisoned {
-                operation: "write model state for unload",
-            })?;
+        let mut state = self.inner.write().map_err(|_| CandleLlamaEngineError::LockPoisoned {
+            operation: "write model state for unload",
+        })?;
         state.model = None;
         state.tokenizer = None;
         state.sessions.clear();
@@ -201,14 +192,10 @@ impl CandleLlamaEngine {
         let mut state = self
             .inner
             .write()
-            .map_err(|_| CandleLlamaEngineError::LockPoisoned {
-                operation: "create session",
-            })?;
+            .map_err(|_| CandleLlamaEngineError::LockPoisoned { operation: "create session" })?;
         let sid = state.next_session_id;
         state.next_session_id += 1;
-        state
-            .sessions
-            .insert(sid, SessionState { tokens: Vec::new() });
+        state.sessions.insert(sid, SessionState { tokens: Vec::new() });
         Ok(sid)
     }
 
@@ -217,9 +204,7 @@ impl CandleLlamaEngine {
         let mut state = self
             .inner
             .write()
-            .map_err(|_| CandleLlamaEngineError::LockPoisoned {
-                operation: "end session",
-            })?;
+            .map_err(|_| CandleLlamaEngineError::LockPoisoned { operation: "end session" })?;
         state.sessions.remove(&session_id);
         Ok(())
     }
@@ -235,8 +220,7 @@ impl CandleLlamaEngine {
     ) -> Result<String, EngineError> {
         #[cfg(feature = "candle")]
         {
-            self.run_inference_blocking(prompt, max_tokens, session_id)
-                .await
+            self.run_inference_blocking(prompt, max_tokens, session_id).await
         }
         #[cfg(not(feature = "candle"))]
         {
@@ -386,14 +370,15 @@ impl CandleLlamaEngine {
         let mut forward_pos = all_tokens.len().saturating_sub(1);
 
         for _ in 0..max_new_tokens {
-            let input =
-                match CandleTensor::new(all_tokens.as_slice(), &device).and_then(|t| t.unsqueeze(0)) {
-                    Ok(t) => t,
-                    Err(e) => {
-                        send(StreamChunk::Error(format!("tensor error: {e}")));
-                        return;
-                    }
-                };
+            let input = match CandleTensor::new(all_tokens.as_slice(), &device)
+                .and_then(|t| t.unsqueeze(0))
+            {
+                Ok(t) => t,
+                Err(e) => {
+                    send(StreamChunk::Error(format!("tensor error: {e}")));
+                    return;
+                }
+            };
 
             // Acquire write lock once per token for forward + decode.
             let (next_token, token_text) = {
@@ -502,10 +487,7 @@ impl ModelLoader for CandleLlamaEngine {
     }
 
     fn is_loaded(&self) -> bool {
-        self.inner
-            .read()
-            .map(|s| s.model.is_some())
-            .unwrap_or(false)
+        self.inner.read().map(|s| s.model.is_some()).unwrap_or(false)
     }
 }
 
@@ -525,12 +507,10 @@ impl CausalLM for CandleLlamaEngine {
             use candle_core::Device;
 
             let token_ids =
-                input_ids
-                    .as_token_ids()
-                    .ok_or_else(|| CoreError::UnsupportedOperation {
-                        backend: "candle.llama".into(),
-                        op: "forward: expected token-ID (U32) tensor".into(),
-                    })?;
+                input_ids.as_token_ids().ok_or_else(|| CoreError::UnsupportedOperation {
+                    backend: "candle.llama".into(),
+                    op: "forward: expected token-ID (U32) tensor".into(),
+                })?;
 
             if token_ids.is_empty() {
                 return Err(CoreError::InvalidModelSpec {
@@ -541,39 +521,23 @@ impl CausalLM for CandleLlamaEngine {
             let device = Device::Cpu;
             // `CandleTensor::from_vec` requires an owned Vec; the copy is
             // unavoidable because the Candle API takes ownership of the data.
-            let input_t = CandleTensor::from_vec(
-                token_ids.to_vec(),
-                (1, token_ids.len()),
-                &device,
-            )
-            .map_err(|e| CandleLlamaEngineError::Inference {
-                message: e.to_string(),
-            })?;
+            let input_t = CandleTensor::from_vec(token_ids.to_vec(), (1, token_ids.len()), &device)
+                .map_err(|e| CandleLlamaEngineError::Inference { message: e.to_string() })?;
 
-            let mut state =
-                self.inner
-                    .write()
-                    .map_err(|_| CandleLlamaEngineError::LockPoisoned {
-                        operation: "forward",
-                    })?;
-            let model =
-                state
-                    .model
-                    .as_mut()
-                    .ok_or(CandleLlamaEngineError::ModelNotLoaded)?;
+            let mut state = self
+                .inner
+                .write()
+                .map_err(|_| CandleLlamaEngineError::LockPoisoned { operation: "forward" })?;
+            let model = state.model.as_mut().ok_or(CandleLlamaEngineError::ModelNotLoaded)?;
 
             // Position 0: stateless pass — no KV cache from prior calls.
             let logits_t = model
                 .forward(&input_t, 0)
-                .map_err(|e| CandleLlamaEngineError::Inference {
-                    message: e.to_string(),
-                })?;
+                .map_err(|e| CandleLlamaEngineError::Inference { message: e.to_string() })?;
 
             let logits_t = logits_t
                 .squeeze(0)
-                .map_err(|e| CandleLlamaEngineError::Inference {
-                    message: e.to_string(),
-                })?;
+                .map_err(|e| CandleLlamaEngineError::Inference { message: e.to_string() })?;
 
             Tensor::from_candle_logits(&logits_t)
         }

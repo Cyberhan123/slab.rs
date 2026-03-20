@@ -77,12 +77,7 @@ fn normalize_peer_control_path(path: Path) -> Path {
 }
 
 fn non_receiver_arg_count(method: &ImplItemFn) -> usize {
-    method
-        .sig
-        .inputs
-        .iter()
-        .filter(|arg| !matches!(arg, FnArg::Receiver(_)))
-        .count()
+    method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))).count()
 }
 
 fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
@@ -195,10 +190,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                     format!("duplicate event handler for `{key}`"),
                 ));
             }
-            event_routes.push(EventRoute {
-                pattern,
-                method: method_ident.clone(),
-            });
+            event_routes.push(EventRoute { pattern, method: method_ident.clone() });
         }
 
         if !peer_args.is_empty() {
@@ -220,11 +212,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                             format!("duplicate peer control handler for `{key}`"),
                         ));
                     }
-                    peer_routes.push(PeerRoute {
-                        pattern,
-                        method: method_ident.clone(),
-                        pass_cmd,
-                    });
+                    peer_routes.push(PeerRoute { pattern, method: method_ident.clone(), pass_cmd });
                 } else {
                     if peer_fallback_method.is_some() {
                         return Err(syn::Error::new(

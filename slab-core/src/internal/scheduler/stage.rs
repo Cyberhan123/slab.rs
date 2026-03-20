@@ -50,9 +50,7 @@ pub struct CpuStage {
 
 impl std::fmt::Debug for CpuStage {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("CpuStage")
-            .field("name", &self.name)
-            .finish()
+        f.debug_struct("CpuStage").field("name", &self.name).finish()
     }
 }
 
@@ -62,10 +60,7 @@ impl CpuStage {
         name: impl Into<String>,
         work: impl Fn(Payload) -> Result<Payload, String> + Send + Sync + 'static,
     ) -> Self {
-        Self {
-            name: name.into(),
-            work: Arc::new(work),
-        }
+        Self { name: name.into(), work: Arc::new(work) }
     }
 
     /// Execute this stage inside `spawn_blocking`, returning the new payload.
@@ -78,10 +73,7 @@ impl CpuStage {
                 stage_name: name.clone(),
                 message: "spawn_blocking task panicked".into(),
             })?
-            .map_err(|message| CoreError::CpuStageFailed {
-                stage_name: name,
-                message,
-            })
+            .map_err(|message| CoreError::CpuStageFailed { stage_name: name, message })
     }
 }
 
@@ -126,10 +118,9 @@ impl GpuStage {
         ingress_tx.try_send(req).map_err(|e| {
             let cap = ingress_tx.max_capacity();
             match e {
-                tokio::sync::mpsc::error::TrySendError::Full(_) => CoreError::QueueFull {
-                    queue: self.backend_id.clone(),
-                    capacity: cap,
-                },
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    CoreError::QueueFull { queue: self.backend_id.clone(), capacity: cap }
+                }
                 tokio::sync::mpsc::error::TrySendError::Closed(_) => CoreError::BackendShutdown,
             }
         })?;
@@ -137,10 +128,9 @@ impl GpuStage {
         let reply = reply_rx.await.map_err(|_| CoreError::BackendShutdown)?;
         match reply {
             BackendReply::Value(payload) => Ok(payload),
-            BackendReply::Error(msg) => Err(CoreError::GpuStageFailed {
-                stage_name: self.name.clone(),
-                message: msg,
-            }),
+            BackendReply::Error(msg) => {
+                Err(CoreError::GpuStageFailed { stage_name: self.name.clone(), message: msg })
+            }
             BackendReply::Stream(_) => Err(CoreError::GpuStageFailed {
                 stage_name: self.name.clone(),
                 message: "unexpected stream reply on non-streaming stage".into(),
@@ -191,10 +181,9 @@ impl GpuStreamStage {
         ingress_tx.try_send(req).map_err(|e| {
             let cap = ingress_tx.max_capacity();
             match e {
-                tokio::sync::mpsc::error::TrySendError::Full(_) => CoreError::QueueFull {
-                    queue: self.backend_id.clone(),
-                    capacity: cap,
-                },
+                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                    CoreError::QueueFull { queue: self.backend_id.clone(), capacity: cap }
+                }
                 tokio::sync::mpsc::error::TrySendError::Closed(_) => CoreError::BackendShutdown,
             }
         })?;
@@ -202,10 +191,9 @@ impl GpuStreamStage {
         let reply = reply_rx.await.map_err(|_| CoreError::BackendShutdown)?;
         match reply {
             BackendReply::Stream(handle) => Ok(handle),
-            BackendReply::Error(msg) => Err(CoreError::GpuStageFailed {
-                stage_name: self.name.clone(),
-                message: msg,
-            }),
+            BackendReply::Error(msg) => {
+                Err(CoreError::GpuStageFailed { stage_name: self.name.clone(), message: msg })
+            }
             BackendReply::Value(_) => Err(CoreError::GpuStageFailed {
                 stage_name: self.name.clone(),
                 message: "expected stream reply but got value".into(),

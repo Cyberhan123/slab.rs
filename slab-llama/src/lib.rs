@@ -148,20 +148,14 @@ impl Llama {
             };
             let llama_lib = unsafe { slab_llama_sys::LlamaLib::from_library(lib)? };
             let ggml_lib = load_ggml_backend(path.as_ref(), &llama_lib)?;
-            Ok(Self {
-                lib: Arc::new(llama_lib),
-                _ggml_lib: ggml_lib,
-            })
+            Ok(Self { lib: Arc::new(llama_lib), _ggml_lib: ggml_lib })
         }
 
         #[cfg(not(windows))]
         {
             let lib = unsafe { slab_llama_sys::LlamaLib::new(path.as_ref())? };
             let ggml_lib = load_ggml_backend(path.as_ref(), &lib)?;
-            Ok(Self {
-                lib: Arc::new(lib),
-                _ggml_lib: ggml_lib,
-            })
+            Ok(Self { lib: Arc::new(lib), _ggml_lib: ggml_lib })
         }
     }
 

@@ -7,7 +7,9 @@ use serde::{Deserialize, Serialize};
 use crate::backend::RuntimeBackendId;
 use crate::inference::JsonOptions;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash, PartialOrd, Ord,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum ModelFamily {
     Llama,
@@ -16,7 +18,9 @@ pub enum ModelFamily {
     Onnx,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[derive(
+    Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash, PartialOrd, Ord,
+)]
 #[serde(rename_all = "snake_case")]
 pub enum Capability {
     TextGeneration,
@@ -58,10 +62,9 @@ impl ModelSource {
     pub fn primary_path(&self) -> Option<&Path> {
         match self {
             Self::LocalPath { path } => Some(path.as_path()),
-            Self::LocalArtifacts { files } | Self::HuggingFace { files, .. } => files
-                .get("model")
-                .or_else(|| files.values().next())
-                .map(PathBuf::as_path),
+            Self::LocalArtifacts { files } | Self::HuggingFace { files, .. } => {
+                files.get("model").or_else(|| files.values().next()).map(PathBuf::as_path)
+            }
         }
     }
 

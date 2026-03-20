@@ -6,7 +6,7 @@ use crate::internal::scheduler::backend::admission::{ResourceManager, ResourceMa
 use crate::internal::scheduler::backend::protocol::{BackendOp, BackendReply};
 use crate::internal::scheduler::orchestrator::Orchestrator;
 use crate::internal::scheduler::pipeline::PipelineBuilder;
-use crate::internal::scheduler::types::{GlobalOperationKind, Payload, CoreError, TaskStatus};
+use crate::internal::scheduler::types::{CoreError, GlobalOperationKind, Payload, TaskStatus};
 
 fn text_payload(s: &str) -> Payload {
     Payload::Text(Arc::from(s))
@@ -43,8 +43,7 @@ async fn inference_lease_acquired_and_released() {
         .expect("second lease");
     assert!(
         matches!(
-            rm.acquire_inference_lease("test-backend", std::time::Duration::from_millis(20))
-                .await,
+            rm.acquire_inference_lease("test-backend", std::time::Duration::from_millis(20)).await,
             Err(CoreError::Timeout)
         ),
         "third lease should time out while capacity is exhausted"
@@ -66,10 +65,7 @@ async fn inference_lease_unknown_backend_returns_busy() {
         .await
         .unwrap_err();
     assert!(
-        matches!(
-            err,
-            crate::internal::scheduler::types::CoreError::Busy { .. }
-        ),
+        matches!(err, crate::internal::scheduler::types::CoreError::Busy { .. }),
         "expected Busy error"
     );
 }
@@ -128,10 +124,7 @@ async fn gpu_stage_dispatches_and_receives_reply() {
         Orchestrator::start(rm, 64)
     };
 
-    let op = BackendOp {
-        name: "echo".to_owned(),
-        options: Payload::default(),
-    };
+    let op = BackendOp { name: "echo".to_owned(), options: Payload::default() };
 
     let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("ping"))
         .gpu("echo-stage", "echo-backend", op)
@@ -141,10 +134,7 @@ async fn gpu_stage_dispatches_and_receives_reply() {
 
     let result = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            let view = orchestrator
-                .get_status(task_id)
-                .await
-                .expect("task should exist");
+            let view = orchestrator.get_status(task_id).await.expect("task should exist");
             match &view.status {
                 TaskStatus::Succeeded { .. } | TaskStatus::Failed { .. } => break view.status,
                 _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
@@ -177,10 +167,7 @@ async fn gpu_stage_busy_error_when_no_permits() {
     rm.register_backend("busy-backend", |_shared_rx, _control_tx| {});
     let orchestrator = Orchestrator::start(rm, 64);
 
-    let op = BackendOp {
-        name: "noop".to_owned(),
-        options: Payload::default(),
-    };
+    let op = BackendOp { name: "noop".to_owned(), options: Payload::default() };
 
     let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("x"))
         .gpu("noop-stage", "busy-backend", op)
@@ -192,10 +179,7 @@ async fn gpu_stage_busy_error_when_no_permits() {
     // task should fail well within this window.
     let result = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
-            let view = orchestrator
-                .get_status(task_id)
-                .await
-                .expect("task should exist");
+            let view = orchestrator.get_status(task_id).await.expect("task should exist");
             match &view.status {
                 TaskStatus::Failed { .. } | TaskStatus::Succeeded { .. } => break view.status,
                 _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
@@ -248,10 +232,7 @@ async fn streaming_pipeline_returns_stream_handle() {
         });
     });
     let orchestrator = Orchestrator::start(rm, 64);
-    let op = BackendOp {
-        name: "stream-gen".to_owned(),
-        options: Payload::default(),
-    };
+    let op = BackendOp { name: "stream-gen".to_owned(), options: Payload::default() };
 
     let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("prompt"))
         .gpu_stream("stream-stage", "stream-backend", op)
@@ -262,10 +243,7 @@ async fn streaming_pipeline_returns_stream_handle() {
     // Wait for SucceededStreaming.
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            let view = orchestrator
-                .get_status(task_id)
-                .await
-                .expect("task should exist");
+            let view = orchestrator.get_status(task_id).await.expect("task should exist");
             if matches!(view.status, TaskStatus::SucceededStreaming) {
                 break;
             }
@@ -275,10 +253,8 @@ async fn streaming_pipeline_returns_stream_handle() {
     .await
     .expect("task should reach SucceededStreaming");
 
-    let mut handle = orchestrator
-        .take_stream(task_id)
-        .await
-        .expect("stream handle should be available");
+    let mut handle =
+        orchestrator.take_stream(task_id).await.expect("stream handle should be available");
 
     let mut tokens = String::new();
     while let Some(chunk) = handle.recv().await {
@@ -323,9 +299,8 @@ async fn acquire_inference_lease_waits_for_capacity() {
     });
 
     // acquire_inference_lease should succeed once the lease is released.
-    let result = rm
-        .acquire_inference_lease("serial-backend", std::time::Duration::from_secs(2))
-        .await;
+    let result =
+        rm.acquire_inference_lease("serial-backend", std::time::Duration::from_secs(2)).await;
     assert!(result.is_ok(), "should acquire lease after it is released");
 }
 
@@ -434,10 +409,7 @@ async fn worker_broadcast_unload_clears_all_worker_contexts() {
 
     // All context flags must now be false.
     for (i, ctx) in ctx_flags.iter().enumerate() {
-        assert!(
-            !ctx.load(Ordering::SeqCst),
-            "worker {i} context should be cleared after Unload"
-        );
+        assert!(!ctx.load(Ordering::SeqCst), "worker {i} context should be cleared after Unload");
     }
 }
 
@@ -480,9 +452,7 @@ async fn stale_broadcast_sequence_is_ignored() {
     }
     drop(bc_tx);
 
-    worker
-        .await
-        .expect("broadcast worker should stop after sender is dropped");
+    worker.await.expect("broadcast worker should stop after sender is dropped");
 
     let observed = applied.lock().await.clone();
     assert_eq!(
@@ -521,10 +491,7 @@ async fn inconsistent_global_state_blocks_inference_submission() {
     let op_id = 42;
     rm_state.mark_global_inconsistent(op_id).await;
 
-    let op = BackendOp {
-        name: "echo".to_owned(),
-        options: Payload::default(),
-    };
+    let op = BackendOp { name: "echo".to_owned(), options: Payload::default() };
 
     let result = PipelineBuilder::new(orchestrator, text_payload("blocked"))
         .gpu("echo-stage", "gate-backend", op)
@@ -566,51 +533,36 @@ async fn manual_override_clears_inference_gate() {
     let op_id = 99;
     rm_state.mark_global_inconsistent(op_id).await;
 
-    let blocked = PipelineBuilder::new(
-        orchestrator.clone(),
-        text_payload("first blocked submission"),
-    )
-    .gpu(
-        "echo-stage",
-        "gate-backend",
-        BackendOp {
-            name: "echo".to_owned(),
-            options: Payload::default(),
-        },
-    )
-    .run()
-    .await;
+    let blocked =
+        PipelineBuilder::new(orchestrator.clone(), text_payload("first blocked submission"))
+            .gpu(
+                "echo-stage",
+                "gate-backend",
+                BackendOp { name: "echo".to_owned(), options: Payload::default() },
+            )
+            .run()
+            .await;
     assert!(
         matches!(blocked, Err(CoreError::GlobalStateInconsistent { .. })),
         "submission should be blocked before manual override"
     );
 
-    rm_state
-        .manual_mark_consistent("operator override in test")
-        .await;
+    rm_state.manual_mark_consistent("operator override in test").await;
 
-    let task_id = PipelineBuilder::new(
-        orchestrator.clone(),
-        text_payload("submission after override"),
-    )
-    .gpu(
-        "echo-stage",
-        "gate-backend",
-        BackendOp {
-            name: "echo".to_owned(),
-            options: Payload::default(),
-        },
-    )
-    .run()
-    .await
-    .expect("submission should be accepted after manual override");
+    let task_id =
+        PipelineBuilder::new(orchestrator.clone(), text_payload("submission after override"))
+            .gpu(
+                "echo-stage",
+                "gate-backend",
+                BackendOp { name: "echo".to_owned(), options: Payload::default() },
+            )
+            .run()
+            .await
+            .expect("submission should be accepted after manual override");
 
     let status = tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
-            let view = orchestrator
-                .get_status(task_id)
-                .await
-                .expect("task should exist");
+            let view = orchestrator.get_status(task_id).await.expect("task should exist");
             match view.status {
                 TaskStatus::Succeeded { .. } | TaskStatus::Failed { .. } => break view.status,
                 _ => tokio::time::sleep(std::time::Duration::from_millis(10)).await,
@@ -688,10 +640,7 @@ async fn global_management_emits_runtime_control_signal() {
     .await
     .expect("runtime control signal should arrive");
 
-    assert!(
-        saw_runtime_signal,
-        "expected a runtime control signal on backend control channel"
-    );
+    assert!(saw_runtime_signal, "expected a runtime control signal on backend control channel");
 }
 
 // ── Tests: purge_task ─────────────────────────────────────────────────────
@@ -720,14 +669,7 @@ async fn purge_task_removes_record() {
     let orchestrator = Orchestrator::start(rm, 64);
 
     let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("hello"))
-        .gpu(
-            "echo",
-            "echo",
-            BackendOp {
-                name: "echo".into(),
-                options: Payload::default(),
-            },
-        )
+        .gpu("echo", "echo", BackendOp { name: "echo".into(), options: Payload::default() })
         .run()
         .await
         .expect("submit should succeed");
@@ -745,19 +687,13 @@ async fn purge_task_removes_record() {
     .expect("task should complete");
 
     // Record should exist before purge.
-    assert!(
-        orchestrator.get_status(task_id).await.is_ok(),
-        "record should exist before purge"
-    );
+    assert!(orchestrator.get_status(task_id).await.is_ok(), "record should exist before purge");
 
     orchestrator.purge_task(task_id).await;
 
     // After purge the record is gone.
     assert!(
-        matches!(
-            orchestrator.get_status(task_id).await,
-            Err(CoreError::TaskNotFound { .. })
-        ),
+        matches!(orchestrator.get_status(task_id).await, Err(CoreError::TaskNotFound { .. })),
         "record should be gone after purge"
     );
 }
@@ -773,14 +709,7 @@ async fn purge_task_removes_failed_record() {
     let orchestrator = Orchestrator::start(rm, 64);
 
     let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("x"))
-        .gpu(
-            "stall",
-            "stall",
-            BackendOp {
-                name: "stall".into(),
-                options: Payload::default(),
-            },
-        )
+        .gpu("stall", "stall", BackendOp { name: "stall".into(), options: Payload::default() })
         .run()
         .await
         .expect("submit should succeed");
@@ -800,10 +729,7 @@ async fn purge_task_removes_failed_record() {
     orchestrator.purge_task(task_id).await;
 
     assert!(
-        matches!(
-            orchestrator.get_status(task_id).await,
-            Err(CoreError::TaskNotFound { .. })
-        ),
+        matches!(orchestrator.get_status(task_id).await, Err(CoreError::TaskNotFound { .. })),
         "failed task record should be gone after purge"
     );
 }
@@ -852,14 +778,7 @@ async fn cancel_and_purge_signals_before_removing_record() {
     let orchestrator = Orchestrator::start(rm, 64);
 
     let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("slow"))
-        .gpu(
-            "slow-stage",
-            "slow",
-            BackendOp {
-                name: "slow".into(),
-                options: Payload::default(),
-            },
-        )
+        .gpu("slow-stage", "slow", BackendOp { name: "slow".into(), options: Payload::default() })
         .run()
         .await
         .expect("submit should succeed");
@@ -874,10 +793,7 @@ async fn cancel_and_purge_signals_before_removing_record() {
 
     // Record is gone immediately.
     assert!(
-        matches!(
-            orchestrator.get_status(task_id).await,
-            Err(CoreError::TaskNotFound { .. })
-        ),
+        matches!(orchestrator.get_status(task_id).await, Err(CoreError::TaskNotFound { .. })),
         "record should be gone after cancel_and_purge"
     );
 

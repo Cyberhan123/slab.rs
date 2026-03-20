@@ -151,11 +151,7 @@ fn register_ggml_drivers(
     resource_manager.register_backend("ggml.diffusion", move |shared_rx, control_tx| {
         let count = worker_count.max(1);
         let mut worker_engines: Vec<Option<GGMLDiffusionEngine>> = (1..count)
-            .map(|_| {
-                diffusion_engine
-                    .as_ref()
-                    .map(|engine| engine.fork_library())
-            })
+            .map(|_| diffusion_engine.as_ref().map(|engine| engine.fork_library()))
             .collect();
         worker_engines.insert(0, diffusion_engine);
         let mut worker_engines = worker_engines.into_iter();

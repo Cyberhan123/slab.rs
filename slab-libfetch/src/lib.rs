@@ -37,14 +37,8 @@ pub async fn fetch_header(
         .to_string();
 
     let version_api = match tag {
-        Some(t) => Api::new()
-            .set_install_dir(install_dir)
-            .repo(repo_full)
-            .version(t),
-        None => Api::new()
-            .set_install_dir(install_dir)
-            .repo(repo_full)
-            .latest(),
+        Some(t) => Api::new().set_install_dir(install_dir).repo(repo_full).version(t),
+        None => Api::new().set_install_dir(install_dir).repo(repo_full).latest(),
     };
 
     version_api.fetch_header(target_include_path).await
@@ -57,20 +51,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_extract_include_ggml() {
-        fetch_header("ggml-org", "ggml", Some("v0.9.7"), Path::new("target/ggml"))
-            .await
-            .unwrap();
+        fetch_header("ggml-org", "ggml", Some("v0.9.7"), Path::new("target/ggml")).await.unwrap();
     }
 
     #[tokio::test]
     async fn test_extract_include_whisper() {
-        fetch_header(
-            "ggml-org",
-            "whisper.cpp",
-            Some("v1.8.3"),
-            Path::new("target/whisper"),
-        )
-        .await
-        .unwrap();
+        fetch_header("ggml-org", "whisper.cpp", Some("v1.8.3"), Path::new("target/whisper"))
+            .await
+            .unwrap();
     }
 }

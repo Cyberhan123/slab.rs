@@ -29,8 +29,7 @@ impl Whisper {
             state,
             segment_idx,
             token_count: unsafe {
-                self.lib
-                    .whisper_full_n_tokens_from_state(state.ptr, segment_idx)
+                self.lib.whisper_full_n_tokens_from_state(state.ptr, segment_idx)
             },
             instance: self.clone(),
         }
@@ -97,12 +96,10 @@ impl<'a> WhisperSegment<'a> {
     /// `bool whisper_full_get_segment_speaker_turn_next_from_state(struct whisper_state * state, int i_segment)`
     pub fn next_segment_speaker_turn(&self) -> bool {
         unsafe {
-            self.instance
-                .lib
-                .whisper_full_get_segment_speaker_turn_next_from_state(
-                    self.state.ptr,
-                    self.segment_idx,
-                )
+            self.instance.lib.whisper_full_get_segment_speaker_turn_next_from_state(
+                self.state.ptr,
+                self.segment_idx,
+            )
         }
     }
 
@@ -115,12 +112,10 @@ impl<'a> WhisperSegment<'a> {
     /// `float whisper_full_get_segment_no_speech_prob_from_state(struct whisper_state * state, int i_segment)`
     pub fn no_speech_probability(&self) -> f32 {
         unsafe {
-            self.instance
-                .lib
-                .whisper_full_get_segment_no_speech_prob_from_state(
-                    self.state.ptr,
-                    self.segment_idx,
-                )
+            self.instance.lib.whisper_full_get_segment_no_speech_prob_from_state(
+                self.state.ptr,
+                self.segment_idx,
+            )
         }
     }
 
@@ -203,12 +198,7 @@ impl<'a> WhisperSegment<'a> {
 /// Uses [`Self::to_str_lossy`] internally.
 impl fmt::Display for WhisperSegment<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "{}",
-            self.to_str_lossy()
-                .expect("got null pointer during string write")
-        )
+        write!(f, "{}", self.to_str_lossy().expect("got null pointer during string write"))
     }
 }
 
@@ -219,10 +209,7 @@ impl fmt::Debug for WhisperSegment<'_> {
             .field("n_tokens", &self.token_count)
             .field("start_ts", &self.start_timestamp())
             .field("end_ts", &self.end_timestamp())
-            .field(
-                "next_segment_speaker_turn",
-                &self.next_segment_speaker_turn(),
-            )
+            .field("next_segment_speaker_turn", &self.next_segment_speaker_turn())
             .field("no_speech_probability", &self.no_speech_probability())
             .field("text", &self.to_str_lossy())
             .finish_non_exhaustive()

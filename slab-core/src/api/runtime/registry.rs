@@ -26,13 +26,7 @@ impl Runtime {
         resolver: DriverResolver,
         drivers: DriversConfig,
     ) -> Self {
-        Self {
-            inner: Arc::new(RuntimeRegistry {
-                orchestrator,
-                resolver,
-                drivers,
-            }),
-        }
+        Self { inner: Arc::new(RuntimeRegistry { orchestrator, resolver, drivers }) }
     }
 
     pub fn pipeline(&self, spec: ModelSpec) -> Result<Pipeline, CoreError> {

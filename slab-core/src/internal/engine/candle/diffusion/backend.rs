@@ -94,41 +94,26 @@ impl CandleDiffusionWorker {
         bc_tx: broadcast::Sender<WorkerCommand>,
         worker_id: usize,
     ) -> Self {
-        Self {
-            engine,
-            bc_tx,
-            worker_id,
-        }
+        Self { engine, bc_tx, worker_id }
     }
 
     #[on_event(LoadModel)]
     async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            input,
-            broadcast_seq,
-            reply_tx,
-            ..
-        } = req;
+        let BackendRequest { input, broadcast_seq, reply_tx, .. } = req;
         let seq_id = broadcast_seq.unwrap_or(0);
         self.handle_load_model(input, reply_tx, seq_id).await;
     }
 
     #[on_event(UnloadModel)]
     async fn on_unload_model(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            broadcast_seq,
-            reply_tx,
-            ..
-        } = req;
+        let BackendRequest { broadcast_seq, reply_tx, .. } = req;
         let seq_id = broadcast_seq.unwrap_or(0);
         self.handle_unload_model(reply_tx, seq_id).await;
     }
 
     #[on_event(InferenceImage)]
     async fn on_inference_image(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
+        let BackendRequest { input, reply_tx, .. } = req;
         self.handle_inference_image(input, reply_tx).await;
     }
 
@@ -215,17 +200,13 @@ impl CandleDiffusionWorker {
         let config: CandleDiffusionModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "invalid model.load config: {e}"
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
                 return;
             }
         };
 
-        let engine = self
-            .engine
-            .get_or_insert_with(CandleDiffusionEngine::new)
-            .clone();
+        let engine = self.engine.get_or_insert_with(CandleDiffusionEngine::new).clone();
         let model_path = config.model_path.clone();
         let vae_path = config.vae_path.clone();
         let sd_version = config.sd_version.clone();
@@ -236,15 +217,12 @@ impl CandleDiffusionWorker {
 
         match result {
             Ok(()) => {
-                let _ = self
-                    .bc_tx
-                    .send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                        sync: SyncMessage::Deployment(deployment),
-                        sender_id: self.worker_id,
-                    }));
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
+                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
+                    sync: SyncMessage::Deployment(deployment),
+                    sender_id: self.worker_id,
+                }));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -260,15 +238,12 @@ impl CandleDiffusionWorker {
         match self.engine.as_ref() {
             Some(engine) => {
                 engine.unload();
-                let _ = self
-                    .bc_tx
-                    .send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
-                        sync: SyncMessage::Generation { generation: seq_id },
-                        sender_id: self.worker_id,
-                    }));
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
+                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
+                    sync: SyncMessage::Generation { generation: seq_id },
+                    sender_id: self.worker_id,
+                }));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             }
             None => {
                 let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
@@ -294,9 +269,8 @@ impl CandleDiffusionWorker {
         let raw: GenImageInput = match input.to_json() {
             Ok(v) => v,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "invalid inference.image params: {e}"
-                )));
+                let _ = reply_tx
+                    .send(BackendReply::Error(format!("invalid inference.image params: {e}")));
                 return;
             }
         };
@@ -329,9 +303,8 @@ impl CandleDiffusionWorker {
                 let _ = reply_tx.send(BackendReply::Value(Payload::Json(json)));
             }
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "candle.diffusion inference failed: {e}"
-                )));
+                let _ = reply_tx
+                    .send(BackendReply::Error(format!("candle.diffusion inference failed: {e}")));
             }
         }
     }
@@ -345,14 +318,9 @@ pub(crate) fn spawn_backend(
     control_tx: broadcast::Sender<WorkerCommand>,
     count: usize,
 ) {
-    spawn_workers(
-        shared_ingress_rx,
-        control_tx,
-        count.max(1),
-        |worker_id, bc_tx| {
-            CandleDiffusionWorker::new(Some(CandleDiffusionEngine::new()), bc_tx, worker_id)
-        },
-    );
+    spawn_workers(shared_ingress_rx, control_tx, count.max(1), |worker_id, bc_tx| {
+        CandleDiffusionWorker::new(Some(CandleDiffusionEngine::new()), bc_tx, worker_id)
+    });
 }
 
 #[cfg(test)]
@@ -369,9 +337,7 @@ mod tests {
     #[tokio::test]
     async fn global_unload_is_safe_without_engine() {
         let mut worker = make_worker();
-        worker
-            .apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 })
-            .await;
+        worker.apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 }).await;
         // No panic – test passes.
     }
 }

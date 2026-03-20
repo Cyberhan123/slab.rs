@@ -12,8 +12,7 @@ use crate::internal::scheduler::backend::protocol::{
 use crate::internal::scheduler::stage::Stage;
 use crate::internal::scheduler::storage::ResultStorage;
 use crate::internal::scheduler::types::{
-    BackendLifecycleState, CoreError, GlobalOperationKind, Payload, StageStatus, TaskId,
-    TaskStatus,
+    BackendLifecycleState, CoreError, GlobalOperationKind, Payload, StageStatus, TaskId, TaskStatus,
 };
 
 /// Default wait timeout used when blocking until a task result is ready.
@@ -82,10 +81,7 @@ impl Orchestrator {
         op_name: &str,
         input: Payload,
     ) -> Result<Payload, CoreError> {
-        let _mgmt_lease = self
-            .resource_manager
-            .acquire_management_lease(backend_id)
-            .await?;
+        let _mgmt_lease = self.resource_manager.acquire_management_lease(backend_id).await?;
         self.resource_manager
             .set_backend_state(backend_id, BackendLifecycleState::Transitioning)
             .await?;
@@ -97,10 +93,7 @@ impl Orchestrator {
 
         let req = BackendRequest {
             kind: BackendRequestKind::Management(event),
-            op: BackendOp {
-                name: op_name.to_owned(),
-                options: Payload::default(),
-            },
+            op: BackendOp { name: op_name.to_owned(), options: Payload::default() },
             input,
             cancel_rx: watch_rx,
             broadcast_seq: Some(seq),
@@ -111,10 +104,9 @@ impl Orchestrator {
         ingress_tx.try_send(req).map_err(|e| {
             let cap = ingress_tx.max_capacity();
             match e {
-                mpsc::error::TrySendError::Full(_) => CoreError::QueueFull {
-                    queue: backend_id.to_owned(),
-                    capacity: cap,
-                },
+                mpsc::error::TrySendError::Full(_) => {
+                    CoreError::QueueFull { queue: backend_id.to_owned(), capacity: cap }
+                }
                 mpsc::error::TrySendError::Closed(_) => CoreError::BackendShutdown,
             }
         })?;
@@ -126,19 +118,14 @@ impl Orchestrator {
                     ManagementEvent::LoadModel => BackendLifecycleState::ModelLoaded,
                     ManagementEvent::UnloadModel => BackendLifecycleState::Initialized,
                 };
-                self.resource_manager
-                    .set_backend_state(backend_id, state)
-                    .await?;
+                self.resource_manager.set_backend_state(backend_id, state).await?;
                 Ok(payload)
             }
             BackendReply::Error(msg) => {
                 self.resource_manager
                     .set_backend_state(backend_id, BackendLifecycleState::Error)
                     .await?;
-                Err(CoreError::GpuStageFailed {
-                    stage_name: op_name.to_owned(),
-                    message: msg,
-                })
+                Err(CoreError::GpuStageFailed { stage_name: op_name.to_owned(), message: msg })
             }
             BackendReply::Stream(_) => Err(CoreError::GpuStageFailed {
                 stage_name: op_name.to_owned(),
@@ -157,10 +144,7 @@ impl Orchestrator {
     pub fn start(resource_manager: ResourceManager, queue_capacity: usize) -> Self {
         let (submit_tx, submit_rx) = mpsc::channel::<OrchestratorCommand>(queue_capacity);
         let storage = ResultStorage::new(submit_tx);
-        let orchestrator = Self {
-            storage: storage.clone(),
-            resource_manager,
-        };
+        let orchestrator = Self { storage: storage.clone(), resource_manager };
 
         // Spawn the background dispatch loop.
         let loop_storage = storage.clone();
@@ -180,11 +164,7 @@ impl Orchestrator {
     ) {
         while let Some(cmd) = rx.recv().await {
             match cmd {
-                OrchestratorCommand::Submit {
-                    stages,
-                    initial_payload,
-                    reply_tx,
-                } => {
+                OrchestratorCommand::Submit { stages, initial_payload, reply_tx } => {
                     let task_id = storage.create_task(stages.len()).await;
                     let _ = reply_tx.send(task_id);
 
@@ -229,9 +209,7 @@ impl Orchestrator {
         for (idx, stage) in stages.iter().enumerate() {
             // Check cancellation before each stage.
             if *cancel_rx.borrow() {
-                storage
-                    .set_stage_status(task_id, idx, StageStatus::Cancelled)
-                    .await;
+                storage.set_stage_status(task_id, idx, StageStatus::Cancelled).await;
                 storage.set_status(task_id, TaskStatus::Cancelled).await;
                 info!(task_id, stage_index = idx, "task cancelled before stage");
                 return;
@@ -240,31 +218,20 @@ impl Orchestrator {
             storage
                 .set_status(
                     task_id,
-                    TaskStatus::Running {
-                        stage_index: idx,
-                        stage_name: stage.name().to_owned(),
-                    },
+                    TaskStatus::Running { stage_index: idx, stage_name: stage.name().to_owned() },
                 )
                 .await;
-            storage
-                .set_stage_status(task_id, idx, StageStatus::Running)
-                .await;
+            storage.set_stage_status(task_id, idx, StageStatus::Running).await;
 
             match stage {
                 Stage::Cpu(cpu_stage) => match cpu_stage.run(payload).await {
                     Ok(next_payload) => {
-                        storage
-                            .set_stage_status(task_id, idx, StageStatus::Completed)
-                            .await;
+                        storage.set_stage_status(task_id, idx, StageStatus::Completed).await;
                         payload = next_payload;
                     }
                     Err(err) => {
-                        storage
-                            .set_stage_status(task_id, idx, StageStatus::Failed)
-                            .await;
-                        storage
-                            .set_status(task_id, TaskStatus::Failed { error: err })
-                            .await;
+                        storage.set_stage_status(task_id, idx, StageStatus::Failed).await;
+                        storage.set_status(task_id, TaskStatus::Failed { error: err }).await;
                         return;
                     }
                 },
@@ -276,12 +243,8 @@ impl Orchestrator {
                     {
                         Ok(lease) => lease,
                         Err(err) => {
-                            storage
-                                .set_stage_status(task_id, idx, StageStatus::Failed)
-                                .await;
-                            storage
-                                .set_status(task_id, TaskStatus::Failed { error: err })
-                                .await;
+                            storage.set_stage_status(task_id, idx, StageStatus::Failed).await;
+                            storage.set_status(task_id, TaskStatus::Failed { error: err }).await;
                             return;
                         }
                     };
@@ -291,18 +254,12 @@ impl Orchestrator {
 
                     match result {
                         Ok(next_payload) => {
-                            storage
-                                .set_stage_status(task_id, idx, StageStatus::Completed)
-                                .await;
+                            storage.set_stage_status(task_id, idx, StageStatus::Completed).await;
                             payload = next_payload;
                         }
                         Err(err) => {
-                            storage
-                                .set_stage_status(task_id, idx, StageStatus::Failed)
-                                .await;
-                            storage
-                                .set_status(task_id, TaskStatus::Failed { error: err })
-                                .await;
+                            storage.set_stage_status(task_id, idx, StageStatus::Failed).await;
+                            storage.set_status(task_id, TaskStatus::Failed { error: err }).await;
                             return;
                         }
                     }
@@ -316,12 +273,8 @@ impl Orchestrator {
                     {
                         Ok(lease) => lease,
                         Err(err) => {
-                            storage
-                                .set_stage_status(task_id, idx, StageStatus::Failed)
-                                .await;
-                            storage
-                                .set_status(task_id, TaskStatus::Failed { error: err })
-                                .await;
+                            storage.set_stage_status(task_id, idx, StageStatus::Failed).await;
+                            storage.set_status(task_id, TaskStatus::Failed { error: err }).await;
                             return;
                         }
                     };
@@ -331,22 +284,14 @@ impl Orchestrator {
 
                     match result {
                         Ok(handle) => {
-                            storage
-                                .set_stage_status(task_id, idx, StageStatus::Completed)
-                                .await;
-                            storage
-                                .set_status(task_id, TaskStatus::SucceededStreaming)
-                                .await;
+                            storage.set_stage_status(task_id, idx, StageStatus::Completed).await;
+                            storage.set_status(task_id, TaskStatus::SucceededStreaming).await;
                             storage.set_stream_handle(task_id, handle).await;
                             info!(task_id, "task succeeded (streaming)");
                         }
                         Err(err) => {
-                            storage
-                                .set_stage_status(task_id, idx, StageStatus::Failed)
-                                .await;
-                            storage
-                                .set_status(task_id, TaskStatus::Failed { error: err })
-                                .await;
+                            storage.set_stage_status(task_id, idx, StageStatus::Failed).await;
+                            storage.set_status(task_id, TaskStatus::Failed { error: err }).await;
                         }
                     }
                     // Streaming stage is always terminal; stop here.
@@ -356,9 +301,7 @@ impl Orchestrator {
         }
 
         // All stages completed; store final result.
-        storage
-            .set_status(task_id, TaskStatus::Succeeded { result: payload })
-            .await;
+        storage.set_status(task_id, TaskStatus::Succeeded { result: payload }).await;
         info!(task_id, "task succeeded");
     }
 
@@ -376,21 +319,14 @@ impl Orchestrator {
     ) -> Result<TaskId, CoreError> {
         // Gate GPU-bearing submissions early when global state is inconsistent.
         // This prevents queueing work that is guaranteed to be rejected later.
-        if stages
-            .iter()
-            .any(|stage| matches!(stage, Stage::Gpu(_) | Stage::GpuStream(_)))
-        {
+        if stages.iter().any(|stage| matches!(stage, Stage::Gpu(_) | Stage::GpuStream(_))) {
             self.resource_manager.ensure_inference_allowed().await?;
         }
 
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.storage
             .submit_tx()
-            .try_send(OrchestratorCommand::Submit {
-                stages,
-                initial_payload,
-                reply_tx,
-            })
+            .try_send(OrchestratorCommand::Submit { stages, initial_payload, reply_tx })
             .map_err(|e| {
                 let cap = self.storage.submit_tx().max_capacity();
                 match e {
@@ -407,10 +343,7 @@ impl Orchestrator {
     /// Request best-effort cancellation of a task.
     pub fn cancel(&self, task_id: TaskId) {
         // Best-effort: ignore send errors (task may have already completed).
-        let _ = self
-            .storage
-            .submit_tx()
-            .try_send(OrchestratorCommand::Cancel { task_id });
+        let _ = self.storage.submit_tx().try_send(OrchestratorCommand::Cancel { task_id });
     }
 
     /// Cancel a task and immediately remove its in-memory record.
@@ -478,10 +411,7 @@ impl Orchestrator {
                 GlobalOperationKind::LoadModels => {
                     self.emit_runtime_control_signal(
                         backend_id,
-                        RuntimeControlSignal::GlobalLoad {
-                            op_id,
-                            payload: payload.clone(),
-                        },
+                        RuntimeControlSignal::GlobalLoad { op_id, payload: payload.clone() },
                     );
                 }
             }
@@ -525,10 +455,7 @@ impl Orchestrator {
         &self,
         task_id: TaskId,
     ) -> Result<crate::internal::scheduler::storage::TaskStatusView, CoreError> {
-        self.storage
-            .get_status(task_id)
-            .await
-            .ok_or(CoreError::TaskNotFound { task_id })
+        self.storage.get_status(task_id).await.ok_or(CoreError::TaskNotFound { task_id })
     }
 
     /// Consume and return the completed payload for a non-streaming task.
@@ -595,10 +522,9 @@ impl Orchestrator {
         timeout: Duration,
     ) -> Result<Payload, CoreError> {
         match self.wait_terminal(task_id, timeout).await? {
-            TaskStatus::Succeeded { .. } => self
-                .get_result(task_id)
-                .await
-                .ok_or(CoreError::TaskNotFound { task_id }),
+            TaskStatus::Succeeded { .. } => {
+                self.get_result(task_id).await.ok_or(CoreError::TaskNotFound { task_id })
+            }
             TaskStatus::ResultConsumed => Err(CoreError::GpuStageFailed {
                 stage_name: "result".into(),
                 message: "task result has already been consumed".into(),
@@ -639,10 +565,9 @@ impl Orchestrator {
         .await;
 
         match wait_result {
-            Ok(Ok(())) => self
-                .take_stream(task_id)
-                .await
-                .ok_or(CoreError::TaskNotFound { task_id }),
+            Ok(Ok(())) => {
+                self.take_stream(task_id).await.ok_or(CoreError::TaskNotFound { task_id })
+            }
             Ok(Err(error)) => Err(error),
             Err(_) => {
                 self.cancel_and_purge(task_id).await;

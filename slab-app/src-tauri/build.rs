@@ -9,12 +9,7 @@ fn main() {
     let workspace_target_dir = get_workspace_target_dir(&manifest_dir, &profile);
 
     sync_sidecar("slab-server", &target, &workspace_target_dir, &manifest_dir);
-    sync_sidecar(
-        "slab-runtime",
-        &target,
-        &workspace_target_dir,
-        &manifest_dir,
-    );
+    sync_sidecar("slab-runtime", &target, &workspace_target_dir, &manifest_dir);
 
     let attributes =
         tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(&[
@@ -44,11 +39,7 @@ fn get_workspace_target_dir(manifest_dir: &Path, profile: &str) -> PathBuf {
 }
 
 fn sync_sidecar(bin_name: &str, target: &str, src_dir: &Path, tauri_dir: &Path) {
-    let extension = if target.contains("windows") {
-        ".exe"
-    } else {
-        ""
-    };
+    let extension = if target.contains("windows") { ".exe" } else { "" };
     let src_path = src_dir.join(format!("{bin_name}{extension}"));
 
     let sidecar_dir = tauri_dir.join("binaries");

@@ -49,19 +49,14 @@ struct CandleLlamaWorker {
 #[backend_handler]
 impl CandleLlamaWorker {
     fn new(engine: Option<Arc<CandleLlamaEngine>>) -> Self {
-        Self {
-            engine,
-            sessions: HashMap::new(),
-        }
+        Self { engine, sessions: HashMap::new() }
     }
 
     // ── Event handlers ────────────────────────────────────────────────────────
 
     #[on_event(LoadModel)]
     async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
+        let BackendRequest { input, reply_tx, .. } = req;
         self.handle_load_model(input, reply_tx).await;
     }
 
@@ -80,21 +75,12 @@ impl CandleLlamaWorker {
                 return;
             }
         };
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
+        let BackendRequest { input, reply_tx, .. } = req;
         let opts = invocation.options.to_serde_value();
-        let max_tokens = opts
-            .get("max_tokens")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize)
-            .unwrap_or(256);
-        let session_key = opts
-            .get("session_key")
-            .and_then(|s| s.as_str())
-            .map(str::to_owned);
-        self.handle_inference(input, max_tokens, session_key, reply_tx)
-            .await;
+        let max_tokens =
+            opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
+        let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
+        self.handle_inference(input, max_tokens, session_key, reply_tx).await;
     }
 
     #[on_event(InferenceStream)]
@@ -106,21 +92,12 @@ impl CandleLlamaWorker {
                 return;
             }
         };
-        let BackendRequest {
-            input, reply_tx, ..
-        } = req;
+        let BackendRequest { input, reply_tx, .. } = req;
         let opts = invocation.options.to_serde_value();
-        let max_tokens = opts
-            .get("max_tokens")
-            .and_then(|v| v.as_u64())
-            .map(|v| v as usize)
-            .unwrap_or(256);
-        let session_key = opts
-            .get("session_key")
-            .and_then(|s| s.as_str())
-            .map(str::to_owned);
-        self.handle_inference_stream(input, max_tokens, session_key, reply_tx)
-            .await;
+        let max_tokens =
+            opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
+        let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
+        self.handle_inference_stream(input, max_tokens, session_key, reply_tx).await;
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -163,9 +140,8 @@ impl CandleLlamaWorker {
         let config: CandleLlamaModelLoadConfig = match input.to_json() {
             Ok(c) => c,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
-                    "invalid model.load config: {e}"
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
                 return;
             }
         };
@@ -186,9 +162,8 @@ impl CandleLlamaWorker {
                 // Clear stale sessions from any previously loaded model.
                 self.sessions.clear();
                 self.engine = Some(engine);
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -202,9 +177,8 @@ impl CandleLlamaWorker {
                 let _ = engine.unload();
                 self.engine = None;
                 self.sessions.clear();
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(
-                    Arc::from([] as [u8; 0]),
-                )));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             }
             None => {
                 let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
@@ -245,9 +219,8 @@ impl CandleLlamaWorker {
                         Some(sid)
                     }
                     Err(e) => {
-                        let _ = reply_tx.send(BackendReply::Error(format!(
-                            "failed to create session: {e}"
-                        )));
+                        let _ = reply_tx
+                            .send(BackendReply::Error(format!("failed to create session: {e}")));
                         return;
                     }
                 },
@@ -258,9 +231,8 @@ impl CandleLlamaWorker {
 
         match engine.inference(&prompt, max_tokens, session_id).await {
             Ok(text) => {
-                let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(
-                    text.as_bytes(),
-                ))));
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(text.as_bytes()))));
             }
             Err(e) => {
                 // Drop the session on error so the next request starts fresh.
@@ -305,9 +277,8 @@ impl CandleLlamaWorker {
                         Some(sid)
                     }
                     Err(e) => {
-                        let _ = reply_tx.send(BackendReply::Error(format!(
-                            "failed to create session: {e}"
-                        )));
+                        let _ = reply_tx
+                            .send(BackendReply::Error(format!("failed to create session: {e}")));
                         return;
                     }
                 },
@@ -321,10 +292,7 @@ impl CandleLlamaWorker {
 
         tokio::spawn(async move {
             use crate::internal::engine::candle::llama::errors::StreamChunk as CandleChunk;
-            match engine
-                .inference_stream(&prompt, max_tokens, existing_session_id)
-                .await
-            {
+            match engine.inference_stream(&prompt, max_tokens, existing_session_id).await {
                 Ok((mut llama_rx, sid)) => {
                     while let Some(chunk) = llama_rx.recv().await {
                         let mapped = match chunk {
@@ -384,13 +352,8 @@ mod tests {
     #[tokio::test]
     async fn runtime_global_unload_clears_engine() {
         let mut worker = CandleLlamaWorker::new(None);
-        worker
-            .apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 })
-            .await;
-        assert!(
-            worker.engine.is_none(),
-            "global unload should leave engine cleared"
-        );
+        worker.apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 }).await;
+        assert!(worker.engine.is_none(), "global unload should leave engine cleared");
     }
 
     #[tokio::test]

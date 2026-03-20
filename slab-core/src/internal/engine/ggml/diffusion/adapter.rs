@@ -69,11 +69,7 @@ impl GGMLDiffusionEngine {
         }
 
         std::fs::canonicalize(&lib_path).map_err(|source| {
-            GGMLDiffusionEngineError::CanonicalizeLibraryPath {
-                path: lib_path,
-                source,
-            }
-            .into()
+            GGMLDiffusionEngineError::CanonicalizeLibraryPath { path: lib_path, source }.into()
         })
     }
 
@@ -86,10 +82,7 @@ impl GGMLDiffusionEngine {
             }
         })?;
 
-        Ok(Self {
-            instance: Arc::new(diffusion),
-            ctx: None,
-        })
+        Ok(Self { instance: Arc::new(diffusion), ctx: None })
     }
 
     /// Create a new engine from the library at `path` **without** registering
@@ -123,10 +116,7 @@ impl GGMLDiffusionEngine {
         &self,
         params: &SdImgGenParams,
     ) -> Result<Vec<SdImage>, engine::EngineError> {
-        let ctx = self
-            .ctx
-            .as_ref()
-            .ok_or(GGMLDiffusionEngineError::ContextNotInitialized)?;
+        let ctx = self.ctx.as_ref().ok_or(GGMLDiffusionEngineError::ContextNotInitialized)?;
 
         ctx.generate_image(params)
             .map_err(|source| GGMLDiffusionEngineError::InferenceFailed { source }.into())
@@ -149,10 +139,7 @@ impl GGMLDiffusionEngine {
     /// `ctx` slot (loaded independently) while all workers share the same
     /// dynamic-library `Arc`.
     pub fn fork_library(&self) -> Self {
-        Self {
-            instance: Arc::clone(&self.instance),
-            ctx: None,
-        }
+        Self { instance: Arc::clone(&self.instance), ctx: None }
     }
 }
 
@@ -189,8 +176,7 @@ mod test {
         }
 
         let ctx_params = SdContextParams::with_model(model_path.to_str().unwrap());
-        ds.new_context(&ctx_params)
-            .expect("failed to create diffusion context");
+        ds.new_context(&ctx_params).expect("failed to create diffusion context");
 
         let gen_params = SdImgGenParams {
             prompt: "a lovely cat sitting on a roof".to_string(),
@@ -200,9 +186,7 @@ mod test {
             ..SdImgGenParams::default()
         };
 
-        let images = ds
-            .generate_image(&gen_params)
-            .expect("generate_image failed");
+        let images = ds.generate_image(&gen_params).expect("generate_image failed");
 
         assert_eq!(images.len(), 1);
         assert!(!images[0].data.is_empty());

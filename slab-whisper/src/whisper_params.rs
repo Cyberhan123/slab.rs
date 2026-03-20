@@ -60,25 +60,21 @@ impl Whisper {
         sampling_strategy: SamplingStrategy,
     ) -> FullParams<'a, 'b> {
         let mut fp = unsafe {
-            self.lib
-                .whisper_full_default_params(match sampling_strategy {
-                    SamplingStrategy::Greedy { .. } => {
-                        slab_whisper_sys::whisper_sampling_strategy_WHISPER_SAMPLING_GREEDY
-                    }
-                    SamplingStrategy::BeamSearch { .. } => {
-                        slab_whisper_sys::whisper_sampling_strategy_WHISPER_SAMPLING_BEAM_SEARCH
-                    }
-                } as _)
+            self.lib.whisper_full_default_params(match sampling_strategy {
+                SamplingStrategy::Greedy { .. } => {
+                    slab_whisper_sys::whisper_sampling_strategy_WHISPER_SAMPLING_GREEDY
+                }
+                SamplingStrategy::BeamSearch { .. } => {
+                    slab_whisper_sys::whisper_sampling_strategy_WHISPER_SAMPLING_BEAM_SEARCH
+                }
+            } as _)
         };
 
         match sampling_strategy {
             SamplingStrategy::Greedy { best_of } => {
                 fp.greedy.best_of = best_of;
             }
-            SamplingStrategy::BeamSearch {
-                mut beam_size,
-                patience,
-            } => {
+            SamplingStrategy::BeamSearch { mut beam_size, patience } => {
                 if beam_size < 1 {
                     beam_size = 1;
                 }
@@ -295,9 +291,9 @@ impl<'a, 'b> FullParams<'a, 'b> {
     /// Defaults to "en".
     pub fn set_language(&mut self, language: Option<&'a str>) {
         self.fp.language = match language {
-            Some(language) => CString::new(language)
-                .expect("Language contains null byte")
-                .into_raw() as *const _,
+            Some(language) => {
+                CString::new(language).expect("Language contains null byte").into_raw() as *const _
+            }
             None => std::ptr::null(),
         };
     }
@@ -453,17 +449,11 @@ impl<'a, 'b> FullParams<'a, 'b> {
                 //let user_data = user_data as *mut Box<dyn FnMut(SegmentCallbackData)>;
 
                 for i in s0..n_segments {
-                    let text = user_data
-                        .lib
-                        .whisper_full_get_segment_text_from_state(state, i);
+                    let text = user_data.lib.whisper_full_get_segment_text_from_state(state, i);
                     let text = CStr::from_ptr(text);
 
-                    let t0 = user_data
-                        .lib
-                        .whisper_full_get_segment_t0_from_state(state, i);
-                    let t1 = user_data
-                        .lib
-                        .whisper_full_get_segment_t1_from_state(state, i);
+                    let t0 = user_data.lib.whisper_full_get_segment_t0_from_state(state, i);
+                    let t1 = user_data.lib.whisper_full_get_segment_t1_from_state(state, i);
 
                     if let Ok(n) = text.to_str() {
                         (user_data.handler)(SegmentCallbackData {
@@ -532,17 +522,11 @@ impl<'a, 'b> FullParams<'a, 'b> {
                 //let user_data = user_data as *mut Box<dyn FnMut(SegmentCallbackData)>;
 
                 for i in s0..n_segments {
-                    let text = user_data
-                        .lib
-                        .whisper_full_get_segment_text_from_state(state, i);
+                    let text = user_data.lib.whisper_full_get_segment_text_from_state(state, i);
                     let text = CStr::from_ptr(text);
 
-                    let t0 = user_data
-                        .lib
-                        .whisper_full_get_segment_t0_from_state(state, i);
-                    let t1 = user_data
-                        .lib
-                        .whisper_full_get_segment_t1_from_state(state, i);
+                    let t0 = user_data.lib.whisper_full_get_segment_t0_from_state(state, i);
+                    let t1 = user_data.lib.whisper_full_get_segment_t1_from_state(state, i);
                     (user_data.handler)(SegmentCallbackData {
                         segment: i,
                         start_timestamp: t0,
@@ -879,9 +863,8 @@ impl<'a, 'b> FullParams<'a, 'b> {
     /// This method will panic if `vad_model_path` contains a null byte.
     pub fn set_vad_model_path(&mut self, vad_model_path: Option<&str>) {
         self.fp.vad_model_path = if let Some(vad_model_path) = vad_model_path {
-            CString::new(vad_model_path)
-                .expect("VAD model path contains null byte")
-                .into_raw() as *const c_char
+            CString::new(vad_model_path).expect("VAD model path contains null byte").into_raw()
+                as *const c_char
         } else {
             self.fp.vad = false;
 

@@ -30,11 +30,7 @@ async fn check_backend_status() -> Result<bool, String> {
 /// Get system information
 #[tauri::command]
 async fn get_system_info() -> Result<String, String> {
-    Ok(format!(
-        "OS: {}\nArch: {}",
-        std::env::consts::OS,
-        std::env::consts::ARCH
-    ))
+    Ok(format!("OS: {}\nArch: {}", std::env::consts::OS, std::env::consts::ARCH))
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
