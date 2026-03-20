@@ -82,7 +82,7 @@ impl Timing {
 
 impl Debug for Timing {
     fn fmt(&self, f: &mut Formatter) -> FmtResult {
-        write!(f, "Timing({})", self.to_string())
+        write!(f, "Timing({})", self)
     }
 }
 
@@ -341,7 +341,7 @@ pub struct TimeSpan {
 impl TimeSpan {
     /// Constructor of `TimeSpan`s.
     pub fn new(start: TimePoint, end: TimePoint) -> TimeSpan {
-        TimeSpan { start: start, end: end }
+        TimeSpan { start, end }
     }
 
     /// Get the length of the `TimeSpan` (can be negative).

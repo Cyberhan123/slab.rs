@@ -108,7 +108,7 @@ impl SsaFieldsInfo {
             end_field_idx: end_field_idx
                 .ok_or_else(|| Error::from(SsaMissingField { line_num, f: "End" }))?,
             text_field_idx: text_field_idx2,
-            num_fields: num_fields,
+            num_fields,
         })
     }
 }
@@ -281,7 +281,7 @@ impl SsaFile {
             .map(extract_file_parts_closure)
             .collect::<Result<Vec<Vec<SsaFilePart>>>>()?
             .into_iter()
-            .flat_map(|part| part)
+            .flatten()
             .collect();
         Ok(result)
     }

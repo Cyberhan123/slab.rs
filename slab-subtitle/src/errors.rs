@@ -39,7 +39,7 @@ pub enum ErrorKind {
 
     /// The attempted operation does not work on this format (not supported in this version of this library).
     #[error(
-        "updating subtitles is not implemented or supported by the `subparse` library for this format: {}",
+        "updating subtitles is not implemented or supported by this subtitle library for this format: {}",
         format.get_name()
     )]
     UpdatingEntriesNotSupported {
