@@ -7363,7 +7363,6 @@ dependencies = [
  "serde_json",
  "slab-core-macros",
  "slab-diffusion",
- "slab-diffusion-sys",
  "slab-libfetch",
  "slab-llama",
  "slab-subtitle",

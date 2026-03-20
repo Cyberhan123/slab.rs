@@ -63,17 +63,11 @@ use slab_core_macros::backend_handler;
 /// Parse a sample method string into the native enum value.
 fn parse_sample_method(s: &str) -> slab_diffusion::SampleMethod {
     use slab_diffusion::{
-        SAMPLE_EULER as SD_EULER, SAMPLE_EULER_A as SD_EULER_A, SAMPLE_LCM as SD_LCM,
+        SAMPLE_DPM2 as SD_DPM2, SAMPLE_DPM_PP_2M as SD_DPM_PP_2M,
+        SAMPLE_DPM_PP_2M_V2 as SD_DPM_PP_2M_V2, SAMPLE_DPM_PP_2S_A as SD_DPM_PP_2S_A,
+        SAMPLE_EULER as SD_EULER, SAMPLE_EULER_A as SD_EULER_A, SAMPLE_HEUN as SD_HEUN,
+        SAMPLE_IPNDM as SD_IPNDM, SAMPLE_IPNDM_V as SD_IPNDM_V, SAMPLE_LCM as SD_LCM,
         SAMPLE_METHOD_COUNT,
-    };
-    use slab_diffusion_sys::{
-        sample_method_t_DPM2_SAMPLE_METHOD as SD_DPM2,
-        sample_method_t_DPMPP2M_SAMPLE_METHOD as SD_DPM_PP_2M,
-        sample_method_t_DPMPP2Mv2_SAMPLE_METHOD as SD_DPM_PP_2M_V2,
-        sample_method_t_DPMPP2S_A_SAMPLE_METHOD as SD_DPM_PP_2S_A,
-        sample_method_t_HEUN_SAMPLE_METHOD as SD_HEUN,
-        sample_method_t_IPNDM_SAMPLE_METHOD as SD_IPNDM,
-        sample_method_t_IPNDM_V_SAMPLE_METHOD as SD_IPNDM_V,
     };
     match s {
         "euler" => SD_EULER,
@@ -93,11 +87,9 @@ fn parse_sample_method(s: &str) -> slab_diffusion::SampleMethod {
 /// Parse a scheduler string into the native enum value.
 fn parse_scheduler(s: &str) -> slab_diffusion::Scheduler {
     use slab_diffusion::{
-        SCHEDULER_COUNT, SCHEDULER_DISCRETE as SD_DISCRETE, SCHEDULER_KARRAS as SD_KARRAS,
-    };
-    use slab_diffusion_sys::{
-        scheduler_t_AYS_SCHEDULER as SD_AYS, scheduler_t_EXPONENTIAL_SCHEDULER as SD_EXPONENTIAL,
-        scheduler_t_GITS_SCHEDULER as SD_GITS,
+        SCHEDULER_AYS as SD_AYS, SCHEDULER_COUNT, SCHEDULER_DISCRETE as SD_DISCRETE,
+        SCHEDULER_EXPONENTIAL as SD_EXPONENTIAL, SCHEDULER_GITS as SD_GITS,
+        SCHEDULER_KARRAS as SD_KARRAS,
     };
     match s {
         "discrete" => SD_DISCRETE,
