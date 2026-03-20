@@ -1,6 +1,7 @@
 use thiserror::Error;
 
 /// Global error type for the slab-types crate.
+#[non_exhaustive]
 #[derive(Debug, Error)]
 pub enum SlabTypeError {
     /// A required value was missing or null.
