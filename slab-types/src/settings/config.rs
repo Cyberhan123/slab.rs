@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -139,22 +137,27 @@ pub struct DiffusionConfig {
 }
 
 /// Paths to diffusion model files.
+///
+/// Fields are stored as `Option<String>` (raw setting values from the PMID store).
+/// Callers that perform file I/O should convert to `PathBuf` at the boundary where
+/// the path is used, consistent with how `DiffusionLoadOptions` (which uses `PathBuf`)
+/// is populated from these values.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DiffusionPathsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<PathBuf>,
+    pub model: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub vae: Option<PathBuf>,
+    pub vae: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub taesd: Option<PathBuf>,
+    pub taesd: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub lora_model_dir: Option<PathBuf>,
+    pub lora_model_dir: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub clip_l: Option<PathBuf>,
+    pub clip_l: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub clip_g: Option<PathBuf>,
+    pub clip_g: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub t5xxl: Option<PathBuf>,
+    pub t5xxl: Option<String>,
 }
 
 /// Diffusion performance tuning settings.

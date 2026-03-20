@@ -59,9 +59,9 @@ impl FromStr for RuntimeBackendId {
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "ggml.llama" | "ggml-llama" => Ok(Self::GgmlLlama),
-            "ggml.whisper" | "ggml-whisper" => Ok(Self::GgmlWhisper),
-            "ggml.diffusion" | "ggml-diffusion" => Ok(Self::GgmlDiffusion),
+            "ggml.llama" | "ggml-llama" | "llama" => Ok(Self::GgmlLlama),
+            "ggml.whisper" | "ggml-whisper" | "whisper" => Ok(Self::GgmlWhisper),
+            "ggml.diffusion" | "ggml-diffusion" | "diffusion" => Ok(Self::GgmlDiffusion),
             "candle.llama" | "candle-llama" => Ok(Self::CandleLlama),
             "candle.whisper" | "candle-whisper" => Ok(Self::CandleWhisper),
             "candle.diffusion" | "candle-diffusion" => Ok(Self::CandleDiffusion),
@@ -127,6 +127,17 @@ mod tests {
         assert_eq!(
             RuntimeBackendId::from_str("candle-diffusion").unwrap(),
             RuntimeBackendId::CandleDiffusion
+        );
+    }
+
+    #[test]
+    fn parses_legacy_unqualified_aliases() {
+        // Legacy aliases map to GGML variants for backward compatibility.
+        assert_eq!(RuntimeBackendId::from_str("llama").unwrap(), RuntimeBackendId::GgmlLlama);
+        assert_eq!(RuntimeBackendId::from_str("whisper").unwrap(), RuntimeBackendId::GgmlWhisper);
+        assert_eq!(
+            RuntimeBackendId::from_str("diffusion").unwrap(),
+            RuntimeBackendId::GgmlDiffusion
         );
     }
 
