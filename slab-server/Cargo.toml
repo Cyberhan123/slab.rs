@@ -16,6 +16,7 @@ path = "src/main.rs"
 # Core AI runtime
 slab-core     = { workspace = true }
 slab-proto    = { workspace = true }
+slab-types    = { workspace = true }
 slab-libfetch = { workspace = true }
 hf-hub        = { workspace = true }
 
