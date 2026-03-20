@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use crate::backend::RuntimeBackendId;
 use crate::inference::JsonOptions;
 
+#[non_exhaustive]
 #[derive(
     Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash, PartialOrd, Ord,
 )]
@@ -18,6 +19,7 @@ pub enum ModelFamily {
     Onnx,
 }
 
+#[non_exhaustive]
 #[derive(
     Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash, PartialOrd, Ord,
 )]
@@ -39,6 +41,7 @@ pub struct DriverHints {
     pub require_streaming: bool,
 }
 
+#[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ModelSource {

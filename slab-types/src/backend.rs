@@ -4,13 +4,20 @@ use std::str::FromStr;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::error::SlabTypeError;
+
 /// Canonical backend identifiers exposed on the runtime boundary today.
+#[non_exhaustive]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum RuntimeBackendId {
     GgmlLlama,
     GgmlWhisper,
     GgmlDiffusion,
+    CandleLlama,
+    CandleWhisper,
+    CandleDiffusion,
+    Onnx,
 }
 
 impl RuntimeBackendId {
@@ -20,15 +27,23 @@ impl RuntimeBackendId {
             Self::GgmlLlama => "ggml.llama",
             Self::GgmlWhisper => "ggml.whisper",
             Self::GgmlDiffusion => "ggml.diffusion",
+            Self::CandleLlama => "candle.llama",
+            Self::CandleWhisper => "candle.whisper",
+            Self::CandleDiffusion => "candle.diffusion",
+            Self::Onnx => "onnx",
         }
     }
 
     /// Return the short human-friendly alias for the backend.
     pub const fn short_name(self) -> &'static str {
         match self {
-            Self::GgmlLlama => "llama",
-            Self::GgmlWhisper => "whisper",
-            Self::GgmlDiffusion => "diffusion",
+            Self::GgmlLlama => "ggml-llama",
+            Self::GgmlWhisper => "ggml-whisper",
+            Self::GgmlDiffusion => "ggml-diffusion",
+            Self::CandleLlama => "candle-llama",
+            Self::CandleWhisper => "candle-whisper",
+            Self::CandleDiffusion => "candle-diffusion",
+            Self::Onnx => "onnx",
         }
     }
 }
@@ -40,14 +55,18 @@ impl fmt::Display for RuntimeBackendId {
 }
 
 impl FromStr for RuntimeBackendId {
-    type Err = String;
+    type Err = SlabTypeError;
 
     fn from_str(value: &str) -> Result<Self, Self::Err> {
         match value.trim().to_ascii_lowercase().as_str() {
-            "ggml.llama" | "llama" => Ok(Self::GgmlLlama),
-            "ggml.whisper" | "whisper" => Ok(Self::GgmlWhisper),
-            "ggml.diffusion" | "diffusion" => Ok(Self::GgmlDiffusion),
-            other => Err(format!("unknown runtime backend id: {other}")),
+            "ggml.llama" | "ggml-llama" => Ok(Self::GgmlLlama),
+            "ggml.whisper" | "ggml-whisper" => Ok(Self::GgmlWhisper),
+            "ggml.diffusion" | "ggml-diffusion" => Ok(Self::GgmlDiffusion),
+            "candle.llama" | "candle-llama" => Ok(Self::CandleLlama),
+            "candle.whisper" | "candle-whisper" => Ok(Self::CandleWhisper),
+            "candle.diffusion" | "candle-diffusion" => Ok(Self::CandleDiffusion),
+            "onnx" => Ok(Self::Onnx),
+            other => Err(SlabTypeError::Parse(format!("unknown runtime backend id: {other}"))),
         }
     }
 }
@@ -68,15 +87,52 @@ mod tests {
             RuntimeBackendId::from_str("ggml.diffusion").unwrap(),
             RuntimeBackendId::GgmlDiffusion
         );
+        assert_eq!(
+            RuntimeBackendId::from_str("candle.llama").unwrap(),
+            RuntimeBackendId::CandleLlama
+        );
+        assert_eq!(
+            RuntimeBackendId::from_str("candle.whisper").unwrap(),
+            RuntimeBackendId::CandleWhisper
+        );
+        assert_eq!(
+            RuntimeBackendId::from_str("candle.diffusion").unwrap(),
+            RuntimeBackendId::CandleDiffusion
+        );
+        assert_eq!(RuntimeBackendId::from_str("onnx").unwrap(), RuntimeBackendId::Onnx);
     }
 
     #[test]
     fn parses_short_backend_aliases() {
-        assert_eq!(RuntimeBackendId::from_str("llama").unwrap(), RuntimeBackendId::GgmlLlama);
-        assert_eq!(RuntimeBackendId::from_str("whisper").unwrap(), RuntimeBackendId::GgmlWhisper);
         assert_eq!(
-            RuntimeBackendId::from_str("diffusion").unwrap(),
+            RuntimeBackendId::from_str("ggml-llama").unwrap(),
+            RuntimeBackendId::GgmlLlama
+        );
+        assert_eq!(
+            RuntimeBackendId::from_str("ggml-whisper").unwrap(),
+            RuntimeBackendId::GgmlWhisper
+        );
+        assert_eq!(
+            RuntimeBackendId::from_str("ggml-diffusion").unwrap(),
             RuntimeBackendId::GgmlDiffusion
         );
+        assert_eq!(
+            RuntimeBackendId::from_str("candle-llama").unwrap(),
+            RuntimeBackendId::CandleLlama
+        );
+        assert_eq!(
+            RuntimeBackendId::from_str("candle-whisper").unwrap(),
+            RuntimeBackendId::CandleWhisper
+        );
+        assert_eq!(
+            RuntimeBackendId::from_str("candle-diffusion").unwrap(),
+            RuntimeBackendId::CandleDiffusion
+        );
+    }
+
+    #[test]
+    fn returns_parse_error_for_unknown_backend() {
+        let err = RuntimeBackendId::from_str("unknown-backend").unwrap_err();
+        assert!(err.to_string().contains("unknown runtime backend id"));
     }
 }

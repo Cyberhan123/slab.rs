@@ -1,8 +1,10 @@
+use std::path::PathBuf;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// A configured cloud/remote AI provider.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct CloudProviderConfig {
     /// Unique provider identifier.
     #[serde(alias = "provider_id", alias = "providerId")]
@@ -24,7 +26,7 @@ pub struct CloudProviderConfig {
 // ── Snapshot of all PMID-managed settings ────────────────────────────────────
 
 /// Typed snapshot of all PMID-managed settings values.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct PmidConfig {
     pub setup: SetupConfig,
     pub runtime: RuntimeConfig,
@@ -33,7 +35,7 @@ pub struct PmidConfig {
 }
 
 /// Setup / first-run settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SetupConfig {
     /// Whether the initial setup wizard has been completed.
     pub initialized: bool,
@@ -42,7 +44,7 @@ pub struct SetupConfig {
 }
 
 /// FFmpeg-related setup settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SetupFfmpegConfig {
     /// Whether FFmpeg should be downloaded automatically when not found.
     /// Reserved for future use; not yet wired to any download logic.
@@ -53,7 +55,7 @@ pub struct SetupFfmpegConfig {
 }
 
 /// Backend library setup settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SetupBackendsConfig {
     /// Directory where backend libraries are stored.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -68,7 +70,7 @@ pub struct SetupBackendsConfig {
 }
 
 /// Release tag and asset for a single backend library.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SetupBackendReleaseConfig {
     /// The release tag (e.g. `"v1.2.3"`).
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,7 +83,7 @@ pub struct SetupBackendReleaseConfig {
 // ── Runtime settings ─────────────────────────────────────────────────────────
 
 /// Runtime engine settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RuntimeConfig {
     /// Directory used to cache downloaded models.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -93,7 +95,7 @@ pub struct RuntimeConfig {
 }
 
 /// Llama runtime settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RuntimeLlamaConfig {
     /// Number of parallel llama workers.
     pub num_workers: u32,
@@ -103,14 +105,14 @@ pub struct RuntimeLlamaConfig {
 }
 
 /// Generic single-backend worker settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RuntimeWorkerConfig {
     /// Number of parallel workers for this backend.
     pub num_workers: u32,
 }
 
 /// Model auto-unload settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RuntimeModelAutoUnloadConfig {
     /// Whether idle models should be unloaded automatically.
     pub enabled: bool,
@@ -121,7 +123,7 @@ pub struct RuntimeModelAutoUnloadConfig {
 // ── Chat settings ─────────────────────────────────────────────────────────────
 
 /// Chat / LLM provider settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ChatConfig {
     /// Configured cloud/remote AI providers.
     pub providers: Vec<CloudProviderConfig>,
@@ -130,33 +132,33 @@ pub struct ChatConfig {
 // ── Diffusion settings ────────────────────────────────────────────────────────
 
 /// Image diffusion settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DiffusionConfig {
     pub paths: DiffusionPathsConfig,
     pub performance: DiffusionPerformanceConfig,
 }
 
 /// Paths to diffusion model files.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DiffusionPathsConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub model: Option<String>,
+    pub model: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub vae: Option<String>,
+    pub vae: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub taesd: Option<String>,
+    pub taesd: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub lora_model_dir: Option<String>,
+    pub lora_model_dir: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub clip_l: Option<String>,
+    pub clip_l: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub clip_g: Option<String>,
+    pub clip_g: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub t5xxl: Option<String>,
+    pub t5xxl: Option<PathBuf>,
 }
 
 /// Diffusion performance tuning settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DiffusionPerformanceConfig {
     pub flash_attn: bool,
     pub keep_vae_on_cpu: bool,
