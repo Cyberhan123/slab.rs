@@ -1,47 +1,34 @@
 # AI Skill Map
 
-This file maps slab.rs tasks to the local skills under `.agents/skills`.
+slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should start from the codebase, and a local skill should only be opened when the task clearly matches it.
 
-## Project Skills
+## Direct Skill Routing
 
-- `slab-frontend-page`
-  Use for routed page work in `slab-app/src/pages`, `routes`, `layouts`, and page-local chat surfaces.
-- `slab-ui-primitives`
-  Use for shared UI primitives, form building blocks, and theme-level frontend patterns.
-- `slab-tauri-app`
-  Use for `src-tauri`, capabilities, sidecars, plugin webviews, and desktop security boundaries.
-- `slab-server-feature`
-  Use for `slab-server` API, service, context, persistence, and gateway-side feature work.
-- `slab-runtime-async`
-  Use for scheduler and async runtime internals in `slab-core` and `slab-runtime`.
-- `slab-ui-review`
-  Use for project-specific UI review and pre-merge UX/accessibility checks.
-
-## Support Skills To Reference Through Project Skills
-
-- `frontend-design`
-  Use through `slab-frontend-page` when the task needs a stronger visual direction.
-- `ui-ux-pro-max`
-  Use through `slab-frontend-page` or `slab-ui-review` when you want a design-system-first approach or remediation ideas.
 - `use-x-chat`
-  Use through `slab-frontend-page` for `useXChat` and `useXConversations` work in `slab-app/src/pages/chat/**`.
+  Use for `useXChat`, `useXConversations`, reload/abort flow, and page-local message state in `slab-app/src/pages/chat/**`.
 - `x-request`
-  Use through `slab-frontend-page` for `XRequest` transport, streaming, and auth-safe frontend request wiring.
+  Use for chat transport, streaming params, and request wiring in `slab-app/src/pages/chat/chat-context.ts`.
 - `x-markdown`
-  Use through `slab-frontend-page` or `slab-ui-review` for assistant Markdown rendering and streaming content behavior.
+  Use for assistant Markdown rendering and streaming content display in the chat UI.
 - `x-chat-provider`
-  Use through `slab-frontend-page` only when the built-in `DeepSeekChatProvider` no longer matches the backend shape.
+  Use only when the built-in `DeepSeekChatProvider` no longer matches the backend response shape.
 - `shadcn-ui`
-  Use through `slab-ui-primitives` for generic primitive patterns.
+  Use for shared UI primitives, forms, dialogs, tables, and Tailwind-based component work.
 - `tauri-v2`
-  Use through `slab-tauri-app` for Tauri API details and common pitfalls.
+  Use for `src-tauri`, Tauri commands, capabilities, IPC, plugins, and runtime integration.
 
 ## Selection Order
 
-- Page feature in `slab-app`: `slab-frontend-page`
-- Chat UI in `slab-app/src/pages/chat`: `slab-frontend-page`, then `use-x-chat`, `x-request`, or `x-markdown` as needed; add `x-chat-provider` only for custom provider work
-- Shared component or theme work: `slab-ui-primitives`
-- Tauri host or permission work: `slab-tauri-app`
-- HTTP gateway feature in `slab-server`: `slab-server-feature`
-- Runtime orchestration or backend concurrency: `slab-runtime-async`
-- UI review: `slab-ui-review`, with `ui-ux-pro-max` only when you need design remediation ideas
+- General repo work: read the code first, no skill required by default.
+- Chat state behavior: `use-x-chat`
+- Chat request wiring: `x-request`
+- Chat Markdown rendering: `x-markdown`
+- Custom chat provider adaptation: `x-chat-provider` only after confirming request config alone is not enough
+- Shared frontend primitives or forms: `shadcn-ui`
+- Tauri host and permission work: `tauri-v2`
+
+## Common Pairings
+
+- Chat flow changes often need both `use-x-chat` and `x-request`.
+- Chat rendering changes sometimes pair `use-x-chat` with `x-markdown`.
+- A custom provider change should usually start with `use-x-chat` and `x-request`, then add `x-chat-provider` only if needed.
