@@ -1,14 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Textarea } from '@/components/ui/textarea';
-import { Input } from '@/components/ui/input';
-import { Slider } from '@/components/ui/slider';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
-import { Badge } from '@/components/ui/badge';
-import { Separator } from '@/components/ui/separator';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   ChevronDown,
@@ -17,18 +8,45 @@ import {
   ImageIcon,
   Loader2,
   Sparkles,
-  Upload,
   X,
   ZoomIn,
 } from 'lucide-react';
+
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
+import { Textarea } from '@/components/ui/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from '@/components/ui/collapsible';
+import {
+  CompactConfigSummary,
+  SoftPanel,
+  SplitWorkbench,
+  StageEmptyState,
+  UploadDropzone,
+} from '@/components/ui/workspace';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import { useImageModelPreparation } from './hooks/use-image-model-preparation';
 
-// ── Constants ─────────────────────────────────────────────────────────────────
-
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
+const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
+  'http://localhost:3000';
 
 const SAMPLE_METHODS = [
   { value: 'auto', label: 'Auto' },
@@ -56,22 +74,22 @@ const SCHEDULERS = [
 const POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_ATTEMPTS = 150;
 
-// ── Types ─────────────────────────────────────────────────────────────────────
-
-interface GeneratedImage {
+type GeneratedImage = {
   src: string;
   prompt: string;
   width: number;
   height: number;
-  mode: string;
-}
+  mode: 'txt2img' | 'img2img';
+};
 
-interface TaskResult {
+type TaskResult = {
   image?: string;
   images?: string[];
-}
+};
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+type ImageRouteState = {
+  prompt?: string;
+};
 
 async function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -82,18 +100,36 @@ async function fileToDataUri(file: File): Promise<string> {
   });
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
-
 export default function ImagePage() {
-  // ── Mode ────────────────────────────────────────────────────────────────────
+  const location = useLocation();
   const [mode, setMode] = useState<'txt2img' | 'img2img'>('txt2img');
-  usePageHeader({
-    ...PAGE_HEADER_META.image,
-    subtitle:
-      mode === 'img2img'
-        ? 'Refine an input image with diffusion controls'
-        : 'Generate images from text prompts',
-  });
+  const [prompt, setPrompt] = useState('');
+  const [negativePrompt, setNegativePrompt] = useState('');
+  const [widthStr, setWidthStr] = useState('512');
+  const [heightStr, setHeightStr] = useState('512');
+  const [numImages, setNumImages] = useState(1);
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const [cfgScale, setCfgScale] = useState(7.0);
+  const [guidance, setGuidance] = useState(3.5);
+  const [steps, setSteps] = useState(20);
+  const [seed, setSeed] = useState(-1);
+  const [sampleMethod, setSampleMethod] = useState('auto');
+  const [scheduler, setScheduler] = useState('auto');
+  const [clipSkip, setClipSkip] = useState(0);
+  const [eta, setEta] = useState(0);
+  const [strength, setStrength] = useState(0.75);
+  const [initImageDataUri, setInitImageDataUri] = useState<string | null>(null);
+  const [taskId, setTaskId] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPolling, setIsPolling] = useState(false);
+  const [images, setImages] = useState<GeneratedImage[]>([]);
+  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
+
+  const initImageInputRef = useRef<HTMLInputElement>(null);
+  const pollAttempts = useRef(0);
+  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortRef = useRef(false);
+
   const {
     catalogLoading,
     isPreparingModel,
@@ -103,46 +139,52 @@ export default function ImagePage() {
     setSelectedModelId,
   } = useImageModelPreparation();
 
-  // ── Model selection ─────────────────────────────────────────────────────────
-  // ── Basic params ────────────────────────────────────────────────────────────
-  const [prompt, setPrompt] = useState('');
-  const [negativePrompt, setNegativePrompt] = useState('');
-  const [widthStr, setWidthStr] = useState('512');
-  const [heightStr, setHeightStr] = useState('512');
-  const [numImages, setNumImages] = useState(1);
+  const getPrefilledPrompt = useCallback(() => {
+    const statePrompt =
+      typeof (location.state as ImageRouteState | null)?.prompt === 'string'
+        ? (location.state as ImageRouteState).prompt
+        : null;
 
-  // ── Advanced params ─────────────────────────────────────────────────────────
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [cfgScale, setCfgScale] = useState(7.0);
-  const [guidance, setGuidance] = useState(3.5);
-  const [steps, setSteps] = useState(20);
-  const [seed, setSeed] = useState(-1);
-  const [sampleMethod, setSampleMethod] = useState('auto');
-  const [scheduler, setScheduler] = useState('auto');
-  const [clipSkip, setClipSkip] = useState(0);
-  const [eta, setEta] = useState(0.0);
-  const [strength, setStrength] = useState(0.75);
+    const search = new URLSearchParams(location.search);
+    const queryPrompt = search.get('prompt') ?? search.get('q');
 
-  // ── Init image (img2img) ────────────────────────────────────────────────────
-  const [initImageDataUri, setInitImageDataUri] = useState<string | null>(null);
-  const initImageInputRef = useRef<HTMLInputElement>(null);
+    return (statePrompt ?? queryPrompt ?? '').trim();
+  }, [location.search, location.state]);
 
-  // ── Task state ──────────────────────────────────────────────────────────────
-  const [taskId, setTaskId] = useState<string | null>(null);
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isPolling, setIsPolling] = useState(false);
-  const [images, setImages] = useState<GeneratedImage[]>([]);
-  const [zoomedImage, setZoomedImage] = useState<string | null>(null);
-  const pollAttempts = useRef(0);
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef(false);
+  useEffect(() => {
+    const prefilled = getPrefilledPrompt();
+    if (prefilled) {
+      setPrompt(prefilled);
+    }
+  }, [getPrefilledPrompt, location.key]);
 
-  // ── Model loading ────────────────────────────────────────────────────────────
-  // ── Init image handling ──────────────────────────────────────────────────────
+  usePageHeader({
+    ...PAGE_HEADER_META.image,
+    subtitle:
+      mode === 'img2img'
+        ? 'Refine an input image with diffusion controls'
+        : 'Generate images from text prompts',
+  });
+
+  const isGenerating = isSubmitting || isPolling;
+  const isBusy = isGenerating || isPreparingModel;
+
+  const summaryItems = useMemo(
+    () => [
+      { label: 'Mode', value: mode },
+      { label: 'Size', value: `${widthStr || '--'} x ${heightStr || '--'}` },
+      { label: 'Batch', value: numImages },
+      { label: 'Result Count', value: images.length },
+    ],
+    [heightStr, images.length, mode, numImages, widthStr],
+  );
+
   const handleInitImageChange = useCallback(
-    async (e: React.ChangeEvent<HTMLInputElement>) => {
-      const file = e.target.files?.[0];
-      if (!file) return;
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) {
+        return;
+      }
       try {
         const dataUri = await fileToDataUri(file);
         setInitImageDataUri(dataUri);
@@ -153,12 +195,12 @@ export default function ImagePage() {
     [],
   );
 
-  // ── Submit ───────────────────────────────────────────────────────────────────
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async () => {
     if (!prompt.trim()) {
       toast.error('Please enter a prompt');
       return;
     }
+
     if (mode === 'img2img' && !initImageDataUri) {
       toast.error('Please upload an init image for img2img mode');
       return;
@@ -168,9 +210,11 @@ export default function ImagePage() {
 
     try {
       const modelPath = await prepareSelectedModel();
-
       setIsSubmitting(true);
-      const [w, h] = [parseInt(widthStr, 10) || 512, parseInt(heightStr, 10) || 512];
+
+      const width = Number.parseInt(widthStr, 10) || 512;
+      const height = Number.parseInt(heightStr, 10) || 512;
+
       const response = await fetch(`${API_BASE_URL}/v1/images/generations`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -179,8 +223,8 @@ export default function ImagePage() {
           prompt,
           negative_prompt: negativePrompt || undefined,
           n: numImages,
-          width: w,
-          height: h,
+          width,
+          height,
           cfg_scale: cfgScale,
           guidance,
           steps,
@@ -204,17 +248,36 @@ export default function ImagePage() {
       setTaskId(operation_id);
       setIsPolling(true);
       pollAttempts.current = 0;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(msg);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      toast.error(message);
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [
+    cfgScale,
+    clipSkip,
+    eta,
+    guidance,
+    heightStr,
+    initImageDataUri,
+    mode,
+    negativePrompt,
+    numImages,
+    prepareSelectedModel,
+    prompt,
+    sampleMethod,
+    scheduler,
+    seed,
+    steps,
+    strength,
+    widthStr,
+  ]);
 
-  // ── Polling ──────────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (!isPolling || !taskId) return;
+    if (!isPolling || !taskId) {
+      return;
+    }
 
     const poll = async () => {
       if (abortRef.current) {
@@ -232,7 +295,9 @@ export default function ImagePage() {
 
       try {
         const statusRes = await fetch(`${API_BASE_URL}/v1/tasks/${taskId}`);
-        if (!statusRes.ok) throw new Error(`status ${statusRes.status}`);
+        if (!statusRes.ok) {
+          throw new Error(`status ${statusRes.status}`);
+        }
         const status = (await statusRes.json()) as { status: string };
 
         if (status.status === 'failed') {
@@ -244,30 +309,36 @@ export default function ImagePage() {
 
         if (status.status === 'succeeded') {
           const resultRes = await fetch(`${API_BASE_URL}/v1/tasks/${taskId}/result`);
-          if (!resultRes.ok) throw new Error(`result ${resultRes.status}`);
+          if (!resultRes.ok) {
+            throw new Error(`result ${resultRes.status}`);
+          }
           const result = (await resultRes.json()) as TaskResult;
 
-          const srcs: string[] = result.images ?? (result.image ? [result.image] : []);
-          const [w, h] = [parseInt(widthStr, 10) || 512, parseInt(heightStr, 10) || 512];
-          const newImages: GeneratedImage[] = srcs.map((src) => ({
+          const srcs = result.images ?? (result.image ? [result.image] : []);
+          const width = Number.parseInt(widthStr, 10) || 512;
+          const height = Number.parseInt(heightStr, 10) || 512;
+
+          const generated: GeneratedImage[] = srcs.map((src) => ({
             src,
             prompt,
-            width: w,
-            height: h,
+            width,
+            height,
             mode,
           }));
-          setImages((prev) => [...newImages, ...prev]);
-          toast.success(`Generated ${newImages.length} image${newImages.length !== 1 ? 's' : ''}!`);
+
+          setImages((previous) => [...generated, ...previous]);
+          toast.success(
+            `Generated ${generated.length} image${generated.length !== 1 ? 's' : ''}!`,
+          );
           setIsPolling(false);
           setTaskId(null);
           return;
         }
 
-        // Still running — poll again.
         pollTimer.current = setTimeout(poll, POLL_INTERVAL_MS);
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
-        toast.error(`Polling error: ${msg}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        toast.error(`Polling error: ${message}`);
         setIsPolling(false);
         setTaskId(null);
       }
@@ -275,19 +346,22 @@ export default function ImagePage() {
 
     pollTimer.current = setTimeout(poll, POLL_INTERVAL_MS);
     return () => {
-      if (pollTimer.current) clearTimeout(pollTimer.current);
+      if (pollTimer.current) {
+        clearTimeout(pollTimer.current);
+      }
     };
-  }, [isPolling, taskId, prompt, widthStr, heightStr, mode]);
+  }, [heightStr, isPolling, mode, prompt, taskId, widthStr]);
 
   const handleCancel = useCallback(async () => {
     abortRef.current = true;
-    if (pollTimer.current) clearTimeout(pollTimer.current);
+    if (pollTimer.current) {
+      clearTimeout(pollTimer.current);
+    }
     if (taskId) {
       try {
         await fetch(`${API_BASE_URL}/v1/tasks/${taskId}/cancel`, { method: 'POST' });
-      } catch (err) {
-        // Best-effort — don't block UI cleanup on server errors.
-        console.error('Failed to cancel task', err);
+      } catch (error) {
+        console.error('Failed to cancel task', error);
       }
     }
     setIsPolling(false);
@@ -295,405 +369,455 @@ export default function ImagePage() {
   }, [taskId]);
 
   const handleDownload = useCallback((src: string, index: number) => {
-    const a = document.createElement('a');
-    a.href = src;
-    a.download = `generated-${index + 1}.png`;
-    a.click();
+    const anchor = document.createElement('a');
+    anchor.href = src;
+    anchor.download = `generated-${index + 1}.png`;
+    anchor.click();
   }, []);
 
-  // ── Render ───────────────────────────────────────────────────────────────────
-  const isGenerating = isSubmitting || isPolling;
-  const isBusy = isGenerating || isPreparingModel;
-
   return (
-    <div className="h-full overflow-y-auto lg:overflow-hidden">
-      <div className="container mx-auto flex h-full max-w-6xl flex-col px-4 py-6">
-        <div className="grid grid-cols-1 gap-6 lg:min-h-0 lg:flex-1 lg:grid-cols-3">
-          {/* ── Left panel: controls ── */}
-          <div className="space-y-4 lg:col-span-1 lg:min-h-0 lg:overflow-y-auto lg:pr-3">
-          {/* Mode tabs */}
-          <Tabs value={mode} onValueChange={(v) => setMode(v as typeof mode)}>
-            <TabsList className="w-full">
-              <TabsTrigger value="txt2img" className="flex-1">Text → Image</TabsTrigger>
-              <TabsTrigger value="img2img" className="flex-1">Image → Image</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="txt2img" className="mt-0" />
-            <TabsContent value="img2img" className="mt-0">
-              {/* Init image upload */}
-              <div className="mt-3 space-y-2">
-                <Label>Init Image</Label>
-                {initImageDataUri ? (
-                  <div className="relative">
-                    <img
-                      src={initImageDataUri}
-                      alt="init"
-                      className="w-full rounded-md border object-cover max-h-40"
-                    />
-                    <Button
-                      size="icon"
-                      variant="destructive"
-                      className="absolute top-1 right-1 h-6 w-6"
-                      onClick={() => setInitImageDataUri(null)}
-                    >
-                      <X className="h-3 w-3" />
-                    </Button>
-                  </div>
-                ) : (
-                  <div
-                    className="border-2 border-dashed rounded-md p-6 flex flex-col items-center gap-2 cursor-pointer hover:border-primary transition-colors"
+    <div className="h-full w-full overflow-y-auto">
+      <SplitWorkbench
+        className="h-full"
+        sidebar={
+          <>
+            <SoftPanel className="space-y-4">
+              <Tabs value={mode} onValueChange={(value) => setMode(value as typeof mode)}>
+                <TabsList className="grid w-full grid-cols-2">
+                  <TabsTrigger value="txt2img">Text to Image</TabsTrigger>
+                  <TabsTrigger value="img2img">Image to Image</TabsTrigger>
+                </TabsList>
+                <TabsContent value="txt2img" className="mt-0" />
+                <TabsContent value="img2img" className="mt-4">
+                  <UploadDropzone
+                    title={initImageDataUri ? 'Init image ready' : 'Upload init image'}
+                    description={
+                      initImageDataUri
+                        ? 'Click to replace image'
+                        : 'PNG/JPEG for img2img mode'
+                    }
+                    actionLabel="Choose image"
+                    preview={
+                      initImageDataUri ? (
+                        <div className="relative">
+                          <img
+                            src={initImageDataUri}
+                            alt="init"
+                            className="max-h-52 w-full rounded-[20px] object-cover"
+                          />
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="icon-sm"
+                            className="absolute top-2 right-2"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              setInitImageDataUri(null);
+                            }}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      ) : undefined
+                    }
                     onClick={() => initImageInputRef.current?.click()}
-                  >
-                    <Upload className="h-6 w-6 text-muted-foreground" />
-                    <span className="text-sm text-muted-foreground">
-                      Click to upload PNG / JPEG
-                    </span>
-                  </div>
-                )}
-                <input
-                  ref={initImageInputRef}
-                  type="file"
-                  accept="image/png,image/jpeg"
-                  className="hidden"
-                  onChange={handleInitImageChange}
-                />
+                  />
+                  <input
+                    ref={initImageInputRef}
+                    type="file"
+                    accept="image/png,image/jpeg"
+                    className="hidden"
+                    onChange={handleInitImageChange}
+                  />
+                </TabsContent>
+              </Tabs>
+
+              <div className="space-y-2">
+                <Label>Model</Label>
+                <Select
+                  value={selectedModelId}
+                  onValueChange={setSelectedModelId}
+                  disabled={isBusy || modelOptions.length === 0}
+                >
+                  <SelectTrigger variant="pill" size="pill" className="w-full">
+                    <SelectValue
+                      placeholder={catalogLoading ? 'Loading models...' : 'Select model'}
+                    />
+                  </SelectTrigger>
+                  <SelectContent variant="pill">
+                    {modelOptions.length === 0 ? (
+                      <SelectItem value="__none" disabled>
+                        No diffusion models found
+                      </SelectItem>
+                    ) : (
+                      modelOptions.map((model) => (
+                        <SelectItem key={model.id} value={model.id}>
+                          <span className="flex min-w-0 items-center gap-2">
+                            <span className="truncate">{model.label}</span>
+                            {model.pending ? <Badge variant="chip">Downloading</Badge> : null}
+                            {!model.downloaded ? <Badge variant="chip">Not local</Badge> : null}
+                          </span>
+                        </SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
-            </TabsContent>
-          </Tabs>
 
-          {/* Model selector */}
-          <div className="space-y-1.5">
-            <Label>Model</Label>
-            <Select
-              value={selectedModelId}
-              onValueChange={setSelectedModelId}
-              disabled={isBusy || modelOptions.length === 0}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder={catalogLoading ? 'Loading…' : 'Select a model'} />
-              </SelectTrigger>
-              <SelectContent>
-                {modelOptions.length === 0 && (
-                  <SelectItem value="__none" disabled>
-                    No diffusion models found
-                  </SelectItem>
-                )}
-                {modelOptions.map((m) => (
-                  <SelectItem key={m.id} value={m.id}>
-                    <span className="flex items-center gap-2">
-                      {m.label}
-                      {m.pending && (
-                        <Badge variant="secondary" className="text-xs">Downloading</Badge>
-                      )}
-                      {!m.downloaded && (
-                        <Badge variant="outline" className="text-xs">Not downloaded</Badge>
-                      )}
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-muted-foreground">
-              Missing diffusion models are downloaded automatically when you generate.
-            </p>
-          </div>
-
-          {/* Prompt */}
-          <div className="space-y-1.5">
-            <Label htmlFor="prompt">Prompt</Label>
-            <Textarea
-              id="prompt"
-              placeholder="a cat sitting on a rooftop at sunset…"
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              rows={3}
-              className="resize-none"
-            />
-          </div>
-
-          {/* Negative prompt */}
-          <div className="space-y-1.5">
-            <Label htmlFor="neg-prompt">Negative Prompt</Label>
-            <Textarea
-              id="neg-prompt"
-              placeholder="blurry, low quality, ugly…"
-              value={negativePrompt}
-              onChange={(e) => setNegativePrompt(e.target.value)}
-              rows={2}
-              className="resize-none"
-            />
-          </div>
-
-          {/* Size */}
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1.5">
-              <Label>Width</Label>
-              <Input
-                type="number"
-                min={64}
-                max={2048}
-                step={64}
-                value={widthStr}
-                onChange={(e) => setWidthStr(e.target.value)}
-              />
-            </div>
-            <div className="space-y-1.5">
-              <Label>Height</Label>
-              <Input
-                type="number"
-                min={64}
-                max={2048}
-                step={64}
-                value={heightStr}
-                onChange={(e) => setHeightStr(e.target.value)}
-              />
-            </div>
-          </div>
-
-          {/* Count */}
-          <div className="space-y-1.5">
-            <Label>Number of Images</Label>
-            <Select value={String(numImages)} onValueChange={(v) => setNumImages(Number(v))}>
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {[1, 2, 4].map((n) => (
-                  <SelectItem key={n} value={String(n)}>{n}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {/* Advanced params */}
-          <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-            <CollapsibleTrigger asChild>
-              <Button variant="ghost" className="w-full flex items-center justify-between px-2">
-                <span className="text-sm font-medium">Advanced Parameters</span>
-                {advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-              </Button>
-            </CollapsibleTrigger>
-            <CollapsibleContent className="space-y-4 pt-2">
-              {/* CFG Scale */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between">
-                  <Label>CFG Scale</Label>
-                  <span className="text-sm text-muted-foreground">{cfgScale.toFixed(1)}</span>
-                </div>
-                <Slider
-                  min={1}
-                  max={30}
-                  step={0.5}
-                  value={[cfgScale]}
-                  onValueChange={([v]) => setCfgScale(v)}
+              <div className="space-y-2">
+                <Label htmlFor="prompt">Prompt</Label>
+                <Textarea
+                  id="prompt"
+                  variant="soft"
+                  placeholder="A cinematic portrait with moody rim light..."
+                  rows={4}
+                  value={prompt}
+                  onChange={(event) => setPrompt(event.target.value)}
                 />
               </div>
 
-              {/* Guidance (distilled, for Flux/SD3) */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between">
-                  <Label>Guidance (Flux/SD3)</Label>
-                  <span className="text-sm text-muted-foreground">{guidance.toFixed(1)}</span>
-                </div>
-                <Slider
-                  min={0}
-                  max={10}
-                  step={0.1}
-                  value={[guidance]}
-                  onValueChange={([v]) => setGuidance(v)}
+              <div className="space-y-2">
+                <Label htmlFor="negative-prompt">Negative Prompt</Label>
+                <Textarea
+                  id="negative-prompt"
+                  variant="soft"
+                  placeholder="blurry, low quality, distorted..."
+                  rows={3}
+                  value={negativePrompt}
+                  onChange={(event) => setNegativePrompt(event.target.value)}
                 />
               </div>
 
-              {/* Steps */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between">
-                  <Label>Steps</Label>
-                  <span className="text-sm text-muted-foreground">{steps}</span>
-                </div>
-                <Slider
-                  min={1}
-                  max={50}
-                  step={1}
-                  value={[steps]}
-                  onValueChange={([v]) => setSteps(v)}
-                />
-              </div>
-
-              {/* Strength (img2img only) */}
-              {mode === 'img2img' && (
-                <div className="space-y-1.5">
-                  <div className="flex justify-between">
-                    <Label>Strength</Label>
-                    <span className="text-sm text-muted-foreground">{strength.toFixed(2)}</span>
-                  </div>
-                  <Slider
-                    min={0}
-                    max={1}
-                    step={0.01}
-                    value={[strength]}
-                    onValueChange={([v]) => setStrength(v)}
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <Label>Width</Label>
+                  <Input
+                    variant="soft"
+                    type="number"
+                    min={64}
+                    max={2048}
+                    step={64}
+                    value={widthStr}
+                    onChange={(event) => setWidthStr(event.target.value)}
                   />
                 </div>
-              )}
-
-              {/* Seed */}
-              <div className="space-y-1.5">
-                <Label>Seed (-1 = random)</Label>
-                <Input
-                  type="number"
-                  value={seed}
-                  onChange={(e) => setSeed(parseInt(e.target.value, 10))}
-                />
+                <div className="space-y-2">
+                  <Label>Height</Label>
+                  <Input
+                    variant="soft"
+                    type="number"
+                    min={64}
+                    max={2048}
+                    step={64}
+                    value={heightStr}
+                    onChange={(event) => setHeightStr(event.target.value)}
+                  />
+                </div>
               </div>
 
-              {/* Sampler */}
-              <div className="space-y-1.5">
-                <Label>Sampler</Label>
-                <Select value={sampleMethod} onValueChange={setSampleMethod}>
-                  <SelectTrigger>
+              <div className="space-y-2">
+                <Label>Batch</Label>
+                <Select
+                  value={String(numImages)}
+                  onValueChange={(value) => setNumImages(Number(value))}
+                >
+                  <SelectTrigger variant="soft" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent>
-                    {SAMPLE_METHODS.map((m) => (
-                      <SelectItem key={m.value} value={m.value}>{m.label}</SelectItem>
+                  <SelectContent variant="soft">
+                    {[1, 2, 4].map((count) => (
+                      <SelectItem key={count} value={String(count)}>
+                        {count}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
               </div>
 
-              {/* Scheduler */}
-              <div className="space-y-1.5">
-                <Label>Scheduler</Label>
-                <Select value={scheduler} onValueChange={setScheduler}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SCHEDULERS.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {/* CLIP skip */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between">
-                  <Label>CLIP Skip</Label>
-                  <span className="text-sm text-muted-foreground">{clipSkip}</span>
-                </div>
-                <Slider
-                  min={0}
-                  max={12}
-                  step={1}
-                  value={[clipSkip]}
-                  onValueChange={([v]) => setClipSkip(v)}
-                />
-              </div>
-
-              {/* Eta */}
-              <div className="space-y-1.5">
-                <div className="flex justify-between">
-                  <Label>Eta (DDIM)</Label>
-                  <span className="text-sm text-muted-foreground">{eta.toFixed(2)}</span>
-                </div>
-                <Slider
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={[eta]}
-                  onValueChange={([v]) => setEta(v)}
-                />
-              </div>
-            </CollapsibleContent>
-          </Collapsible>
-
-          <Separator />
-
-          {/* Generate button */}
-          <div className="flex gap-2">
-            <Button
-              className="flex-1"
-              onClick={handleSubmit}
-              disabled={isBusy || !prompt.trim() || !selectedModelId}
-            >
-              {isPreparingModel ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Preparing model...
-                </>
-              ) : isGenerating ? (
-                <>
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  Generating…
-                </>
-              ) : (
-                <>
-                  <Sparkles className="mr-2 h-4 w-4" />
-                  Generate
-                </>
-              )}
-            </Button>
-            {isGenerating && (
-              <Button variant="outline" onClick={handleCancel}>
-                Cancel
-              </Button>
-            )}
-          </div>
-        </div>
-
-          {/* ── Right panel: gallery ── */}
-          <div className="min-h-0 lg:col-span-2 lg:overflow-y-auto">
-          {images.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed h-full min-h-[400px] gap-4 text-muted-foreground">
-              <ImageIcon className="h-12 w-12 opacity-30" />
-              <p className="text-sm">Generated images will appear here</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-4">
-              {images.map((img, i) => (
-                <div key={i} className="group relative rounded-lg overflow-hidden border bg-muted">
-                  <img
-                    src={img.src}
-                    alt={img.prompt}
-                    className="w-full object-cover"
-                    loading="lazy"
+              <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
+                <CollapsibleTrigger asChild>
+                  <Button variant="quiet" className="w-full justify-between">
+                    Advanced Parameters
+                    {advancedOpen ? (
+                      <ChevronUp className="h-4 w-4" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4" />
+                    )}
+                  </Button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="space-y-4 pt-3">
+                  <SliderField
+                    label="CFG Scale"
+                    value={cfgScale.toFixed(1)}
+                    slider={
+                      <Slider
+                        min={1}
+                        max={30}
+                        step={0.5}
+                        value={[cfgScale]}
+                        onValueChange={([value]) => setCfgScale(value)}
+                      />
+                    }
                   />
-                  <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2">
-                    <Button
-                      size="icon"
-                      variant="secondary"
-                      onClick={() => setZoomedImage(img.src)}
-                    >
-                      <ZoomIn className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="icon"
-                      variant="secondary"
-                      onClick={() => handleDownload(img.src, i)}
-                    >
-                      <Download className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="p-2 text-xs text-muted-foreground truncate">
-                    {img.prompt}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-          </div>
-        </div>
+                  <SliderField
+                    label="Guidance"
+                    value={guidance.toFixed(1)}
+                    slider={
+                      <Slider
+                        min={0}
+                        max={10}
+                        step={0.1}
+                        value={[guidance]}
+                        onValueChange={([value]) => setGuidance(value)}
+                      />
+                    }
+                  />
+                  <SliderField
+                    label="Steps"
+                    value={steps}
+                    slider={
+                      <Slider
+                        min={1}
+                        max={50}
+                        step={1}
+                        value={[steps]}
+                        onValueChange={([value]) => setSteps(value)}
+                      />
+                    }
+                  />
+                  {mode === 'img2img' ? (
+                    <SliderField
+                      label="Strength"
+                      value={strength.toFixed(2)}
+                      slider={
+                        <Slider
+                          min={0}
+                          max={1}
+                          step={0.01}
+                          value={[strength]}
+                          onValueChange={([value]) => setStrength(value)}
+                        />
+                      }
+                    />
+                  ) : null}
 
-        {/* Zoom dialog */}
-        <Dialog open={!!zoomedImage} onOpenChange={(open) => { if (!open) setZoomedImage(null); }}>
-          <DialogContent className="max-w-3xl p-2">
-            {zoomedImage && (
-              <img src={zoomedImage} alt="preview" className="w-full rounded" />
+                  <div className="space-y-2">
+                    <Label>Seed (-1 random)</Label>
+                    <Input
+                      variant="soft"
+                      type="number"
+                      value={seed}
+                      onChange={(event) =>
+                        setSeed(Number.parseInt(event.target.value, 10))
+                      }
+                    />
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Sampler</Label>
+                    <Select value={sampleMethod} onValueChange={setSampleMethod}>
+                      <SelectTrigger variant="soft" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent variant="soft">
+                        {SAMPLE_METHODS.map((method) => (
+                          <SelectItem key={method.value} value={method.value}>
+                            {method.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label>Scheduler</Label>
+                    <Select value={scheduler} onValueChange={setScheduler}>
+                      <SelectTrigger variant="soft" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent variant="soft">
+                        {SCHEDULERS.map((schedulerItem) => (
+                          <SelectItem
+                            key={schedulerItem.value}
+                            value={schedulerItem.value}
+                          >
+                            {schedulerItem.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <SliderField
+                    label="CLIP Skip"
+                    value={clipSkip}
+                    slider={
+                      <Slider
+                        min={0}
+                        max={12}
+                        step={1}
+                        value={[clipSkip]}
+                        onValueChange={([value]) => setClipSkip(value)}
+                      />
+                    }
+                  />
+                  <SliderField
+                    label="Eta (DDIM)"
+                    value={eta.toFixed(2)}
+                    slider={
+                      <Slider
+                        min={0}
+                        max={1}
+                        step={0.01}
+                        value={[eta]}
+                        onValueChange={([value]) => setEta(value)}
+                      />
+                    }
+                  />
+                </CollapsibleContent>
+              </Collapsible>
+
+              <div className="flex gap-2 pt-2">
+                <Button
+                  variant="cta"
+                  size="pill"
+                  className="flex-1"
+                  onClick={handleSubmit}
+                  disabled={isBusy || !prompt.trim() || !selectedModelId}
+                >
+                  {isPreparingModel ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Preparing model...
+                    </>
+                  ) : isGenerating ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      <Sparkles className="h-4 w-4" />
+                      Generate
+                    </>
+                  )}
+                </Button>
+                {isGenerating ? (
+                  <Button variant="pill" size="pill" onClick={handleCancel}>
+                    Cancel
+                  </Button>
+                ) : null}
+              </div>
+            </SoftPanel>
+
+            <CompactConfigSummary title="Generation Snapshot" items={summaryItems} />
+          </>
+        }
+        main={
+          <div className="flex h-full min-h-[540px] flex-col gap-4">
+            {images.length === 0 ? (
+              <StageEmptyState
+                title={isGenerating ? 'Generating images...' : 'No images yet'}
+                description={
+                  isGenerating
+                    ? 'Your task is running. Generated images will appear here automatically.'
+                    : 'Tune your prompt and settings on the left, then start generation.'
+                }
+                icon={ImageIcon}
+              />
+            ) : (
+              <Card variant="soft" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <CardHeader className="border-b border-border/60">
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    Results
+                    <Badge variant="counter">{images.length}</Badge>
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="min-h-0 flex-1 overflow-y-auto pt-5">
+                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                    {images.map((image, index) => (
+                      <figure
+                        key={`${image.src}-${index}`}
+                        className="group workspace-soft-panel overflow-hidden rounded-[22px] p-0"
+                      >
+                        <div className="relative">
+                          <img
+                            src={image.src}
+                            alt={image.prompt}
+                            className="max-h-[460px] w-full object-cover"
+                            loading="lazy"
+                          />
+                          <div className="pointer-events-none absolute inset-0 bg-black/35 opacity-0 transition-opacity group-hover:opacity-100" />
+                          <div className="absolute top-3 right-3 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                            <Button
+                              variant="pill"
+                              size="icon-sm"
+                              onClick={() => setZoomedImage(image.src)}
+                            >
+                              <ZoomIn className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              variant="pill"
+                              size="icon-sm"
+                              onClick={() => handleDownload(image.src, index)}
+                            >
+                              <Download className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </div>
+                        <figcaption className="space-y-1 px-3 py-3 text-xs text-muted-foreground">
+                          <div className="line-clamp-2">{image.prompt}</div>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="chip">{image.mode}</Badge>
+                            <span>
+                              {image.width} x {image.height}
+                            </span>
+                          </div>
+                        </figcaption>
+                      </figure>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
             )}
-          </DialogContent>
-        </Dialog>
+          </div>
+        }
+      />
+
+      <Dialog
+        open={Boolean(zoomedImage)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setZoomedImage(null);
+          }
+        }}
+      >
+        <DialogContent className="max-w-4xl p-2">
+          {zoomedImage ? (
+            <img src={zoomedImage} alt="preview" className="w-full rounded-xl" />
+          ) : null}
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function SliderField({
+  label,
+  value,
+  slider,
+}: {
+  label: string;
+  value: string | number;
+  slider: ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between">
+        <Label>{label}</Label>
+        <span className="text-xs font-medium text-muted-foreground">{value}</span>
       </div>
+      {slider}
     </div>
   );
 }

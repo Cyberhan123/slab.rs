@@ -1,5 +1,11 @@
 import { useDeferredValue, useMemo, useState } from 'react';
-import { Loader2, RefreshCw, Search, TriangleAlert } from 'lucide-react';
+import {
+  Loader2,
+  RefreshCw,
+  Search,
+  SlidersHorizontal,
+  TriangleAlert,
+} from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +18,12 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
+import {
+  MetricCard,
+  PillFilterBar,
+  SoftPanel,
+  StageEmptyState,
+} from '@/components/ui/workspace';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api, { getErrorMessage } from '@/lib/api';
@@ -36,12 +48,7 @@ export default function SettingsPage() {
   const deferredSearch = useDeferredValue(search);
   const normalizedSearch = deferredSearch.trim().toLowerCase();
 
-  const {
-    data,
-    error,
-    isLoading,
-    refetch,
-  } = api.useQuery('get', '/v1/settings');
+  const { data, error, isLoading, isRefetching, refetch } = api.useQuery('get', '/v1/settings');
 
   const propertyMap = useMemo(() => {
     const map = new Map<string, SettingResponse>();
@@ -77,14 +84,10 @@ export default function SettingsPage() {
       .filter((section) => section.subsections.length > 0);
   }, [data, normalizedSearch]);
 
-  const totalPropertyCount = useMemo(
-    () => countProperties(data?.sections ?? []),
-    [data],
-  );
-  const visiblePropertyCount = useMemo(
-    () => countProperties(filteredSections),
-    [filteredSections],
-  );
+  const totalPropertyCount = useMemo(() => countProperties(data?.sections ?? []), [data]);
+  const visiblePropertyCount = useMemo(() => countProperties(filteredSections), [filteredSections]);
+  const sectionCount = data?.sections.length ?? 0;
+
   usePageHeader({
     ...PAGE_HEADER_META.settings,
     subtitle:
@@ -106,10 +109,6 @@ export default function SettingsPage() {
     refetch,
   });
 
-  async function refreshSettings() {
-    await refetch();
-  }
-
   function jumpToTarget(targetId: string) {
     setActiveTarget(targetId);
     document.getElementById(targetId)?.scrollIntoView({
@@ -120,12 +119,12 @@ export default function SettingsPage() {
 
   if (isLoading) {
     return (
-      <div className="flex min-h-[50vh] items-center justify-center">
-        <div className="flex items-center gap-3 rounded-full border border-border/60 bg-card px-5 py-3 text-sm text-muted-foreground shadow-sm">
-          <Loader2 className="h-4 w-4 animate-spin" />
-          Loading settings document...
-        </div>
-      </div>
+      <StageEmptyState
+        icon={Loader2}
+        title="Loading settings document"
+        description="Fetching runtime schema and values."
+        className="[&_svg]:animate-spin"
+      />
     );
   }
 
@@ -140,7 +139,7 @@ export default function SettingsPage() {
           </AlertDescription>
         </Alert>
         <div>
-          <Button onClick={refreshSettings}>
+          <Button variant="pill" size="pill" onClick={() => void refetch()}>
             <RefreshCw className="mr-2 h-4 w-4" />
             Try again
           </Button>
@@ -150,23 +149,56 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 pb-10">
-        <div className="sticky top-0 z-30 pb-2">
-          <Card className="overflow-hidden border-border/70 bg-background/90 shadow-[0_24px_70px_-48px_color-mix(in_oklab,var(--foreground)_32%,transparent)] backdrop-blur supports-[backdrop-filter]:bg-background/72">
-            <CardContent className="py-4">
-              <div className="relative">
-                <Search className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  value={search}
-                  onChange={(event) => setSearch(event.target.value)}
-                  placeholder="Search settings"
-                  className="h-12 rounded-2xl border-border/70 bg-background pl-11 text-base shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_8%,transparent)]"
-                />
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+    <div className="h-full w-full overflow-y-auto">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-1 pb-8">
+        <SoftPanel className="workspace-halo space-y-5 overflow-hidden rounded-[30px] border border-border/70">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <Badge variant="chip">Dynamic schema settings</Badge>
+              <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Settings Workbench</h1>
+              <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+                Configure runtime and product options with auto-save and schema-aware validation.
+              </p>
+            </div>
+            <Button
+              variant="pill"
+              size="pill"
+              disabled={isRefetching}
+              onClick={() => void refetch()}
+            >
+              {isRefetching ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </div>
+
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Sections" value={sectionCount} hint="Top-level configuration groups" icon={SlidersHorizontal} />
+            <MetricCard label="Visible Fields" value={visiblePropertyCount} hint="After current search filter" icon={Search} />
+            <MetricCard label="Pending Saves" value={statusSummary.dirty} hint="Waiting for autosave" icon={Loader2} />
+            <MetricCard label="Errors" value={statusSummary.error} hint="Validation or save errors" icon={TriangleAlert} />
+          </div>
+        </SoftPanel>
+
+        <PillFilterBar>
+          <div className="relative min-w-[280px] flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              variant="shell"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Search settings"
+              className="h-10 w-full pl-10"
+            />
+          </div>
+          <Badge variant="counter">
+            {visiblePropertyCount} / {totalPropertyCount} fields
+          </Badge>
+          {statusSummary.saving > 0 ? <Badge variant="chip">{statusSummary.saving} saving</Badge> : null}
+        </PillFilterBar>
 
         {data.warnings.length > 0 ? (
           <Alert>
@@ -183,19 +215,14 @@ export default function SettingsPage() {
         ) : null}
 
         {filteredSections.length === 0 ? (
-          <Card>
-            <CardHeader>
-              <CardTitle>No settings matched</CardTitle>
-              <CardDescription>
-                Try a broader keyword or clear the search to see everything again.
-              </CardDescription>
-            </CardHeader>
-          </Card>
-        ) : null}
-
-        {filteredSections.length > 0 ? (
-          <div className="grid gap-6 lg:grid-cols-[280px_minmax(0,1fr)]">
-            <aside className="lg:sticky lg:top-32 lg:self-start">
+          <StageEmptyState
+            icon={Search}
+            title="No settings matched"
+            description="Try a broader keyword or clear search."
+          />
+        ) : (
+          <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
+            <aside className="lg:sticky lg:top-3 lg:self-start">
               <SettingsNavigation
                 activeTarget={activeTarget}
                 dirtyCount={statusSummary.dirty}
@@ -206,17 +233,18 @@ export default function SettingsPage() {
               />
             </aside>
 
-            <div className="space-y-6">
+            <div className="space-y-5">
               {filteredSections.map((section) => (
                 <Card
                   key={section.id}
                   id={sectionAnchorId(section.id)}
-                  className="scroll-mt-36 overflow-hidden border-border/70 shadow-[0_20px_60px_-48px_color-mix(in_oklab,var(--foreground)_32%,transparent)]"
+                  variant="soft"
+                  className="scroll-mt-20 overflow-hidden rounded-[30px]"
                 >
-                  <CardHeader className="gap-3 border-b border-border/60 bg-muted/15">
+                  <CardHeader className="gap-3 border-b border-border/60 bg-[var(--surface-soft)]/70">
                     <div className="flex flex-wrap items-center gap-3">
-                      <CardTitle className="text-2xl">{section.title}</CardTitle>
-                      <Badge variant="secondary">
+                      <CardTitle className="text-2xl tracking-tight">{section.title}</CardTitle>
+                      <Badge variant="counter">
                         {countSectionProperties(section)} settings
                       </Badge>
                     </div>
@@ -226,12 +254,13 @@ export default function SettingsPage() {
                       </CardDescription>
                     ) : null}
                   </CardHeader>
-                  <CardContent className="space-y-8 pt-6">
+
+                  <CardContent className="space-y-7 pt-5">
                     {section.subsections.map((subsection, subsectionIndex) => (
                       <div
                         key={subsection.id}
                         id={subsectionAnchorId(section.id, subsection.id)}
-                        className="scroll-mt-40 space-y-5"
+                        className="scroll-mt-24 space-y-4"
                       >
                         {subsectionIndex > 0 ? <SeparatorLine /> : null}
                         {shouldCollapseSubsectionHeading(section, subsection) ? (
@@ -243,10 +272,8 @@ export default function SettingsPage() {
                         ) : (
                           <div className="space-y-2">
                             <div className="flex flex-wrap items-center gap-3">
-                              <h2 className="text-lg font-semibold">{subsection.title}</h2>
-                              <Badge variant="outline">
-                                {subsection.properties.length} fields
-                              </Badge>
+                              <h2 className="text-lg font-semibold tracking-tight">{subsection.title}</h2>
+                              <Badge variant="chip">{subsection.properties.length} fields</Badge>
                             </div>
                             {subsection.description_md ? (
                               <p className="text-sm leading-6 text-muted-foreground">
@@ -256,7 +283,7 @@ export default function SettingsPage() {
                           </div>
                         )}
 
-                        <div className="space-y-4">
+                        <div className="space-y-3">
                           {subsection.properties.map((property) => (
                             <SettingFieldCard
                               key={property.pmid}
@@ -277,7 +304,7 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
-        ) : null}
+        )}
       </div>
     </div>
   );

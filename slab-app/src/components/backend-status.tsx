@@ -26,12 +26,14 @@ export function BackendStatus() {
   const statusBadge = (
     label: string,
     dotClassName: string,
-    variant: React.ComponentProps<typeof Badge>['variant'] = 'outline',
+    variant: React.ComponentProps<typeof Badge>['variant'] = 'status',
+    status: 'neutral' | 'success' | 'danger' | 'info' = 'neutral',
     busy = false,
   ) => (
     <Badge
       variant={variant}
-      className="gap-1"
+      data-status={status}
+      className="gap-1.5 px-3 py-1.5"
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -43,7 +45,7 @@ export function BackendStatus() {
   );
 
   if (isChecking) {
-    return statusBadge('Checking...', 'h-2 w-2 rounded-full bg-yellow-500 animate-pulse', 'outline', true);
+    return statusBadge('Checking...', 'h-2 w-2 rounded-full bg-yellow-500 animate-pulse', 'status', 'info', true);
   }
 
   if (isOnline === null) {
@@ -51,8 +53,8 @@ export function BackendStatus() {
   }
 
   if (isOnline) {
-    return statusBadge('Online', 'h-2 w-2 rounded-full bg-green-500', 'default');
+    return statusBadge('Online', 'h-2 w-2 rounded-full bg-green-500', 'status', 'success');
   }
 
-  return statusBadge('Offline', 'h-2 w-2 rounded-full bg-red-500', 'destructive');
+  return statusBadge('Offline', 'h-2 w-2 rounded-full bg-red-500', 'status', 'danger');
 }
