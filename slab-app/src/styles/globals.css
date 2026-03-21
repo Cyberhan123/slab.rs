@@ -5,23 +5,31 @@
 
 
 :root {
-  --background: oklch(0.975 0.008 200);
+  --background: oklch(0.982 0.005 200);
+  --foreground: oklch(0.29 0.03 220);
 
-  --foreground: oklch(0.28 0.03 220);
+  --app-canvas: oklch(0.966 0.01 205);
+  --surface-1: oklch(0.992 0.004 200);
+  --surface-2: oklch(0.978 0.008 200);
+  --surface-soft: oklch(0.954 0.013 202);
+  --surface-selected: oklch(0.93 0.022 202);
+  --surface-input: oklch(0.986 0.004 200);
 
-  --card: oklch(0.993 0.004 200);
-  --card-foreground: oklch(0.28 0.03 220);
+  --card: var(--surface-1);
+  --card-foreground: var(--foreground);
 
-  --popover: oklch(0.995 0.003 200);
-  --popover-foreground: oklch(0.28 0.03 220);
+  --popover: oklch(0.994 0.003 200);
+  --popover-foreground: var(--foreground);
 
   --primary: oklch(0.588 0.12 195);
   --primary-foreground: oklch(0.99 0.005 200);
 
-  --secondary: oklch(0.94 0.015 200);
+  --brand-teal: oklch(0.61 0.12 195);
+  --brand-teal-foreground: oklch(0.99 0.005 200);
+  --brand-gold: oklch(0.78 0.12 78);
+
+  --secondary: oklch(0.944 0.015 200);
   --secondary-foreground: oklch(0.35 0.04 220);
-
-
   --muted: oklch(0.955 0.01 200);
   --muted-foreground: oklch(0.52 0.02 230);
 
@@ -29,10 +37,10 @@
   --accent-foreground: oklch(0.25 0.04 40);
 
   --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.577 0.245 27.325);
+  --destructive-foreground: oklch(0.98 0.01 25);
 
-  --border: oklch(0.91 0.012 200);
-  --input: oklch(0.92 0.01 200);
+  --border: oklch(0.9 0.012 200);
+  --input: var(--surface-input);
   --ring: oklch(0.588 0.12 195);
 
   --chart-1: oklch(0.588 0.12 195);
@@ -41,15 +49,24 @@
   --chart-4: oklch(0.60 0.14 280);
   --chart-5: oklch(0.68 0.18 340);
 
-  --radius: 0.75rem;
+  --status-success-bg: color-mix(in oklab, oklch(0.82 0.1 155) 46%, white);
+  --status-info-bg: color-mix(in oklab, var(--brand-teal) 16%, white);
+  --status-danger-bg: color-mix(in oklab, oklch(0.72 0.18 25) 18%, white);
+  --status-neutral-bg: color-mix(in oklab, var(--foreground) 6%, white);
 
-  --sidebar: oklch(0.965 0.012 200);
+  --radius: 0.95rem;
+  --shell-rail-width: 5rem;
+  --shell-topbar-height: 5rem;
+  --shell-footer-height: 2.75rem;
+  --shell-content-gutter: 1.25rem;
+
+  --sidebar: color-mix(in oklab, var(--surface-1) 84%, white);
   --sidebar-foreground: oklch(0.28 0.03 220);
   --sidebar-primary: oklch(0.588 0.12 195);
   --sidebar-primary-foreground: oklch(0.99 0.005 200);
-  --sidebar-accent: oklch(0.93 0.018 200);
+  --sidebar-accent: var(--surface-soft);
   --sidebar-accent-foreground: oklch(0.35 0.04 220);
-  --sidebar-border: oklch(0.90 0.015 200);
+  --sidebar-border: oklch(0.89 0.014 200);
   --sidebar-ring: oklch(0.588 0.12 195);
 
   --ai-bubble: oklch(0.94 0.02 195);
@@ -63,10 +80,17 @@
 }
 
 .dark {
-  --background: oklch(0.175 0.015 220);
+  --background: oklch(0.18 0.014 220);
   --foreground: oklch(0.92 0.01 200);
 
-  --card: oklch(0.21 0.018 220);
+  --app-canvas: oklch(0.16 0.014 220);
+  --surface-1: oklch(0.21 0.018 220);
+  --surface-2: oklch(0.24 0.018 220);
+  --surface-soft: oklch(0.26 0.022 220);
+  --surface-selected: oklch(0.29 0.026 220);
+  --surface-input: oklch(0.23 0.018 220);
+
+  --card: var(--surface-1);
   --card-foreground: oklch(0.92 0.01 200);
 
   --popover: oklch(0.22 0.016 220);
@@ -74,6 +98,9 @@
 
   --primary: oklch(0.72 0.14 195);
   --primary-foreground: oklch(0.16 0.02 220);
+  --brand-teal: oklch(0.72 0.14 195);
+  --brand-teal-foreground: oklch(0.16 0.02 220);
+  --brand-gold: oklch(0.76 0.13 78);
 
   --secondary: oklch(0.26 0.02 220);
   --secondary-foreground: oklch(0.88 0.01 200);
@@ -85,10 +112,10 @@
   --accent-foreground: oklch(0.15 0.02 40);
 
   --destructive: oklch(0.45 0.18 25);
-  --destructive-foreground: oklch(0.65 0.22 25);
+  --destructive-foreground: oklch(0.95 0.01 25);
 
   --border: oklch(0.30 0.02 220);
-  --input: oklch(0.28 0.018 220);
+  --input: var(--surface-input);
   --ring: oklch(0.72 0.14 195);
 
   --chart-1: oklch(0.72 0.14 195);
@@ -97,11 +124,11 @@
   --chart-4: oklch(0.65 0.15 280);
   --chart-5: oklch(0.70 0.18 340);
 
-  --sidebar: oklch(0.195 0.018 220);
+  --sidebar: oklch(0.188 0.018 220);
   --sidebar-foreground: oklch(0.92 0.01 200);
   --sidebar-primary: oklch(0.72 0.14 195);
   --sidebar-primary-foreground: oklch(0.16 0.02 220);
-  --sidebar-accent: oklch(0.28 0.02 220);
+  --sidebar-accent: var(--surface-soft);
   --sidebar-accent-foreground: oklch(0.88 0.01 200);
   --sidebar-border: oklch(0.30 0.02 220);
   --sidebar-ring: oklch(0.72 0.14 195);
@@ -114,6 +141,10 @@
   --ai-tool-foreground: oklch(0.98 0.01 40);
   --success: oklch(0.62 0.16 155);
   --success-foreground: oklch(0.15 0.02 155);
+  --status-success-bg: color-mix(in oklab, oklch(0.62 0.16 155) 24%, var(--surface-2));
+  --status-info-bg: color-mix(in oklab, var(--brand-teal) 18%, var(--surface-2));
+  --status-danger-bg: color-mix(in oklab, oklch(0.72 0.18 25) 20%, var(--surface-2));
+  --status-neutral-bg: color-mix(in oklab, white 10%, var(--surface-2));
 }
 
 @theme inline {
@@ -125,8 +156,17 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
+  --color-app-canvas: var(--app-canvas);
+  --color-surface-1: var(--surface-1);
+  --color-surface-2: var(--surface-2);
+  --color-surface-soft: var(--surface-soft);
+  --color-surface-selected: var(--surface-selected);
+  --color-surface-input: var(--surface-input);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
+  --color-brand-teal: var(--brand-teal);
+  --color-brand-teal-foreground: var(--brand-teal-foreground);
+  --color-brand-gold: var(--brand-gold);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
@@ -164,68 +204,116 @@
   --color-ai-tool-foreground: var(--ai-tool-foreground);
   --color-success: var(--success);
   --color-success-foreground: var(--success-foreground);
+  --color-status-success-bg: var(--status-success-bg);
+  --color-status-info-bg: var(--status-info-bg);
+  --color-status-danger-bg: var(--status-danger-bg);
+  --color-status-neutral-bg: var(--status-neutral-bg);
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
   }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-background text-foreground font-sans antialiased;
+    background:
+      radial-gradient(circle at top left, color-mix(in oklab, var(--brand-teal) 10%, transparent), transparent 30%),
+      radial-gradient(circle at bottom right, color-mix(in oklab, var(--brand-gold) 14%, transparent), transparent 32%),
+      var(--app-canvas);
   }
 }
 
-.chat-model-select.ant-select {
-  min-width: 220px;
-}
+@layer components {
+  .workspace-shell {
+    display: flex;
+    min-height: 100%;
+    width: 100%;
+    background:
+      linear-gradient(180deg, color-mix(in oklab, var(--surface-1) 66%, transparent) 0%, transparent 100%),
+      var(--app-canvas);
+  }
 
-.chat-model-select.ant-select .ant-select-selector {
-  height: 32px !important;
-  border-radius: 9999px !important;
-  border-color: var(--border) !important;
-  background: var(--background) !important;
-  box-shadow: none !important;
-}
+  .workspace-surface {
+    background: var(--surface-1);
+    border: 1px solid color-mix(in oklab, var(--border) 90%, white 10%);
+    box-shadow: 0 20px 56px -42px color-mix(in oklab, var(--foreground) 32%, transparent);
+  }
 
-.chat-model-select.ant-select .ant-select-selection-item,
-.chat-model-select.ant-select .ant-select-selection-placeholder {
-  line-height: 30px !important;
-  color: var(--foreground) !important;
-  font-size: 12px;
-}
+  .workspace-soft-panel {
+    background: var(--surface-soft);
+    border: 1px solid color-mix(in oklab, var(--border) 86%, white 14%);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent);
+  }
 
-.chat-model-select.ant-select .ant-select-arrow {
-  color: var(--muted-foreground) !important;
-}
+  .workspace-halo {
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
+  }
 
-.chat-model-select.ant-select.ant-select-focused .ant-select-selector,
-.chat-model-select.ant-select:not(.ant-select-disabled):hover .ant-select-selector {
-  border-color: var(--ring) !important;
-}
+  .workspace-halo::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background:
+      radial-gradient(circle at top right, color-mix(in oklab, var(--brand-teal) 16%, transparent), transparent 38%),
+      radial-gradient(circle at bottom left, color-mix(in oklab, var(--brand-gold) 18%, transparent), transparent 34%);
+    opacity: 0.85;
+  }
 
-.chat-model-select.ant-select.ant-select-focused .ant-select-selector {
-  box-shadow: 0 0 0 2px color-mix(in oklab, var(--ring) 22%, transparent) !important;
-}
+  .workspace-topbar-search {
+    background: color-mix(in oklab, var(--surface-input) 92%, white 8%);
+    border: 1px solid color-mix(in oklab, var(--border) 88%, white 12%);
+    box-shadow: 0 16px 32px -28px color-mix(in oklab, var(--foreground) 32%, transparent);
+  }
 
-.chat-model-select-dropdown.ant-select-dropdown {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--popover);
-  box-shadow: 0 14px 30px color-mix(in oklab, var(--foreground) 12%, transparent);
-  padding: 6px;
-}
+  .chat-markdown {
+    color: inherit;
+    font-size: 0.95rem;
+    line-height: 1.72;
+  }
 
-.chat-model-select-dropdown .ant-select-item {
-  border-radius: 8px;
-  color: var(--foreground);
-}
+  .chat-markdown > * + * {
+    margin-top: 0.85rem;
+  }
 
-.chat-model-select-dropdown .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
-  background: color-mix(in oklab, var(--primary) 14%, var(--popover));
-}
+  .chat-markdown h1,
+  .chat-markdown h2,
+  .chat-markdown h3,
+  .chat-markdown h4 {
+    font-weight: 600;
+    letter-spacing: -0.01em;
+  }
 
-.chat-model-select-dropdown .ant-select-item-option-selected:not(.ant-select-item-option-disabled) {
-  background: color-mix(in oklab, var(--primary) 22%, var(--popover));
-  color: var(--foreground);
-  font-weight: 600;
+  .chat-markdown pre {
+    overflow-x: auto;
+    border-radius: 1rem;
+    background: color-mix(in oklab, var(--foreground) 5%, var(--surface-2));
+    padding: 0.875rem 1rem;
+  }
+
+  .chat-markdown code:not(pre code) {
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--foreground) 6%, var(--surface-2));
+    padding: 0.15rem 0.45rem;
+    font-size: 0.85em;
+  }
+
+  .chat-markdown blockquote {
+    border-left: 3px solid color-mix(in oklab, var(--brand-teal) 45%, var(--border));
+    padding-left: 0.9rem;
+    color: var(--muted-foreground);
+  }
+
+  .chat-markdown a {
+    color: var(--brand-teal);
+    text-decoration: underline;
+    text-underline-offset: 0.18rem;
+  }
 }

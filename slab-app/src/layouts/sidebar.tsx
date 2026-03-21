@@ -1,88 +1,97 @@
 import {
-    Sidebar,
-    SidebarContent,
-    SidebarFooter,
-    SidebarMenuItem,
-    SidebarHeader,
-    SidebarMenu,
-    SidebarMenuButton
-} from "@/components/ui/sidebar"
+  BotMessageSquare,
+  ClipboardList,
+  Film,
+  ImageIcon,
+  Mic,
+  Package,
+  Puzzle,
+  Settings,
+  type LucideIcon,
+} from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
-import { BotMessageSquare, ImageIcon, Mic, Film, Package, ClipboardList, Settings, Puzzle, type LucideIcon } from "lucide-react"
+
+import { Button } from "@/components/ui/button"
+import { StatusPill } from "@/components/ui/workspace"
+import { cn } from "@/lib/utils"
 
 type SidebarItem = {
-    to: string;
-    label: string;
-    icon: LucideIcon;
-    end?: boolean;
-};
+  to: string
+  label: string
+  icon: LucideIcon
+  end?: boolean
+}
 
 const primaryItems: SidebarItem[] = [
-    { to: "/", label: "Chat", icon: BotMessageSquare, end: true },
-    { to: "/image", label: "Image", icon: ImageIcon },
-    { to: "/audio", label: "Audio", icon: Mic },
-    { to: "/video", label: "Video", icon: Film },
-    { to: "/hub", label: "Hub", icon: Package },
-    { to: "/plugins", label: "Plugins", icon: Puzzle },
-    { to: "/task", label: "Tasks", icon: ClipboardList },
-];
+  { to: "/", label: "Chat", icon: BotMessageSquare, end: true },
+  { to: "/image", label: "Image", icon: ImageIcon },
+  { to: "/video", label: "Video", icon: Film },
+  { to: "/audio", label: "Audio", icon: Mic },
+  { to: "/hub", label: "Hub", icon: Package },
+  { to: "/task", label: "Tasks", icon: ClipboardList },
+  { to: "/plugins", label: "Plugins", icon: Puzzle },
+]
 
 const footerItems: SidebarItem[] = [
-    { to: "/settings", label: "Settings", icon: Settings },
-];
+  { to: "/settings", label: "Settings", icon: Settings },
+]
 
 const isPathActive = (pathname: string, to: string, end = false) => {
-    if (end) {
-        return pathname === to;
-    }
-    return pathname === to || pathname.startsWith(`${to}/`);
-};
+  if (end) {
+    return pathname === to
+  }
+
+  return pathname === to || pathname.startsWith(`${to}/`)
+}
 
 export function AppSidebar() {
-    const { pathname } = useLocation();
+  const { pathname } = useLocation()
 
-    const renderItem = (item: SidebarItem) => {
-        const Icon = item.icon;
-        const active = isPathActive(pathname, item.to, item.end);
-
-        return (
-            <SidebarMenuItem key={item.to}>
-                <SidebarMenuButton
-                    asChild
-                    isActive={active}
-                    tooltip={item.label}
-                    className="h-9 rounded-md group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center"
-                >
-                    <Link to={item.to} aria-current={active ? "page" : undefined}>
-                        <Icon />
-                        <span>{item.label}</span>
-                    </Link>
-                </SidebarMenuButton>
-            </SidebarMenuItem>
-        );
-    };
+  const renderItem = (item: SidebarItem) => {
+    const Icon = item.icon
+    const active = isPathActive(pathname, item.to, item.end)
 
     return (
-        <Sidebar
-            variant="sidebar"
-            collapsible="icon"
-            className="border-r border-sidebar-border/70 bg-sidebar/95 backdrop-blur md:bottom-7 md:h-[calc(100svh-1.75rem)]"
+      <Button
+        key={item.to}
+        asChild
+        variant="rail"
+        size="rail"
+        data-active={active ? "true" : "false"}
+        className="h-14 w-full rounded-[20px] px-2"
+      >
+        <Link
+          to={item.to}
+          aria-current={active ? "page" : undefined}
+          className="flex h-full w-full flex-col items-center justify-center gap-1"
         >
-            <SidebarHeader className="items-center border-b border-sidebar-border/60 px-2 py-2">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-primary/30 bg-primary/10">
-                    <span className="text-[11px] font-semibold tracking-wide text-primary">Slab</span>
-                </div>
-            </SidebarHeader>
-            <SidebarContent className="px-2 py-2">
-                <SidebarMenu className="gap-1.5">
-                    {primaryItems.map(renderItem)}
-                </SidebarMenu>
-            </SidebarContent>
-            <SidebarFooter className="border-t border-sidebar-border/60 px-2 py-2">
-                <SidebarMenu className="gap-1.5">
-                    {footerItems.map(renderItem)}
-                </SidebarMenu>
-            </SidebarFooter>
-        </Sidebar>
+          <Icon className={cn("size-4", active && "text-[var(--brand-teal)]")} />
+          <span className="text-[11px] font-medium tracking-tight">{item.label}</span>
+        </Link>
+      </Button>
     )
+  }
+
+  return (
+    <aside className="workspace-surface flex w-[var(--shell-rail-width)] shrink-0 flex-col rounded-[32px] p-2">
+      <div className="flex flex-col items-center gap-3 px-1 py-2">
+        <div className="flex size-12 items-center justify-center rounded-[20px] bg-[linear-gradient(180deg,color-mix(in_oklab,var(--brand-teal)_20%,var(--surface-soft))_0%,var(--surface-soft)_100%)] shadow-[0_18px_30px_-24px_color-mix(in_oklab,var(--brand-teal)_35%,transparent)]">
+          <span className="text-xs font-semibold tracking-[0.18em] text-[var(--brand-teal)]">
+            SLAB
+          </span>
+        </div>
+        <StatusPill status="info" className="px-2 py-1 text-[10px]">
+          AI
+        </StatusPill>
+      </div>
+
+      <nav className="mt-4 flex flex-1 flex-col gap-2">
+        {primaryItems.map(renderItem)}
+      </nav>
+
+      <div className="mt-4 border-t border-border/60 pt-3">
+        {footerItems.map(renderItem)}
+      </div>
+    </aside>
+  )
 }

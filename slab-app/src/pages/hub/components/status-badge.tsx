@@ -1,27 +1,35 @@
-import { Badge } from '@/components/ui/badge';
+import { StatusPill } from '@/components/ui/workspace';
 
 import type { ModelStatus } from '../hooks/use-hub-model-catalog';
 
 export function StatusBadge({ status }: { status: ModelStatus }) {
   if (status === 'ready') {
     return (
-      <Badge className="border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300">
+      <StatusPill status="success" className="text-xs">
         Ready
-      </Badge>
+      </StatusPill>
     );
   }
 
   if (status === 'downloading') {
     return (
-      <Badge className="border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300">
+      <StatusPill status="info" className="text-xs">
         Downloading
-      </Badge>
+      </StatusPill>
     );
   }
 
   if (status === 'error') {
-    return <Badge variant="destructive">Error</Badge>;
+    return (
+      <StatusPill status="danger" className="text-xs">
+        Error
+      </StatusPill>
+    );
   }
 
-  return <Badge variant="outline">Not downloaded</Badge>;
+  return (
+    <StatusPill status="neutral" className="text-xs">
+      Not downloaded
+    </StatusPill>
+  );
 }

@@ -18,6 +18,12 @@ const badgeVariants = cva(
           "border-border text-foreground [a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         ghost: "[a&]:hover:bg-accent [a&]:hover:text-accent-foreground",
         link: "text-primary underline-offset-4 [a&]:hover:underline",
+        chip:
+          "border-border/70 bg-[var(--surface-soft)] px-2.5 py-1 text-[11px] text-muted-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]",
+        counter:
+          "border-border/60 bg-[var(--surface-1)] px-2.5 py-1 text-[11px] font-semibold text-foreground shadow-[0_10px_20px_-18px_color-mix(in_oklab,var(--foreground)_45%,transparent)]",
+        status:
+          "border-transparent px-2.5 py-1 text-[11px] font-semibold",
       },
     },
     defaultVariants: {
@@ -39,7 +45,12 @@ function Badge({
     <Comp
       data-slot="badge"
       data-variant={variant}
-      className={cn(badgeVariants({ variant }), className)}
+      className={cn(
+        badgeVariants({ variant }),
+        variant === "status" &&
+          "bg-[var(--status-neutral-bg)] text-foreground [&[data-status=success]]:bg-[var(--status-success-bg)] [&[data-status=info]]:bg-[var(--status-info-bg)] [&[data-status=danger]]:bg-[var(--status-danger-bg)]",
+        className
+      )}
       {...props}
     />
   )

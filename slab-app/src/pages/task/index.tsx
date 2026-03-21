@@ -1,16 +1,36 @@
-import { useState, useEffect, useMemo } from 'react';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
-import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  ListChecks,
+  Loader2,
+  PlayCircle,
+  RefreshCw,
+  Timer,
+  TriangleAlert,
+} from 'lucide-react';
+
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { toast } from 'sonner';
-import api from '@/lib/api';
+import {
+  MetricCard,
+  PillFilterBar,
+  SoftPanel,
+  StageEmptyState,
+  StatusPill,
+} from '@/components/ui/workspace';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
+import api from '@/lib/api';
+import { toast } from 'sonner';
 
 interface Task {
   id: string;
@@ -32,58 +52,66 @@ export default function Task() {
   const [taskResult, setTaskResult] = useState<TaskResult | null>(null);
   const [taskType, setTaskType] = useState<string>('all');
 
-  // API queries and mutations
-  const { data: tasks, error: tasksError, isLoading: tasksLoading, refetch: refetchTasks } = api.useQuery(
-    'get',
-    '/v1/tasks',
-    {
-      params: {
-        path: { type: null },
-      },
-    }
-  );
+  const {
+    data: tasks,
+    error: tasksError,
+    isLoading: tasksLoading,
+    isRefetching,
+    refetch: refetchTasks,
+  } = api.useQuery('get', '/v1/tasks', {
+    params: {
+      path: { type: null },
+    },
+  });
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
   const getTaskResultMutation = api.useMutation('get', '/v1/tasks/{id}/result');
   const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
   const restartTaskMutation = api.useMutation('post', '/v1/tasks/{id}/restart');
 
+  const allTasks = useMemo<Task[]>(() => (Array.isArray(tasks) ? tasks : []), [tasks]);
   const filteredTasks = useMemo(() => {
-    if (!Array.isArray(tasks)) return [];
-    if (taskType === 'all') return tasks;
-    return tasks.filter((task) => task.task_type === taskType);
-  }, [taskType, tasks]);
+    if (taskType === 'all') return allTasks;
+    return allTasks.filter((task) => task.task_type === taskType);
+  }, [allTasks, taskType]);
 
-  // Auto-refresh for running tasks in the list
+  const metrics = useMemo(
+    () => ({
+      total: allTasks.length,
+      running: allTasks.filter((task) => task.status === 'running').length,
+      failed: allTasks.filter((task) => task.status === 'failed').length,
+      succeeded: allTasks.filter((task) => task.status === 'succeeded').length,
+    }),
+    [allTasks],
+  );
+
   useEffect(() => {
-    const hasRunningTasks = filteredTasks.some(task => task.status === 'running');
+    const hasRunningTasks = filteredTasks.some((task) => task.status === 'running');
     if (!hasRunningTasks) return;
 
     const interval = setInterval(() => {
-      refetchTasks();
-    }, 3000); // Poll every 3 seconds
+      void refetchTasks();
+    }, 3000);
 
     return () => clearInterval(interval);
   }, [filteredTasks, refetchTasks]);
 
-  // Auto-refresh for selected running task
   useEffect(() => {
     if (!selectedTask || selectedTask.status !== 'running') return;
 
     const interval = setInterval(() => {
-      fetchTaskDetail(selectedTask.id);
-    }, 3000); // Poll every 3 seconds
+      void fetchTaskDetail(selectedTask.id);
+    }, 3000);
 
     return () => clearInterval(interval);
   }, [selectedTask?.status, selectedTask?.id]);
 
-  // Show error toast when tasksError changes
-
   const fetchTaskDetail = async (id: string) => {
     try {
+      setTaskResult(null);
       const data = await getTaskMutation.mutateAsync({
         params: {
-          path: { id }
-        }
+          path: { id },
+        },
       });
 
       setSelectedTask(data);
@@ -91,7 +119,7 @@ export default function Task() {
       if (data.status === 'succeeded') {
         await fetchTaskResult(id);
       }
-    } catch (err) {
+    } catch {
       toast.error('Failed to fetch task details');
     }
   };
@@ -100,13 +128,13 @@ export default function Task() {
     try {
       const data = await getTaskResultMutation.mutateAsync({
         params: {
-          path: { id }
-        }
+          path: { id },
+        },
       });
 
       setTaskResult(data);
     } catch (err) {
-      toast.error('Failed to fetch task result: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      toast.error(`Failed to fetch task result: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -114,16 +142,16 @@ export default function Task() {
     try {
       await cancelTaskMutation.mutateAsync({
         params: {
-          path: { id }
-        }
+          path: { id },
+        },
       });
 
-      refetchTasks();
+      void refetchTasks();
       if (selectedTask?.id === id) {
         await fetchTaskDetail(id);
       }
     } catch (err) {
-      toast.error('Failed to cancel task: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      toast.error(`Failed to cancel task: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
 
@@ -131,231 +159,269 @@ export default function Task() {
     try {
       await restartTaskMutation.mutateAsync({
         params: {
-          path: { id }
-        }
+          path: { id },
+        },
       });
 
-      refetchTasks();
+      void refetchTasks();
       if (selectedTask?.id === id) {
         await fetchTaskDetail(id);
       }
     } catch (err) {
-      toast.error('Failed to restart task: ' + (err instanceof Error ? err.message : 'Unknown error'));
+      toast.error(`Failed to restart task: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
   };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'pending':
-        return <Badge variant="secondary">Pending</Badge>;
-      case 'running':
-        return <Badge variant="outline">Running</Badge>;
-      case 'succeeded':
-        return <Badge variant="default">Succeeded</Badge>;
-      case 'failed':
-        return <Badge variant="destructive">Failed</Badge>;
-      case 'cancelled':
-        return <Badge variant="outline">Cancelled</Badge>;
-      default:
-        return <Badge variant="secondary">{status}</Badge>;
-    }
-  };
-
-  const formatDateTime = (value: string) =>
-    new Date(value).toLocaleString(undefined, {
-      year: '2-digit',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-    });
 
   return (
-    <div className="h-full overflow-auto">
-      <div className="container mx-auto space-y-8 px-4 py-8">
-        <Card>
-          <CardHeader className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-
-            <div className="w-full sm:w-56">
-              <Select value={taskType} onValueChange={setTaskType}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Task type" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All types</SelectItem>
-                  <SelectItem value="transcription">Audio transcription</SelectItem>
-                  <SelectItem value="image_generation">Image generation</SelectItem>
-                  <SelectItem value="model_download">Model download</SelectItem>
-                </SelectContent>
-              </Select>
+    <div className="h-full w-full overflow-auto">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-1 pb-8">
+        <SoftPanel className="workspace-halo space-y-5 overflow-hidden rounded-[30px] border border-border/70">
+          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+            <div className="space-y-2">
+              <Badge variant="chip">Task operations</Badge>
+              <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
+                Task Workbench
+              </h1>
+              <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
+                Monitor long-running AI jobs, inspect task details, and recover failed or cancelled tasks from one console.
+              </p>
             </div>
-          </CardHeader>
-          <CardContent>
-            {tasksError && (
-              <Alert variant="destructive">
-                <AlertTitle>Error</AlertTitle>
-                <AlertDescription>Failed to fetch task list</AlertDescription>
-              </Alert>
-            )}
+            <Button
+              variant="pill"
+              size="pill"
+              disabled={isRefetching}
+              onClick={() => void refetchTasks()}
+            >
+              {isRefetching ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <RefreshCw className="mr-2 h-4 w-4" />
+              )}
+              Refresh
+            </Button>
+          </div>
 
-            {tasksLoading ? (
-              <div className="flex justify-center py-8">
-                <Spinner className="h-8 w-8" />
-              </div>
-            ) : (
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="w-[220px]">Task ID</TableHead>
-                    <TableHead className="min-w-[140px]">Type</TableHead>
-                    <TableHead className="min-w-[120px]">Status</TableHead>
-                    <TableHead className="min-w-[140px]">Created At</TableHead>
-                    <TableHead className="hidden min-w-[140px] xl:table-cell">Updated At</TableHead>
-                    <TableHead className="sticky right-0 z-20 w-[96px] bg-card text-right shadow-[-1px_0_0_hsl(var(--border))]">
-                      Actions
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredTasks.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="py-8 text-center text-muted-foreground">
-                        <div className="flex flex-col items-center space-y-2">
-                          <p>No tasks yet</p>
-                          <p className="text-sm">Go to the Audio or Image page to create a task</p>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredTasks.map((task) => (
-                      <TableRow key={task.id} className="group">
-                        <TableCell className="max-w-[220px] truncate font-mono text-xs font-medium" title={task.id}>
-                          {task.id}
-                        </TableCell>
-                        <TableCell className="max-w-[140px] truncate" title={task.task_type}>{task.task_type}</TableCell>
-                        <TableCell>{getStatusBadge(task.status)}</TableCell>
-                        <TableCell>{formatDateTime(task.created_at)}</TableCell>
-                        <TableCell className="hidden xl:table-cell">{formatDateTime(task.updated_at)}</TableCell>
-                        <TableCell className="sticky right-0 z-10 bg-card text-right shadow-[-1px_0_0_hsl(var(--border))] group-hover:bg-muted/50">
-                          <Dialog>
-                            <DialogTrigger asChild>
-                              <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={() => fetchTaskDetail(task.id)}
-                              >
-                                Details
-                              </Button>
-                            </DialogTrigger>
-                            <DialogContent className="sm:max-w-[600px]">
-                              <DialogHeader>
-                                <DialogTitle>Task Details</DialogTitle>
-                                <DialogDescription>
-                                  Task ID: {selectedTask?.id}
-                                </DialogDescription>
-                              </DialogHeader>
-                              <div className="space-y-4 py-4">
-                                {selectedTask ? (
-                                  <>
-                                    <div className="space-y-2">
-                                      <h4 className="font-medium">Basic Info</h4>
-                                      <div className="grid grid-cols-2 gap-4">
-                                        <div>
-                                          <p className="text-sm text-muted-foreground">Type</p>
-                                          <p>{selectedTask.task_type}</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-sm text-muted-foreground">Status</p>
-                                          <p>{getStatusBadge(selectedTask.status)}</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-sm text-muted-foreground">Created At</p>
-                                          <p>{new Date(selectedTask.created_at).toLocaleString()}</p>
-                                        </div>
-                                        <div>
-                                          <p className="text-sm text-muted-foreground">Updated At</p>
-                                          <p>{new Date(selectedTask.updated_at).toLocaleString()}</p>
-                                        </div>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Total Tasks" value={metrics.total} hint="Current list size" icon={ListChecks} />
+            <MetricCard label="Running" value={metrics.running} hint="Actively processing" icon={Timer} />
+            <MetricCard label="Succeeded" value={metrics.succeeded} hint="Finished successfully" icon={PlayCircle} />
+            <MetricCard label="Failed" value={metrics.failed} hint="Needs attention" icon={TriangleAlert} />
+          </div>
+        </SoftPanel>
+
+        <PillFilterBar>
+          <Select value={taskType} onValueChange={setTaskType}>
+            <SelectTrigger variant="pill" size="pill" className="min-w-[210px]">
+              <SelectValue placeholder="Task type" />
+            </SelectTrigger>
+            <SelectContent variant="pill">
+              <SelectItem value="all">All types</SelectItem>
+              <SelectItem value="transcription">Audio transcription</SelectItem>
+              <SelectItem value="image_generation">Image generation</SelectItem>
+              <SelectItem value="model_download">Model download</SelectItem>
+            </SelectContent>
+          </Select>
+          <Badge variant="counter">{filteredTasks.length} visible</Badge>
+          {isRefetching ? <StatusPill status="info">Syncing...</StatusPill> : null}
+        </PillFilterBar>
+
+        {tasksError ? (
+          <Alert variant="destructive">
+            <AlertTitle>Error</AlertTitle>
+            <AlertDescription>Failed to fetch task list</AlertDescription>
+          </Alert>
+        ) : null}
+
+        {tasksLoading ? (
+          <StageEmptyState
+            icon={Loader2}
+            title="Loading task list"
+            description="Fetching latest task status from the backend."
+            className="[&_svg]:animate-spin"
+          />
+        ) : filteredTasks.length === 0 ? (
+          <StageEmptyState
+            icon={ListChecks}
+            title="No tasks yet"
+            description="Go to Audio, Image, or Video pages to create a task."
+          />
+        ) : (
+          <SoftPanel className="overflow-hidden p-3">
+            <div className="workspace-soft-panel overflow-x-auto rounded-[26px] p-2">
+              <table className="w-full min-w-[980px] text-sm">
+                <thead>
+                  <tr className="border-b border-border/60 text-left text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                    <th className="px-4 py-3">Task ID</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3">Status</th>
+                    <th className="px-4 py-3">Created</th>
+                    <th className="px-4 py-3">Updated</th>
+                    <th className="px-4 py-3 text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredTasks.map((task) => (
+                    <tr key={task.id} className="border-b border-border/45 hover:bg-[var(--surface-1)]/60">
+                      <td className="max-w-[240px] truncate px-4 py-4 font-mono text-xs font-medium" title={task.id}>
+                        {task.id}
+                      </td>
+                      <td className="max-w-[180px] truncate px-4 py-4" title={task.task_type}>
+                        {task.task_type}
+                      </td>
+                      <td className="px-4 py-4">{renderStatusPill(task.status)}</td>
+                      <td className="px-4 py-4 text-muted-foreground">{formatDateTime(task.created_at)}</td>
+                      <td className="px-4 py-4 text-muted-foreground">{formatDateTime(task.updated_at)}</td>
+                      <td className="px-4 py-4 text-right">
+                        <Dialog>
+                          <DialogTrigger asChild>
+                            <Button
+                              variant="pill"
+                              size="sm"
+                              onClick={() => {
+                                setSelectedTask(null);
+                                void fetchTaskDetail(task.id);
+                              }}
+                            >
+                              Details
+                            </Button>
+                          </DialogTrigger>
+                          <DialogContent className="max-w-3xl">
+                            <DialogHeader>
+                              <DialogTitle>Task Details</DialogTitle>
+                              <DialogDescription>Task ID: {selectedTask?.id ?? task.id}</DialogDescription>
+                            </DialogHeader>
+                            <div className="space-y-4 py-2">
+                              {selectedTask ? (
+                                <>
+                                  <SoftPanel className="space-y-3 rounded-[20px]">
+                                    <div className="grid gap-3 md:grid-cols-2">
+                                      <div>
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Type</p>
+                                        <p className="mt-1 text-sm font-medium">{selectedTask.task_type}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Status</p>
+                                        <div className="mt-1">{renderStatusPill(selectedTask.status)}</div>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Created</p>
+                                        <p className="mt-1 text-sm font-medium">{new Date(selectedTask.created_at).toLocaleString()}</p>
+                                      </div>
+                                      <div>
+                                        <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Updated</p>
+                                        <p className="mt-1 text-sm font-medium">{new Date(selectedTask.updated_at).toLocaleString()}</p>
                                       </div>
                                     </div>
+                                  </SoftPanel>
 
-                                    {selectedTask.status === 'failed' && selectedTask.error_msg && (
-                                      <Alert variant="destructive">
-                                        <AlertTitle>Failure reason</AlertTitle>
-                                        <AlertDescription className="whitespace-pre-wrap break-words">
-                                          {selectedTask.error_msg}
-                                        </AlertDescription>
-                                      </Alert>
-                                    )}
+                                  {selectedTask.status === 'failed' && selectedTask.error_msg ? (
+                                    <Alert variant="destructive">
+                                      <AlertTitle>Failure reason</AlertTitle>
+                                      <AlertDescription className="whitespace-pre-wrap break-words">
+                                        {selectedTask.error_msg}
+                                      </AlertDescription>
+                                    </Alert>
+                                  ) : null}
 
-                                    {selectedTask.status === 'succeeded' && taskResult && (
-                                      <div className="space-y-2">
-                                        <h4 className="font-medium">Task Result</h4>
-                                        <div className="rounded-md border bg-muted/50 p-4">
-                                          {taskResult.text ? (
-                                            <div className="space-y-2">
-                                              <p className="whitespace-pre-wrap text-sm">{taskResult.text}</p>
-                                              <Button
-                                                variant="secondary"
-                                                size="sm"
-                                                onClick={() => {
-                                                  navigator.clipboard.writeText(taskResult.text);
-                                                  toast.success('Copied to clipboard');
-                                                }}
-                                              >
-                                                Copy result
-                                              </Button>
-                                            </div>
-                                          ) : (
-                                            <pre className="whitespace-pre-wrap text-sm">
-                                              {JSON.stringify(taskResult, null, 2)}
-                                            </pre>
-                                          )}
+                                  {selectedTask.status === 'succeeded' && taskResult ? (
+                                    <SoftPanel className="space-y-3 rounded-[20px]">
+                                      <h4 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+                                        Task Result
+                                      </h4>
+                                      {taskResult.text ? (
+                                        <div className="space-y-3">
+                                          <p className="whitespace-pre-wrap text-sm leading-6">{taskResult.text}</p>
+                                          <Button
+                                            variant="pill"
+                                            size="sm"
+                                            onClick={() => {
+                                              navigator.clipboard.writeText(taskResult.text);
+                                              toast.success('Copied to clipboard');
+                                            }}
+                                          >
+                                            Copy result
+                                          </Button>
                                         </div>
-                                      </div>
-                                    )}
+                                      ) : (
+                                        <pre className="overflow-x-auto rounded-xl bg-[var(--surface-1)] p-3 text-xs">
+                                          {JSON.stringify(taskResult, null, 2)}
+                                        </pre>
+                                      )}
+                                    </SoftPanel>
+                                  ) : null}
 
-                                    <div className="flex space-x-2">
-                                      {selectedTask.status === 'running' && (
-                                        <Button
-                                          variant="destructive"
-                                          size="sm"
-                                          onClick={() => cancelTask(selectedTask.id)}
-                                          disabled={cancelTaskMutation.isPending}
-                                        >
-                                          {cancelTaskMutation.isPending ? 'Cancelling...' : 'Cancel task'}
-                                        </Button>
-                                      )}
-                                      {(selectedTask.status === 'failed' || selectedTask.status === 'cancelled' || selectedTask.status === 'succeeded') && (
-                                        <Button
-                                          variant="secondary"
-                                          size="sm"
-                                          onClick={() => restartTask(selectedTask.id)}
-                                          disabled={restartTaskMutation.isPending}
-                                        >
-                                          {restartTaskMutation.isPending ? 'Restarting...' : 'Restart task'}
-                                        </Button>
-                                      )}
-                                    </div>
-                                  </>
-                                ) : (
-                                  <div className="flex justify-center py-8">
-                                    <Spinner className="h-8 w-8" />
+                                  <div className="flex flex-wrap gap-2">
+                                    {selectedTask.status === 'running' ? (
+                                      <Button
+                                        variant="destructive"
+                                        size="sm"
+                                        onClick={() => void cancelTask(selectedTask.id)}
+                                        disabled={cancelTaskMutation.isPending}
+                                      >
+                                        {cancelTaskMutation.isPending ? 'Cancelling...' : 'Cancel task'}
+                                      </Button>
+                                    ) : null}
+                                    {selectedTask.status === 'failed' ||
+                                    selectedTask.status === 'cancelled' ||
+                                    selectedTask.status === 'succeeded' ? (
+                                      <Button
+                                        variant="pill"
+                                        size="sm"
+                                        onClick={() => void restartTask(selectedTask.id)}
+                                        disabled={restartTaskMutation.isPending}
+                                      >
+                                        {restartTaskMutation.isPending ? 'Restarting...' : 'Restart task'}
+                                      </Button>
+                                    ) : null}
                                   </div>
-                                )}
-                              </div>
-                            </DialogContent>
-                          </Dialog>
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
-            )}
-          </CardContent>
-        </Card>
+                                </>
+                              ) : (
+                                <div className="flex justify-center py-10">
+                                  <Spinner className="h-8 w-8" />
+                                </div>
+                              )}
+                            </div>
+                          </DialogContent>
+                        </Dialog>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </SoftPanel>
+        )}
       </div>
     </div>
   );
+}
+
+function renderStatusPill(status: string) {
+  if (status === 'succeeded') {
+    return <StatusPill status="success">Succeeded</StatusPill>;
+  }
+  if (status === 'running') {
+    return <StatusPill status="info">Running</StatusPill>;
+  }
+  if (status === 'failed') {
+    return <StatusPill status="danger">Failed</StatusPill>;
+  }
+  if (status === 'cancelled') {
+    return <StatusPill status="neutral">Cancelled</StatusPill>;
+  }
+  if (status === 'pending') {
+    return <StatusPill status="neutral">Pending</StatusPill>;
+  }
+
+  return <StatusPill status="neutral">{status}</StatusPill>;
+}
+
+function formatDateTime(value: string) {
+  return new Date(value).toLocaleString(undefined, {
+    year: '2-digit',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }

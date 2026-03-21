@@ -8,6 +8,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Spinner } from '@/components/ui/spinner';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Switch } from '@/components/ui/switch';
+import { CompactConfigSummary, SoftPanel, StageEmptyState } from '@/components/ui/workspace';
+import { Loader2, Mic } from 'lucide-react';
 import { toast } from 'sonner';
 import useFile, { SelectedFile } from '@/hooks/use-file';
 import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } from './hooks/use-transcribe';
@@ -106,6 +108,16 @@ export default function Audio() {
     transcribe.isPending ||
     loadModelMutation.isPending ||
     downloadModelMutation.isPending;
+
+  const summaryItems = useMemo(
+    () => [
+      { label: 'Source', value: file?.name ?? 'No file selected' },
+      { label: 'Model', value: selectedModel?.display_name ?? 'Not selected' },
+      { label: 'VAD', value: enableVad ? 'Enabled' : 'Disabled' },
+      { label: 'Decode', value: showDecodeOptions ? 'Custom' : 'Default' },
+    ],
+    [enableVad, file?.name, selectedModel?.display_name, showDecodeOptions]
+  );
 
   useEffect(() => {
     if (whisperTranscribeModels.length === 0) {
@@ -446,16 +458,17 @@ export default function Audio() {
   };
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="container mx-auto px-4 py-8 space-y-8">
-        <Card className="max-w-2xl mx-auto">
-        <CardHeader>
-          <CardTitle>Transcription Setup</CardTitle>
-          <CardDescription>
-            Choose a whisper model and file. You can optionally enable VAD and configure advanced whisper decode parameters. Missing model files are downloaded automatically. Worker count comes from Settings configuration.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
+    <div className="h-full w-full overflow-y-auto">
+      <div className="mx-auto grid w-full max-w-7xl gap-5 pb-8 xl:grid-cols-[minmax(380px,460px)_minmax(0,1fr)]">
+        <SoftPanel className="space-y-0 p-0">
+          <Card variant="soft" className="gap-4 border-0 shadow-none">
+            <CardHeader className="border-b border-border/60">
+              <CardTitle>Transcription Setup</CardTitle>
+              <CardDescription>
+                Choose a whisper model and file. You can optionally enable VAD and configure advanced whisper decode parameters. Missing model files are downloaded automatically. Worker count comes from Settings configuration.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
           {catalogModelsError && (
             <Alert variant="destructive">
               <AlertTitle>Model Catalog Error</AlertTitle>
@@ -930,20 +943,66 @@ export default function Audio() {
               )}
             </div>
           )}
-        </CardContent>
-        <CardFooter className="flex justify-end">
-          <Button
-            onClick={handleTranscribe}
-            disabled={!isTauri || !file || !selectedModelId || isBusy || (enableVad && !selectedVadModelId)}
-          >
-            {preparingStage === 'prepare'
-              ? 'Preparing Model...'
-              : preparingStage === 'transcribe' || transcribe?.isPending
-                ? 'Processing...'
-                : 'Start Transcription'}
-          </Button>
-        </CardFooter>
-        </Card>
+            </CardContent>
+            <CardFooter className="flex justify-end">
+              <Button
+                variant="cta"
+                size="pill"
+                onClick={handleTranscribe}
+                disabled={!isTauri || !file || !selectedModelId || isBusy || (enableVad && !selectedVadModelId)}
+              >
+                {preparingStage === 'prepare'
+                  ? 'Preparing Model...'
+                  : preparingStage === 'transcribe' || transcribe?.isPending
+                    ? 'Processing...'
+                    : 'Start Transcription'}
+              </Button>
+            </CardFooter>
+          </Card>
+        </SoftPanel>
+
+        <div className="space-y-4">
+          <CompactConfigSummary title="Transcription Snapshot" items={summaryItems} />
+
+          {isBusy ? (
+            <SoftPanel className="workspace-halo flex min-h-[420px] flex-col items-center justify-center gap-4 rounded-[28px] text-center">
+              <Loader2 className="h-8 w-8 animate-spin text-[var(--brand-teal)]" />
+              <p className="text-sm font-medium">
+                {preparingStage === 'prepare'
+                  ? 'Preparing selected model...'
+                  : 'Processing transcription request...'}
+              </p>
+              {taskId ? (
+                <p className="text-xs text-muted-foreground">Task ID: {taskId}</p>
+              ) : null}
+            </SoftPanel>
+          ) : file ? (
+            <SoftPanel className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                File is ready. Start Transcription will create a task and keep current STT flow unchanged.
+              </p>
+              <div className="rounded-2xl bg-[var(--surface-1)] px-4 py-3 text-sm">
+                <p className="font-medium">{file.name}</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  After submission, you can continue tracking progress in Tasks.
+                </p>
+              </div>
+              <Button variant="pill" size="pill" onClick={() => navigate('/task')}>
+                Open Tasks
+              </Button>
+            </SoftPanel>
+          ) : (
+            <StageEmptyState
+              icon={Mic}
+              title="No source file selected"
+              description={
+                isTauri
+                  ? 'Choose a local audio/video file in the left panel to start transcription.'
+                  : 'Web transcription upload is not implemented yet. Please use the desktop app.'
+              }
+            />
+          )}
+        </div>
       </div>
     </div>
   );
