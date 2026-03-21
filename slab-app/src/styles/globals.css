@@ -56,9 +56,23 @@
 
   --radius: 0.95rem;
   --shell-rail-width: 5rem;
-  --shell-topbar-height: 5rem;
-  --shell-footer-height: 2.75rem;
-  --shell-content-gutter: 1.25rem;
+  --shell-topbar-height: 3.5rem;
+  --shell-footer-height: 2rem;
+  --shell-content-gutter: 1.5rem;
+  --shell-title: #0f172a;
+  --shell-subtitle: #0d9488;
+  --shell-rail-bg: #f2f4f6;
+  --shell-topbar-bg: rgba(247, 249, 251, 0.5);
+  --shell-footer-bg: #f2f4f6;
+  --shell-search-bg: rgba(224, 227, 229, 0.4);
+  --shell-search-foreground: #94a3b8;
+  --shell-divider: rgba(188, 201, 198, 0.3);
+  --shell-rail-label: #64748b;
+  --shell-rail-active: #0d9488;
+  --shell-footer-label: #394a56;
+  --shell-footer-value: #009d86;
+  --shell-elevation: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shell-line: rgba(229, 231, 235, 0.9);
 
   --sidebar: color-mix(in oklab, var(--surface-1) 84%, white);
   --sidebar-foreground: oklch(0.28 0.03 220);
@@ -145,6 +159,20 @@
   --status-info-bg: color-mix(in oklab, var(--brand-teal) 18%, var(--surface-2));
   --status-danger-bg: color-mix(in oklab, oklch(0.72 0.18 25) 20%, var(--surface-2));
   --status-neutral-bg: color-mix(in oklab, white 10%, var(--surface-2));
+  --shell-title: oklch(0.94 0.01 200);
+  --shell-subtitle: oklch(0.78 0.12 190);
+  --shell-rail-bg: color-mix(in oklab, var(--app-canvas) 90%, black 10%);
+  --shell-topbar-bg: color-mix(in oklab, var(--app-canvas) 82%, black 18%);
+  --shell-footer-bg: color-mix(in oklab, var(--app-canvas) 92%, black 8%);
+  --shell-search-bg: color-mix(in oklab, var(--surface-soft) 72%, black 28%);
+  --shell-search-foreground: oklch(0.74 0.012 220);
+  --shell-divider: color-mix(in oklab, white 18%, transparent);
+  --shell-rail-label: oklch(0.74 0.018 220);
+  --shell-rail-active: oklch(0.78 0.12 190);
+  --shell-footer-label: oklch(0.78 0.012 220);
+  --shell-footer-value: oklch(0.78 0.12 190);
+  --shell-elevation: 0 1px 2px rgba(0, 0, 0, 0.34);
+  --shell-line: color-mix(in oklab, white 12%, transparent);
 }
 
 @theme inline {
@@ -234,8 +262,9 @@
     min-height: 100%;
     width: 100%;
     background:
-      linear-gradient(180deg, color-mix(in oklab, var(--surface-1) 66%, transparent) 0%, transparent 100%),
-      var(--app-canvas);
+      linear-gradient(180deg, color-mix(in oklab, white 32%, transparent) 0%, transparent 18%),
+      radial-gradient(circle at top right, color-mix(in oklab, var(--brand-teal) 3%, transparent), transparent 36%),
+      var(--shell-rail-bg);
   }
 
   .workspace-surface {
@@ -271,6 +300,25 @@
     background: color-mix(in oklab, var(--surface-input) 92%, white 8%);
     border: 1px solid color-mix(in oklab, var(--border) 88%, white 12%);
     box-shadow: 0 16px 32px -28px color-mix(in oklab, var(--foreground) 32%, transparent);
+  }
+
+  .shell-topbar {
+    background:
+      linear-gradient(180deg, color-mix(in oklab, white 30%, transparent) 0%, transparent 100%),
+      var(--shell-topbar-bg);
+    border-bottom: 1px solid var(--shell-line);
+    backdrop-filter: blur(10px);
+  }
+
+  .shell-search {
+    background: var(--shell-search-bg);
+    border: 1px solid color-mix(in oklab, white 32%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 44%, transparent);
+  }
+
+  .shell-footer-bar {
+    background: var(--shell-footer-bg);
+    border-top: 1px solid var(--shell-line);
   }
 
   .chat-markdown {
@@ -315,5 +363,15 @@
     color: var(--brand-teal);
     text-decoration: underline;
     text-underline-offset: 0.18rem;
+  }
+
+  .chat-markdown--assistant code:not(pre code) {
+    background: #d7dde3;
+    color: #0d1c2f;
+  }
+
+  .chat-markdown--user code:not(pre code) {
+    background: #b9c7e0;
+    color: #0d1c2f;
   }
 }

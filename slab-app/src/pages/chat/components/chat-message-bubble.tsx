@@ -1,4 +1,4 @@
-import { Copy, RefreshCcw } from "lucide-react"
+import { BotMessageSquare, Copy, RefreshCcw, UserRound } from "lucide-react"
 import XMarkdown from "@ant-design/x-markdown"
 
 import { Button } from "@/components/ui/button"
@@ -82,21 +82,44 @@ export function ChatMessageBubble({
 
   return (
     <div className={cn("flex w-full", isAssistant ? "justify-start" : "justify-end")}>
-      <div className={cn("flex max-w-[min(100%,46rem)] flex-col gap-2", !isAssistant && "items-end")}>
+      <div className={cn("flex max-w-[min(100%,40.8rem)] flex-col gap-2", !isAssistant && "items-end")}>
+        <div className={cn("flex items-center gap-2 px-1", !isAssistant && "flex-row-reverse")}>
+          <span
+            className={cn(
+              "flex size-6 shrink-0 items-center justify-center",
+              isAssistant
+                ? "rounded-[8px] bg-[#008378] text-white"
+                : "rounded-full border border-[#bcc9c64d] bg-white text-[#3d4947]"
+            )}
+          >
+            {isAssistant ? (
+              <BotMessageSquare className="size-3.5" />
+            ) : (
+              <UserRound className="size-3.5" />
+            )}
+          </span>
+          <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#6d7a77]">
+            {isAssistant ? "Ethereal Assistant" : "User"}
+          </span>
+        </div>
+
         <div
           className={cn(
-            "rounded-[28px] px-5 py-4 shadow-[0_18px_40px_-32px_color-mix(in_oklab,var(--foreground)_35%,transparent)]",
+            "px-6 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.05)]",
             isAssistant
-              ? "border border-border/60 bg-[var(--surface-1)] text-foreground"
-              : "bg-[var(--brand-teal)] text-[var(--brand-teal-foreground)]"
+              ? "rounded-tl-[24px] rounded-tr-[24px] rounded-br-[24px] rounded-bl-[8px] bg-[#e6e8ea] text-[#191c1e]"
+              : "rounded-tl-[24px] rounded-tr-[24px] rounded-br-[8px] rounded-bl-[24px] bg-[#d5e3fd] text-[#0d1c2f]"
           )}
         >
           {thinking ? (
-            <div className="mb-3">
+            <div className="mb-4">
               <ChatThinkingPanel thinking={thinking} loading={thinkingLoading && isBusy}>
                 <XMarkdown
                   paragraphTag="div"
-                  className={cn("chat-markdown", markdownClassName)}
+                  className={cn(
+                    "chat-markdown chat-markdown--assistant text-base leading-[1.625]",
+                    markdownClassName
+                  )}
                   streaming={{
                     hasNextChunk,
                     enableAnimation: true,
@@ -111,7 +134,11 @@ export function ChatMessageBubble({
           {answer ? (
             <XMarkdown
               paragraphTag="div"
-              className={cn("chat-markdown", markdownClassName)}
+              className={cn(
+                "chat-markdown text-base leading-[1.625]",
+                isAssistant ? "chat-markdown--assistant" : "chat-markdown--user",
+                markdownClassName
+              )}
               streaming={{
                 hasNextChunk,
                 enableAnimation: true,
@@ -124,12 +151,12 @@ export function ChatMessageBubble({
           ) : null}
         </div>
 
-        <div className="flex items-center gap-2 px-1">
+        <div className={cn("flex items-center gap-2 px-1", !isAssistant && "justify-end")}>
           <Button
             type="button"
             variant="quiet"
             size="sm"
-            className="h-8 rounded-full px-3 text-xs"
+            className="h-7 rounded-full px-3 text-[11px] text-[#6d7a77] hover:text-[#191c1e]"
             onClick={() => void copyMessage()}
           >
             <Copy className="size-3.5" />
@@ -140,7 +167,7 @@ export function ChatMessageBubble({
               type="button"
               variant="quiet"
               size="sm"
-              className="h-8 rounded-full px-3 text-xs"
+              className="h-7 rounded-full px-3 text-[11px] text-[#6d7a77] hover:text-[#191c1e]"
               onClick={() => onRetry(item.id)}
             >
               <RefreshCcw className="size-3.5" />

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from "react"
-import { Cpu, Gauge, MemoryStick } from "lucide-react"
+import { Bell } from "lucide-react"
 
-import { StatusPill } from "@/components/ui/workspace"
 import { getApiUrl } from "@/lib/tauri-api"
+import { cn } from "@/lib/utils"
 
 type GpuDeviceStatus = {
   id: number
@@ -43,7 +43,31 @@ async function fetchGpuStatus(): Promise<GpuStatusResponse> {
   return (await response.json()) as GpuStatusResponse
 }
 
-export default function FooterStatusBar() {
+type FooterStatusBarProps = {
+  variant?: "default" | "chat"
+}
+
+type FooterMetricProps = {
+  label: string
+  value: string
+  title?: string
+  className?: string
+}
+
+function FooterMetric({ label, value, title, className }: FooterMetricProps) {
+  return (
+    <div className={cn("flex min-w-0 items-center gap-2", className)} title={title ?? value}>
+      <span className="shrink-0 text-[10px] font-bold uppercase tracking-[-0.04em] text-[var(--shell-footer-label)]">
+        {label}
+      </span>
+      <span className="truncate text-[10px] font-bold uppercase tracking-[-0.025em] text-[var(--shell-footer-value)]">
+        {value}
+      </span>
+    </div>
+  )
+}
+
+export default function FooterStatusBar({ variant = "default" }: FooterStatusBarProps) {
   const [snapshot, setSnapshot] = useState<GpuStatusResponse | null>(null)
   const [isLoading, setIsLoading] = useState(true)
 
@@ -115,34 +139,39 @@ export default function FooterStatusBar() {
     }
   }, [snapshot])
 
-  const status = isLoading ? "info" : summary.available ? "success" : "danger"
+  const isChatVariant = variant === "chat"
+  const gpuText = isLoading ? "Detecting GPU..." : summary.model
+  const telemetryLabel = snapshot?.backend ?? "all-smi"
 
   return (
-    <footer className="workspace-surface flex h-[var(--shell-footer-height)] items-center justify-between rounded-[28px] px-4 text-[11px] text-muted-foreground">
-      <div className="flex min-w-0 items-center gap-3 overflow-hidden">
-        <StatusPill status={status} className="shrink-0">
-          <Cpu className="size-3" />
-          GPU
-        </StatusPill>
-
-        <span className="truncate font-medium text-foreground/85" title={summary.model}>
-          {isLoading ? "Detecting hardware..." : summary.model}
-        </span>
-
-        <span className="hidden items-center gap-1 rounded-full bg-[var(--surface-soft)] px-3 py-1 tabular-nums sm:inline-flex">
-          <MemoryStick className="size-3" />
-          {summary.memory}
-        </span>
-
-        <span className="hidden items-center gap-1 rounded-full bg-[var(--surface-soft)] px-3 py-1 tabular-nums md:inline-flex">
-          <Gauge className="size-3" />
-          {summary.utilization}
-        </span>
+    <footer
+      className="shell-footer-bar flex h-[var(--shell-footer-height)] items-center justify-between px-4 sm:px-6"
+    >
+      <div className="flex min-w-0 items-center gap-4 overflow-hidden sm:gap-6">
+        <FooterMetric
+          label="GPU"
+          value={gpuText}
+          title={summary.model}
+          className={cn(isChatVariant ? "max-w-[9rem] sm:max-w-[14rem]" : "max-w-[11rem] sm:max-w-[18rem]")}
+        />
+        <FooterMetric label="VRAM" value={summary.memory} className="hidden sm:flex" />
+        <FooterMetric label="LOAD" value={summary.utilization} className="hidden md:flex" />
       </div>
 
-      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground/85">
-        {snapshot?.backend ?? "all-smi"}
-      </span>
+      <div className="ml-4 flex shrink-0 items-center gap-3">
+        <span className="hidden text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--shell-footer-label)] lg:block">
+          {telemetryLabel}
+        </span>
+        <div
+          aria-hidden="true"
+          className={cn(
+            "flex size-5 items-center justify-center text-[var(--shell-footer-label)]",
+            summary.available && !isLoading && "text-[var(--shell-footer-value)]"
+          )}
+        >
+          <Bell className="size-3.5" />
+        </div>
+      </div>
     </footer>
   )
 }
