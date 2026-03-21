@@ -1,5 +1,6 @@
 import { ChevronDown, History, Search } from "lucide-react"
 import { useGlobalHeaderMeta } from "@/hooks/use-global-header-meta"
+import { WindowControls } from "@/layouts/window-controls"
 import { cn } from "@/lib/utils"
 
 type HeaderProps = {
@@ -19,7 +20,7 @@ export default function Header({ variant = "default" }: HeaderProps) {
   return (
     <header
       className={cn(
-        "shell-topbar flex h-[var(--shell-topbar-height)] items-center justify-between gap-4 px-5 md:px-8"
+        "shell-topbar flex h-[var(--shell-topbar-height)] items-center justify-between gap-4 pl-5 md:pl-8"
       )}
     >
       <div className="flex min-w-0 items-center gap-3 md:gap-4">
@@ -49,6 +50,8 @@ export default function Header({ variant = "default" }: HeaderProps) {
         >
           <History className="size-4" />
         </div>
+        <span className="hidden h-4 w-px shrink-0 bg-[var(--shell-divider)] md:block" />
+        <WindowControls />
       </div>
     </header>
   )
