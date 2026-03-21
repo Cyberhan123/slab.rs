@@ -227,7 +227,7 @@ pub(crate) fn encode_image_generation_request(
     match resolved.driver_id.as_str() {
         "candle.diffusion" => {
             if !object.contains_key("cfg_scale") {
-                insert_option(&mut object, "cfg_scale", f64::from(request.guidance));
+                insert_option(&mut object, "cfg_scale", request.guidance.map(f64::from));
             }
         }
         _ => {
