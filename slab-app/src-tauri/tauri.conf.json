@@ -14,8 +14,8 @@
     "windows": [
       {
         "title": "Slab",
-        "width": 1024,
-        "height": 768,
+        "width": 1280,
+        "height": 1040,
         "resizable": true,
         "center": true
       }

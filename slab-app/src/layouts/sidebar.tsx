@@ -11,8 +11,6 @@ import {
 } from "lucide-react"
 import { Link, useLocation } from "react-router-dom"
 
-import { Button } from "@/components/ui/button"
-import { StatusPill } from "@/components/ui/workspace"
 import { cn } from "@/lib/utils"
 
 type SidebarItem = {
@@ -23,7 +21,7 @@ type SidebarItem = {
 }
 
 const primaryItems: SidebarItem[] = [
-  { to: "/", label: "Chat", icon: BotMessageSquare, end: true },
+  { to: "/", label: "Assistant", icon: BotMessageSquare, end: true },
   { to: "/image", label: "Image", icon: ImageIcon },
   { to: "/video", label: "Video", icon: Film },
   { to: "/audio", label: "Audio", icon: Mic },
@@ -44,53 +42,67 @@ const isPathActive = (pathname: string, to: string, end = false) => {
   return pathname === to || pathname.startsWith(`${to}/`)
 }
 
-export function AppSidebar() {
+type AppSidebarProps = {
+  variant?: "default" | "chat"
+}
+
+export function AppSidebar({ variant = "default" }: AppSidebarProps) {
   const { pathname } = useLocation()
+  const isChatVariant = variant === "chat"
 
   const renderItem = (item: SidebarItem) => {
     const Icon = item.icon
     const active = isPathActive(pathname, item.to, item.end)
 
     return (
-      <Button
+      <Link
         key={item.to}
-        asChild
-        variant="rail"
-        size="rail"
+        to={item.to}
+        aria-current={active ? "page" : undefined}
         data-active={active ? "true" : "false"}
-        className="h-14 w-full rounded-[20px] px-2"
+        className={cn(
+          "flex flex-col items-center justify-center rounded-[12px] outline-none transition-[background-color,color,box-shadow,opacity,transform] duration-200 focus-visible:ring-2 focus-visible:ring-[color-mix(in_oklab,var(--brand-teal)_28%,transparent)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--shell-rail-bg)]",
+          active
+            ? "size-[52px] bg-white text-[var(--shell-rail-active)] opacity-100 shadow-[var(--shell-elevation)]"
+            : "size-12 text-[var(--shell-rail-label)] opacity-70 hover:-translate-y-px hover:bg-white/80 hover:text-[var(--shell-title)] hover:opacity-100"
+        )}
       >
-        <Link
-          to={item.to}
-          aria-current={active ? "page" : undefined}
-          className="flex h-full w-full flex-col items-center justify-center gap-1"
+        <Icon className="size-[18px]" />
+        <span
+          className={cn(
+            "pt-1 text-[10px] font-medium leading-[15px] tracking-[-0.025em]",
+            active && "text-[var(--shell-rail-active)]"
+          )}
         >
-          <Icon className={cn("size-4", active && "text-[var(--brand-teal)]")} />
-          <span className="text-[11px] font-medium tracking-tight">{item.label}</span>
-        </Link>
-      </Button>
+          {item.label}
+        </span>
+      </Link>
     )
   }
 
   return (
-    <aside className="workspace-surface flex w-[var(--shell-rail-width)] shrink-0 flex-col rounded-[32px] p-2">
-      <div className="flex flex-col items-center gap-3 px-1 py-2">
-        <div className="flex size-12 items-center justify-center rounded-[20px] bg-[linear-gradient(180deg,color-mix(in_oklab,var(--brand-teal)_20%,var(--surface-soft))_0%,var(--surface-soft)_100%)] shadow-[0_18px_30px_-24px_color-mix(in_oklab,var(--brand-teal)_35%,transparent)]">
-          <span className="text-xs font-semibold tracking-[0.18em] text-[var(--brand-teal)]">
-            SLAB
-          </span>
+    <aside
+      className={cn(
+        "flex min-h-0 w-[var(--shell-rail-width)] shrink-0 flex-col bg-[var(--shell-rail-bg)] py-6",
+        !isChatVariant && "shadow-[inset_-1px_0_0_var(--shell-line)]"
+      )}
+    >
+      <div className="flex flex-1 flex-col items-center justify-between">
+        <div className="flex flex-col items-center gap-6">
+          <div className="flex h-[54px] w-[59px] items-center justify-center rounded-[16px] bg-white shadow-[var(--shell-elevation)]">
+            <span className="text-[20px] font-bold tracking-[-0.045em] text-[var(--brand-teal)]">
+              Slab
+            </span>
+          </div>
+
+          <nav className="flex flex-col items-center gap-4">
+            {primaryItems.map(renderItem)}
+          </nav>
         </div>
-        <StatusPill status="info" className="px-2 py-1 text-[10px]">
-          AI
-        </StatusPill>
-      </div>
 
-      <nav className="mt-4 flex flex-1 flex-col gap-2">
-        {primaryItems.map(renderItem)}
-      </nav>
-
-      <div className="mt-4 border-t border-border/60 pt-3">
-        {footerItems.map(renderItem)}
+        <div className="flex flex-col items-center gap-4">
+          {footerItems.map(renderItem)}
+        </div>
       </div>
     </aside>
   )

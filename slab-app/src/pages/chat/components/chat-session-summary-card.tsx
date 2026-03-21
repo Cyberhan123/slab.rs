@@ -1,73 +1,85 @@
-import { History, Layers3, Sparkles } from "lucide-react"
+import { FolderOpen, MessageSquareDot, Plus } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { cn } from "@/lib/utils"
+
+export type ChatSessionSummaryItem = {
+  key: string
+  label: string
+  hint: string
+  tone: "warm" | "mint"
+}
 
 type ChatSessionSummaryCardProps = {
-  title: string
-  messageCount: number
-  modelLabel: string
-  deepThink: boolean
+  items: ChatSessionSummaryItem[]
   onManageSessions: () => void
   onNewSession: () => void
 }
 
 export function ChatSessionSummaryCard({
-  title,
-  messageCount,
-  modelLabel,
-  deepThink,
+  items,
   onManageSessions,
   onNewSession,
 }: ChatSessionSummaryCardProps) {
   return (
-    <Card variant="soft" className="w-full max-w-sm gap-4">
-      <CardHeader className="gap-3">
-        <div className="flex items-center justify-between gap-3">
-          <Badge variant="chip">Latest session</Badge>
-          <Sparkles className="size-4 text-[var(--brand-gold)]" />
-        </div>
-        <CardTitle className="line-clamp-2 text-lg">{title}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4 pt-0">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="rounded-2xl bg-[var(--surface-soft)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Messages
-            </p>
-            <p className="mt-1 inline-flex items-center gap-2 text-sm font-medium">
-              <History className="size-4 text-muted-foreground" />
-              {messageCount}
-            </p>
-          </div>
-          <div className="rounded-2xl bg-[var(--surface-soft)] px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-              Mode
-            </p>
-            <p className="mt-1 inline-flex items-center gap-2 text-sm font-medium">
-              <Layers3 className="size-4 text-muted-foreground" />
-              {deepThink ? "Deep think" : "Standard"}
-            </p>
-          </div>
-        </div>
+    <aside className="w-full max-w-[288px] rounded-[24px] border border-border/50 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#6d7a77]">
+          Latest session
+        </p>
+        <Button
+          type="button"
+          variant="quiet"
+          size="icon-xs"
+          className="rounded-full"
+          onClick={onNewSession}
+        >
+          <Plus className="size-3.5" />
+          <span className="sr-only">New session</span>
+        </Button>
+      </div>
 
-        <div className="rounded-2xl bg-[var(--surface-soft)] px-4 py-3">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-            Model
-          </p>
-          <p className="mt-1 text-sm font-medium">{modelLabel}</p>
-        </div>
+      <div className="mt-4 space-y-4">
+        {items.map((item, index) => {
+          const Icon = index === 0 ? FolderOpen : MessageSquareDot
 
-        <div className="flex gap-2">
-          <Button variant="pill" size="pill" className="flex-1" onClick={onManageSessions}>
-            Manage sessions
-          </Button>
-          <Button variant="quiet" size="pill" className="flex-1" onClick={onNewSession}>
-            New session
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={onManageSessions}
+              className="flex w-full items-center gap-3 text-left"
+            >
+              <span
+                className={cn(
+                  "flex size-8 shrink-0 items-center justify-center rounded-[8px]",
+                  item.tone === "warm"
+                    ? "bg-[#ffddb8] text-[#855300]"
+                    : "bg-[#89f5e7] text-[#00685f]"
+                )}
+              >
+                <Icon className="size-4" />
+              </span>
+
+              <span className="min-w-0">
+                <span className="block truncate text-sm font-semibold text-[#191c1e]">
+                  {item.label}
+                </span>
+                <span className="block text-[11px] text-[#6d7a77]">{item.hint}</span>
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      <Button
+        type="button"
+        variant="outline"
+        className="mt-5 h-[38px] w-full rounded-[12px] border-border/60 bg-white text-[#3d4947] hover:bg-[var(--surface-soft)]"
+        onClick={onManageSessions}
+      >
+        Manage sessions
+      </Button>
+    </aside>
   )
 }

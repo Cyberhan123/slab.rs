@@ -7,13 +7,14 @@ import { toast } from "sonner"
 import "@ant-design/x-markdown/themes/dark.css"
 import "@ant-design/x-markdown/themes/light.css"
 
-import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ChatComposer } from "@/pages/chat/components/chat-composer"
 import { ChatMessageBubble } from "@/pages/chat/components/chat-message-bubble"
 import { ChatSessionSheet } from "@/pages/chat/components/chat-session-sheet"
-import { ChatSessionSummaryCard } from "@/pages/chat/components/chat-session-summary-card"
-import { ChatWelcome } from "@/pages/chat/components/chat-welcome"
+import {
+  ChatSessionSummaryCard,
+  type ChatSessionSummaryItem,
+} from "@/pages/chat/components/chat-session-summary-card"
 import api from "@/lib/api"
 import { toCatalogModelList } from "@/lib/api/models"
 import { PAGE_HEADER_META } from "@/layouts/header-meta"
@@ -88,6 +89,20 @@ function createConversationLabel(value: string) {
   }
 
   return trimmed.length > 42 ? `${trimmed.slice(0, 42)}...` : trimmed
+}
+
+function getGreeting(date: Date) {
+  const hour = date.getHours()
+
+  if (hour < 12) {
+    return "Good morning"
+  }
+
+  if (hour < 18) {
+    return "Good afternoon"
+  }
+
+  return "Good evening"
 }
 
 function Chat() {
@@ -396,7 +411,6 @@ function Chat() {
     downloadModelMutation.isPending
 
   const safeMessages = (messages ?? []) as ChatMessageRecord[]
-  const currentConversationRecord = conversationList.find((item) => item.key === curConversation)
   const selectedModelLabel =
     modelOptions.find((item) => item.id === selectedModelId)?.label ?? "Select model"
   const latestUserPrompt =
@@ -425,6 +439,29 @@ function Chat() {
       return String(b.key).localeCompare(String(a.key))
     })
   }, [conversationList, curConversation])
+  const greeting = useMemo(() => getGreeting(new Date()), [])
+  const sessionSummaryItems = useMemo<ChatSessionSummaryItem[]>(() => {
+    const items = sortedConversations.slice(0, 2).map<ChatSessionSummaryItem>((conversation, index) => ({
+      key: conversation.key,
+      label: conversation.label ?? (index === 0 ? "Current session" : "Next session"),
+      hint:
+        conversation.key === curConversation
+          ? `${safeMessages.length} ${safeMessages.length === 1 ? "message" : "messages"}`
+          : conversation.group ?? "Workspace",
+      tone: index === 0 ? "warm" : "mint",
+    }))
+
+    if (items.length === 1) {
+      items.push({
+        key: `${selectedModelId || "model"}-status`,
+        label: selectedModelLabel,
+        hint: deepThink ? "Deep think enabled" : "Standard mode",
+        tone: "mint",
+      })
+    }
+
+    return items
+  }, [curConversation, deepThink, safeMessages.length, selectedModelId, selectedModelLabel, sortedConversations])
 
   const setConversationLabelIfNeeded = useCallback(
     (conversationKey: string, prompt: string) => {
@@ -515,40 +552,50 @@ function Chat() {
   return (
     <XProvider locale={locale}>
       <ChatContext.Provider value={{ onReload }}>
-        <div className="relative flex min-h-0 flex-1 flex-col">
-          <div className="flex flex-wrap items-start justify-between gap-4 pb-4">
-            <div className="max-w-2xl space-y-3">
-              <Badge variant="chip">Single-column chat</Badge>
-              <div className="space-y-2">
-                <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
-                  Keep the thread focused and move fast.
-                </h1>
-                <p className="text-sm leading-7 text-muted-foreground md:text-base">
-                  Sessions live in a sheet, the message rail stays centered, and composer tools stay
-                  close to the prompt instead of scattered across the page.
-                </p>
-              </div>
+        <div className="relative flex min-h-0 flex-1 flex-col bg-white">
+          <div className="pointer-events-none absolute right-4 top-4 hidden xl:block">
+            <div className="pointer-events-auto">
+              <ChatSessionSummaryCard
+                items={sessionSummaryItems}
+                onManageSessions={() => setIsSessionSheetOpen(true)}
+                onNewSession={handleCreateConversation}
+              />
             </div>
+          </div>
 
+          <div className="mx-auto w-full max-w-[768px] px-6 pb-6 pt-12 md:px-8 xl:px-0">
+            <div className="space-y-2">
+              <h1 className="text-[clamp(2.75rem,6vw,4rem)] font-semibold tracking-[-0.055em] text-[#191c1e]">
+                {greeting}
+              </h1>
+              <p className="text-lg leading-7 text-[#3d4947]/80">
+                How can I assist your creative workflow today?
+              </p>
+            </div>
+          </div>
+
+          <div className="mx-auto block w-full max-w-[768px] px-6 pb-6 md:px-8 xl:hidden xl:px-0">
             <ChatSessionSummaryCard
-              title={currentConversationRecord?.label ?? "New chat"}
-              messageCount={safeMessages.length}
-              modelLabel={selectedModelLabel}
-              deepThink={deepThink}
+              items={sessionSummaryItems}
               onManageSessions={() => setIsSessionSheetOpen(true)}
               onNewSession={handleCreateConversation}
             />
           </div>
 
           <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-1 pb-56 pt-2">
+            <div className="mx-auto flex w-full max-w-[768px] flex-col gap-8 px-6 pb-56 pt-2 md:px-8 xl:px-0">
               {safeMessages.length === 0 ? (
-                <ChatWelcome
-                  agentName={locale.agentName}
-                  onUsePrompt={setDraft}
-                  onGenerateImage={handleGenerateImage}
-                  onNewSession={handleCreateConversation}
-                />
+                <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-[#d7dee3] bg-[linear-gradient(180deg,rgba(247,249,251,0.9)_0%,rgba(247,249,251,0.5)_100%)] px-8 text-center">
+                  <div className="max-w-md space-y-3">
+                    <p className="text-base font-medium text-[#191c1e]">
+                      Start a new thread and keep the stage focused.
+                    </p>
+                    <p className="text-sm leading-6 text-[#6d7a77]">
+                      Ask for debugging help, refine a draft, or pass the current idea into image
+                      generation when it needs a visual direction.
+                    </p>
+                  </div>
+                </div>
               ) : (
                 safeMessages.map((item) => (
                   <ChatMessageBubble
@@ -568,8 +615,8 @@ function Chat() {
           </ScrollArea>
 
           <div className="pointer-events-none absolute inset-x-0 bottom-0">
-            <div className="h-24 bg-gradient-to-t from-[var(--surface-1)] via-[color:color-mix(in_oklab,var(--surface-1)_92%,transparent)] to-transparent" />
-            <div className="pointer-events-auto mx-auto -mt-2 w-full max-w-3xl px-1 pb-4">
+            <div className="h-28 bg-gradient-to-t from-[#f7f9fb] via-[rgba(247,249,251,0.92)] to-transparent" />
+            <div className="pointer-events-auto mx-auto -mt-3 w-full max-w-[768px] px-6 pb-6 md:px-8 xl:px-0">
               <ChatComposer
                 value={draft}
                 onValueChange={setDraft}
