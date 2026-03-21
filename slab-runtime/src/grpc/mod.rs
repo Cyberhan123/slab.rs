@@ -353,6 +353,15 @@ fn update_model_source_primary_path(source: &mut ModelSource, path: PathBuf) {
         ModelSource::LocalArtifacts { files } | ModelSource::HuggingFace { files, .. } => {
             files.insert("model".to_owned(), path);
         }
+        // `ModelSource` is `#[non_exhaustive]`; future variants that carry no
+        // embedded file map cannot have their primary path updated here. Log a
+        // warning so unexpected sources don't fail silently.
+        _ => {
+            tracing::warn!(
+                "update_model_source_primary_path: unrecognised ModelSource variant; \
+                 primary path was not updated"
+            );
+        }
     }
 }
 

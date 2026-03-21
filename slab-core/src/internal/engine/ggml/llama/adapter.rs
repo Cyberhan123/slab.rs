@@ -53,6 +53,15 @@ impl GGMLLlamaEngine {
 
         llama.backend_init();
 
+        // SAFETY: `Llama` wraps `Arc<slab_llama_sys::LlamaLib>` — a dlopen2-generated
+        // handle that holds a read-only table of function pointers loaded once at startup.
+        // After `Llama::new` returns the function pointer table is never mutated, making
+        // concurrent reads from multiple threads safe. No other mutable state is stored
+        // directly on `Llama`; all mutable engine state (`inference_engine`, `loaded_model`)
+        // is guarded by `RwLock` on the enclosing `GGMLLlamaEngine`. The `GGMLLlamaEngine`
+        // struct therefore satisfies the `Send + Sync` contract, which is asserted explicitly
+        // via the `unsafe impl` declarations above this block.
+        #[allow(clippy::arc_with_non_send_sync)]
         Ok(Self {
             instance: Arc::new(llama),
             inference_engine: RwLock::new(None),
