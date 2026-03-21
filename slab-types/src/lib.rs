@@ -22,8 +22,19 @@ pub mod settings;
 pub mod whisper;
 
 pub use backend::RuntimeBackendId;
+pub use common::{Id, Timestamp};
+pub use diffusion::{
+    DiffusionImageRequest, DiffusionImageResponse, DiffusionVideoRequest, DiffusionVideoResponse,
+};
 pub use error::SlabTypeError;
+pub use inference::{
+    AudioTranscriptionRequest, AudioTranscriptionResponse, ImageGenerationRequest,
+    ImageGenerationResponse, JsonOptions, TextGenerationChunk, TextGenerationRequest,
+    TextGenerationResponse,
+};
+pub use media::{GeneratedFrame, GeneratedImage, RawImageInput};
 pub use runtime::{
     Capability, DiffusionLoadOptions, DriverHints, ModelFamily, ModelSource, ModelSpec,
     RuntimeModelLoadCommand, RuntimeModelLoadSpec, RuntimeModelReloadSpec, RuntimeModelStatus,
 };
+pub use whisper::{WhisperDecodeOptions, WhisperVadOptions};

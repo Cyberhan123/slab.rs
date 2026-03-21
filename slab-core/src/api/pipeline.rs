@@ -873,8 +873,8 @@ mod tests {
                 prompt: "generate a cat".to_owned(),
                 width: 256,
                 height: 256,
-                steps: 4,
-                guidance: 6.5,
+                steps: Some(4),
+                guidance: Some(6.5),
                 ..ImageGenerationRequest::default()
             })
             .await

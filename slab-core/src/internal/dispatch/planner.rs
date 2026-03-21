@@ -106,6 +106,10 @@ fn source_kind(source: &ModelSource) -> ModelSourceKind {
         ModelSource::LocalPath { .. } => ModelSourceKind::LocalPath,
         ModelSource::LocalArtifacts { .. } => ModelSourceKind::LocalArtifacts,
         ModelSource::HuggingFace { .. } => ModelSourceKind::HuggingFace,
+        // `ModelSource` is `#[non_exhaustive]`; treat any future variant as a
+        // local-path source so that filtering still returns a viable candidate
+        // rather than silently excluding it.
+        _ => ModelSourceKind::LocalPath,
     }
 }
 

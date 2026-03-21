@@ -10,6 +10,12 @@ pub struct SettingPmid(String);
 
 impl SettingPmid {
     /// Build a [`SettingPmid`] by joining N static segments with `.`.
+    ///
+    /// # Note
+    /// TODO: This performs a heap allocation on every call because `segments.join(".")` is not
+    /// a `const` operation. Since all PMIDs are compile-time known values, a future optimization
+    /// could store `&'static str` directly (e.g., via a `const fn from_static(s: &'static str)`
+    /// constructor or a proc-macro) to eliminate the per-call allocation.
     pub fn from_segments<const N: usize>(segments: [&'static str; N]) -> Self {
         Self(segments.join("."))
     }
