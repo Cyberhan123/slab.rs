@@ -354,9 +354,14 @@ fn update_model_source_primary_path(source: &mut ModelSource, path: PathBuf) {
             files.insert("model".to_owned(), path);
         }
         // `ModelSource` is `#[non_exhaustive]`; future variants that carry no
-        // embedded file map cannot have their primary path updated here, so we
-        // simply do nothing and let the caller handle the result.
-        _ => {}
+        // embedded file map cannot have their primary path updated here. Log a
+        // warning so unexpected sources don't fail silently.
+        _ => {
+            tracing::warn!(
+                "update_model_source_primary_path: unrecognised ModelSource variant; \
+                 primary path was not updated"
+            );
+        }
     }
 }
 
