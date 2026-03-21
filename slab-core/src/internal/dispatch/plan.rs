@@ -126,6 +126,9 @@ fn op_name_for(capability: Capability, streaming: bool) -> &'static str {
         (Capability::TextGeneration, false)
         | (Capability::AudioTranscription, _)
         | (Capability::ImageEmbedding, _) => "inference",
+        // `Capability` is `#[non_exhaustive]`; future variants default to the
+        // generic "inference" op until an explicit mapping is added.
+        (_, _) => "inference",
     }
 }
 
