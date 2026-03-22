@@ -538,7 +538,7 @@ export function ImageWorkbench({
 
                   <div className="mt-auto shrink-0 pt-8 xl:pt-6">
                     <Button
-                      className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-base font-semibold text-white shadow-[0_10px_15px_-3px_color-mix(in_oklab,var(--brand-teal)_20%,transparent),0_4px_6px_-4px_color-mix(in_oklab,var(--brand-teal)_20%,transparent)] hover:brightness-[1.03]"
+                      className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-base font-semibold text-[var(--brand-teal-foreground)] shadow-[0_10px_15px_-3px_color-mix(in_oklab,var(--brand-teal)_20%,transparent),0_4px_6px_-4px_color-mix(in_oklab,var(--brand-teal)_20%,transparent)] hover:brightness-[1.03]"
                       onClick={handleSubmit}
                       disabled={isBusy || !prompt.trim() || !selectedModelId}
                     >
@@ -582,7 +582,7 @@ export function ImageWorkbench({
                       <div className="flex size-32 items-center justify-center rounded-full bg-[var(--surface-soft)] text-muted-foreground/60">
                         <ImageIcon className="size-14 stroke-[1.5]" />
                       </div>
-                      <div className="absolute -right-2 -bottom-2 flex size-12 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-white shadow-[0_10px_15px_-3px_color-mix(in_oklab,var(--brand-teal)_24%,transparent),0_4px_6px_-4px_color-mix(in_oklab,var(--brand-teal)_22%,transparent)]">
+                      <div className="absolute -right-2 -bottom-2 flex size-12 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-[var(--brand-teal-foreground)] shadow-[0_10px_15px_-3px_color-mix(in_oklab,var(--brand-teal)_24%,transparent),0_4px_6px_-4px_color-mix(in_oklab,var(--brand-teal)_22%,transparent)]">
                         {isGenerating ? (
                           <Loader2 className="size-5 animate-spin" />
                         ) : (

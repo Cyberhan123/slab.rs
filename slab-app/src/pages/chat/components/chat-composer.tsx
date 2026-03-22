@@ -59,7 +59,7 @@ export function ChatComposer({
                 <Button
                   variant="quiet"
                   size="icon"
-                  className="size-10 rounded-full border border-white/50 bg-[var(--shell-card)]/60 text-muted-foreground hover:bg-[var(--shell-card)]"
+                  className="size-10 rounded-full border border-border/30 bg-[var(--shell-card)]/60 text-muted-foreground hover:bg-[var(--shell-card)]"
                 >
                   <Plus className="size-4" />
                 </Button>

@@ -501,14 +501,14 @@ export function VideoWorkbench({
 
               {videoPath ? (
                 <div className="relative z-10 w-full max-w-[640px] space-y-4">
-                  <div className="overflow-hidden rounded-[28px] border border-[var(--shell-card)]/50 bg-black/88 shadow-[0_32px_80px_-42px_color-mix(in_oklab,var(--foreground)_60%,transparent)]">
+                  <div className="overflow-hidden rounded-[28px] border border-[var(--shell-card)]/50 bg-[var(--media-canvas)]/88 shadow-[0_32px_80px_-42px_color-mix(in_oklab,var(--foreground)_60%,transparent)]">
                     <video
                       src={`file://${videoPath}`}
                       controls
                       autoPlay
                       loop
                       className={cn(
-                        'w-full bg-black',
+                        'w-full bg-[var(--media-canvas)]',
                         immersivePreview ? 'h-[520px] object-cover' : 'max-h-[520px] object-contain',
                       )}
                     />

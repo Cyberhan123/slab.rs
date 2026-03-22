@@ -95,6 +95,7 @@
   --ai-tool-foreground: oklch(0.25 0.04 40);
   --success: oklch(0.62 0.16 155);
   --success-foreground: oklch(0.98 0.01 155);
+  --media-canvas: oklch(0 0 0);
 }
 
 .dark {
@@ -159,10 +160,11 @@
   --ai-tool-foreground: oklch(0.98 0.01 40);
   --success: oklch(0.62 0.16 155);
   --success-foreground: oklch(0.15 0.02 155);
+  --media-canvas: oklch(0 0 0);
   --status-success-bg: color-mix(in oklab, var(--success) 24%, var(--surface-2));
   --status-info-bg: color-mix(in oklab, var(--brand-teal) 18%, var(--surface-2));
   --status-danger-bg: color-mix(in oklab, var(--destructive) 20%, var(--surface-2));
-  --status-neutral-bg: color-mix(in oklab, white 10%, var(--surface-2));
+  --status-neutral-bg: color-mix(in oklab, var(--foreground) 10%, var(--surface-2));
   --shell-card: var(--surface-2);
   --shell-title: var(--foreground);
   --shell-subtitle: var(--brand-teal);
@@ -171,13 +173,13 @@
   --shell-footer-bg: color-mix(in oklab, var(--app-canvas) 92%, black 8%);
   --shell-search-bg: color-mix(in oklab, var(--surface-soft) 72%, black 28%);
   --shell-search-foreground: var(--muted-foreground);
-  --shell-divider: color-mix(in oklab, white 18%, transparent);
+  --shell-divider: color-mix(in oklab, var(--foreground) 18%, transparent);
   --shell-rail-label: var(--muted-foreground);
   --shell-rail-active: var(--brand-teal);
   --shell-footer-label: var(--muted-foreground);
   --shell-footer-value: var(--brand-teal);
   --shell-elevation: 0 1px 2px color-mix(in oklab, var(--foreground) 34%, transparent);
-  --shell-line: color-mix(in oklab, white 12%, transparent);
+  --shell-line: color-mix(in oklab, var(--foreground) 12%, transparent);
 }
 
 @theme inline {
@@ -241,6 +243,7 @@
   --color-status-info-bg: var(--status-info-bg);
   --color-status-danger-bg: var(--status-danger-bg);
   --color-status-neutral-bg: var(--status-neutral-bg);
+  --color-media-canvas: var(--media-canvas);
 
   /* Shell chrome tokens – exposed so callers can use e.g. text-shell-title */
   --color-shell-card: var(--shell-card);
@@ -314,8 +317,8 @@
   }
 
   .workspace-topbar-search {
-    background: color-mix(in oklab, var(--surface-input) 92%, white 8%);
-    border: 1px solid color-mix(in oklab, var(--border) 88%, white 12%);
+    background: color-mix(in oklab, var(--surface-input) 92%, var(--shell-card) 8%);
+    border: 1px solid color-mix(in oklab, var(--border) 88%, var(--shell-card) 12%);
     box-shadow: 0 16px 32px -28px color-mix(in oklab, var(--foreground) 32%, transparent);
   }
 
