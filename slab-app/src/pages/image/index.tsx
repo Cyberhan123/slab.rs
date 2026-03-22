@@ -1,20 +1,21 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 import {
   ChevronDown,
   ChevronUp,
   Download,
+  History,
   ImageIcon,
+  Lightbulb,
   Loader2,
   Sparkles,
   X,
   ZoomIn,
 } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -33,15 +34,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from '@/components/ui/collapsible';
-import {
-  CompactConfigSummary,
-  SoftPanel,
-  SplitWorkbench,
-  StageEmptyState,
-  UploadDropzone,
-} from '@/components/ui/workspace';
+import { SplitWorkbench } from '@/components/ui/workspace';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
+import { cn } from '@/lib/utils';
 import { useImageModelPreparation } from './hooks/use-image-model-preparation';
 
 const API_BASE_URL =
@@ -73,6 +69,16 @@ const SCHEDULERS = [
 
 const POLL_INTERVAL_MS = 2_000;
 const MAX_POLL_ATTEMPTS = 150;
+const DIMENSION_PRESETS = [
+  { label: '1:1', width: 512, height: 512 },
+  { label: '4:3', width: 768, height: 576 },
+  { label: '16:9', width: 1024, height: 576 },
+] as const;
+const SIDEBAR_LABEL_CLASSNAME = 'text-[12px] font-semibold leading-4 text-[#191c1e]';
+const SIDEBAR_INPUT_CLASSNAME =
+  'h-10 w-full rounded-xl border-[#dbe4ea] bg-white px-3 text-sm text-[#191c1e] shadow-none focus-visible:border-[#64c3ba] focus-visible:ring-[3px] focus-visible:ring-[#0d9488]/12';
+const SIDEBAR_TEXTAREA_CLASSNAME =
+  'w-full rounded-xl border-[#dbe4ea] bg-white px-4 py-3 text-sm leading-5 text-[#191c1e] shadow-none resize-none focus-visible:border-[#64c3ba] focus-visible:ring-[3px] focus-visible:ring-[#0d9488]/12';
 
 type GeneratedImage = {
   src: string;
@@ -168,16 +174,17 @@ export default function ImagePage() {
 
   const isGenerating = isSubmitting || isPolling;
   const isBusy = isGenerating || isPreparingModel;
+  const parsedWidth = Number.parseInt(widthStr, 10) || 512;
+  const parsedHeight = Number.parseInt(heightStr, 10) || 512;
+  const activeDimensionPreset =
+    DIMENSION_PRESETS.find(
+      (preset) => preset.width === parsedWidth && preset.height === parsedHeight,
+    )?.label ?? null;
 
-  const summaryItems = useMemo(
-    () => [
-      { label: 'Mode', value: mode },
-      { label: 'Size', value: `${widthStr || '--'} x ${heightStr || '--'}` },
-      { label: 'Batch', value: numImages },
-      { label: 'Result Count', value: images.length },
-    ],
-    [heightStr, images.length, mode, numImages, widthStr],
-  );
+  const handleDimensionPreset = useCallback((width: number, height: number) => {
+    setWidthStr(String(width));
+    setHeightStr(String(height));
+  }, []);
 
   const handleInitImageChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -376,75 +383,111 @@ export default function ImagePage() {
   }, []);
 
   return (
-    <div className="h-full w-full overflow-y-auto">
-      <SplitWorkbench
-        className="h-full"
+    <div className="h-full w-full overflow-y-auto bg-white">
+      <div className="mx-auto flex min-h-full max-w-[1248px] flex-col px-4 py-4 sm:px-6">
+        <SplitWorkbench
+          className="h-full gap-6 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-0"
+          sidebarClassName="space-y-0"
+          mainClassName="min-h-full"
         sidebar={
-          <>
-            <SoftPanel className="space-y-4">
-              <Tabs value={mode} onValueChange={(value) => setMode(value as typeof mode)}>
-                <TabsList className="grid w-full grid-cols-2">
-                  <TabsTrigger value="txt2img">Text to Image</TabsTrigger>
-                  <TabsTrigger value="img2img">Image to Image</TabsTrigger>
-                </TabsList>
-                <TabsContent value="txt2img" className="mt-0" />
-                <TabsContent value="img2img" className="mt-4">
-                  <UploadDropzone
-                    title={initImageDataUri ? 'Init image ready' : 'Upload init image'}
-                    description={
-                      initImageDataUri
-                        ? 'Click to replace image'
-                        : 'PNG/JPEG for img2img mode'
-                    }
-                    actionLabel="Choose image"
-                    preview={
-                      initImageDataUri ? (
-                        <div className="relative">
-                          <img
-                            src={initImageDataUri}
-                            alt="init"
-                            className="max-h-52 w-full rounded-[20px] object-cover"
-                          />
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            size="icon-sm"
-                            className="absolute top-2 right-2"
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              setInitImageDataUri(null);
-                            }}
-                          >
-                            <X className="h-3.5 w-3.5" />
-                          </Button>
-                        </div>
-                      ) : undefined
-                    }
-                    onClick={() => initImageInputRef.current?.click()}
-                  />
-                  <input
-                    ref={initImageInputRef}
-                    type="file"
-                    accept="image/png,image/jpeg"
-                    className="hidden"
-                    onChange={handleInitImageChange}
-                  />
-                </TabsContent>
-              </Tabs>
+          <aside className="flex h-full flex-col rounded-[28px] border border-[#eef2f7] bg-[#f2f4f6] px-5 py-5 xl:min-h-[780px] xl:rounded-none xl:border-0 xl:border-r xl:border-[#e2e8f0]/70 xl:px-6 xl:py-6">
+            <div className="flex h-full flex-col">
+              <div className="space-y-6">
+              <div className="space-y-4">
+                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#64748b]">
+                  Generation Parameters
+                </p>
+                <Tabs
+                  value={mode}
+                  onValueChange={(value) => setMode(value as typeof mode)}
+                  className="gap-4"
+                >
+                  <TabsList className="grid h-auto w-full grid-cols-2 rounded-[16px] bg-transparent p-1">
+                    <TabsTrigger
+                      value="txt2img"
+                      className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-[#475569] shadow-none data-[state=active]:border-[#dbe4ea] data-[state=active]:bg-white data-[state=active]:text-[#0f172a] data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                    >
+                      Text to Image
+                    </TabsTrigger>
+                    <TabsTrigger
+                      value="img2img"
+                      className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-[#475569] shadow-none data-[state=active]:border-[#dbe4ea] data-[state=active]:bg-white data-[state=active]:text-[#0f172a] data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                    >
+                      Image to Image
+                    </TabsTrigger>
+                  </TabsList>
+                  <TabsContent value="txt2img" className="m-0" />
+                  <TabsContent value="img2img" className="m-0">
+                    <div className="space-y-2.5">
+                      <Label className={SIDEBAR_LABEL_CLASSNAME}>
+                        {initImageDataUri ? 'Init Image' : 'Upload Init Image'}
+                      </Label>
+                      <button
+                        type="button"
+                        className="group flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[#cbd5e1] bg-white px-4 py-4 text-center transition hover:border-[#5bc0b5] hover:bg-[#f8fcfb]"
+                        onClick={() => initImageInputRef.current?.click()}
+                      >
+                        {initImageDataUri ? (
+                          <div className="relative w-full overflow-hidden rounded-lg">
+                            <img
+                              src={initImageDataUri}
+                              alt="init"
+                              className="max-h-52 w-full rounded-lg object-cover"
+                            />
+                            <Button
+                              type="button"
+                              variant="pill"
+                              size="icon-sm"
+                              className="absolute top-2 right-2 border-white/80 bg-white/90 shadow-sm"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                setInitImageDataUri(null);
+                              }}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex size-12 items-center justify-center rounded-[14px] bg-[#f1f5f9] text-[#64748b] transition group-hover:bg-[#ebf7f5] group-hover:text-[#0d9488]">
+                              <ImageIcon className="size-5" />
+                            </div>
+                            <div className="space-y-1">
+                              <p className="text-sm font-medium text-[#191c1e]">
+                                Click to choose an image
+                              </p>
+                              <p className="text-xs text-[#64748b]">
+                                PNG/JPEG for img2img mode
+                              </p>
+                            </div>
+                          </>
+                        )}
+                      </button>
+                      <input
+                        ref={initImageInputRef}
+                        type="file"
+                        accept="image/png,image/jpeg"
+                        className="hidden"
+                        onChange={handleInitImageChange}
+                      />
+                    </div>
+                  </TabsContent>
+                </Tabs>
+              </div>
 
-              <div className="space-y-2">
-                <Label>Model</Label>
+              <div className="space-y-2.5">
+                <Label className={SIDEBAR_LABEL_CLASSNAME}>Model</Label>
                 <Select
                   value={selectedModelId}
                   onValueChange={setSelectedModelId}
                   disabled={isBusy || modelOptions.length === 0}
                 >
-                  <SelectTrigger variant="pill" size="pill" className="w-full">
+                  <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                     <SelectValue
                       placeholder={catalogLoading ? 'Loading models...' : 'Select model'}
                     />
                   </SelectTrigger>
-                  <SelectContent variant="pill">
+                  <SelectContent className="rounded-[16px] border-[#dbe4ea] bg-white shadow-[0_24px_48px_-34px_rgba(15,23,42,0.32)]">
                     {modelOptions.length === 0 ? (
                       <SelectItem value="__none" disabled>
                         No diffusion models found
@@ -464,70 +507,78 @@ export default function ImagePage() {
                 </Select>
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="prompt">Prompt</Label>
+              <div className="space-y-2.5">
+                <Label htmlFor="prompt" className={SIDEBAR_LABEL_CLASSNAME}>
+                  Prompt
+                </Label>
                 <Textarea
                   id="prompt"
-                  variant="soft"
                   placeholder="A cinematic portrait with moody rim light..."
-                  rows={4}
+                  rows={5}
                   value={prompt}
+                  className={SIDEBAR_TEXTAREA_CLASSNAME}
                   onChange={(event) => setPrompt(event.target.value)}
                 />
               </div>
 
-              <div className="space-y-2">
-                <Label htmlFor="negative-prompt">Negative Prompt</Label>
+              <div className="space-y-2.5">
+                <Label htmlFor="negative-prompt" className={SIDEBAR_LABEL_CLASSNAME}>
+                  Negative Prompt
+                </Label>
                 <Textarea
                   id="negative-prompt"
-                  variant="soft"
                   placeholder="blurry, low quality, distorted..."
                   rows={3}
                   value={negativePrompt}
+                  className={SIDEBAR_TEXTAREA_CLASSNAME}
                   onChange={(event) => setNegativePrompt(event.target.value)}
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <div className="space-y-2">
-                  <Label>Width</Label>
-                  <Input
-                    variant="soft"
-                    type="number"
-                    min={64}
-                    max={2048}
-                    step={64}
-                    value={widthStr}
-                    onChange={(event) => setWidthStr(event.target.value)}
-                  />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-3">
+                  <Label className={SIDEBAR_LABEL_CLASSNAME}>Dimensions</Label>
+                  <span className="rounded-full bg-[#dff5f1] px-2 py-1 font-mono text-[10px] leading-none text-[#0d9488]">
+                    {parsedWidth} x {parsedHeight}
+                  </span>
                 </div>
-                <div className="space-y-2">
-                  <Label>Height</Label>
-                  <Input
-                    variant="soft"
-                    type="number"
-                    min={64}
-                    max={2048}
-                    step={64}
-                    value={heightStr}
-                    onChange={(event) => setHeightStr(event.target.value)}
-                  />
+                <div className="grid grid-cols-3 gap-2">
+                  {DIMENSION_PRESETS.map((preset) => {
+                    const isActive = activeDimensionPreset === preset.label;
+
+                    return (
+                      <button
+                        key={preset.label}
+                        type="button"
+                        aria-pressed={isActive}
+                        className={cn(
+                          'flex h-10 items-center justify-center rounded-xl border bg-white px-3 text-[11px] font-medium text-[#191c1e] transition',
+                          isActive
+                            ? 'border-[#74cec4] shadow-[0_1px_2px_rgba(0,0,0,0.05)]'
+                            : 'border-[#e2e8f0] hover:border-[#cbd5e1]',
+                        )}
+                        onClick={() => handleDimensionPreset(preset.width, preset.height)}
+                      >
+                        {preset.label}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
 
-              <div className="space-y-2">
-                <Label>Batch</Label>
+              <div className="space-y-2.5">
+                <Label className={SIDEBAR_LABEL_CLASSNAME}>Number of Images</Label>
                 <Select
                   value={String(numImages)}
                   onValueChange={(value) => setNumImages(Number(value))}
                 >
-                  <SelectTrigger variant="soft" className="w-full">
+                  <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                     <SelectValue />
                   </SelectTrigger>
-                  <SelectContent variant="soft">
+                  <SelectContent className="rounded-[16px] border-[#dbe4ea] bg-white shadow-[0_24px_48px_-34px_rgba(15,23,42,0.32)]">
                     {[1, 2, 4].map((count) => (
                       <SelectItem key={count} value={String(count)}>
-                        {count}
+                        {count} {count === 1 ? 'Image' : 'Images'}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -535,17 +586,50 @@ export default function ImagePage() {
               </div>
 
               <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-                <CollapsibleTrigger asChild>
-                  <Button variant="quiet" className="w-full justify-between">
-                    Advanced Parameters
-                    {advancedOpen ? (
-                      <ChevronUp className="h-4 w-4" />
-                    ) : (
-                      <ChevronDown className="h-4 w-4" />
-                    )}
-                  </Button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="space-y-4 pt-3">
+                <div className="border-t border-[#dbe4ea]">
+                  <CollapsibleTrigger asChild>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between py-3 text-left"
+                    >
+                      <span className="text-xs font-bold text-[#64748b]">
+                        Advanced Settings
+                      </span>
+                      {advancedOpen ? (
+                        <ChevronUp className="h-4 w-4 text-[#64748b]" />
+                      ) : (
+                        <ChevronDown className="h-4 w-4 text-[#64748b]" />
+                      )}
+                    </button>
+                  </CollapsibleTrigger>
+                </div>
+                <CollapsibleContent className="space-y-4 pb-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2.5">
+                      <Label className={SIDEBAR_LABEL_CLASSNAME}>Width</Label>
+                      <Input
+                        type="number"
+                        min={64}
+                        max={2048}
+                        step={64}
+                        value={widthStr}
+                        className={SIDEBAR_INPUT_CLASSNAME}
+                        onChange={(event) => setWidthStr(event.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2.5">
+                      <Label className={SIDEBAR_LABEL_CLASSNAME}>Height</Label>
+                      <Input
+                        type="number"
+                        min={64}
+                        max={2048}
+                        step={64}
+                        value={heightStr}
+                        className={SIDEBAR_INPUT_CLASSNAME}
+                        onChange={(event) => setHeightStr(event.target.value)}
+                      />
+                    </div>
+                  </div>
                   <SliderField
                     label="CFG Scale"
                     value={cfgScale.toFixed(1)}
@@ -601,25 +685,25 @@ export default function ImagePage() {
                     />
                   ) : null}
 
-                  <div className="space-y-2">
-                    <Label>Seed (-1 random)</Label>
+                  <div className="space-y-2.5">
+                    <Label className={SIDEBAR_LABEL_CLASSNAME}>Seed (-1 random)</Label>
                     <Input
-                      variant="soft"
                       type="number"
                       value={seed}
+                      className={SIDEBAR_INPUT_CLASSNAME}
                       onChange={(event) =>
                         setSeed(Number.parseInt(event.target.value, 10))
                       }
                     />
                   </div>
 
-                  <div className="space-y-2">
-                    <Label>Sampler</Label>
+                  <div className="space-y-2.5">
+                    <Label className={SIDEBAR_LABEL_CLASSNAME}>Sampler</Label>
                     <Select value={sampleMethod} onValueChange={setSampleMethod}>
-                      <SelectTrigger variant="soft" className="w-full">
+                      <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent variant="soft">
+                      <SelectContent className="rounded-[16px] border-[#dbe4ea] bg-white shadow-[0_24px_48px_-34px_rgba(15,23,42,0.32)]">
                         {SAMPLE_METHODS.map((method) => (
                           <SelectItem key={method.value} value={method.value}>
                             {method.label}
@@ -629,13 +713,13 @@ export default function ImagePage() {
                     </Select>
                   </div>
 
-                  <div className="space-y-2">
-                    <Label>Scheduler</Label>
+                  <div className="space-y-2.5">
+                    <Label className={SIDEBAR_LABEL_CLASSNAME}>Scheduler</Label>
                     <Select value={scheduler} onValueChange={setScheduler}>
-                      <SelectTrigger variant="soft" className="w-full">
+                      <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent variant="soft">
+                      <SelectContent className="rounded-[16px] border-[#dbe4ea] bg-white shadow-[0_24px_48px_-34px_rgba(15,23,42,0.32)]">
                         {SCHEDULERS.map((schedulerItem) => (
                           <SelectItem
                             key={schedulerItem.value}
@@ -677,11 +761,9 @@ export default function ImagePage() {
                 </CollapsibleContent>
               </Collapsible>
 
-              <div className="flex gap-2 pt-2">
+              <div className="mt-auto pt-8">
                 <Button
-                  variant="cta"
-                  size="pill"
-                  className="flex-1"
+                  className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,#00685f_0%,#008378_100%)] text-base font-semibold text-white shadow-[0_10px_15px_-3px_rgba(13,148,136,0.2),0_4px_6px_-4px_rgba(13,148,136,0.2)] hover:brightness-[1.03]"
                   onClick={handleSubmit}
                   disabled={isBusy || !prompt.trim() || !selectedModelId}
                 >
@@ -698,60 +780,112 @@ export default function ImagePage() {
                   ) : (
                     <>
                       <Sparkles className="h-4 w-4" />
-                      Generate
+                      Generate Images
                     </>
                   )}
                 </Button>
                 {isGenerating ? (
-                  <Button variant="pill" size="pill" onClick={handleCancel}>
-                    Cancel
+                  <Button
+                    variant="ghost"
+                    className="mt-3 h-10 w-full rounded-xl text-[#64748b] hover:bg-white/60 hover:text-[#0f172a]"
+                    onClick={handleCancel}
+                  >
+                    Cancel generation
                   </Button>
                 ) : null}
               </div>
-            </SoftPanel>
-
-            <CompactConfigSummary title="Generation Snapshot" items={summaryItems} />
-          </>
+            </div>
+          </aside>
         }
         main={
-          <div className="flex h-full min-h-[540px] flex-col gap-4">
+          <section className="rounded-[28px] border border-[#eef2f7] bg-white xl:min-h-[780px] xl:rounded-none xl:border-0">
             {images.length === 0 ? (
-              <StageEmptyState
-                title={isGenerating ? 'Generating images...' : 'No images yet'}
-                description={
-                  isGenerating
-                    ? 'Your task is running. Generated images will appear here automatically.'
-                    : 'Tune your prompt and settings on the left, then start generation.'
-                }
-                icon={ImageIcon}
-              />
+              <div className="flex h-full min-h-[520px] items-center justify-center px-6 py-12 xl:min-h-[780px]">
+                <div className="flex max-w-[448px] flex-col items-center gap-6 text-center">
+                  <div className="relative flex items-center justify-center">
+                    <div className="flex size-32 items-center justify-center rounded-full bg-[#f1f5f9] text-[#b8c4d2]">
+                      <ImageIcon className="size-14 stroke-[1.5]" />
+                    </div>
+                    <div className="absolute -right-2 -bottom-2 flex size-12 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,#00685f_0%,#008378_100%)] text-white shadow-[0_10px_15px_-3px_rgba(13,148,136,0.24),0_4px_6px_-4px_rgba(13,148,136,0.22)]">
+                      {isGenerating ? (
+                        <Loader2 className="size-5 animate-spin" />
+                      ) : (
+                        <Sparkles className="size-5" />
+                      )}
+                    </div>
+                  </div>
+                  <div className="space-y-2">
+                    <h2 className="text-[30px] font-semibold tracking-[-0.03em] text-[#0f172a]">
+                      {isGenerating ? 'Generating images...' : 'Ready to create?'}
+                    </h2>
+                    <p className="mx-auto max-w-[320px] text-sm leading-6 text-[#64748b]">
+                      {isGenerating
+                        ? 'Your task is running. Generated images will appear here automatically.'
+                        : 'Enter a prompt and adjust the parameters to see your imagination come to life.'}
+                    </p>
+                  </div>
+                  {isGenerating ? (
+                    <div className="rounded-full bg-[#f2f4f6] px-3 py-1 text-sm text-[#64748b]">
+                      Task running
+                    </div>
+                  ) : (
+                    <div className="flex flex-wrap items-center justify-center gap-4 text-sm text-[#94a3b8]">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1.5 transition hover:text-[#0f172a]"
+                      >
+                        <History className="size-3.5" />
+                        View History
+                      </button>
+                      <span className="size-1 rounded-full bg-[#e2e8f0]" />
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1.5 transition hover:text-[#0f172a]"
+                      >
+                        <Lightbulb className="size-3.5" />
+                        Get Inspired
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             ) : (
-              <Card variant="soft" className="flex min-h-0 flex-1 flex-col overflow-hidden">
-                <CardHeader className="border-b border-border/60">
-                  <CardTitle className="flex items-center gap-2 text-lg">
-                    Results
-                    <Badge variant="counter">{images.length}</Badge>
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="min-h-0 flex-1 overflow-y-auto pt-5">
-                  <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+              <div className="flex h-full min-h-[520px] flex-col">
+                <div className="border-b border-[#eef2f7] px-6 py-6 xl:px-10">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <h2 className="text-[24px] font-semibold tracking-[-0.02em] text-[#0f172a]">
+                        Generated Images
+                      </h2>
+                      <p className="mt-1 text-sm text-[#64748b]">
+                        Review the latest renders, zoom in for detail, or download the best take.
+                      </p>
+                    </div>
+                    <span className="rounded-full bg-[#e7f7f4] px-3 py-1 text-sm font-medium text-[#0d9488]">
+                      {images.length} {images.length === 1 ? 'image' : 'images'}
+                    </span>
+                  </div>
+                </div>
+                <div className="min-h-0 flex-1 overflow-y-auto px-6 py-6 xl:px-10 xl:py-8">
+                  <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
                     {images.map((image, index) => (
                       <figure
                         key={`${image.src}-${index}`}
-                        className="group workspace-soft-panel overflow-hidden rounded-[22px] p-0"
+                        className="group overflow-hidden rounded-[24px] border border-[#e2e8f0] bg-[#f8fafc] shadow-[0_18px_32px_-28px_rgba(15,23,42,0.28)]"
                       >
-                        <div className="relative">
+                        <div className="relative overflow-hidden bg-white">
                           <img
                             src={image.src}
                             alt={image.prompt}
-                            className="max-h-[460px] w-full object-cover"
+                            className="max-h-[460px] w-full object-cover transition duration-300 group-hover:scale-[1.015]"
                             loading="lazy"
                           />
-                          <div className="pointer-events-none absolute inset-0 bg-black/35 opacity-0 transition-opacity group-hover:opacity-100" />
-                          <div className="absolute top-3 right-3 flex gap-2 opacity-0 transition-opacity group-hover:opacity-100">
+                          <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-transparent opacity-0 transition-opacity group-hover:opacity-100" />
+                          <div className="absolute top-4 right-4 flex gap-2 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
                             <Button
                               variant="pill"
                               size="icon-sm"
+                              className="border-white/80 bg-white/95 shadow-sm backdrop-blur"
                               onClick={() => setZoomedImage(image.src)}
                             >
                               <ZoomIn className="h-4 w-4" />
@@ -759,17 +893,20 @@ export default function ImagePage() {
                             <Button
                               variant="pill"
                               size="icon-sm"
+                              className="border-white/80 bg-white/95 shadow-sm backdrop-blur"
                               onClick={() => handleDownload(image.src, index)}
                             >
                               <Download className="h-4 w-4" />
                             </Button>
                           </div>
                         </div>
-                        <figcaption className="space-y-1 px-3 py-3 text-xs text-muted-foreground">
-                          <div className="line-clamp-2">{image.prompt}</div>
-                          <div className="flex items-center gap-2">
+                        <figcaption className="space-y-3 border-t border-[#e2e8f0]/80 bg-white px-4 py-4">
+                          <p className="line-clamp-2 text-sm leading-6 text-[#334155]">
+                            {image.prompt}
+                          </p>
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-[#64748b]">
                             <Badge variant="chip">{image.mode}</Badge>
-                            <span>
+                            <span className="rounded-full bg-[#f2f4f6] px-2.5 py-1">
                               {image.width} x {image.height}
                             </span>
                           </div>
@@ -777,12 +914,13 @@ export default function ImagePage() {
                       </figure>
                     ))}
                   </div>
-                </CardContent>
-              </Card>
+                </div>
+              </div>
             )}
-          </div>
+          </section>
         }
-      />
+        />
+      </div>
 
       <Dialog
         open={Boolean(zoomedImage)}
@@ -814,8 +952,8 @@ function SliderField({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <Label>{label}</Label>
-        <span className="text-xs font-medium text-muted-foreground">{value}</span>
+        <Label className={SIDEBAR_LABEL_CLASSNAME}>{label}</Label>
+        <span className="text-[11px] font-medium text-[#64748b]">{value}</span>
       </div>
       {slider}
     </div>

@@ -42,6 +42,7 @@ type ModelOption = {
   downloaded: boolean
   pending: boolean
   source: ModelOptionSource
+  contextWindow?: number | null
 }
 
 type ChatModelApiItem = {
@@ -51,6 +52,7 @@ type ChatModelApiItem = {
   downloaded: boolean
   pending: boolean
   provider_name?: string | null
+  context_window?: number | null
 }
 
 type ConversationItem = ConversationData & {
@@ -77,7 +79,10 @@ function isChatModelApiItem(value: unknown): value is ChatModelApiItem {
     typeof obj.display_name === "string" &&
     (obj.source === "local" || obj.source === "cloud") &&
     typeof obj.downloaded === "boolean" &&
-    typeof obj.pending === "boolean"
+    typeof obj.pending === "boolean" &&
+    (obj.context_window === undefined ||
+      obj.context_window === null ||
+      typeof obj.context_window === "number")
   )
 }
 
@@ -166,6 +171,7 @@ function Chat() {
           downloaded: item.downloaded,
           pending: item.pending,
           source: "cloud",
+          contextWindow: item.context_window ?? null,
         }))
 
       setCloudModelOptions(cloudOnly)
@@ -201,6 +207,7 @@ function Chat() {
         downloaded: Boolean(model.local_path),
         pending: model.pending,
         source: "local",
+        contextWindow: model.spec.context_window ?? null,
       })),
     [llamaModels]
   )
@@ -411,8 +418,35 @@ function Chat() {
     downloadModelMutation.isPending
 
   const safeMessages = (messages ?? []) as ChatMessageRecord[]
-  const selectedModelLabel =
-    modelOptions.find((item) => item.id === selectedModelId)?.label ?? "Select model"
+  const selectedModel = modelOptions.find((item) => item.id === selectedModelId)
+  const selectedModelLabel = selectedModel?.label ?? "Select model"
+  const selectedModelStatusLabel = useMemo(() => {
+    if (modelLoading) {
+      return "Loading models"
+    }
+
+    if (!selectedModel) {
+      return "Select model"
+    }
+
+    const parts = [selectedModel.label]
+
+    if (selectedModel.contextWindow && selectedModel.contextWindow > 0) {
+      parts.push(
+        `${new Intl.NumberFormat("en-US").format(selectedModel.contextWindow)} Context`
+      )
+    } else if (selectedModel.pending) {
+      parts.push("Downloading")
+    } else if (selectedModel.source === "local" && !selectedModel.downloaded) {
+      parts.push("Needs download")
+    } else if (isPreparingModel) {
+      parts.push("Preparing")
+    } else if (selectedModel.source === "cloud") {
+      parts.push("Cloud model")
+    }
+
+    return parts.join(" / ")
+  }, [isPreparingModel, modelLoading, selectedModel])
   const latestUserPrompt =
     safeMessages
       .slice()
@@ -441,7 +475,7 @@ function Chat() {
   }, [conversationList, curConversation])
   const greeting = useMemo(() => getGreeting(new Date()), [])
   const sessionSummaryItems = useMemo<ChatSessionSummaryItem[]>(() => {
-    const items = sortedConversations.slice(0, 2).map<ChatSessionSummaryItem>((conversation, index) => ({
+    return sortedConversations.slice(0, 2).map<ChatSessionSummaryItem>((conversation, index) => ({
       key: conversation.key,
       label: conversation.label ?? (index === 0 ? "Current session" : "Next session"),
       hint:
@@ -450,18 +484,7 @@ function Chat() {
           : conversation.group ?? "Workspace",
       tone: index === 0 ? "warm" : "mint",
     }))
-
-    if (items.length === 1) {
-      items.push({
-        key: `${selectedModelId || "model"}-status`,
-        label: selectedModelLabel,
-        hint: deepThink ? "Deep think enabled" : "Standard mode",
-        tone: "mint",
-      })
-    }
-
-    return items
-  }, [curConversation, deepThink, safeMessages.length, selectedModelId, selectedModelLabel, sortedConversations])
+  }, [curConversation, safeMessages.length, sortedConversations])
 
   const setConversationLabelIfNeeded = useCallback(
     (conversationKey: string, prompt: string) => {
@@ -583,7 +606,7 @@ function Chat() {
           </div>
 
           <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-[768px] flex-col gap-8 px-6 pb-56 pt-2 md:px-8 xl:px-0">
+            <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-56 pt-2 md:px-8 xl:px-0">
               {safeMessages.length === 0 ? (
                 <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-[#d7dee3] bg-[linear-gradient(180deg,rgba(247,249,251,0.9)_0%,rgba(247,249,251,0.5)_100%)] px-8 text-center">
                   <div className="max-w-md space-y-3">
@@ -615,8 +638,8 @@ function Chat() {
           </ScrollArea>
 
           <div className="pointer-events-none absolute inset-x-0 bottom-0">
-            <div className="h-28 bg-gradient-to-t from-[#f7f9fb] via-[rgba(247,249,251,0.92)] to-transparent" />
-            <div className="pointer-events-auto mx-auto -mt-3 w-full max-w-[768px] px-6 pb-6 md:px-8 xl:px-0">
+            <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-[#f7f9fb] via-[rgba(247,249,251,0.92)] to-transparent" />
+            <div className="pointer-events-auto relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-[4.25rem] md:px-8 xl:px-0">
               <ChatComposer
                 value={draft}
                 onValueChange={setDraft}
@@ -625,14 +648,8 @@ function Chat() {
                 isRequesting={isRequesting || isPreparingModel}
                 deepThink={deepThink}
                 setDeepThink={setDeepThink}
-                modelOptions={modelOptions}
-                selectedModelId={selectedModelId}
-                onModelChange={setSelectedModelId}
-                modelLoading={modelLoading}
-                modelDisabled={
-                  isRequesting || isPreparingModel || modelOptions.length === 0
-                }
                 onGenerateImage={handleGenerateImage}
+                statusLabel={selectedModelStatusLabel}
               />
             </div>
           </div>
