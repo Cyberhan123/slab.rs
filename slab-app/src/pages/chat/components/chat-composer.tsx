@@ -51,7 +51,7 @@ export function ChatComposer({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-[24px] bg-[#e0e3e5] p-[5px] shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
+      <div className="rounded-[24px] bg-[var(--surface-soft)] p-[5px] shadow-[var(--shell-elevation)]">
         <div className="flex items-end gap-2 px-4 py-2">
           <div className="pb-1">
             <DropdownMenu>
@@ -59,7 +59,7 @@ export function ChatComposer({
                 <Button
                   variant="quiet"
                   size="icon"
-                  className="size-10 rounded-full border border-white/50 bg-white/60 text-[#6d7a77] hover:bg-white"
+                  className="size-10 rounded-full border border-border/30 bg-[var(--shell-card)]/60 text-muted-foreground hover:bg-[var(--shell-card)]"
                 >
                   <Plus className="size-4" />
                 </Button>
@@ -86,7 +86,7 @@ export function ChatComposer({
             variant="shell"
             onChange={(event) => onValueChange(event.target.value)}
             placeholder="Type a message or drop files..."
-            className="min-h-[48px] max-h-48 resize-none border-0 bg-transparent px-3 py-3 text-base text-[#191c1e] shadow-none placeholder:text-[#6d7a77]/60 focus-visible:ring-0"
+            className="min-h-[48px] max-h-48 resize-none border-0 bg-transparent px-3 py-3 text-base text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault()
@@ -99,7 +99,7 @@ export function ChatComposer({
             <Button
               variant="quiet"
               size="icon"
-              className="size-10 rounded-full text-[#6d7a77] hover:bg-white/70 hover:text-[#3d4947]"
+              className="size-10 rounded-full text-muted-foreground hover:bg-[var(--shell-card)]/70 hover:text-foreground/80"
               disabled
             >
               <Mic className="size-4" />
@@ -109,8 +109,8 @@ export function ChatComposer({
               variant="cta"
               size="icon"
               className={cn(
-                "size-10 rounded-full shadow-[0_10px_15px_-3px_rgba(0,104,95,0.2),0_4px_6px_-4px_rgba(0,104,95,0.2)]",
-                isRequesting && "bg-[#191c1e] text-white shadow-none"
+                "size-10 rounded-full shadow-[0_10px_15px_-3px_color-mix(in oklab,var(--brand-teal) 20%,transparent),0_4px_6px_-4px_color-mix(in oklab,var(--brand-teal) 20%,transparent)]",
+                isRequesting && "bg-foreground text-background shadow-none"
               )}
               onClick={() => {
                 if (isRequesting) {
@@ -134,7 +134,7 @@ export function ChatComposer({
           <button
             type="button"
             disabled
-            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#6d7a77] transition disabled:cursor-not-allowed disabled:opacity-100"
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground transition disabled:cursor-not-allowed disabled:opacity-100"
           >
             <Search className="size-3" />
             Web Search
@@ -146,7 +146,7 @@ export function ChatComposer({
             onClick={() => setDeepThink(!deepThink)}
             className={cn(
               "inline-flex items-center gap-1.5 text-[11px] font-bold transition",
-              deepThink ? "text-[#191c1e]" : "text-[#6d7a77] hover:text-[#191c1e]"
+              deepThink ? "text-foreground" : "text-muted-foreground hover:text-foreground"
             )}
           >
             <WandSparkles className={cn("size-3", deepThink && "text-[var(--brand-teal)]")} />
@@ -156,14 +156,14 @@ export function ChatComposer({
           <button
             type="button"
             onClick={onGenerateImage}
-            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#6d7a77] transition hover:text-[#191c1e]"
+            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground transition hover:text-foreground"
           >
             <ImagePlus className="size-3" />
             Generate Image
           </button>
         </div>
 
-        <p className="max-w-full text-[10px] font-medium text-[#6d7a77]/70">{statusLabel}</p>
+        <p className="max-w-full text-[10px] font-medium text-muted-foreground/70">{statusLabel}</p>
       </div>
     </div>
   )

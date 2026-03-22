@@ -158,18 +158,18 @@ export function ImageWorkbench({
   zoomedImage,
 }: ImageWorkbenchProps) {
   return (
-    <div className="h-full w-full overflow-y-auto bg-white xl:overflow-hidden">
+    <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] xl:overflow-hidden">
       <div className="mx-auto flex min-h-full max-w-[1248px] flex-col px-4 py-4 sm:px-6 xl:h-full xl:min-h-0">
         <SplitWorkbench
           className="h-full min-h-0 gap-6 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-0"
           sidebarClassName="space-y-0"
           mainClassName="min-h-full xl:min-h-0"
           sidebar={
-            <aside className="flex h-full flex-col rounded-[28px] border border-[#eef2f7] bg-[#f2f4f6] px-5 py-5 xl:min-h-0 xl:overflow-hidden xl:rounded-none xl:border-0 xl:border-r xl:border-[#e2e8f0]/70 xl:px-6 xl:py-6">
+            <aside className="flex h-full flex-col rounded-[28px] border border-border/60 bg-[var(--surface-soft)] px-5 py-5 xl:min-h-0 xl:overflow-hidden xl:rounded-none xl:border-0 xl:border-r xl:border-border/50 xl:px-6 xl:py-6">
               <div className="flex h-full min-h-0 flex-col">
                 <div className="space-y-6 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-2">
                   <div className="space-y-4">
-                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#64748b]">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
                       Generation Parameters
                     </p>
                     <Tabs
@@ -180,13 +180,13 @@ export function ImageWorkbench({
                       <TabsList className="grid h-auto w-full grid-cols-2 rounded-[16px] bg-transparent p-1">
                         <TabsTrigger
                           value="txt2img"
-                          className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-[#475569] shadow-none data-[state=active]:border-[#dbe4ea] data-[state=active]:bg-white data-[state=active]:text-[#0f172a] data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                          className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-[var(--shell-card)] data-[state=active]:text-foreground data-[state=active]:shadow-[var(--shell-elevation)]"
                         >
                           Text to Image
                         </TabsTrigger>
                         <TabsTrigger
                           value="img2img"
-                          className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-[#475569] shadow-none data-[state=active]:border-[#dbe4ea] data-[state=active]:bg-white data-[state=active]:text-[#0f172a] data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                          className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-[var(--shell-card)] data-[state=active]:text-foreground data-[state=active]:shadow-[var(--shell-elevation)]"
                         >
                           Image to Image
                         </TabsTrigger>
@@ -199,7 +199,7 @@ export function ImageWorkbench({
                           </Label>
                           <button
                             type="button"
-                            className="group flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[#cbd5e1] bg-white px-4 py-4 text-center transition hover:border-[#5bc0b5] hover:bg-[#f8fcfb]"
+                            className="group flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border/50 bg-[var(--shell-card)] px-4 py-4 text-center transition hover:border-[var(--brand-teal)]/70 hover:bg-[var(--surface-soft)]"
                             onClick={() => initImageInputRef.current?.click()}
                           >
                             {initImageDataUri ? (
@@ -213,7 +213,7 @@ export function ImageWorkbench({
                                   type="button"
                                   variant="pill"
                                   size="icon-sm"
-                                  className="absolute top-2 right-2 border-white/80 bg-white/90 shadow-sm"
+                                  className="absolute top-2 right-2 border-[var(--shell-card)]/80 bg-[var(--shell-card)]/90 shadow-sm"
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     setInitImageDataUri(null);
@@ -224,14 +224,14 @@ export function ImageWorkbench({
                               </div>
                             ) : (
                               <>
-                                <div className="flex size-12 items-center justify-center rounded-[14px] bg-[#f1f5f9] text-[#64748b] transition group-hover:bg-[#ebf7f5] group-hover:text-[#0d9488]">
+                                <div className="flex size-12 items-center justify-center rounded-[14px] bg-[var(--surface-soft)] text-muted-foreground transition group-hover:bg-[var(--brand-teal)]/10 group-hover:text-[var(--brand-teal)]">
                                   <ImageIcon className="size-5" />
                                 </div>
                                 <div className="space-y-1">
-                                  <p className="text-sm font-medium text-[#191c1e]">
+                                  <p className="text-sm font-medium text-foreground">
                                     Click to choose an image
                                   </p>
-                                  <p className="text-xs text-[#64748b]">
+                                  <p className="text-xs text-muted-foreground">
                                     PNG/JPEG for img2img mode
                                   </p>
                                 </div>
@@ -262,7 +262,7 @@ export function ImageWorkbench({
                           placeholder={catalogLoading ? 'Loading models...' : 'Select model'}
                         />
                       </SelectTrigger>
-                      <SelectContent className="rounded-[16px] border-[#dbe4ea] bg-white shadow-[0_24px_48px_-34px_rgba(15,23,42,0.32)]">
+                      <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-[0_24px_48px_-34px_color-mix(in_oklab,var(--foreground)_32%,transparent)]">
                         {modelOptions.length === 0 ? (
                           <SelectItem value="__none" disabled>
                             No diffusion models found
@@ -313,7 +313,7 @@ export function ImageWorkbench({
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
                       <Label className={SIDEBAR_LABEL_CLASSNAME}>Dimensions</Label>
-                      <span className="rounded-full bg-[#dff5f1] px-2 py-1 font-mono text-[10px] leading-none text-[#0d9488]">
+                      <span className="rounded-full bg-[var(--brand-teal)]/15 px-2 py-1 font-mono text-[10px] leading-none text-[var(--brand-teal)]">
                         {parsedWidth} x {parsedHeight}
                       </span>
                     </div>
@@ -327,10 +327,10 @@ export function ImageWorkbench({
                             type="button"
                             aria-pressed={isActive}
                             className={cn(
-                              'flex h-10 items-center justify-center rounded-xl border bg-white px-3 text-[11px] font-medium text-[#191c1e] transition',
+                              'flex h-10 items-center justify-center rounded-xl border bg-[var(--shell-card)] px-3 text-[11px] font-medium text-foreground transition',
                               isActive
-                                ? 'border-[#74cec4] shadow-[0_1px_2px_rgba(0,0,0,0.05)]'
-                                : 'border-[#e2e8f0] hover:border-[#cbd5e1]',
+                                ? 'border-[var(--brand-teal)]/60 shadow-[var(--shell-elevation)]'
+                                : 'border-border/60 hover:border-border/50',
                             )}
                             onClick={() => handleDimensionPreset(preset.width, preset.height)}
                           >
@@ -350,7 +350,7 @@ export function ImageWorkbench({
                       <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent className="rounded-[16px] border-[#dbe4ea] bg-white shadow-[0_24px_48px_-34px_rgba(15,23,42,0.32)]">
+                      <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-[0_24px_48px_-34px_color-mix(in_oklab,var(--foreground)_32%,transparent)]">
                         {[1, 2, 4].map((count) => (
                           <SelectItem key={count} value={String(count)}>
                             {count} {count === 1 ? 'Image' : 'Images'}
@@ -361,19 +361,19 @@ export function ImageWorkbench({
                   </div>
 
                   <Collapsible open={advancedOpen} onOpenChange={setAdvancedOpen}>
-                    <div className="border-t border-[#dbe4ea]">
+                    <div className="border-t border-border/70">
                       <CollapsibleTrigger asChild>
                         <button
                           type="button"
                           className="flex w-full items-center justify-between py-3 text-left"
                         >
-                          <span className="text-xs font-bold text-[#64748b]">
+                          <span className="text-xs font-bold text-muted-foreground">
                             Advanced Settings
                           </span>
                           {advancedOpen ? (
-                            <ChevronUp className="h-4 w-4 text-[#64748b]" />
+                            <ChevronUp className="h-4 w-4 text-muted-foreground" />
                           ) : (
-                            <ChevronDown className="h-4 w-4 text-[#64748b]" />
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
                           )}
                         </button>
                       </CollapsibleTrigger>
@@ -478,7 +478,7 @@ export function ImageWorkbench({
                           <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent className="rounded-[16px] border-[#dbe4ea] bg-white shadow-[0_24px_48px_-34px_rgba(15,23,42,0.32)]">
+                          <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-[0_24px_48px_-34px_color-mix(in_oklab,var(--foreground)_32%,transparent)]">
                             {SAMPLE_METHODS.map((method) => (
                               <SelectItem key={method.value} value={method.value}>
                                 {method.label}
@@ -494,7 +494,7 @@ export function ImageWorkbench({
                           <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                             <SelectValue />
                           </SelectTrigger>
-                          <SelectContent className="rounded-[16px] border-[#dbe4ea] bg-white shadow-[0_24px_48px_-34px_rgba(15,23,42,0.32)]">
+                          <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-[0_24px_48px_-34px_color-mix(in_oklab,var(--foreground)_32%,transparent)]">
                             {SCHEDULERS.map((schedulerItem) => (
                               <SelectItem
                                 key={schedulerItem.value}
@@ -538,7 +538,7 @@ export function ImageWorkbench({
 
                   <div className="mt-auto shrink-0 pt-8 xl:pt-6">
                     <Button
-                      className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,#00685f_0%,#008378_100%)] text-base font-semibold text-white shadow-[0_10px_15px_-3px_rgba(13,148,136,0.2),0_4px_6px_-4px_rgba(13,148,136,0.2)] hover:brightness-[1.03]"
+                      className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-base font-semibold text-[var(--brand-teal-foreground)] shadow-[0_10px_15px_-3px_color-mix(in_oklab,var(--brand-teal)_20%,transparent),0_4px_6px_-4px_color-mix(in_oklab,var(--brand-teal)_20%,transparent)] hover:brightness-[1.03]"
                       onClick={handleSubmit}
                       disabled={isBusy || !prompt.trim() || !selectedModelId}
                     >
@@ -562,7 +562,7 @@ export function ImageWorkbench({
                     {isGenerating ? (
                       <Button
                         variant="ghost"
-                        className="mt-3 h-10 w-full rounded-xl text-[#64748b] hover:bg-white/60 hover:text-[#0f172a]"
+                        className="mt-3 h-10 w-full rounded-xl text-muted-foreground hover:bg-[var(--shell-card)]/60 hover:text-foreground"
                         onClick={handleCancel}
                       >
                         Cancel generation
@@ -574,15 +574,15 @@ export function ImageWorkbench({
             </aside>
           }
           main={
-            <section className="h-full min-h-[520px] rounded-[28px] border border-[#eef2f7] bg-white xl:min-h-0 xl:overflow-hidden xl:rounded-none xl:border-0">
+            <section className="h-full min-h-[520px] rounded-[28px] border border-border/60 bg-[var(--shell-card)] xl:min-h-0 xl:overflow-hidden xl:rounded-none xl:border-0">
               {images.length === 0 ? (
                 <div className="flex h-full min-h-[520px] items-center justify-center px-6 py-12 xl:min-h-[780px]">
                   <div className="flex max-w-[448px] flex-col items-center gap-6 text-center">
                     <div className="relative flex items-center justify-center">
-                      <div className="flex size-32 items-center justify-center rounded-full bg-[#f1f5f9] text-[#b8c4d2]">
+                      <div className="flex size-32 items-center justify-center rounded-full bg-[var(--surface-soft)] text-muted-foreground/60">
                         <ImageIcon className="size-14 stroke-[1.5]" />
                       </div>
-                      <div className="absolute -right-2 -bottom-2 flex size-12 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,#00685f_0%,#008378_100%)] text-white shadow-[0_10px_15px_-3px_rgba(13,148,136,0.24),0_4px_6px_-4px_rgba(13,148,136,0.22)]">
+                      <div className="absolute -right-2 -bottom-2 flex size-12 items-center justify-center rounded-[14px] bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-[var(--brand-teal-foreground)] shadow-[0_10px_15px_-3px_color-mix(in_oklab,var(--brand-teal)_24%,transparent),0_4px_6px_-4px_color-mix(in_oklab,var(--brand-teal)_22%,transparent)]">
                         {isGenerating ? (
                           <Loader2 className="size-5 animate-spin" />
                         ) : (
@@ -591,32 +591,32 @@ export function ImageWorkbench({
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <h2 className="text-[30px] font-semibold tracking-[-0.03em] text-[#0f172a]">
+                      <h2 className="text-[30px] font-semibold tracking-[-0.03em] text-foreground">
                         {isGenerating ? 'Generating images...' : 'Ready to create?'}
                       </h2>
-                      <p className="mx-auto max-w-[320px] text-sm leading-6 text-[#64748b]">
+                      <p className="mx-auto max-w-[320px] text-sm leading-6 text-muted-foreground">
                         {isGenerating
                           ? 'Your task is running. Generated images will appear here automatically.'
                           : 'Enter a prompt and adjust the parameters to see your imagination come to life.'}
                       </p>
                     </div>
                     {isGenerating ? (
-                      <div className="rounded-full bg-[#f2f4f6] px-3 py-1 text-sm text-[#64748b]">
+                      <div className="rounded-full bg-[var(--surface-soft)] px-3 py-1 text-sm text-muted-foreground">
                         Task running
                       </div>
                     ) : (
-                      <div className="flex flex-wrap items-center justify-center gap-4 text-sm text-[#94a3b8]">
+                      <div className="flex flex-wrap items-center justify-center gap-4 text-sm text-muted-foreground">
                         <button
                           type="button"
-                          className="inline-flex items-center gap-1.5 transition hover:text-[#0f172a]"
+                          className="inline-flex items-center gap-1.5 transition hover:text-foreground"
                         >
                           <History className="size-3.5" />
                           View History
                         </button>
-                        <span className="size-1 rounded-full bg-[#e2e8f0]" />
+                        <span className="size-1 rounded-full bg-border/30" />
                         <button
                           type="button"
-                          className="inline-flex items-center gap-1.5 transition hover:text-[#0f172a]"
+                          className="inline-flex items-center gap-1.5 transition hover:text-foreground"
                         >
                           <Lightbulb className="size-3.5" />
                           Get Inspired
@@ -627,17 +627,17 @@ export function ImageWorkbench({
                 </div>
               ) : (
                 <div className="flex h-full min-h-[520px] flex-col">
-                  <div className="border-b border-[#eef2f7] px-6 py-6 xl:px-10">
+                  <div className="border-b border-border/60 px-6 py-6 xl:px-10">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
-                        <h2 className="text-[24px] font-semibold tracking-[-0.02em] text-[#0f172a]">
+                        <h2 className="text-[24px] font-semibold tracking-[-0.02em] text-foreground">
                           Generated Images
                         </h2>
-                        <p className="mt-1 text-sm text-[#64748b]">
+                        <p className="mt-1 text-sm text-muted-foreground">
                           Review the latest renders, zoom in for detail, or download the best take.
                         </p>
                       </div>
-                      <span className="rounded-full bg-[#e7f7f4] px-3 py-1 text-sm font-medium text-[#0d9488]">
+                      <span className="rounded-full bg-[var(--brand-teal)]/15 px-3 py-1 text-sm font-medium text-[var(--brand-teal)]">
                         {images.length} {images.length === 1 ? 'image' : 'images'}
                       </span>
                     </div>
@@ -647,9 +647,9 @@ export function ImageWorkbench({
                       {images.map((image, index) => (
                         <figure
                           key={`${image.src}-${index}`}
-                          className="group overflow-hidden rounded-[24px] border border-[#e2e8f0] bg-[#f8fafc] shadow-[0_18px_32px_-28px_rgba(15,23,42,0.28)]"
+                          className="group overflow-hidden rounded-[24px] border border-border/60 bg-[var(--surface-soft)] shadow-[0_18px_32px_-28px_color-mix(in_oklab,var(--foreground)_28%,transparent)]"
                         >
-                          <div className="relative overflow-hidden bg-white">
+                          <div className="relative overflow-hidden bg-[var(--shell-card)]">
                             <img
                               src={image.src}
                               alt={image.prompt}
@@ -661,7 +661,7 @@ export function ImageWorkbench({
                               <Button
                                 variant="pill"
                                 size="icon-sm"
-                                className="border-white/80 bg-white/95 shadow-sm backdrop-blur"
+                                className="border-[var(--shell-card)]/80 bg-[var(--shell-card)]/95 shadow-sm backdrop-blur"
                                 onClick={() => setZoomedImage(image.src)}
                               >
                                 <ZoomIn className="h-4 w-4" />
@@ -669,20 +669,20 @@ export function ImageWorkbench({
                               <Button
                                 variant="pill"
                                 size="icon-sm"
-                                className="border-white/80 bg-white/95 shadow-sm backdrop-blur"
+                                className="border-[var(--shell-card)]/80 bg-[var(--shell-card)]/95 shadow-sm backdrop-blur"
                                 onClick={() => handleDownload(image.src, index)}
                               >
                                 <Download className="h-4 w-4" />
                               </Button>
                             </div>
                           </div>
-                          <figcaption className="space-y-3 border-t border-[#e2e8f0]/80 bg-white px-4 py-4">
-                            <p className="line-clamp-2 text-sm leading-6 text-[#334155]">
+                          <figcaption className="space-y-3 border-t border-border/48 bg-[var(--shell-card)] px-4 py-4">
+                            <p className="line-clamp-2 text-sm leading-6 text-foreground/80">
                               {image.prompt}
                             </p>
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-[#64748b]">
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                               <Badge variant="chip">{image.mode}</Badge>
-                              <span className="rounded-full bg-[#f2f4f6] px-2.5 py-1">
+                              <span className="rounded-full bg-[var(--surface-soft)] px-2.5 py-1">
                                 {image.width} x {image.height}
                               </span>
                             </div>

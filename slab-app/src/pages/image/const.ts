@@ -35,11 +35,11 @@ export const DIMENSION_PRESETS = [
 ] as const;
 
 export const SIDEBAR_LABEL_CLASSNAME =
-  'text-[12px] font-semibold leading-4 text-[#191c1e]';
+  'text-[12px] font-semibold leading-4 text-foreground';
 export const SIDEBAR_INPUT_CLASSNAME =
-  'h-10 w-full rounded-xl border-[#dbe4ea] bg-white px-3 text-sm text-[#191c1e] shadow-none focus-visible:border-[#64c3ba] focus-visible:ring-[3px] focus-visible:ring-[#0d9488]/12';
+  'h-10 w-full rounded-xl border-border/70 bg-[var(--shell-card)] px-3 text-sm text-foreground shadow-none focus-visible:border-[var(--brand-teal)]/60 focus-visible:ring-[3px] focus-visible:ring-[var(--brand-teal)]/12';
 export const SIDEBAR_TEXTAREA_CLASSNAME =
-  'w-full rounded-xl border-[#dbe4ea] bg-white px-4 py-3 text-sm leading-5 text-[#191c1e] shadow-none resize-none focus-visible:border-[#64c3ba] focus-visible:ring-[3px] focus-visible:ring-[#0d9488]/12';
+  'w-full rounded-xl border-border/70 bg-[var(--shell-card)] px-4 py-3 text-sm leading-5 text-foreground shadow-none resize-none focus-visible:border-[var(--brand-teal)]/60 focus-visible:ring-[3px] focus-visible:ring-[var(--brand-teal)]/12';
 
 export type GeneratedImage = {
   src: string;

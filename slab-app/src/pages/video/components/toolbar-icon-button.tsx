@@ -24,10 +24,10 @@ export function ToolbarIconButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        'flex size-10 items-center justify-center rounded-2xl text-slate-600 transition',
-        active && 'bg-white text-[#00685f] shadow-[0_12px_24px_-18px_rgba(15,23,42,0.45)]',
-        !active && 'hover:bg-white/70 hover:text-slate-900',
-        disabled && 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-slate-600',
+        'flex size-10 items-center justify-center rounded-2xl text-muted-foreground transition',
+        active && 'bg-[var(--shell-card)] text-[var(--brand-teal)] shadow-[0_12px_24px_-18px_color-mix(in_oklab,var(--foreground)_45%,transparent)]',
+        !active && 'hover:bg-[var(--shell-card)]/70 hover:text-foreground',
+        disabled && 'cursor-not-allowed opacity-35 hover:bg-transparent hover:text-muted-foreground',
       )}
     >
       <Icon className="h-[18px] w-[18px]" />

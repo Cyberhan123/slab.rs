@@ -575,7 +575,7 @@ function Chat() {
   return (
     <XProvider locale={locale}>
       <ChatContext.Provider value={{ onReload }}>
-        <div className="relative flex min-h-0 flex-1 flex-col bg-white">
+        <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--shell-card)]">
           <div className="pointer-events-none absolute right-4 top-4 hidden xl:block">
             <div className="pointer-events-auto">
               <ChatSessionSummaryCard
@@ -588,10 +588,10 @@ function Chat() {
 
           <div className="mx-auto w-full max-w-[768px] px-6 pb-6 pt-12 md:px-8 xl:px-0">
             <div className="space-y-2">
-              <h1 className="text-[clamp(2.75rem,6vw,4rem)] font-semibold tracking-[-0.055em] text-[#191c1e]">
+              <h1 className="text-[clamp(2.75rem,6vw,4rem)] font-semibold tracking-[-0.055em] text-foreground">
                 {greeting}
               </h1>
-              <p className="text-lg leading-7 text-[#3d4947]/80">
+              <p className="text-lg leading-7 text-muted-foreground/80">
                 How can I assist your creative workflow today?
               </p>
             </div>
@@ -608,12 +608,12 @@ function Chat() {
           <ScrollArea className="min-h-0 flex-1">
             <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-56 pt-2 md:px-8 xl:px-0">
               {safeMessages.length === 0 ? (
-                <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-[#d7dee3] bg-[linear-gradient(180deg,rgba(247,249,251,0.9)_0%,rgba(247,249,251,0.5)_100%)] px-8 text-center">
+                <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
                   <div className="max-w-md space-y-3">
-                    <p className="text-base font-medium text-[#191c1e]">
+                    <p className="text-base font-medium text-foreground">
                       Start a new thread and keep the stage focused.
                     </p>
-                    <p className="text-sm leading-6 text-[#6d7a77]">
+                    <p className="text-sm leading-6 text-muted-foreground">
                       Ask for debugging help, refine a draft, or pass the current idea into image
                       generation when it needs a visual direction.
                     </p>
@@ -638,7 +638,7 @@ function Chat() {
           </ScrollArea>
 
           <div className="pointer-events-none absolute inset-x-0 bottom-0">
-            <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-[#f7f9fb] via-[rgba(247,249,251,0.92)] to-transparent" />
+            <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-[var(--app-canvas)] via-[color-mix(in_oklab,var(--app-canvas)_92%,transparent)] to-transparent" />
             <div className="pointer-events-auto relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-[4.25rem] md:px-8 xl:px-0">
               <ChatComposer
                 value={draft}

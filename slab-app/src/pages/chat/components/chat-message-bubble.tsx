@@ -88,8 +88,8 @@ export function ChatMessageBubble({
             className={cn(
               "flex size-6 shrink-0 items-center justify-center",
               isAssistant
-                ? "rounded-[8px] bg-[#008378] text-white"
-                : "rounded-full border border-[#bcc9c64d] bg-white text-[#3d4947]"
+                ? "rounded-[8px] bg-[var(--brand-teal)] text-[var(--brand-teal-foreground)]"
+                : "rounded-full border border-border/30 bg-[var(--shell-card)] text-foreground/70"
             )}
           >
             {isAssistant ? (
@@ -98,17 +98,17 @@ export function ChatMessageBubble({
               <UserRound className="size-3.5" />
             )}
           </span>
-          <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-[#6d7a77]">
+          <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
             {isAssistant ? "Ethereal Assistant" : "User"}
           </span>
         </div>
 
         <div
           className={cn(
-            "px-6 py-4 shadow-[0_1px_2px_rgba(0,0,0,0.05)]",
+            "px-6 py-4 shadow-[var(--shell-elevation)]",
             isAssistant
-              ? "rounded-tl-[24px] rounded-tr-[24px] rounded-br-[24px] rounded-bl-[8px] bg-[#e6e8ea] text-[#191c1e]"
-              : "rounded-tl-[24px] rounded-tr-[24px] rounded-br-[8px] rounded-bl-[24px] bg-[#d5e3fd] text-[#0d1c2f]"
+              ? "rounded-tl-[24px] rounded-tr-[24px] rounded-br-[24px] rounded-bl-[8px] bg-[var(--ai-bubble)] text-[var(--ai-bubble-foreground)]"
+              : "rounded-tl-[24px] rounded-tr-[24px] rounded-br-[8px] rounded-bl-[24px] bg-[var(--user-bubble)] text-[var(--user-bubble-foreground)]"
           )}
         >
           {thinking ? (
@@ -156,7 +156,7 @@ export function ChatMessageBubble({
             type="button"
             variant="quiet"
             size="sm"
-            className="h-7 rounded-full px-3 text-[11px] text-[#6d7a77] hover:text-[#191c1e]"
+            className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
             onClick={() => void copyMessage()}
           >
             <Copy className="size-3.5" />
@@ -167,7 +167,7 @@ export function ChatMessageBubble({
               type="button"
               variant="quiet"
               size="sm"
-              className="h-7 rounded-full px-3 text-[11px] text-[#6d7a77] hover:text-[#191c1e]"
+              className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
               onClick={() => onRetry(item.id)}
             >
               <RefreshCcw className="size-3.5" />
