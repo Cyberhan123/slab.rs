@@ -1,7 +1,5 @@
 import {
-  ChevronDown,
   ImagePlus,
-  Loader2,
   Mic,
   Plus,
   Search,
@@ -9,7 +7,6 @@ import {
   Square,
   WandSparkles,
 } from "lucide-react"
-import { useMemo } from "react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -18,25 +15,8 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
-import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
-
-type ModelOption = {
-  id: string
-  label: string
-  downloaded: boolean
-  pending: boolean
-  source: "local" | "cloud"
-}
 
 type ChatComposerProps = {
   value: string
@@ -46,12 +26,8 @@ type ChatComposerProps = {
   isRequesting: boolean
   deepThink: boolean
   setDeepThink: (value: boolean) => void
-  modelOptions: ModelOption[]
-  selectedModelId: string
-  onModelChange: (id: string) => void
-  modelLoading?: boolean
-  modelDisabled?: boolean
   onGenerateImage: () => void
+  statusLabel: string
 }
 
 export function ChatComposer({
@@ -62,26 +38,9 @@ export function ChatComposer({
   isRequesting,
   deepThink,
   setDeepThink,
-  modelOptions,
-  selectedModelId,
-  onModelChange,
-  modelLoading = false,
-  modelDisabled = false,
   onGenerateImage,
+  statusLabel,
 }: ChatComposerProps) {
-  const selectedModel = useMemo(
-    () => modelOptions.find((option) => option.id === selectedModelId),
-    [modelOptions, selectedModelId]
-  )
-  const settingsLabel = useMemo(() => {
-    if (modelLoading) {
-      return "Loading models"
-    }
-
-    const modeLabel = deepThink ? "Deep think" : "Standard mode"
-    return selectedModel?.label ? `${selectedModel.label} • ${modeLabel}` : modeLabel
-  }, [deepThink, modelLoading, selectedModel?.label])
-
   const handleSubmit = () => {
     if (!value.trim() || isRequesting) {
       return
@@ -183,6 +142,19 @@ export function ChatComposer({
 
           <button
             type="button"
+            aria-pressed={deepThink}
+            onClick={() => setDeepThink(!deepThink)}
+            className={cn(
+              "inline-flex items-center gap-1.5 text-[11px] font-bold transition",
+              deepThink ? "text-[#191c1e]" : "text-[#6d7a77] hover:text-[#191c1e]"
+            )}
+          >
+            <WandSparkles className={cn("size-3", deepThink && "text-[var(--brand-teal)]")} />
+            {deepThink ? "Deep Think On" : "Deep Think"}
+          </button>
+
+          <button
+            type="button"
             onClick={onGenerateImage}
             className="inline-flex items-center gap-1.5 text-[11px] font-bold text-[#6d7a77] transition hover:text-[#191c1e]"
           >
@@ -191,82 +163,7 @@ export function ChatComposer({
           </button>
         </div>
 
-        <Popover>
-          <PopoverTrigger asChild>
-            <button
-              type="button"
-              className="inline-flex max-w-full items-center gap-2 text-[10px] font-medium text-[#6d7a77]/80 transition hover:text-[#3d4947]"
-            >
-              <WandSparkles className="size-3" />
-              <span className="max-w-[320px] truncate text-right">{settingsLabel}</span>
-              <ChevronDown className="size-3" />
-            </button>
-          </PopoverTrigger>
-          <PopoverContent className="w-80 rounded-[24px] border-border/70 bg-[var(--surface-1)]">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between gap-3 rounded-[18px] bg-[var(--surface-soft)] px-4 py-3">
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">Deep think</p>
-                  <p className="text-xs text-muted-foreground">
-                    Use longer reasoning before replying.
-                  </p>
-                </div>
-                <Switch
-                  checked={deepThink}
-                  onCheckedChange={setDeepThink}
-                  variant="workspace"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div>
-                  <p className="text-sm font-semibold">Chat model</p>
-                  <p className="text-sm text-muted-foreground">
-                    Local models auto-prepare before the request. Cloud models switch instantly.
-                  </p>
-                </div>
-
-                <Select
-                  value={selectedModelId}
-                  onValueChange={onModelChange}
-                  disabled={modelDisabled || modelLoading}
-                >
-                  <SelectTrigger variant="soft" className="w-full">
-                    <SelectValue placeholder="Select model" />
-                  </SelectTrigger>
-                  <SelectContent variant="soft">
-                    {modelOptions.length === 0 ? (
-                      <SelectItem value="__none" disabled>
-                        No chat models available
-                      </SelectItem>
-                    ) : (
-                      modelOptions.map((option) => (
-                        <SelectItem key={option.id} value={option.id}>
-                          <div className="flex min-w-0 items-center gap-2">
-                            <span className="truncate">{option.label}</span>
-                            {option.pending ? (
-                              <span className="text-xs text-muted-foreground">Downloading</span>
-                            ) : null}
-                            {!option.downloaded && option.source === "local" ? (
-                              <span className="text-xs text-muted-foreground">Not downloaded</span>
-                            ) : null}
-                          </div>
-                        </SelectItem>
-                      ))
-                    )}
-                  </SelectContent>
-                </Select>
-
-                {modelLoading ? (
-                  <div className="inline-flex items-center gap-2 text-xs text-muted-foreground">
-                    <Loader2 className="size-3.5 animate-spin" />
-                    Loading models
-                  </div>
-                ) : null}
-              </div>
-            </div>
-          </PopoverContent>
-        </Popover>
+        <p className="max-w-full text-[10px] font-medium text-[#6d7a77]/70">{statusLabel}</p>
       </div>
     </div>
   )
