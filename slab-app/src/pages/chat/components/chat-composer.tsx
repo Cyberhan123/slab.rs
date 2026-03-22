@@ -51,7 +51,7 @@ export function ChatComposer({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-[24px] bg-[var(--surface-soft)] p-[5px] shadow-[var(--shell-elevation)]">
+      <div className="rounded-[24px] bg-[var(--surface-input)] p-[5px] shadow-[var(--shell-elevation)]">
         <div className="flex items-end gap-2 px-4 py-2">
           <div className="pb-1">
             <DropdownMenu>
@@ -59,7 +59,7 @@ export function ChatComposer({
                 <Button
                   variant="quiet"
                   size="icon"
-                  className="size-10 rounded-full border border-border/30 bg-[var(--shell-card)]/60 text-muted-foreground hover:bg-[var(--shell-card)]"
+                  className="size-10 rounded-full border border-transparent bg-transparent text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
                 >
                   <Plus className="size-4" />
                 </Button>
@@ -99,7 +99,7 @@ export function ChatComposer({
             <Button
               variant="quiet"
               size="icon"
-              className="size-10 rounded-full text-muted-foreground hover:bg-[var(--shell-card)]/70 hover:text-foreground/80"
+              className="size-10 rounded-full text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
               disabled
             >
               <Mic className="size-4" />

@@ -80,7 +80,7 @@ export type AudioWorkbenchProps = {
   vadSamplesOverlap: string;
   vadSpeechPadMs: string;
   vadThreshold: string;
-  webFileInputRef: RefObject<HTMLInputElement>;
+  webFileInputRef: RefObject<HTMLInputElement | null>;
   whisperTranscribeModels: CatalogModel[];
   whisperVadModels: CatalogModel[];
 };
@@ -168,7 +168,7 @@ export function AudioWorkbench({
               </p>
             </div>
 
-            {catalogModelsError && (
+            {Boolean(catalogModelsError) && (
               <Alert variant="destructive">
                 <AlertTitle>Model Catalog Error</AlertTitle>
                 <AlertDescription>

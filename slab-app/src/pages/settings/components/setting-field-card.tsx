@@ -78,16 +78,16 @@ export function SettingFieldCard({
     <div
       id={`setting-${property.pmid}`}
       className={cn(
-        'rounded-[16px] border border-slate-200/80 bg-white p-5 shadow-[0_1px_2px_rgba(15,23,42,0.06)]',
+        'rounded-[16px] border border-border/60 bg-[var(--shell-card)] p-5 shadow-[0_1px_2px_color-mix(in_oklab,var(--foreground)_8%,transparent)]',
         errorState && 'border-destructive/70 bg-destructive/5',
       )}
     >
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 flex-1 space-y-1.5">
-          <h3 className="text-sm font-bold tracking-[-0.02em] text-slate-900">{property.label}</h3>
+          <h3 className="text-sm font-bold tracking-[-0.02em] text-foreground">{property.label}</h3>
 
           {property.description_md ? (
-            <p className="max-w-2xl text-[11px] leading-[16.5px] text-slate-500">
+            <p className="max-w-2xl text-[11px] leading-[16.5px] text-muted-foreground">
               {property.description_md}
             </p>
           ) : null}
@@ -100,7 +100,7 @@ export function SettingFieldCard({
             size="sm"
             onClick={() => onReset(property)}
             disabled={isResetting || !canReset}
-            className="h-8 rounded-[12px] border-slate-200 px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-500 shadow-none"
+            className="h-8 rounded-[12px] border-border/60 bg-transparent px-3 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground shadow-none hover:bg-accent hover:text-accent-foreground"
           >
             {isResetting ? (
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
@@ -125,67 +125,67 @@ export function SettingFieldCard({
       {propertyType === 'boolean' ? null : (
         <div className="mt-4 space-y-2">
           {isEnum ? (
-          <Select value={textValue} onValueChange={(value) => onChange(property, value)}>
-            <SelectTrigger
-              id={property.pmid}
-              variant="soft"
-              className="h-[42px] w-full rounded-[12px] border-slate-200 bg-slate-50 px-4 text-xs shadow-[inset_0_0_0_1px_rgba(203,213,225,0.75)]"
-            >
-              <SelectValue placeholder="Select an option" />
-            </SelectTrigger>
-            <SelectContent variant="soft">
-              {property.schema.enum?.map((option) => (
-                <SelectItem key={option} value={option}>
-                  {option}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+            <Select value={textValue} onValueChange={(value) => onChange(property, value)}>
+              <SelectTrigger
+                id={property.pmid}
+                variant="soft"
+                className="h-[42px] w-full rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
+              >
+                <SelectValue placeholder="Select an option" />
+              </SelectTrigger>
+              <SelectContent variant="soft">
+                {property.schema.enum?.map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           ) : propertyType === 'integer' ? (
-          <Input
-            id={property.pmid}
-            inputMode="numeric"
-            variant="soft"
-            value={textValue}
-            onChange={(event) => onChange(property, event.target.value)}
-            placeholder="Enter a whole number"
-            className="h-[42px] rounded-[12px] border-slate-200 bg-slate-50 px-4 font-mono text-xs shadow-[inset_0_0_0_1px_rgba(203,213,225,0.75)]"
-            aria-invalid={Boolean(errorState)}
-          />
+            <Input
+              id={property.pmid}
+              inputMode="numeric"
+              variant="soft"
+              value={textValue}
+              onChange={(event) => onChange(property, event.target.value)}
+              placeholder="Enter a whole number"
+              className="h-[42px] rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
+              aria-invalid={Boolean(errorState)}
+            />
           ) : structuredSchema ? (
-          <StructuredJsonField
-            schema={structuredSchema}
-            value={structuredValue}
-            errorState={errorState}
-            onChange={(value) => onChange(property, value)}
-          />
+            <StructuredJsonField
+              schema={structuredSchema}
+              value={structuredValue}
+              errorState={errorState}
+              onChange={(value) => onChange(property, value)}
+            />
           ) : propertyType === 'array' ||
             propertyType === 'object' ||
             property.schema.multiline ? (
-          <Textarea
-            id={property.pmid}
-            variant="soft"
-            value={textValue}
-            onChange={(event) => onChange(property, event.target.value)}
-            placeholder={
-              propertyType === 'array' || propertyType === 'object'
-                ? 'Enter valid JSON'
-                : 'Enter a value'
-            }
-            className="min-h-40 rounded-[12px] border-slate-200 bg-slate-50 px-4 py-3 font-mono text-xs shadow-[inset_0_0_0_1px_rgba(203,213,225,0.75)]"
-            aria-invalid={Boolean(errorState)}
-          />
+            <Textarea
+              id={property.pmid}
+              variant="soft"
+              value={textValue}
+              onChange={(event) => onChange(property, event.target.value)}
+              placeholder={
+                propertyType === 'array' || propertyType === 'object'
+                  ? 'Enter valid JSON'
+                  : 'Enter a value'
+              }
+              className="min-h-40 rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 py-3 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
+              aria-invalid={Boolean(errorState)}
+            />
           ) : (
-          <Input
-            id={property.pmid}
-            type={property.schema.secret ? 'password' : 'text'}
-            variant="soft"
-            value={textValue}
-            onChange={(event) => onChange(property, event.target.value)}
-            placeholder="Enter a value"
-            className="h-[42px] rounded-[12px] border-slate-200 bg-slate-50 px-4 font-mono text-xs shadow-[inset_0_0_0_1px_rgba(203,213,225,0.75)]"
-            aria-invalid={Boolean(errorState)}
-          />
+            <Input
+              id={property.pmid}
+              type={property.schema.secret ? 'password' : 'text'}
+              variant="soft"
+              value={textValue}
+              onChange={(event) => onChange(property, event.target.value)}
+              placeholder="Enter a value"
+              className="h-[42px] rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
+              aria-invalid={Boolean(errorState)}
+            />
           )}
 
           {errorState && !structuredSchema ? (
