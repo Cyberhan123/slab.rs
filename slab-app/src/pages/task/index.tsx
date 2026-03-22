@@ -1,31 +1,32 @@
+import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import {
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Image,
   ListChecks,
   Loader2,
+  Mic,
   PlayCircle,
-  RefreshCw,
   Timer,
-  TriangleAlert,
 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select';
 import { Spinner } from '@/components/ui/spinner';
 import {
-  MetricCard,
-  PillFilterBar,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import {
   SoftPanel,
   StageEmptyState,
-  StatusPill,
 } from '@/components/ui/workspace';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
@@ -45,18 +46,19 @@ interface TaskResult {
   [key: string]: any;
 }
 
+const PAGE_SIZE = 4;
+
 export default function Task() {
   usePageHeader(PAGE_HEADER_META.task);
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [taskResult, setTaskResult] = useState<TaskResult | null>(null);
-  const [taskType, setTaskType] = useState<string>('all');
+  const [page, setPage] = useState(1);
 
   const {
     data: tasks,
     error: tasksError,
     isLoading: tasksLoading,
-    isRefetching,
     refetch: refetchTasks,
   } = api.useQuery('get', '/v1/tasks', {
     params: {
@@ -69,23 +71,95 @@ export default function Task() {
   const restartTaskMutation = api.useMutation('post', '/v1/tasks/{id}/restart');
 
   const allTasks = useMemo<Task[]>(() => (Array.isArray(tasks) ? tasks : []), [tasks]);
-  const filteredTasks = useMemo(() => {
-    if (taskType === 'all') return allTasks;
-    return allTasks.filter((task) => task.task_type === taskType);
-  }, [allTasks, taskType]);
 
   const metrics = useMemo(
     () => ({
       total: allTasks.length,
       running: allTasks.filter((task) => task.status === 'running').length,
+      queued: allTasks.filter((task) => task.status === 'pending').length,
       failed: allTasks.filter((task) => task.status === 'failed').length,
       succeeded: allTasks.filter((task) => task.status === 'succeeded').length,
     }),
     [allTasks],
   );
 
+  const settledTasks = useMemo(
+    () => allTasks.filter((task) => isSettledStatus(task.status)),
+    [allTasks],
+  );
+
+  const successRate = useMemo(() => {
+    if (settledTasks.length === 0) return 0;
+    return (metrics.succeeded / settledTasks.length) * 100;
+  }, [metrics.succeeded, settledTasks.length]);
+
+  const activeTaskCount = metrics.running + metrics.queued;
+  const activeShare = metrics.total > 0 ? (activeTaskCount / metrics.total) * 100 : 0;
+
+  const averageTurnaroundMs = useMemo(() => {
+    if (settledTasks.length === 0) return 0;
+
+    const totalDuration = settledTasks.reduce((sum, task) => {
+      return sum + getTaskDurationMs(task);
+    }, 0);
+
+    return totalDuration / settledTasks.length;
+  }, [settledTasks]);
+
+  const successSparkline = useMemo(() => {
+    const recentTasks = [...allTasks]
+      .sort((left, right) => Date.parse(left.updated_at) - Date.parse(right.updated_at))
+      .slice(-7);
+
+    if (recentTasks.length === 0) {
+      return [0.32, 0.48, 0.44, 0.66, 0.82, 0.72, 0.77];
+    }
+
+    return recentTasks.map((task) => getSparklineWeight(task.status));
+  }, [allTasks]);
+
+  const durationSparkline = useMemo(() => {
+    const samples = [...settledTasks]
+      .sort((left, right) => Date.parse(left.updated_at) - Date.parse(right.updated_at))
+      .slice(-5)
+      .map((task) => getTaskDurationMs(task));
+
+    if (samples.length === 0) {
+      return [0.18, 0.28, 0.24, 0.6, 0.44];
+    }
+
+    const maxSample = Math.max(...samples, 1);
+
+    return samples.map((sample) => Math.max(sample / maxSample, 0.16));
+  }, [settledTasks]);
+
+  const totalPages = Math.max(1, Math.ceil(allTasks.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+
+  const paginatedTasks = useMemo(() => {
+    const startIndex = (currentPage - 1) * PAGE_SIZE;
+    return allTasks.slice(startIndex, startIndex + PAGE_SIZE);
+  }, [allTasks, currentPage]);
+
+  const paginationLabel = useMemo(() => {
+    if (allTasks.length === 0) {
+      return 'Showing 0 to 0 of 0 entries';
+    }
+
+    const start = (currentPage - 1) * PAGE_SIZE + 1;
+    const end = Math.min(currentPage * PAGE_SIZE, allTasks.length);
+
+    return `Showing ${start} to ${end} of ${allTasks.length} entries`;
+  }, [allTasks.length, currentPage]);
+
   useEffect(() => {
-    const hasRunningTasks = filteredTasks.some((task) => task.status === 'running');
+    if (page > totalPages) {
+      setPage(totalPages);
+    }
+  }, [page, totalPages]);
+
+  useEffect(() => {
+    const hasRunningTasks = allTasks.some((task) => task.status === 'running');
     if (!hasRunningTasks) return;
 
     const interval = setInterval(() => {
@@ -93,7 +167,7 @@ export default function Task() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [filteredTasks, refetchTasks]);
+  }, [allTasks, refetchTasks]);
 
   useEffect(() => {
     if (!selectedTask || selectedTask.status !== 'running') return;
@@ -174,56 +248,68 @@ export default function Task() {
 
   return (
     <div className="h-full w-full overflow-auto">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-1 pb-8">
-        <SoftPanel className="workspace-halo space-y-5 overflow-hidden rounded-[30px] border border-border/70">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-2">
-              <Badge variant="chip">Task operations</Badge>
-              <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">
-                Task Workbench
-              </h1>
-              <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                Monitor long-running AI jobs, inspect task details, and recover failed or cancelled tasks from one console.
-              </p>
+      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-1 pb-8 pt-6">
+        <section className="grid gap-6 xl:grid-cols-3">
+          <TaskMetricCard
+            label="Success Rate"
+            value={formatPercent(successRate)}
+            note={settledTasks.length > 0 ? `${metrics.succeeded} successful` : 'No completed tasks'}
+            noteTone="success"
+            icon={PlayCircle}
+          >
+            <div className="mt-4 flex h-12 items-end gap-1">
+              {successSparkline.map((barHeight, index) => (
+                <div
+                  key={`${index}-${barHeight}`}
+                  className="flex-1 rounded-t-[2px] bg-[rgba(0,104,95,0.1)]"
+                  style={{ height: `${Math.max(barHeight * 48, 10)}px` }}
+                />
+              ))}
             </div>
-            <Button
-              variant="pill"
-              size="pill"
-              disabled={isRefetching}
-              onClick={() => void refetchTasks()}
-            >
-              {isRefetching ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-2 h-4 w-4" />
-              )}
-              Refresh
-            </Button>
-          </div>
+          </TaskMetricCard>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard label="Total Tasks" value={metrics.total} hint="Current list size" icon={ListChecks} />
-            <MetricCard label="Running" value={metrics.running} hint="Actively processing" icon={Timer} />
-            <MetricCard label="Succeeded" value={metrics.succeeded} hint="Finished successfully" icon={PlayCircle} />
-            <MetricCard label="Failed" value={metrics.failed} hint="Needs attention" icon={TriangleAlert} />
-          </div>
-        </SoftPanel>
+          <TaskMetricCard
+            label="Active Queue"
+            value={formatPercent(activeShare)}
+            note={activeTaskCount > 0 ? `${activeTaskCount} active` : 'Idle'}
+            noteTone="muted"
+            icon={Timer}
+            className="border border-[rgba(0,104,95,0.08)]"
+          >
+            <div className="mt-5">
+              <div className="h-1.5 overflow-hidden rounded-full bg-[#dfe4e7]">
+                <div
+                  className="h-full rounded-full bg-[#855300] shadow-[0_0_12px_rgba(254,166,25,0.3)]"
+                  style={{ width: `${Math.max(activeShare, activeTaskCount > 0 ? 8 : 0)}%` }}
+                />
+              </div>
+              <div className="mt-3 flex items-center justify-between font-mono text-[10px] text-[#6d7a77]">
+                <span>0%</span>
+                <span>{activeTaskCount > 0 ? 'Active' : 'Idle'}</span>
+                <span>100%</span>
+              </div>
+            </div>
+          </TaskMetricCard>
 
-        <PillFilterBar>
-          <Select value={taskType} onValueChange={setTaskType}>
-            <SelectTrigger variant="pill" size="pill" className="min-w-[210px]">
-              <SelectValue placeholder="Task type" />
-            </SelectTrigger>
-            <SelectContent variant="pill">
-              <SelectItem value="all">All types</SelectItem>
-              <SelectItem value="transcription">Audio transcription</SelectItem>
-              <SelectItem value="image_generation">Image generation</SelectItem>
-              <SelectItem value="model_download">Model download</SelectItem>
-            </SelectContent>
-          </Select>
-          <Badge variant="counter">{filteredTasks.length} visible</Badge>
-          {isRefetching ? <StatusPill status="info">Syncing...</StatusPill> : null}
-        </PillFilterBar>
+          <TaskMetricCard
+            label="Avg. Turnaround"
+            value={formatCompactDuration(averageTurnaroundMs)}
+            note={settledTasks.length > 0 ? `${settledTasks.length} settled` : 'No settled tasks'}
+            noteTone={metrics.failed > 0 ? 'danger' : 'muted'}
+            icon={ListChecks}
+          >
+            <div className="mt-4 flex h-12 items-end gap-1">
+              {durationSparkline.map((barHeight, index) => (
+                <div key={`${index}-${barHeight}`} className="flex h-full flex-1 items-end">
+                  <div
+                    className="w-full rounded-[2px] bg-[rgba(79,93,114,0.1)]"
+                    style={{ height: `${Math.max(barHeight * 48, 9)}px` }}
+                  />
+                </div>
+              ))}
+            </div>
+          </TaskMetricCard>
+        </section>
 
         {tasksError ? (
           <Alert variant="destructive">
@@ -239,44 +325,73 @@ export default function Task() {
             description="Fetching latest task status from the backend."
             className="[&_svg]:animate-spin"
           />
-        ) : filteredTasks.length === 0 ? (
+        ) : allTasks.length === 0 ? (
           <StageEmptyState
             icon={ListChecks}
             title="No tasks yet"
             description="Go to Audio, Image, or Video pages to create a task."
           />
         ) : (
-          <SoftPanel className="overflow-hidden p-3">
-            <div className="workspace-soft-panel overflow-x-auto rounded-[26px] p-2">
-              <table className="w-full min-w-[980px] text-sm">
-                <thead>
-                  <tr className="border-b border-border/60 text-left text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                    <th className="px-4 py-3">Task ID</th>
-                    <th className="px-4 py-3">Type</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Created</th>
-                    <th className="px-4 py-3">Updated</th>
-                    <th className="px-4 py-3 text-right">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredTasks.map((task) => (
-                    <tr key={task.id} className="border-b border-border/45 hover:bg-[var(--surface-1)]/60">
-                      <td className="max-w-[240px] truncate px-4 py-4 font-mono text-xs font-medium" title={task.id}>
-                        {task.id}
-                      </td>
-                      <td className="max-w-[180px] truncate px-4 py-4" title={task.task_type}>
-                        {task.task_type}
-                      </td>
-                      <td className="px-4 py-4">{renderStatusPill(task.status)}</td>
-                      <td className="px-4 py-4 text-muted-foreground">{formatDateTime(task.created_at)}</td>
-                      <td className="px-4 py-4 text-muted-foreground">{formatDateTime(task.updated_at)}</td>
-                      <td className="px-4 py-4 text-right">
+          <section className="overflow-hidden rounded-[20px] border border-[color:rgba(188,201,198,0.35)] bg-[var(--surface-1)] shadow-[0_12px_40px_-12px_rgba(25,28,30,0.05)]">
+            <Table className="min-w-[980px]" variant="roomy">
+              <TableHeader className="[&_tr]:border-b-0 [&_tr]:bg-[#f2f4f6]">
+                <TableRow className="hover:bg-[#f2f4f6]">
+                  <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6d7a77]">
+                    Task ID
+                  </TableHead>
+                  <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6d7a77]">
+                    Type
+                  </TableHead>
+                  <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6d7a77]">
+                    Status
+                  </TableHead>
+                  <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6d7a77]">
+                    Created At
+                  </TableHead>
+                  <TableHead className="h-[45px] px-6 text-right text-[11px] font-semibold uppercase tracking-[0.1em] text-[#6d7a77]">
+                    Actions
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+
+              <TableBody>
+                {paginatedTasks.map((task) => {
+                  const taskMeta = getTaskTypeMeta(task.task_type);
+
+                  return (
+                    <TableRow
+                      key={task.id}
+                      className="border-b border-[rgba(236,238,240,1)] hover:bg-[#fbfcfc]"
+                    >
+                      <TableCell
+                        className="px-6 py-6 font-mono text-sm font-medium text-[var(--brand-teal)]"
+                        title={task.id}
+                      >
+                        {formatTaskId(task.id)}
+                      </TableCell>
+                      <TableCell className="px-6 py-5">
+                        <div className="flex items-center gap-3">
+                          <div className={`flex size-8 items-center justify-center rounded-xl ${taskMeta.iconBg}`}>
+                            <taskMeta.icon className={`h-4 w-4 ${taskMeta.iconColor}`} />
+                          </div>
+                          <span className="text-sm font-semibold text-[#191c1e]">
+                            {taskMeta.label}
+                          </span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="px-6 py-5">
+                        {renderStatusPill(task.status)}
+                      </TableCell>
+                      <TableCell className="px-6 py-5 text-sm text-[#6d7a77]">
+                        {formatDateTime(task.created_at)}
+                      </TableCell>
+                      <TableCell className="px-6 py-5 text-right">
                         <Dialog>
                           <DialogTrigger asChild>
                             <Button
-                              variant="pill"
+                              variant="quiet"
                               size="sm"
+                              className="h-auto rounded-xl px-2 py-1 text-sm font-semibold text-[var(--brand-teal)] hover:bg-[rgba(0,104,95,0.06)] hover:text-[var(--brand-teal)]"
                               onClick={() => {
                                 setSelectedTask(null);
                                 void fetchTaskDetail(task.id);
@@ -383,13 +498,49 @@ export default function Task() {
                             </div>
                           </DialogContent>
                         </Dialog>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+
+            <div className="flex flex-wrap items-center justify-between gap-4 border-t border-[rgba(188,201,198,0.12)] bg-[#f2f4f6] px-6 py-4">
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-[#6d7a77]">
+                {paginationLabel}
+              </p>
+
+              <div className="flex items-center gap-2">
+                <PaginationButton
+                  aria-label="Previous page"
+                  disabled={currentPage === 1}
+                  onClick={() => setPage((value) => Math.max(1, value - 1))}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </PaginationButton>
+                {Array.from({ length: totalPages }, (_, index) => {
+                  const pageNumber = index + 1;
+
+                  return (
+                    <PaginationButton
+                      key={pageNumber}
+                      active={pageNumber === currentPage}
+                      onClick={() => setPage(pageNumber)}
+                    >
+                      {pageNumber}
+                    </PaginationButton>
+                  );
+                })}
+                <PaginationButton
+                  aria-label="Next page"
+                  disabled={currentPage === totalPages}
+                  onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </PaginationButton>
+              </div>
             </div>
-          </SoftPanel>
+          </section>
         )}
       </div>
     </div>
@@ -397,31 +548,246 @@ export default function Task() {
 }
 
 function renderStatusPill(status: string) {
-  if (status === 'succeeded') {
-    return <StatusPill status="success">Succeeded</StatusPill>;
-  }
-  if (status === 'running') {
-    return <StatusPill status="info">Running</StatusPill>;
-  }
-  if (status === 'failed') {
-    return <StatusPill status="danger">Failed</StatusPill>;
-  }
-  if (status === 'cancelled') {
-    return <StatusPill status="neutral">Cancelled</StatusPill>;
-  }
-  if (status === 'pending') {
-    return <StatusPill status="neutral">Pending</StatusPill>;
-  }
+  const tone = getStatusTone(status);
 
-  return <StatusPill status="neutral">{status}</StatusPill>;
+  return (
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.04em] ${tone.className}`}
+    >
+      <span className={`size-1.5 rounded-full ${tone.dotClassName}`} />
+      {tone.label}
+    </span>
+  );
 }
 
 function formatDateTime(value: string) {
-  return new Date(value).toLocaleString(undefined, {
-    year: '2-digit',
-    month: '2-digit',
+  return new Date(value).toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
+    hour12: false,
   });
+}
+
+function formatPercent(value: number) {
+  if (!Number.isFinite(value)) {
+    return '0.0%';
+  }
+
+  return `${value.toFixed(1)}%`;
+}
+
+function formatCompactDuration(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '<1s';
+  }
+
+  const seconds = value / 1000;
+  if (seconds < 60) {
+    return `${seconds < 10 ? seconds.toFixed(1) : Math.round(seconds)}s`;
+  }
+
+  const minutes = seconds / 60;
+  if (minutes < 60) {
+    return `${minutes < 10 ? minutes.toFixed(1) : Math.round(minutes)}m`;
+  }
+
+  const hours = minutes / 60;
+  return `${hours < 10 ? hours.toFixed(1) : Math.round(hours)}h`;
+}
+
+function formatTaskId(value: string) {
+  return `#${value.replace(/-/g, '').slice(0, 8).toUpperCase()}`;
+}
+
+function getTaskDurationMs(task: Task) {
+  const createdAt = Date.parse(task.created_at);
+  const updatedAt = Date.parse(task.updated_at);
+
+  if (Number.isNaN(createdAt) || Number.isNaN(updatedAt)) {
+    return 0;
+  }
+
+  return Math.max(updatedAt - createdAt, 0);
+}
+
+function isSettledStatus(status: string) {
+  return ['succeeded', 'failed', 'cancelled', 'interrupted'].includes(status);
+}
+
+function getSparklineWeight(status: string) {
+  switch (status) {
+    case 'succeeded':
+      return 0.92;
+    case 'running':
+      return 0.72;
+    case 'pending':
+      return 0.58;
+    case 'failed':
+      return 0.4;
+    case 'cancelled':
+    case 'interrupted':
+      return 0.3;
+    default:
+      return 0.48;
+  }
+}
+
+function getStatusTone(status: string) {
+  switch (status) {
+    case 'succeeded':
+      return {
+        label: 'Succeeded',
+        className: 'bg-[#d1fae5] text-[#047857]',
+        dotClassName: 'bg-[#10b981]',
+      };
+    case 'running':
+      return {
+        label: 'Running',
+        className: 'bg-[#dbeafe] text-[#1d4ed8]',
+        dotClassName: 'bg-[#3b82f6]',
+      };
+    case 'failed':
+      return {
+        label: 'Failed',
+        className: 'bg-[#fee2e2] text-[#b91c1c]',
+        dotClassName: 'bg-[#ef4444]',
+      };
+    case 'pending':
+      return {
+        label: 'Queued',
+        className: 'bg-[#e5e7eb] text-[#4b5563]',
+        dotClassName: 'bg-[#6b7280]',
+      };
+    case 'cancelled':
+      return {
+        label: 'Cancelled',
+        className: 'bg-[#e5e7eb] text-[#4b5563]',
+        dotClassName: 'bg-[#6b7280]',
+      };
+    case 'interrupted':
+      return {
+        label: 'Interrupted',
+        className: 'bg-[#e5e7eb] text-[#4b5563]',
+        dotClassName: 'bg-[#6b7280]',
+      };
+    default:
+      return {
+        label: status,
+        className: 'bg-[#e5e7eb] text-[#4b5563]',
+        dotClassName: 'bg-[#6b7280]',
+      };
+  }
+}
+
+function getTaskTypeMeta(taskType: string) {
+  const normalized = taskType.toLowerCase();
+
+  if (normalized.includes('whisper') || normalized.includes('transcription')) {
+    return {
+      label: 'Transcription',
+      icon: Mic,
+      iconBg: 'bg-[#d5e3fd]',
+      iconColor: 'text-[#446287]',
+    };
+  }
+
+  if (normalized.includes('diffusion') || normalized.includes('image')) {
+    return {
+      label: 'Image Generation',
+      icon: Image,
+      iconBg: 'bg-[#ede9fe]',
+      iconColor: 'text-[#6d28d9]',
+    };
+  }
+
+  if (normalized.includes('download')) {
+    return {
+      label: 'Model Download',
+      icon: Download,
+      iconBg: 'bg-[#e0e3e5]',
+      iconColor: 'text-[#5b6872]',
+    };
+  }
+
+  return {
+    label: taskType
+      .replaceAll('.', ' ')
+      .replaceAll('_', ' ')
+      .replace(/\b\w/g, (character) => character.toUpperCase()),
+    icon: ListChecks,
+    iconBg: 'bg-[#e0e3e5]',
+    iconColor: 'text-[#5b6872]',
+  };
+}
+
+type TaskMetricCardProps = {
+  label: string;
+  value: string;
+  note: string;
+  noteTone: 'success' | 'danger' | 'muted';
+  icon: typeof ListChecks;
+  className?: string;
+  children: ReactNode;
+};
+
+function TaskMetricCard({
+  label,
+  value,
+  note,
+  noteTone,
+  icon: Icon,
+  className,
+  children,
+}: TaskMetricCardProps) {
+  const noteClassName =
+    noteTone === 'success'
+      ? 'text-[#059669]'
+      : noteTone === 'danger'
+        ? 'text-[#ef4444]'
+        : 'text-[#6d7a77]';
+
+  return (
+    <article
+      className={`rounded-2xl bg-[#f2f4f6] px-6 py-6 shadow-[0_12px_40px_-24px_rgba(25,28,30,0.08)] ${className ?? ''}`}
+    >
+      <div className="flex items-start justify-between gap-4">
+        <p className="text-[12px] font-bold uppercase tracking-[0.14em] text-[#6d7a77]">
+          {label}
+        </p>
+        <Icon className="h-[18px] w-[18px] text-[#5b6872]" />
+      </div>
+      <div className="mt-5 flex items-end gap-3">
+        <p className="text-[30px] font-semibold leading-none tracking-[-0.03em] text-[#191c1e]">
+          {value}
+        </p>
+        <p className={`pb-1 text-[12px] font-semibold ${noteClassName}`}>
+          {note}
+        </p>
+      </div>
+      {children}
+    </article>
+  );
+}
+
+type PaginationButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  active?: boolean;
+};
+
+function PaginationButton({ active = false, className, ...props }: PaginationButtonProps) {
+  return (
+    <button
+      type="button"
+      className={[
+        'flex size-8 items-center justify-center rounded-xl text-xs font-bold transition-colors',
+        active
+          ? 'bg-[var(--brand-teal)] text-white'
+          : 'text-[#191c1e] hover:bg-[rgba(0,104,95,0.08)] disabled:text-[#94a3b8] disabled:hover:bg-transparent',
+        className,
+      ].join(' ')}
+      {...props}
+    />
+  );
 }
