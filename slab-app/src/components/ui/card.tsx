@@ -13,7 +13,7 @@ const cardVariants = cva(
         elevated:
           "bg-[var(--surface-1)] shadow-[0_24px_60px_-38px_color-mix(in_oklab,var(--foreground)_40%,transparent)]",
         metric:
-          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-1)_85%,white)_0%,var(--surface-1)_100%)] shadow-[0_18px_44px_-30px_color-mix(in_oklab,var(--foreground)_32%,transparent)]",
+          "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-1)_85%,var(--background))_0%,var(--surface-1)_100%)] shadow-[0_18px_44px_-30px_color-mix(in_oklab,var(--foreground)_32%,transparent)]",
         hero:
           "bg-[linear-gradient(180deg,color-mix(in_oklab,var(--brand-teal)_9%,var(--surface-1))_0%,var(--surface-1)_56%,color-mix(in_oklab,var(--brand-gold)_10%,var(--surface-1))_100%)] shadow-[0_28px_80px_-48px_color-mix(in_oklab,var(--brand-teal)_28%,transparent)]",
       },

@@ -75,8 +75,8 @@ export default function Hub() {
             variant="hero"
             className="workspace-halo relative overflow-hidden rounded-[34px] border-none px-7 py-8 md:px-10 md:py-10"
           >
-            <div className="absolute top-10 right-14 size-28 rounded-full bg-[color:color-mix(in_oklab,var(--brand-gold)_18%,white)] blur-3xl" />
-            <div className="absolute right-[-5%] bottom-[-12%] size-56 rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_16%,white)] blur-3xl" />
+            <div className="absolute top-10 right-14 size-28 rounded-full bg-[color:color-mix(in_oklab,var(--brand-gold)_18%,var(--surface-1))] blur-3xl" />
+            <div className="absolute right-[-5%] bottom-[-12%] size-56 rounded-full bg-[color:color-mix(in_oklab,var(--brand-teal)_16%,var(--surface-1))] blur-3xl" />
 
             <div className="relative flex h-full flex-col gap-8">
               <div className="space-y-4">

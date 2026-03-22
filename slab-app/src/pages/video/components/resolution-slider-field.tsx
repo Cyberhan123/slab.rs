@@ -25,7 +25,7 @@ export function ResolutionSliderField({
     <div className="space-y-2.5">
       <div className="flex items-center justify-between">
         <FieldLabel>{label}</FieldLabel>
-        <span className="font-mono text-[12px] font-semibold text-[#00685f]">
+        <span className="font-mono text-[12px] font-semibold text-primary">
           {resolvedValue}
         </span>
       </div>
@@ -35,7 +35,7 @@ export function ResolutionSliderField({
         step={step}
         value={[resolvedValue]}
         onValueChange={([nextValue]) => onChange(String(nextValue))}
-        className="[&_[data-slot=slider-range]]:bg-[#0f766e] [&_[data-slot=slider-thumb]]:border-[#0f766e] [&_[data-slot=slider-track]]:bg-slate-200"
+        className="[&_[data-slot=slider-range]]:bg-primary [&_[data-slot=slider-thumb]]:border-primary [&_[data-slot=slider-track]]:bg-border/70"
       />
     </div>
   );

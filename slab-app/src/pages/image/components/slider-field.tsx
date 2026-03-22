@@ -13,7 +13,7 @@ export function SliderField({ label, value, slider }: SliderFieldProps) {
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label className={SIDEBAR_LABEL_CLASSNAME}>{label}</Label>
-        <span className="text-[11px] font-medium text-[#64748b]">{value}</span>
+        <span className="text-[11px] font-medium text-muted-foreground">{value}</span>
       </div>
       {slider}
     </div>

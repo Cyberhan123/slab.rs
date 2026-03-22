@@ -5,49 +5,145 @@
 
 
 :root {
-  --background: oklch(0.982 0.005 200);
-  --foreground: oklch(0.29 0.03 220);
+  /* Figma ref: #F7F9FB
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --background: oklch(98.12% 0.0034 247.86);
+  /* Figma ref: #191C1E
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --foreground: oklch(22.41% 0.006 236.83);
 
-  --app-canvas: oklch(0.966 0.01 205);
-  --surface-1: oklch(0.992 0.004 200);
-  --surface-2: oklch(0.978 0.008 200);
-  --surface-soft: oklch(0.954 0.013 202);
-  --surface-selected: oklch(0.93 0.022 202);
-  --surface-input: oklch(0.986 0.004 200);
+  /* Figma ref: #F7F9FB
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --app-canvas: oklch(98.12% 0.0034 247.86);
+  /* Figma ref: #FFFFFF
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --surface-1: oklch(100% 0 0);
+  /* Figma ref: #FBFCFD
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --surface-2: oklch(99.06% 0.0017 247.84);
+  /* Figma ref: #F2F4F6
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --surface-soft: oklch(96.62% 0.0034 247.86);
+  /* Figma ref: #E6EBEF
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --surface-selected: oklch(93.74% 0.0076 241.67);
+  /* Figma ref: #E0E3E5
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --surface-input: oklch(91.41% 0.0042 236.5);
 
   --card: var(--surface-1);
   --card-foreground: var(--foreground);
 
-  --popover: oklch(0.994 0.003 200);
+  /* Figma ref: #FFFFFF
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --popover: oklch(100% 0 0);
   --popover-foreground: var(--foreground);
 
-  --primary: oklch(0.588 0.12 195);
-  --primary-foreground: oklch(0.99 0.005 200);
+  /* Figma ref: #0D9488
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
 
-  --brand-teal: oklch(0.61 0.12 195);
-  --brand-teal-foreground: oklch(0.99 0.005 200);
-  --brand-gold: oklch(0.78 0.12 78);
+  --primary: oklch(60.02% 0.1038 184.7);
+  /* Figma ref: #F8FFFD
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --primary-foreground: oklch(99.42% 0.0078 177.33);
 
-  --secondary: oklch(0.944 0.015 200);
-  --secondary-foreground: oklch(0.35 0.04 220);
-  --muted: oklch(0.955 0.01 200);
-  --muted-foreground: oklch(0.52 0.02 230);
+  /* Figma ref: #0D9488
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
 
-  --accent: oklch(0.75 0.14 55);
-  --accent-foreground: oklch(0.25 0.04 40);
+  --brand-teal: oklch(60.02% 0.1038 184.7);
+  /* Figma ref: #F8FFFD
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --brand-teal-foreground: oklch(99.42% 0.0078 177.33);
+  /* Figma ref: #855300
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --brand-gold: oklch(48.72% 0.1056 69.9);
 
-  --destructive: oklch(0.577 0.245 27.325);
-  --destructive-foreground: oklch(0.98 0.01 25);
+  /* Figma ref: #F2F4F6
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
 
-  --border: oklch(0.9 0.012 200);
+  --secondary: oklch(96.62% 0.0034 247.86);
+  /* Figma ref: #3D4947
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --secondary-foreground: oklch(39.41% 0.0158 184.37);
+  /* Figma ref: #F2F4F6
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --muted: oklch(96.62% 0.0034 247.86);
+  /* Figma ref: #6D7A77
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --muted-foreground: oklch(56.78% 0.0161 180.31);
+
+  /* Figma ref: #EEF2F4
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --accent: oklch(95.87% 0.0051 228.82);
+  /* Figma ref: #191C1E
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --accent-foreground: oklch(22.41% 0.006 236.83);
+
+  /* Figma ref: #EF4444
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --destructive: oklch(63.68% 0.2078 25.33);
+  /* Figma ref: #FFFFFF
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --destructive-foreground: oklch(100% 0 0);
+
+  /* Figma ref: #E2E8EE
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --border: oklch(92.82% 0.0104 247.94);
   --input: var(--surface-input);
-  --ring: oklch(0.588 0.12 195);
+  /* Figma ref: #0D9488
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --ring: oklch(60.02% 0.1038 184.7);
 
-  --chart-1: oklch(0.588 0.12 195);
-  --chart-2: oklch(0.65 0.15 160);
-  --chart-3: oklch(0.72 0.14 55);
-  --chart-4: oklch(0.60 0.14 280);
-  --chart-5: oklch(0.68 0.18 340);
+  /* Figma ref: #0D9488
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --chart-1: oklch(60.02% 0.1038 184.7);
+  /* Figma ref: #2563EB
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --chart-2: oklch(54.61% 0.2152 262.88);
+  /* Figma ref: #F59E0B
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --chart-3: oklch(76.86% 0.1647 70.08);
+  /* Figma ref: #8B5CF6
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --chart-4: oklch(60.56% 0.2189 292.72);
+  /* Figma ref: #EC4899
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --chart-5: oklch(65.59% 0.2118 354.31);
 
   --status-success-bg: color-mix(in oklab, var(--success) 40%, var(--background));
   --status-info-bg: color-mix(in oklab, var(--brand-teal) 16%, var(--background));
@@ -62,88 +158,258 @@
 
   /* Shell UI – all values derived from theme tokens so swapping a palette
      automatically re-skins the entire shell chrome. */
-  --shell-card: oklch(1 0 0);
-  --shell-title: var(--foreground);
+  /* Figma ref: #FFFFFF
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-card: oklch(100% 0 0);
+  /* Figma ref: #0F172A
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-title: oklch(20.77% 0.0398 265.75);
   --shell-subtitle: var(--brand-teal);
-  --shell-rail-bg: color-mix(in oklab, var(--app-canvas) 90%, var(--foreground) 10%);
-  --shell-topbar-bg: color-mix(in oklab, var(--app-canvas) 80%, transparent);
-  --shell-footer-bg: color-mix(in oklab, var(--app-canvas) 90%, var(--foreground) 10%);
-  --shell-search-bg: color-mix(in oklab, var(--surface-soft) 60%, transparent);
-  --shell-search-foreground: var(--muted-foreground);
-  --shell-divider: color-mix(in oklab, var(--border) 48%, transparent);
-  --shell-rail-label: var(--muted-foreground);
+  /* Figma ref: #F2F4F6
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-rail-bg: oklch(96.62% 0.0034 247.86);
+  /* Figma ref: rgb(247 249 251 / 0.5)
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-topbar-bg: oklch(98.12% 0.0034 247.86 / 0.5);
+  /* Figma ref: #F2F4F6
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-footer-bg: oklch(96.62% 0.0034 247.86);
+  /* Figma ref: rgb(224 227 229 / 0.4)
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-search-bg: oklch(91.41% 0.0042 236.5 / 0.4);
+  /* Figma ref: #94A3B8
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-search-foreground: oklch(71.07% 0.0351 256.79);
+  /* Figma ref: rgb(188 201 198 / 0.3)
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-divider: oklch(82.5% 0.0148 180.62 / 0.3);
+  /* Figma ref: #64748B
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-rail-label: oklch(55.44% 0.0407 257.42);
   --shell-rail-active: var(--brand-teal);
-  --shell-footer-label: color-mix(in oklab, var(--muted-foreground) 85%, var(--foreground) 15%);
-  --shell-footer-value: var(--brand-teal);
-  --shell-elevation: 0 1px 2px color-mix(in oklab, var(--foreground) 5%, transparent);
-  --shell-line: color-mix(in oklab, var(--border) 90%, transparent);
+  /* Figma ref: #394A56
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-footer-label: oklch(39.94% 0.0296 239.23);
+  /* Figma ref: #009D86
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-footer-value: oklch(62.24% 0.1151 177.36);
+  /* Figma ref: rgb(0 0 0 / 0.05)
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-elevation: 0 1px 2px oklch(0% 0 0 / 0.05);
+  /* Figma ref: rgb(229 231 235 / 0.9)
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-line: oklch(92.76% 0.0058 264.53 / 0.9);
 
-  --sidebar: color-mix(in oklab, var(--surface-1) 84%, var(--background));
-  --sidebar-foreground: var(--foreground);
+  --sidebar: var(--shell-rail-bg);
+  --sidebar-foreground: var(--shell-title);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
-  --sidebar-accent: var(--surface-soft);
-  --sidebar-accent-foreground: var(--secondary-foreground);
-  --sidebar-border: var(--border);
+  --sidebar-accent: var(--shell-card);
+  --sidebar-accent-foreground: var(--shell-title);
+  /* Figma ref: #E5E7EB
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --sidebar-border: oklch(92.76% 0.0058 264.53);
   --sidebar-ring: var(--ring);
 
-  --ai-bubble: oklch(0.94 0.02 195);
-  --ai-bubble-foreground: oklch(0.28 0.03 220);
-  --user-bubble: oklch(0.588 0.12 195);
-  --user-bubble-foreground: oklch(0.99 0.005 200);
-  --ai-tool: oklch(0.75 0.14 55);
-  --ai-tool-foreground: oklch(0.25 0.04 40);
-  --success: oklch(0.62 0.16 155);
-  --success-foreground: oklch(0.98 0.01 155);
-  --media-canvas: oklch(0 0 0);
+  /* Figma ref: #E6E8EA
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --ai-bubble: oklch(93% 0.0035 247.86);
+  /* Figma ref: #191C1E
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --ai-bubble-foreground: oklch(22.41% 0.006 236.83);
+  /* Figma ref: #D5E3FD
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --user-bubble: oklch(91.34% 0.0386 262.93);
+  /* Figma ref: #0D1C2F
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --user-bubble-foreground: oklch(22.39% 0.0427 255.07);
+  /* Figma ref: #FFDDB8
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --ai-tool: oklch(91.68% 0.0614 69.31);
+  /* Figma ref: #855300
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --ai-tool-foreground: oklch(48.72% 0.1056 69.9);
+  /* Figma ref: #059669
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --success: oklch(59.6% 0.1274 163.23);
+  /* Figma ref: #F0FDF4
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --success-foreground: oklch(98.19% 0.0181 155.83);
+  /* Figma ref: #000000
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --media-canvas: oklch(0% 0 0);
 }
 
 .dark {
-  --background: oklch(0.18 0.014 220);
-  --foreground: oklch(0.92 0.01 200);
+  /* Figma ref: #0F1518
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --background: oklch(19.09% 0.011 229.67);
+  /* Figma ref: #F3F7F7
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --foreground: oklch(97.31% 0.0043 197.09);
 
-  --app-canvas: oklch(0.16 0.014 220);
-  --surface-1: oklch(0.21 0.018 220);
-  --surface-2: oklch(0.24 0.018 220);
-  --surface-soft: oklch(0.26 0.022 220);
-  --surface-selected: oklch(0.29 0.026 220);
-  --surface-input: oklch(0.23 0.018 220);
+  /* Figma ref: #10171A
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --app-canvas: oklch(19.89% 0.0121 225.89);
+  /* Figma ref: #151D21
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --surface-1: oklch(22.46% 0.0141 229.77);
+  /* Figma ref: #192226
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --surface-2: oklch(24.5% 0.015 226.78);
+  /* Figma ref: #1E2A30
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --surface-soft: oklch(27.65% 0.0199 229.98);
+  /* Figma ref: #26343C
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --surface-selected: oklch(31.59% 0.0235 233.53);
+  /* Figma ref: #1D282E
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --surface-input: oklch(26.92% 0.0189 232.21);
 
   --card: var(--surface-1);
   --card-foreground: var(--foreground);
 
-  --popover: oklch(0.22 0.016 220);
+  /* Figma ref: #192226
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --popover: oklch(24.5% 0.015 226.78);
   --popover-foreground: var(--foreground);
 
-  --primary: oklch(0.72 0.14 195);
-  --primary-foreground: oklch(0.16 0.02 220);
-  --brand-teal: oklch(0.72 0.14 195);
-  --brand-teal-foreground: oklch(0.16 0.02 220);
-  --brand-gold: oklch(0.76 0.13 78);
+  /* Figma ref: #4CC7BA
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
 
-  --secondary: oklch(0.26 0.02 220);
-  --secondary-foreground: oklch(0.88 0.01 200);
+  --primary: oklch(75.79% 0.11 185.41);
+  /* Figma ref: #062321
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --primary-foreground: oklch(23.39% 0.0345 188.68);
+  /* Figma ref: #4CC7BA
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --brand-teal: oklch(75.79% 0.11 185.41);
+  /* Figma ref: #062321
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --brand-teal-foreground: oklch(23.39% 0.0345 188.68);
+  /* Figma ref: #F1C27D
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --brand-gold: oklch(84.08% 0.102 76.23);
 
-  --muted: oklch(0.25 0.018 220);
-  --muted-foreground: oklch(0.62 0.02 220);
+  /* Figma ref: #1E2A30
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
 
-  --accent: oklch(0.72 0.15 55);
-  --accent-foreground: oklch(0.15 0.02 40);
+  --secondary: oklch(27.65% 0.0199 229.98);
+  /* Figma ref: #F3F7F7
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --secondary-foreground: oklch(97.31% 0.0043 197.09);
 
-  --destructive: oklch(0.45 0.18 25);
-  --destructive-foreground: oklch(0.95 0.01 25);
+  /* Figma ref: #182126
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
 
-  --border: oklch(0.30 0.02 220);
+  --muted: oklch(24.13% 0.0161 232.61);
+  /* Figma ref: #93A4AD
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --muted-foreground: oklch(70.83% 0.0233 230.7);
+
+  /* Figma ref: #223039
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --accent: oklch(30.05% 0.0249 236.88);
+  /* Figma ref: #F3F7F7
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --accent-foreground: oklch(97.31% 0.0043 197.09);
+
+  /* Figma ref: #F87171
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --destructive: oklch(71.06% 0.1661 22.22);
+  /* Figma ref: #210B0F
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --destructive-foreground: oklch(18.62% 0.0381 10.04);
+
+  /* Figma ref: #2A3841
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --border: oklch(33.2% 0.0244 236.68);
   --input: var(--surface-input);
-  --ring: oklch(0.72 0.14 195);
+  /* Figma ref: #4CC7BA
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --ring: oklch(75.79% 0.11 185.41);
 
-  --chart-1: oklch(0.72 0.14 195);
-  --chart-2: oklch(0.68 0.16 160);
-  --chart-3: oklch(0.75 0.15 55);
-  --chart-4: oklch(0.65 0.15 280);
-  --chart-5: oklch(0.70 0.18 340);
+  /* Figma ref: #4CC7BA
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
 
-  --sidebar: oklch(0.188 0.018 220);
+  --chart-1: oklch(75.79% 0.11 185.41);
+  /* Figma ref: #60A5FA
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --chart-2: oklch(71.37% 0.1434 254.62);
+  /* Figma ref: #FBBF24
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --chart-3: oklch(83.69% 0.1644 84.43);
+  /* Figma ref: #A78BFA
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --chart-4: oklch(70.9% 0.1592 293.54);
+  /* Figma ref: #F472B6
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --chart-5: oklch(72.53% 0.1752 349.76);
+
+  /* Figma ref: #0F171B
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --sidebar: oklch(19.85% 0.0144 229.99);
   --sidebar-foreground: var(--foreground);
   --sidebar-primary: var(--primary);
   --sidebar-primary-foreground: var(--primary-foreground);
@@ -152,34 +418,92 @@
   --sidebar-border: var(--border);
   --sidebar-ring: var(--ring);
 
-  --ai-bubble: oklch(0.25 0.02 220);
-  --ai-bubble-foreground: oklch(0.90 0.01 200);
-  --user-bubble: oklch(0.50 0.12 195);
-  --user-bubble-foreground: oklch(0.98 0.005 200);
-  --ai-tool: oklch(0.60 0.14 55);
-  --ai-tool-foreground: oklch(0.98 0.01 40);
-  --success: oklch(0.62 0.16 155);
-  --success-foreground: oklch(0.15 0.02 155);
-  --media-canvas: oklch(0 0 0);
+  /* Figma ref: #1D272D
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+
+  --ai-bubble: oklch(26.59% 0.018 234.69);
+  /* Figma ref: #F3F7F7
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --ai-bubble-foreground: oklch(97.31% 0.0043 197.09);
+  /* Figma ref: #23344A
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --user-bubble: oklch(32.09% 0.0455 255.23);
+  /* Figma ref: #ECF4FF
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --user-bubble-foreground: oklch(96.43% 0.0171 256.28);
+  /* Figma ref: #5A4524
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --ai-tool: oklch(40.49% 0.0563 77.39);
+  /* Figma ref: #FEF3C7
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --ai-tool-foreground: oklch(96.19% 0.058 95.62);
+  /* Figma ref: #34D399
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --success: oklch(77.29% 0.1535 163.22);
+  /* Figma ref: #042118
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --success-foreground: oklch(22.27% 0.0394 169.04);
+  /* Figma ref: #000000
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --media-canvas: oklch(0% 0 0);
   --status-success-bg: color-mix(in oklab, var(--success) 24%, var(--surface-2));
   --status-info-bg: color-mix(in oklab, var(--brand-teal) 18%, var(--surface-2));
   --status-danger-bg: color-mix(in oklab, var(--destructive) 20%, var(--surface-2));
   --status-neutral-bg: color-mix(in oklab, var(--foreground) 10%, var(--surface-2));
-  --shell-card: var(--surface-2);
+  --shell-card: var(--surface-1);
   --shell-title: var(--foreground);
   --shell-subtitle: var(--brand-teal);
-  --shell-rail-bg: color-mix(in oklab, var(--app-canvas) 90%, black 10%);
-  --shell-topbar-bg: color-mix(in oklab, var(--app-canvas) 82%, black 18%);
-  --shell-footer-bg: color-mix(in oklab, var(--app-canvas) 92%, black 8%);
-  --shell-search-bg: color-mix(in oklab, var(--surface-soft) 72%, black 28%);
-  --shell-search-foreground: var(--muted-foreground);
-  --shell-divider: color-mix(in oklab, var(--foreground) 18%, transparent);
-  --shell-rail-label: var(--muted-foreground);
+  /* Figma ref: #0F171B
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-rail-bg: oklch(19.85% 0.0144 229.99);
+  /* Figma ref: rgb(16 23 26 / 0.82)
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-topbar-bg: oklch(19.89% 0.0121 225.89 / 0.82);
+  /* Figma ref: #10181C
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-footer-bg: oklch(20.29% 0.0143 229.95);
+  /* Figma ref: #1B252B
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-search-bg: oklch(25.76% 0.0181 234.74);
+  /* Figma ref: #8DA1AC
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-search-foreground: oklch(69.7% 0.0277 231.82);
+  /* Figma ref: rgb(243 247 247 / 0.12)
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-divider: oklch(97.31% 0.0043 197.09 / 0.12);
+  /* Figma ref: #90A2AC
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-rail-label: oklch(70.14% 0.0251 232.02);
   --shell-rail-active: var(--brand-teal);
-  --shell-footer-label: var(--muted-foreground);
+  /* Figma ref: #9BAAB3
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-footer-label: oklch(72.91% 0.0213 233.98);
   --shell-footer-value: var(--brand-teal);
-  --shell-elevation: 0 1px 2px color-mix(in oklab, var(--foreground) 34%, transparent);
-  --shell-line: color-mix(in oklab, var(--foreground) 12%, transparent);
+  /* Figma ref: rgb(0 0 0 / 0.34)
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-elevation: 0 1px 2px oklch(0% 0 0 / 0.34);
+  /* Figma ref: rgb(243 247 247 / 0.08)
+   Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
+  */
+  --shell-line: oklch(97.31% 0.0043 197.09 / 0.08);
 }
 
 @theme inline {

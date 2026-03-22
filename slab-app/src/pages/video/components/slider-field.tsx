@@ -12,7 +12,7 @@ export function SliderField({ label, value, slider }: SliderFieldProps) {
     <div className="space-y-2.5">
       <div className="flex items-center justify-between">
         <FieldLabel>{label}</FieldLabel>
-        <span className="font-mono text-[12px] font-semibold text-[#00685f]">
+        <span className="font-mono text-[12px] font-semibold text-primary">
           {value}
         </span>
       </div>
