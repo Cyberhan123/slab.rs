@@ -1,4 +1,4 @@
-import { useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import api, { getErrorMessage } from '@/lib/api';
@@ -7,7 +7,15 @@ import { inferWhisperVadModel, toCatalogModelList, type CatalogModelStatus } fro
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
 
-export const PAGE_SIZE_OPTIONS = [10, 20, 50] as const;
+export const PAGE_SIZE_OPTIONS = [6, 12, 24] as const;
+export const CATEGORY_OPTIONS = [
+  { value: 'all', label: 'All models' },
+  { value: 'language', label: 'Large language' },
+  { value: 'vision', label: 'Vision' },
+  { value: 'audio', label: 'Audio' },
+  { value: 'coding', label: 'Coding' },
+  { value: 'embedding', label: 'Embedding' },
+] as const;
 export const STATUS_OPTIONS = [
   { value: 'all', label: 'All statuses' },
   { value: 'ready', label: 'Ready' },
@@ -16,6 +24,7 @@ export const STATUS_OPTIONS = [
   { value: 'error', label: 'Error' },
 ] as const;
 
+export type ModelCategory = (typeof CATEGORY_OPTIONS)[number]['value'];
 export type ModelFilterStatus = (typeof STATUS_OPTIONS)[number]['value'];
 export type ModelStatus = CatalogModelStatus;
 export type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
@@ -38,16 +47,14 @@ type ImportedModelResponse = {
 };
 
 export function useHubModelCatalog() {
+  const [category, setCategory] = useState<ModelCategory>('all');
   const [status, setStatus] = useState<ModelFilterStatus>('all');
-  const [search, setSearch] = useState('');
-  const [pageSize, setPageSize] = useState<PageSize>(10);
+  const [pageSize, setPageSize] = useState<PageSize>(6);
   const [page, setPage] = useState(1);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createFile, setCreateFile] = useState<File | null>(null);
   const [createModelPending, setCreateModelPending] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
-
-  const searchQuery = useDeferredValue(search).trim().toLowerCase();
 
   const {
     data,
@@ -80,13 +87,17 @@ export function useHubModelCatalog() {
   const filteredModels = useMemo(
     () =>
       models.filter((model) => {
+        if (category !== 'all' && inferModelCategory(model) !== category) {
+          return false;
+        }
+
         if (status !== 'all' && model.status !== status) {
           return false;
         }
 
-        return matchesModel(model, searchQuery);
+        return true;
       }),
-    [models, searchQuery, status],
+    [category, models, status],
   );
   const downloadedCount = useMemo(
     () => models.filter((model) => Boolean(model.local_path)).length,
@@ -108,7 +119,7 @@ export function useHubModelCatalog() {
 
   useEffect(() => {
     setPage(1);
-  }, [pageSize, searchQuery, status]);
+  }, [category, pageSize, status]);
 
   useEffect(() => {
     setPage((current) => Math.min(current, totalPages));
@@ -158,12 +169,8 @@ export function useHubModelCatalog() {
             : createFile.name,
       });
 
+      setCategory('all');
       setStatus('all');
-      setSearch(
-        typeof created?.display_name === 'string' && created.display_name.trim()
-          ? created.display_name.trim()
-          : deriveSearchTermFromFileName(createFile.name),
-      );
       setCreateOpen(false);
       void refetch();
     } catch (createError) {
@@ -198,10 +205,10 @@ export function useHubModelCatalog() {
   }
 
   return {
+    category,
+    setCategory,
     status,
     setStatus,
-    search,
-    setSearch,
     pageSize,
     setPageSize,
     page,
@@ -232,31 +239,44 @@ export function useHubModelCatalog() {
   };
 }
 
-function matchesModel(model: ModelItem, query: string) {
-  if (!query) {
-    return true;
+function inferModelCategory(model: ModelItem): ModelCategory {
+  const haystack = `${model.display_name} ${model.provider} ${model.repo_id} ${model.filename}`
+    .toLowerCase()
+    .trim();
+
+  if (haystack.includes('embed')) {
+    return 'embedding';
   }
 
-  return [
-    model.display_name,
-    model.provider,
-    model.repo_id,
-    model.filename,
-    model.status,
-    model.local_path ?? '',
-    ...model.backend_ids,
-  ]
-    .join(' ')
-    .toLowerCase()
-    .includes(query);
-}
+  if (
+    model.backend_ids.includes('ggml.diffusion') ||
+    haystack.includes('stable diffusion') ||
+    haystack.includes('sdxl') ||
+    haystack.includes('vision') ||
+    haystack.includes('image')
+  ) {
+    return 'vision';
+  }
 
-function deriveSearchTermFromFileName(fileName: string) {
-  return (fileName.split('/').at(-1) ?? fileName)
-    .replace(/\.json$/i, '')
-    .replace(/[-_]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
+  if (
+    model.backend_ids.includes('ggml.whisper') ||
+    haystack.includes('whisper') ||
+    haystack.includes('audio') ||
+    haystack.includes('speech') ||
+    haystack.includes('transcrib')
+  ) {
+    return 'audio';
+  }
+
+  if (
+    haystack.includes('coder') ||
+    haystack.includes('codegen') ||
+    haystack.includes('programming')
+  ) {
+    return 'coding';
+  }
+
+  return 'language';
 }
 
 async function readJsonFile(file: File): Promise<unknown> {
