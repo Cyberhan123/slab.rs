@@ -48,7 +48,7 @@ export const PAGE_HEADER_META = {
   },
   hub: {
     title: "Hub",
-    subtitle: "Model and backend operations center",
+    subtitle: "Models Repository",
     icon: Package,
   },
   image: {
