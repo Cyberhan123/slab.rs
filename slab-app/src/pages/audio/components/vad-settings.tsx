@@ -52,10 +52,10 @@ export function VadSettings({
   setVadSamplesOverlap,
 }: VadSettingsProps) {
   return (
-    <div className="rounded-[22px] border border-white/70 bg-white/60 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+    <div className="rounded-[22px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/60 p-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
       <div className="flex items-start justify-between gap-5">
         <div className="space-y-1">
-          <Label htmlFor="enable-vad" className="text-base font-semibold text-[#191c1e]">
+          <Label htmlFor="enable-vad" className="text-base font-semibold text-foreground">
             Enable VAD
           </Label>
           <p className="text-sm leading-5 text-muted-foreground">Trim silence and reduce background noise before decoding.</p>
@@ -71,7 +71,7 @@ export function VadSettings({
       {enableVad && (
         <div className="mt-4 space-y-4 border-t border-border/60 pt-4">
           <div className="space-y-2">
-            <Label className="text-[12px] font-semibold text-[#191c1e]">VAD Model</Label>
+            <Label className="text-[12px] font-semibold text-foreground">VAD Model</Label>
             <Select
               value={selectedVadModelId}
               onValueChange={setSelectedVadModelId}
@@ -80,7 +80,7 @@ export function VadSettings({
               <SelectTrigger
                 variant="soft"
                 size="pill"
-                className="w-full justify-between border-[#dbe4ea] bg-white shadow-none"
+                className="w-full justify-between border-border/70 bg-[var(--shell-card)] shadow-none"
               >
                 <SelectValue
                   placeholder={catalogModelsLoading ? 'Loading models...' : 'Select VAD model'}
@@ -111,7 +111,7 @@ export function VadSettings({
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="vad-threshold" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="vad-threshold" className="text-xs font-semibold text-foreground">
                 Threshold
               </Label>
               <Input
@@ -125,11 +125,11 @@ export function VadSettings({
                 onChange={(e) => setVadThreshold(e.target.value)}
                 placeholder="0.50"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="vad-min-speech-duration" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="vad-min-speech-duration" className="text-xs font-semibold text-foreground">
                 Min Speech (ms)
               </Label>
               <Input
@@ -142,11 +142,11 @@ export function VadSettings({
                 onChange={(e) => setVadMinSpeechDurationMs(e.target.value)}
                 placeholder="250"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="vad-min-silence-duration" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="vad-min-silence-duration" className="text-xs font-semibold text-foreground">
                 Min Silence (ms)
               </Label>
               <Input
@@ -159,11 +159,11 @@ export function VadSettings({
                 onChange={(e) => setVadMinSilenceDurationMs(e.target.value)}
                 placeholder="100"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="vad-max-speech-duration" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="vad-max-speech-duration" className="text-xs font-semibold text-foreground">
                 Max Speech (s)
               </Label>
               <Input
@@ -176,11 +176,11 @@ export function VadSettings({
                 onChange={(e) => setVadMaxSpeechDurationS(e.target.value)}
                 placeholder="No limit"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="vad-speech-pad" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="vad-speech-pad" className="text-xs font-semibold text-foreground">
                 Speech Pad (ms)
               </Label>
               <Input
@@ -193,11 +193,11 @@ export function VadSettings({
                 onChange={(e) => setVadSpeechPadMs(e.target.value)}
                 placeholder="30"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="vad-samples-overlap" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="vad-samples-overlap" className="text-xs font-semibold text-foreground">
                 Samples Overlap (s)
               </Label>
               <Input
@@ -210,7 +210,7 @@ export function VadSettings({
                 onChange={(e) => setVadSamplesOverlap(e.target.value)}
                 placeholder="0.10"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
           </div>

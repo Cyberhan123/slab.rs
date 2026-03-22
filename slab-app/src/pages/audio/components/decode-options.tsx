@@ -80,10 +80,10 @@ export function DecodeOptions({
   setDecodeTdrzEnable,
 }: DecodeOptionsProps) {
   return (
-    <div className="rounded-[22px] border border-white/70 bg-white/60 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
+    <div className="rounded-[22px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/60 p-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
       <div className="flex items-start justify-between gap-5">
         <div className="space-y-1">
-          <Label htmlFor="show-decode-options" className="text-base font-semibold text-[#191c1e]">
+          <Label htmlFor="show-decode-options" className="text-base font-semibold text-foreground">
             Advanced Decode Options
           </Label>
           <p className="text-sm leading-5 text-muted-foreground">Expose manual whisper.cpp knobs only when you need custom behavior.</p>
@@ -100,7 +100,7 @@ export function DecodeOptions({
         <div className="mt-4 space-y-4 border-t border-border/60 pt-4">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
-              <Label htmlFor="decode-offset-ms" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="decode-offset-ms" className="text-xs font-semibold text-foreground">
                 Offset (ms)
               </Label>
               <Input
@@ -113,11 +113,11 @@ export function DecodeOptions({
                 onChange={(e) => setDecodeOffsetMs(e.target.value)}
                 placeholder="0"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="decode-duration-ms" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="decode-duration-ms" className="text-xs font-semibold text-foreground">
                 Duration (ms)
               </Label>
               <Input
@@ -130,11 +130,11 @@ export function DecodeOptions({
                 onChange={(e) => setDecodeDurationMs(e.target.value)}
                 placeholder="0 (full)"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="decode-word-thold" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="decode-word-thold" className="text-xs font-semibold text-foreground">
                 Word Threshold
               </Label>
               <Input
@@ -148,11 +148,11 @@ export function DecodeOptions({
                 onChange={(e) => setDecodeWordThold(e.target.value)}
                 placeholder="0.01"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="decode-max-len" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="decode-max-len" className="text-xs font-semibold text-foreground">
                 Max Segment Length
               </Label>
               <Input
@@ -165,11 +165,11 @@ export function DecodeOptions({
                 onChange={(e) => setDecodeMaxLen(e.target.value)}
                 placeholder="0 (no limit)"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="decode-max-tokens" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="decode-max-tokens" className="text-xs font-semibold text-foreground">
                 Max Tokens / Segment
               </Label>
               <Input
@@ -182,11 +182,11 @@ export function DecodeOptions({
                 onChange={(e) => setDecodeMaxTokens(e.target.value)}
                 placeholder="0 (no limit)"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="decode-temperature" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="decode-temperature" className="text-xs font-semibold text-foreground">
                 Temperature
               </Label>
               <Input
@@ -199,11 +199,11 @@ export function DecodeOptions({
                 onChange={(e) => setDecodeTemperature(e.target.value)}
                 placeholder="0.00"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="decode-temperature-inc" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="decode-temperature-inc" className="text-xs font-semibold text-foreground">
                 Temperature Increment
               </Label>
               <Input
@@ -216,11 +216,11 @@ export function DecodeOptions({
                 onChange={(e) => setDecodeTemperatureInc(e.target.value)}
                 placeholder="0.20"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="decode-entropy-thold" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="decode-entropy-thold" className="text-xs font-semibold text-foreground">
                 Entropy Threshold
               </Label>
               <Input
@@ -232,11 +232,11 @@ export function DecodeOptions({
                 onChange={(e) => setDecodeEntropyThold(e.target.value)}
                 placeholder="2.40"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="decode-logprob-thold" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="decode-logprob-thold" className="text-xs font-semibold text-foreground">
                 Logprob Threshold
               </Label>
               <Input
@@ -248,11 +248,11 @@ export function DecodeOptions({
                 onChange={(e) => setDecodeLogprobThold(e.target.value)}
                 placeholder="-1.00"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="decode-no-speech-thold" className="text-xs font-semibold text-[#191c1e]">
+              <Label htmlFor="decode-no-speech-thold" className="text-xs font-semibold text-foreground">
                 No Speech Threshold
               </Label>
               <Input
@@ -264,44 +264,44 @@ export function DecodeOptions({
                 onChange={(e) => setDecodeNoSpeechThold(e.target.value)}
                 placeholder="0.60"
                 disabled={isBusy}
-                className="h-11 rounded-xl border-[#dbe4ea] bg-white shadow-none"
+                className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-            <div className="flex items-center justify-between rounded-[16px] border border-[#dbe4ea] bg-white px-4 py-3">
-              <Label htmlFor="decode-no-context" className="text-sm font-medium text-[#191c1e]">
+            <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
+              <Label htmlFor="decode-no-context" className="text-sm font-medium text-foreground">
                 No Context
               </Label>
               <Switch id="decode-no-context" checked={decodeNoContext} onCheckedChange={setDecodeNoContext} disabled={isBusy} />
             </div>
-            <div className="flex items-center justify-between rounded-[16px] border border-[#dbe4ea] bg-white px-4 py-3">
-              <Label htmlFor="decode-no-timestamps" className="text-sm font-medium text-[#191c1e]">
+            <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
+              <Label htmlFor="decode-no-timestamps" className="text-sm font-medium text-foreground">
                 No Timestamps
               </Label>
               <Switch id="decode-no-timestamps" checked={decodeNoTimestamps} onCheckedChange={setDecodeNoTimestamps} disabled={isBusy} />
             </div>
-            <div className="flex items-center justify-between rounded-[16px] border border-[#dbe4ea] bg-white px-4 py-3">
-              <Label htmlFor="decode-token-timestamps" className="text-sm font-medium text-[#191c1e]">
+            <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
+              <Label htmlFor="decode-token-timestamps" className="text-sm font-medium text-foreground">
                 Token Timestamps
               </Label>
               <Switch id="decode-token-timestamps" checked={decodeTokenTimestamps} onCheckedChange={setDecodeTokenTimestamps} disabled={isBusy} />
             </div>
-            <div className="flex items-center justify-between rounded-[16px] border border-[#dbe4ea] bg-white px-4 py-3">
-              <Label htmlFor="decode-split-on-word" className="text-sm font-medium text-[#191c1e]">
+            <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
+              <Label htmlFor="decode-split-on-word" className="text-sm font-medium text-foreground">
                 Split On Word
               </Label>
               <Switch id="decode-split-on-word" checked={decodeSplitOnWord} onCheckedChange={setDecodeSplitOnWord} disabled={isBusy} />
             </div>
-            <div className="flex items-center justify-between rounded-[16px] border border-[#dbe4ea] bg-white px-4 py-3">
-              <Label htmlFor="decode-suppress-nst" className="text-sm font-medium text-[#191c1e]">
+            <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
+              <Label htmlFor="decode-suppress-nst" className="text-sm font-medium text-foreground">
                 Suppress NST
               </Label>
               <Switch id="decode-suppress-nst" checked={decodeSuppressNst} onCheckedChange={setDecodeSuppressNst} disabled={isBusy} />
             </div>
-            <div className="flex items-center justify-between rounded-[16px] border border-[#dbe4ea] bg-white px-4 py-3">
-              <Label htmlFor="decode-tdrz-enable" className="text-sm font-medium text-[#191c1e]">
+            <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
+              <Label htmlFor="decode-tdrz-enable" className="text-sm font-medium text-foreground">
                 Enable TinyDiarize
               </Label>
               <Switch id="decode-tdrz-enable" checked={decodeTdrzEnable} onCheckedChange={setDecodeTdrzEnable} disabled={isBusy} />

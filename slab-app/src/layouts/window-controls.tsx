@@ -60,7 +60,7 @@ export function WindowControls() {
         size="icon-sm"
         aria-label={WINDOW_CONTROL_LABELS.minimize}
         title={WINDOW_CONTROL_LABELS.minimize}
-        className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-white/80 hover:text-[var(--shell-title)]"
+        className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-[var(--shell-card)]/80 hover:text-[var(--shell-title)]"
         onClick={() => {
           void runWindowAction("minimize")
         }}
@@ -74,7 +74,7 @@ export function WindowControls() {
         size="icon-sm"
         aria-label={WINDOW_CONTROL_LABELS.toggleMaximize}
         title={WINDOW_CONTROL_LABELS.toggleMaximize}
-        className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-white/80 hover:text-[var(--shell-title)]"
+        className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-[var(--shell-card)]/80 hover:text-[var(--shell-title)]"
         onClick={() => {
           void runWindowAction("toggleMaximize")
         }}
@@ -88,7 +88,7 @@ export function WindowControls() {
         size="icon-sm"
         aria-label={WINDOW_CONTROL_LABELS.close}
         title={WINDOW_CONTROL_LABELS.close}
-        className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-[#ef4444]/12 hover:text-[#dc2626]"
+        className="size-7 rounded-[10px] text-[var(--shell-rail-label)] hover:bg-destructive/12 hover:text-destructive"
         onClick={() => {
           void runWindowAction("close")
         }}

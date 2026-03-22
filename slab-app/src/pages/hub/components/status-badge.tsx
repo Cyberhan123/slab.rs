@@ -15,7 +15,7 @@ export function StatusBadge({
 
   if (status === 'ready') {
     return (
-      <StatusPill status="success" className={cn(sharedClassName, 'text-[#00685f]', className)}>
+      <StatusPill status="success" className={cn(sharedClassName, 'text-[var(--success)]', className)}>
         Ready
       </StatusPill>
     );
@@ -23,7 +23,7 @@ export function StatusBadge({
 
   if (status === 'downloading') {
     return (
-      <StatusPill status="info" className={cn(sharedClassName, 'text-[#0d9488]', className)}>
+      <StatusPill status="info" className={cn(sharedClassName, 'text-[var(--primary)]', className)}>
         Downloading
       </StatusPill>
     );
@@ -31,14 +31,14 @@ export function StatusBadge({
 
   if (status === 'error') {
     return (
-      <StatusPill status="danger" className={cn(sharedClassName, 'text-[#c2410c]', className)}>
+      <StatusPill status="danger" className={cn(sharedClassName, 'text-destructive', className)}>
         Error
       </StatusPill>
     );
   }
 
   return (
-    <StatusPill status="neutral" className={cn(sharedClassName, 'text-[#6d7a77]', className)}>
+    <StatusPill status="neutral" className={cn(sharedClassName, 'text-muted-foreground', className)}>
       Not downloaded
     </StatusPill>
   );

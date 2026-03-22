@@ -8,7 +8,7 @@ export function FieldLabel({
   return (
     <Label
       className={cn(
-        'text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500',
+        'text-[11px] font-bold uppercase tracking-[0.18em] text-muted-foreground',
         className,
       )}
       {...props}

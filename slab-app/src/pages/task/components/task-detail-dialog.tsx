@@ -34,7 +34,7 @@ export function TaskDetailDialog({
         <Button
           variant="quiet"
           size="sm"
-          className="h-auto rounded-xl px-2 py-1 text-sm font-semibold text-[var(--brand-teal)] hover:bg-[rgba(0,104,95,0.06)] hover:text-[var(--brand-teal)]"
+          className="h-auto rounded-xl px-2 py-1 text-sm font-semibold text-[var(--brand-teal)] hover:bg-[var(--brand-teal)]/6 hover:text-[var(--brand-teal)]"
           onClick={() => {
             onOpen(task.id);
           }}

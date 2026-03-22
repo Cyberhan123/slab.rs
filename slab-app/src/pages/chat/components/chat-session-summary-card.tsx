@@ -22,9 +22,9 @@ export function ChatSessionSummaryCard({
   onNewSession,
 }: ChatSessionSummaryCardProps) {
   return (
-    <aside className="w-full max-w-[288px] rounded-[24px] border border-border/50 bg-white p-6 shadow-[0_1px_2px_rgba(0,0,0,0.05)]">
+    <aside className="w-full max-w-[288px] rounded-[24px] border border-border/50 bg-[var(--shell-card)] p-6 shadow-[var(--shell-elevation)]">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-[#6d7a77]">
+        <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
           Latest session
         </p>
         <Button
@@ -54,18 +54,18 @@ export function ChatSessionSummaryCard({
                 className={cn(
                   "flex size-8 shrink-0 items-center justify-center rounded-[8px]",
                   item.tone === "warm"
-                    ? "bg-[#ffddb8] text-[#855300]"
-                    : "bg-[#89f5e7] text-[#00685f]"
+                    ? "bg-[var(--brand-gold)]/20 text-[var(--brand-gold)]"
+                    : "bg-[var(--brand-teal)]/20 text-[var(--brand-teal)]"
                 )}
               >
                 <Icon className="size-4" />
               </span>
 
               <span className="min-w-0">
-                <span className="block truncate text-sm font-semibold text-[#191c1e]">
+                <span className="block truncate text-sm font-semibold text-foreground">
                   {item.label}
                 </span>
-                <span className="block text-[11px] text-[#6d7a77]">{item.hint}</span>
+                <span className="block text-[11px] text-muted-foreground">{item.hint}</span>
               </span>
             </button>
           )
@@ -75,7 +75,7 @@ export function ChatSessionSummaryCard({
       <Button
         type="button"
         variant="outline"
-        className="mt-5 h-[38px] w-full rounded-[12px] border-border/60 bg-white text-[#3d4947] hover:bg-[var(--surface-soft)]"
+        className="mt-5 h-[38px] w-full rounded-[12px] border-border/60 bg-[var(--shell-card)] text-foreground/70 hover:bg-[var(--surface-soft)]"
         onClick={onManageSessions}
       >
         Manage sessions

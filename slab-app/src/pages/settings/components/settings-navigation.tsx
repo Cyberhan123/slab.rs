@@ -46,14 +46,14 @@ export function SettingsNavigation({
               className={cn(
                 'flex w-full items-center gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors',
                 isActiveSection
-                  ? 'bg-white text-teal-700 shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
-                  : 'text-slate-600 hover:bg-white/80 hover:text-slate-900',
+                  ? 'bg-[var(--shell-card)] text-[var(--brand-teal)] shadow-[var(--shell-elevation)]'
+                  : 'text-muted-foreground hover:bg-[var(--shell-card)]/80 hover:text-foreground',
               )}
             >
               <span
                 className={cn(
                   'flex size-8 shrink-0 items-center justify-center rounded-[12px]',
-                  isActiveSection ? 'bg-teal-50 text-teal-600' : 'bg-transparent text-slate-400',
+                  isActiveSection ? 'bg-[var(--brand-teal)]/10 text-[var(--brand-teal)]' : 'bg-transparent text-muted-foreground/70',
                 )}
               >
                 <SectionIcon className="size-4" />
@@ -63,7 +63,7 @@ export function SettingsNavigation({
                 <span
                   className={cn(
                     'block truncate text-sm',
-                    isActiveSection ? 'font-semibold text-teal-700' : 'font-medium',
+                    isActiveSection ? 'font-semibold text-[var(--brand-teal)]' : 'font-medium',
                   )}
                 >
                   {section.title}
@@ -73,7 +73,7 @@ export function SettingsNavigation({
               {isActiveSection ? (
                 <Badge
                   variant="counter"
-                  className="rounded-full border-white/80 bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 shadow-none"
+                  className="rounded-full border-[var(--shell-card)]/80 bg-[var(--surface-soft)] px-2 py-0.5 text-[10px] font-bold text-muted-foreground shadow-none"
                 >
                   {countSectionProperties(section)}
                 </Badge>
