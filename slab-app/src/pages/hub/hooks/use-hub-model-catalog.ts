@@ -6,8 +6,7 @@ import { inferWhisperVadModel, toCatalogModelList, type CatalogModelStatus } fro
 
 const API_BASE_URL =
   (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
-
-export const PAGE_SIZE_OPTIONS = [6, 12, 24] as const;
+const DEFAULT_VISIBLE_COUNT = 10;
 export const CATEGORY_OPTIONS = [
   { value: 'all', label: 'All models' },
   { value: 'language', label: 'Large language' },
@@ -27,7 +26,6 @@ export const STATUS_OPTIONS = [
 export type ModelCategory = (typeof CATEGORY_OPTIONS)[number]['value'];
 export type ModelFilterStatus = (typeof STATUS_OPTIONS)[number]['value'];
 export type ModelStatus = CatalogModelStatus;
-export type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 export type ModelItem = {
   id: string;
   display_name: string;
@@ -49,8 +47,7 @@ type ImportedModelResponse = {
 export function useHubModelCatalog() {
   const [category, setCategory] = useState<ModelCategory>('all');
   const [status, setStatus] = useState<ModelFilterStatus>('all');
-  const [pageSize, setPageSize] = useState<PageSize>(6);
-  const [page, setPage] = useState(1);
+  const [visibleCount, setVisibleCount] = useState(DEFAULT_VISIBLE_COUNT);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
   const [createFile, setCreateFile] = useState<File | null>(null);
   const [createModelPending, setCreateModelPending] = useState(false);
@@ -107,23 +104,16 @@ export function useHubModelCatalog() {
     () => models.filter((model) => model.status === 'downloading').length,
     [models],
   );
-  const totalPages = Math.max(1, Math.ceil(filteredModels.length / pageSize));
-  const pagedModels = useMemo(() => {
-    const start = (page - 1) * pageSize;
-    return filteredModels.slice(start, start + pageSize);
-  }, [filteredModels, page, pageSize]);
-
-  const showingFrom = filteredModels.length === 0 ? 0 : (page - 1) * pageSize + 1;
-  const showingTo = Math.min(page * pageSize, filteredModels.length);
+  const visibleModels = useMemo(
+    () => filteredModels.slice(0, visibleCount),
+    [filteredModels, visibleCount],
+  );
+  const hasMore = visibleModels.length < filteredModels.length;
   const canCreate = Boolean(createFile && !createModelPending);
 
   useEffect(() => {
-    setPage(1);
-  }, [category, pageSize, status]);
-
-  useEffect(() => {
-    setPage((current) => Math.min(current, totalPages));
-  }, [totalPages]);
+    setVisibleCount(DEFAULT_VISIBLE_COUNT);
+  }, [category, status]);
 
   useEffect(() => {
     if (!models.some((model) => model.status === 'downloading')) {
@@ -150,6 +140,14 @@ export function useHubModelCatalog() {
 
   function updateCreateFile(file: File | null) {
     setCreateFile(file);
+  }
+
+  function loadMore() {
+    setVisibleCount((current) =>
+      current >= filteredModels.length
+        ? current
+        : Math.min(current + DEFAULT_VISIBLE_COUNT, filteredModels.length),
+    );
   }
 
   async function createModel() {
@@ -209,11 +207,6 @@ export function useHubModelCatalog() {
     setCategory,
     status,
     setStatus,
-    pageSize,
-    setPageSize,
-    page,
-    setPage,
-    totalPages,
     isCreateOpen,
     setCreateOpen,
     createFileName: createFile?.name ?? null,
@@ -222,11 +215,11 @@ export function useHubModelCatalog() {
     setModelToDelete,
     models,
     filteredModels,
-    pagedModels,
+    visibleModels,
+    hasMore,
+    loadMore,
     downloadedCount,
     pendingCount,
-    showingFrom,
-    showingTo,
     isLoading,
     isRefetching,
     error,

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import {
   Boxes,
   HardDriveDownload,
@@ -27,20 +28,47 @@ import { HubCreateModelDialog } from './components/hub-create-model-dialog';
 import { HubDeleteModelDialog } from './components/hub-delete-model-dialog';
 import {
   CATEGORY_OPTIONS,
-  PAGE_SIZE_OPTIONS,
   STATUS_OPTIONS,
   useHubModelCatalog,
 } from './hooks/use-hub-model-catalog';
 
 export default function Hub() {
   const hub = useHubModelCatalog();
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const loadMoreRef = useRef<HTMLDivElement | null>(null);
   usePageHeader(PAGE_HEADER_META.hub);
 
   const backendCount = new Set(hub.models.flatMap((model) => model.backend_ids)).size;
-  const providerCount = new Set(hub.models.map((model) => model.provider)).size;
+
+  useEffect(() => {
+    if (!hub.hasMore || hub.isLoading) {
+      return;
+    }
+
+    const root = scrollRef.current;
+    const target = loadMoreRef.current;
+    if (!root || !target) {
+      return;
+    }
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          hub.loadMore();
+        }
+      },
+      {
+        root,
+        rootMargin: '0px 0px 240px 0px',
+      },
+    );
+
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [hub.hasMore, hub.isLoading, hub.loadMore]);
 
   return (
-    <div className="h-full w-full overflow-y-auto">
+    <div ref={scrollRef} className="h-full w-full overflow-y-auto">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-6 px-1 pb-10">
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1.9fr)_minmax(280px,0.92fr)]">
           <Card
@@ -94,12 +122,6 @@ export default function Hub() {
                   Refresh catalog
                 </Button>
               </div>
-
-              <div className="flex flex-wrap gap-3">
-                <HeroFact label="Ready" value={hub.downloadedCount} />
-                <HeroFact label="Downloading" value={hub.pendingCount} />
-                <HeroFact label="Providers" value={providerCount} />
-              </div>
             </div>
           </Card>
 
@@ -126,7 +148,7 @@ export default function Hub() {
         </section>
 
         <section className="space-y-4 rounded-[32px] border border-white/70 bg-white/45 px-4 py-4 shadow-[0_20px_48px_-42px_color-mix(in_oklab,var(--foreground)_30%,transparent)] backdrop-blur">
-          <div className="flex flex-wrap gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             {CATEGORY_OPTIONS.map((option) => {
               const isActive = hub.category === option.value;
 
@@ -142,51 +164,22 @@ export default function Hub() {
                 </Button>
               );
             })}
-          </div>
 
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-              <Badge variant="counter">{hub.filteredModels.length} visible</Badge>
-              <span>{providerCount} provider{providerCount === 1 ? '' : 's'}</span>
-              <span className="hidden h-4 w-px bg-border/70 sm:block" />
-              <span>{backendCount || 0} runtime backend{backendCount === 1 ? '' : 's'}</span>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Select
-                value={hub.status}
-                onValueChange={(value) => hub.setStatus(value as typeof hub.status)}
-              >
-                <SelectTrigger variant="pill" size="pill" className="min-w-[190px] bg-white/85">
-                  <SelectValue placeholder="Status" />
-                </SelectTrigger>
-                <SelectContent variant="pill">
-                  {STATUS_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
-              <Select
-                value={String(hub.pageSize)}
-                onValueChange={(value) =>
-                  hub.setPageSize(Number(value) as (typeof PAGE_SIZE_OPTIONS)[number])
-                }
-              >
-                <SelectTrigger variant="pill" size="pill" className="min-w-[140px] bg-white/85">
-                  <SelectValue placeholder="Cards" />
-                </SelectTrigger>
-                <SelectContent variant="pill">
-                  {PAGE_SIZE_OPTIONS.map((size) => (
-                    <SelectItem key={size} value={String(size)}>
-                      {size} cards
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
+            <Select
+              value={hub.status}
+              onValueChange={(value) => hub.setStatus(value as typeof hub.status)}
+            >
+              <SelectTrigger variant="pill" size="pill" className="h-9 min-w-[190px] bg-white/85">
+                <SelectValue placeholder="Status" />
+              </SelectTrigger>
+              <SelectContent variant="pill">
+                {STATUS_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </section>
 
@@ -222,38 +215,11 @@ export default function Hub() {
         ) : (
           <div className="space-y-4">
             <HubCatalogTable
-              models={hub.pagedModels}
+              models={hub.visibleModels}
               deletePending={hub.deleteModelPending}
               onDeleteClick={hub.setModelToDelete}
-              onCreateClick={() => hub.setCreateOpen(true)}
             />
-
-            <div className="workspace-soft-panel flex flex-col gap-3 rounded-[28px] px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-muted-foreground">
-                Showing {hub.showingFrom}-{hub.showingTo} of {hub.filteredModels.length}
-              </p>
-              <div className="flex items-center gap-2">
-                <Button
-                  variant="pill"
-                  size="sm"
-                  onClick={() => hub.setPage((value) => value - 1)}
-                  disabled={hub.page <= 1}
-                >
-                  Previous
-                </Button>
-                <Badge variant="counter">
-                  Page {hub.page} / {hub.totalPages}
-                </Badge>
-                <Button
-                  variant="pill"
-                  size="sm"
-                  onClick={() => hub.setPage((value) => value + 1)}
-                  disabled={hub.page >= hub.totalPages}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
+            {hub.hasMore ? <div ref={loadMoreRef} className="h-8 w-full" aria-hidden="true" /> : null}
           </div>
         )}
       </div>
@@ -318,19 +284,6 @@ function HubSummaryCard({
           <p className="text-[1.65rem] font-semibold tracking-tight text-[#191c1e]">{label}</p>
           <p className="text-sm leading-6 text-[#3d4947]">{description}</p>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function HeroFact({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-full border border-white/70 bg-white/72 px-4 py-2 shadow-[0_16px_34px_-28px_color-mix(in_oklab,var(--foreground)_40%,transparent)] backdrop-blur">
-      <div className="flex items-center gap-2">
-        <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-          {label}
-        </span>
-        <span className="text-sm font-semibold text-[#191c1e]">{value}</span>
       </div>
     </div>
   );

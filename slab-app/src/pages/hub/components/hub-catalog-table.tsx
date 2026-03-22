@@ -1,9 +1,8 @@
-import { Bot, Boxes, Code2, ImageIcon, Mic, Plus, Trash2 } from 'lucide-react';
+import { Bot, Boxes, Code2, ImageIcon, Mic, Trash2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { StageEmptyState } from '@/components/ui/workspace';
-import { cn } from '@/lib/utils';
 
 import type { ModelItem } from '../hooks/use-hub-model-catalog';
 import { StatusBadge } from './status-badge';
@@ -12,15 +11,9 @@ type HubCatalogTableProps = {
   models: ModelItem[];
   deletePending: boolean;
   onDeleteClick: (model: ModelItem) => void;
-  onCreateClick: () => void;
 };
 
-export function HubCatalogTable({
-  models,
-  deletePending,
-  onDeleteClick,
-  onCreateClick,
-}: HubCatalogTableProps) {
+export function HubCatalogTable({ models, deletePending, onDeleteClick }: HubCatalogTableProps) {
   if (models.length === 0) {
     return (
       <StageEmptyState
@@ -32,39 +25,26 @@ export function HubCatalogTable({
     );
   }
 
-  const cards = models.flatMap((model, index) => {
-    const items = [
-      <HubModelCard
-        key={model.id}
-        model={model}
-        featured={index === 3}
-        deletePending={deletePending}
-        onDeleteClick={onDeleteClick}
-      />,
-    ];
-
-    if (index === 3) {
-      items.push(<ImportModelCard key="hub-import-card" onCreateClick={onCreateClick} />);
-    }
-
-    return items;
-  });
-
-  if (models.length < 4) {
-    cards.push(<ImportModelCard key="hub-import-card" onCreateClick={onCreateClick} />);
-  }
-
-  return <div className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">{cards}</div>;
+  return (
+    <div className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
+      {models.map((model) => (
+        <HubModelCard
+          key={model.id}
+          model={model}
+          deletePending={deletePending}
+          onDeleteClick={onDeleteClick}
+        />
+      ))}
+    </div>
+  );
 }
 
 function HubModelCard({
   model,
-  featured,
   deletePending,
   onDeleteClick,
 }: {
   model: ModelItem;
-  featured: boolean;
   deletePending: boolean;
   onDeleteClick: (model: ModelItem) => void;
 }) {
@@ -74,49 +54,26 @@ function HubModelCard({
 
   return (
     <article
-      className={cn(
-        'group relative overflow-hidden rounded-[30px] border border-white/80 bg-[color:color-mix(in_oklab,var(--surface-1)_92%,white)] p-6 shadow-[0_24px_56px_-40px_color-mix(in_oklab,var(--foreground)_40%,transparent)]',
-        featured && 'md:col-span-2 2xl:min-h-[272px]',
-      )}
+      className="group relative overflow-hidden rounded-[30px] border border-white/80 bg-[color:color-mix(in_oklab,var(--surface-1)_92%,white)] p-6 shadow-[0_24px_56px_-40px_color-mix(in_oklab,var(--foreground)_40%,transparent)]"
     >
       <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_top_right,color-mix(in_oklab,var(--brand-teal)_9%,transparent),transparent_34%),radial-gradient(circle_at_bottom_left,color-mix(in_oklab,var(--brand-gold)_12%,transparent),transparent_30%)]" />
 
-      <div className={cn('relative flex h-full flex-col gap-6', featured && 'md:flex-row md:gap-8')}>
-        <div
-          className={cn(
-            'flex items-start justify-between gap-4',
-            featured && 'md:w-28 md:flex-col md:justify-start',
-          )}
-        >
-          <div
-            className={cn(
-              'flex size-14 items-center justify-center rounded-[18px] bg-[var(--surface-soft)] text-[var(--brand-teal)]',
-              featured && 'size-24 rounded-[24px]',
-            )}
-          >
-            <Icon className={cn('size-6', featured && 'size-10')} />
+      <div className="relative flex h-full flex-col gap-6">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex size-14 items-center justify-center rounded-[18px] bg-[var(--surface-soft)] text-[var(--brand-teal)]">
+            <Icon className="size-6" />
           </div>
 
-          {!featured ? <StatusBadge status={model.status} /> : null}
+          <StatusBadge status={model.status} />
         </div>
 
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0 space-y-3">
-              {featured ? <StatusBadge status={model.status} /> : null}
-              <div className="space-y-2">
-                <h3
-                  className={cn(
-                    'tracking-tight text-[#191c1e]',
-                    featured ? 'text-3xl font-semibold' : 'text-[1.9rem] font-semibold',
-                  )}
-                >
-                  {model.display_name}
-                </h3>
-                <p className="max-w-2xl text-sm leading-6 text-[#3d4947]">
-                  {describeModel(model)}
-                </p>
-              </div>
+            <div className="min-w-0 space-y-2">
+              <h3 className="text-[1.9rem] font-semibold tracking-tight text-[#191c1e]">
+                {model.display_name}
+              </h3>
+              <p className="max-w-2xl text-sm leading-6 text-[#3d4947]">{describeModel(model)}</p>
             </div>
 
             <Button
@@ -174,34 +131,6 @@ function HubModelCard({
         </div>
       </div>
     </article>
-  );
-}
-
-function ImportModelCard({ onCreateClick }: { onCreateClick: () => void }) {
-  return (
-    <aside className="relative overflow-hidden rounded-[30px] bg-[linear-gradient(135deg,#855300_0%,#8f5d05_62%,#a86d0f_100%)] p-8 text-white shadow-[0_28px_80px_-44px_rgba(133,83,0,0.65)]">
-      <div className="absolute -top-4 -right-5 size-28 rounded-full bg-white/10 blur-2xl" />
-      <div className="relative flex h-full flex-col gap-6">
-        <div className="flex size-12 items-center justify-center rounded-[18px] bg-white/12">
-          <Plus className="size-6" />
-        </div>
-        <div className="space-y-3">
-          <h3 className="text-3xl font-semibold tracking-tight">Bring your own model</h3>
-          <p className="max-w-sm text-sm leading-6 text-white/80">
-            Import JSON manifests for local runtimes, keep the catalog tidy, and surface new models
-            without leaving Hub.
-          </p>
-        </div>
-        <Button
-          variant="secondary"
-          size="pill"
-          className="mt-auto w-fit bg-white px-5 text-[#855300] hover:bg-white/95"
-          onClick={onCreateClick}
-        >
-          Import model
-        </Button>
-      </div>
-    </aside>
   );
 }
 
