@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import api from '@/lib/api';
@@ -112,7 +112,7 @@ export function useTaskList() {
     return `Showing ${start} to ${end} of ${allTasks.length} entries`;
   }, [allTasks.length, currentPage]);
 
-  const fetchTaskResult = async (id: string) => {
+  const fetchTaskResult = useCallback(async (id: string) => {
     try {
       const data = await getTaskResultMutation.mutateAsync({
         params: {
@@ -124,9 +124,9 @@ export function useTaskList() {
     } catch (err) {
       toast.error(`Failed to fetch task result: ${err instanceof Error ? err.message : 'Unknown error'}`);
     }
-  };
+  }, [getTaskResultMutation]);
 
-  const fetchTaskDetail = async (id: string) => {
+  const fetchTaskDetail = useCallback(async (id: string) => {
     try {
       setTaskResult(null);
       const data = await getTaskMutation.mutateAsync({
@@ -143,7 +143,7 @@ export function useTaskList() {
     } catch {
       toast.error('Failed to fetch task details');
     }
-  };
+  }, [getTaskMutation, fetchTaskResult]);
 
   const cancelTask = async (id: string) => {
     try {
@@ -204,8 +204,7 @@ export function useTaskList() {
     }, 3000);
 
     return () => clearInterval(interval);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedTask?.status, selectedTask?.id]);
+  }, [selectedTask?.status, selectedTask?.id, fetchTaskDetail]);
 
   return {
     allTasks,
