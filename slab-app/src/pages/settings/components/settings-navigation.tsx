@@ -1,182 +1,87 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ChevronRight } from 'lucide-react';
+import {
+  Cloud,
+  Cpu,
+  Download,
+  SlidersHorizontal,
+  Sparkles,
+  type LucideIcon,
+} from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import { ScrollArea } from '@/components/ui/scroll-area';
-import { SoftPanel, StatusPill } from '@/components/ui/workspace';
 import { cn } from '@/lib/utils';
 
 import type { SettingsSectionResponse } from '../types';
-import {
-  countSectionProperties,
-  sectionAnchorId,
-  shouldCollapseSubsectionHeading,
-  subsectionAnchorId,
-} from '../utils';
+import { countSectionProperties } from '../utils';
 
 type SettingsNavigationProps = {
-  activeTarget: string | null;
-  dirtyCount: number;
-  errorCount: number;
-  savingCount: number;
+  activeSectionId: string | null;
   sections: SettingsSectionResponse[];
-  onJump: (targetId: string) => void;
+  onSelectSection: (sectionId: string) => void;
+};
+
+const sectionIcons: Record<string, LucideIcon> = {
+  cloud: Cloud,
+  diffusion: Sparkles,
+  runtime: Cpu,
+  setup: Download,
 };
 
 export function SettingsNavigation({
-  activeTarget,
-  dirtyCount,
-  errorCount,
-  savingCount,
+  activeSectionId,
   sections,
-  onJump,
+  onSelectSection,
 }: SettingsNavigationProps) {
-  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
-
-  const activeParentSectionId = useMemo(() => {
-    if (!activeTarget) {
-      return null;
-    }
-
-    for (const section of sections) {
-      if (activeTarget === sectionAnchorId(section.id)) {
-        return section.id;
-      }
-
-      if (
-        section.subsections.some(
-          (subsection) => subsectionAnchorId(section.id, subsection.id) === activeTarget,
-        )
-      ) {
-        return section.id;
-      }
-    }
-
-    return null;
-  }, [activeTarget, sections]);
-
-  useEffect(() => {
-    if (!activeParentSectionId) {
-      return;
-    }
-
-    setOpenSections((current) =>
-      current[activeParentSectionId] ? current : { ...current, [activeParentSectionId]: true },
-    );
-  }, [activeParentSectionId]);
-
-  function setSectionOpen(sectionId: string, isOpen: boolean) {
-    setOpenSections((current) => ({ ...current, [sectionId]: isOpen }));
-  }
-
   return (
-    <SoftPanel className="space-y-4 rounded-[28px] border border-border/70 p-3">
-      <div className="space-y-3 rounded-[22px] bg-[var(--surface-1)] px-4 py-4">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-            Navigation
-          </p>
-          <p className="mt-1 text-base font-semibold tracking-tight">Settings Outline</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <StatusPill status={errorCount > 0 ? 'danger' : 'success'}>
-            {errorCount > 0 ? `${errorCount} issue${errorCount > 1 ? 's' : ''}` : 'No issues'}
-          </StatusPill>
-          <StatusPill status={savingCount > 0 ? 'info' : 'neutral'}>
-            {savingCount > 0 ? `${savingCount} saving` : 'Saved'}
-          </StatusPill>
-          <Badge variant="counter">
-            {dirtyCount > 0 ? `${dirtyCount} pending` : 'Synced'}
-          </Badge>
-        </div>
-      </div>
+    <div className="flex h-full flex-col px-4 py-5 lg:px-5 lg:py-6">
+      <nav className="flex flex-col gap-1.5 overflow-y-auto pr-1">
+        {sections.map((section) => {
+          const SectionIcon = sectionIcons[section.id] ?? SlidersHorizontal;
+          const isActiveSection = section.id === activeSectionId;
 
-      <ScrollArea className="max-h-[calc(100vh-18rem)] rounded-[20px] bg-[var(--surface-1)] p-2">
-        <div className="flex flex-col gap-1.5">
-          {sections.map((section) => {
-            const sectionTargetId = sectionAnchorId(section.id);
-            const visibleSubsections = section.subsections.filter(
-              (subsection) => !shouldCollapseSubsectionHeading(section, subsection),
-            );
-            const hasActiveSubsection = section.subsections.some(
-              (subsection) => subsectionAnchorId(section.id, subsection.id) === activeTarget,
-            );
-            const isSectionActive = activeTarget === sectionTargetId || hasActiveSubsection;
-            const isOpen = openSections[section.id] || hasActiveSubsection;
-
-            return (
-              <Collapsible
-                key={section.id}
-                open={isOpen}
-                onOpenChange={(nextOpen) => setSectionOpen(section.id, nextOpen)}
+          return (
+            <button
+              key={section.id}
+              type="button"
+              onClick={() => onSelectSection(section.id)}
+              className={cn(
+                'flex w-full items-center gap-3 rounded-[16px] px-3 py-2.5 text-left transition-colors',
+                isActiveSection
+                  ? 'bg-white text-teal-700 shadow-[0_1px_2px_rgba(15,23,42,0.06)]'
+                  : 'text-slate-600 hover:bg-white/80 hover:text-slate-900',
+              )}
+            >
+              <span
+                className={cn(
+                  'flex size-8 shrink-0 items-center justify-center rounded-[12px]',
+                  isActiveSection ? 'bg-teal-50 text-teal-600' : 'bg-transparent text-slate-400',
+                )}
               >
-                <CollapsibleTrigger asChild>
-                  <Button
-                    variant="quiet"
-                    size="sm"
-                    className={cn(
-                      'group h-auto w-full justify-start gap-2 rounded-xl px-3 py-2 text-left',
-                      isSectionActive &&
-                        'bg-[var(--surface-selected)] text-foreground shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--border)_85%,white_15%)]',
-                    )}
-                    onClick={() => onJump(sectionTargetId)}
-                  >
-                    <ChevronRight
-                      className={cn(
-                        'h-4 w-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-90',
-                        isSectionActive && 'text-foreground/90',
-                      )}
-                    />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate font-medium">{section.title}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {countSectionProperties(section)} settings
-                      </p>
-                    </div>
-                  </Button>
-                </CollapsibleTrigger>
+                <SectionIcon className="size-4" />
+              </span>
 
-                {visibleSubsections.length > 0 ? (
-                  <CollapsibleContent className="overflow-hidden">
-                    <div className="mt-1 ml-5 border-l border-border/60 pl-2">
-                      {visibleSubsections.map((subsection) => {
-                        const subsectionTargetId = subsectionAnchorId(section.id, subsection.id);
+              <span className="min-w-0 flex-1">
+                <span
+                  className={cn(
+                    'block truncate text-sm',
+                    isActiveSection ? 'font-semibold text-teal-700' : 'font-medium',
+                  )}
+                >
+                  {section.title}
+                </span>
+              </span>
 
-                        return (
-                          <Button
-                            key={subsection.id}
-                            variant="quiet"
-                            size="sm"
-                            className={cn(
-                              'h-auto w-full justify-start gap-2 rounded-xl px-3 py-1.5 text-left',
-                              activeTarget === subsectionTargetId &&
-                                'bg-[var(--surface-selected)] text-foreground',
-                            )}
-                            onClick={() => onJump(subsectionTargetId)}
-                          >
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate">{subsection.title}</p>
-                              <p className="text-xs text-muted-foreground">
-                                {subsection.properties.length} fields
-                              </p>
-                            </div>
-                          </Button>
-                        );
-                      })}
-                    </div>
-                  </CollapsibleContent>
-                ) : null}
-              </Collapsible>
-            );
-          })}
-        </div>
-      </ScrollArea>
-    </SoftPanel>
+              {isActiveSection ? (
+                <Badge
+                  variant="counter"
+                  className="rounded-full border-white/80 bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600 shadow-none"
+                >
+                  {countSectionProperties(section)}
+                </Badge>
+              ) : null}
+            </button>
+          );
+        })}
+      </nav>
+    </div>
   );
 }

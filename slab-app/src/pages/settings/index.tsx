@@ -1,29 +1,10 @@
-import { useDeferredValue, useMemo, useState } from 'react';
-import {
-  Loader2,
-  RefreshCw,
-  Search,
-  SlidersHorizontal,
-  TriangleAlert,
-} from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import {
-  MetricCard,
-  PillFilterBar,
-  SoftPanel,
-  StageEmptyState,
-} from '@/components/ui/workspace';
+import { StageEmptyState, StatusPill } from '@/components/ui/workspace';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api, { getErrorMessage } from '@/lib/api';
@@ -33,22 +14,17 @@ import { SettingsNavigation } from './components/settings-navigation';
 import { useSettingsAutosave } from './hooks/use-settings-autosave';
 import type { SettingResponse } from './types';
 import {
-  countProperties,
   countSectionProperties,
-  matchesSearch,
   sectionAnchorId,
   subsectionAnchorId,
   shouldCollapseSubsectionHeading,
 } from './utils';
 
 export default function SettingsPage() {
-  const [search, setSearch] = useState('');
-  const [activeTarget, setActiveTarget] = useState<string | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
+  const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
 
-  const deferredSearch = useDeferredValue(search);
-  const normalizedSearch = deferredSearch.trim().toLowerCase();
-
-  const { data, error, isLoading, isRefetching, refetch } = api.useQuery('get', '/v1/settings');
+  const { data, error, isLoading, refetch } = api.useQuery('get', '/v1/settings');
 
   const propertyMap = useMemo(() => {
     const map = new Map<string, SettingResponse>();
@@ -64,37 +40,27 @@ export default function SettingsPage() {
     return map;
   }, [data]);
 
-  const filteredSections = useMemo(() => {
-    if (!data) {
-      return [];
+  const sections = data?.sections ?? [];
+  const activeSection = useMemo(
+    () => sections.find((section) => section.id === activeSectionId) ?? sections[0] ?? null,
+    [activeSectionId, sections],
+  );
+
+  useEffect(() => {
+    if (sections.length === 0) {
+      setActiveSectionId(null);
+      return;
     }
 
-    return data.sections
-      .map((section) => ({
-        ...section,
-        subsections: section.subsections
-          .map((subsection) => ({
-            ...subsection,
-            properties: subsection.properties.filter((property) =>
-              matchesSearch(section, subsection, property, normalizedSearch),
-            ),
-          }))
-          .filter((subsection) => subsection.properties.length > 0),
-      }))
-      .filter((section) => section.subsections.length > 0);
-  }, [data, normalizedSearch]);
+    if (activeSectionId && sections.some((section) => section.id === activeSectionId)) {
+      return;
+    }
 
-  const totalPropertyCount = useMemo(() => countProperties(data?.sections ?? []), [data]);
-  const visiblePropertyCount = useMemo(() => countProperties(filteredSections), [filteredSections]);
-  const sectionCount = data?.sections.length ?? 0;
+    const nextSectionId = sections[0].id;
+    setActiveSectionId(nextSectionId);
+  }, [activeSectionId, sections]);
 
-  usePageHeader({
-    ...PAGE_HEADER_META.settings,
-    subtitle:
-      normalizedSearch.length > 0
-        ? `Showing ${visiblePropertyCount} of ${totalPropertyCount} settings for "${deferredSearch.trim()}"`
-        : PAGE_HEADER_META.settings.subtitle,
-  });
+  usePageHeader(PAGE_HEADER_META.settings);
 
   const {
     drafts,
@@ -109,12 +75,20 @@ export default function SettingsPage() {
     refetch,
   });
 
-  function jumpToTarget(targetId: string) {
-    setActiveTarget(targetId);
-    document.getElementById(targetId)?.scrollIntoView({
-      behavior: 'smooth',
-      block: 'start',
+  function scrollToTarget(targetId: string) {
+    window.requestAnimationFrame(() => {
+      document.getElementById(targetId)?.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start',
+      });
     });
+  }
+
+  function selectSection(sectionId: string) {
+    const targetId = sectionAnchorId(sectionId);
+    setActiveSectionId(sectionId);
+    canvasRef.current?.scrollTo({ top: 0, behavior: 'smooth' });
+    scrollToTarget(targetId);
   }
 
   if (isLoading) {
@@ -149,167 +123,154 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="h-full w-full overflow-y-auto">
-      <div className="mx-auto flex w-full max-w-7xl flex-col gap-5 px-1 pb-8">
-        <SoftPanel className="workspace-halo space-y-5 overflow-hidden rounded-[30px] border border-border/70">
-          <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
-            <div className="space-y-2">
-              <Badge variant="chip">Dynamic schema settings</Badge>
-              <h1 className="text-2xl font-semibold tracking-tight md:text-3xl">Settings Workbench</h1>
-              <p className="max-w-3xl text-sm leading-6 text-muted-foreground">
-                Configure runtime and product options with auto-save and schema-aware validation.
-              </p>
-            </div>
-            <Button
-              variant="pill"
-              size="pill"
-              disabled={isRefetching}
-              onClick={() => void refetch()}
-            >
-              {isRefetching ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <RefreshCw className="mr-2 h-4 w-4" />
-              )}
-              Refresh
-            </Button>
-          </div>
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-[24px] border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] lg:flex-row">
+      <aside className="w-full shrink-0 border-b border-slate-200/80 bg-slate-50/80 lg:w-[256px] lg:border-r lg:border-b-0">
+        <SettingsNavigation
+          activeSectionId={activeSection?.id ?? null}
+          sections={sections}
+          onSelectSection={selectSection}
+        />
+      </aside>
 
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <MetricCard label="Sections" value={sectionCount} hint="Top-level configuration groups" icon={SlidersHorizontal} />
-            <MetricCard label="Visible Fields" value={visiblePropertyCount} hint="After current search filter" icon={Search} />
-            <MetricCard label="Pending Saves" value={statusSummary.dirty} hint="Waiting for autosave" icon={Loader2} />
-            <MetricCard label="Errors" value={statusSummary.error} hint="Validation or save errors" icon={TriangleAlert} />
-          </div>
-        </SoftPanel>
+      <div ref={canvasRef} className="min-w-0 flex-1 overflow-y-auto">
+        <div className="mx-auto flex w-full max-w-[944px] flex-col gap-6 px-6 py-6 md:px-8 md:py-8">
+          {data.warnings.length > 0 ? (
+            <Alert>
+              <TriangleAlert className="h-4 w-4" />
+              <AlertTitle>Recovered settings warnings</AlertTitle>
+              <AlertDescription>
+                <div className="space-y-1">
+                  {data.warnings.map((warning) => (
+                    <p key={warning}>{warning}</p>
+                  ))}
+                </div>
+              </AlertDescription>
+            </Alert>
+          ) : null}
 
-        <PillFilterBar>
-          <div className="relative min-w-[280px] flex-1">
-            <Search className="pointer-events-none absolute top-1/2 left-4 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              variant="shell"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search settings"
-              className="h-10 w-full pl-10"
+          {!activeSection ? (
+            <StageEmptyState
+              title="No settings available"
+              description="The settings document is empty."
             />
-          </div>
-          <Badge variant="counter">
-            {visiblePropertyCount} / {totalPropertyCount} fields
-          </Badge>
-          {statusSummary.saving > 0 ? <Badge variant="chip">{statusSummary.saving} saving</Badge> : null}
-        </PillFilterBar>
-
-        {data.warnings.length > 0 ? (
-          <Alert>
-            <TriangleAlert className="h-4 w-4" />
-            <AlertTitle>Recovered settings warnings</AlertTitle>
-            <AlertDescription>
-              <div className="space-y-1">
-                {data.warnings.map((warning) => (
-                  <p key={warning}>{warning}</p>
-                ))}
-              </div>
-            </AlertDescription>
-          </Alert>
-        ) : null}
-
-        {filteredSections.length === 0 ? (
-          <StageEmptyState
-            icon={Search}
-            title="No settings matched"
-            description="Try a broader keyword or clear search."
-          />
-        ) : (
-          <div className="grid gap-6 lg:grid-cols-[300px_minmax(0,1fr)]">
-            <aside className="lg:sticky lg:top-3 lg:self-start">
-              <SettingsNavigation
-                activeTarget={activeTarget}
-                dirtyCount={statusSummary.dirty}
-                errorCount={statusSummary.error}
-                savingCount={statusSummary.saving}
-                sections={filteredSections}
-                onJump={jumpToTarget}
-              />
-            </aside>
-
-            <div className="space-y-5">
-              {filteredSections.map((section) => (
-                <Card
-                  key={section.id}
-                  id={sectionAnchorId(section.id)}
-                  variant="soft"
-                  className="scroll-mt-20 overflow-hidden rounded-[30px]"
-                >
-                  <CardHeader className="gap-3 border-b border-border/60 bg-[var(--surface-soft)]/70">
+          ) : (
+            <>
+              <header
+                id={sectionAnchorId(activeSection.id)}
+                className="scroll-mt-6 space-y-4 border-b border-slate-200/80 pb-6"
+              >
+                <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                  <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-3">
-                      <CardTitle className="text-2xl tracking-tight">{section.title}</CardTitle>
-                      <Badge variant="counter">
-                        {countSectionProperties(section)} settings
+                      <h1 className="text-3xl font-bold tracking-[-0.045em] text-slate-900">
+                        {activeSection.title}
+                      </h1>
+                      <Badge
+                        variant="chip"
+                        className="rounded-full border-slate-200 bg-slate-200/80 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-600"
+                      >
+                        {countSectionProperties(activeSection)} settings
                       </Badge>
                     </div>
-                    {section.description_md ? (
-                      <CardDescription className="max-w-4xl text-sm leading-6">
-                        {section.description_md}
-                      </CardDescription>
+                    {activeSection.description_md ? (
+                      <p className="max-w-3xl text-base leading-8 text-slate-500">
+                        {activeSection.description_md}
+                      </p>
                     ) : null}
-                  </CardHeader>
+                  </div>
 
-                  <CardContent className="space-y-7 pt-5">
-                    {section.subsections.map((subsection, subsectionIndex) => (
-                      <div
-                        key={subsection.id}
-                        id={subsectionAnchorId(section.id, subsection.id)}
-                        className="scroll-mt-24 space-y-4"
-                      >
-                        {subsectionIndex > 0 ? <SeparatorLine /> : null}
-                        {shouldCollapseSubsectionHeading(section, subsection) ? (
-                          subsection.description_md ? (
-                            <p className="text-sm leading-6 text-muted-foreground">
-                              {subsection.description_md}
-                            </p>
-                          ) : null
-                        ) : (
-                          <div className="space-y-2">
-                            <div className="flex flex-wrap items-center gap-3">
-                              <h2 className="text-lg font-semibold tracking-tight">{subsection.title}</h2>
-                              <Badge variant="chip">{subsection.properties.length} fields</Badge>
-                            </div>
-                            {subsection.description_md ? (
-                              <p className="text-sm leading-6 text-muted-foreground">
-                                {subsection.description_md}
-                              </p>
-                            ) : null}
-                          </div>
-                        )}
+                  {statusSummary.error > 0 ||
+                  statusSummary.saving > 0 ||
+                  statusSummary.dirty > 0 ? (
+                    <div className="flex flex-wrap items-center gap-2">
+                      {statusSummary.error > 0 ? (
+                        <StatusPill status="danger">
+                          {statusSummary.error} issue{statusSummary.error > 1 ? 's' : ''}
+                        </StatusPill>
+                      ) : null}
+                      {statusSummary.saving > 0 ? (
+                        <StatusPill status="info">{statusSummary.saving} saving</StatusPill>
+                      ) : null}
+                      {statusSummary.dirty > 0 ? (
+                        <Badge variant="counter">{statusSummary.dirty} pending</Badge>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </header>
 
-                        <div className="space-y-3">
-                          {subsection.properties.map((property) => (
-                            <SettingFieldCard
-                              key={property.pmid}
-                              property={property}
-                              draftValue={drafts[property.pmid]}
-                              errorState={fieldErrors[property.pmid]}
-                              fieldStatus={fieldStatuses[property.pmid]}
-                              isResetting={resettingPmid === property.pmid}
-                              onChange={setDraftValue}
-                              onReset={resetSetting}
-                            />
-                          ))}
+              <div className="space-y-6 pb-8">
+                {activeSection.subsections.map((subsection) => (
+                  <section
+                    key={subsection.id}
+                    id={subsectionAnchorId(activeSection.id, subsection.id)}
+                    className="scroll-mt-8 rounded-[20px] border border-slate-200/60 bg-slate-50/70 p-6 md:p-8"
+                  >
+                    {shouldCollapseSubsectionHeading(activeSection, subsection) ? (
+                      subsection.description_md ? (
+                        <p className="text-sm leading-7 text-slate-500">
+                          {subsection.description_md}
+                        </p>
+                      ) : null
+                    ) : (
+                      <div className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-3">
+                          <h2 className="text-[18px] font-bold tracking-[-0.03em] text-slate-900">
+                            {subsection.title}
+                          </h2>
                         </div>
+                        {subsection.description_md ? (
+                          <p className="text-sm leading-7 text-slate-500">
+                            {subsection.description_md}
+                          </p>
+                        ) : null}
                       </div>
-                    ))}
-                  </CardContent>
-                </Card>
-              ))}
-            </div>
-          </div>
-        )}
+                    )}
+
+                    <div className="mt-6 grid gap-4 xl:grid-cols-2">
+                      {subsection.properties.map((property) => (
+                        <div
+                          key={property.pmid}
+                          className={shouldPropertySpanFullWidth(property) ? 'xl:col-span-2' : ''}
+                        >
+                          <SettingFieldCard
+                            property={property}
+                            draftValue={drafts[property.pmid]}
+                            errorState={fieldErrors[property.pmid]}
+                            fieldStatus={fieldStatuses[property.pmid]}
+                            isResetting={resettingPmid === property.pmid}
+                            onChange={setDraftValue}
+                            onReset={resetSetting}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+                ))}
+              </div>
+            </>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
-function SeparatorLine() {
-  return <div className="h-px w-full bg-border/60" />;
+function shouldPropertySpanFullWidth(property: SettingResponse) {
+  if (property.schema.multiline || property.schema.json_schema) {
+    return true;
+  }
+
+  if (property.schema.type === 'array' || property.schema.type === 'object') {
+    return true;
+  }
+
+  const label = property.label.toLowerCase();
+
+  return (
+    property.schema.type === 'boolean' ||
+    label.includes('directory') ||
+    label.includes('providers') ||
+    label.includes('path')
+  );
 }
