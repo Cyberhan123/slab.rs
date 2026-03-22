@@ -1,12 +1,12 @@
 import type { ReactNode } from 'react';
-import type { ListChecks } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 
 type TaskMetricCardProps = {
   label: string;
   value: string;
   note: string;
   noteTone: 'success' | 'danger' | 'muted';
-  icon: typeof ListChecks;
+  icon: LucideIcon;
   className?: string;
   children: ReactNode;
 };

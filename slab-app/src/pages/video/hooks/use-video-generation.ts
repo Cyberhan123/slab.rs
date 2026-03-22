@@ -88,16 +88,6 @@ export function useVideoGeneration() {
 
   const isGenerating = isSubmitting || isPolling;
 
-  const summaryItems = useMemo(
-    () => [
-      { label: 'Frames', value: frames },
-      { label: 'FPS', value: fps },
-      { label: 'Size', value: `${widthStr || '--'} x ${heightStr || '--'}` },
-      { label: 'Init Image', value: initImageDataUri ? 'Attached' : 'None' },
-    ],
-    [fps, frames, heightStr, initImageDataUri, widthStr],
-  );
-
   const loadInitImageFile = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
       toast.error('Please choose an image file');
