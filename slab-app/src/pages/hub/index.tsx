@@ -270,7 +270,7 @@ function HubSummaryCard({
 
   return (
     <div
-      className={`relative overflow-hidden rounded-[30px] border border-white/80 ${backgroundClassName} p-6 shadow-[0_24px_56px_-42px_color-mix(in_oklab,var(--foreground)_28%,transparent)]`}
+      className={`relative overflow-hidden rounded-[30px] border border-border/40 ${backgroundClassName} p-6 shadow-[0_24px_56px_-42px_color-mix(in_oklab,var(--foreground)_28%,transparent)]`}
     >
       <div className="absolute -top-5 -right-6 size-24 rounded-full bg-[var(--shell-card)]/45 blur-2xl" />
       <div className="relative flex h-full flex-col gap-6">

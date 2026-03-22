@@ -54,7 +54,7 @@ function HubModelCard({
 
   return (
     <article
-      className="group relative overflow-hidden rounded-[30px] border border-white/80 bg-[color:color-mix(in_oklab,var(--surface-1)_92%,white)] p-6 shadow-[0_24px_56px_-40px_color-mix(in_oklab,var(--foreground)_40%,transparent)]"
+      className="group relative overflow-hidden rounded-[30px] border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_92%,var(--background))] p-6 shadow-[0_24px_56px_-40px_color-mix(in_oklab,var(--foreground)_40%,transparent)]"
     >
       <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_top_right,color-mix(in_oklab,var(--brand-teal)_9%,transparent),transparent_34%),radial-gradient(circle_at_bottom_left,color-mix(in_oklab,var(--brand-gold)_12%,transparent),transparent_30%)]" />
 
