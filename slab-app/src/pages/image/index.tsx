@@ -383,97 +383,97 @@ export default function ImagePage() {
   }, []);
 
   return (
-    <div className="h-full w-full overflow-y-auto bg-white">
-      <div className="mx-auto flex min-h-full max-w-[1248px] flex-col px-4 py-4 sm:px-6">
+    <div className="h-full w-full overflow-y-auto bg-white xl:overflow-hidden">
+      <div className="mx-auto flex min-h-full max-w-[1248px] flex-col px-4 py-4 sm:px-6 xl:h-full xl:min-h-0">
         <SplitWorkbench
-          className="h-full gap-6 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-0"
+          className="h-full min-h-0 gap-6 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-0"
           sidebarClassName="space-y-0"
-          mainClassName="min-h-full"
-        sidebar={
-          <aside className="flex h-full flex-col rounded-[28px] border border-[#eef2f7] bg-[#f2f4f6] px-5 py-5 xl:min-h-[780px] xl:rounded-none xl:border-0 xl:border-r xl:border-[#e2e8f0]/70 xl:px-6 xl:py-6">
-            <div className="flex h-full flex-col">
-              <div className="space-y-6">
-              <div className="space-y-4">
-                <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#64748b]">
-                  Generation Parameters
-                </p>
-                <Tabs
-                  value={mode}
-                  onValueChange={(value) => setMode(value as typeof mode)}
-                  className="gap-4"
-                >
-                  <TabsList className="grid h-auto w-full grid-cols-2 rounded-[16px] bg-transparent p-1">
-                    <TabsTrigger
-                      value="txt2img"
-                      className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-[#475569] shadow-none data-[state=active]:border-[#dbe4ea] data-[state=active]:bg-white data-[state=active]:text-[#0f172a] data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+          mainClassName="min-h-full xl:min-h-0"
+          sidebar={
+            <aside className="flex h-full flex-col rounded-[28px] border border-[#eef2f7] bg-[#f2f4f6] px-5 py-5 xl:min-h-0 xl:overflow-hidden xl:rounded-none xl:border-0 xl:border-r xl:border-[#e2e8f0]/70 xl:px-6 xl:py-6">
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="space-y-6 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-2">
+                  <div className="space-y-4">
+                    <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-[#64748b]">
+                      Generation Parameters
+                    </p>
+                    <Tabs
+                      value={mode}
+                      onValueChange={(value) => setMode(value as typeof mode)}
+                      className="gap-4"
                     >
-                      Text to Image
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="img2img"
-                      className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-[#475569] shadow-none data-[state=active]:border-[#dbe4ea] data-[state=active]:bg-white data-[state=active]:text-[#0f172a] data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
-                    >
-                      Image to Image
-                    </TabsTrigger>
-                  </TabsList>
-                  <TabsContent value="txt2img" className="m-0" />
-                  <TabsContent value="img2img" className="m-0">
-                    <div className="space-y-2.5">
-                      <Label className={SIDEBAR_LABEL_CLASSNAME}>
-                        {initImageDataUri ? 'Init Image' : 'Upload Init Image'}
-                      </Label>
-                      <button
-                        type="button"
-                        className="group flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[#cbd5e1] bg-white px-4 py-4 text-center transition hover:border-[#5bc0b5] hover:bg-[#f8fcfb]"
-                        onClick={() => initImageInputRef.current?.click()}
-                      >
-                        {initImageDataUri ? (
-                          <div className="relative w-full overflow-hidden rounded-lg">
-                            <img
-                              src={initImageDataUri}
-                              alt="init"
-                              className="max-h-52 w-full rounded-lg object-cover"
-                            />
-                            <Button
-                              type="button"
-                              variant="pill"
-                              size="icon-sm"
-                              className="absolute top-2 right-2 border-white/80 bg-white/90 shadow-sm"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setInitImageDataUri(null);
-                              }}
-                            >
-                              <X className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        ) : (
-                          <>
-                            <div className="flex size-12 items-center justify-center rounded-[14px] bg-[#f1f5f9] text-[#64748b] transition group-hover:bg-[#ebf7f5] group-hover:text-[#0d9488]">
-                              <ImageIcon className="size-5" />
-                            </div>
-                            <div className="space-y-1">
-                              <p className="text-sm font-medium text-[#191c1e]">
-                                Click to choose an image
-                              </p>
-                              <p className="text-xs text-[#64748b]">
-                                PNG/JPEG for img2img mode
-                              </p>
-                            </div>
-                          </>
-                        )}
-                      </button>
-                      <input
-                        ref={initImageInputRef}
-                        type="file"
-                        accept="image/png,image/jpeg"
-                        className="hidden"
-                        onChange={handleInitImageChange}
-                      />
-                    </div>
-                  </TabsContent>
-                </Tabs>
-              </div>
+                      <TabsList className="grid h-auto w-full grid-cols-2 rounded-[16px] bg-transparent p-1">
+                        <TabsTrigger
+                          value="txt2img"
+                          className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-[#475569] shadow-none data-[state=active]:border-[#dbe4ea] data-[state=active]:bg-white data-[state=active]:text-[#0f172a] data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                        >
+                          Text to Image
+                        </TabsTrigger>
+                        <TabsTrigger
+                          value="img2img"
+                          className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-[#475569] shadow-none data-[state=active]:border-[#dbe4ea] data-[state=active]:bg-white data-[state=active]:text-[#0f172a] data-[state=active]:shadow-[0_1px_2px_rgba(0,0,0,0.05)]"
+                        >
+                          Image to Image
+                        </TabsTrigger>
+                      </TabsList>
+                      <TabsContent value="txt2img" className="m-0" />
+                      <TabsContent value="img2img" className="m-0">
+                        <div className="space-y-2.5">
+                          <Label className={SIDEBAR_LABEL_CLASSNAME}>
+                            {initImageDataUri ? 'Init Image' : 'Upload Init Image'}
+                          </Label>
+                          <button
+                            type="button"
+                            className="group flex w-full flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-[#cbd5e1] bg-white px-4 py-4 text-center transition hover:border-[#5bc0b5] hover:bg-[#f8fcfb]"
+                            onClick={() => initImageInputRef.current?.click()}
+                          >
+                            {initImageDataUri ? (
+                              <div className="relative w-full overflow-hidden rounded-lg">
+                                <img
+                                  src={initImageDataUri}
+                                  alt="init"
+                                  className="max-h-52 w-full rounded-lg object-cover"
+                                />
+                                <Button
+                                  type="button"
+                                  variant="pill"
+                                  size="icon-sm"
+                                  className="absolute top-2 right-2 border-white/80 bg-white/90 shadow-sm"
+                                  onClick={(event) => {
+                                    event.stopPropagation();
+                                    setInitImageDataUri(null);
+                                  }}
+                                >
+                                  <X className="h-3.5 w-3.5" />
+                                </Button>
+                              </div>
+                            ) : (
+                              <>
+                                <div className="flex size-12 items-center justify-center rounded-[14px] bg-[#f1f5f9] text-[#64748b] transition group-hover:bg-[#ebf7f5] group-hover:text-[#0d9488]">
+                                  <ImageIcon className="size-5" />
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-sm font-medium text-[#191c1e]">
+                                    Click to choose an image
+                                  </p>
+                                  <p className="text-xs text-[#64748b]">
+                                    PNG/JPEG for img2img mode
+                                  </p>
+                                </div>
+                              </>
+                            )}
+                          </button>
+                          <input
+                            ref={initImageInputRef}
+                            type="file"
+                            accept="image/png,image/jpeg"
+                            className="hidden"
+                            onChange={handleInitImageChange}
+                          />
+                        </div>
+                      </TabsContent>
+                    </Tabs>
+                  </div>
 
               <div className="space-y-2.5">
                 <Label className={SIDEBAR_LABEL_CLASSNAME}>Model</Label>
@@ -761,7 +761,7 @@ export default function ImagePage() {
                 </CollapsibleContent>
               </Collapsible>
 
-              <div className="mt-auto pt-8">
+              <div className="mt-auto shrink-0 pt-8 xl:pt-6">
                 <Button
                   className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,#00685f_0%,#008378_100%)] text-base font-semibold text-white shadow-[0_10px_15px_-3px_rgba(13,148,136,0.2),0_4px_6px_-4px_rgba(13,148,136,0.2)] hover:brightness-[1.03]"
                   onClick={handleSubmit}
@@ -795,10 +795,11 @@ export default function ImagePage() {
                 ) : null}
               </div>
             </div>
+          </div>
           </aside>
         }
         main={
-          <section className="rounded-[28px] border border-[#eef2f7] bg-white xl:min-h-[780px] xl:rounded-none xl:border-0">
+          <section className="h-full min-h-[520px] rounded-[28px] border border-[#eef2f7] bg-white xl:min-h-0 xl:overflow-hidden xl:rounded-none xl:border-0">
             {images.length === 0 ? (
               <div className="flex h-full min-h-[520px] items-center justify-center px-6 py-12 xl:min-h-[780px]">
                 <div className="flex max-w-[448px] flex-col items-center gap-6 text-center">
