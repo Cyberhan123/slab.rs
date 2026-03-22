@@ -70,16 +70,16 @@ function HubModelCard({
         <div className="flex min-w-0 flex-1 flex-col gap-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0 space-y-2">
-              <h3 className="text-[1.9rem] font-semibold tracking-tight text-[#191c1e]">
+              <h3 className="text-[1.9rem] font-semibold tracking-tight text-foreground">
                 {model.display_name}
               </h3>
-              <p className="max-w-2xl text-sm leading-6 text-[#3d4947]">{describeModel(model)}</p>
+              <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{describeModel(model)}</p>
             </div>
 
             <Button
               variant="quiet"
               size="icon-sm"
-              className="size-10 rounded-full border border-border/70 bg-white/80 text-destructive hover:bg-white hover:text-destructive"
+              className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80 text-destructive hover:bg-[var(--shell-card)] hover:text-destructive"
               onClick={() => onDeleteClick(model)}
               disabled={deletePending}
               aria-label={`Delete ${model.display_name}`}
@@ -89,21 +89,21 @@ function HubModelCard({
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-[#6d7a77]">
+            <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
               {backendLabel}
             </Badge>
-            <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-[#6d7a77]">
+            <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
               {formatProvider(model.provider)}
             </Badge>
             {model.is_vad_model ? (
-              <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-[#6d7a77]">
+              <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
                 VAD
               </Badge>
             ) : null}
             {model.filename ? (
               <Badge
                 variant="chip"
-                className="bg-[var(--surface-1)] px-3 py-1 font-mono text-[#6d7a77]"
+                className="bg-[var(--surface-1)] px-3 py-1 font-mono text-muted-foreground"
               >
                 {shortFileName(model.filename)}
               </Badge>
@@ -115,7 +115,7 @@ function HubModelCard({
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                 Source
               </p>
-              <p className="truncate font-mono text-xs text-[#6d7a77]" title={sourceLabel}>
+              <p className="truncate font-mono text-xs text-muted-foreground" title={sourceLabel}>
                 {sourceLabel}
               </p>
             </div>

@@ -123,8 +123,8 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden rounded-[24px] border border-slate-200/80 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)] lg:flex-row">
-      <aside className="w-full shrink-0 border-b border-slate-200/80 bg-slate-50/80 lg:w-[256px] lg:border-r lg:border-b-0">
+    <div className="flex h-full w-full flex-col overflow-hidden rounded-[24px] border border-border/50 bg-[var(--shell-card)] shadow-[var(--shell-elevation)] lg:flex-row">
+      <aside className="w-full shrink-0 border-b border-border/50 bg-[var(--surface-soft)]/80 lg:w-[256px] lg:border-r lg:border-b-0">
         <SettingsNavigation
           activeSectionId={activeSection?.id ?? null}
           sections={sections}
@@ -157,23 +157,23 @@ export default function SettingsPage() {
             <>
               <header
                 id={sectionAnchorId(activeSection.id)}
-                className="scroll-mt-6 space-y-4 border-b border-slate-200/80 pb-6"
+                className="scroll-mt-6 space-y-4 border-b border-border/50 pb-6"
               >
                 <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
                   <div className="space-y-3">
                     <div className="flex flex-wrap items-center gap-3">
-                      <h1 className="text-3xl font-bold tracking-[-0.045em] text-slate-900">
+                      <h1 className="text-3xl font-bold tracking-[-0.045em] text-foreground">
                         {activeSection.title}
                       </h1>
                       <Badge
                         variant="chip"
-                        className="rounded-full border-slate-200 bg-slate-200/80 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-slate-600"
+                        className="rounded-full border-border/60 bg-border/30 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground"
                       >
                         {countSectionProperties(activeSection)} settings
                       </Badge>
                     </div>
                     {activeSection.description_md ? (
-                      <p className="max-w-3xl text-base leading-8 text-slate-500">
+                      <p className="max-w-3xl text-base leading-8 text-muted-foreground">
                         {activeSection.description_md}
                       </p>
                     ) : null}
@@ -204,23 +204,23 @@ export default function SettingsPage() {
                   <section
                     key={subsection.id}
                     id={subsectionAnchorId(activeSection.id, subsection.id)}
-                    className="scroll-mt-8 rounded-[20px] border border-slate-200/60 bg-slate-50/70 p-6 md:p-8"
+                    className="scroll-mt-8 rounded-[20px] border border-border/40 bg-[var(--surface-soft)]/70 p-6 md:p-8"
                   >
                     {shouldCollapseSubsectionHeading(activeSection, subsection) ? (
                       subsection.description_md ? (
-                        <p className="text-sm leading-7 text-slate-500">
+                        <p className="text-sm leading-7 text-muted-foreground">
                           {subsection.description_md}
                         </p>
                       ) : null
                     ) : (
                       <div className="space-y-2">
                         <div className="flex flex-wrap items-center gap-3">
-                          <h2 className="text-[18px] font-bold tracking-[-0.03em] text-slate-900">
+                          <h2 className="text-[18px] font-bold tracking-[-0.03em] text-foreground">
                             {subsection.title}
                           </h2>
                         </div>
                         {subsection.description_md ? (
-                          <p className="text-sm leading-7 text-slate-500">
+                          <p className="text-sm leading-7 text-muted-foreground">
                             {subsection.description_md}
                           </p>
                         ) : null}

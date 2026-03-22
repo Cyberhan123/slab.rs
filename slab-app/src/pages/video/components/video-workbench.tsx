@@ -140,12 +140,12 @@ export function VideoWorkbench({
   widthValue,
 }: VideoWorkbenchProps) {
   return (
-    <div className="h-full w-full overflow-y-auto bg-white xl:overflow-hidden">
+    <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] xl:overflow-hidden">
       <div className="mx-auto flex min-h-full w-full max-w-[1200px] flex-col px-4 py-4 sm:px-6 xl:h-full xl:min-h-0 xl:py-6">
         <div className="grid min-h-0 flex-1 gap-6 xl:grid-cols-[378px_minmax(0,1fr)]">
-          <aside className="flex h-full min-h-[520px] flex-col rounded-[28px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(242,244,246,0.96),rgba(248,250,252,0.96))] p-6 shadow-[0_20px_50px_-38px_rgba(15,23,42,0.35)] xl:min-h-0 xl:overflow-hidden">
+          <aside className="flex h-full min-h-[520px] flex-col rounded-[28px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-[0_20px_50px_-38px_color-mix(in_oklab,var(--foreground)_35%,transparent)] xl:min-h-0 xl:overflow-hidden">
             <div className="pb-6">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
                 Configuration
               </p>
             </div>
@@ -160,7 +160,7 @@ export function VideoWorkbench({
                   rows={4}
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
-                  className="min-h-[112px] rounded-[22px] border-slate-200/80 bg-white/78 px-4 py-4 text-[15px] leading-6 text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] placeholder:text-slate-400"
+                  className="min-h-[112px] rounded-[22px] border-border/50 bg-[var(--shell-card)]/78 px-4 py-4 text-[15px] leading-6 text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)] placeholder:text-muted-foreground/70"
                 />
               </div>
 
@@ -172,7 +172,7 @@ export function VideoWorkbench({
                   placeholder="Blurry, low quality, distorted..."
                   value={negativePrompt}
                   onChange={(event) => setNegativePrompt(event.target.value)}
-                  className="h-14 rounded-[18px] border-slate-200/80 bg-white/78 px-4 text-[15px] text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)] placeholder:text-slate-400"
+                  className="h-14 rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-[15px] text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)] placeholder:text-muted-foreground/70"
                 />
               </div>
 
@@ -201,7 +201,7 @@ export function VideoWorkbench({
                   <Select value={String(frames)} onValueChange={(value) => setFrames(Number(value))}>
                     <SelectTrigger
                       variant="soft"
-                      className="h-14 w-full rounded-[18px] border-slate-200/80 bg-white/78 px-4 text-base font-semibold text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]"
+                      className="h-14 w-full rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-base font-semibold text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                     >
                       <SelectValue />
                     </SelectTrigger>
@@ -220,7 +220,7 @@ export function VideoWorkbench({
                   <Select value={String(fps)} onValueChange={(value) => setFps(Number(value))}>
                     <SelectTrigger
                       variant="soft"
-                      className="h-14 w-full rounded-[18px] border-slate-200/80 bg-white/78 px-4 text-base font-semibold text-slate-900 shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]"
+                      className="h-14 w-full rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-base font-semibold text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                     >
                       <SelectValue />
                     </SelectTrigger>
@@ -242,10 +242,10 @@ export function VideoWorkbench({
                   onClick={() => initImageInputRef.current?.click()}
                   onDragOver={(event) => event.preventDefault()}
                   onDrop={handleInitImageDrop}
-                  className="group flex w-full flex-col items-center justify-center gap-4 rounded-[22px] border-2 border-dashed border-slate-300/80 bg-white/52 px-5 py-7 text-center transition hover:border-[#0d9488]/45 hover:bg-white/72"
+                  className="group flex w-full flex-col items-center justify-center gap-4 rounded-[22px] border-2 border-dashed border-border/60 bg-[var(--shell-card)]/52 px-5 py-7 text-center transition hover:border-[var(--brand-teal)]/45 hover:bg-[var(--shell-card)]/72"
                 >
                   {initImageDataUri ? (
-                    <div className="relative w-full overflow-hidden rounded-[18px] border border-white/70 bg-white/80 shadow-[0_18px_30px_-24px_rgba(15,23,42,0.35)]">
+                    <div className="relative w-full overflow-hidden rounded-[18px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/80 shadow-[0_18px_30px_-24px_color-mix(in_oklab,var(--foreground)_35%,transparent)]">
                       <img
                         src={initImageDataUri}
                         alt="Reference"
@@ -253,8 +253,8 @@ export function VideoWorkbench({
                       />
                       <div className="flex items-center justify-between gap-3 px-4 py-3 text-left">
                         <div>
-                          <p className="text-sm font-semibold text-slate-900">Reference frame ready</p>
-                          <p className="text-xs text-slate-500">
+                          <p className="text-sm font-semibold text-foreground">Reference frame ready</p>
+                          <p className="text-xs text-muted-foreground">
                             Slab will use this image as the starting frame.
                           </p>
                         </div>
@@ -274,14 +274,14 @@ export function VideoWorkbench({
                     </div>
                   ) : (
                     <>
-                      <div className="flex size-14 items-center justify-center rounded-full bg-white text-slate-500 shadow-[0_18px_30px_-24px_rgba(15,23,42,0.35)]">
+                      <div className="flex size-14 items-center justify-center rounded-full bg-[var(--shell-card)] text-muted-foreground shadow-[0_18px_30px_-24px_color-mix(in_oklab,var(--foreground)_35%,transparent)]">
                         <ImagePlus className="h-6 w-6" />
                       </div>
                       <div className="space-y-1">
-                        <p className="text-sm font-medium text-slate-700">
+                        <p className="text-sm font-medium text-foreground/80">
                           Drop PNG/JPG or click to upload
                         </p>
-                        <p className="text-xs text-slate-500">
+                        <p className="text-xs text-muted-foreground">
                           Optional starting frame for motion generation.
                         </p>
                       </div>
@@ -301,7 +301,7 @@ export function VideoWorkbench({
                 <CollapsibleTrigger asChild>
                   <button
                     type="button"
-                    className="flex w-full items-center justify-between rounded-[18px] border border-slate-200/80 bg-white/72 px-4 py-3 text-sm font-semibold text-slate-700 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)] transition hover:border-slate-300 hover:text-slate-900"
+                    className="flex w-full items-center justify-between rounded-[18px] border border-border/50 bg-[var(--shell-card)]/72 px-4 py-3 text-sm font-semibold text-foreground/80 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_85%,transparent)] transition hover:border-border/70 hover:text-foreground"
                   >
                     Advanced Parameters
                     {advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
@@ -314,7 +314,7 @@ export function VideoWorkbench({
                     <Select value={selectedModelId} onValueChange={setSelectedModelId}>
                       <SelectTrigger
                         variant="soft"
-                        className="h-12 w-full rounded-[18px] border-slate-200/80 bg-white/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]"
+                        className="h-12 w-full rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                       >
                         <SelectValue
                           placeholder={catalogLoading ? 'Loading models...' : 'Select model'}
@@ -408,7 +408,7 @@ export function VideoWorkbench({
                         type="number"
                         value={seed}
                         onChange={(event) => setSeed(Number.parseInt(event.target.value, 10))}
-                        className="h-12 rounded-[18px] border-slate-200/80 bg-white/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]"
+                        className="h-12 rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                       />
                     </div>
 
@@ -417,7 +417,7 @@ export function VideoWorkbench({
                       <Select value={sampleMethod} onValueChange={setSampleMethod}>
                         <SelectTrigger
                           variant="soft"
-                          className="h-12 w-full rounded-[18px] border-slate-200/80 bg-white/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]"
+                          className="h-12 w-full rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                         >
                           <SelectValue />
                         </SelectTrigger>
@@ -436,7 +436,7 @@ export function VideoWorkbench({
                       <Select value={scheduler} onValueChange={setScheduler}>
                         <SelectTrigger
                           variant="soft"
-                          className="h-12 w-full rounded-[18px] border-slate-200/80 bg-white/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_rgba(255,255,255,0.9)]"
+                          className="h-12 w-full rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
                         >
                           <SelectValue />
                         </SelectTrigger>
@@ -490,18 +490,18 @@ export function VideoWorkbench({
           <section className="flex min-h-[520px] flex-col gap-6 xl:min-h-0">
             <div
               className={cn(
-                'relative flex min-h-[420px] flex-1 items-center justify-center overflow-hidden rounded-[32px] border border-slate-200/70 bg-[#eceef0] p-6 shadow-[0_32px_80px_-56px_rgba(15,23,42,0.45)] xl:min-h-0',
+                'relative flex min-h-[420px] flex-1 items-center justify-center overflow-hidden rounded-[32px] border border-border/50 bg-[var(--surface-soft)] p-6 shadow-[0_32px_80px_-56px_color-mix(in_oklab,var(--foreground)_45%,transparent)] xl:min-h-0',
               )}
               style={{
                 backgroundImage:
-                  'radial-gradient(circle at center, rgba(0,104,95,0.12) 0%, rgba(255,255,255,0) 24%), linear-gradient(135deg, rgba(255,255,255,0.88) 0%, rgba(235,239,241,0.92) 40%, rgba(255,255,255,0.9) 100%)',
+                  'radial-gradient(circle at center, color-mix(in oklab,var(--brand-teal) 12%,transparent) 0%, transparent 24%), linear-gradient(135deg, color-mix(in oklab,var(--shell-card) 88%,transparent) 0%, color-mix(in oklab,var(--surface-soft) 92%,transparent) 40%, color-mix(in oklab,var(--shell-card) 90%,transparent) 100%)',
               }}
             >
-              <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_top_right,rgba(15,23,42,0.06),transparent_38%),radial-gradient(circle_at_bottom_left,rgba(255,255,255,0.88),transparent_34%)]" />
+              <div className="absolute inset-0 opacity-70 [background:radial-gradient(circle_at_top_right,color-mix(in oklab,var(--foreground) 6%,transparent),transparent_38%),radial-gradient(circle_at_bottom_left,color-mix(in oklab,var(--shell-card) 88%,transparent),transparent_34%)]" />
 
               {videoPath ? (
                 <div className="relative z-10 w-full max-w-[640px] space-y-4">
-                  <div className="overflow-hidden rounded-[28px] border border-white/50 bg-black/88 shadow-[0_32px_80px_-42px_rgba(15,23,42,0.6)]">
+                  <div className="overflow-hidden rounded-[28px] border border-[var(--shell-card)]/50 bg-black/88 shadow-[0_32px_80px_-42px_color-mix(in_oklab,var(--foreground)_60%,transparent)]">
                     <video
                       src={`file://${videoPath}`}
                       controls
@@ -517,23 +517,23 @@ export function VideoWorkbench({
               ) : (
                 <div className="relative z-10 flex max-w-[340px] flex-col items-center gap-6 text-center">
                   <div className="relative">
-                    <div className="absolute inset-[-26px] rounded-full bg-[#00685f]/18 blur-3xl" />
-                    <div className="relative flex size-24 items-center justify-center rounded-[32px] bg-white text-[#00685f] shadow-[0_28px_60px_-36px_rgba(15,23,42,0.45)]">
+                    <div className="absolute inset-[-26px] rounded-full bg-[var(--brand-teal)]/18 blur-3xl" />
+                    <div className="relative flex size-24 items-center justify-center rounded-[32px] bg-[var(--shell-card)] text-[var(--brand-teal)] shadow-[0_28px_60px_-36px_color-mix(in_oklab,var(--foreground)_45%,transparent)]">
                       {isGenerating ? <Loader2 className="h-10 w-10 animate-spin" /> : <Film className="h-10 w-10" />}
                     </div>
                   </div>
 
                   <div className="space-y-3">
-                    <h2 className="text-[32px] font-semibold tracking-[-0.035em] text-slate-900">
+                    <h2 className="text-[32px] font-semibold tracking-[-0.035em] text-foreground">
                       {stageTitle}
                     </h2>
-                    <p className="text-sm leading-7 text-slate-600">{stageDescription}</p>
+                    <p className="text-sm leading-7 text-muted-foreground">{stageDescription}</p>
                   </div>
                 </div>
               )}
 
               <div className="absolute bottom-8 left-1/2 z-20 -translate-x-1/2">
-                <div className="flex items-center gap-2 rounded-[20px] border border-white/45 bg-white/72 px-4 py-3 backdrop-blur-xl shadow-[0_24px_50px_-34px_rgba(15,23,42,0.42)]">
+                <div className="flex items-center gap-2 rounded-[20px] border border-[var(--shell-card)]/45 bg-[var(--shell-card)]/72 px-4 py-3 backdrop-blur-xl shadow-[0_24px_50px_-34px_color-mix(in_oklab,var(--foreground)_42%,transparent)]">
                   <ToolbarIconButton
                     icon={Maximize2}
                     label="Toggle stage scale"
@@ -550,14 +550,14 @@ export function VideoWorkbench({
               </div>
             </div>
 
-            <div className="rounded-[22px] border border-slate-200/80 bg-[linear-gradient(180deg,rgba(242,244,246,0.95),rgba(248,250,252,0.92))] px-5 py-4 shadow-[0_18px_42px_-34px_rgba(15,23,42,0.28)]">
+            <div className="rounded-[22px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_95%,transparent),color-mix(in_oklab,var(--surface-1)_92%,transparent))] px-5 py-4 shadow-[0_18px_42px_-34px_color-mix(in_oklab,var(--foreground)_28%,transparent)]">
               <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                 <div className="grid gap-4 sm:grid-cols-3">
                   <StatusMetric label="Render Status" value={stageStatus} />
                   <StatusMetric label="Clip Spec" value={`${frames} frames • ${fps} fps`} />
                   <StatusMetric label="Canvas" value={`${widthValue} x ${heightValue}`} />
                 </div>
-                <p className="text-xs font-medium text-slate-600 lg:text-right">{footerHint}</p>
+                <p className="text-xs font-medium text-muted-foreground lg:text-right">{footerHint}</p>
               </div>
             </div>
           </section>
