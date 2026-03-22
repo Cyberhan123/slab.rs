@@ -23,7 +23,7 @@ export default function Layout() {
             >
               <main
                 className={cn(
-                  "flex min-h-0 flex-1 overflow-hidden",
+                  "flex min-h-0 flex-1 overflow-hidden bg-white",
                   isChatShell
                     ? "p-0"
                     : "px-[var(--shell-content-gutter)] pb-[var(--shell-content-gutter)] pt-4"
