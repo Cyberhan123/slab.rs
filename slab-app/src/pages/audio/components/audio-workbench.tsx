@@ -158,9 +158,9 @@ export function AudioWorkbench({
     <div className="h-full w-full overflow-y-auto">
       <div className="mx-auto grid w-full max-w-[1120px] gap-8 pb-8 xl:grid-cols-[minmax(0,1fr)_392px]">
         <div className="space-y-6">
-          <SoftPanel className="space-y-5 rounded-[28px] border border-[#e2e8ee] bg-[#f2f4f6] px-7 py-6">
+          <SoftPanel className="space-y-5 rounded-[28px] border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-[#6d7a77]">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                 Transcription Setup
               </p>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
@@ -251,18 +251,18 @@ export function AudioWorkbench({
               setDecodeTdrzEnable={setDecodeTdrzEnable}
             />
           </SoftPanel>
-          <SoftPanel className="space-y-5 rounded-[28px] border border-[#e2e8ee] bg-[#f2f4f6] px-7 py-6">
+          <SoftPanel className="space-y-5 rounded-[28px] border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
             <div>
-              <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-[#6d7a77]">
+              <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
                 Source Audio
               </p>
             </div>
 
-            <div className="rounded-[24px] border border-dashed border-[#cfd8de] bg-white/40 px-6 py-8 text-center">
-              <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-white/85 text-[var(--brand-teal)] shadow-[0_18px_34px_-24px_color-mix(in_oklab,var(--brand-teal)_38%,transparent)]">
+            <div className="rounded-[24px] border border-dashed border-border/50 bg-[var(--shell-card)]/40 px-6 py-8 text-center">
+              <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-[var(--shell-card)]/85 text-[var(--brand-teal)] shadow-[0_18px_34px_-24px_color-mix(in_oklab,var(--brand-teal)_38%,transparent)]">
                 <FileAudio2 className="size-6" />
               </div>
-              <h3 className="mt-5 text-[18px] font-semibold tracking-[-0.02em] text-[#191c1e]">
+              <h3 className="mt-5 text-[18px] font-semibold tracking-[-0.02em] text-foreground">
                 Drag and drop audio files
               </h3>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
@@ -273,7 +273,7 @@ export function AudioWorkbench({
                   type="button"
                   variant="pill"
                   size="pill"
-                  className="rounded-[14px] bg-white"
+                  className="rounded-[14px] bg-[var(--shell-card)]"
                   onClick={() => {
                     if (isTauri) {
                       void handleTauriFileSelect();
@@ -287,7 +287,7 @@ export function AudioWorkbench({
                   {file ? 'Change File' : 'Browse Files'}
                 </Button>
                 {file ? (
-                  <span className="max-w-full rounded-full border border-white/70 bg-white/80 px-4 py-2 text-xs font-medium text-[#3d4947]">
+                  <span className="max-w-full rounded-full border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/80 px-4 py-2 text-xs font-medium text-muted-foreground">
                     {file.name}
                   </span>
                 ) : null}
@@ -306,11 +306,11 @@ export function AudioWorkbench({
             </div>
 
             {file ? (
-              <div className="rounded-[20px] border border-white/70 bg-white/60 px-4 py-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-                <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-[#6d7a77]">
+              <div className="rounded-[20px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/60 px-4 py-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
+                <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                   Selected File
                 </p>
-                <p className="mt-2 truncate text-sm font-semibold text-[#191c1e]">{file.name}</p>
+                <p className="mt-2 truncate text-sm font-semibold text-foreground">{file.name}</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
                   Ready for transcription. You can swap the file at any time before creating the
                   task.
@@ -320,7 +320,7 @@ export function AudioWorkbench({
           </SoftPanel>
         </div>
         <div className="workspace-surface h-fit rounded-[30px] px-7 py-8 shadow-[0_28px_72px_-44px_color-mix(in_oklab,var(--foreground)_34%,transparent)]">
-          <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-[#6d7a77]">
+          <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
             Configuration Preview
           </p>
 
@@ -330,15 +330,15 @@ export function AudioWorkbench({
                 key={item.label}
                 className="flex items-start justify-between gap-4 border-b border-border/60 pb-4 last:border-b-0 last:pb-0"
               >
-                <p className="pt-1 text-sm text-[#3d4947]">{item.label}</p>
+                <p className="pt-1 text-sm text-muted-foreground">{item.label}</p>
                 {item.chip ? (
-                  <span className="max-w-[220px] rounded-md bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,white)] px-2.5 py-1 text-right text-xs font-semibold text-[var(--brand-teal)]">
+                  <span className="max-w-[220px] rounded-md bg-[color:color-mix(in_oklab,var(--brand-teal)_10%,var(--background))] px-2.5 py-1 text-right text-xs font-semibold text-[var(--brand-teal)]">
                     {item.value}
                   </span>
                 ) : (
                   <p
                     className={`max-w-[220px] text-right text-sm font-semibold leading-6 ${
-                      item.accent ? 'text-[var(--brand-teal)]' : 'text-[#191c1e]'
+                      item.accent ? 'text-[var(--brand-teal)]' : 'text-foreground'
                     }`}
                   >
                     {item.value}
@@ -372,11 +372,11 @@ export function AudioWorkbench({
             <div className="mt-6 rounded-[22px] bg-[var(--surface-soft)] p-4">
               {isBusy ? (
                 <div className="flex items-start gap-3">
-                  <div className="mt-0.5 flex size-10 items-center justify-center rounded-full bg-white text-[var(--brand-teal)]">
+                  <div className="mt-0.5 flex size-10 items-center justify-center rounded-full bg-[var(--shell-card)] text-[var(--brand-teal)]">
                     <Loader2 className="size-5 animate-spin" />
                   </div>
                   <div className="space-y-1">
-                    <p className="text-sm font-semibold text-[#191c1e]">
+                    <p className="text-sm font-semibold text-foreground">
                       {preparingStage === 'prepare'
                         ? 'Preparing selected model'
                         : 'Creating transcription task'}
@@ -394,7 +394,7 @@ export function AudioWorkbench({
               ) : taskId ? (
                 <div className="space-y-4">
                   <div className="space-y-1">
-                    <p className="text-sm font-semibold text-[#191c1e]">Transcription task created</p>
+                    <p className="text-sm font-semibold text-foreground">Transcription task created</p>
                     <p className="text-xs leading-5 text-muted-foreground">
                       Task ID: {taskId}. You can keep working here or jump straight to the Tasks page
                       to monitor progress.
@@ -406,8 +406,8 @@ export function AudioWorkbench({
                 </div>
               ) : (
                 <div className="space-y-1">
-                  <p className="text-sm font-semibold text-[#191c1e]">Source file ready</p>
-                  <p className="truncate text-sm text-[#3d4947]">{file?.name ?? 'Source file selected'}</p>
+                  <p className="text-sm font-semibold text-foreground">Source file ready</p>
+                  <p className="truncate text-sm text-muted-foreground">{file?.name ?? 'Source file selected'}</p>
                   <p className="text-xs leading-5 text-muted-foreground">
                     Start Transcription will create a task without changing the existing backend flow.
                   </p>

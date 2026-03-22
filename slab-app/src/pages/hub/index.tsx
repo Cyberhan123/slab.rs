@@ -82,15 +82,15 @@ export default function Hub() {
               <div className="space-y-4">
                 <Badge
                   variant="chip"
-                  className="border-transparent bg-white/75 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[#a16207]"
+                  className="border-transparent bg-[var(--shell-card)]/75 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--brand-gold)]"
                 >
                   New release
                 </Badge>
                 <div className="space-y-4">
-                  <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.05em] text-[#191c1e] md:text-6xl">
+                  <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.05em] text-foreground md:text-6xl">
                     Shape your local <span className="text-[var(--brand-teal)]">model catalog.</span>
                   </h1>
-                  <p className="max-w-2xl text-sm leading-7 text-[#3d4947] md:text-lg">
+                  <p className="max-w-2xl text-sm leading-7 text-muted-foreground md:text-lg">
                     Import JSON manifests, monitor runtime readiness, and keep every local inference
                     asset organized without leaving the workspace.
                   </p>
@@ -110,7 +110,7 @@ export default function Hub() {
                 <Button
                   variant="pill"
                   size="pill"
-                  className="bg-white/85 px-5"
+                  className="bg-[var(--shell-card)]/85 px-5"
                   onClick={() => void hub.refetch()}
                   disabled={hub.isRefetching}
                 >
@@ -147,7 +147,7 @@ export default function Hub() {
           </div>
         </section>
 
-        <section className="space-y-4 rounded-[32px] border border-white/70 bg-white/45 px-4 py-4 shadow-[0_20px_48px_-42px_color-mix(in_oklab,var(--foreground)_30%,transparent)] backdrop-blur">
+        <section className="space-y-4 rounded-[32px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/45 px-4 py-4 shadow-[0_20px_48px_-42px_color-mix(in_oklab,var(--foreground)_30%,transparent)] backdrop-blur">
           <div className="flex flex-wrap items-center gap-2">
             {CATEGORY_OPTIONS.map((option) => {
               const isActive = hub.category === option.value;
@@ -169,7 +169,7 @@ export default function Hub() {
               value={hub.status}
               onValueChange={(value) => hub.setStatus(value as typeof hub.status)}
             >
-              <SelectTrigger variant="pill" size="pill" className="h-9 min-w-[190px] bg-white/85">
+              <SelectTrigger variant="pill" size="pill" className="h-9 min-w-[190px] bg-[var(--shell-card)]/85">
                 <SelectValue placeholder="Status" />
               </SelectTrigger>
               <SelectContent variant="pill">
@@ -264,25 +264,25 @@ function HubSummaryCard({
 }) {
   const backgroundClassName =
     tone === 'gold'
-      ? 'bg-[linear-gradient(180deg,#f3f0e8_0%,#eef1ef_100%)]'
-      : 'bg-[linear-gradient(180deg,#dbe7ff_0%,#dfe8ff_100%)]';
-  const iconClassName = tone === 'gold' ? 'text-[#855300]' : 'text-[#1d4ed8]';
+      ? 'bg-[linear-gradient(180deg,color-mix(in_oklab,var(--brand-gold)_12%,var(--surface-1))_0%,var(--surface-1)_100%)]'
+      : 'bg-[linear-gradient(180deg,color-mix(in_oklab,var(--primary)_12%,var(--surface-1))_0%,var(--surface-1)_100%)]';
+  const iconClassName = tone === 'gold' ? 'text-[var(--brand-gold)]' : 'text-primary';
 
   return (
     <div
       className={`relative overflow-hidden rounded-[30px] border border-white/80 ${backgroundClassName} p-6 shadow-[0_24px_56px_-42px_color-mix(in_oklab,var(--foreground)_28%,transparent)]`}
     >
-      <div className="absolute -top-5 -right-6 size-24 rounded-full bg-white/45 blur-2xl" />
+      <div className="absolute -top-5 -right-6 size-24 rounded-full bg-[var(--shell-card)]/45 blur-2xl" />
       <div className="relative flex h-full flex-col gap-6">
         <div
-          className={`flex size-12 items-center justify-center rounded-[18px] bg-white/75 ${iconClassName}`}
+          className={`flex size-12 items-center justify-center rounded-[18px] bg-[var(--shell-card)]/75 ${iconClassName}`}
         >
           <Icon className="size-5" />
         </div>
         <div className="space-y-1">
-          <p className="text-4xl font-semibold tracking-tight text-[#191c1e]">{value}</p>
-          <p className="text-[1.65rem] font-semibold tracking-tight text-[#191c1e]">{label}</p>
-          <p className="text-sm leading-6 text-[#3d4947]">{description}</p>
+          <p className="text-4xl font-semibold tracking-tight text-foreground">{value}</p>
+          <p className="text-[1.65rem] font-semibold tracking-tight text-foreground">{label}</p>
+          <p className="text-sm leading-6 text-muted-foreground">{description}</p>
         </div>
       </div>
     </div>

@@ -49,7 +49,7 @@ export function BackendStatus() {
   }
 
   if (isOnline === null) {
-    return statusBadge('Unknown', 'h-2 w-2 rounded-full bg-gray-500');
+    return statusBadge('Unknown', 'h-2 w-2 rounded-full bg-muted-foreground');
   }
 
   if (isOnline) {

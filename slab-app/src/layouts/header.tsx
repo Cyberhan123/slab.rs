@@ -31,7 +31,7 @@ export default function Header({ variant = "default" }: HeaderProps) {
         <p className="hidden max-w-[28rem] min-w-0 truncate text-[13px] font-medium leading-5 text-[var(--shell-subtitle)] xl:max-w-[34rem] sm:block">
           {displaySubtitle}
         </p>
-        <div className="hidden h-8 shrink-0 items-center gap-2 rounded-full border border-black/5 bg-white/92 pl-3 pr-2.5 text-[12px] font-semibold text-[#3d4947] shadow-[var(--shell-elevation)] lg:inline-flex">
+        <div className="hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-[var(--shell-card)]/92 pl-3 pr-2.5 text-[12px] font-semibold text-foreground/70 shadow-[var(--shell-elevation)] lg:inline-flex">
           <span className="size-2 rounded-full bg-[var(--brand-gold)]" />
           <span className="max-w-[11rem] truncate">{shellContextLabel}</span>
           <ChevronDown className="size-3.5 text-muted-foreground" />
@@ -46,7 +46,7 @@ export default function Header({ variant = "default" }: HeaderProps) {
         <span className="hidden h-4 w-px shrink-0 bg-[var(--shell-divider)] md:block" />
         <div
           aria-hidden="true"
-          className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--shell-rail-label)] transition hover:bg-white/80 hover:text-[var(--shell-title)]"
+          className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--shell-rail-label)] transition hover:bg-[var(--shell-card)]/80 hover:text-[var(--shell-title)]"
         >
           <History className="size-4" />
         </div>

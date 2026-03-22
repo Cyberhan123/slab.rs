@@ -49,39 +49,43 @@
   --chart-4: oklch(0.60 0.14 280);
   --chart-5: oklch(0.68 0.18 340);
 
-  --status-success-bg: color-mix(in oklab, oklch(0.82 0.1 155) 46%, white);
-  --status-info-bg: color-mix(in oklab, var(--brand-teal) 16%, white);
-  --status-danger-bg: color-mix(in oklab, oklch(0.72 0.18 25) 18%, white);
-  --status-neutral-bg: color-mix(in oklab, var(--foreground) 6%, white);
+  --status-success-bg: color-mix(in oklab, var(--success) 40%, var(--background));
+  --status-info-bg: color-mix(in oklab, var(--brand-teal) 16%, var(--background));
+  --status-danger-bg: color-mix(in oklab, var(--destructive) 15%, var(--background));
+  --status-neutral-bg: color-mix(in oklab, var(--foreground) 6%, var(--background));
 
   --radius: 0.95rem;
   --shell-rail-width: 5rem;
   --shell-topbar-height: 3.5rem;
   --shell-footer-height: 2rem;
   --shell-content-gutter: 1.5rem;
-  --shell-title: #0f172a;
-  --shell-subtitle: #0d9488;
-  --shell-rail-bg: #f2f4f6;
-  --shell-topbar-bg: rgba(247, 249, 251, 0.5);
-  --shell-footer-bg: #f2f4f6;
-  --shell-search-bg: rgba(224, 227, 229, 0.4);
-  --shell-search-foreground: #94a3b8;
-  --shell-divider: rgba(188, 201, 198, 0.3);
-  --shell-rail-label: #64748b;
-  --shell-rail-active: #0d9488;
-  --shell-footer-label: #394a56;
-  --shell-footer-value: #009d86;
-  --shell-elevation: 0 1px 2px rgba(0, 0, 0, 0.05);
-  --shell-line: rgba(229, 231, 235, 0.9);
 
-  --sidebar: color-mix(in oklab, var(--surface-1) 84%, white);
-  --sidebar-foreground: oklch(0.28 0.03 220);
-  --sidebar-primary: oklch(0.588 0.12 195);
-  --sidebar-primary-foreground: oklch(0.99 0.005 200);
+  /* Shell UI – all values derived from theme tokens so swapping a palette
+     automatically re-skins the entire shell chrome. */
+  --shell-card: oklch(1 0 0);
+  --shell-title: var(--foreground);
+  --shell-subtitle: var(--brand-teal);
+  --shell-rail-bg: color-mix(in oklab, var(--app-canvas) 90%, var(--foreground) 10%);
+  --shell-topbar-bg: color-mix(in oklab, var(--app-canvas) 80%, transparent);
+  --shell-footer-bg: color-mix(in oklab, var(--app-canvas) 90%, var(--foreground) 10%);
+  --shell-search-bg: color-mix(in oklab, var(--surface-soft) 60%, transparent);
+  --shell-search-foreground: var(--muted-foreground);
+  --shell-divider: color-mix(in oklab, var(--border) 48%, transparent);
+  --shell-rail-label: var(--muted-foreground);
+  --shell-rail-active: var(--brand-teal);
+  --shell-footer-label: color-mix(in oklab, var(--muted-foreground) 85%, var(--foreground) 15%);
+  --shell-footer-value: var(--brand-teal);
+  --shell-elevation: 0 1px 2px color-mix(in oklab, var(--foreground) 5%, transparent);
+  --shell-line: color-mix(in oklab, var(--border) 90%, transparent);
+
+  --sidebar: color-mix(in oklab, var(--surface-1) 84%, var(--background));
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: var(--surface-soft);
-  --sidebar-accent-foreground: oklch(0.35 0.04 220);
-  --sidebar-border: oklch(0.89 0.014 200);
-  --sidebar-ring: oklch(0.588 0.12 195);
+  --sidebar-accent-foreground: var(--secondary-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 
   --ai-bubble: oklch(0.94 0.02 195);
   --ai-bubble-foreground: oklch(0.28 0.03 220);
@@ -105,10 +109,10 @@
   --surface-input: oklch(0.23 0.018 220);
 
   --card: var(--surface-1);
-  --card-foreground: oklch(0.92 0.01 200);
+  --card-foreground: var(--foreground);
 
   --popover: oklch(0.22 0.016 220);
-  --popover-foreground: oklch(0.92 0.01 200);
+  --popover-foreground: var(--foreground);
 
   --primary: oklch(0.72 0.14 195);
   --primary-foreground: oklch(0.16 0.02 220);
@@ -139,13 +143,13 @@
   --chart-5: oklch(0.70 0.18 340);
 
   --sidebar: oklch(0.188 0.018 220);
-  --sidebar-foreground: oklch(0.92 0.01 200);
-  --sidebar-primary: oklch(0.72 0.14 195);
-  --sidebar-primary-foreground: oklch(0.16 0.02 220);
+  --sidebar-foreground: var(--foreground);
+  --sidebar-primary: var(--primary);
+  --sidebar-primary-foreground: var(--primary-foreground);
   --sidebar-accent: var(--surface-soft);
-  --sidebar-accent-foreground: oklch(0.88 0.01 200);
-  --sidebar-border: oklch(0.30 0.02 220);
-  --sidebar-ring: oklch(0.72 0.14 195);
+  --sidebar-accent-foreground: var(--secondary-foreground);
+  --sidebar-border: var(--border);
+  --sidebar-ring: var(--ring);
 
   --ai-bubble: oklch(0.25 0.02 220);
   --ai-bubble-foreground: oklch(0.90 0.01 200);
@@ -155,23 +159,24 @@
   --ai-tool-foreground: oklch(0.98 0.01 40);
   --success: oklch(0.62 0.16 155);
   --success-foreground: oklch(0.15 0.02 155);
-  --status-success-bg: color-mix(in oklab, oklch(0.62 0.16 155) 24%, var(--surface-2));
+  --status-success-bg: color-mix(in oklab, var(--success) 24%, var(--surface-2));
   --status-info-bg: color-mix(in oklab, var(--brand-teal) 18%, var(--surface-2));
-  --status-danger-bg: color-mix(in oklab, oklch(0.72 0.18 25) 20%, var(--surface-2));
+  --status-danger-bg: color-mix(in oklab, var(--destructive) 20%, var(--surface-2));
   --status-neutral-bg: color-mix(in oklab, white 10%, var(--surface-2));
-  --shell-title: oklch(0.94 0.01 200);
-  --shell-subtitle: oklch(0.78 0.12 190);
+  --shell-card: var(--surface-2);
+  --shell-title: var(--foreground);
+  --shell-subtitle: var(--brand-teal);
   --shell-rail-bg: color-mix(in oklab, var(--app-canvas) 90%, black 10%);
   --shell-topbar-bg: color-mix(in oklab, var(--app-canvas) 82%, black 18%);
   --shell-footer-bg: color-mix(in oklab, var(--app-canvas) 92%, black 8%);
   --shell-search-bg: color-mix(in oklab, var(--surface-soft) 72%, black 28%);
-  --shell-search-foreground: oklch(0.74 0.012 220);
+  --shell-search-foreground: var(--muted-foreground);
   --shell-divider: color-mix(in oklab, white 18%, transparent);
-  --shell-rail-label: oklch(0.74 0.018 220);
-  --shell-rail-active: oklch(0.78 0.12 190);
-  --shell-footer-label: oklch(0.78 0.012 220);
-  --shell-footer-value: oklch(0.78 0.12 190);
-  --shell-elevation: 0 1px 2px rgba(0, 0, 0, 0.34);
+  --shell-rail-label: var(--muted-foreground);
+  --shell-rail-active: var(--brand-teal);
+  --shell-footer-label: var(--muted-foreground);
+  --shell-footer-value: var(--brand-teal);
+  --shell-elevation: 0 1px 2px color-mix(in oklab, var(--foreground) 34%, transparent);
   --shell-line: color-mix(in oklab, white 12%, transparent);
 }
 
@@ -236,6 +241,18 @@
   --color-status-info-bg: var(--status-info-bg);
   --color-status-danger-bg: var(--status-danger-bg);
   --color-status-neutral-bg: var(--status-neutral-bg);
+
+  /* Shell chrome tokens – exposed so callers can use e.g. text-shell-title */
+  --color-shell-card: var(--shell-card);
+  --color-shell-title: var(--shell-title);
+  --color-shell-subtitle: var(--shell-subtitle);
+  --color-shell-search-foreground: var(--shell-search-foreground);
+  --color-shell-divider: var(--shell-divider);
+  --color-shell-rail-label: var(--shell-rail-label);
+  --color-shell-rail-active: var(--shell-rail-active);
+  --color-shell-footer-label: var(--shell-footer-label);
+  --color-shell-footer-value: var(--shell-footer-value);
+  --color-shell-line: var(--shell-line);
 }
 
 @layer base {
@@ -262,20 +279,20 @@
     min-height: 100%;
     width: 100%;
     background:
-      linear-gradient(180deg, color-mix(in oklab, white 32%, transparent) 0%, transparent 18%),
+      linear-gradient(180deg, color-mix(in oklab, var(--shell-card) 32%, transparent) 0%, transparent 18%),
       radial-gradient(circle at top right, color-mix(in oklab, var(--brand-teal) 3%, transparent), transparent 36%),
       var(--shell-rail-bg);
   }
 
   .workspace-surface {
     background: var(--surface-1);
-    border: 1px solid color-mix(in oklab, var(--border) 90%, white 10%);
+    border: 1px solid color-mix(in oklab, var(--border) 90%, var(--background) 10%);
     box-shadow: 0 20px 56px -42px color-mix(in oklab, var(--foreground) 32%, transparent);
   }
 
   .workspace-soft-panel {
     background: var(--surface-soft);
-    border: 1px solid color-mix(in oklab, var(--border) 86%, white 14%);
+    border: 1px solid color-mix(in oklab, var(--border) 86%, var(--background) 14%);
     box-shadow: inset 0 1px 0 color-mix(in oklab, var(--foreground) 4%, transparent);
   }
 
@@ -304,7 +321,7 @@
 
   .shell-topbar {
     background:
-      linear-gradient(180deg, color-mix(in oklab, white 30%, transparent) 0%, transparent 100%),
+      linear-gradient(180deg, color-mix(in oklab, var(--shell-card) 30%, transparent) 0%, transparent 100%),
       var(--shell-topbar-bg);
     border-bottom: 1px solid var(--shell-line);
     backdrop-filter: blur(10px);
@@ -312,8 +329,8 @@
 
   .shell-search {
     background: var(--shell-search-bg);
-    border: 1px solid color-mix(in oklab, white 32%, transparent);
-    box-shadow: inset 0 1px 0 color-mix(in oklab, white 44%, transparent);
+    border: 1px solid color-mix(in oklab, var(--shell-card) 32%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, var(--shell-card) 44%, transparent);
   }
 
   .shell-footer-bar {
@@ -366,12 +383,12 @@
   }
 
   .chat-markdown--assistant code:not(pre code) {
-    background: #d7dde3;
-    color: #0d1c2f;
+    background: color-mix(in oklab, var(--ai-bubble-foreground) 10%, var(--ai-bubble));
+    color: var(--ai-bubble-foreground);
   }
 
   .chat-markdown--user code:not(pre code) {
-    background: #b9c7e0;
-    color: #0d1c2f;
+    background: color-mix(in oklab, var(--user-bubble-foreground) 22%, var(--user-bubble));
+    color: var(--user-bubble-foreground);
   }
 }
