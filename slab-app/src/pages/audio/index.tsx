@@ -474,6 +474,9 @@ export default function Audio() {
               <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-[#6d7a77]">
                 Transcription Setup
               </p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                The active Whisper model comes from the global header.
+              </p>
             </div>
 
             {catalogModelsError && (
@@ -496,65 +499,6 @@ export default function Audio() {
               </Alert>
             )}
 
-            <div className="rounded-[22px] border border-white/70 bg-white/60 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="space-y-1">
-                  <Label className="text-[12px] font-semibold text-[#191c1e]">Whisper Model</Label>
-                  <p className="text-xs leading-5 text-muted-foreground">
-                    Choose the transcription model used for this task.
-                  </p>
-                </div>
-                <Button
-                  type="button"
-                  variant="quiet"
-                  size="sm"
-                  className="rounded-full px-3"
-                  onClick={() => void refetchCatalogModels()}
-                  disabled={isBusy || catalogModelsLoading}
-                >
-                  Refresh
-                </Button>
-              </div>
-
-              <Select
-                value={selectedModelId}
-                onValueChange={setSelectedModelId}
-                disabled={!isTauri || isBusy || catalogModelsLoading || whisperTranscribeModels.length === 0}
-              >
-                <SelectTrigger
-                  variant="soft"
-                  size="pill"
-                  className="mt-4 w-full justify-between border-[#dbe4ea] bg-white shadow-none"
-                >
-                  <SelectValue
-                    placeholder={catalogModelsLoading ? 'Loading models...' : 'Select whisper model'}
-                  />
-                </SelectTrigger>
-                <SelectContent variant="soft">
-                  {whisperTranscribeModels.length === 0 ? (
-                    <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                      No Whisper transcription models in catalog
-                    </div>
-                  ) : (
-                    whisperTranscribeModels.map((model) => (
-                      <SelectItem key={model.id} value={model.id}>
-                        {model.display_name}
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
-
-              <p className="mt-2 text-[11px] leading-5 text-muted-foreground">
-                {selectedModel
-                  ? selectedModel.local_path
-                    ? 'Downloaded locally and ready to load.'
-                    : 'Not downloaded yet. It will be fetched automatically when you start.'
-                  : catalogModelsLoading
-                    ? 'Loading model catalog...'
-                    : 'No Whisper transcription model available. Please add one in Settings first.'}
-              </p>
-            </div>
             <div className="rounded-[22px] border border-white/70 bg-white/60 p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.7)]">
               <div className="flex items-start justify-between gap-5">
                 <div className="space-y-1">
