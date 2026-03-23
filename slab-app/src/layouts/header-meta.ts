@@ -66,6 +66,11 @@ export const PAGE_HEADER_META = {
     subtitle: "Configure app and backend options",
     icon: Settings,
   },
+  setup: {
+    title: "Setup",
+    subtitle: "Initialize local runtime dependencies",
+    icon: Package,
+  },
   task: {
     title: "Tasks",
     subtitle: "Track and manage system tasks",

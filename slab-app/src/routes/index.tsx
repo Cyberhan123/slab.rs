@@ -12,6 +12,7 @@ import Video from "@/pages/video";
 import Image from "@/pages/image";
 import Plugins from "@/pages/plugins";
 import { Spinner } from "@/components/ui/spinner";
+import { GlobalHeaderProvider } from "@/layouts/global-header-provider";
 
 // Lazy-load the setup page so it doesn't bloat the main bundle.
 const SetupPage = lazy(() => import("@/pages/setup"));
@@ -23,15 +24,17 @@ function AppRoutes() {
       // full-screen canvas.  It navigates to "/" once setup is complete.
       path: '/setup',
       element: (
-        <Suspense
-          fallback={
-            <div className="flex h-screen items-center justify-center">
-              <Spinner className="h-8 w-8" />
-            </div>
-          }
-        >
-          <SetupPage />
-        </Suspense>
+        <GlobalHeaderProvider>
+          <Suspense
+            fallback={
+              <div className="flex h-screen items-center justify-center">
+                <Spinner className="h-8 w-8" />
+              </div>
+            }
+          >
+            <SetupPage />
+          </Suspense>
+        </GlobalHeaderProvider>
       ),
     },
     {
