@@ -11,13 +11,17 @@ on:
 
 jobs:
   copilot-setup-steps:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
+    runs-on: ubuntu-24.04
+    timeout-minutes: 59
     permissions:
       contents: read
     steps:
       - name: Checkout code
         uses: actions/checkout@v5
+
+      - name: Verify Linux x86_64 runner
+        run: |
+          test "$(uname -m)" = "x86_64"
 
       - name: Install Linux system dependencies
         run: |
@@ -37,7 +41,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
 
       - name: Prefetch Rust dependencies
-        run: cargo fetch --workspace --locked
+        run: cargo fetch --locked
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
