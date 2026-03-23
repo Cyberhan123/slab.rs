@@ -26,14 +26,14 @@ futures = { workspace = true }
 bytes   = { workspace = true }
 
 # Web framework + middleware
-axum       = { version = "0.8", features = ["macros", "multipart"] }
-tower      = { version = "0.5", features = ["util"] }
-tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "set-header","util"] }
-http = "1.4.0"
-http-body-util = "0.1.3"
-tonic = { version = "0.12", features = ["transport"] }
-parity-tokio-ipc = "0.9"
-hyper-util = { version = "0.1", features = ["tokio"] }
+axum       = { workspace = true, features = ["multipart"] }
+tower      = { workspace = true }
+tower-http = { workspace = true }
+http = { workspace = true }
+http-body-util = { workspace = true }
+tonic = { workspace = true }
+parity-tokio-ipc = { workspace = true }
+hyper-util = { workspace = true }
 
 # Serialization
 serde      = { workspace = true }
@@ -54,9 +54,9 @@ utoipa-axum       = { version = "0.2" }
 utoipa-swagger-ui = { version = "9", features = ["axum","cache"] }
 
 # Logging
-tracing            = "0.1"
-tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
-tracing-appender   = "0.2"
+tracing            = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender   = { workspace = true }
 
 # Error handling
 thiserror = { workspace = true }
@@ -65,9 +65,9 @@ validator = { version = "0.19", features = ["derive"] }
 
 # Misc
 base64    = { workspace = true }
-bytemuck  = "1"
-strum = { version = "0.28.0", features = ["derive"] }
-clap = { version = "4.5.60", features = ["derive"] }
+bytemuck  = { workspace = true }
+strum = { workspace = true }
+clap = { workspace = true }
 all-smi = "0.17"
 image     = { workspace = true }
 dirs-next = "2.0.0"
