@@ -134,18 +134,14 @@ pub fn encode_chat_request(
     model: impl Into<String>,
     request: &TextGenerationRequest,
 ) -> pb::ChatRequest {
-    let prompt = if request.apply_chat_template && !request.chat_messages.is_empty() {
-        // When sending structured messages for template application the
-        // prompt field carries the pre-rendered fallback; messages field
-        // carries the structured payload.
-        request.prompt.clone()
-    } else {
-        match request.system_prompt.as_deref() {
-            Some(system_prompt) if !system_prompt.is_empty() => {
-                format!("{system_prompt}\n\n{}", request.prompt)
-            }
-            _ => request.prompt.clone(),
+    // The prompt field always carries the pre-rendered fallback.  Preserve the
+    // legacy behavior of prefixing `system_prompt` when present, even when
+    // using structured messages for template application.
+    let prompt = match request.system_prompt.as_deref() {
+        Some(system_prompt) if !system_prompt.is_empty() => {
+            format!("{system_prompt}\n\n{}", request.prompt)
         }
+        _ => request.prompt.clone(),
     };
 
     let messages = request
@@ -169,8 +165,11 @@ pub fn decode_chat_request(
     request: &pb::ChatRequest,
     stream: bool,
 ) -> Result<TextGenerationRequest, ProtoConversionError> {
-    // At least one of prompt or messages must be non-empty.
-    if request.prompt.is_empty() && request.messages.is_empty() {
+    // Require a non-empty prompt, or (apply_chat_template && non-empty messages).
+    let prompt_empty = request.prompt.trim().is_empty();
+    let messages_empty = request.messages.is_empty();
+
+    if prompt_empty && !(request.apply_chat_template && !messages_empty) {
         return Err(ProtoConversionError::EmptyField { field: "prompt" });
     }
 
