@@ -36,20 +36,13 @@ slab-libfetch = { workspace = true }
 hf-hub = { workspace = true }
 thiserror = { workspace = true }
 serde_json = { workspace = true }
-
-serde = { version = "1.0.228", features = ["derive"] }
-axum = { version = "0.8.8", features = ["macros"] }
-tracing-subscriber = "0.3.22"
-tracing = "0.1"
-anyhow = "1.0.101"
-bytemuck = "1.25.0"
+serde = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
 slab-subtitle = { workspace = true }
-tracing-test = "0.2.6"
 bytes = { workspace = true }
 futures = { workspace = true }
-strum = { version = "0.28.0", features = ["derive", "strum_macros"] }
-strum_macros = "0.28.0"
-async-trait = "0.1.89"
 base64 = { workspace = true }
 image = { workspace = true }
 ort = { workspace = true, optional = true }
@@ -60,3 +53,4 @@ tokenizers = { workspace = true, optional = true }
 
 [dev-dependencies]
 trybuild = "1.0"
+tracing-test = { workspace = true }

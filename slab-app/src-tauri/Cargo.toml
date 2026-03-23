@@ -26,19 +26,19 @@ tauri = { version = "2", features = ["unstable"] }
 tauri-plugin-opener = "2"
 tauri-plugin-mcp-bridge = "0.9"
 tauri-plugin-log = "2"
-serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+serde = { workspace = true }
+serde_json = { workspace = true }
 tauri-plugin-dialog = "2"
-reqwest = { version = "0.12", features = ["json", "blocking"] }
-tokio = { version = "1", features = ["full"] }
+reqwest = { workspace = true, features = ["blocking"] }
+tokio = { workspace = true }
 tauri-plugin-shell = "2"
-log = "0.4"
+log = { workspace = true }
 extism = "1.12.0"
 sha2 = "0.10"
 hex = "0.4"
 mime_guess = "2.0"
 percent-encoding = "2.3"
-base64 = "0.22"
+base64 = { workspace = true }
 dirs-next = "2.0.0"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
