@@ -11,18 +11,19 @@
   },
   "app": {
     "withGlobalTauri": true,
-    "windows": [
-      {
-        "title": "Slab",
-        "width": 1280,
-        "height": 1040,
-        "resizable": true,
-        "center": true,
-        "decorations": false
-      }
-    ],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self';",
+      "csp": {
+        "default-src": "'self' asset:",
+        "script-src": "'self' asset: http://localhost:3000 blob: 'unsafe-eval'",
+        "connect-src": [
+          "'self'",
+          "http://127.0.0.1:3000",
+          "http://localhost:3000"
+        ],
+        "font-src": "'self' asset:",
+        "img-src": "'self' asset: http://asset.localhost blob: data:",
+        "style-src": "'unsafe-inline' 'self'"
+      },
       "capabilities": [
         "main-window",
         "plugin-webview"
@@ -39,7 +40,7 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-   "resources": [
+    "resources": [
       "resources/**/*.dll"
     ],
     "externalBin": [
