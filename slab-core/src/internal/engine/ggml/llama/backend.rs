@@ -97,6 +97,22 @@ fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
+/// Deserialize a `chat_messages` JSON array from the options map into a
+/// `Vec<LlamaChatMessage>`.  Returns an empty Vec when the key is absent or
+/// the value cannot be parsed.
+fn extract_chat_messages(opts: &serde_json::Value) -> Vec<LlamaChatMessage> {
+    let Some(arr) = opts.get("chat_messages").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|v| {
+            let role = v.get("role").and_then(|r| r.as_str())?.to_owned();
+            let content = v.get("content").and_then(|c| c.as_str())?.to_owned();
+            Some(LlamaChatMessage { role, content })
+        })
+        .collect()
+}
+
 struct LlamaWorker {
     /// The engine: wraps both the library handle and inference workers.
     /// - `None` → library not loaded.
@@ -160,7 +176,10 @@ impl LlamaWorker {
         let max_tokens =
             opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
         let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
-        self.handle_inference(input, max_tokens, session_key, reply_tx).await;
+        let apply_chat_template =
+            opts.get("apply_chat_template").and_then(|v| v.as_bool()).unwrap_or(false);
+        let chat_messages = extract_chat_messages(&opts);
+        self.handle_inference(input, max_tokens, session_key, apply_chat_template, chat_messages, reply_tx).await;
     }
 
     #[on_event(InferenceStream)]
@@ -177,7 +196,10 @@ impl LlamaWorker {
         let max_tokens =
             opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
         let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
-        self.handle_inference_stream(input, max_tokens, session_key, reply_tx).await;
+        let apply_chat_template =
+            opts.get("apply_chat_template").and_then(|v| v.as_bool()).unwrap_or(false);
+        let chat_messages = extract_chat_messages(&opts);
+        self.handle_inference_stream(input, max_tokens, session_key, apply_chat_template, chat_messages, reply_tx).await;
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -391,6 +413,8 @@ impl LlamaWorker {
         input: Payload,
         max_tokens: usize,
         session_key: Option<String>,
+        apply_chat_template: bool,
+        chat_messages: Vec<LlamaChatMessage>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -408,7 +432,20 @@ impl LlamaWorker {
                 return;
             }
         };
-        let prompt = Self::apply_chat_template_if_possible(engine.as_ref(), &prompt);
+        let prompt = if apply_chat_template && !chat_messages.is_empty() {
+            match engine.apply_chat_template(&chat_messages, true) {
+                Ok(applied) => applied,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to apply embedded chat template; falling back to raw prompt"
+                    );
+                    prompt
+                }
+            }
+        } else {
+            Self::apply_chat_template_if_possible(engine.as_ref(), &prompt)
+        };
         let prepared =
             match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt).await {
                 Ok(v) => v,
@@ -446,6 +483,8 @@ impl LlamaWorker {
         input: Payload,
         max_tokens: usize,
         session_key: Option<String>,
+        apply_chat_template: bool,
+        chat_messages: Vec<LlamaChatMessage>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -463,7 +502,20 @@ impl LlamaWorker {
                 return;
             }
         };
-        let prompt = Self::apply_chat_template_if_possible(engine.as_ref(), prompt.as_ref());
+        let prompt = if apply_chat_template && !chat_messages.is_empty() {
+            match engine.apply_chat_template(&chat_messages, true) {
+                Ok(applied) => applied,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to apply embedded chat template; falling back to raw prompt"
+                    );
+                    prompt.as_ref().to_owned()
+                }
+            }
+        } else {
+            Self::apply_chat_template_if_possible(engine.as_ref(), prompt.as_ref())
+        };
         let prepared =
             match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt).await {
                 Ok(v) => v,

@@ -4,6 +4,7 @@ use base64::Engine as _;
 use image::GenericImageView;
 use serde::{Deserialize, Serialize};
 use slab_types::backend::RuntimeBackendId;
+use slab_types::chat::ConversationMessage;
 use slab_types::diffusion::{
     DiffusionImageRequest, DiffusionImageResponse, DiffusionVideoRequest, DiffusionVideoResponse,
 };
@@ -133,12 +134,25 @@ pub fn encode_chat_request(
     model: impl Into<String>,
     request: &TextGenerationRequest,
 ) -> pb::ChatRequest {
-    let prompt = match request.system_prompt.as_deref() {
-        Some(system_prompt) if !system_prompt.is_empty() => {
-            format!("{system_prompt}\n\n{}", request.prompt)
+    let prompt = if request.apply_chat_template && !request.chat_messages.is_empty() {
+        // When sending structured messages for template application the
+        // prompt field carries the pre-rendered fallback; messages field
+        // carries the structured payload.
+        request.prompt.clone()
+    } else {
+        match request.system_prompt.as_deref() {
+            Some(system_prompt) if !system_prompt.is_empty() => {
+                format!("{system_prompt}\n\n{}", request.prompt)
+            }
+            _ => request.prompt.clone(),
         }
-        _ => request.prompt.clone(),
     };
+
+    let messages = request
+        .chat_messages
+        .iter()
+        .map(|m| pb::ChatMessage { role: m.role.clone(), content: m.content.clone() })
+        .collect();
 
     pb::ChatRequest {
         prompt,
@@ -146,6 +160,8 @@ pub fn encode_chat_request(
         max_tokens: request.max_tokens.unwrap_or_default(),
         temperature: request.temperature.unwrap_or_default(),
         session_key: request.session_key.clone().unwrap_or_default(),
+        messages,
+        apply_chat_template: request.apply_chat_template,
     }
 }
 
@@ -153,11 +169,22 @@ pub fn decode_chat_request(
     request: &pb::ChatRequest,
     stream: bool,
 ) -> Result<TextGenerationRequest, ProtoConversionError> {
-    ensure_non_empty(&request.prompt, "prompt")?;
+    // At least one of prompt or messages must be non-empty.
+    if request.prompt.is_empty() && request.messages.is_empty() {
+        return Err(ProtoConversionError::EmptyField { field: "prompt" });
+    }
+
+    let chat_messages: Vec<ConversationMessage> = request
+        .messages
+        .iter()
+        .map(|m| ConversationMessage { role: m.role.clone(), content: m.content.clone() })
+        .collect();
 
     Ok(TextGenerationRequest {
         prompt: request.prompt.clone(),
         system_prompt: None,
+        chat_messages,
+        apply_chat_template: request.apply_chat_template,
         max_tokens: (request.max_tokens > 0).then_some(request.max_tokens),
         temperature: (request.temperature > 0.0).then_some(request.temperature),
         top_p: None,
