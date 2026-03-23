@@ -2,6 +2,7 @@
 //!
 //! # Modules
 //! - [`backend`] runtime-facing backend identifiers.
+//! - [`chat`] shared chat conversation and inference-control types.
 //! - [`common`] universal building blocks: [`common::Id`], [`common::Timestamp`].
 //! - [`diffusion`] normalized diffusion request and response types.
 //! - [`error`] crate-level error type.
@@ -12,6 +13,7 @@
 //! - [`whisper`] shared whisper VAD and decode option types.
 
 pub mod backend;
+pub mod chat;
 pub mod common;
 pub mod diffusion;
 pub mod error;
@@ -22,6 +24,7 @@ pub mod settings;
 pub mod whisper;
 
 pub use backend::RuntimeBackendId;
+pub use chat::{ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationMessage};
 pub use common::{Id, Timestamp};
 pub use diffusion::{
     DiffusionImageRequest, DiffusionImageResponse, DiffusionVideoRequest, DiffusionVideoResponse,

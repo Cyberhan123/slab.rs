@@ -1,4 +1,4 @@
-use genai::chat::ChatMessage as GenaiChatMessage;
+pub use slab_types::chat::{ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationMessage};
 
 use crate::api::v1::chat::schema::{
     ChatCompletionRequest, ChatMessage, ChatReasoningEffort as ApiChatReasoningEffort,
@@ -18,12 +18,6 @@ pub enum ChatCompletionOutput {
     Stream(BoxStream<'static, ChatStreamChunk>),
 }
 
-#[derive(Debug, Clone, Copy)]
-pub enum ChatModelSource {
-    Local,
-    Cloud,
-}
-
 #[derive(Debug, Clone)]
 pub struct ChatModelOption {
     pub id: String,
@@ -34,50 +28,6 @@ pub struct ChatModelOption {
     pub backend_id: Option<String>,
     pub provider_id: Option<String>,
     pub provider_name: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct ConversationMessage {
-    pub role: String,
-    pub content: String,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ChatReasoningEffort {
-    None,
-    Low,
-    Medium,
-    High,
-    Minimal,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub enum ChatVerbosity {
-    Low,
-    Medium,
-    High,
-}
-
-impl ChatReasoningEffort {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::None => "none",
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-            Self::Minimal => "minimal",
-        }
-    }
-}
-
-impl ChatVerbosity {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Low => "low",
-            Self::Medium => "medium",
-            Self::High => "high",
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -117,16 +67,6 @@ impl From<ChatMessage> for ConversationMessage {
 impl From<db::ChatMessage> for ConversationMessage {
     fn from(message: db::ChatMessage) -> Self {
         Self { role: message.role, content: message.content }
-    }
-}
-
-impl From<&ConversationMessage> for GenaiChatMessage {
-    fn from(message: &ConversationMessage) -> Self {
-        match message.role.as_str() {
-            "system" => Self::system(message.content.clone()),
-            "assistant" => Self::assistant(message.content.clone()),
-            _ => Self::user(message.content.clone()),
-        }
     }
 }
 
