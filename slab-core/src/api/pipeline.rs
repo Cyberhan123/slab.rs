@@ -131,7 +131,7 @@ impl Pipeline {
             vec![CpuStage::new("audio.decode.wav", move |_| {
                 crate::internal::engine::audio_utils::load_pcm_from_wav(&path.to_string_lossy())
                     .map(Payload::from)
-                    .map_err(|error| error.to_string())
+                    .map_err(|e| CoreError::EngineIo(e.to_string()))
             })]
         };
         let plan = InvocationPlan::new(

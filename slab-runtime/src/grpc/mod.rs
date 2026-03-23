@@ -408,6 +408,7 @@ pub(super) fn runtime_to_status(err: CoreError) -> Status {
             Status::not_found(msg)
         }
         CoreError::Timeout | CoreError::BroadcastAckTimeout => Status::deadline_exceeded(msg),
+        CoreError::Cancelled => Status::cancelled(msg),
         CoreError::BackendShutdown | CoreError::LibraryLoadFailed { .. } => {
             Status::unavailable(msg)
         }

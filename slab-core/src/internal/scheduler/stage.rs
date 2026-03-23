@@ -9,8 +9,8 @@ use crate::internal::scheduler::types::{CoreError, Payload};
 /// Type alias for the boxed synchronous CPU work closure.
 ///
 /// The closure receives an input `Payload` and returns either a new `Payload`
-/// or an error string.
-pub type CpuFn = Arc<dyn Fn(Payload) -> Result<Payload, String> + Send + Sync + 'static>;
+/// or a [`CoreError`].
+pub type CpuFn = Arc<dyn Fn(Payload) -> Result<Payload, CoreError> + Send + Sync + 'static>;
 
 /// Describes a single stage in a pipeline.
 ///
@@ -58,7 +58,7 @@ impl CpuStage {
     /// Construct a new `CpuStage` from a name and a synchronous work function.
     pub fn new(
         name: impl Into<String>,
-        work: impl Fn(Payload) -> Result<Payload, String> + Send + Sync + 'static,
+        work: impl Fn(Payload) -> Result<Payload, CoreError> + Send + Sync + 'static,
     ) -> Self {
         Self { name: name.into(), work: Arc::new(work) }
     }
@@ -70,10 +70,9 @@ impl CpuStage {
         tokio::task::spawn_blocking(move || work(input))
             .await
             .map_err(|_| CoreError::CpuStageFailed {
-                stage_name: name.clone(),
+                stage_name: name,
                 message: "spawn_blocking task panicked".into(),
             })?
-            .map_err(|message| CoreError::CpuStageFailed { stage_name: name, message })
     }
 }
 

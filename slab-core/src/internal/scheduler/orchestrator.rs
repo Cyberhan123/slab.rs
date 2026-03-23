@@ -530,7 +530,7 @@ impl Orchestrator {
                 message: "task result has already been consumed".into(),
             }),
             TaskStatus::Failed { error } => Err(error),
-            TaskStatus::Cancelled => Err(CoreError::BackendShutdown),
+            TaskStatus::Cancelled => Err(CoreError::Cancelled),
             TaskStatus::SucceededStreaming => Err(CoreError::GpuStageFailed {
                 stage_name: "result".into(),
                 message: "streaming task has no unary result".into(),
@@ -557,7 +557,7 @@ impl Orchestrator {
                         });
                     }
                     TaskStatus::Failed { error } => return Err(error),
-                    TaskStatus::Cancelled => return Err(CoreError::BackendShutdown),
+                    TaskStatus::Cancelled => return Err(CoreError::Cancelled),
                     _ => tokio::time::sleep(Duration::from_millis(5)).await,
                 }
             }
