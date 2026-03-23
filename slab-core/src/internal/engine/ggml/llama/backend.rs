@@ -113,6 +113,15 @@ fn extract_chat_messages(opts: &serde_json::Value) -> Vec<LlamaChatMessage> {
         .collect()
 }
 
+/// Infer the `add_assistant_prompt` flag from the message list.
+///
+/// Returns `false` when the last message already has role `"assistant"` (i.e.
+/// an assistant-prefill / regeneration scenario where the template should not
+/// append another opening assistant turn).  Returns `true` in all other cases.
+fn infer_add_assistant_prompt(messages: &[LlamaChatMessage]) -> bool {
+    messages.last().map(|m| m.role != "assistant").unwrap_or(true)
+}
+
 struct LlamaWorker {
     /// The engine: wraps both the library handle and inference workers.
     /// - `None` → library not loaded.
@@ -433,7 +442,8 @@ impl LlamaWorker {
             }
         };
         let prompt = if apply_chat_template && !chat_messages.is_empty() {
-            match engine.apply_chat_template(&chat_messages, true) {
+            let add_assistant = infer_add_assistant_prompt(&chat_messages);
+            match engine.apply_chat_template(&chat_messages, add_assistant) {
                 Ok(applied) => applied,
                 Err(e) => {
                     tracing::warn!(
@@ -503,7 +513,8 @@ impl LlamaWorker {
             }
         };
         let prompt = if apply_chat_template && !chat_messages.is_empty() {
-            match engine.apply_chat_template(&chat_messages, true) {
+            let add_assistant = infer_add_assistant_prompt(&chat_messages);
+            match engine.apply_chat_template(&chat_messages, add_assistant) {
                 Ok(applied) => applied,
                 Err(e) => {
                     tracing::warn!(
@@ -623,9 +634,91 @@ pub(crate) fn spawn_backend_with_engine(
 
 #[cfg(test)]
 mod tests {
-    use super::{LlamaWorker, SessionBinding};
+    use super::{LlamaWorker, SessionBinding, extract_chat_messages, infer_add_assistant_prompt};
     use crate::internal::scheduler::backend::protocol::RuntimeControlSignal;
     use crate::internal::scheduler::types::Payload;
+
+    // ── infer_add_assistant_prompt ────────────────────────────────────────────
+
+    fn msg(role: &str, content: &str) -> super::LlamaChatMessage {
+        super::LlamaChatMessage { role: role.to_owned(), content: content.to_owned() }
+    }
+
+    #[test]
+    fn infer_add_assistant_returns_true_for_empty_messages() {
+        assert!(infer_add_assistant_prompt(&[]), "empty list should default to add_assistant=true");
+    }
+
+    #[test]
+    fn infer_add_assistant_returns_true_when_last_role_is_user() {
+        let messages = vec![msg("user", "hello")];
+        assert!(
+            infer_add_assistant_prompt(&messages),
+            "user-last messages should yield add_assistant=true"
+        );
+    }
+
+    #[test]
+    fn infer_add_assistant_returns_false_when_last_role_is_assistant() {
+        let messages = vec![msg("user", "hello"), msg("assistant", "hi there")];
+        assert!(
+            !infer_add_assistant_prompt(&messages),
+            "assistant-last messages (prefill) should yield add_assistant=false"
+        );
+    }
+
+    // ── extract_chat_messages ─────────────────────────────────────────────────
+
+    #[test]
+    fn extract_chat_messages_returns_empty_when_key_absent() {
+        let opts = serde_json::json!({ "other_key": "value" });
+        let result = extract_chat_messages(&opts);
+        assert!(result.is_empty(), "missing key should yield empty vec");
+    }
+
+    #[test]
+    fn extract_chat_messages_returns_empty_when_value_is_not_array() {
+        let opts = serde_json::json!({ "chat_messages": "not an array" });
+        let result = extract_chat_messages(&opts);
+        assert!(result.is_empty(), "non-array value should yield empty vec");
+    }
+
+    #[test]
+    fn extract_chat_messages_skips_malformed_entries() {
+        let opts = serde_json::json!({
+            "chat_messages": [
+                { "role": "user", "content": "hello" },
+                { "role": "user" },             // missing content → skipped
+                { "content": "no role" },       // missing role → skipped
+                42,                             // wrong type → skipped
+            ]
+        });
+        let result = extract_chat_messages(&opts);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].role, "user");
+        assert_eq!(result[0].content, "hello");
+    }
+
+    #[test]
+    fn extract_chat_messages_round_trips_valid_array() {
+        let opts = serde_json::json!({
+            "chat_messages": [
+                { "role": "system", "content": "You are a helpful assistant." },
+                { "role": "user", "content": "Hi!" },
+                { "role": "assistant", "content": "Hello there!" },
+            ]
+        });
+        let result = extract_chat_messages(&opts);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].role, "system");
+        assert_eq!(result[0].content, "You are a helpful assistant.");
+        assert_eq!(result[1].role, "user");
+        assert_eq!(result[1].content, "Hi!");
+        assert_eq!(result[2].role, "assistant");
+        assert_eq!(result[2].content, "Hello there!");
+    }
+
+    // ── LlamaWorker session management ────────────────────────────────────────
 
     #[tokio::test]
     async fn runtime_global_unload_clears_sessions() {
