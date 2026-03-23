@@ -133,24 +133,53 @@ pub(super) async fn create_chat_completion(
         let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
         let created_ts = chrono::Utc::now().timestamp();
         let model_name = requested_model.to_owned();
+        let completion_id_for_tokens = completion_id.clone();
+        let model_name_for_tokens = model_name.clone();
+        let completion_id_for_role = completion_id.clone();
+        let model_name_for_role = model_name.clone();
+        let completion_id_for_finish = completion_id.clone();
+        let model_name_for_finish = model_name.clone();
+
+        let role_chunk = stream::once(async move {
+            ChatStreamChunk::Data(super::build_role_chunk(
+                &completion_id_for_role,
+                created_ts,
+                &model_name_for_role,
+            ))
+        });
 
         let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
             match chunk {
                 Ok(CloudDelta::Content(token)) => ChatStreamChunk::Data(super::build_chunk(
-                    &completion_id,
+                    &completion_id_for_tokens,
                     created_ts,
-                    &model_name,
+                    &model_name_for_tokens,
                     &token,
                 )),
                 Ok(CloudDelta::Reasoning(token)) => ChatStreamChunk::Data(
-                    super::build_reasoning_chunk(&completion_id, created_ts, &model_name, &token),
+                    super::build_reasoning_chunk(
+                        &completion_id_for_tokens,
+                        created_ts,
+                        &model_name_for_tokens,
+                        &token,
+                    ),
                 ),
                 Err(error) => ChatStreamChunk::Comment(error.to_string()),
             }
         });
+        let finish_chunk = stream::once(async move {
+            ChatStreamChunk::Data(super::build_finish_chunk(
+                &completion_id_for_finish,
+                created_ts,
+                &model_name_for_finish,
+                "stop",
+            ))
+        });
 
-        let sse_stream =
-            token_stream.chain(stream::once(async { ChatStreamChunk::Data("[DONE]".into()) }));
+        let sse_stream = role_chunk
+            .chain(token_stream)
+            .chain(finish_chunk)
+            .chain(stream::once(async { ChatStreamChunk::Data("[DONE]".into()) }));
 
         return Ok(GeneratedChatOutput::Stream(Box::pin(sse_stream)));
     }

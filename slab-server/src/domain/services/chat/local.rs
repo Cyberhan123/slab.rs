@@ -5,8 +5,11 @@ use slab_types::inference::TextGenerationRequest;
 use uuid::Uuid;
 
 use crate::context::ModelState;
-use crate::domain::models::{ChatStreamChunk, ConversationMessage as DomainConversationMessage};
+use crate::domain::models::{
+    ChatStreamChunk, ConversationMessage as DomainConversationMessage, UnifiedModel,
+};
 use crate::error::ServerError;
+use crate::infra::db::ModelStore;
 use crate::infra::rpc;
 
 use super::GeneratedChatOutput;
@@ -20,7 +23,8 @@ pub(super) async fn create_chat_completion(
     temperature: f32,
     stream: bool,
 ) -> Result<GeneratedChatOutput, ServerError> {
-    let prompt = build_prompt(messages);
+    let prompt_template = resolve_prompt_template(state, model).await?;
+    let prompt = super::template::build_prompt(messages, prompt_template.as_deref());
     let request = TextGenerationRequest {
         prompt,
         system_prompt: None,
@@ -50,22 +54,51 @@ pub(super) async fn create_chat_completion(
         let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
         let created_ts = Utc::now().timestamp();
         let model_name = model.to_owned();
+        let completion_id_for_role = completion_id.clone();
+        let model_name_for_role = model_name.clone();
+        let completion_id_for_tokens = completion_id.clone();
+        let model_name_for_tokens = model_name.clone();
+        let completion_id_for_finish = completion_id.clone();
+        let model_name_for_finish = model_name.clone();
 
-        let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
-            match chunk {
-                Ok(message) if !message.error.is_empty() => ChatStreamChunk::Comment(message.error),
-                Ok(message) if message.done => ChatStreamChunk::Comment("done".into()),
-                Ok(message) => ChatStreamChunk::Data(super::build_chunk(
-                    &completion_id,
-                    created_ts,
-                    &model_name,
-                    &message.token,
-                )),
-                Err(error) => ChatStreamChunk::Comment(error.to_string()),
+        let role_chunk = stream::once(async move {
+            ChatStreamChunk::Data(super::build_role_chunk(
+                &completion_id_for_role,
+                created_ts,
+                &model_name_for_role,
+            ))
+        });
+        let token_stream = backend_stream.filter_map(move |chunk| {
+            let completion_id = completion_id_for_tokens.clone();
+            let model_name = model_name_for_tokens.clone();
+            async move {
+                match chunk {
+                    Ok(message) if !message.error.is_empty() => {
+                        Some(ChatStreamChunk::Comment(message.error))
+                    }
+                    Ok(message) if message.done => None,
+                    Ok(message) => Some(ChatStreamChunk::Data(super::build_chunk(
+                        &completion_id,
+                        created_ts,
+                        &model_name,
+                        &message.token,
+                    ))),
+                    Err(error) => Some(ChatStreamChunk::Comment(error.to_string())),
+                }
             }
         });
+        let finish_chunk = stream::once(async move {
+            ChatStreamChunk::Data(super::build_finish_chunk(
+                &completion_id_for_finish,
+                created_ts,
+                &model_name_for_finish,
+                "stop",
+            ))
+        });
 
-        let sse_stream = token_stream
+        let sse_stream = role_chunk
+            .chain(token_stream)
+            .chain(finish_chunk)
             .chain(stream::once(async { ChatStreamChunk::Data("[DONE]".into()) }))
             .map(move |item| {
                 // Keep the usage guard alive for the whole SSE stream lifetime.
@@ -88,21 +121,14 @@ pub(super) async fn create_chat_completion(
     Ok(GeneratedChatOutput::Text(generated))
 }
 
-/// Build the local llama prompt from merged message history.
-fn build_prompt(messages: &[DomainConversationMessage]) -> String {
-    let mut parts: Vec<String> = messages
-        .iter()
-        .map(|message| format!("{}: {}", capitalize_role(&message.role), message.content))
-        .collect();
-    parts.push("Assistant:".into());
-    parts.join("\n")
-}
-
-fn capitalize_role(role: &str) -> &str {
-    match role {
-        "user" => "User",
-        "assistant" => "Assistant",
-        "system" => "System",
-        other => other,
-    }
+async fn resolve_prompt_template(
+    state: &ModelState,
+    model: &str,
+) -> Result<Option<String>, ServerError> {
+    let Some(record) = state.store().get_model(model).await? else {
+        return Ok(None);
+    };
+    let model: UnifiedModel =
+        record.try_into().map_err(|error: String| ServerError::Internal(error))?;
+    Ok(model.spec.chat_template)
 }
