@@ -647,17 +647,28 @@
   }
 
   .shell-topbar {
+    app-region: drag;
     background:
       linear-gradient(180deg, color-mix(in oklab, var(--shell-card) 30%, transparent) 0%, transparent 100%),
       var(--shell-topbar-bg);
     border-bottom: 1px solid var(--shell-line);
     backdrop-filter: blur(10px);
+   
   }
 
   .shell-search {
+    app-region: no-drag;
     background: var(--shell-search-bg);
     border: 1px solid color-mix(in oklab, var(--shell-card) 32%, transparent);
     box-shadow: inset 0 1px 0 color-mix(in oklab, var(--shell-card) 44%, transparent);
+  }
+
+  .shell-context {
+    app-region: no-drag;
+  }
+
+  .shell-window-controls {
+    app-region: no-drag;
   }
 
   .shell-footer-bar {
