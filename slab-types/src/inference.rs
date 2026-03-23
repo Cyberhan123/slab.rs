@@ -5,6 +5,7 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::chat::ConversationMessage;
 use crate::whisper::{WhisperDecodeOptions, WhisperVadOptions};
 
 pub type JsonOptions = BTreeMap<String, serde_json::Value>;
@@ -14,6 +15,19 @@ pub struct TextGenerationRequest {
     pub prompt: String,
     #[serde(default)]
     pub system_prompt: Option<String>,
+    /// Structured conversation messages for chat-template–aware inference.
+    ///
+    /// When this list is non-empty and `apply_chat_template` is `true` the
+    /// backend will pass these messages directly to the model's embedded chat
+    /// template (via `llama_chat_apply_template`) instead of using the
+    /// pre-rendered `prompt` string.
+    #[serde(default)]
+    pub chat_messages: Vec<ConversationMessage>,
+    /// When `true`, the llama backend applies the model's own embedded chat
+    /// template to `chat_messages` and uses the result as the inference
+    /// prompt.  Has no effect when `chat_messages` is empty.
+    #[serde(default)]
+    pub apply_chat_template: bool,
     #[serde(default)]
     pub max_tokens: Option<u32>,
     #[serde(default)]

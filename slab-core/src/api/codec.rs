@@ -110,6 +110,19 @@ pub(crate) fn encode_text_generation_request(
     insert_option(&mut options, "session_key", request.session_key.clone());
     insert_option(&mut options, "stream", request.stream);
 
+    // Pass structured chat messages and the template flag to the backend so
+    // it can apply the model's embedded chat template instead of relying on
+    // the server-side pre-rendered prompt.
+    if request.apply_chat_template && !request.chat_messages.is_empty() {
+        insert_option(&mut options, "apply_chat_template", true);
+        let messages_json: Vec<Value> = request
+            .chat_messages
+            .iter()
+            .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
+            .collect();
+        options.insert("chat_messages".to_owned(), Value::Array(messages_json));
+    }
+
     Ok((input, Payload::Json(Value::Object(options))))
 }
 
