@@ -123,6 +123,15 @@ pub(crate) fn encode_text_generation_request(
         options.insert("chat_messages".to_owned(), Value::Array(messages_json));
     }
 
+    // Transport grammar constraint fields to the backend.
+    insert_option(&mut options, "grammar", request.grammar.clone());
+    if request.grammar_json {
+        insert_option(&mut options, "grammar_json", true);
+    }
+    if request.grammar_tool_call {
+        insert_option(&mut options, "grammar_tool_call", true);
+    }
+
     Ok((input, Payload::Json(Value::Object(options))))
 }
 

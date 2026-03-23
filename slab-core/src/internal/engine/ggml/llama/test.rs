@@ -55,7 +55,7 @@ async fn make_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
 async fn test_llama_inference() {
     let service = make_service(1).await;
 
-    let result = service.inference("Hello, my name is", 64, None).await.expect("inference failed");
+    let result = service.inference("Hello, my name is", 64, None, None).await.expect("inference failed");
 
     println!("Generated: {result}");
     assert!(!result.is_empty(), "expected non-empty output");
@@ -442,7 +442,7 @@ async fn test_multi_token_generation() {
     let service = make_local_service(1).await;
 
     let result =
-        service.inference("Once upon a time", 32, None).await.expect("inference failed");
+        service.inference("Once upon a time", 32, None, None).await.expect("inference failed");
 
     assert!(!result.is_empty(), "32-token generation should produce non-empty text");
     println!("Generated ({} chars): {result}", result.len());

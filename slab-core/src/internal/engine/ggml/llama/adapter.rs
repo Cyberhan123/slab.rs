@@ -152,6 +152,15 @@ impl GGMLLlamaEngine {
         engine.create_session().await.map_err(Into::into)
     }
 
+    /// Create a new session with an optional GBNF grammar constraint.
+    pub async fn create_session_with_grammar(
+        &self,
+        grammar: Option<String>,
+    ) -> Result<SessionId, engine::EngineError> {
+        let engine = self.require_engine()?;
+        engine.create_session_with_grammar(grammar).await.map_err(Into::into)
+    }
+
     /// Append text delta to an existing session.
     pub async fn append_input(
         &self,
@@ -192,20 +201,25 @@ impl GGMLLlamaEngine {
 
     /// Generate text from a prompt by delegating to `LlamaInferenceEngine`.
     ///
-    /// If `session_id` is `None`, creates a temporary session, appends the full prompt,
-    /// consumes stream chunks until `Done`, and then ends the session.
+    /// If `session_id` is `None`, creates a temporary session (with the
+    /// optional grammar constraint applied to its sampler chain), appends the
+    /// full prompt, consumes stream chunks until `Done`, and then ends the
+    /// session.
     ///
-    /// If `session_id` is `Some(sid)`, appends to the existing session and returns
-    /// the output without ending the session (caller is responsible for cleanup).
+    /// If `session_id` is `Some(sid)`, appends to the existing session and
+    /// returns the output without ending the session (caller is responsible
+    /// for cleanup).  `grammar` is ignored when `session_id` is `Some` because
+    /// the session's sampler was already built at creation time.
     pub async fn inference(
         &self,
         prompt: &str,
         max_tokens: usize,
         session_id: Option<SessionId>,
+        grammar: Option<String>,
     ) -> Result<String, engine::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
-            None => self.create_session().await?,
+            None => self.create_session_with_grammar(grammar).await?,
         };
         let should_end = session_id.is_none();
 
@@ -255,20 +269,25 @@ impl GGMLLlamaEngine {
 
     /// Generate text from a prompt as an async stream.
     ///
-    /// If `session_id` is `None`, creates a new temporary session and returns both
-    /// the stream handle and the session ID (caller must end the session when done).
+    /// If `session_id` is `None`, creates a new temporary session (with the
+    /// optional grammar constraint applied to its sampler chain) and returns
+    /// both the stream handle and the session ID (caller must end the session
+    /// when done).
     ///
-    /// If `session_id` is `Some(sid)`, appends to the existing session and returns
-    /// the stream handle (caller is responsible for session management).
+    /// If `session_id` is `Some(sid)`, appends to the existing session and
+    /// returns the stream handle (caller is responsible for session
+    /// management).  `grammar` is ignored when `session_id` is `Some` because
+    /// the session's sampler was already built at creation time.
     pub async fn inference_stream(
         &self,
         prompt: &str,
         max_tokens: usize,
         session_id: Option<SessionId>,
+        grammar: Option<String>,
     ) -> Result<(StreamHandle, SessionId), engine::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
-            None => self.create_session().await?,
+            None => self.create_session_with_grammar(grammar).await?,
         };
 
         if let Err(error) = self.append_input(sid, prompt.to_string()).await {

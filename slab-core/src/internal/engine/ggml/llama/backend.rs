@@ -16,6 +16,22 @@
 //! ```json
 //! { "model_path": "/path/to/model.gguf", "num_workers": 1, "context_length": 4096 }
 //! ```
+//!
+//! ## Grammar constraints (optional)
+//!
+//! Callers may request GBNF grammar-constrained sampling via options keys:
+//!
+//! | Key               | Type    | Description                                              |
+//! |-------------------|---------|----------------------------------------------------------|
+//! | `grammar`         | string  | Raw GBNF grammar string (highest priority).             |
+//! | `grammar_json`    | bool    | Use built-in JSON grammar when `true`.                  |
+//! | `grammar_tool_call` | bool  | Use built-in tool-call grammar when `true`.             |
+//!
+//! Priority: `grammar` > `grammar_json` > `grammar_tool_call`.
+//!
+//! If grammar initialization fails for any reason (invalid GBNF, null vocab,
+//! unsupported runtime) a warning is logged and generation falls back to
+//! unconstrained sampling — existing behavior is never broken.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -32,6 +48,81 @@ use crate::internal::scheduler::backend::protocol::{
 use crate::internal::scheduler::backend::runner::{spawn_runtime_worker, SharedIngressRx};
 use crate::internal::scheduler::types::Payload;
 use slab_core_macros::backend_handler;
+
+// ── Built-in grammar strings ──────────────────────────────────────────────────
+
+/// Minimal GBNF grammar that constrains output to a valid JSON value.
+///
+/// Supports objects, arrays, strings, numbers, booleans and null.
+/// Based on the grammar shipped with llama.cpp examples.
+pub(crate) const GRAMMAR_JSON: &str = r#"root   ::= object
+value  ::= object | array | string | number | "true" | "false" | "null" | ws
+object ::=
+  "{" ws (
+            string ":" ws value
+    ("," ws string ":" ws value)*
+  )? "}" ws
+array  ::=
+  "[" ws (
+            value
+    ("," ws value)*
+  )? "]" ws
+string ::=
+  "\"" (
+    [^\\"\x7F\x00-\x1F] |
+    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
+  )* "\"" ws
+number ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? (([eE] [-+]? [0-9]+))? ws
+ws     ::= ([ \t\n] ws)?
+"#;
+
+/// GBNF grammar for tool-call envelope: `{"tool":"<name>","arguments":{...}}`.
+///
+/// Constrains output to a JSON object that contains exactly the keys `"tool"`
+/// (string) and `"arguments"` (JSON object), in that order.
+pub(crate) const GRAMMAR_TOOL_CALL: &str = r#"root      ::= "{" ws "\"tool\"" ws ":" ws string ws "," ws "\"arguments\"" ws ":" ws object ws "}"
+object    ::=
+  "{" ws (
+            string ":" ws value
+    ("," ws string ":" ws value)*
+  )? "}" ws
+value     ::= object | array | string | number | "true" | "false" | "null" | ws
+array     ::=
+  "[" ws (
+            value
+    ("," ws value)*
+  )? "]" ws
+string    ::=
+  "\"" (
+    [^\\"\x7F\x00-\x1F] |
+    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
+  )* "\"" ws
+number    ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? (([eE] [-+]? [0-9]+))? ws
+ws        ::= ([ \t\n] ws)?
+"#;
+
+/// Resolve the active grammar string from the options map.
+///
+/// Priority: `grammar` (raw GBNF) > `grammar_json` > `grammar_tool_call`.
+/// Returns `None` when no grammar option is set or when the raw grammar string
+/// is empty.
+fn resolve_grammar(opts: &serde_json::Value) -> Option<String> {
+    // Highest priority: raw GBNF string.
+    if let Some(g) = opts.get("grammar").and_then(|v| v.as_str()) {
+        if !g.is_empty() {
+            return Some(g.to_owned());
+        }
+    }
+    // Second: built-in JSON grammar.
+    if opts.get("grammar_json").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return Some(GRAMMAR_JSON.to_owned());
+    }
+    // Third: built-in tool-call grammar.
+    if opts.get("grammar_tool_call").and_then(|v| v.as_bool()).unwrap_or(false) {
+        return Some(GRAMMAR_TOOL_CALL.to_owned());
+    }
+    None
+}
 
 // ── Configurations ────────────────────────────────────────────────────────────
 
@@ -188,7 +279,8 @@ impl LlamaWorker {
         let apply_chat_template =
             opts.get("apply_chat_template").and_then(|v| v.as_bool()).unwrap_or(false);
         let chat_messages = extract_chat_messages(&opts);
-        self.handle_inference(input, max_tokens, session_key, apply_chat_template, chat_messages, reply_tx).await;
+        let grammar = resolve_grammar(&opts);
+        self.handle_inference(input, max_tokens, session_key, apply_chat_template, chat_messages, grammar, reply_tx).await;
     }
 
     #[on_event(InferenceStream)]
@@ -208,7 +300,8 @@ impl LlamaWorker {
         let apply_chat_template =
             opts.get("apply_chat_template").and_then(|v| v.as_bool()).unwrap_or(false);
         let chat_messages = extract_chat_messages(&opts);
-        self.handle_inference_stream(input, max_tokens, session_key, apply_chat_template, chat_messages, reply_tx).await;
+        let grammar = resolve_grammar(&opts);
+        self.handle_inference_stream(input, max_tokens, session_key, apply_chat_template, chat_messages, grammar, reply_tx).await;
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -424,6 +517,7 @@ impl LlamaWorker {
         session_key: Option<String>,
         apply_chat_template: bool,
         chat_messages: Vec<LlamaChatMessage>,
+        grammar: Option<String>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -465,7 +559,7 @@ impl LlamaWorker {
                 }
             };
 
-        match engine.inference(&prepared.delta_prompt, max_tokens, prepared.sid).await {
+        match engine.inference(&prepared.delta_prompt, max_tokens, prepared.sid, grammar).await {
             Ok(text) => {
                 self.commit_session_success(
                     prepared.key,
@@ -495,6 +589,7 @@ impl LlamaWorker {
         session_key: Option<String>,
         apply_chat_template: bool,
         chat_messages: Vec<LlamaChatMessage>,
+        grammar: Option<String>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -546,7 +641,7 @@ impl LlamaWorker {
             use crate::internal::engine::ggml::llama::StreamChunk as LlamaChunk;
             let PreparedSession { key, sid, delta_prompt, full_prompt } = prepared;
 
-            match engine_for_spawn.inference_stream(&delta_prompt, max_tokens, sid).await {
+            match engine_for_spawn.inference_stream(&delta_prompt, max_tokens, sid, grammar).await {
                 Ok((mut llama_rx, new_sid)) => {
                     let mut generated = String::new();
                     let mut completed = false;
