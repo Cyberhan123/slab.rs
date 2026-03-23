@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-fn default_channels() -> u8 {
+const fn default_channels() -> u8 {
     3
 }
 

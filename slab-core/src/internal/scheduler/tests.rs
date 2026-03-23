@@ -58,15 +58,15 @@ async fn inference_lease_acquired_and_released() {
 }
 
 #[tokio::test]
-async fn inference_lease_unknown_backend_returns_busy() {
+async fn inference_lease_unknown_backend_returns_driver_not_registered() {
     let rm = ResourceManager::new();
     let err = rm
         .acquire_inference_lease("nonexistent", std::time::Duration::from_millis(20))
         .await
         .unwrap_err();
     assert!(
-        matches!(err, crate::internal::scheduler::types::CoreError::Busy { .. }),
-        "expected Busy error"
+        matches!(err, crate::internal::scheduler::types::CoreError::DriverNotRegistered { .. }),
+        "expected DriverNotRegistered error"
     );
 }
 
@@ -92,7 +92,12 @@ async fn cpu_stage_transforms_payload() {
 async fn cpu_stage_propagates_error() {
     use crate::internal::scheduler::stage::CpuStage;
 
-    let stage = CpuStage::new("fail-stage", |_p| Err("intentional error".to_owned()));
+    let stage = CpuStage::new("fail-stage", |_p| {
+        Err(CoreError::CpuStageFailed {
+            stage_name: "fail-stage".to_owned(),
+            message: "intentional error".to_owned(),
+        })
+    });
     let result = stage.run(text_payload("x")).await;
     assert!(result.is_err(), "stage should propagate work fn error");
 }
