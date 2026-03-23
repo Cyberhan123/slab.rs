@@ -1,0 +1,52 @@
+name: Copilot Setup Steps
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+  pull_request:
+    paths:
+      - .github/workflows/copilot-setup-steps.yml
+
+jobs:
+  copilot-setup-steps:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            protobuf-compiler \
+            libssl-dev \
+            pkg-config
+
+      - name: Verify protoc
+        run: protoc --version
+
+      - name: Install Rust stable toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry and target directories
+        uses: Swatinem/rust-cache@v2
+
+      - name: Prefetch Rust dependencies
+        run: cargo fetch --workspace --locked
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install frontend dependencies
+        working-directory: slab-app
+        run: bun install --frozen-lockfile
+
+      - name: Warm up key Rust crates
+        run: |
+          cargo check -p slab-server
+          cargo check -p slab-runtime
