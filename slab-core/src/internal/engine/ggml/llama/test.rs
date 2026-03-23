@@ -1,9 +1,14 @@
 use super::*;
 use crate::internal::engine::ggml::llama::adapter::GGMLLlamaEngine;
 use hf_hub::api::sync::Api;
-use slab_llama::{ChatMessage, LlamaBatch, LlamaContextParams, LlamaModelParams};
+use slab_llama::{LlamaContextParams, LlamaModelParams};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+
+#[cfg(target_os = "linux")]
+use slab_llama::{ChatMessage, LlamaBatch};
+#[cfg(target_os = "linux")]
+use std::sync::{Mutex, OnceLock};
 
 /// Ensure llama dynamic library artifacts are available under `testdata/`.
 ///
@@ -221,10 +226,17 @@ async fn test_service_seq_id_reuse() {
 /// concurrent `dlopen` calls that are not safe when invoked simultaneously from
 /// multiple threads.  All test helpers that create a `Llama` or `GGMLLlamaEngine`
 /// must hold this lock for the duration of the library-load step.
+#[cfg(target_os = "linux")]
 static LLAMA_INIT_LOCK: Mutex<()> = Mutex::new(());
+
+/// Guards the once-per-process `backend_init` call so it is invoked exactly
+/// once even when multiple test functions call `make_local_llama` concurrently.
+#[cfg(target_os = "linux")]
+static LLAMA_BACKEND_INIT: OnceLock<()> = OnceLock::new();
 
 /// Return the path to the platform-specific llama shared library directory
 /// shipped with the repository under `testdata/llama/libs/<os>`.
+#[cfg(target_os = "linux")]
 fn llama_lib_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../testdata/llama/libs")
@@ -232,19 +244,28 @@ fn llama_lib_dir() -> PathBuf {
 }
 
 /// Return the path to the small test model bundled in `testdata/llama/models`.
+#[cfg(target_os = "linux")]
 fn local_model_path() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .join("../testdata/llama/models/stories15M.Q4_0.gguf")
 }
 
 /// Load the llama dynamic library from the local testdata directory directly.
+///
+/// Both library load (`Llama::new`) and the once-per-process `backend_init` are
+/// performed under `LLAMA_INIT_LOCK` so concurrent test threads cannot race on
+/// either step.
 #[cfg(target_os = "linux")]
 fn make_local_llama() -> slab_llama::Llama {
     let _guard = LLAMA_INIT_LOCK
         .lock()
         .expect("LLAMA_INIT_LOCK was poisoned by a panicked thread during library initialization");
-    slab_llama::Llama::new(llama_lib_dir().join("libllama.so"))
-        .expect("failed to load llama library from testdata")
+    let llama = slab_llama::Llama::new(llama_lib_dir().join("libllama.so"))
+        .expect("failed to load llama library from testdata");
+    // `backend_init` must only be called once per process; guard it with OnceLock
+    // while still holding the init lock so the call is fully serialized.
+    LLAMA_BACKEND_INIT.get_or_init(|| llama.backend_init());
+    llama
 }
 
 /// Build a `GGMLLlamaEngine` backed by the local testdata library and model.
@@ -276,8 +297,7 @@ async fn make_local_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
 #[test]
 #[cfg(target_os = "linux")]
 fn test_llama_backend_init() {
-    let llama = make_local_llama();
-    llama.backend_init();
+    let _llama = make_local_llama();
     // Reaching here without a panic confirms lib loading and backend init work.
 }
 
@@ -287,7 +307,6 @@ fn test_llama_backend_init() {
 #[cfg(target_os = "linux")]
 fn test_model_load_and_metadata() {
     let llama = make_local_llama();
-    llama.backend_init();
 
     let model = llama
         .load_model_from_file(local_model_path().to_str().unwrap(), LlamaModelParams::default())
@@ -314,7 +333,6 @@ fn test_model_load_and_metadata() {
 #[cfg(target_os = "linux")]
 fn test_tokenize_roundtrip() {
     let llama = make_local_llama();
-    llama.backend_init();
 
     let model = llama
         .load_model_from_file(local_model_path().to_str().unwrap(), LlamaModelParams::default())
@@ -346,7 +364,6 @@ fn test_tokenize_roundtrip() {
 #[cfg(target_os = "linux")]
 fn test_single_decode_and_sample() {
     let llama = make_local_llama();
-    llama.backend_init();
 
     let model = llama
         .load_model_from_file(local_model_path().to_str().unwrap(), LlamaModelParams::default())
@@ -391,7 +408,6 @@ fn test_single_decode_and_sample() {
 #[cfg(target_os = "linux")]
 fn test_sampler_correctness() {
     let llama = make_local_llama();
-    llama.backend_init();
 
     let model = llama
         .load_model_from_file(local_model_path().to_str().unwrap(), LlamaModelParams::default())
@@ -487,18 +503,17 @@ async fn test_chat_template_format() {
     ];
 
     match service.apply_chat_template(&messages, true) {
-        Ok(formatted) => {
-            // Some models embed a template — verify basic sanity.
-            assert!(!formatted.is_empty(), "formatted template should not be empty");
-            assert!(
-                formatted.contains("Hello") || formatted.contains("language model"),
-                "template output should contain message content; got: {formatted}"
-            );
-            println!("Chat template output: {formatted}");
-        }
-        Err(_) => {
+        Err(e) => {
             // stories-15M has no embedded chat template; this branch is expected.
-            println!("Model has no embedded chat template (expected for stories-15M)");
+            println!(
+                "Model has no embedded chat template (expected for stories-15M); error: {e}"
+            );
+        }
+        Ok(formatted) => {
+            panic!(
+                "stories-15M is documented to have no embedded chat template; \
+                 expected apply_chat_template to return Err, got Ok with output: {formatted}"
+            );
         }
     }
 }
