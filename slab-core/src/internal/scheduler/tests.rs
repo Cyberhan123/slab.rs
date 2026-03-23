@@ -806,3 +806,132 @@ async fn cancel_and_purge_signals_before_removing_record() {
     // cancellation had been lost the backend would block forever and the
     // test would time out.
 }
+
+/// Verify that `wait_result` returns `CoreError::Cancelled` when a task is
+/// cancelled between pipeline stages.
+///
+/// Uses a 2-stage CPU→GPU pipeline.  The CPU stage gates completion via a
+/// channel so the test can:
+///   1. Wait for the CPU stage to start.
+///   2. Call `cancel()` so the orchestrator sets the cancel watch.
+///   3. Release the CPU stage gate.
+///
+/// When `execute_task` checks cancel *before* the GPU stage, it sees `true`
+/// and transitions to `TaskStatus::Cancelled`.
+#[tokio::test]
+async fn wait_result_returns_cancelled_after_cancel() {
+    use crate::internal::scheduler::stage::CpuStage;
+    use std::sync::{Arc, Mutex};
+
+    // CPU stage signals "started" and then blocks on a std channel gate.
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let (gate_tx, gate_rx) = std::sync::mpsc::channel::<()>();
+    // Wrap Receiver in Arc<Mutex<_>> so it satisfies the Sync bound on CpuFn.
+    let gate_rx = Arc::new(Mutex::new(gate_rx));
+
+    let mut rm = ResourceManager::new();
+    rm.register_backend("unreachable-backend", |_shared_rx, _control_tx| {
+        // This backend is never reached; cancel fires before the GPU stage.
+    });
+    let orchestrator = Orchestrator::start(rm, 64);
+
+    let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("input"))
+        .cpu_stage(CpuStage::new("gating-cpu", move |p| {
+            let _ = started_tx.blocking_send(());
+            let _ = gate_rx.lock().unwrap().recv();
+            Ok(p)
+        }))
+        .gpu(
+            "unreachable-gpu",
+            "unreachable-backend",
+            BackendOp { name: "inference".into(), options: Payload::default() },
+        )
+        .run()
+        .await
+        .expect("submit should succeed");
+
+    // Wait for the CPU stage to signal that it has started.
+    started_rx.recv().await.expect("CPU stage should start");
+
+    // Signal cancellation, then yield so the orchestrator loop can process
+    // the Cancel command and set the cancel watch before the gate is released.
+    orchestrator.cancel(task_id);
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+
+    // Release the CPU stage gate.  execute_task will then check cancel before
+    // the GPU stage and transition to TaskStatus::Cancelled.
+    gate_tx.send(()).ok();
+
+    let err = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        orchestrator.wait_result(task_id, std::time::Duration::from_secs(10)),
+    )
+    .await
+    .expect("wait_result should complete after cancellation")
+    .expect_err("cancelled task should return an error");
+
+    assert!(
+        matches!(err, CoreError::Cancelled),
+        "wait_result should return CoreError::Cancelled, got {err:?}"
+    );
+}
+
+/// Verify that `wait_stream` returns `CoreError::Cancelled` when a streaming
+/// task is cancelled between pipeline stages.
+///
+/// Same gating strategy as `wait_result_returns_cancelled_after_cancel`, but
+/// uses a CPU→GPU-stream pipeline so the cancelled-before-stream-stage path
+/// in `wait_stream` is exercised.
+#[tokio::test]
+async fn wait_stream_returns_cancelled_after_cancel() {
+    use crate::internal::scheduler::stage::CpuStage;
+    use std::sync::{Arc, Mutex};
+
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::channel::<()>(1);
+    let (gate_tx, gate_rx) = std::sync::mpsc::channel::<()>();
+    let gate_rx = Arc::new(Mutex::new(gate_rx));
+
+    let mut rm = ResourceManager::new();
+    rm.register_backend("unreachable-stream", |_shared_rx, _control_tx| {
+        // Never reached.
+    });
+    let orchestrator = Orchestrator::start(rm, 64);
+
+    let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("prompt"))
+        .cpu_stage(CpuStage::new("gating-cpu-stream", move |p| {
+            let _ = started_tx.blocking_send(());
+            let _ = gate_rx.lock().unwrap().recv();
+            Ok(p)
+        }))
+        .gpu_stream(
+            "unreachable-stream-stage",
+            "unreachable-stream",
+            BackendOp { name: "inference.stream".into(), options: Payload::default() },
+        )
+        .run_stream()
+        .await
+        .expect("submit should succeed");
+
+    started_rx.recv().await.expect("CPU stage should start");
+
+    orchestrator.cancel(task_id);
+    for _ in 0..10 {
+        tokio::task::yield_now().await;
+    }
+    gate_tx.send(()).ok();
+
+    let err = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        orchestrator.wait_stream(task_id, std::time::Duration::from_secs(10)),
+    )
+    .await
+    .expect("wait_stream should complete after cancellation")
+    .expect_err("cancelled task should return an error");
+
+    assert!(
+        matches!(err, CoreError::Cancelled),
+        "wait_stream should return CoreError::Cancelled, got {err:?}"
+    );
+}
