@@ -34,7 +34,7 @@ export default function Header({ variant = "default" }: HeaderProps) {
           {displaySubtitle}
         </p>
         {!isMinimalVariant ? (
-          <div className="hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-[var(--shell-card)]/92 pl-3 pr-2.5 text-[12px] font-semibold text-foreground/70 shadow-[var(--shell-elevation)] lg:inline-flex">
+          <div className=" shell-context hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-[var(--shell-card)]/92 pl-3 pr-2.5 text-[12px] font-semibold text-foreground/70 shadow-[var(--shell-elevation)] lg:inline-flex">
             <span className="size-2 rounded-full bg-[var(--brand-gold)]" />
             <span className="max-w-[11rem] truncate">{shellContextLabel}</span>
             <ChevronDown className="size-3.5 text-muted-foreground" />

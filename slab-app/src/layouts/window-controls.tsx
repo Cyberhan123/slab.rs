@@ -53,7 +53,7 @@ export function WindowControls() {
   }
 
   return (
-    <div className="mr-2 flex items-center gap-1" data-tauri-drag-region="false">
+    <div className="shell-window-controls mr-2 flex items-center gap-1" data-tauri-drag-region="false">
       <Button
         type="button"
         variant="ghost"
