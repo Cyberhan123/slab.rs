@@ -23,11 +23,19 @@ pub(super) async fn create_chat_completion(
     temperature: f32,
     stream: bool,
 ) -> Result<GeneratedChatOutput, ServerError> {
+    // Always pre-render a fallback prompt using the server-side static
+    // template renderer.  We also send the structured messages with
+    // `apply_chat_template = true` so the llama backend will try to apply
+    // the model's own embedded chat template first.  If the embedded
+    // template is absent or fails, the backend falls back to the
+    // pre-rendered prompt automatically.
     let prompt_template = resolve_prompt_template(state, model).await?;
     let prompt = super::template::build_prompt(messages, prompt_template.as_deref());
     let request = TextGenerationRequest {
         prompt,
         system_prompt: None,
+        chat_messages: messages.to_vec(),
+        apply_chat_template: true,
         max_tokens: Some(max_tokens),
         temperature: Some(temperature),
         top_p: None,
