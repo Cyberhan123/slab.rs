@@ -8,8 +8,9 @@
                 "height": 1040,
                 "resizable": true,
                 "center": true,
-                "decorations": false,
-                "devtools": true
+                "decorations": true,
+                "titleBarStyle": "Transparent",
+                "hiddenTitle": true
             }
         ]
     }

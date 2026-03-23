@@ -7,9 +7,15 @@
   ],
   "permissions": [
     "core:default",
-    "core:window:allow-minimize",
-    "core:window:allow-toggle-maximize",
     "core:window:allow-close",
+    "core:window:allow-center",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-set-size",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
     "opener:default",
     "dialog:default",
     "dialog:allow-open",
@@ -25,6 +31,8 @@
     "allow-plugin-unmount-view",
     "allow-plugin-call",
     "allow-plugin-api-request",
+    "window-state:default",
+    "decorum:allow-show-snap-overlay",
     {
       "identifier": "shell:allow-execute",
       "allow": [

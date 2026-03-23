@@ -1,14 +1,26 @@
-import { ChevronDown, History, Search } from "lucide-react"
-import { useGlobalHeaderMeta } from "@/hooks/use-global-header-meta"
+import { History, Search } from "lucide-react"
+import { useGlobalHeaderState } from "@/hooks/use-global-header-meta"
 import { WindowControls } from "@/layouts/window-controls"
 import { cn } from "@/lib/utils"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 type HeaderProps = {
   variant?: "default" | "chat" | "minimal"
 }
 
 export default function Header({ variant = "default" }: HeaderProps) {
-  const { title, subtitle } = useGlobalHeaderMeta()
+  const {
+    meta: { title, subtitle },
+    modelPicker,
+  } = useGlobalHeaderState()
   const isChatVariant = variant === "chat"
   const isMinimalVariant = variant === "minimal"
   const searchPlaceholder = isChatVariant ? "Search tasks..." : "Search pages, tools, or settings..."
@@ -17,6 +29,12 @@ export default function Header({ variant = "default" }: HeaderProps) {
   const shellContextLabel = isChatVariant
     ? subtitleParts.slice(1).join(" - ") || "Active Workspace"
     : "Slab Desktop"
+  const selectedModelOption = modelPicker?.options.find((option) => option.id === modelPicker.value)
+  const modelPickerPlaceholder = modelPicker?.loading
+    ? "Loading models..."
+    : modelPicker?.placeholder ?? "Select model"
+  const modelPickerDisabled =
+    modelPicker?.disabled || modelPicker == null || modelPicker.options.length === 0
 
   return (
     <header
@@ -34,11 +52,52 @@ export default function Header({ variant = "default" }: HeaderProps) {
           {displaySubtitle}
         </p>
         {!isMinimalVariant ? (
-          <div className=" shell-context hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-[var(--shell-card)]/92 pl-3 pr-2.5 text-[12px] font-semibold text-foreground/70 shadow-[var(--shell-elevation)] lg:inline-flex">
-            <span className="size-2 rounded-full bg-[var(--brand-gold)]" />
-            <span className="max-w-[11rem] truncate">{shellContextLabel}</span>
-            <ChevronDown className="size-3.5 text-muted-foreground" />
-          </div>
+          modelPicker ? (
+            <Select
+              value={modelPicker.value || undefined}
+              onValueChange={modelPicker.onValueChange}
+              disabled={modelPickerDisabled}
+            >
+              <SelectTrigger
+                size="sm"
+                variant="pill"
+                title={selectedModelOption?.label ?? modelPickerPlaceholder}
+                className="shell-context hidden h-8 max-w-[18rem] shrink-0 border-border/30 bg-[var(--shell-card)]/92 pl-3 pr-2.5 text-[12px] font-semibold text-foreground/70 shadow-[var(--shell-elevation)] lg:flex"
+              >
+                <span className="size-2 shrink-0 rounded-full bg-[var(--brand-gold)]" />
+                <SelectValue
+                  placeholder={modelPickerPlaceholder}
+                  className="max-w-[11rem] truncate"
+                />
+              </SelectTrigger>
+              <SelectContent
+                variant="pill"
+                position="popper"
+                align="start"
+                className="max-h-80 min-w-[18rem]"
+              >
+                <SelectGroup>
+                  <SelectLabel>Chat Models</SelectLabel>
+                  {modelPicker.options.length === 0 ? (
+                    <SelectItem value="__no_models__" disabled>
+                      {modelPicker.emptyLabel ?? "No models available"}
+                    </SelectItem>
+                  ) : (
+                    modelPicker.options.map((option) => (
+                      <SelectItem key={option.id} value={option.id}>
+                        {option.label}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="shell-context hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-[var(--shell-card)]/92 pl-3 pr-2.5 text-[12px] font-semibold text-foreground/70 shadow-[var(--shell-elevation)] lg:inline-flex">
+              <span className="size-2 rounded-full bg-[var(--brand-gold)]" />
+              <span className="max-w-[11rem] truncate">{shellContextLabel}</span>
+            </div>
+          )
         ) : null}
       </div>
 
