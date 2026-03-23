@@ -18,10 +18,9 @@ import {
 import api from "@/lib/api"
 import { toCatalogModelList } from "@/lib/api/models"
 import { PAGE_HEADER_META } from "@/layouts/header-meta"
-import { usePageHeader } from "@/hooks/use-global-header-meta"
+import { usePageHeader, usePageHeaderModelPicker } from "@/hooks/use-global-header-meta"
 
 import {
-  API_BASE_URL,
   ChatContext,
   DEFAULT_CONVERSATIONS_ITEMS,
   DEFAULT_CONVERSATION_KEY,
@@ -45,16 +44,6 @@ type ModelOption = {
   contextWindow?: number | null
 }
 
-type ChatModelApiItem = {
-  id: string
-  display_name: string
-  source: ModelOptionSource
-  downloaded: boolean
-  pending: boolean
-  provider_name?: string | null
-  context_window?: number | null
-}
-
 type ConversationItem = ConversationData & {
   label?: string
   group?: string
@@ -68,22 +57,6 @@ type ChatMessageRecord = {
     content?: string | null
     extraInfo?: unknown
   }
-}
-
-function isChatModelApiItem(value: unknown): value is ChatModelApiItem {
-  if (typeof value !== "object" || value === null) return false
-  const obj = value as Record<string, unknown>
-
-  return (
-    typeof obj.id === "string" &&
-    typeof obj.display_name === "string" &&
-    (obj.source === "local" || obj.source === "cloud") &&
-    typeof obj.downloaded === "boolean" &&
-    typeof obj.pending === "boolean" &&
-    (obj.context_window === undefined ||
-      obj.context_window === null ||
-      typeof obj.context_window === "number")
-  )
 }
 
 function createConversationLabel(value: string) {
@@ -122,8 +95,6 @@ function Chat() {
 
   const [selectedModelId, setSelectedModelId] = useState("")
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
-  const [cloudModelOptions, setCloudModelOptions] = useState<ModelOption[]>([])
-  const [cloudModelsLoading, setCloudModelsLoading] = useState(false)
   const bottomRef = useRef<HTMLDivElement | null>(null)
 
   const { conversations, addConversation, setConversations } = useXConversations({
@@ -142,79 +113,39 @@ function Chat() {
   const switchModelMutation = api.useMutation("post", "/v1/models/switch")
   const getTaskMutation = api.useMutation("get", "/v1/tasks/{id}")
 
-  const loadCloudModels = useCallback(async () => {
-    setCloudModelsLoading(true)
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/v1/chat/models`, {
-        method: "GET",
-      })
-
-      if (!response.ok) {
-        const detail = await response.text()
-        throw new Error(`HTTP ${response.status}: ${detail || "failed to load models"}`)
-      }
-
-      const payload: unknown = await response.json()
-      if (!Array.isArray(payload)) {
-        throw new Error("Invalid chat model payload")
-      }
-
-      const cloudOnly = payload
-        .filter((item): item is ChatModelApiItem => isChatModelApiItem(item))
-        .filter((item) => item.source === "cloud")
-        .map<ModelOption>((item) => ({
-          id: item.id,
-          label: item.provider_name
-            ? `${item.provider_name} / ${item.display_name}`
-            : item.display_name,
-          downloaded: item.downloaded,
-          pending: item.pending,
-          source: "cloud",
-          contextWindow: item.context_window ?? null,
-        }))
-
-      setCloudModelOptions(cloudOnly)
-    } catch (error: any) {
-      setCloudModelOptions([])
-      toast.error("Failed to load cloud model options", {
-        description: error?.message || "Unknown error",
-      })
-    } finally {
-      setCloudModelsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    void loadCloudModels()
-  }, [loadCloudModels])
-
   const parsedCatalogModels = useMemo(
     () => toCatalogModelList(catalogModels),
     [catalogModels]
   )
 
-  const llamaModels = useMemo(
-    () => parsedCatalogModels.filter((model) => model.backend_id === LLAMA_BACKEND_ID),
+  const chatCatalogModels = useMemo(
+    () =>
+      parsedCatalogModels.filter(
+        (model) =>
+          model.backend_id === LLAMA_BACKEND_ID || Boolean(model.spec.remote_model_id)
+      ),
     [parsedCatalogModels]
   )
 
-  const localModelOptions = useMemo<ModelOption[]>(
-    () =>
-      llamaModels.map((model) => ({
-        id: model.id,
-        label: model.display_name,
-        downloaded: Boolean(model.local_path),
-        pending: model.pending,
-        source: "local",
-        contextWindow: model.spec.context_window ?? null,
-      })),
-    [llamaModels]
+  const llamaModels = useMemo(
+    () => chatCatalogModels.filter((model) => model.backend_id === LLAMA_BACKEND_ID),
+    [chatCatalogModels]
   )
 
   const modelOptions = useMemo<ModelOption[]>(
-    () => [...localModelOptions, ...cloudModelOptions],
-    [localModelOptions, cloudModelOptions]
+    () =>
+      chatCatalogModels.map((model) => ({
+        id: model.id,
+        label:
+          model.backend_id === LLAMA_BACKEND_ID
+            ? model.display_name
+            : `${formatProviderLabel(model.provider)} / ${model.display_name}`,
+        downloaded: model.backend_id === LLAMA_BACKEND_ID ? Boolean(model.local_path) : true,
+        pending: model.pending,
+        source: model.backend_id === LLAMA_BACKEND_ID ? "local" : "cloud",
+        contextWindow: model.spec.context_window ?? null,
+      })),
+    [chatCatalogModels]
   )
 
   useEffect(() => {
@@ -411,7 +342,7 @@ function Chat() {
     handleSubmit,
   } = useChat(curConversation, selectedModelId || "slab-llama", deepThink, ensureChatModelReady)
 
-  const modelLoading = catalogModelsLoading || cloudModelsLoading
+  const modelLoading = catalogModelsLoading
   const isPreparingModel =
     loadModelMutation.isPending ||
     switchModelMutation.isPending ||
@@ -419,7 +350,6 @@ function Chat() {
 
   const safeMessages = (messages ?? []) as ChatMessageRecord[]
   const selectedModel = modelOptions.find((item) => item.id === selectedModelId)
-  const selectedModelLabel = selectedModel?.label ?? "Select model"
   const selectedModelStatusLabel = useMemo(() => {
     if (modelLoading) {
       return "Loading models"
@@ -447,6 +377,25 @@ function Chat() {
 
     return parts.join(" / ")
   }, [isPreparingModel, modelLoading, selectedModel])
+  const headerModelPicker = useMemo(
+    () => ({
+      value: selectedModelId,
+      options: modelOptions.map((model) => ({
+        id: model.id,
+        label: model.label,
+      })),
+      onValueChange: setSelectedModelId,
+      placeholder: "Select model",
+      loading: modelLoading,
+      disabled:
+        modelLoading ||
+        isPreparingModel ||
+        isRequesting ||
+        modelOptions.length === 0,
+      emptyLabel: "No chat models",
+    }),
+    [isPreparingModel, isRequesting, modelLoading, modelOptions, selectedModelId]
+  )
   const latestUserPrompt =
     safeMessages
       .slice()
@@ -454,10 +403,8 @@ function Chat() {
       .find((item) => item.message.role === "user")
       ?.message.content?.trim() ?? ""
 
-  usePageHeader({
-    ...PAGE_HEADER_META.chat,
-    subtitle: `Talk with AI models in one workspace - ${selectedModelLabel}`,
-  })
+  usePageHeader(PAGE_HEADER_META.chat)
+  usePageHeaderModelPicker(headerModelPicker)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({
@@ -606,7 +553,7 @@ function Chat() {
           </div>
 
           <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-56 pt-2 md:px-8 xl:px-0">
+            <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-8 pt-2 md:px-8 xl:px-0">
               {safeMessages.length === 0 ? (
                 <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
                   <div className="max-w-md space-y-3">
@@ -637,9 +584,9 @@ function Chat() {
             </div>
           </ScrollArea>
 
-          <div className="pointer-events-none absolute inset-x-0 bottom-0">
-            <div className="absolute inset-x-0 bottom-0 h-28 bg-gradient-to-t from-[var(--app-canvas)] via-[color-mix(in_oklab,var(--app-canvas)_92%,transparent)] to-transparent" />
-            <div className="pointer-events-auto relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-[4.25rem] md:px-8 xl:px-0">
+          <div className="relative shrink-0 bg-[var(--shell-card)]">
+            <div className="pointer-events-none absolute inset-x-0 top-0 h-20 -translate-y-full bg-gradient-to-b from-transparent via-[color-mix(in_oklab,var(--shell-card)_92%,transparent)] to-[var(--shell-card)]" />
+            <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 xl:px-0">
               <ChatComposer
                 value={draft}
                 onValueChange={setDraft}
@@ -674,3 +621,11 @@ function Chat() {
 }
 
 export default Chat
+
+function formatProviderLabel(provider: string) {
+  return provider
+    .replace(/^cloud\./, "")
+    .replace(/^local\./, "")
+    .replace(/[._-]+/g, " ")
+    .replace(/\b\w/g, (char) => char.toUpperCase())
+}
