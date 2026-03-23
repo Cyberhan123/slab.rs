@@ -6,6 +6,7 @@ use std::sync::{
 use std::time::Duration;
 
 use dirs_next::config_dir;
+use log::{error, info, warn};
 use tauri::path::BaseDirectory;
 use tauri::Manager;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
@@ -36,7 +37,7 @@ impl SidecarState {
         };
 
         if let Err(e) = child.write(b"shutdown\n") {
-            eprintln!("[Sidecar] failed to send shutdown command: {e}");
+            error!("sidecar shutdown signal failed: {e}");
         }
 
         let terminated = Arc::clone(&self.terminated);
@@ -46,7 +47,7 @@ impl SidecarState {
                 return;
             }
             if let Err(e) = child.kill() {
-                eprintln!("[Sidecar] failed to force-kill sidecar after timeout: {e}");
+                error!("sidecar force kill failed after timeout: {e}");
             }
         });
     }
@@ -64,10 +65,14 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
     let lib_path_str = lib_path.to_str().ok_or("invalid lib path")?;
     let config_base_dir = config_dir().unwrap_or_else(|| PathBuf::from(".")).join("Slab");
     std::fs::create_dir_all(&config_base_dir)?;
+    let app_log_dir = app.path().app_log_dir()?;
+    std::fs::create_dir_all(&app_log_dir)?;
     let settings_path = config_base_dir.join("settings.json");
     let database_path = config_base_dir.join("slab.db");
+    let server_log_path = app_log_dir.join("slab-server.log");
     let settings_path_str = settings_path.to_str().ok_or("invalid settings path")?;
     let database_url = sqlite_database_url(&database_path);
+    let server_log_path_str = server_log_path.to_str().ok_or("invalid sidecar log path")?;
 
     let sidecar_command = app_handle.shell().sidecar("slab-server")?.args([
         "--gateway-bind",
@@ -84,6 +89,8 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
         database_url.as_str(),
         "--settings-path",
         settings_path_str,
+        "--log-file",
+        server_log_path_str,
         "--shutdown-on-stdin-close",
     ]);
 
@@ -97,30 +104,45 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
             match event {
                 CommandEvent::Stdout(line) => {
                     let msg = String::from_utf8_lossy(&line);
-                    println!("[Sidecar STDOUT] {}", msg);
+                    info!("sidecar stdout: {}", msg.trim_end());
                 }
                 CommandEvent::Stderr(line) => {
                     let msg = String::from_utf8_lossy(&line);
-                    eprintln!("[Sidecar STDERR] {}", msg);
+                    warn!("sidecar stderr: {}", msg.trim_end());
                 }
                 CommandEvent::Error(err) => {
-                    eprintln!("[Sidecar ERROR] {}", err);
+                    error!("sidecar process error: {err}");
                 }
                 CommandEvent::Terminated(payload) => {
                     terminated_for_events.store(true, Ordering::SeqCst);
-                    println!(
-                        "[Sidecar TERMINATED] signal {:?} code {:?}",
-                        payload.signal, payload.code
-                    );
+                    match payload.code {
+                        Some(0) => {
+                            info!(
+                                "sidecar terminated: signal {:?} code {:?}",
+                                payload.signal, payload.code
+                            );
+                        }
+                        _ => {
+                            warn!(
+                                "sidecar terminated: signal {:?} code {:?}",
+                                payload.signal, payload.code
+                            );
+                        }
+                    }
                 }
                 other => {
-                    println!("[Sidecar Event] {:?}", other);
+                    info!("sidecar event: {:?}", other);
                 }
             }
         }
     });
 
-    println!("Slab sidecar started");
+    info!(
+        "tauri log persistence enabled: log_dir={} server_log={}",
+        app_log_dir.display(),
+        server_log_path.display()
+    );
+    info!("Slab sidecar started");
     Ok(())
 }
 

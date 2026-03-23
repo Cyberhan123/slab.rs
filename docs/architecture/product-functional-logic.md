@@ -380,14 +380,15 @@ const downloadMutation = api.useMutation('post', '/admin/backends/download');
 
 **Server Configuration**:
 ```bash
-SLAB_LOG=debug                    # Log level
-SLAB_LOG_JSON=false               # JSON logging
-SLAB_DATABASE_URL=./slab.db       # SQLite database path
-SLAB_BIND_ADDRESS=127.0.0.1:3000  # Server bind address
-SLAB_TRANSPORT_MODE=http          # Transport mode
-SLAB_ADMIN_TOKEN=optional         # Admin authentication
-SLAB_CORS_ORIGINS=*              # CORS origins
-SLAB_ENABLE_SWAGGER=true          # Enable Swagger UI
+SLAB_LOG=debug                              # Log level / tracing filter
+SLAB_LOG_JSON=false                         # JSON logging
+SLAB_LOG_FILE=./logs/slab-server.log        # Optional file sink
+SLAB_DATABASE_URL=sqlite://./slab.db?mode=rwc # SQLite database URL
+SLAB_BIND=127.0.0.1:3000                    # Server bind address
+SLAB_TRANSPORT=http                         # Runtime transport mode
+SLAB_ADMIN_TOKEN=optional                   # Admin authentication
+SLAB_CORS_ORIGINS=*                         # CORS origins
+SLAB_ENABLE_SWAGGER=true                    # Enable Swagger UI
 ```
 
 **Backend Library Paths**:

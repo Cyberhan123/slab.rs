@@ -14,13 +14,16 @@ use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
-use std::{future::Future, io::ErrorKind};
+use std::{fs::OpenOptions, future::Future, io::ErrorKind};
 
 use anyhow::{anyhow, Context};
 use clap::Parser;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command as TokioCommand};
 use tracing::{error, info, warn};
+use tracing_appender::non_blocking::WorkerGuard;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
 
 use crate::config::Config;
 use crate::context::AppState;
@@ -55,6 +58,8 @@ struct SupervisorArgs {
     log_level: Option<String>,
     #[arg(long = "log-json", action = clap::ArgAction::SetTrue)]
     log_json: bool,
+    #[arg(long = "log-file")]
+    log_file: Option<PathBuf>,
     #[arg(long = "queue-capacity")]
     queue_capacity: Option<usize>,
     #[arg(long = "backend-capacity")]
@@ -114,6 +119,7 @@ impl Default for SupervisorArgs {
             model_config_dir: None,
             log_level: None,
             log_json: false,
+            log_file: None,
             queue_capacity: None,
             backend_capacity: None,
             lib_dir: None,
@@ -133,6 +139,9 @@ async fn main() -> anyhow::Result<()> {
     if args.log_json {
         cfg.log_json = true;
     }
+    if let Some(log_file) = &args.log_file {
+        cfg.log_file = Some(log_file.clone());
+    }
     if !args.log_json && cfg.log_json {
         args.log_json = true;
     }
@@ -141,6 +150,9 @@ async fn main() -> anyhow::Result<()> {
     }
     if args.log_level.is_none() {
         args.log_level = Some(cfg.log_level.clone());
+    }
+    if args.log_file.is_none() {
+        args.log_file = cfg.log_file.clone();
     }
     if args.settings_path.is_none() {
         args.settings_path = Some(cfg.settings_path.clone());
@@ -161,35 +173,84 @@ async fn main() -> anyhow::Result<()> {
         args.runtime_transport = Some(cfg.transport_mode.clone());
     }
 
-    init_tracing(&cfg.log_level, cfg.log_json);
+    let _log_guards = init_tracing(&cfg.log_level, cfg.log_json, cfg.log_file.as_deref())?;
     run_supervisor(args).await
 }
 
-fn init_tracing(log_level: &str, log_json: bool) {
+fn init_tracing(
+    log_level: &str,
+    log_json: bool,
+    log_file: Option<&Path>,
+) -> anyhow::Result<Vec<WorkerGuard>> {
     let env_filter = match tracing_subscriber::EnvFilter::try_from_default_env() {
         Ok(f) => f,
         Err(_) => match log_level.parse::<tracing_subscriber::EnvFilter>() {
             Ok(f) => f,
             Err(e) => {
-                eprintln!(
-                    "WARN: SLAB_LOG='{}' is not a valid tracing filter ({}); falling back to 'info'",
-                    log_level, e
-                );
+                eprintln!("WARN: log level '{}' is invalid ({}); fallback to info", log_level, e);
                 tracing_subscriber::EnvFilter::new("info")
             }
         },
     };
 
-    let subscriber = tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
-        .with_target(true)
-        .with_thread_ids(true);
+    let mut guards = Vec::new();
 
-    if log_json {
-        subscriber.json().init();
+    if let Some(path) = log_file {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).with_context(|| {
+                format!("failed to create slab-server log directory '{}'", parent.display())
+            })?;
+        }
+
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .with_context(|| format!("failed to open slab-server log file '{}'", path.display()))?;
+        let (file_writer, guard) = tracing_appender::non_blocking(file);
+        guards.push(guard);
+
+        if log_json {
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(
+                    tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true),
+                )
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .json()
+                        .with_ansi(false)
+                        .with_target(true)
+                        .with_thread_ids(true)
+                        .with_writer(file_writer),
+                )
+                .init();
+        } else {
+            tracing_subscriber::registry()
+                .with(env_filter)
+                .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
+                .with(
+                    tracing_subscriber::fmt::layer()
+                        .with_ansi(false)
+                        .with_target(true)
+                        .with_thread_ids(true)
+                        .with_writer(file_writer),
+                )
+                .init();
+        }
+    } else if log_json {
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true))
+            .init();
     } else {
-        subscriber.init();
+        tracing_subscriber::registry()
+            .with(env_filter)
+            .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
+            .init();
     }
+
+    Ok(guards)
 }
 
 async fn run_gateway<F>(cfg: Config, shutdown: F) -> anyhow::Result<()>
@@ -600,6 +661,9 @@ async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
     }
     if args.log_json {
         gateway_cfg.log_json = true;
+    }
+    if let Some(v) = &args.log_file {
+        gateway_cfg.log_file = Some(v.clone());
     }
     gateway_cfg.bind_address = args.gateway_bind.clone();
     gateway_cfg.transport_mode = runtime_transport.as_str().to_string();

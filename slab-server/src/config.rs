@@ -29,6 +29,9 @@ pub struct Config {
     /// When `true`, emit log records as newline-delimited JSON.
     pub log_json: bool,
 
+    /// Optional path to a file that receives appended server logs.
+    pub log_file: Option<PathBuf>,
+
     /// When `true`, log redacted outbound cloud chat HTTP request/response data.
     ///
     /// This is intended for short-lived debugging sessions only because it can
@@ -101,6 +104,7 @@ impl Config {
             log_json: std::env::var("SLAB_LOG_JSON")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),
+            log_file: std::env::var("SLAB_LOG_FILE").ok().map(PathBuf::from),
             cloud_http_trace: std::env::var("SLAB_CLOUD_HTTP_TRACE")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 .unwrap_or(false),

@@ -28,16 +28,10 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-gnu
-            server_bin: slab-server
-            runtime_bin: slab-runtime
           - os: windows-latest
             target: x86_64-pc-windows-msvc
-            server_bin: slab-server.exe
-            runtime_bin: slab-runtime.exe
           - os: macos-latest
             target: aarch64-apple-darwin
-            server_bin: slab-server
-            runtime_bin: slab-runtime
     steps:
       - uses: actions/checkout@v4
 
@@ -69,13 +63,24 @@ jobs:
       - name: Build slab-runtime (release)
         run: cargo build --release -p slab-runtime --target ${{ matrix.target }}
 
+      - name: Prepare sidecar artifacts for Tauri
+        shell: pwsh
+        run: |
+          $ext = if ('${{ runner.os }}' -eq 'Windows') { '.exe' } else { '' }
+          $serverSrc = "target/${{ matrix.target }}/release/slab-server$ext"
+          $runtimeSrc = "target/${{ matrix.target }}/release/slab-runtime$ext"
+          $outDir = "dist-sidecars"
+
+          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+          Copy-Item $serverSrc "$outDir/slab-server-${{ matrix.target }}$ext"
+          Copy-Item $runtimeSrc "$outDir/slab-runtime-${{ matrix.target }}$ext"
+
       - name: Upload server binary
         uses: actions/upload-artifact@v4
         with:
           name: binaries-${{ matrix.target }}
           path: |
-            target/${{ matrix.target }}/release/${{ matrix.server_bin }}
-            target/${{ matrix.target }}/release/${{ matrix.runtime_bin }}
+            dist-sidecars/*
           retention-days: 1
 
   # ── Tauri desktop bundle ────────────────────────────────────────────────────
@@ -134,11 +139,27 @@ jobs:
           name: binaries-${{ matrix.target }}
           path: slab-app/src-tauri/binaries/
 
+      - name: Verify sidecar binaries (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $server = "slab-app/src-tauri/binaries/slab-server-${{ matrix.target }}.exe"
+          $runtime = "slab-app/src-tauri/binaries/slab-runtime-${{ matrix.target }}.exe"
+
+          if (!(Test-Path $server)) { throw "Missing sidecar: $server" }
+          if (!(Test-Path $runtime)) { throw "Missing sidecar: $runtime" }
+
+      - name: Verify sidecar binaries (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          test -f slab-app/src-tauri/binaries/slab-server-${{ matrix.target }}
+          test -f slab-app/src-tauri/binaries/slab-runtime-${{ matrix.target }}
+
       - name: Mark binaries executable (Unix)
         if: runner.os != 'Windows'
         run: |
-          chmod +x slab-app/src-tauri/binaries/slab-server
-          chmod +x slab-app/src-tauri/binaries/slab-runtime
+          chmod +x slab-app/src-tauri/binaries/slab-server-${{ matrix.target }}
+          chmod +x slab-app/src-tauri/binaries/slab-runtime-${{ matrix.target }}
 
       - name: Install frontend dependencies
         working-directory: slab-app

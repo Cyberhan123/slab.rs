@@ -36,6 +36,17 @@ async fn get_system_info() -> Result<String, String> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let mut builder = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                        file_name: Some("slab-app".to_string()),
+                    }),
+                ])
+                .timezone_strategy(tauri_plugin_log::TimezoneStrategy::UseLocal)
+                .build(),
+        )
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init());
@@ -61,6 +72,7 @@ pub fn run() {
             plugins::plugin_api_request
         ])
         .setup(|app| {
+            setup::setup_windows(app)?;
             setup::run_server_sidecar(app)?;
             plugins::init(app).map_err(std::io::Error::other)?;
             Ok(())
