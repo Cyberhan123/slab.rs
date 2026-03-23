@@ -486,6 +486,7 @@ fn canonicalize_model_spec(provider: &str, mut spec: ModelSpec) -> Result<ModelS
     spec.repo_id = normalize_optional_text(spec.repo_id);
     spec.filename = normalize_optional_text(spec.filename);
     spec.local_path = normalize_optional_text(spec.local_path);
+    spec.chat_template = normalize_optional_text(spec.chat_template);
 
     if provider.starts_with("cloud.") {
         if spec.provider_id.is_none() {

@@ -47,6 +47,9 @@ pub struct ModelSpecRequest {
     /// Maximum context window size in tokens.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub context_window: Option<u32>,
+    /// Optional prompt template name used for local chat rendering.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub chat_template: Option<String>,
 }
 
 /// Default runtime parameters (request).
@@ -242,6 +245,8 @@ pub struct ModelSpecResponse {
     pub local_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_template: Option<String>,
 }
 
 /// Default runtime parameters (response).
@@ -289,6 +294,7 @@ impl From<DomainModelSpec> for ModelSpecResponse {
             filename: spec.filename,
             local_path: spec.local_path,
             context_window: spec.context_window,
+            chat_template: spec.chat_template,
         }
     }
 }

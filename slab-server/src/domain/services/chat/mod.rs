@@ -2,6 +2,7 @@
 
 mod cloud;
 mod local;
+mod template;
 
 use chrono::Utc;
 use futures::stream::BoxStream;
@@ -65,6 +66,22 @@ fn build_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
     .to_string()
 }
 
+/// Build an OpenAI-compatible initial SSE chunk that announces the assistant role.
+fn build_role_chunk(id: &str, created: i64, model: &str) -> String {
+    serde_json::json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": { "role": "assistant" },
+            "finish_reason": null
+        }]
+    })
+    .to_string()
+}
+
 /// Build an OpenAI-compatible reasoning SSE chunk payload.
 fn build_reasoning_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
     serde_json::json!({
@@ -76,6 +93,22 @@ fn build_reasoning_chunk(id: &str, created: i64, model: &str, token: &str) -> St
             "index": 0,
             "delta": { "reasoning_content": token },
             "finish_reason": null
+        }]
+    })
+    .to_string()
+}
+
+/// Build an OpenAI-compatible final SSE chunk with a finish reason.
+fn build_finish_chunk(id: &str, created: i64, model: &str, finish_reason: &str) -> String {
+    serde_json::json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": finish_reason
         }]
     })
     .to_string()
@@ -289,4 +322,5 @@ mod test {
         assert_eq!(choice["delta"]["content"], "Hello");
         assert!(choice["finish_reason"].is_null());
     }
+
 }

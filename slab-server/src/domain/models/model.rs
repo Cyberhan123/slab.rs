@@ -72,6 +72,9 @@ pub struct ModelSpec {
     /// Maximum context window size in tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
+    /// Optional chat prompt template name for local chat rendering.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_template: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -318,6 +321,7 @@ impl From<crate::api::v1::models::schema::ModelSpecRequest> for ModelSpec {
             filename: req.filename,
             local_path: req.local_path,
             context_window: req.context_window,
+            chat_template: req.chat_template,
         }
     }
 }
