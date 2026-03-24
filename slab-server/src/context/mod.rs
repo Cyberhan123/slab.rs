@@ -68,8 +68,11 @@ impl AppState {
         ));
 
         // Build the AgentControl with port adapters and register built-in tools.
+        let store_for_agent: Arc<dyn slab_agent::port::AgentStorePort> =
+            Arc::clone(&store) as Arc<dyn slab_agent::port::AgentStorePort>;
         let agent_control = Arc::new(build_agent_control(&context, Arc::clone(&store)));
-        let agent_service = crate::domain::services::AgentService::new(agent_control);
+        let agent_service =
+            crate::domain::services::AgentService::new(agent_control, store_for_agent);
 
         let services = Arc::new(crate::domain::services::AppServices::new(
             (*context.model_state).clone(),

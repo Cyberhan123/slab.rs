@@ -4,19 +4,24 @@ use serde::{Deserialize, Serialize};
 use slab_agent::config::AgentConfig;
 use slab_types::agent::AgentThreadStatus;
 use utoipa::ToSchema;
+use validator::Validate;
+
+use crate::api::validation::validate_non_blank;
 
 // ── Spawn ─────────────────────────────────────────────────────────────────────
 
 /// Request body for `POST /v1/agents/spawn`.
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema, Validate)]
 pub struct SpawnAgentRequest {
     /// Chat session ID that backs this agent thread.
+    #[validate(custom(function = "validate_non_blank", message = "session_id must not be blank"))]
     pub session_id: String,
     /// Agent runtime configuration (model, temperature, etc.).
     #[serde(default)]
     pub config: AgentConfigInput,
     /// Initial messages to seed the agent's conversation.
     #[serde(default)]
+    #[validate(nested)]
     pub messages: Vec<MessageInput>,
 }
 
@@ -48,8 +53,9 @@ impl From<AgentConfigInput> for AgentConfig {
 }
 
 /// A single message in the initial conversation.
-#[derive(Debug, Deserialize, ToSchema)]
+#[derive(Debug, Deserialize, ToSchema, Validate)]
 pub struct MessageInput {
+    #[validate(custom(function = "validate_non_blank", message = "role must not be blank"))]
     pub role: String,
     pub content: String,
 }

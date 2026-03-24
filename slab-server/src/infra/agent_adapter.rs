@@ -13,6 +13,7 @@ use slab_agent::error::AgentError;
 use slab_agent::port::{AgentNotifyPort, LlmPort, LlmResponse, ParsedToolCall, ThreadStatus, ToolSpec};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 use tracing::warn;
+use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{ChatCompletionCommand, ChatCompletionOutput, ChatStreamOptions};
@@ -81,7 +82,7 @@ impl LlmPort for ServerLlmAdapter {
                     .tool_calls
                     .into_iter()
                     .map(|tc| ParsedToolCall {
-                        id: tc.id.unwrap_or_default(),
+                        id: tc.id.filter(|s| !s.is_empty()).unwrap_or_else(|| Uuid::new_v4().to_string()),
                         name: tc.function.name,
                         arguments: tc.function.arguments,
                     })

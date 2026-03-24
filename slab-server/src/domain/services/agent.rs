@@ -8,6 +8,7 @@ use std::sync::Arc;
 use slab_agent::config::AgentConfig;
 use slab_agent::control::AgentControl;
 use slab_agent::error::AgentError;
+use slab_agent::port::AgentStorePort;
 use slab_types::ConversationMessage;
 
 use crate::error::ServerError;
@@ -16,11 +17,12 @@ use crate::error::ServerError;
 #[derive(Clone)]
 pub struct AgentService {
     control: Arc<AgentControl>,
+    store: Arc<dyn AgentStorePort>,
 }
 
 impl AgentService {
-    pub fn new(control: Arc<AgentControl>) -> Self {
-        Self { control }
+    pub fn new(control: Arc<AgentControl>, store: Arc<dyn AgentStorePort>) -> Self {
+        Self { control, store }
     }
 
     /// Spawn a root agent thread.  Returns the new thread ID.
@@ -36,14 +38,33 @@ impl AgentService {
             .map_err(agent_err_to_server)
     }
 
-    /// Get the current status snapshot of an agent thread.
+    /// Get the current status of an agent thread.
+    ///
+    /// First checks the in-memory registry (for live threads), then falls back
+    /// to the persisted snapshot so callers polling after completion still get
+    /// an accurate status rather than a 404.
     pub async fn get_status(
         &self,
         thread_id: &str,
     ) -> Result<slab_types::agent::AgentThreadStatus, ServerError> {
-        let rx = self.control.subscribe(thread_id).await.map_err(agent_err_to_server)?;
-        let status = *rx.borrow();
-        Ok(status)
+        // Try the live in-memory registry first.
+        match self.control.subscribe(thread_id).await {
+            Ok(rx) => {
+                return Ok(*rx.borrow());
+            }
+            Err(AgentError::ThreadNotFound(_)) => {
+                // Thread has already finished and was removed from the registry.
+                // Fall through to the DB lookup below.
+            }
+            Err(e) => return Err(agent_err_to_server(e)),
+        }
+
+        // Fallback: look up the persisted snapshot.
+        match self.store.get_thread(thread_id).await {
+            Ok(Some(snapshot)) => Ok(snapshot.status),
+            Ok(None) => Err(ServerError::NotFound(format!("agent thread not found: {thread_id}"))),
+            Err(e) => Err(ServerError::Internal(e.to_string())),
+        }
     }
 
     /// Gracefully shut down a running agent thread.
@@ -63,7 +84,7 @@ fn agent_err_to_server(e: AgentError) -> ServerError {
             ServerError::NotFound(format!("agent thread not found: {id}"))
         }
         AgentError::ThreadLimitExceeded { current, max } => {
-            ServerError::BadRequest(format!(
+            ServerError::TooManyRequests(format!(
                 "thread limit exceeded: {current}/{max} concurrent threads active"
             ))
         }
