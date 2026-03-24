@@ -129,7 +129,7 @@ impl ResourceManager {
             .expect("backend map poisoned")
             .get(backend_id)
             .cloned()
-            .ok_or_else(|| CoreError::Busy { backend_id: backend_id.to_owned() })
+            .ok_or_else(|| CoreError::DriverNotRegistered { driver_id: backend_id.to_owned() })
     }
 
     /// List registered backends in deterministic order.

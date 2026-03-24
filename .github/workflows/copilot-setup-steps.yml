@@ -46,7 +46,7 @@ jobs:
           cache-on-failure: "true"
 
       - name: Prefetch Rust dependencies
-        run: cargo fetch --locked
+        run: cargo fetch
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2

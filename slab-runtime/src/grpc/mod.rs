@@ -408,6 +408,7 @@ pub(super) fn runtime_to_status(err: CoreError) -> Status {
             Status::not_found(msg)
         }
         CoreError::Timeout | CoreError::BroadcastAckTimeout => Status::deadline_exceeded(msg),
+        CoreError::Cancelled => Status::cancelled(msg),
         CoreError::BackendShutdown | CoreError::LibraryLoadFailed { .. } => {
             Status::unavailable(msg)
         }
@@ -460,5 +461,12 @@ mod tests {
             runtime_to_status(slab_core::api::CoreError::GGMLEngine("session not found".into()));
         assert_eq!(ggml.code(), Code::Internal);
         assert!(ggml.message().contains("GGML engine error"));
+    }
+
+    #[test]
+    fn cancelled_error_maps_to_cancelled_status() {
+        let status = runtime_to_status(slab_core::api::CoreError::Cancelled);
+        assert_eq!(status.code(), Code::Cancelled);
+        assert!(status.message().contains("task cancelled"));
     }
 }
