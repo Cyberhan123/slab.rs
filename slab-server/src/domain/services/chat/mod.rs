@@ -353,6 +353,7 @@ async fn create_chat_completion_with_state(
     }
 
     let resolved_model = resolve_requested_model(&state, &command.model).await?;
+    let continue_generation = command.continue_generation;
     let user_content = command
         .messages
         .iter()
@@ -378,6 +379,7 @@ async fn create_chat_completion_with_state(
         model = %resolved_model,
         prompt_len = user_content.len(),
         stream = command.stream,
+        continue_generation,
         session_id = ?command.id,
         "chat completion request"
     );
@@ -385,7 +387,7 @@ async fn create_chat_completion_with_state(
     let resolved_messages =
         build_messages(&state, command.id.as_deref(), &command.messages).await?;
 
-    if let Some(session_id) = command.id.as_deref() {
+    if let Some(session_id) = command.id.as_deref().filter(|_| !continue_generation) {
         state
             .store()
             .append_message(ChatMessage {
@@ -769,6 +771,7 @@ mod test {
                 tool_call_id: None,
                 tool_calls: Vec::new(),
             }],
+            continue_generation: false,
             stream: false,
             max_tokens: None,
             temperature: None,

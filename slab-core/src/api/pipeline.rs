@@ -500,10 +500,19 @@ mod tests {
                                         let (stream_tx, stream_rx) = mpsc::channel(4);
                                         let _ = req.reply_tx.send(BackendReply::Stream(stream_rx));
 
-                                        tokio::spawn(async move {
-                                            let _ = stream_tx.send(StreamChunk::Token(text)).await;
-                                            let _ = stream_tx.send(StreamChunk::Done).await;
-                                        });
+                                        if text == "__stream_wait__" {
+                                            let mut cancel_rx = req.cancel_rx.clone();
+                                            tokio::spawn(async move {
+                                                let _ =
+                                                    stream_tx.send(StreamChunk::Token("tick".into())).await;
+                                                let _ = cancel_rx.wait_for(|cancelled| *cancelled).await;
+                                            });
+                                        } else {
+                                            tokio::spawn(async move {
+                                                let _ = stream_tx.send(StreamChunk::Token(text)).await;
+                                                let _ = stream_tx.send(StreamChunk::Done).await;
+                                            });
+                                        }
                                     }
                                     other => {
                                         let _ = req.reply_tx.send(BackendReply::Error(format!(
@@ -813,6 +822,45 @@ mod tests {
         let error =
             slow_handle.status().await.expect_err("cancelled and purged task should be gone");
         assert!(matches!(error, CoreError::TaskNotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn cancel_closes_active_streaming_task() {
+        let runtime = test_runtime();
+        let pipeline = runtime.pipeline(text_spec()).expect("pipeline should build");
+
+        let stream_handle = pipeline
+            .submit_text_generation(TextGenerationRequest {
+                prompt: "__stream_wait__".to_owned(),
+                stream: true,
+                ..TextGenerationRequest::default()
+            })
+            .await
+            .expect("streaming task should submit");
+
+        let mut stream = stream_handle
+            .take_stream()
+            .await
+            .expect("stream handle should be available");
+
+        let first_chunk = tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("stream should yield an initial chunk")
+            .expect("stream should not close before cancel")
+            .expect("initial chunk should decode");
+        assert_eq!(first_chunk.delta, "tick");
+
+        stream_handle.cancel();
+
+        let next_chunk = tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("stream should react to cancellation");
+        assert!(
+            next_chunk.is_none(),
+            "stream should close after the task is cancelled, got {next_chunk:?}"
+        );
+
+        stream_handle.cancel_and_purge().await;
     }
 
     #[tokio::test]

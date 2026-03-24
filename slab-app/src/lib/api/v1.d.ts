@@ -137,6 +137,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/completions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["completions"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ffmpeg/convert": {
         parameters: {
             query?: never;
@@ -577,8 +593,14 @@ export interface components {
         };
         /** @description Request body for `POST /v1/chat/completions`. */
         ChatCompletionRequest: {
+            /** @description When `true`, continue generating from the last assistant message instead of starting a new turn. */
+            continue_generation?: boolean;
+            /** @description Raw grammar passed through to the local llama backend. */
+            grammar?: string | null;
             /** @description Optional chat session ID for stateful conversations. */
             id?: string | null;
+            /** @description Legacy llama.cpp-compatible top-level JSON schema field. */
+            json_schema?: unknown;
             /**
              * Format: int32
              * @description Maximum tokens to generate.
@@ -590,8 +612,15 @@ export interface components {
              * @description Unified model identifier from `/v1/models`.
              *     `GET /v1/chat/models` returns picker options that reuse the same ids.
              */
-            model: string;
+            model?: string;
+            /**
+             * Format: int32
+             * @description Number of completions to generate.
+             */
+            n?: number | null;
             reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
+            response_format?: null | components["schemas"]["ChatResponseFormat"];
+            stop?: null | components["schemas"]["StopSequences"];
             /** @description When `true`, the response is streamed token-by-token using SSE. */
             stream?: boolean;
             stream_options?: null | components["schemas"]["ChatStreamOptions"];
@@ -601,6 +630,11 @@ export interface components {
              */
             temperature?: number | null;
             thinking?: null | components["schemas"]["ChatThinkingConfig"];
+            /**
+             * Format: float
+             * @description Nucleus sampling threshold in (0, 1].
+             */
+            top_p?: number | null;
             verbosity?: null | components["schemas"]["ChatVerbosity"];
         };
         /** @description Response body for `POST /v1/chat/completions`. */
@@ -618,6 +652,8 @@ export interface components {
             model: string;
             /** @description Always `"chat.completion"`. */
             object: string;
+            /** @description Backend/system fingerprint for compatibility with OpenAI clients. */
+            system_fingerprint: string;
             usage?: null | components["schemas"]["ChatCompletionUsage"];
         };
         ChatCompletionUsage: {
@@ -708,6 +744,19 @@ export interface components {
          * @enum {string}
          */
         ChatReasoningEffort: "none" | "low" | "medium" | "high" | "minimal";
+        ChatResponseFormat: {
+            json_schema?: null | components["schemas"]["ChatResponseJsonSchema"];
+            schema?: unknown;
+            type: components["schemas"]["ChatResponseFormatType"];
+        };
+        /** @enum {string} */
+        ChatResponseFormatType: "text" | "json_object" | "json_schema";
+        ChatResponseJsonSchema: {
+            description?: string | null;
+            name?: string | null;
+            schema: unknown;
+            strict?: boolean | null;
+        };
         /** @description Streaming controls accepted by `POST /v1/chat/completions`. */
         ChatStreamOptions: {
             /** @description Whether the final chunk should include a usage payload. */
@@ -744,11 +793,74 @@ export interface components {
             /** @description Pass `true` to mark setup as done, `false` to reset it. */
             initialized?: boolean;
         };
+        /** @description A single choice in the text completion response. */
+        CompletionChoice: {
+            /** @description Why generation stopped (`"stop"`, `"length"`, ...). */
+            finish_reason?: string | null;
+            /**
+             * Format: int32
+             * @description Zero-based index of this choice.
+             */
+            index: number;
+            /** @description Generated text for this choice. */
+            text: string;
+        };
+        /** @description Request body for `POST /v1/completions`. */
         CompletionRequest: {
-            decode?: null | components["schemas"]["TranscribeDecodeRequest"];
-            /** @description The audio file path to transcribe. */
-            path: string;
-            vad?: null | components["schemas"]["TranscribeVadRequest"];
+            /** @description Raw grammar passed through to the local llama backend. */
+            grammar?: string | null;
+            /** @description Legacy llama.cpp-compatible top-level JSON schema field. */
+            json_schema?: unknown;
+            /**
+             * Format: int32
+             * @description Maximum tokens to generate.
+             */
+            max_tokens?: number | null;
+            /**
+             * @description Unified model identifier from `/v1/models`.
+             *     When omitted, the first available chat-compatible model is used.
+             */
+            model?: string;
+            /**
+             * Format: int32
+             * @description Number of completions to generate.
+             */
+            n?: number | null;
+            /** @description Raw prompt for completion-style generation. */
+            prompt: string;
+            response_format?: null | components["schemas"]["ChatResponseFormat"];
+            stop?: null | components["schemas"]["StopSequences"];
+            /** @description Stream the result using SSE. */
+            stream?: boolean;
+            /**
+             * Format: float
+             * @description Sampling temperature in [0, 2].
+             */
+            temperature?: number | null;
+            /**
+             * Format: float
+             * @description Nucleus sampling threshold in (0, 1].
+             */
+            top_p?: number | null;
+        };
+        /** @description Response body for `POST /v1/completions`. */
+        CompletionResponse: {
+            /** @description Generated choices. */
+            choices: components["schemas"]["CompletionChoice"][];
+            /**
+             * Format: int64
+             * @description Unix timestamp of when the response was created.
+             */
+            created: number;
+            /** @description Unique identifier for this completion. */
+            id: string;
+            /** @description Model that produced the completion. */
+            model: string;
+            /** @description Always `"text_completion"`. */
+            object: string;
+            /** @description Backend/system fingerprint for compatibility with OpenAI clients. */
+            system_fingerprint: string;
+            usage?: null | components["schemas"]["ChatCompletionUsage"];
         };
         /** @description Availability information for a single environment component. */
         ComponentStatusResponse: {
@@ -1134,6 +1246,7 @@ export interface components {
             /** @description Whether the one-time setup wizard has been completed. */
             initialized: boolean;
         };
+        StopSequences: string | string[];
         /** @description Request body for `POST /v1/models/switch`. */
         SwitchModelRequest: {
             /** @description Legacy backend identifier, e.g. `"ggml.llama"`. */
@@ -1647,6 +1760,48 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    completions: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompletionRequest"];
+            };
+        };
+        responses: {
+            /** @description Text completion generated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompletionResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
         };
     };
