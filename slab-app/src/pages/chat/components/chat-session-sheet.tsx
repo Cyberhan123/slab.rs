@@ -1,4 +1,4 @@
-import { MoreHorizontal, Plus, Trash2 } from "lucide-react"
+import { MoreHorizontal, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -32,7 +32,6 @@ type ChatSessionSheetProps = {
   activeConversation?: string
   busy?: boolean
   onSelect: (key: string) => void
-  onCreate: () => void
   onDelete: (key: string) => void
 }
 
@@ -44,31 +43,24 @@ export function ChatSessionSheet({
   activeConversation,
   busy = false,
   onSelect,
-  onCreate,
   onDelete,
 }: ChatSessionSheetProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="w-full border-l border-border/60 bg-[var(--surface-1)] p-0 sm:max-w-xl"
+        className="w-full overflow-hidden border-l border-border/60 bg-[var(--surface-1)] p-0 sm:max-w-xl"
       >
-        <SheetHeader className="border-b border-border/60 px-6 py-5">
-          <div className="flex items-start justify-between gap-4">
-            <div className="space-y-1">
-              <SheetTitle className="text-xl">Manage sessions</SheetTitle>
-              <SheetDescription>
-                Create, switch, and clean up conversations without leaving the chat stage.
-              </SheetDescription>
-            </div>
-            <Button variant="outline" size="sm" className="shrink-0" onClick={onCreate} disabled={busy}>
-              <Plus className="size-4" />
-              New chat
-            </Button>
+        <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
+          <div className="space-y-1">
+            <SheetTitle className="text-xl">Manage sessions</SheetTitle>
+            <SheetDescription>
+              Switch and clean up conversations without leaving the chat stage.
+            </SheetDescription>
           </div>
         </SheetHeader>
 
-        <ScrollArea className="h-full">
+        <ScrollArea className="min-h-0 flex-1 overflow-hidden">
           <div className="space-y-3 px-6 py-5">
             {conversations.map((conversation) => {
               const isCurrent = conversation.key === currentConversation
