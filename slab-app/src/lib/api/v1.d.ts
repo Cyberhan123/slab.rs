@@ -565,8 +565,8 @@ export interface components {
         };
         /** @description A single choice in the completion response. */
         ChatChoice: {
-            /** @description Why generation stopped (`"stop"`, `"length"`, 鈥?. */
-            finish_reason: string;
+            /** @description Why generation stopped (`"stop"`, `"length"`, ...). */
+            finish_reason?: string | null;
             /**
              * Format: int32
              * @description Zero-based index of this choice.
@@ -594,6 +594,7 @@ export interface components {
             reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
             /** @description When `true`, the response is streamed token-by-token using SSE. */
             stream?: boolean;
+            stream_options?: null | components["schemas"]["ChatStreamOptions"];
             /**
              * Format: float
              * @description Sampling temperature in [0, 2].
@@ -617,14 +618,63 @@ export interface components {
             model: string;
             /** @description Always `"chat.completion"`. */
             object: string;
+            usage?: null | components["schemas"]["ChatCompletionUsage"];
+        };
+        ChatCompletionUsage: {
+            /** Format: int32 */
+            completion_tokens: number;
+            estimated?: boolean;
+            /** Format: int32 */
+            prompt_tokens: number;
+            prompt_tokens_details: components["schemas"]["ChatPromptTokensDetails"];
+            /** Format: int32 */
+            total_tokens: number;
+        };
+        ChatContentPart: {
+            text: string;
+            /** @enum {string} */
+            type: "text";
+        } | {
+            text: string;
+            /** @enum {string} */
+            type: "input_text";
+        } | {
+            text: string;
+            /** @enum {string} */
+            type: "output_text";
+        } | {
+            detail?: string | null;
+            image_url?: string | null;
+            mime_type?: string | null;
+            /** @enum {string} */
+            type: "image";
+        } | {
+            tool_call_id?: string | null;
+            /** @enum {string} */
+            type: "tool_result";
+            value: unknown;
+        } | {
+            /** @enum {string} */
+            type: "json";
+            value: unknown;
+        } | {
+            text: string;
+            /** @enum {string} */
+            type: "refusal";
         };
         /** @description A single message in the conversation history. */
         ChatMessage: {
-            /** @description The content of the message. */
-            content: string;
-            /** @description The role of the message author (`"system"`, `"user"`, `"assistant"`). */
+            content?: null | components["schemas"]["ChatMessageContent"];
+            /** @description Optional participant name for providers that support named turns. */
+            name?: string | null;
+            /** @description The role of the message author. */
             role: string;
+            /** @description Tool call id for tool result messages. */
+            tool_call_id?: string | null;
+            /** @description Assistant-emitted tool calls. */
+            tool_calls?: components["schemas"]["ChatToolCall"][];
         };
+        ChatMessageContent: string | components["schemas"]["ChatContentPart"][];
         /** @description A selectable chat model option from `GET /v1/chat/models`. */
         ChatModelOption: {
             /** @description Backend id when `source = local`, e.g. `"ggml.llama"`. */
@@ -649,11 +699,20 @@ export interface components {
          * @enum {string}
          */
         ChatModelSource: "local" | "cloud";
+        ChatPromptTokensDetails: {
+            /** Format: int32 */
+            cached_tokens?: number;
+        };
         /**
          * @description Reasoning effort hint for cloud chat providers that support thinking control.
          * @enum {string}
          */
         ChatReasoningEffort: "none" | "low" | "medium" | "high" | "minimal";
+        /** @description Streaming controls accepted by `POST /v1/chat/completions`. */
+        ChatStreamOptions: {
+            /** @description Whether the final chunk should include a usage payload. */
+            include_usage?: boolean;
+        };
         /** @description Thinking settings accepted by `POST /v1/chat/completions`. */
         ChatThinkingConfig: {
             reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
@@ -666,6 +725,15 @@ export interface components {
          * @enum {string}
          */
         ChatThinkingType: "enabled" | "disabled";
+        ChatToolCall: {
+            function: components["schemas"]["ChatToolFunction"];
+            id?: string | null;
+            type?: string;
+        };
+        ChatToolFunction: {
+            arguments?: string;
+            name: string;
+        };
         /**
          * @description Verbosity hint for cloud chat providers that support thinking control.
          * @enum {string}
@@ -879,10 +947,12 @@ export interface components {
         ListModelsQuery: Record<string, never>;
         /** @description Request body for `POST /v1/models/load`. */
         LoadModelRequest: {
-            /** @description Backend identifier, e.g. `"ggml.llama"`. */
-            backend_id: string;
-            /** @description Path to the model weights file. */
-            model_path: string;
+            /** @description Legacy backend identifier, e.g. `"ggml.llama"`. */
+            backend_id?: string | null;
+            /** @description Catalog model id from `/v1/models`. Preferred for local lifecycle operations. */
+            model_id?: string | null;
+            /** @description Legacy path to the model weights file. */
+            model_path?: string | null;
             /**
              * Format: int32
              * @description Optional worker override.
@@ -898,6 +968,8 @@ export interface components {
         };
         /** @description Provider-specific model configuration (request). */
         ModelSpecRequest: {
+            /** @description Optional prompt template name used for local chat rendering. */
+            chat_template?: string | null;
             /**
              * Format: int32
              * @description Maximum context window size in tokens.
@@ -917,6 +989,7 @@ export interface components {
         };
         /** @description Provider-specific model configuration (response). */
         ModelSpecResponse: {
+            chat_template?: string | null;
             /** Format: int32 */
             context_window?: number | null;
             filename?: string | null;
@@ -932,6 +1005,15 @@ export interface components {
             backend: string;
             /** @description Human-readable status string. */
             status: string;
+        };
+        OpenAiError: {
+            code?: string | null;
+            message: string;
+            param?: string | null;
+            type: string;
+        };
+        OpenAiErrorResponse: {
+            error: components["schemas"]["OpenAiError"];
         };
         OperationAcceptedResponse: {
             operation_id: string;
@@ -1054,8 +1136,12 @@ export interface components {
         };
         /** @description Request body for `POST /v1/models/switch`. */
         SwitchModelRequest: {
-            backend_id: string;
-            model_path: string;
+            /** @description Legacy backend identifier, e.g. `"ggml.llama"`. */
+            backend_id?: string | null;
+            /** @description Catalog model id from `/v1/models`. Preferred for local lifecycle operations. */
+            model_id?: string | null;
+            /** @description Legacy path to the model weights file. */
+            model_path?: string | null;
             /** Format: int32 */
             num_workers?: number | null;
         };
@@ -1205,6 +1291,13 @@ export interface components {
             /** @description Status: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`. */
             status: string;
             updated_at: string;
+        };
+        /** @description Request body for `POST /v1/models/unload`. */
+        UnloadModelRequest: {
+            /** @description Legacy backend identifier for direct runtime unloads. */
+            backend_id?: string | null;
+            /** @description Catalog model id from `/v1/models`. Preferred for local lifecycle operations. */
+            model_id?: string | null;
         };
         /** @description Request body for `PUT /v1/models/{id}`. */
         UpdateModelRequest: {
@@ -1515,14 +1608,18 @@ export interface operations {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
             /** @description Backend error */
             500: {
                 headers: {
                     [name: string]: unknown;
                 };
-                content?: never;
+                content: {
+                    "application/json": components["schemas"]["OpenAiErrorResponse"];
+                };
             };
         };
     };
@@ -1905,7 +2002,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/json": components["schemas"]["LoadModelRequest"];
+                "application/json": components["schemas"]["UnloadModelRequest"];
             };
         };
         responses: {

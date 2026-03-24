@@ -260,7 +260,7 @@ export function useAudio() {
       throw new Error('Selected model no longer exists in catalog.');
     }
 
-    const { modelPath, downloadedNow } = await ensureDownloadedModelPath(selectedModelId);
+    const { downloadedNow } = await ensureDownloadedModelPath(selectedModelId);
 
     if (downloadedNow) {
       toast.success(`Downloaded ${model.display_name}`);
@@ -268,8 +268,7 @@ export function useAudio() {
 
     await loadModelMutation.mutateAsync({
       body: {
-        backend_id: WHISPER_BACKEND_ID,
-        model_path: modelPath,
+        model_id: selectedModelId,
       },
     });
 

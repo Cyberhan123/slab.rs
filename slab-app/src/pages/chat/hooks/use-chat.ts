@@ -1,7 +1,14 @@
-import { useXChat } from '@ant-design/x-sdk';
+import { SSEFields, useXChat, XModelParams, XModelResponse } from '@ant-design/x-sdk';
 import { useState } from 'react';
 import locale from '../local';
-import { providerFactory, historyMessageFactory } from '../chat-context';
+import {
+  getChatMessageTextContent,
+  getChatRequestErrorMessage,
+  getChatRequestErrorMeta,
+  historyMessageFactory,
+  providerFactory,
+  type ChatUiMessage,
+} from '../chat-context';
 
 export const useChat = (
   conversationKey: string,
@@ -11,7 +18,12 @@ export const useChat = (
 ) => {
   const [activeConversation, setActiveConversation] = useState<string>();
 
-  const { onRequest, messages, isRequesting, abort, onReload: rawOnReload } = useXChat({
+  const { onRequest, messages, isRequesting, abort, onReload: rawOnReload } = useXChat<
+    ChatUiMessage,
+    ChatUiMessage,
+    XModelParams,
+    Partial<Record<SSEFields, XModelResponse>>
+  >({
     provider: providerFactory(conversationKey, model),
     conversationKey: conversationKey,
     defaultMessages: historyMessageFactory(conversationKey),
@@ -24,12 +36,14 @@ export const useChat = (
     requestFallback: (_, { error, errorInfo, messageInfo }) => {
       if (error.name === 'AbortError') {
         return {
-          content: messageInfo?.message?.content || locale.requestAborted,
+          content: getChatMessageTextContent(messageInfo?.message) || locale.requestAborted,
           role: 'assistant',
         };
       }
+
       return {
-        content: errorInfo?.error?.message || locale.requestFailed,
+        content: getChatRequestErrorMessage(errorInfo) || error.message || locale.requestFailed,
+        ...getChatRequestErrorMeta(errorInfo),
         role: 'assistant',
       };
     },

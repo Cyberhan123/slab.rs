@@ -21,7 +21,8 @@ pub use backend::{
 pub use chat::{
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
     ChatModelSource, ChatReasoningEffort, ChatResultChoice, ChatStreamChunk, ChatVerbosity,
-    ConversationMessage,
+    ConversationContentPart, ConversationMessage, ConversationMessageContent, ConversationToolCall,
+    ConversationToolFunction,
 };
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{ImageGenerationCommand, ImageGenerationMode};

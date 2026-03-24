@@ -1,8 +1,8 @@
 //! OpenAI-compatible API v1 request / response types.
 //!
 //! The structures here are intentionally kept compatible with the OpenAI REST
-//! API specification so that existing OpenAI SDK clients work without
-//! modification.
+//! API shape while also accepting richer structured content for future
+//! multimodal and tool-calling work.
 
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
@@ -11,26 +11,136 @@ use validator::{Validate, ValidationError};
 use crate::domain::models::{
     ChatCompletionResult as DomainChatCompletionResult, ChatModelOption as DomainChatModelOption,
     ChatModelSource as DomainChatModelSource, ChatResultChoice as DomainChatResultChoice,
-    ConversationMessage,
+    ConversationContentPart as DomainConversationContentPart,
+    ConversationMessage as DomainConversationMessage,
+    ConversationMessageContent as DomainConversationMessageContent,
+    ConversationToolCall as DomainConversationToolCall,
+    ConversationToolFunction as DomainConversationToolFunction,
 };
+use slab_types::inference::TextGenerationUsage;
 
 const MAX_PROMPT_BYTES: usize = 128 * 1024;
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ChatContentPart {
+    Text {
+        text: String,
+    },
+    InputText {
+        text: String,
+    },
+    OutputText {
+        text: String,
+    },
+    Image {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        image_url: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        mime_type: Option<String>,
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        detail: Option<String>,
+    },
+    ToolResult {
+        #[serde(skip_serializing_if = "Option::is_none", default)]
+        tool_call_id: Option<String>,
+        value: serde_json::Value,
+    },
+    Json {
+        value: serde_json::Value,
+    },
+    Refusal {
+        text: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+pub enum ChatMessageContent {
+    Text(String),
+    Parts(Vec<ChatContentPart>),
+}
+
+impl Default for ChatMessageContent {
+    fn default() -> Self {
+        Self::Text(String::new())
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatToolFunction {
+    pub name: String,
+    #[serde(default)]
+    pub arguments: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatToolCall {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub id: Option<String>,
+    #[serde(default = "default_tool_call_type")]
+    pub r#type: String,
+    pub function: ChatToolFunction,
+}
+
+fn default_tool_call_type() -> String {
+    "function".to_owned()
+}
+
 /// A single message in the conversation history.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+#[validate(schema(function = "validate_chat_message"))]
 pub struct ChatMessage {
-    /// The role of the message author (`"system"`, `"user"`, `"assistant"`).
-    #[validate(custom(
-        function = "crate::api::validation::validate_chat_role",
-        message = "role must be one of: system, user, assistant"
-    ))]
+    /// The role of the message author.
     pub role: String,
-    /// The content of the message.
-    #[validate(custom(
-        function = "crate::api::validation::validate_non_blank",
-        message = "content must not be empty"
-    ))]
-    pub content: String,
+    /// String content or a richer structured content array.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub content: Option<ChatMessageContent>,
+    /// Optional participant name for providers that support named turns.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub name: Option<String>,
+    /// Tool call id for tool result messages.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub tool_call_id: Option<String>,
+    /// Assistant-emitted tool calls.
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pub tool_calls: Vec<ChatToolCall>,
+}
+
+impl ChatMessage {
+    pub fn has_meaningful_payload(&self) -> bool {
+        self.content
+            .as_ref()
+            .is_some_and(ChatMessageContent::has_meaningful_content)
+            || !self.tool_calls.is_empty()
+    }
+
+    pub fn rendered_text(&self) -> String {
+        DomainConversationMessage::from(self.clone()).rendered_text()
+    }
+}
+
+impl ChatMessageContent {
+    pub fn has_meaningful_content(&self) -> bool {
+        match self {
+            Self::Text(text) => !text.trim().is_empty(),
+            Self::Parts(parts) => parts.iter().any(chat_content_part_has_meaningful_content),
+        }
+    }
+}
+
+fn chat_content_part_has_meaningful_content(part: &ChatContentPart) -> bool {
+    match part {
+        ChatContentPart::Text { text }
+        | ChatContentPart::InputText { text }
+        | ChatContentPart::OutputText { text }
+        | ChatContentPart::Refusal { text } => !text.trim().is_empty(),
+        ChatContentPart::Image { image_url, mime_type, .. } => {
+            image_url.as_deref().is_some_and(|value| !value.trim().is_empty())
+                || mime_type.as_deref().is_some_and(|value| !value.trim().is_empty())
+        }
+        ChatContentPart::ToolResult { .. } | ChatContentPart::Json { .. } => true,
+    }
 }
 
 /// Reasoning effort hint for cloud chat providers that support thinking control.
@@ -83,6 +193,18 @@ pub struct ChatThinkingConfig {
     pub verbosity: Option<ChatVerbosity>,
 }
 
+/// Streaming controls accepted by `POST /v1/chat/completions`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatStreamOptions {
+    /// Whether the final chunk should include a usage payload.
+    #[serde(default = "default_include_usage")]
+    pub include_usage: bool,
+}
+
+fn default_include_usage() -> bool {
+    true
+}
+
 /// Request body for `POST /v1/chat/completions`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 #[validate(schema(function = "validate_chat_completion_request"))]
@@ -108,6 +230,9 @@ pub struct ChatCompletionRequest {
     /// When `true`, the response is streamed token-by-token using SSE.
     #[serde(default)]
     pub stream: bool,
+    /// Controls streaming-only behavior.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub stream_options: Option<ChatStreamOptions>,
     /// Maximum tokens to generate.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 1, max = 4096, message = "max_tokens must be between 1 and 4096"))]
@@ -127,6 +252,22 @@ pub struct ChatCompletionRequest {
     pub verbosity: Option<ChatVerbosity>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatPromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatCompletionUsage {
+    pub prompt_tokens: u32,
+    pub completion_tokens: u32,
+    pub total_tokens: u32,
+    pub prompt_tokens_details: ChatPromptTokensDetails,
+    #[serde(default)]
+    pub estimated: bool,
+}
+
 /// A single choice in the completion response.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ChatChoice {
@@ -134,8 +275,9 @@ pub struct ChatChoice {
     pub index: u32,
     /// The generated message.
     pub message: ChatMessage,
-    /// Why generation stopped (`"stop"`, `"length"`, 鈥?.
-    pub finish_reason: String,
+    /// Why generation stopped (`"stop"`, `"length"`, ...).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
 }
 
 /// Response body for `POST /v1/chat/completions`.
@@ -151,6 +293,25 @@ pub struct ChatCompletionResponse {
     pub model: String,
     /// Generated choices.
     pub choices: Vec<ChatChoice>,
+    /// Usage statistics for the request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<ChatCompletionUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct OpenAiError {
+    pub message: String,
+    #[serde(rename = "type")]
+    pub error_type: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub param: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub code: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct OpenAiErrorResponse {
+    pub error: OpenAiError,
 }
 
 /// A selectable chat model option from `GET /v1/chat/models`.
@@ -177,9 +338,119 @@ pub struct ChatModelOption {
     pub provider_name: Option<String>,
 }
 
-impl From<ConversationMessage> for ChatMessage {
-    fn from(message: ConversationMessage) -> Self {
-        Self { role: message.role, content: message.content }
+impl From<DomainConversationContentPart> for ChatContentPart {
+    fn from(value: DomainConversationContentPart) -> Self {
+        match value {
+            DomainConversationContentPart::Text { text } => Self::Text { text },
+            DomainConversationContentPart::InputText { text } => Self::InputText { text },
+            DomainConversationContentPart::OutputText { text } => Self::OutputText { text },
+            DomainConversationContentPart::Image { image_url, mime_type, detail } => {
+                Self::Image { image_url, mime_type, detail }
+            }
+            DomainConversationContentPart::ToolResult { tool_call_id, value } => {
+                Self::ToolResult { tool_call_id, value }
+            }
+            DomainConversationContentPart::Json { value } => Self::Json { value },
+            DomainConversationContentPart::Refusal { text } => Self::Refusal { text },
+        }
+    }
+}
+
+impl From<ChatContentPart> for DomainConversationContentPart {
+    fn from(value: ChatContentPart) -> Self {
+        match value {
+            ChatContentPart::Text { text } => DomainConversationContentPart::Text { text },
+            ChatContentPart::InputText { text } => DomainConversationContentPart::InputText { text },
+            ChatContentPart::OutputText { text } => {
+                DomainConversationContentPart::OutputText { text }
+            }
+            ChatContentPart::Image { image_url, mime_type, detail } => {
+                DomainConversationContentPart::Image { image_url, mime_type, detail }
+            }
+            ChatContentPart::ToolResult { tool_call_id, value } => {
+                DomainConversationContentPart::ToolResult { tool_call_id, value }
+            }
+            ChatContentPart::Json { value } => DomainConversationContentPart::Json { value },
+            ChatContentPart::Refusal { text } => DomainConversationContentPart::Refusal { text },
+        }
+    }
+}
+
+impl From<DomainConversationMessageContent> for ChatMessageContent {
+    fn from(value: DomainConversationMessageContent) -> Self {
+        match value {
+            DomainConversationMessageContent::Text(text) => Self::Text(text),
+            DomainConversationMessageContent::Parts(parts) => {
+                Self::Parts(parts.into_iter().map(Into::into).collect())
+            }
+        }
+    }
+}
+
+impl From<ChatMessageContent> for DomainConversationMessageContent {
+    fn from(value: ChatMessageContent) -> Self {
+        match value {
+            ChatMessageContent::Text(text) => Self::Text(text),
+            ChatMessageContent::Parts(parts) => {
+                Self::Parts(parts.into_iter().map(Into::into).collect())
+            }
+        }
+    }
+}
+
+impl From<DomainConversationToolFunction> for ChatToolFunction {
+    fn from(value: DomainConversationToolFunction) -> Self {
+        Self { name: value.name, arguments: value.arguments }
+    }
+}
+
+impl From<ChatToolFunction> for DomainConversationToolFunction {
+    fn from(value: ChatToolFunction) -> Self {
+        Self { name: value.name, arguments: value.arguments }
+    }
+}
+
+impl From<DomainConversationToolCall> for ChatToolCall {
+    fn from(value: DomainConversationToolCall) -> Self {
+        Self {
+            id: value.id,
+            r#type: value.r#type,
+            function: value.function.into(),
+        }
+    }
+}
+
+impl From<ChatToolCall> for DomainConversationToolCall {
+    fn from(value: ChatToolCall) -> Self {
+        Self {
+            id: value.id,
+            r#type: value.r#type,
+            function: value.function.into(),
+        }
+    }
+}
+
+impl From<DomainConversationMessage> for ChatMessage {
+    fn from(message: DomainConversationMessage) -> Self {
+        Self {
+            role: message.role,
+            content: Some(message.content.into()),
+            name: message.name,
+            tool_call_id: message.tool_call_id,
+            tool_calls: message.tool_calls.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<ChatMessage> for DomainConversationMessage {
+    fn from(message: ChatMessage) -> Self {
+        Self {
+            role: message.role,
+            content: message.content.unwrap_or_default().into(),
+            name: message.name,
+            tool_call_id: message.tool_call_id,
+            tool_calls: message.tool_calls.into_iter().map(Into::into).collect(),
+        }
     }
 }
 
@@ -193,6 +464,20 @@ impl From<DomainChatResultChoice> for ChatChoice {
     }
 }
 
+impl From<TextGenerationUsage> for ChatCompletionUsage {
+    fn from(value: TextGenerationUsage) -> Self {
+        Self {
+            prompt_tokens: value.prompt_tokens,
+            completion_tokens: value.completion_tokens,
+            total_tokens: value.total_tokens,
+            prompt_tokens_details: ChatPromptTokensDetails {
+                cached_tokens: value.prompt_tokens_details.cached_tokens,
+            },
+            estimated: value.estimated,
+        }
+    }
+}
+
 impl From<DomainChatCompletionResult> for ChatCompletionResponse {
     fn from(result: DomainChatCompletionResult) -> Self {
         Self {
@@ -201,6 +486,7 @@ impl From<DomainChatCompletionResult> for ChatCompletionResponse {
             created: result.created,
             model: result.model,
             choices: result.choices.into_iter().map(Into::into).collect(),
+            usage: result.usage.map(Into::into),
         }
     }
 }
@@ -229,6 +515,16 @@ impl From<DomainChatModelOption> for ChatModelOption {
     }
 }
 
+fn validate_chat_message(message: &ChatMessage) -> Result<(), ValidationError> {
+    crate::api::validation::validate_chat_role(&message.role)?;
+    if !message.has_meaningful_payload() {
+        let mut error = ValidationError::new("blank_message");
+        error.message = Some("content must not be empty".into());
+        return Err(error);
+    }
+    Ok(())
+}
+
 fn validate_chat_completion_request(
     request: &ChatCompletionRequest,
 ) -> Result<(), ValidationError> {
@@ -236,19 +532,20 @@ fn validate_chat_completion_request(
         .messages
         .iter()
         .rev()
-        .find(|message| message.role == "user" && !message.content.trim().is_empty())
+        .find(|message| message.role == "user" && message.has_meaningful_payload())
     else {
         let mut error = ValidationError::new("no_user_message");
         error.message = Some("messages must contain at least one user message".into());
         return Err(error);
     };
 
-    if user_message.content.len() > MAX_PROMPT_BYTES {
+    let rendered = user_message.rendered_text();
+    if !rendered.is_empty() && rendered.len() > MAX_PROMPT_BYTES {
         let mut error = ValidationError::new("prompt_too_large");
         error.message = Some(
             format!(
                 "last user message is too large ({} bytes); maximum is {} bytes",
-                user_message.content.len(),
+                rendered.len(),
                 MAX_PROMPT_BYTES
             )
             .into(),

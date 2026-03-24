@@ -148,13 +148,12 @@ export function useImageModelPreparation() {
     return { modelPath: refreshedModel.local_path, downloadedNow: true };
   };
 
-  const loadOrSwitchSelectedModel = async (modelPath: string) => {
+  const loadOrSwitchSelectedModel = async (modelId: string) => {
     const shouldSwitch = Boolean(loadedModelId && loadedModelId !== selectedModelId);
     if (shouldSwitch) {
       await switchModelMutation.mutateAsync({
         body: {
-          backend_id: DIFFUSION_BACKEND_ID,
-          model_path: modelPath,
+          model_id: modelId,
         },
       });
       return;
@@ -162,8 +161,7 @@ export function useImageModelPreparation() {
 
     await loadModelMutation.mutateAsync({
       body: {
-        backend_id: DIFFUSION_BACKEND_ID,
-        model_path: modelPath,
+        model_id: modelId,
       },
     });
   };
@@ -188,7 +186,7 @@ export function useImageModelPreparation() {
     }
 
     try {
-      await loadOrSwitchSelectedModel(modelPath);
+      await loadOrSwitchSelectedModel(selectedModelId);
     } catch (firstLoadError) {
       if (downloadedNow) {
         throw firstLoadError;
@@ -201,7 +199,7 @@ export function useImageModelPreparation() {
         toast.success(`Downloaded ${selectedModel.display_name}`);
       }
 
-      await loadOrSwitchSelectedModel(retry.modelPath);
+      await loadOrSwitchSelectedModel(selectedModelId);
       setLoadedModelId(selectedModelId);
       return retry.modelPath;
     }

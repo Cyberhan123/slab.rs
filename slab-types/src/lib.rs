@@ -24,7 +24,10 @@ pub mod settings;
 pub mod whisper;
 
 pub use backend::RuntimeBackendId;
-pub use chat::{ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationMessage};
+pub use chat::{
+    ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationContentPart,
+    ConversationMessage, ConversationMessageContent, ConversationToolCall, ConversationToolFunction,
+};
 pub use common::{Id, Timestamp};
 pub use diffusion::{
     DiffusionImageRequest, DiffusionImageResponse, DiffusionVideoRequest, DiffusionVideoResponse,

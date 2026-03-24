@@ -24,6 +24,8 @@ import {
   ChatContext,
   DEFAULT_CONVERSATIONS_ITEMS,
   DEFAULT_CONVERSATION_KEY,
+  getChatMessageTextContent,
+  type ChatMessageRecord,
 } from "./chat-context"
 import { useChat } from "./hooks/use-chat"
 import { useMarkdownTheme } from "./hooks/use-markdowm-theme"
@@ -47,16 +49,6 @@ type ModelOption = {
 type ConversationItem = ConversationData & {
   label?: string
   group?: string
-}
-
-type ChatMessageRecord = {
-  id: string | number
-  status?: string
-  message: {
-    role: "assistant" | "user"
-    content?: string | null
-    extraInfo?: unknown
-  }
 }
 
 function createConversationLabel(value: string) {
@@ -255,14 +247,13 @@ function Chat() {
     return { modelPath: refreshedModel.local_path, downloadedNow: true }
   }
 
-  const loadOrSwitchSelectedModel = async (modelPath: string) => {
+  const loadOrSwitchSelectedModel = async (modelId: string) => {
     const shouldSwitch = Boolean(loadedModelId && loadedModelId !== selectedModelId)
 
     if (shouldSwitch) {
       await switchModelMutation.mutateAsync({
         body: {
-          backend_id: LLAMA_BACKEND_ID,
-          model_path: modelPath,
+          model_id: modelId,
         },
       })
       return
@@ -270,8 +261,7 @@ function Chat() {
 
     await loadModelMutation.mutateAsync({
       body: {
-        backend_id: LLAMA_BACKEND_ID,
-        model_path: modelPath,
+        model_id: modelId,
       },
     })
   }
@@ -296,14 +286,14 @@ function Chat() {
     }
 
     const selectedLocal = llamaModels.find((item) => item.id === selectedModelId)
-    const { modelPath, downloadedNow } = await ensureDownloadedModelPath(selectedModelId)
+    const { downloadedNow } = await ensureDownloadedModelPath(selectedModelId)
 
     if (downloadedNow) {
       toast.success(`Downloaded ${selectedLocal?.display_name ?? selectedModelId}`)
     }
 
     try {
-      await loadOrSwitchSelectedModel(modelPath)
+      await loadOrSwitchSelectedModel(selectedModelId)
     } catch (firstLoadError) {
       if (downloadedNow) {
         throw firstLoadError
@@ -316,7 +306,7 @@ function Chat() {
         toast.success(`Downloaded ${selectedLocal?.display_name ?? selectedModelId}`)
       }
 
-      await loadOrSwitchSelectedModel(retry.modelPath)
+      await loadOrSwitchSelectedModel(selectedModelId)
     }
 
     setLoadedModelId(selectedModelId)
@@ -348,8 +338,12 @@ function Chat() {
     switchModelMutation.isPending ||
     downloadModelMutation.isPending
 
-  const safeMessages = (messages ?? []) as ChatMessageRecord[]
+  const safeMessages: ChatMessageRecord[] = messages ?? []
   const selectedModel = modelOptions.find((item) => item.id === selectedModelId)
+  const latestUserMessage = safeMessages
+    .slice()
+    .reverse()
+    .find((item) => item.message.role === "user")
   const selectedModelStatusLabel = useMemo(() => {
     if (modelLoading) {
       return "Loading models"
@@ -396,12 +390,7 @@ function Chat() {
     }),
     [isPreparingModel, isRequesting, modelLoading, modelOptions, selectedModelId]
   )
-  const latestUserPrompt =
-    safeMessages
-      .slice()
-      .reverse()
-      .find((item) => item.message.role === "user")
-      ?.message.content?.trim() ?? ""
+  const latestUserPrompt = getChatMessageTextContent(latestUserMessage?.message).trim()
 
   usePageHeader(PAGE_HEADER_META.chat)
   usePageHeaderModelPicker(headerModelPicker)
