@@ -10,6 +10,28 @@ use crate::whisper::{WhisperDecodeOptions, WhisperVadOptions};
 
 pub type JsonOptions = BTreeMap<String, serde_json::Value>;
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct TextPromptTokensDetails {
+    #[serde(default)]
+    pub cached_tokens: u32,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct TextGenerationUsage {
+    #[serde(default)]
+    pub prompt_tokens: u32,
+    #[serde(default)]
+    pub completion_tokens: u32,
+    #[serde(default)]
+    pub total_tokens: u32,
+    #[serde(default)]
+    pub prompt_tokens_details: TextPromptTokensDetails,
+    /// When `true`, the counts are best-effort estimates rather than exact
+    /// tokenizer-native values reported by the backend.
+    #[serde(default)]
+    pub estimated: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct TextGenerationRequest {
     pub prompt: String,
@@ -75,6 +97,8 @@ pub struct TextGenerationResponse {
     #[serde(default)]
     pub tokens_used: Option<u32>,
     #[serde(default)]
+    pub usage: Option<TextGenerationUsage>,
+    #[serde(default)]
     pub metadata: JsonOptions,
 }
 
@@ -83,6 +107,10 @@ pub struct TextGenerationChunk {
     pub delta: String,
     #[serde(default)]
     pub done: bool,
+    #[serde(default)]
+    pub finish_reason: Option<String>,
+    #[serde(default)]
+    pub usage: Option<TextGenerationUsage>,
     #[serde(default)]
     pub metadata: JsonOptions,
 }

@@ -78,6 +78,8 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
                                 token: String::new(),
                                 error: error.to_string(),
                                 done: false,
+                                finish_reason: String::new(),
+                                usage: None,
                             }
                         }
                     };
@@ -93,6 +95,8 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
                     .send(Ok(convert::encode_chat_stream_chunk(&TextGenerationChunk {
                         delta: String::new(),
                         done: true,
+                        finish_reason: None,
+                        usage: None,
                         metadata: Default::default(),
                     })))
                     .await;

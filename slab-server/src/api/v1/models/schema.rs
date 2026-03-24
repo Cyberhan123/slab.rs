@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
-use validator::Validate;
+use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
     ModelSpec as DomainModelSpec, ModelStatus as DomainModelStatus,
@@ -135,24 +135,22 @@ pub struct UpdateModelRequest {
 }
 
 // ---------------------------------------------------------------------------
-// Load / unload request schemas (unchanged)
+// Load / unload request schemas
 // ---------------------------------------------------------------------------
 
 /// Request body for `POST /v1/models/load`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+#[validate(schema(function = "validate_load_model_request"))]
 pub struct LoadModelRequest {
-    /// Backend identifier, e.g. `"ggml.llama"`.
-    #[validate(custom(
-        function = "crate::api::validation::validate_backend_id",
-        message = "backend_id is invalid"
-    ))]
-    pub backend_id: String,
-    /// Path to the model weights file.
-    #[validate(custom(
-        function = "crate::api::validation::validate_absolute_path",
-        message = "model_path must be an absolute path without '..'"
-    ))]
-    pub model_path: String,
+    /// Catalog model id from `/v1/models`. Preferred for local lifecycle operations.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model_id: Option<String>,
+    /// Legacy backend identifier, e.g. `"ggml.llama"`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub backend_id: Option<String>,
+    /// Legacy path to the model weights file.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model_path: Option<String>,
     /// Optional worker override.
     #[serde(default)]
     #[validate(range(min = 1, message = "num_workers must be at least 1"))]
@@ -169,21 +167,33 @@ pub struct ModelStatusResponse {
 }
 
 /// Request body for `POST /v1/models/switch`.
-#[derive(Debug, Deserialize, ToSchema, Validate)]
+#[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+#[validate(schema(function = "validate_switch_model_request"))]
 pub struct SwitchModelRequest {
-    #[validate(custom(
-        function = "crate::api::validation::validate_absolute_path",
-        message = "model_path must be an absolute path without '..'"
-    ))]
-    pub model_path: String,
-    #[validate(custom(
-        function = "crate::api::validation::validate_backend_id",
-        message = "backend_id is invalid"
-    ))]
-    pub backend_id: String,
+    /// Catalog model id from `/v1/models`. Preferred for local lifecycle operations.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model_id: Option<String>,
+    /// Legacy backend identifier, e.g. `"ggml.llama"`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub backend_id: Option<String>,
+    /// Legacy path to the model weights file.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model_path: Option<String>,
     #[serde(default)]
     #[validate(range(min = 1, message = "num_workers must be at least 1"))]
     pub num_workers: Option<u32>,
+}
+
+/// Request body for `POST /v1/models/unload`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+#[validate(schema(function = "validate_unload_model_request"))]
+pub struct UnloadModelRequest {
+    /// Catalog model id from `/v1/models`. Preferred for local lifecycle operations.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub model_id: Option<String>,
+    /// Legacy backend identifier for direct runtime unloads.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub backend_id: Option<String>,
 }
 
 /// Request body for `POST /v1/models/download`.
@@ -324,4 +334,81 @@ impl From<DomainUnifiedModelStatus> for String {
     fn from(status: DomainUnifiedModelStatus) -> Self {
         status.as_str().to_owned()
     }
+}
+
+fn validate_load_model_request(request: &LoadModelRequest) -> Result<(), ValidationError> {
+    validate_model_lifecycle_request(
+        request.model_id.as_deref(),
+        request.backend_id.as_deref(),
+        request.model_path.as_deref(),
+        true,
+    )
+}
+
+fn validate_switch_model_request(request: &SwitchModelRequest) -> Result<(), ValidationError> {
+    validate_model_lifecycle_request(
+        request.model_id.as_deref(),
+        request.backend_id.as_deref(),
+        request.model_path.as_deref(),
+        true,
+    )
+}
+
+fn validate_unload_model_request(request: &UnloadModelRequest) -> Result<(), ValidationError> {
+    validate_model_lifecycle_request(
+        request.model_id.as_deref(),
+        request.backend_id.as_deref(),
+        None,
+        false,
+    )
+}
+
+fn validate_model_lifecycle_request(
+    model_id: Option<&str>,
+    backend_id: Option<&str>,
+    model_path: Option<&str>,
+    require_model_path: bool,
+) -> Result<(), ValidationError> {
+    let model_id = trim_non_empty(model_id);
+    let backend_id = trim_non_empty(backend_id);
+    let model_path = trim_non_empty(model_path);
+
+    if let Some(model_id) = model_id {
+        crate::api::validation::validate_non_blank(model_id)?;
+        return Ok(());
+    }
+
+    let Some(backend_id) = backend_id else {
+        return Err(validation_error(
+            "missing_model_identity",
+            if require_model_path {
+                "either model_id or backend_id + model_path is required"
+            } else {
+                "either model_id or backend_id is required"
+            },
+        ));
+    };
+    crate::api::validation::validate_backend_id(backend_id)?;
+
+    if require_model_path {
+        let Some(model_path) = model_path else {
+            return Err(validation_error(
+                "missing_model_path",
+                "model_path is required when model_id is not provided",
+            ));
+        };
+        crate::api::validation::validate_absolute_path(model_path)?;
+    }
+
+    Ok(())
+}
+
+fn trim_non_empty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
+}
+
+fn validation_error(code: &'static str, message: &'static str) -> ValidationError {
+    let mut error = ValidationError::new(code);
+    error.message = Some(message.into());
+    error
 }

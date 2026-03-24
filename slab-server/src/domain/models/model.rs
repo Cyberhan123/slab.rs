@@ -4,7 +4,7 @@ use std::str::FromStr;
 
 use crate::api::v1::models::schema::{
     CreateModelRequest, ImportModelConfigRequest, ListModelsQuery, LoadModelRequest,
-    SwitchModelRequest, UpdateModelRequest,
+    SwitchModelRequest, UnloadModelRequest, UpdateModelRequest,
 };
 use crate::infra::db::UnifiedModelRecord;
 
@@ -151,8 +151,9 @@ pub struct ListModelsFilter {
 
 #[derive(Debug, Clone)]
 pub struct ModelLoadCommand {
-    pub backend_id: String,
-    pub model_path: String,
+    pub model_id: Option<String>,
+    pub backend_id: Option<String>,
+    pub model_path: Option<String>,
     pub num_workers: Option<u32>,
 }
 
@@ -229,6 +230,7 @@ impl From<UpdateModelRequest> for UpdateModelCommand {
 impl From<LoadModelRequest> for ModelLoadCommand {
     fn from(request: LoadModelRequest) -> Self {
         Self {
+            model_id: request.model_id,
             backend_id: request.backend_id,
             model_path: request.model_path,
             num_workers: request.num_workers,
@@ -239,9 +241,21 @@ impl From<LoadModelRequest> for ModelLoadCommand {
 impl From<SwitchModelRequest> for ModelLoadCommand {
     fn from(request: SwitchModelRequest) -> Self {
         Self {
+            model_id: request.model_id,
             backend_id: request.backend_id,
             model_path: request.model_path,
             num_workers: request.num_workers,
+        }
+    }
+}
+
+impl From<UnloadModelRequest> for ModelLoadCommand {
+    fn from(request: UnloadModelRequest) -> Self {
+        Self {
+            model_id: request.model_id,
+            backend_id: request.backend_id,
+            model_path: None,
+            num_workers: None,
         }
     }
 }

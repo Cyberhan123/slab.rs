@@ -1,5 +1,8 @@
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+
 use chrono::Utc;
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use slab_proto::convert;
 use slab_types::inference::TextGenerationRequest;
 use uuid::Uuid;
@@ -22,17 +25,12 @@ pub(super) async fn create_chat_completion(
     max_tokens: u32,
     temperature: f32,
     stream: bool,
+    include_usage: bool,
 ) -> Result<GeneratedChatOutput, ServerError> {
-    // Always pre-render a fallback prompt using the server-side static
-    // template renderer.  We also send the structured messages with
-    // `apply_chat_template = true` so the llama backend will try to apply
-    // the model's own embedded chat template first.  If the embedded
-    // template is absent or fails, the backend falls back to the
-    // pre-rendered prompt automatically.
-    let prompt_template = resolve_prompt_template(state, model).await?;
-    let prompt = super::template::build_prompt(messages, prompt_template.as_deref());
+    let prompt_template_context = resolve_prompt_template_context(state, model).await?;
+    let prompt = super::template::build_prompt(messages, prompt_template_context.as_ref());
     let request = TextGenerationRequest {
-        prompt,
+        prompt: prompt.clone(),
         system_prompt: None,
         chat_messages: messages.to_vec(),
         apply_chat_template: true,
@@ -68,6 +66,12 @@ pub(super) async fn create_chat_completion(
         let model_name_for_tokens = model_name.clone();
         let completion_id_for_finish = completion_id.clone();
         let model_name_for_finish = model_name.clone();
+        let completion_id_for_usage = completion_id.clone();
+        let model_name_for_usage = model_name.clone();
+        let prompt_for_usage = prompt.clone();
+
+        let error_flag = Arc::new(AtomicBool::new(false));
+        let completion_tokens = Arc::new(AtomicU32::new(0));
 
         let role_chunk = stream::once(async move {
             ChatStreamChunk::Data(super::build_role_chunk(
@@ -76,40 +80,89 @@ pub(super) async fn create_chat_completion(
                 &model_name_for_role,
             ))
         });
+
+        let token_stream_error_flag = Arc::clone(&error_flag);
+        let token_stream_completion_tokens = Arc::clone(&completion_tokens);
         let token_stream = backend_stream.filter_map(move |chunk| {
             let completion_id = completion_id_for_tokens.clone();
             let model_name = model_name_for_tokens.clone();
+            let error_flag = Arc::clone(&token_stream_error_flag);
+            let completion_tokens = Arc::clone(&token_stream_completion_tokens);
             async move {
                 match chunk {
                     Ok(message) if !message.error.is_empty() => {
-                        Some(ChatStreamChunk::Comment(message.error))
+                        error_flag.store(true, Ordering::SeqCst);
+                        Some(ChatStreamChunk::Data(super::build_error_chunk(&message.error)))
                     }
                     Ok(message) if message.done => None,
-                    Ok(message) => Some(ChatStreamChunk::Data(super::build_chunk(
-                        &completion_id,
-                        created_ts,
-                        &model_name,
-                        &message.token,
-                    ))),
-                    Err(error) => Some(ChatStreamChunk::Comment(error.to_string())),
+                    Ok(message) => {
+                        if message.token.is_empty() {
+                            None
+                        } else {
+                            completion_tokens.fetch_add(1, Ordering::SeqCst);
+                            Some(ChatStreamChunk::Data(super::build_chunk(
+                                &completion_id,
+                                created_ts,
+                                &model_name,
+                                &message.token,
+                            )))
+                        }
+                    }
+                    Err(error) => {
+                        error_flag.store(true, Ordering::SeqCst);
+                        Some(ChatStreamChunk::Data(super::build_error_chunk(&error.to_string())))
+                    }
                 }
             }
         });
+
+        let finish_chunk_error_flag = Arc::clone(&error_flag);
+        let finish_chunk_completion_tokens = Arc::clone(&completion_tokens);
         let finish_chunk = stream::once(async move {
-            ChatStreamChunk::Data(super::build_finish_chunk(
-                &completion_id_for_finish,
-                created_ts,
-                &model_name_for_finish,
-                "stop",
-            ))
-        });
+            if finish_chunk_error_flag.load(Ordering::SeqCst) {
+                None
+            } else {
+                let finish_reason = super::finish_reason_from_token_budget(
+                    finish_chunk_completion_tokens.load(Ordering::SeqCst),
+                    max_tokens,
+                );
+                Some(ChatStreamChunk::Data(super::build_finish_chunk(
+                    &completion_id_for_finish,
+                    created_ts,
+                    &model_name_for_finish,
+                    &finish_reason,
+                )))
+            }
+        })
+        .filter_map(futures::future::ready);
+
+        let usage_chunk_error_flag = Arc::clone(&error_flag);
+        let usage_chunk_completion_tokens = Arc::clone(&completion_tokens);
+        let usage_chunk = stream::once(async move {
+            if !include_usage || usage_chunk_error_flag.load(Ordering::SeqCst) {
+                None
+            } else {
+                let usage = super::build_estimated_usage(
+                    &prompt_for_usage,
+                    "",
+                    Some(usage_chunk_completion_tokens.load(Ordering::SeqCst)),
+                );
+                Some(ChatStreamChunk::Data(super::build_usage_chunk(
+                    &completion_id_for_usage,
+                    created_ts,
+                    &model_name_for_usage,
+                    &usage,
+                )))
+            }
+        })
+        .filter_map(futures::future::ready);
 
         let sse_stream = role_chunk
             .chain(token_stream)
             .chain(finish_chunk)
+            .chain(usage_chunk)
             .chain(stream::once(async { ChatStreamChunk::Data("[DONE]".into()) }))
             .map(move |item| {
-                // Keep the usage guard alive for the whole SSE stream lifetime.
                 let _keep_alive = &usage_guard;
                 item
             });
@@ -125,18 +178,29 @@ pub(super) async fn create_chat_completion(
     let generated = rpc::client::chat(llama_channel, grpc_request)
         .await
         .map_err(|error| ServerError::Internal(format!("grpc chat failed: {error}")))?;
+    let mut response = convert::decode_chat_response(&generated);
 
-    Ok(GeneratedChatOutput::Text(generated))
+    let usage = response
+        .usage
+        .clone()
+        .unwrap_or_else(|| super::build_estimated_usage(&prompt, &response.text, response.tokens_used));
+    response.tokens_used.get_or_insert(usage.completion_tokens);
+    response.usage = Some(usage.clone());
+    response.finish_reason.get_or_insert_with(|| {
+        super::finish_reason_from_token_budget(usage.completion_tokens, max_tokens)
+    });
+
+    Ok(GeneratedChatOutput::Text(response))
 }
 
-async fn resolve_prompt_template(
+async fn resolve_prompt_template_context(
     state: &ModelState,
     model: &str,
-) -> Result<Option<String>, ServerError> {
+) -> Result<Option<super::template::PromptTemplateContext>, ServerError> {
     let Some(record) = state.store().get_model(model).await? else {
         return Ok(None);
     };
     let model: UnifiedModel =
         record.try_into().map_err(|error: String| ServerError::Internal(error))?;
-    Ok(model.spec.chat_template)
+    Ok(Some(super::template::PromptTemplateContext::from_model(&model)))
 }

@@ -23,6 +23,13 @@ use crate::model_auto_unload::{build_model_load_request, LoadedModelSpec};
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 
+#[derive(Debug, Clone)]
+struct ResolvedModelLoadTarget {
+    canonical_backend: String,
+    model_path: String,
+    model_id: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct ModelService {
     model_state: ModelState,
@@ -121,10 +128,10 @@ impl ModelService {
         &self,
         command: ModelLoadCommand,
     ) -> Result<ModelStatus, ServerError> {
-        let backend_id = command.backend_id;
-        info!(backend = %backend_id, "unloading model");
+        let canonical_backend = resolve_unload_backend(&self.model_state, &command).await?;
+        info!(backend = %canonical_backend, model_id = ?command.model_id, "unloading model");
 
-        let (canonical_backend, channel) = resolve_backend_channel(&self.model_state, &backend_id)?;
+        let (_, channel) = resolve_backend_channel(&self.model_state, &canonical_backend)?;
         let response =
             rpc::client::unload_model(channel, &canonical_backend, pb::ModelUnloadRequest {})
                 .await
@@ -722,20 +729,22 @@ async fn load_model_with_state(
     log_message: &'static str,
     command: ModelLoadCommand,
 ) -> Result<ModelStatus, ServerError> {
-    let backend_id = &command.backend_id;
+    let resolved_target = resolve_model_load_target(&state, &command).await?;
 
-    validate_path("model_path", &command.model_path)?;
-    validate_existing_model_file(&command.model_path)?;
+    validate_path("model_path", &resolved_target.model_path)?;
+    validate_existing_model_file(&resolved_target.model_path)?;
 
-    let (canonical_backend, channel) = resolve_backend_channel(&state, backend_id)?;
+    let (_, channel) = resolve_backend_channel(&state, &resolved_target.canonical_backend)?;
     let (num_workers, worker_source) =
-        resolve_model_workers(&state, &canonical_backend, command.num_workers).await?;
+        resolve_model_workers(&state, &resolved_target.canonical_backend, command.num_workers)
+            .await?;
     let (context_length, context_source) =
-        resolve_llama_context_length(&state, &canonical_backend).await?;
+        resolve_llama_context_length(&state, &resolved_target.canonical_backend).await?;
 
     info!(
-        backend = %backend_id,
-        model_path = %command.model_path,
+        backend = %resolved_target.canonical_backend,
+        model_id = ?resolved_target.model_id,
+        model_path = %resolved_target.model_path,
         workers = num_workers,
         worker_source = worker_source,
         context_length = context_length,
@@ -744,18 +753,123 @@ async fn load_model_with_state(
     );
 
     let load_spec = LoadedModelSpec {
-        model_path: PathBuf::from(command.model_path.clone()),
+        model_path: PathBuf::from(resolved_target.model_path.clone()),
         num_workers,
         context_length: (context_length > 0).then_some(context_length),
-        diffusion: resolve_diffusion_context_params(&state, &canonical_backend).await?,
+        diffusion: resolve_diffusion_context_params(&state, &resolved_target.canonical_backend)
+            .await?,
     };
     let grpc_req = build_model_load_request(&load_spec);
-    let response = rpc::client::load_model(channel, &canonical_backend, grpc_req)
+    let response = rpc::client::load_model(channel, &resolved_target.canonical_backend, grpc_req)
         .await
         .map_err(|error| map_grpc_model_error(action, error))?;
-    state.auto_unload().notify_model_loaded(&canonical_backend, load_spec).await;
+    state
+        .auto_unload()
+        .notify_model_loaded(&resolved_target.canonical_backend, load_spec)
+        .await;
 
     decode_model_status(response)
+}
+
+async fn resolve_model_load_target(
+    state: &ModelState,
+    command: &ModelLoadCommand,
+) -> Result<ResolvedModelLoadTarget, ServerError> {
+    if let Some(model_id) = command.model_id.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        let model = resolve_local_catalog_model(state, model_id).await?;
+        let backend_id = resolve_local_backend_from_model(&model)?;
+        let model_path = resolve_local_model_path(&model)?;
+        let (canonical_backend, _) = resolve_backend_channel(state, &backend_id)?;
+        return Ok(ResolvedModelLoadTarget {
+            canonical_backend,
+            model_path,
+            model_id: Some(model.id),
+        });
+    }
+
+    let backend_id = command
+        .backend_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ServerError::BadRequest("backend_id is required when model_id is not provided".into())
+        })?;
+    let model_path = command
+        .model_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ServerError::BadRequest("model_path is required when model_id is not provided".into())
+        })?
+        .to_owned();
+    let (canonical_backend, _) = resolve_backend_channel(state, backend_id)?;
+
+    Ok(ResolvedModelLoadTarget { canonical_backend, model_path, model_id: None })
+}
+
+async fn resolve_unload_backend(
+    state: &ModelState,
+    command: &ModelLoadCommand,
+) -> Result<String, ServerError> {
+    if let Some(model_id) = command.model_id.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        let model = resolve_local_catalog_model(state, model_id).await?;
+        let backend_id = resolve_local_backend_from_model(&model)?;
+        let (canonical_backend, _) = resolve_backend_channel(state, &backend_id)?;
+        return Ok(canonical_backend);
+    }
+
+    let backend_id = command
+        .backend_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            ServerError::BadRequest("backend_id is required when model_id is not provided".into())
+        })?;
+    let (canonical_backend, _) = resolve_backend_channel(state, backend_id)?;
+    Ok(canonical_backend)
+}
+
+async fn resolve_local_catalog_model(
+    state: &ModelState,
+    model_id: &str,
+) -> Result<UnifiedModel, ServerError> {
+    let record = state
+        .store()
+        .get_model(model_id)
+        .await?
+        .ok_or_else(|| ServerError::NotFound(format!("model {model_id} not found")))?;
+    let model: UnifiedModel =
+        record.try_into().map_err(|error: String| ServerError::Internal(error))?;
+    resolve_local_backend_from_model(&model)?;
+    Ok(model)
+}
+
+fn resolve_local_backend_from_model(model: &UnifiedModel) -> Result<String, ServerError> {
+    backend_id_from_provider(&model.provider).ok_or_else(|| {
+        ServerError::BadRequest(format!(
+            "model '{}' uses provider '{}' and cannot be managed with local runtime lifecycle endpoints",
+            model.id, model.provider
+        ))
+    })
+}
+
+fn resolve_local_model_path(model: &UnifiedModel) -> Result<String, ServerError> {
+    model
+        .spec
+        .local_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .ok_or_else(|| {
+            ServerError::BadRequest(format!(
+                "model '{}' has no local_path yet; download it before loading",
+                model.id
+            ))
+        })
 }
 
 #[cfg(test)]

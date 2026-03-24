@@ -115,12 +115,10 @@ pub(crate) fn encode_text_generation_request(
     // the server-side pre-rendered prompt.
     if request.apply_chat_template && !request.chat_messages.is_empty() {
         insert_option(&mut options, "apply_chat_template", true);
-        let messages_json: Vec<Value> = request
-            .chat_messages
-            .iter()
-            .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
-            .collect();
-        options.insert("chat_messages".to_owned(), Value::Array(messages_json));
+        options.insert(
+            "chat_messages".to_owned(),
+            serde_json::to_value(&request.chat_messages).unwrap_or_else(|_| Value::Array(Vec::new())),
+        );
     }
 
     // Transport grammar constraint fields to the backend.
@@ -143,12 +141,14 @@ pub(crate) fn decode_text_generation_response(
             text: String::from_utf8_lossy(&bytes).into_owned(),
             finish_reason: None,
             tokens_used: None,
+            usage: None,
             metadata: BTreeMap::new(),
         }),
         Payload::Text(text) => Ok(TextGenerationResponse {
             text: text.to_string(),
             finish_reason: None,
             tokens_used: None,
+            usage: None,
             metadata: BTreeMap::new(),
         }),
         Payload::Json(value) => Ok(TextGenerationResponse {
@@ -165,6 +165,10 @@ pub(crate) fn decode_text_generation_response(
                 .get("tokens_used")
                 .and_then(Value::as_u64)
                 .and_then(|value| u32::try_from(value).ok()),
+            usage: value
+                .get("usage")
+                .cloned()
+                .and_then(|usage| serde_json::from_value(usage).ok()),
             metadata: BTreeMap::new(),
         }),
         other => Err(CoreError::ResultDecodeFailed {
@@ -178,9 +182,13 @@ pub(crate) fn decode_text_generation_chunk(
     chunk: StreamChunk,
 ) -> Result<Option<TextGenerationChunk>, CoreError> {
     match chunk {
-        StreamChunk::Token(delta) => {
-            Ok(Some(TextGenerationChunk { delta, done: false, metadata: BTreeMap::new() }))
-        }
+        StreamChunk::Token(delta) => Ok(Some(TextGenerationChunk {
+            delta,
+            done: false,
+            finish_reason: None,
+            usage: None,
+            metadata: BTreeMap::new(),
+        })),
         StreamChunk::Done => Ok(None),
         StreamChunk::Error(message) => {
             Err(CoreError::ResultDecodeFailed { task_kind: "text_generation".to_owned(), message })
@@ -528,7 +536,7 @@ fn decode_embedding_tensor(value: &Value, output_name: &str) -> Result<Vec<f32>,
 mod tests {
     use super::*;
     use serde_json::json;
-    use slab_types::chat::ConversationMessage;
+    use slab_types::chat::{ConversationMessage, ConversationMessageContent};
 
     fn make_llama_driver() -> ResolvedDriver {
         use crate::internal::dispatch::{DriverLoadStyle, ResolvedDriver};
@@ -550,7 +558,10 @@ mod tests {
             prompt: "fallback".to_owned(),
             chat_messages: vec![ConversationMessage {
                 role: "user".to_owned(),
-                content: "hello".to_owned(),
+                content: ConversationMessageContent::Text("hello".to_owned()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
             }],
             apply_chat_template: true,
             ..Default::default()
@@ -582,7 +593,10 @@ mod tests {
             prompt: "just a prompt".to_owned(),
             chat_messages: vec![ConversationMessage {
                 role: "user".to_owned(),
-                content: "hi".to_owned(),
+                content: ConversationMessageContent::Text("hi".to_owned()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
             }],
             apply_chat_template: false,
             ..Default::default()

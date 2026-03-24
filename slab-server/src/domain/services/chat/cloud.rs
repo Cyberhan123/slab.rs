@@ -10,7 +10,10 @@ use genai::{
     Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget,
 };
 use serde_json::{json, Value};
+use slab_types::inference::TextGenerationResponse;
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -42,6 +45,7 @@ pub(super) struct CloudChatRequestConfig {
     pub(super) reasoning_effort: Option<ChatReasoningEffort>,
     pub(super) verbosity: Option<ChatVerbosity>,
     pub(super) stream: bool,
+    pub(super) include_usage: bool,
 }
 
 #[derive(Debug)]
@@ -139,6 +143,12 @@ pub(super) async fn create_chat_completion(
         let model_name_for_role = model_name.clone();
         let completion_id_for_finish = completion_id.clone();
         let model_name_for_finish = model_name.clone();
+        let completion_id_for_usage = completion_id.clone();
+        let model_name_for_usage = model_name.clone();
+        let prompt_for_usage = render_messages_for_usage(messages);
+
+        let error_flag = Arc::new(AtomicBool::new(false));
+        let completion_tokens = Arc::new(AtomicU32::new(0));
 
         let role_chunk = stream::once(async move {
             ChatStreamChunk::Data(super::build_role_chunk(
@@ -148,37 +158,77 @@ pub(super) async fn create_chat_completion(
             ))
         });
 
+        let token_stream_error_flag = Arc::clone(&error_flag);
+        let token_stream_completion_tokens = Arc::clone(&completion_tokens);
         let token_stream = backend_stream.map(move |chunk| -> ChatStreamChunk {
             match chunk {
-                Ok(CloudDelta::Content(token)) => ChatStreamChunk::Data(super::build_chunk(
-                    &completion_id_for_tokens,
-                    created_ts,
-                    &model_name_for_tokens,
-                    &token,
-                )),
-                Ok(CloudDelta::Reasoning(token)) => {
-                    ChatStreamChunk::Data(super::build_reasoning_chunk(
+                Ok(CloudDelta::Content(token)) => {
+                    token_stream_completion_tokens.fetch_add(1, Ordering::SeqCst);
+                    ChatStreamChunk::Data(super::build_chunk(
                         &completion_id_for_tokens,
                         created_ts,
                         &model_name_for_tokens,
                         &token,
                     ))
                 }
-                Err(error) => ChatStreamChunk::Comment(error.to_string()),
+                Ok(CloudDelta::Reasoning(token)) => ChatStreamChunk::Data(
+                    super::build_reasoning_chunk(
+                        &completion_id_for_tokens,
+                        created_ts,
+                        &model_name_for_tokens,
+                        &token,
+                    ),
+                ),
+                Err(error) => {
+                    token_stream_error_flag.store(true, Ordering::SeqCst);
+                    ChatStreamChunk::Data(super::build_error_chunk(&error.to_string()))
+                }
             }
         });
+
+        let finish_chunk_error_flag = Arc::clone(&error_flag);
+        let finish_chunk_completion_tokens = Arc::clone(&completion_tokens);
         let finish_chunk = stream::once(async move {
-            ChatStreamChunk::Data(super::build_finish_chunk(
-                &completion_id_for_finish,
-                created_ts,
-                &model_name_for_finish,
-                "stop",
-            ))
+            if finish_chunk_error_flag.load(Ordering::SeqCst) {
+                None
+            } else {
+                let finish_reason = super::finish_reason_from_token_budget(
+                    finish_chunk_completion_tokens.load(Ordering::SeqCst),
+                    config.max_tokens,
+                );
+                Some(ChatStreamChunk::Data(super::build_finish_chunk(
+                    &completion_id_for_finish,
+                    created_ts,
+                    &model_name_for_finish,
+                    &finish_reason,
+                )))
+            }
+        });
+
+        let usage_chunk_error_flag = Arc::clone(&error_flag);
+        let usage_chunk_completion_tokens = Arc::clone(&completion_tokens);
+        let usage_chunk = stream::once(async move {
+            if !config.include_usage || usage_chunk_error_flag.load(Ordering::SeqCst) {
+                None
+            } else {
+                let usage = super::build_estimated_usage(
+                    &prompt_for_usage,
+                    "",
+                    Some(usage_chunk_completion_tokens.load(Ordering::SeqCst)),
+                );
+                Some(ChatStreamChunk::Data(super::build_usage_chunk(
+                    &completion_id_for_usage,
+                    created_ts,
+                    &model_name_for_usage,
+                    &usage,
+                )))
+            }
         });
 
         let sse_stream = role_chunk
             .chain(token_stream)
-            .chain(finish_chunk)
+            .chain(finish_chunk.filter_map(futures::future::ready))
+            .chain(usage_chunk.filter_map(futures::future::ready))
             .chain(stream::once(async { ChatStreamChunk::Data("[DONE]".into()) }));
 
         return Ok(GeneratedChatOutput::Stream(Box::pin(sse_stream)));
@@ -498,11 +548,20 @@ fn build_genai_chat_request(messages: &[DomainConversationMessage]) -> GenaiChat
 }
 
 fn conversation_message_to_genai(message: &DomainConversationMessage) -> GenaiChatMessage {
+    let rendered = message.rendered_text();
     match message.role.as_str() {
-        "system" => GenaiChatMessage::system(message.content.clone()),
-        "assistant" => GenaiChatMessage::assistant(message.content.clone()),
-        _ => GenaiChatMessage::user(message.content.clone()),
+        "system" | "developer" => GenaiChatMessage::system(rendered),
+        "assistant" => GenaiChatMessage::assistant(rendered),
+        _ => GenaiChatMessage::user(rendered),
     }
+}
+
+fn render_messages_for_usage(messages: &[DomainConversationMessage]) -> String {
+    messages
+        .iter()
+        .map(|message| format!("{}: {}", normalize_openai_role(&message.role), message.rendered_text()))
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn build_genai_chat_options(
@@ -550,7 +609,7 @@ async fn cloud_chat_completion(
     messages: &[DomainConversationMessage],
     config: CloudChatRequestConfig,
     trace_http: bool,
-) -> Result<String, ServerError> {
+) -> Result<TextGenerationResponse, ServerError> {
     debug!(
         provider_id = %target.provider_id,
         provider_name = %target.provider_name,
@@ -580,8 +639,19 @@ async fn cloud_chat_completion(
         log_cloud_http_response_success(target, trace, response.captured_raw_body.as_ref());
     }
 
-    response.first_text().map(str::to_owned).ok_or_else(|| {
+    let text = response.first_text().map(str::to_owned).ok_or_else(|| {
         ServerError::Internal("cloud response has empty assistant content".to_owned())
+    })?;
+    let usage = super::build_estimated_usage(&render_messages_for_usage(messages), &text, None);
+    let finish_reason =
+        super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens);
+
+    Ok(TextGenerationResponse {
+        text,
+        finish_reason: Some(finish_reason),
+        tokens_used: Some(usage.completion_tokens),
+        usage: Some(usage),
+        metadata: Default::default(),
     })
 }
 
@@ -705,7 +775,7 @@ fn build_cloud_http_request_body(
             .map(|message| {
                 json!({
                     "role": normalize_openai_role(&message.role),
-                    "content": message.content,
+                    "content": message.rendered_text(),
                 })
             })
             .collect::<Vec<_>>(),
@@ -726,7 +796,7 @@ fn build_cloud_http_request_body(
 
 fn normalize_openai_role(role: &str) -> &str {
     match role {
-        "system" | "assistant" | "user" => role,
+        "system" | "assistant" | "user" | "tool" | "developer" => role,
         _ => "user",
     }
 }

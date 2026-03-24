@@ -11,6 +11,7 @@ use validator::Validate;
 use crate::api::v1::models::schema::{
     CreateModelRequest, DownloadModelRequest, ImportModelConfigRequest, ListAvailableQuery,
     ListModelsQuery, LoadModelRequest, ModelStatusResponse, SwitchModelRequest,
+    UnloadModelRequest,
     UnifiedModelResponse, UpdateModelRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
@@ -39,6 +40,7 @@ use crate::error::ServerError;
         ImportModelConfigRequest,
         UpdateModelRequest,
         LoadModelRequest,
+        UnloadModelRequest,
         ModelStatusResponse,
         SwitchModelRequest,
         DownloadModelRequest,
@@ -209,7 +211,7 @@ async fn load_model(
     post,
     path = "/v1/models/unload",
     tag = "models",
-    request_body = LoadModelRequest,
+    request_body = UnloadModelRequest,
     responses(
         (status = 200, description = "Model unloaded", body = ModelStatusResponse),
         (status = 400, description = "Bad request"),
@@ -218,7 +220,7 @@ async fn load_model(
 )]
 async fn unload_model(
     State(service): State<ModelService>,
-    ValidatedJson(req): ValidatedJson<LoadModelRequest>,
+    ValidatedJson(req): ValidatedJson<UnloadModelRequest>,
 ) -> Result<Json<ModelStatusResponse>, ServerError> {
     Ok(Json(service.unload_model(req.into()).await?.into()))
 }

@@ -38,6 +38,7 @@ use std::sync::Arc;
 
 use serde::Deserialize;
 use slab_llama::ChatMessage as LlamaChatMessage;
+use slab_types::chat::ConversationMessage;
 use tokio::sync::{broadcast, mpsc};
 
 use crate::internal::engine::ggml::llama::adapter::GGMLLlamaEngine;
@@ -192,16 +193,26 @@ fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
 /// `Vec<LlamaChatMessage>`.  Returns an empty Vec when the key is absent or
 /// the value cannot be parsed.
 fn extract_chat_messages(opts: &serde_json::Value) -> Vec<LlamaChatMessage> {
-    let Some(arr) = opts.get("chat_messages").and_then(|v| v.as_array()) else {
+    let Some(raw) = opts.get("chat_messages") else {
         return Vec::new();
     };
-    arr.iter()
-        .filter_map(|v| {
-            let role = v.get("role").and_then(|r| r.as_str())?.to_owned();
-            let content = v.get("content").and_then(|c| c.as_str())?.to_owned();
-            Some(LlamaChatMessage { role, content })
+
+    serde_json::from_value::<Vec<ConversationMessage>>(raw.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .map(|message| LlamaChatMessage {
+            role: normalize_chat_role_for_template(&message.role).to_owned(),
+            content: message.rendered_text(),
         })
         .collect()
+}
+
+fn normalize_chat_role_for_template(role: &str) -> &'static str {
+    match role {
+        "system" | "developer" => "system",
+        "assistant" => "assistant",
+        _ => "user",
+    }
 }
 
 /// Infer the `add_assistant_prompt` flag from the message list.

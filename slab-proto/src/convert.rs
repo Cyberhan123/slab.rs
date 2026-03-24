@@ -4,12 +4,16 @@ use base64::Engine as _;
 use image::GenericImageView;
 use serde::{Deserialize, Serialize};
 use slab_types::backend::RuntimeBackendId;
-use slab_types::chat::ConversationMessage;
+use slab_types::chat::{
+    ConversationContentPart, ConversationMessage, ConversationMessageContent, ConversationToolCall,
+    ConversationToolFunction,
+};
 use slab_types::diffusion::{
     DiffusionImageRequest, DiffusionImageResponse, DiffusionVideoRequest, DiffusionVideoResponse,
 };
 use slab_types::inference::{
     ImageGenerationResponse, TextGenerationChunk, TextGenerationRequest, TextGenerationResponse,
+    TextGenerationUsage, TextPromptTokensDetails,
 };
 use slab_types::media::{GeneratedFrame, GeneratedImage, RawImageInput};
 use slab_types::runtime::{
@@ -147,7 +151,7 @@ pub fn encode_chat_request(
     let messages = request
         .chat_messages
         .iter()
-        .map(|m| pb::ChatMessage { role: m.role.clone(), content: m.content.clone() })
+        .map(conversation_message_to_proto)
         .collect();
 
     pb::ChatRequest {
@@ -176,7 +180,7 @@ pub fn decode_chat_request(
     let chat_messages: Vec<ConversationMessage> = request
         .messages
         .iter()
-        .map(|m| ConversationMessage { role: m.role.clone(), content: m.content.clone() })
+        .map(conversation_message_from_proto)
         .collect();
 
     Ok(TextGenerationRequest {
@@ -194,20 +198,198 @@ pub fn decode_chat_request(
 }
 
 pub fn encode_chat_response(response: &TextGenerationResponse) -> pb::ChatResponse {
-    pb::ChatResponse { text: response.text.clone() }
+    pb::ChatResponse {
+        text: response.text.clone(),
+        finish_reason: response.finish_reason.clone().unwrap_or_default(),
+        tokens_used: response.tokens_used.unwrap_or_default(),
+        usage: response.usage.as_ref().map(encode_usage),
+    }
 }
 
 pub fn decode_chat_response(response: &pb::ChatResponse) -> TextGenerationResponse {
     TextGenerationResponse {
         text: response.text.clone(),
-        finish_reason: None,
-        tokens_used: None,
+        finish_reason: (!response.finish_reason.is_empty()).then_some(response.finish_reason.clone()),
+        tokens_used: (response.tokens_used > 0).then_some(response.tokens_used),
+        usage: response.usage.as_ref().map(decode_usage),
         metadata: Default::default(),
     }
 }
 
 pub fn encode_chat_stream_chunk(chunk: &TextGenerationChunk) -> pb::ChatStreamChunk {
-    pb::ChatStreamChunk { token: chunk.delta.clone(), error: String::new(), done: chunk.done }
+    pb::ChatStreamChunk {
+        token: chunk.delta.clone(),
+        error: String::new(),
+        done: chunk.done,
+        finish_reason: chunk.finish_reason.clone().unwrap_or_default(),
+        usage: chunk.usage.as_ref().map(encode_usage),
+    }
+}
+
+fn encode_usage(usage: &TextGenerationUsage) -> pb::Usage {
+    pb::Usage {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+        prompt_cached_tokens: usage.prompt_tokens_details.cached_tokens,
+        estimated: usage.estimated,
+    }
+}
+
+fn decode_usage(usage: &pb::Usage) -> TextGenerationUsage {
+    TextGenerationUsage {
+        prompt_tokens: usage.prompt_tokens,
+        completion_tokens: usage.completion_tokens,
+        total_tokens: usage.total_tokens,
+        prompt_tokens_details: TextPromptTokensDetails {
+            cached_tokens: usage.prompt_cached_tokens,
+        },
+        estimated: usage.estimated,
+    }
+}
+
+fn conversation_message_to_proto(message: &ConversationMessage) -> pb::ChatMessage {
+    let (content, content_parts) = match &message.content {
+        ConversationMessageContent::Text(text) => (text.clone(), Vec::new()),
+        ConversationMessageContent::Parts(parts) => (
+            message.rendered_text(),
+            parts.iter().map(conversation_content_part_to_proto).collect(),
+        ),
+    };
+
+    pb::ChatMessage {
+        role: message.role.clone(),
+        content,
+        content_parts,
+        name: message.name.clone().unwrap_or_default(),
+        tool_call_id: message.tool_call_id.clone().unwrap_or_default(),
+        tool_calls: message.tool_calls.iter().map(conversation_tool_call_to_proto).collect(),
+    }
+}
+
+fn conversation_message_from_proto(message: &pb::ChatMessage) -> ConversationMessage {
+    let content = if !message.content_parts.is_empty() {
+        ConversationMessageContent::Parts(
+            message.content_parts.iter().map(conversation_content_part_from_proto).collect(),
+        )
+    } else {
+        ConversationMessageContent::Text(message.content.clone())
+    };
+
+    ConversationMessage {
+        role: message.role.clone(),
+        content,
+        name: (!message.name.is_empty()).then_some(message.name.clone()),
+        tool_call_id: (!message.tool_call_id.is_empty()).then_some(message.tool_call_id.clone()),
+        tool_calls: message.tool_calls.iter().map(conversation_tool_call_from_proto).collect(),
+    }
+}
+
+fn conversation_content_part_to_proto(part: &ConversationContentPart) -> pb::ChatContentPart {
+    use pb::chat_content_part::Part;
+
+    let part = match part {
+        ConversationContentPart::Text { text } => {
+            Part::Text(pb::ChatTextPart { text: text.clone() })
+        }
+        ConversationContentPart::InputText { text } => {
+            Part::InputText(pb::ChatTextPart { text: text.clone() })
+        }
+        ConversationContentPart::OutputText { text } => {
+            Part::OutputText(pb::ChatTextPart { text: text.clone() })
+        }
+        ConversationContentPart::Image { image_url, mime_type, detail } => {
+            Part::Image(pb::ChatImagePart {
+                image_url: image_url.clone().unwrap_or_default(),
+                mime_type: mime_type.clone().unwrap_or_default(),
+                detail: detail.clone().unwrap_or_default(),
+            })
+        }
+        ConversationContentPart::ToolResult { tool_call_id, value } => {
+            Part::ToolResult(pb::ChatToolResultPart {
+                tool_call_id: tool_call_id.clone().unwrap_or_default(),
+                value_json: serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned()),
+            })
+        }
+        ConversationContentPart::Json { value } => Part::Json(pb::ChatJsonPart {
+            value_json: serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned()),
+        }),
+        ConversationContentPart::Refusal { text } => {
+            Part::Refusal(pb::ChatTextPart { text: text.clone() })
+        }
+    };
+
+    pb::ChatContentPart { part: Some(part) }
+}
+
+fn conversation_content_part_from_proto(part: &pb::ChatContentPart) -> ConversationContentPart {
+    use pb::chat_content_part::Part;
+
+    match part.part.as_ref() {
+        Some(Part::Text(value)) => ConversationContentPart::Text { text: value.text.clone() },
+        Some(Part::InputText(value)) => {
+            ConversationContentPart::InputText { text: value.text.clone() }
+        }
+        Some(Part::OutputText(value)) => {
+            ConversationContentPart::OutputText { text: value.text.clone() }
+        }
+        Some(Part::Image(value)) => ConversationContentPart::Image {
+            image_url: (!value.image_url.is_empty()).then_some(value.image_url.clone()),
+            mime_type: (!value.mime_type.is_empty()).then_some(value.mime_type.clone()),
+            detail: (!value.detail.is_empty()).then_some(value.detail.clone()),
+        },
+        Some(Part::ToolResult(value)) => ConversationContentPart::ToolResult {
+            tool_call_id: (!value.tool_call_id.is_empty()).then_some(value.tool_call_id.clone()),
+            value: parse_json_or_null(&value.value_json),
+        },
+        Some(Part::Json(value)) => {
+            ConversationContentPart::Json { value: parse_json_or_null(&value.value_json) }
+        }
+        Some(Part::Refusal(value)) => {
+            ConversationContentPart::Refusal { text: value.text.clone() }
+        }
+        None => ConversationContentPart::Text { text: String::new() },
+    }
+}
+
+fn conversation_tool_call_to_proto(tool_call: &ConversationToolCall) -> pb::ChatToolCall {
+    pb::ChatToolCall {
+        id: tool_call.id.clone().unwrap_or_default(),
+        r#type: tool_call.r#type.clone(),
+        function: Some(pb::ChatToolFunction {
+            name: tool_call.function.name.clone(),
+            arguments: tool_call.function.arguments.clone(),
+        }),
+    }
+}
+
+fn conversation_tool_call_from_proto(tool_call: &pb::ChatToolCall) -> ConversationToolCall {
+    ConversationToolCall {
+        id: (!tool_call.id.is_empty()).then_some(tool_call.id.clone()),
+        r#type: if tool_call.r#type.is_empty() {
+            "function".to_owned()
+        } else {
+            tool_call.r#type.clone()
+        },
+        function: conversation_tool_function_from_proto(tool_call.function.as_ref()),
+    }
+}
+
+fn conversation_tool_function_from_proto(
+    function: Option<&pb::ChatToolFunction>,
+) -> ConversationToolFunction {
+    let Some(function) = function else {
+        return ConversationToolFunction { name: String::new(), arguments: String::new() };
+    };
+
+    ConversationToolFunction {
+        name: function.name.clone(),
+        arguments: function.arguments.clone(),
+    }
+}
+
+fn parse_json_or_null(raw: &str) -> serde_json::Value {
+    serde_json::from_str(raw).unwrap_or(serde_json::Value::Null)
 }
 
 pub fn decode_diffusion_image_request(

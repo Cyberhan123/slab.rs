@@ -6,6 +6,7 @@ mod template;
 
 use chrono::Utc;
 use futures::stream::BoxStream;
+use slab_types::inference::{TextGenerationResponse, TextGenerationUsage};
 use tracing::{debug, info};
 use uuid::Uuid;
 
@@ -13,18 +14,16 @@ use crate::context::ModelState;
 use crate::domain::models::{
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
     ChatResultChoice, ChatStreamChunk, ConversationMessage as DomainConversationMessage,
+    ConversationMessageContent,
 };
 use crate::error::ServerError;
 use crate::infra::db::{ChatMessage, ChatStore};
 
-/// Maximum allowed prompt length in bytes.
-#[cfg(test)]
-const MAX_PROMPT_BYTES: usize = 128 * 1024; // 128 KiB
 const LLAMA_BACKEND_ID: &str = "ggml.llama";
 const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
 
 enum GeneratedChatOutput {
-    Text(String),
+    Text(TextGenerationResponse),
     Stream(BoxStream<'static, ChatStreamChunk>),
 }
 
@@ -114,6 +113,79 @@ fn build_finish_chunk(id: &str, created: i64, model: &str, finish_reason: &str) 
     .to_string()
 }
 
+fn build_usage_chunk(id: &str, created: i64, model: &str, usage: &TextGenerationUsage) -> String {
+    serde_json::json!({
+        "id": id,
+        "object": "chat.completion.chunk",
+        "created": created,
+        "model": model,
+        "choices": [],
+        "usage": usage_to_json(usage)
+    })
+    .to_string()
+}
+
+fn build_error_chunk(message: &str) -> String {
+    serde_json::json!({
+        "error": {
+            "message": message,
+            "type": "server_error",
+            "code": null
+        }
+    })
+    .to_string()
+}
+
+fn usage_to_json(usage: &TextGenerationUsage) -> serde_json::Value {
+    serde_json::json!({
+        "prompt_tokens": usage.prompt_tokens,
+        "completion_tokens": usage.completion_tokens,
+        "total_tokens": usage.total_tokens,
+        "prompt_tokens_details": {
+            "cached_tokens": usage.prompt_tokens_details.cached_tokens,
+        },
+        "estimated": usage.estimated,
+    })
+}
+
+pub(super) fn estimate_token_count(text: &str) -> u32 {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
+
+    let bytes = trimmed.len() as u32;
+    let whitespace_groups = trimmed.split_whitespace().count() as u32;
+    let byte_estimate = bytes.div_ceil(4);
+    byte_estimate.max(whitespace_groups).max(1)
+}
+
+pub(super) fn finish_reason_from_token_budget(completion_tokens: u32, max_tokens: u32) -> String {
+    if completion_tokens >= max_tokens && max_tokens > 0 {
+        "length".to_owned()
+    } else {
+        "stop".to_owned()
+    }
+}
+
+pub(super) fn build_estimated_usage(
+    prompt_text: &str,
+    completion_text: &str,
+    completion_tokens: Option<u32>,
+) -> TextGenerationUsage {
+    let prompt_tokens = estimate_token_count(prompt_text);
+    let completion_tokens =
+        completion_tokens.unwrap_or_else(|| estimate_token_count(completion_text));
+
+    TextGenerationUsage {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens: prompt_tokens.saturating_add(completion_tokens),
+        prompt_tokens_details: Default::default(),
+        estimated: true,
+    }
+}
+
 async fn create_chat_completion_with_state(
     state: ModelState,
     command: ChatCompletionCommand,
@@ -123,7 +195,7 @@ async fn create_chat_completion_with_state(
         .iter()
         .rev()
         .find(|message| message.role == "user")
-        .map(|message| message.content.clone())
+        .map(DomainConversationMessage::rendered_text)
         .unwrap_or_default();
 
     let max_tokens = command.max_tokens.unwrap_or(512);
@@ -167,6 +239,7 @@ async fn create_chat_completion_with_state(
                 reasoning_effort: command.reasoning_effort,
                 verbosity: command.verbosity,
                 stream: command.stream,
+                include_usage: command.stream_options.include_usage,
             },
         )
         .await?
@@ -179,6 +252,7 @@ async fn create_chat_completion_with_state(
             max_tokens,
             temperature,
             command.stream,
+            command.stream_options.include_usage,
         )
         .await?
     };
@@ -190,7 +264,7 @@ async fn create_chat_completion_with_state(
 
     info!(
         model = %command.model,
-        output_len = generated.len(),
+        output_len = generated.text.len(),
         "chat completion done"
     );
 
@@ -201,7 +275,7 @@ async fn create_chat_completion_with_state(
                 id: Uuid::new_v4().to_string(),
                 session_id: session_id.to_owned(),
                 role: "assistant".into(),
-                content: generated.clone(),
+                content: generated.text.clone(),
                 created_at: Utc::now(),
             })
             .await
@@ -217,9 +291,16 @@ async fn create_chat_completion_with_state(
         model: command.model,
         choices: vec![ChatResultChoice {
             index: 0,
-            message: DomainConversationMessage { role: "assistant".into(), content: generated },
-            finish_reason: "stop".into(),
+            message: DomainConversationMessage {
+                role: "assistant".into(),
+                content: ConversationMessageContent::Text(generated.text),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            },
+            finish_reason: generated.finish_reason.or(Some("stop".into())),
         }],
+        usage: generated.usage,
     };
 
     Ok(ChatCompletionOutput::Json(response))
@@ -233,13 +314,12 @@ async fn build_messages(
 ) -> Result<Vec<DomainConversationMessage>, ServerError> {
     let current: Vec<DomainConversationMessage> = current_messages
         .iter()
-        .filter(|message| !message.content.trim().is_empty())
+        .filter(|message| message.has_meaningful_content())
         .cloned()
         .collect();
     let client_sent_history = current.len() > 1;
 
     let mut merged = Vec::new();
-    // Avoid duplicating turns: if client already sends history, do not merge DB history again.
     if !client_sent_history {
         if let Some(session_id) = session_id {
             let history = state.store().list_messages(session_id).await?;
@@ -264,7 +344,10 @@ mod test {
             model: "test".into(),
             messages: vec![DomainConversationMessage {
                 role: role.into(),
-                content: content.into(),
+                content: ConversationMessageContent::Text(content.into()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
             }],
             stream: false,
             max_tokens: None,
@@ -272,6 +355,7 @@ mod test {
             reasoning_effort: None,
             verbosity: None,
             id: None,
+            stream_options: Default::default(),
         }
     }
 
@@ -294,12 +378,6 @@ mod test {
     fn validate_temperature_out_of_range() {
         let temperature = 3.0_f32;
         assert!(!(0.0..=2.0).contains(&temperature), "should be out of range");
-    }
-
-    #[test]
-    fn validate_prompt_too_large() {
-        let long_prompt = "x".repeat(MAX_PROMPT_BYTES + 1);
-        assert!(long_prompt.len() > MAX_PROMPT_BYTES);
     }
 
     #[test]

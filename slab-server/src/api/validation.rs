@@ -87,7 +87,7 @@ pub fn validate_backend_id(value: &str) -> Result<(), ValidationError> {
 pub fn validate_chat_role(value: &str) -> Result<(), ValidationError> {
     validate_non_blank(value)?;
 
-    if matches!(value, "system" | "user" | "assistant") {
+    if matches!(value, "system" | "developer" | "user" | "assistant" | "tool" | "function") {
         Ok(())
     } else {
         Err(ValidationError::new("chat_role"))

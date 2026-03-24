@@ -3,17 +3,11 @@ import XMarkdown from "@ant-design/x-markdown"
 
 import { Button } from "@/components/ui/button"
 import { ChatThinkingPanel } from "@/pages/chat/components/chat-thinking-panel"
+import {
+  getChatMessageTextContent,
+  type ChatMessageRecord,
+} from "@/pages/chat/chat-context"
 import { cn } from "@/lib/utils"
-
-type ChatMessageRecord = {
-  id: string | number
-  status?: string
-  message: {
-    role: "assistant" | "user"
-    content?: string | null
-    extraInfo?: unknown
-  }
-}
 
 type ParsedThinkingContent = {
   thinking: string | null
@@ -71,7 +65,7 @@ export function ChatMessageBubble({
 }: ChatMessageBubbleProps) {
   const role = item.message.role
   const isAssistant = role === "assistant"
-  const rawContent = String(item.message.content ?? "")
+  const rawContent = getChatMessageTextContent(item.message)
   const { thinking, answer, thinkingLoading } = parseThinkingContent(rawContent)
   const hasNextChunk = item.status === "updating"
   const isBusy = item.status === "loading" || item.status === "updating"

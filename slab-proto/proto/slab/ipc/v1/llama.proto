@@ -12,12 +12,66 @@ service LlamaService {
   rpc ReloadLibrary(ReloadLibraryRequest) returns (ModelStatusResponse);
 }
 
+message Usage {
+  uint32 prompt_tokens = 1;
+  uint32 completion_tokens = 2;
+  uint32 total_tokens = 3;
+  uint32 prompt_cached_tokens = 4;
+  bool estimated = 5;
+}
+
+message ChatToolFunction {
+  string name = 1;
+  string arguments = 2;
+}
+
+message ChatToolCall {
+  string id = 1;
+  string type = 2;
+  ChatToolFunction function = 3;
+}
+
+message ChatTextPart {
+  string text = 1;
+}
+
+message ChatImagePart {
+  string image_url = 1;
+  string mime_type = 2;
+  string detail = 3;
+}
+
+message ChatToolResultPart {
+  string tool_call_id = 1;
+  string value_json = 2;
+}
+
+message ChatJsonPart {
+  string value_json = 1;
+}
+
 // A single structured chat message (role + content) used for chat-template
 // aware inference.  The backend passes these directly to the model's embedded
 // chat template when `apply_chat_template` is true.
+message ChatContentPart {
+  oneof part {
+    ChatTextPart text = 1;
+    ChatTextPart input_text = 2;
+    ChatTextPart output_text = 3;
+    ChatImagePart image = 4;
+    ChatToolResultPart tool_result = 5;
+    ChatJsonPart json = 6;
+    ChatTextPart refusal = 7;
+  }
+}
+
 message ChatMessage {
   string role = 1;
   string content = 2;
+  repeated ChatContentPart content_parts = 3;
+  string name = 4;
+  string tool_call_id = 5;
+  repeated ChatToolCall tool_calls = 6;
 }
 
 message ChatRequest {
@@ -37,10 +91,15 @@ message ChatRequest {
 
 message ChatResponse {
   string text = 1;
+  string finish_reason = 2;
+  uint32 tokens_used = 3;
+  Usage usage = 4;
 }
 
 message ChatStreamChunk {
   string token = 1;
   string error = 2;
   bool done = 3;
+  string finish_reason = 4;
+  Usage usage = 5;
 }
