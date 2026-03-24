@@ -30,6 +30,7 @@ type ChatSessionSheetProps = {
   conversations: ConversationItem[]
   currentConversation: string
   activeConversation?: string
+  busy?: boolean
   onSelect: (key: string) => void
   onCreate: () => void
   onDelete: (key: string) => void
@@ -41,6 +42,7 @@ export function ChatSessionSheet({
   conversations,
   currentConversation,
   activeConversation,
+  busy = false,
   onSelect,
   onCreate,
   onDelete,
@@ -59,7 +61,7 @@ export function ChatSessionSheet({
                 Create, switch, and clean up conversations without leaving the chat stage.
               </SheetDescription>
             </div>
-            <Button variant="outline" size="sm" className="shrink-0" onClick={onCreate}>
+            <Button variant="outline" size="sm" className="shrink-0" onClick={onCreate} disabled={busy}>
               <Plus className="size-4" />
               New chat
             </Button>
@@ -82,8 +84,9 @@ export function ChatSessionSheet({
                 >
                   <button
                     type="button"
+                    disabled={busy}
                     className="flex min-w-0 flex-1 flex-col items-start text-left"
-                      onClick={() => onSelect(conversation.key)}
+                    onClick={() => onSelect(conversation.key)}
                   >
                     <div className="flex items-center gap-2">
                       <p className="truncate font-medium">{conversation.label ?? "New chat"}</p>
@@ -95,25 +98,26 @@ export function ChatSessionSheet({
                     </p>
                   </button>
 
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button variant="quiet" size="icon-sm" className="rounded-full">
-                        <MoreHorizontal className="size-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="rounded-2xl border-border/70">
-                      <DropdownMenuItem onClick={() => onSelect(conversation.key)}>
-                        Open
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        variant="destructive"
-                        onClick={() => onDelete(conversation.key)}
-                      >
-                        <Trash2 className="size-4" />
-                        Delete
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="quiet" size="icon-sm" className="rounded-full" disabled={busy}>
+                          <MoreHorizontal className="size-4" />
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="rounded-2xl border-border/70">
+                        <DropdownMenuItem disabled={busy} onClick={() => onSelect(conversation.key)}>
+                          Open
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          disabled={busy}
+                          variant="destructive"
+                          onClick={() => onDelete(conversation.key)}
+                        >
+                          <Trash2 className="size-4" />
+                          Delete
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
                 </div>
               )
             })}

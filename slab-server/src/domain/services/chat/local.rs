@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 
 use chrono::Utc;
-use futures::{StreamExt, stream};
+use futures::{stream, StreamExt};
 use slab_proto::convert;
 use slab_types::inference::TextGenerationRequest;
 use uuid::Uuid;
@@ -185,10 +185,9 @@ pub(super) async fn create_chat_completion(
         .map_err(|error| ServerError::Internal(format!("grpc chat failed: {error}")))?;
     let mut response = convert::decode_chat_response(&generated);
 
-    let usage = response
-        .usage
-        .clone()
-        .unwrap_or_else(|| super::build_estimated_usage(&prompt, &response.text, response.tokens_used));
+    let usage = response.usage.clone().unwrap_or_else(|| {
+        super::build_estimated_usage(&prompt, &response.text, response.tokens_used)
+    });
     response.tokens_used.get_or_insert(usage.completion_tokens);
     response.usage = Some(usage.clone());
     response.finish_reason.get_or_insert_with(|| {
@@ -237,10 +236,9 @@ pub(super) async fn create_text_completion(
         .map_err(|error| ServerError::Internal(format!("grpc chat failed: {error}")))?;
     let mut response = convert::decode_chat_response(&generated);
 
-    let usage = response
-        .usage
-        .clone()
-        .unwrap_or_else(|| super::build_estimated_usage(prompt, &response.text, response.tokens_used));
+    let usage = response.usage.clone().unwrap_or_else(|| {
+        super::build_estimated_usage(prompt, &response.text, response.tokens_used)
+    });
     response.tokens_used.get_or_insert(usage.completion_tokens);
     response.usage = Some(usage.clone());
     response.finish_reason.get_or_insert_with(|| {

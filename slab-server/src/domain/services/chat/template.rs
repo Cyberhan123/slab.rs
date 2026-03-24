@@ -1,6 +1,4 @@
-use crate::domain::models::{
-    ConversationMessage as DomainConversationMessage, UnifiedModel,
-};
+use crate::domain::models::{ConversationMessage as DomainConversationMessage, UnifiedModel};
 
 #[derive(Debug, Clone, Default)]
 pub(super) struct PromptTemplateContext {
@@ -62,10 +60,7 @@ impl ChatPromptTemplate {
 
         let combined_hints = context
             .map(|ctx| {
-                ctx.hint_values()
-                    .map(str::to_ascii_lowercase)
-                    .collect::<Vec<_>>()
-                    .join("\n")
+                ctx.hint_values().map(str::to_ascii_lowercase).collect::<Vec<_>>().join("\n")
             })
             .unwrap_or_default();
 
@@ -113,10 +108,7 @@ fn split_prefill(
 ) -> (&[DomainConversationMessage], Option<String>) {
     match messages.last() {
         Some(message) if message.role == "assistant" => {
-            (
-                &messages[..messages.len().saturating_sub(1)],
-                Some(message.rendered_text()),
-            )
+            (&messages[..messages.len().saturating_sub(1)], Some(message.rendered_text()))
         }
         _ => (messages, None),
     }

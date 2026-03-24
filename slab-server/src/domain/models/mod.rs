@@ -18,12 +18,15 @@ pub use backend::{
     BackendId, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
     ReloadBackendLibCommand,
 };
+#[allow(unused_imports)]
+pub use chat::StructuredOutputJsonSchema;
 pub use chat::{
+    assistant_message_from_parts, assistant_message_from_text_response, serialize_session_message,
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
     ChatModelSource, ChatReasoningEffort, ChatResultChoice, ChatStreamChunk, ChatVerbosity,
     ConversationContentPart, ConversationMessage, ConversationMessageContent, ConversationToolCall,
-    ConversationToolFunction, StructuredOutput, StructuredOutputJsonSchema, TextCompletionCommand,
-    TextCompletionOutput, TextCompletionResult, TextResultChoice,
+    ConversationToolFunction, StructuredOutput, TextCompletionCommand, TextCompletionOutput,
+    TextCompletionResult, TextResultChoice,
 };
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{ImageGenerationCommand, ImageGenerationMode};

@@ -790,7 +790,7 @@ export function ThemePreview() {
               ═══════════════════════════════════════════════ */}
           <Section title="Typography 排版" desc="字体与文本层级">
             <Card>
-              <CardContent className="pt-6 space-y-3">
+              <CardContent className="pt-6 space-y-3">assistant
                 <h1 className="text-4xl font-bold text-foreground">{"Heading 1 - 标题一"}</h1>
                 <h2 className="text-3xl font-semibold text-foreground">{"Heading 2 - 标题二"}</h2>
                 <h3 className="text-2xl font-semibold text-foreground">{"Heading 3 - 标题三"}</h3>

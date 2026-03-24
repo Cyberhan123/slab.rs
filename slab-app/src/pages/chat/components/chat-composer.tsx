@@ -24,6 +24,7 @@ type ChatComposerProps = {
   onSubmit: (value: string) => void | Promise<void>
   onCancel: () => void
   isRequesting: boolean
+  disabled?: boolean
   deepThink: boolean
   setDeepThink: (value: boolean) => void
   onGenerateImage: () => void
@@ -36,13 +37,14 @@ export function ChatComposer({
   onSubmit,
   onCancel,
   isRequesting,
+  disabled = false,
   deepThink,
   setDeepThink,
   onGenerateImage,
   statusLabel,
 }: ChatComposerProps) {
   const handleSubmit = () => {
-    if (!value.trim() || isRequesting) {
+    if (!value.trim() || isRequesting || disabled) {
       return
     }
 
@@ -59,6 +61,7 @@ export function ChatComposer({
                 <Button
                   variant="quiet"
                   size="icon"
+                  disabled={disabled}
                   className="size-10 rounded-full border border-transparent bg-transparent text-muted-foreground hover:bg-[var(--shell-card)]/45 hover:text-foreground"
                 >
                   <Plus className="size-4" />
@@ -84,6 +87,7 @@ export function ChatComposer({
           <Textarea
             value={value}
             variant="shell"
+            disabled={disabled}
             onChange={(event) => onValueChange(event.target.value)}
             placeholder="Type a message or drop files..."
             className="min-h-[48px] max-h-48 resize-none border-0 bg-transparent px-3 py-3 text-base text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
@@ -113,6 +117,10 @@ export function ChatComposer({
                 isRequesting && "bg-foreground text-background shadow-none"
               )}
               onClick={() => {
+                if (disabled) {
+                  return
+                }
+
                 if (isRequesting) {
                   onCancel()
                   return
@@ -120,7 +128,7 @@ export function ChatComposer({
 
                 handleSubmit()
               }}
-              disabled={!isRequesting && !value.trim()}
+              disabled={disabled || (!isRequesting && !value.trim())}
               aria-label={isRequesting ? "Stop generating response" : "Send message"}
             >
               {isRequesting ? <Square className="size-4" /> : <SendHorizontal className="size-4" />}
@@ -142,11 +150,13 @@ export function ChatComposer({
 
           <button
             type="button"
+            disabled={disabled}
             aria-pressed={deepThink}
             onClick={() => setDeepThink(!deepThink)}
             className={cn(
               "inline-flex items-center gap-1.5 text-[11px] font-bold transition",
-              deepThink ? "text-foreground" : "text-muted-foreground hover:text-foreground"
+              deepThink ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+              disabled && "cursor-not-allowed opacity-60"
             )}
           >
             <WandSparkles className={cn("size-3", deepThink && "text-[var(--brand-teal)]")} />
@@ -155,8 +165,12 @@ export function ChatComposer({
 
           <button
             type="button"
+            disabled={disabled}
             onClick={onGenerateImage}
-            className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground transition hover:text-foreground"
+            className={cn(
+              "inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground transition hover:text-foreground",
+              disabled && "cursor-not-allowed opacity-60"
+            )}
           >
             <ImagePlus className="size-3" />
             Generate Image

@@ -6,12 +6,16 @@ mod template;
 
 use chrono::Utc;
 use futures::stream::{self, BoxStream};
+use futures::StreamExt;
+use serde_json::Value;
 use slab_types::inference::{TextGenerationResponse, TextGenerationUsage};
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
 use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
+    assistant_message_from_parts, assistant_message_from_text_response, serialize_session_message,
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
     ChatResultChoice, ChatStreamChunk, ConversationMessage as DomainConversationMessage,
     ConversationMessageContent, StructuredOutput, TextCompletionCommand, TextCompletionOutput,
@@ -27,6 +31,13 @@ const SYSTEM_FINGERPRINT: &str = "b-slab";
 enum GeneratedChatOutput {
     Text(TextGenerationResponse),
     Stream(BoxStream<'static, ChatStreamChunk>),
+}
+
+#[derive(Default)]
+struct StreamedAssistantContent {
+    content: String,
+    reasoning: String,
+    saw_error: bool,
 }
 
 #[derive(Clone)]
@@ -244,6 +255,116 @@ pub(super) fn build_estimated_usage(
     }
 }
 
+async fn persist_session_message(
+    state: &ModelState,
+    session_id: &str,
+    message: &DomainConversationMessage,
+) {
+    state
+        .store()
+        .append_message(ChatMessage {
+            id: Uuid::new_v4().to_string(),
+            session_id: session_id.to_owned(),
+            role: message.role.clone(),
+            content: serialize_session_message(message),
+            created_at: Utc::now(),
+        })
+        .await
+        .unwrap_or_else(|error| {
+            tracing::warn!(
+                error = %error,
+                role = %message.role,
+                session_id,
+                "failed to persist session message"
+            )
+        });
+}
+
+fn extract_text_from_chunk_delta<'a>(value: &'a Value, field: &str) -> Option<&'a str> {
+    value
+        .get("choices")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|choice| {
+            choice.get("delta").and_then(|delta| delta.get(field)).and_then(Value::as_str)
+        })
+        .find(|value| !value.is_empty())
+}
+
+fn capture_streamed_assistant_chunk(data: &str, assistant: &Arc<Mutex<StreamedAssistantContent>>) {
+    if data.trim().is_empty() || data.trim() == "[DONE]" {
+        return;
+    }
+
+    let Ok(payload) = serde_json::from_str::<Value>(data) else {
+        return;
+    };
+
+    let mut assistant = assistant.lock().expect("assistant stream accumulator poisoned");
+    if payload.get("error").is_some() {
+        assistant.saw_error = true;
+        return;
+    }
+    if let Some(reasoning) = extract_text_from_chunk_delta(&payload, "reasoning_content") {
+        assistant.reasoning.push_str(reasoning);
+    }
+    if let Some(content) = extract_text_from_chunk_delta(&payload, "content") {
+        assistant.content.push_str(content);
+    }
+}
+
+fn build_streamed_assistant_message(
+    assistant: &StreamedAssistantContent,
+) -> Option<DomainConversationMessage> {
+    if assistant.saw_error {
+        return None;
+    }
+
+    let reasoning = assistant.reasoning.trim();
+    let content = assistant.content.trim();
+    if content.is_empty() && reasoning.is_empty() {
+        return None;
+    }
+
+    Some(assistant_message_from_parts(
+        assistant.content.as_str(),
+        (!reasoning.is_empty()).then_some(assistant.reasoning.as_str()),
+    ))
+}
+
+fn with_stream_session_persistence(
+    stream: BoxStream<'static, ChatStreamChunk>,
+    state: ModelState,
+    session_id: String,
+) -> BoxStream<'static, ChatStreamChunk> {
+    let assistant = Arc::new(Mutex::new(StreamedAssistantContent::default()));
+    let capture_target = Arc::clone(&assistant);
+    let streamed = stream.map(move |chunk| {
+        match &chunk {
+            ChatStreamChunk::Data(data) => capture_streamed_assistant_chunk(data, &capture_target),
+        }
+        chunk
+    });
+
+    let persist_target = Arc::clone(&assistant);
+    let persist = stream::once(async move {
+        let message = {
+            let assistant = persist_target.lock().expect("assistant stream accumulator poisoned");
+            build_streamed_assistant_message(&assistant)
+        };
+
+        if let Some(message) = message.as_ref() {
+            persist_session_message(&state, &session_id, message).await;
+        }
+
+        None::<ChatStreamChunk>
+    })
+    .filter_map(futures::future::ready);
+
+    Box::pin(streamed.chain(persist))
+}
+
 async fn resolve_requested_model(
     state: &ModelState,
     requested_model: &str,
@@ -386,21 +507,30 @@ async fn create_chat_completion_with_state(
 
     let resolved_messages =
         build_messages(&state, command.id.as_deref(), &command.messages).await?;
+    let latest_user_message = command
+        .messages
+        .iter()
+        .rev()
+        .find(|message| message.role == "user" && message.has_meaningful_content())
+        .cloned();
 
     if let Some(session_id) = command.id.as_deref().filter(|_| !continue_generation) {
-        state
-            .store()
-            .append_message(ChatMessage {
-                id: Uuid::new_v4().to_string(),
-                session_id: session_id.to_owned(),
-                role: "user".into(),
-                content: user_content.clone(),
-                created_at: Utc::now(),
-            })
-            .await
-            .unwrap_or_else(
-                |error| tracing::warn!(error = %error, "failed to persist user message"),
-            );
+        if let Some(message) = latest_user_message.as_ref() {
+            persist_session_message(&state, session_id, message).await;
+        } else if !user_content.trim().is_empty() {
+            persist_session_message(
+                &state,
+                session_id,
+                &DomainConversationMessage {
+                    role: "user".into(),
+                    content: ConversationMessageContent::Text(user_content.clone()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                },
+            )
+            .await;
+        }
     }
 
     if command.stream {
@@ -440,6 +570,11 @@ async fn create_chat_completion_with_state(
 
         return match generated {
             GeneratedChatOutput::Text(text) => {
+                let assistant_message = assistant_message_from_text_response(&text);
+                if let Some(session_id) = command.id.as_deref() {
+                    persist_session_message(&state, session_id, &assistant_message).await;
+                }
+
                 let response = ChatCompletionResult {
                     id: format!("chatcmpl-{}", Uuid::new_v4()),
                     object: "chat.completion".into(),
@@ -448,20 +583,22 @@ async fn create_chat_completion_with_state(
                     system_fingerprint: SYSTEM_FINGERPRINT.into(),
                     choices: vec![ChatResultChoice {
                         index: 0,
-                        message: DomainConversationMessage {
-                            role: "assistant".into(),
-                            content: ConversationMessageContent::Text(text.text),
-                            name: None,
-                            tool_call_id: None,
-                            tool_calls: Vec::new(),
-                        },
+                        message: assistant_message,
                         finish_reason: text.finish_reason.or(Some("stop".into())),
                     }],
                     usage: text.usage,
                 };
                 Ok(ChatCompletionOutput::Json(response))
             }
-            GeneratedChatOutput::Stream(stream) => Ok(ChatCompletionOutput::Stream(stream)),
+            GeneratedChatOutput::Stream(stream) => {
+                let stream = match command.id.clone() {
+                    Some(session_id) => {
+                        with_stream_session_persistence(stream, state.clone(), session_id)
+                    }
+                    None => stream,
+                };
+                Ok(ChatCompletionOutput::Stream(stream))
+            }
         };
     }
 
@@ -503,15 +640,10 @@ async fn create_chat_completion_with_state(
         }
 
         merge_usage(&mut usage, generated.usage.clone());
+        let assistant_message = assistant_message_from_text_response(&generated);
         choices.push(ChatResultChoice {
             index,
-            message: DomainConversationMessage {
-                role: "assistant".into(),
-                content: ConversationMessageContent::Text(generated.text),
-                name: None,
-                tool_call_id: None,
-                tool_calls: Vec::new(),
-            },
+            message: assistant_message,
             finish_reason: generated.finish_reason.or(Some("stop".into())),
         });
     }
@@ -527,19 +659,7 @@ async fn create_chat_completion_with_state(
 
     if let Some(session_id) = command.id.as_deref() {
         if let Some(first_choice) = choices.first() {
-            state
-                .store()
-                .append_message(ChatMessage {
-                    id: Uuid::new_v4().to_string(),
-                    session_id: session_id.to_owned(),
-                    role: "assistant".into(),
-                    content: first_choice.message.rendered_text(),
-                    created_at: Utc::now(),
-                })
-                .await
-                .unwrap_or_else(
-                    |error| tracing::warn!(error = %error, "failed to persist assistant message"),
-                );
+            persist_session_message(&state, session_id, &first_choice.message).await;
         }
     }
 
@@ -851,5 +971,53 @@ mod test {
         )));
 
         assert!(matches!(result, Err(ServerError::NotImplemented(_))));
+    }
+
+    #[test]
+    fn streamed_assistant_message_restores_reasoning_chunks_for_session_storage() {
+        let assistant = Arc::new(Mutex::new(StreamedAssistantContent::default()));
+
+        capture_streamed_assistant_chunk(
+            r#"{"choices":[{"delta":{"reasoning_content":"first thought"}}]}"#,
+            &assistant,
+        );
+        capture_streamed_assistant_chunk(
+            r#"{"choices":[{"delta":{"content":"final answer"}}]}"#,
+            &assistant,
+        );
+
+        let message = {
+            let assistant = assistant.lock().expect("assistant stream accumulator poisoned");
+            build_streamed_assistant_message(&assistant).expect("expected assistant message")
+        };
+
+        assert!(matches!(
+            message.content,
+            ConversationMessageContent::Text(ref text)
+                if text.contains("<think status=\"done\">")
+                    && text.contains("first thought")
+                    && text.ends_with("final answer")
+        ));
+    }
+
+    #[test]
+    fn streamed_assistant_message_skips_failed_streams() {
+        let assistant = Arc::new(Mutex::new(StreamedAssistantContent::default()));
+
+        capture_streamed_assistant_chunk(
+            r#"{"choices":[{"delta":{"content":"partial answer"}}]}"#,
+            &assistant,
+        );
+        capture_streamed_assistant_chunk(
+            r#"{"error":{"message":"stream failed","type":"server_error","code":null}}"#,
+            &assistant,
+        );
+
+        let message = {
+            let assistant = assistant.lock().expect("assistant stream accumulator poisoned");
+            build_streamed_assistant_message(&assistant)
+        };
+
+        assert!(message.is_none());
     }
 }

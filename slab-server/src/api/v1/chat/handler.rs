@@ -12,12 +12,12 @@ use serde_json::json;
 use utoipa::OpenApi;
 
 use crate::api::v1::chat::schema::{
-    ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatCompletionUsage, ChatContentPart,
-    ChatMessage as OpenAiMessage, ChatMessageContent, ChatModelOption, ChatModelSource,
-    ChatPromptTokensDetails, ChatReasoningEffort, ChatResponseFormat, ChatResponseFormatType,
-    ChatResponseJsonSchema, ChatStreamOptions, ChatThinkingConfig, ChatThinkingType, ChatToolCall,
-    ChatToolFunction, ChatVerbosity, CompletionChoice, CompletionRequest, CompletionResponse,
-    OpenAiErrorResponse, StopSequences,
+    ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatCompletionUsage,
+    ChatContentPart, ChatMessage as OpenAiMessage, ChatMessageContent, ChatModelOption,
+    ChatModelSource, ChatPromptTokensDetails, ChatReasoningEffort, ChatResponseFormat,
+    ChatResponseFormatType, ChatResponseJsonSchema, ChatStreamOptions, ChatThinkingConfig,
+    ChatThinkingType, ChatToolCall, ChatToolFunction, ChatVerbosity, CompletionChoice,
+    CompletionRequest, CompletionResponse, OpenAiErrorResponse, StopSequences,
 };
 use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
@@ -140,36 +140,24 @@ fn sse_response(stream: futures::stream::BoxStream<'static, ChatStreamChunk>) ->
 
 fn openai_error_response(error: ServerError) -> Response {
     let (status, message, error_type, code) = match error {
-        ServerError::NotFound(message) => (
-            StatusCode::NOT_FOUND,
-            message,
-            "invalid_request_error",
-            Some("not_found"),
-        ),
-        ServerError::BadRequest(message) => (
-            StatusCode::BAD_REQUEST,
-            message,
-            "invalid_request_error",
-            Some("bad_request"),
-        ),
-        ServerError::BadRequestData { message, .. } => (
-            StatusCode::BAD_REQUEST,
-            message,
-            "invalid_request_error",
-            Some("bad_request"),
-        ),
+        ServerError::NotFound(message) => {
+            (StatusCode::NOT_FOUND, message, "invalid_request_error", Some("not_found"))
+        }
+        ServerError::BadRequest(message) => {
+            (StatusCode::BAD_REQUEST, message, "invalid_request_error", Some("bad_request"))
+        }
+        ServerError::BadRequestData { message, .. } => {
+            (StatusCode::BAD_REQUEST, message, "invalid_request_error", Some("bad_request"))
+        }
         ServerError::BackendNotReady(message) => (
             StatusCode::SERVICE_UNAVAILABLE,
             message,
             "service_unavailable_error",
             Some("backend_not_ready"),
         ),
-        ServerError::NotImplemented(message) => (
-            StatusCode::NOT_IMPLEMENTED,
-            message,
-            "invalid_request_error",
-            Some("not_implemented"),
-        ),
+        ServerError::NotImplemented(message) => {
+            (StatusCode::NOT_IMPLEMENTED, message, "invalid_request_error", Some("not_implemented"))
+        }
         ServerError::Runtime(_) | ServerError::Database(_) | ServerError::Internal(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal server error".to_owned(),

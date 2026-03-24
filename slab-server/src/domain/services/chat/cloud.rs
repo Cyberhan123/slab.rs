@@ -679,13 +679,19 @@ async fn cloud_chat_completion(
     let usage = super::build_estimated_usage(&render_messages_for_usage(messages), &text, None);
     let finish_reason =
         super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens);
+    let mut metadata = slab_types::inference::JsonOptions::default();
+    if let Some(reasoning) =
+        extract_reasoning_content_from_raw_body(response.captured_raw_body.as_ref())
+    {
+        metadata.insert("reasoning_content".into(), Value::String(reasoning));
+    }
 
     Ok(TextGenerationResponse {
         text,
         finish_reason: Some(finish_reason),
         tokens_used: Some(usage.completion_tokens),
         usage: Some(usage),
-        metadata: Default::default(),
+        metadata,
     })
 }
 
@@ -769,6 +775,20 @@ fn build_openai_chat_completions_url(api_base: &str) -> String {
         Some((base, query)) => format!("{}/chat/completions?{query}", base.trim_end_matches('/')),
         None => format!("{}/chat/completions", api_base.trim().trim_end_matches('/')),
     }
+}
+
+fn extract_reasoning_content_from_raw_body(raw_body: Option<&Value>) -> Option<String> {
+    let payload = raw_body?;
+    payload
+        .get("choices")
+        .and_then(Value::as_array)
+        .and_then(|choices| choices.first())
+        .and_then(|choice| choice.get("message"))
+        .and_then(|message| message.get("reasoning_content"))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
 }
 
 fn build_cloud_http_trace_context(

@@ -11,8 +11,7 @@ use validator::Validate;
 use crate::api::v1::models::schema::{
     CreateModelRequest, DownloadModelRequest, ImportModelConfigRequest, ListAvailableQuery,
     ListModelsQuery, LoadModelRequest, ModelStatusResponse, SwitchModelRequest,
-    UnloadModelRequest,
-    UnifiedModelResponse, UpdateModelRequest,
+    UnifiedModelResponse, UnloadModelRequest, UpdateModelRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::{validate, ValidatedJson, ValidatedQuery};

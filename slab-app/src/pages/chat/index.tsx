@@ -8,6 +8,7 @@ import "@ant-design/x-markdown/themes/dark.css"
 import "@ant-design/x-markdown/themes/light.css"
 
 import { ScrollArea } from "@/components/ui/scroll-area"
+import type { components } from "@/lib/api/v1.d.ts"
 import { ChatComposer } from "@/pages/chat/components/chat-composer"
 import { ChatMessageBubble } from "@/pages/chat/components/chat-message-bubble"
 import { ChatSessionSheet } from "@/pages/chat/components/chat-session-sheet"
@@ -22,8 +23,7 @@ import { usePageHeader, usePageHeaderModelPicker } from "@/hooks/use-global-head
 
 import {
   ChatContext,
-  DEFAULT_CONVERSATIONS_ITEMS,
-  DEFAULT_CONVERSATION_KEY,
+  clearConversationCache,
   getChatMessageTextContent,
   type ChatMessageRecord,
 } from "./chat-context"
@@ -51,6 +51,12 @@ type ConversationItem = ConversationData & {
   group?: string
 }
 
+type SessionRecord = components["schemas"]["SessionResponse"]
+type SessionLabelMap = Record<string, string>
+
+const CHAT_CURRENT_SESSION_STORAGE_KEY = "slab.chat.currentSessionId"
+const CHAT_SESSION_LABELS_STORAGE_KEY = "slab.chat.sessionLabels"
+
 function createConversationLabel(value: string) {
   const trimmed = value.trim()
 
@@ -75,22 +81,150 @@ function getGreeting(date: Date) {
   return "Good evening"
 }
 
+function getErrorDescription(error: unknown) {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message
+  }
+
+  if (typeof error === "object" && error !== null) {
+    const message = (error as { error?: unknown; message?: unknown }).message
+    if (typeof message === "string" && message.trim()) {
+      return message
+    }
+
+    const rawError = (error as { error?: unknown }).error
+    if (typeof rawError === "string" && rawError.trim()) {
+      return rawError
+    }
+  }
+
+  return "Unknown error"
+}
+
+function readStoredCurrentSessionId() {
+  if (typeof window === "undefined") {
+    return ""
+  }
+
+  try {
+    return window.localStorage.getItem(CHAT_CURRENT_SESSION_STORAGE_KEY)?.trim() ?? ""
+  } catch {
+    return ""
+  }
+}
+
+function writeStoredCurrentSessionId(sessionId: string) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  try {
+    const trimmed = sessionId.trim()
+    if (!trimmed) {
+      window.localStorage.removeItem(CHAT_CURRENT_SESSION_STORAGE_KEY)
+      return
+    }
+
+    window.localStorage.setItem(CHAT_CURRENT_SESSION_STORAGE_KEY, trimmed)
+  } catch {
+    // Ignore storage failures and keep the session in memory.
+  }
+}
+
+function readStoredSessionLabels(): SessionLabelMap {
+  if (typeof window === "undefined") {
+    return {}
+  }
+
+  try {
+    const raw = window.localStorage.getItem(CHAT_SESSION_LABELS_STORAGE_KEY)
+    if (!raw) {
+      return {}
+    }
+
+    const parsed = JSON.parse(raw) as unknown
+    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+      return {}
+    }
+
+    return Object.fromEntries(
+      Object.entries(parsed).filter(
+        ([key, value]) => typeof key === "string" && typeof value === "string" && value.trim()
+      )
+    )
+  } catch {
+    return {}
+  }
+}
+
+function writeStoredSessionLabels(labels: SessionLabelMap) {
+  if (typeof window === "undefined") {
+    return
+  }
+
+  try {
+    window.localStorage.setItem(CHAT_SESSION_LABELS_STORAGE_KEY, JSON.stringify(labels))
+  } catch {
+    // Ignore storage failures and keep the labels in memory.
+  }
+}
+
+function getStoredSessionLabel(sessionId: string) {
+  const value = readStoredSessionLabels()[sessionId]?.trim()
+  return value ? value : null
+}
+
+function setStoredSessionLabel(sessionId: string, label: string) {
+  const trimmedSessionId = sessionId.trim()
+  const trimmedLabel = label.trim()
+
+  if (!trimmedSessionId || !trimmedLabel) {
+    return
+  }
+
+  writeStoredSessionLabels({
+    ...readStoredSessionLabels(),
+    [trimmedSessionId]: trimmedLabel,
+  })
+}
+
+function removeStoredSessionLabel(sessionId: string) {
+  const trimmedSessionId = sessionId.trim()
+  if (!trimmedSessionId) {
+    return
+  }
+
+  const nextLabels = readStoredSessionLabels()
+  delete nextLabels[trimmedSessionId]
+  writeStoredSessionLabels(nextLabels)
+}
+
+function toConversationItem(session: SessionRecord): ConversationItem {
+  const storedLabel = getStoredSessionLabel(session.id)
+  const backendLabel = session.name.trim()
+
+  return {
+    key: session.id,
+    label: storedLabel ?? (backendLabel || "New chat"),
+    group: "Workspace",
+  }
+}
+
 function Chat() {
   const navigate = useNavigate()
   const [markdownThemeClassName] = useMarkdownTheme()
   const [deepThink, setDeepThink] = useState(true)
   const [draft, setDraft] = useState("")
   const [isSessionSheetOpen, setIsSessionSheetOpen] = useState(false)
-  const [curConversation, setCurConversation] = useState<string>(
-    DEFAULT_CONVERSATIONS_ITEMS[0]?.key ?? DEFAULT_CONVERSATION_KEY
-  )
+  const [curConversation, setCurConversation] = useState<string>(() => readStoredCurrentSessionId())
 
   const [selectedModelId, setSelectedModelId] = useState("")
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
+  const hasBootstrappedSessions = useRef(false)
 
   const { conversations, addConversation, setConversations } = useXConversations({
-    defaultConversations: DEFAULT_CONVERSATIONS_ITEMS,
+    defaultConversations: [],
   })
   const conversationList = conversations as ConversationItem[]
 
@@ -104,10 +238,24 @@ function Chat() {
   const loadModelMutation = api.useMutation("post", "/v1/models/load")
   const switchModelMutation = api.useMutation("post", "/v1/models/switch")
   const getTaskMutation = api.useMutation("get", "/v1/tasks/{id}")
+  const { data: sessionData, isLoading: sessionsLoading, refetch: refetchSessions } = api.useQuery(
+    "get",
+    "/v1/sessions"
+  )
+  const createSessionMutation = api.useMutation("post", "/v1/sessions")
+  // Generated types currently drop the DELETE path param for this endpoint.
+  const deleteSessionMutation = api.useMutation("delete", "/v1/sessions/{id}") as unknown as {
+    isPending: boolean
+    mutateAsync: (options: { params: { path: { id: string } } }) => Promise<unknown>
+  }
 
   const parsedCatalogModels = useMemo(
     () => toCatalogModelList(catalogModels),
     [catalogModels]
+  )
+  const sessionRecords = useMemo<SessionRecord[]>(
+    () => (Array.isArray(sessionData) ? sessionData : []),
+    [sessionData]
   )
 
   const chatCatalogModels = useMemo(
@@ -153,10 +301,82 @@ function Chat() {
   }, [modelOptions, selectedModelId])
 
   useEffect(() => {
-    if (!conversationList.some((item) => item.key === curConversation)) {
-      setCurConversation(conversationList[0]?.key ?? DEFAULT_CONVERSATION_KEY)
+    setConversations(sessionRecords.map(toConversationItem))
+  }, [sessionRecords, setConversations])
+
+  const createEmptySession = useCallback(
+    async (options?: { openSheet?: boolean; quiet?: boolean; select?: boolean }) => {
+      try {
+        const session = await createSessionMutation.mutateAsync({
+          body: {},
+        })
+
+        addConversation(toConversationItem(session), "prepend")
+        if (options?.select ?? true) {
+          setCurConversation(session.id)
+        }
+        if (options?.openSheet) {
+          setIsSessionSheetOpen(true)
+        }
+
+        void refetchSessions()
+        return session
+      } catch (error) {
+        if (!options?.quiet) {
+          toast.error("Failed to create chat session.", {
+            description: getErrorDescription(error),
+          })
+        }
+        return null
+      }
+    },
+    [addConversation, createSessionMutation, refetchSessions]
+  )
+
+  useEffect(() => {
+    if (sessionsLoading) {
+      return
+    }
+
+    if (sessionRecords.length > 0) {
+      hasBootstrappedSessions.current = true
+      return
+    }
+
+    if (hasBootstrappedSessions.current) {
+      return
+    }
+
+    hasBootstrappedSessions.current = true
+    void createEmptySession({ quiet: true, select: true })
+  }, [createEmptySession, sessionRecords.length, sessionsLoading])
+
+  useEffect(() => {
+    if (conversationList.length === 0) {
+      if (curConversation) {
+        setCurConversation("")
+      }
+      return
+    }
+
+    if (conversationList.some((item) => item.key === curConversation)) {
+      return
+    }
+
+    const storedConversationId = readStoredCurrentSessionId()
+    const nextConversationKey =
+      conversationList.find((item) => item.key === storedConversationId)?.key ??
+      conversationList[0]?.key ??
+      ""
+
+    if (nextConversationKey && nextConversationKey !== curConversation) {
+      setCurConversation(nextConversationKey)
     }
   }, [conversationList, curConversation])
+
+  useEffect(() => {
+    writeStoredCurrentSessionId(curConversation)
+  }, [curConversation])
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -326,6 +546,7 @@ function Chat() {
   const {
     messages,
     isRequesting,
+    isHistoryLoading,
     abort,
     onReload,
     onContinue,
@@ -338,6 +559,10 @@ function Chat() {
     loadModelMutation.isPending ||
     switchModelMutation.isPending ||
     downloadModelMutation.isPending
+  const isSessionMutating = createSessionMutation.isPending || deleteSessionMutation.isPending
+  const isSessionBusy = isRequesting || isPreparingModel || isHistoryLoading || isSessionMutating
+  const isSessionBootstrapping =
+    (sessionsLoading || createSessionMutation.isPending) && conversationList.length === 0
 
   const safeMessages: ChatMessageRecord[] = messages ?? []
   const latestMessage = safeMessages[safeMessages.length - 1]
@@ -356,6 +581,22 @@ function Chat() {
     .reverse()
     .find((item) => item.message.role === "user")
   const selectedModelStatusLabel = useMemo(() => {
+    if (isSessionBootstrapping || !curConversation) {
+      return "Preparing session"
+    }
+
+    if (isHistoryLoading) {
+      return "Loading session history"
+    }
+
+    if (createSessionMutation.isPending) {
+      return "Creating session"
+    }
+
+    if (deleteSessionMutation.isPending) {
+      return "Deleting session"
+    }
+
     if (modelLoading) {
       return "Loading models"
     }
@@ -381,7 +622,16 @@ function Chat() {
     }
 
     return parts.join(" / ")
-  }, [isPreparingModel, modelLoading, selectedModel])
+  }, [
+    createSessionMutation.isPending,
+    curConversation,
+    deleteSessionMutation.isPending,
+    isHistoryLoading,
+    isPreparingModel,
+    isSessionBootstrapping,
+    modelLoading,
+    selectedModel,
+  ])
   const headerModelPicker = useMemo(
     () => ({
       value: selectedModelId,
@@ -414,11 +664,12 @@ function Chat() {
   }, [safeMessages, isRequesting])
 
   const sortedConversations = useMemo(() => {
-    return [...conversationList].sort((a, b) => {
-      if (a.key === curConversation) return -1
-      if (b.key === curConversation) return 1
-      return String(b.key).localeCompare(String(a.key))
-    })
+    const currentConversation = conversationList.find((item) => item.key === curConversation)
+    const remainingConversations = conversationList.filter((item) => item.key !== curConversation)
+
+    return currentConversation
+      ? [currentConversation, ...remainingConversations]
+      : remainingConversations
   }, [conversationList, curConversation])
   const greeting = useMemo(() => getGreeting(new Date()), [])
   const sessionSummaryItems = useMemo<ChatSessionSummaryItem[]>(() => {
@@ -435,6 +686,8 @@ function Chat() {
 
   const setConversationLabelIfNeeded = useCallback(
     (conversationKey: string, prompt: string) => {
+      let nextLabel = ""
+      let didUpdateLabel = false
       const nextList = conversationList.map((item) => {
         const label = item.label ?? "New chat"
 
@@ -446,53 +699,87 @@ function Chat() {
           return item
         }
 
+        nextLabel = createConversationLabel(prompt)
+        didUpdateLabel = true
         return {
           ...item,
-          label: createConversationLabel(prompt),
+          label: nextLabel,
         }
       })
+
+      if (didUpdateLabel && nextLabel) {
+        setStoredSessionLabel(conversationKey, nextLabel)
+      }
 
       setConversations(nextList)
     },
     [conversationList, setConversations]
   )
 
-  const handleCreateConversation = useCallback(() => {
-    if (safeMessages.length === 0) {
+  const handleCreateConversation = useCallback(async () => {
+    if (isSessionBusy) {
+      toast.info("Wait for the current response to finish before changing sessions.")
+      return
+    }
+
+    if (safeMessages.length === 0 && curConversation) {
       toast.info("The current session is already empty.")
       return
     }
 
-    const now = Date.now().toString()
-    addConversation(
-      {
-        key: now,
-        label: "New chat",
-        group: "Workspace",
-      },
-      "prepend"
-    )
-    setCurConversation(now)
-    setDraft("")
-    setIsSessionSheetOpen(true)
-  }, [addConversation, safeMessages.length])
+    const session = await createEmptySession({ openSheet: true, select: true })
+    if (session) {
+      setDraft("")
+    }
+  }, [createEmptySession, curConversation, isSessionBusy, safeMessages.length])
 
   const handleDeleteConversation = useCallback(
-    (conversationKey: string) => {
-      const nextList = conversationList.filter((item) => item.key !== conversationKey)
-
-      if (nextList.length === 0) {
-        setConversations(DEFAULT_CONVERSATIONS_ITEMS)
-        setCurConversation(DEFAULT_CONVERSATION_KEY)
+    async (conversationKey: string) => {
+      if (isSessionBusy) {
+        toast.info("Wait for the current response to finish before deleting sessions.")
         return
       }
 
-      setConversations(nextList)
-      if (conversationKey === curConversation) {
-        setCurConversation(nextList[0]?.key ?? DEFAULT_CONVERSATION_KEY)
+      try {
+        await deleteSessionMutation.mutateAsync({
+          params: {
+            path: { id: conversationKey },
+          },
+        })
+      } catch (error) {
+        toast.error("Failed to delete chat session.", {
+          description: getErrorDescription(error),
+        })
+        return
       }
+
+      removeStoredSessionLabel(conversationKey)
+      clearConversationCache(conversationKey)
+
+      const nextList = conversationList.filter((item) => item.key !== conversationKey)
+      setConversations(nextList)
+
+      if (nextList.length === 0) {
+        setCurConversation("")
+        await createEmptySession({ select: true })
+        return
+      }
+
+      if (conversationKey === curConversation) {
+        setCurConversation(nextList[0]?.key ?? "")
+      }
+
+      void refetchSessions()
     },
-    [conversationList, curConversation, setConversations]
+    [
+      conversationList,
+      createEmptySession,
+      curConversation,
+      deleteSessionMutation,
+      isSessionBusy,
+      refetchSessions,
+      setConversations,
+    ]
   )
 
   const handleGenerateImage = useCallback(() => {
@@ -512,11 +799,22 @@ function Chat() {
 
   const submitChatMessage = useCallback(
     async (value: string) => {
+      if (!curConversation || isSessionBusy || isSessionBootstrapping) {
+        toast.info("Chat session is still syncing. Please try again in a moment.")
+        return
+      }
+
       setConversationLabelIfNeeded(curConversation, value)
       setDraft("")
       await handleSubmit(value)
     },
-    [curConversation, handleSubmit, setConversationLabelIfNeeded]
+    [
+      curConversation,
+      handleSubmit,
+      isSessionBootstrapping,
+      isSessionBusy,
+      setConversationLabelIfNeeded,
+    ]
   )
 
   return (
@@ -529,6 +827,7 @@ function Chat() {
                 items={sessionSummaryItems}
                 onManageSessions={() => setIsSessionSheetOpen(true)}
                 onNewSession={handleCreateConversation}
+                disableNewSession={isSessionBusy || isSessionBootstrapping}
               />
             </div>
           </div>
@@ -549,12 +848,22 @@ function Chat() {
               items={sessionSummaryItems}
               onManageSessions={() => setIsSessionSheetOpen(true)}
               onNewSession={handleCreateConversation}
+              disableNewSession={isSessionBusy || isSessionBootstrapping}
             />
           </div>
 
           <ScrollArea className="min-h-0 flex-1">
             <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-8 pt-2 md:px-8 xl:px-0">
-              {safeMessages.length === 0 ? (
+              {isSessionBootstrapping || (isHistoryLoading && safeMessages.length === 0) ? (
+                <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
+                  <div className="max-w-md space-y-3">
+                    <p className="text-base font-medium text-foreground">Loading this session...</p>
+                    <p className="text-sm leading-6 text-muted-foreground">
+                      Restoring the saved conversation history before you continue.
+                    </p>
+                  </div>
+                </div>
+              ) : safeMessages.length === 0 ? (
                 <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
                   <div className="max-w-md space-y-3">
                     <p className="text-base font-medium text-foreground">
@@ -594,6 +903,7 @@ function Chat() {
                 onSubmit={submitChatMessage}
                 onCancel={abort}
                 isRequesting={isRequesting || isPreparingModel}
+                disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || !curConversation}
                 deepThink={deepThink}
                 setDeepThink={setDeepThink}
                 onGenerateImage={handleGenerateImage}
@@ -608,7 +918,11 @@ function Chat() {
             conversations={sortedConversations}
             currentConversation={curConversation}
             activeConversation={activeConversation}
+            busy={isSessionBusy || isSessionBootstrapping}
             onSelect={(key) => {
+              if (isSessionBusy || isSessionBootstrapping) {
+                return
+              }
               setCurConversation(key)
               setIsSessionSheetOpen(false)
             }}

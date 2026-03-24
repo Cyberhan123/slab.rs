@@ -2,6 +2,7 @@ import { SSEFields, useXChat, XModelResponse } from '@ant-design/x-sdk'
 import { useState } from 'react'
 import locale from '../local'
 import {
+  DEFAULT_CONVERSATION_KEY,
   getContinueGenerationPrefix,
   getChatMessageTextContent,
   getChatRequestErrorMessage,
@@ -20,16 +21,24 @@ export const useChat = (
   beforeRequest?: () => Promise<void> | void
 ) => {
   const [activeConversation, setActiveConversation] = useState<string>()
+  const resolvedConversationKey = conversationKey || DEFAULT_CONVERSATION_KEY
 
-  const { onRequest, messages, isRequesting, abort, onReload: rawOnReload } = useXChat<
+  const {
+    onRequest,
+    messages,
+    isRequesting,
+    abort,
+    isDefaultMessagesRequesting,
+    onReload: rawOnReload,
+  } = useXChat<
     ChatUiMessage,
     ChatUiMessage,
     ChatRequestParams,
     Partial<Record<SSEFields, XModelResponse>>
   >({
-    provider: providerFactory(conversationKey, model),
-    conversationKey: conversationKey,
-    defaultMessages: historyMessageFactory(conversationKey),
+    provider: providerFactory(resolvedConversationKey, model),
+    conversationKey: resolvedConversationKey,
+    defaultMessages: historyMessageFactory,
     requestPlaceholder: (requestParams) => {
       const continuationPrefix = requestParams?.continue_generation
         ? getContinueGenerationPrefix(requestParams.messages)
@@ -92,7 +101,7 @@ export const useChat = (
           type: deepThink ? 'enabled' : 'disabled',
         },
       })
-      setActiveConversation(conversationKey)
+      setActiveConversation(resolvedConversationKey)
     } catch (_e) {
       // beforeRequest should handle its own user-facing errors.
     }
@@ -137,6 +146,7 @@ export const useChat = (
   return {
     messages,
     isRequesting,
+    isHistoryLoading: isDefaultMessagesRequesting,
     abort,
     onReload,
     onContinue,

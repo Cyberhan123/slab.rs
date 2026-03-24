@@ -14,12 +14,14 @@ type ChatSessionSummaryCardProps = {
   items: ChatSessionSummaryItem[]
   onManageSessions: () => void
   onNewSession: () => void
+  disableNewSession?: boolean
 }
 
 export function ChatSessionSummaryCard({
   items,
   onManageSessions,
   onNewSession,
+  disableNewSession = false,
 }: ChatSessionSummaryCardProps) {
   return (
     <aside className="w-full max-w-[288px] rounded-[24px] border border-border/50 bg-[var(--shell-card)] p-6 shadow-[var(--shell-elevation)]">
@@ -33,6 +35,7 @@ export function ChatSessionSummaryCard({
           size="icon-xs"
           className="rounded-full"
           onClick={onNewSession}
+          disabled={disableNewSession}
         >
           <Plus className="size-3.5" />
           <span className="sr-only">New session</span>

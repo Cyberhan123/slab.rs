@@ -10,17 +10,20 @@ import {
     XModelResponse,
     XRequest,
 } from '@ant-design/x-sdk';
+import { chatMessagesStoreHelper } from '@ant-design/x-sdk/es/x-chat/store';
 
 import type { components } from '@/lib/api/v1.d.ts';
+import { SERVER_BASE_URL } from '@/lib/config';
 
 export const ChatContext = createContext<{
     onReload?: ReturnType<typeof useXChat>['onReload'];
 }>({});
 
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
+export const API_BASE_URL = SERVER_BASE_URL;
 
 type ChatApiError = components['schemas']['OpenAiError'];
 type ChatApiErrorResponse = components['schemas']['OpenAiErrorResponse'];
+type SessionMessageResponse = components['schemas']['MessageResponse'];
 type ProviderTransformParamsOptions = Parameters<
     DeepSeekChatProvider<
         ChatUiMessage,
@@ -63,8 +66,15 @@ export type ChatRequestErrorInfo = {
     success: false;
 };
 
+export const DEFAULT_CONVERSATION_KEY = '__pending_session__';
+
 const isRecord = (value: unknown): value is Record<string, unknown> =>
     typeof value === 'object' && value !== null;
+
+const isEphemeralConversationKey = (value?: string): boolean => {
+    const key = value?.trim();
+    return !key || key === DEFAULT_CONVERSATION_KEY;
+};
 
 const isChatApiErrorResponse = (value: unknown): value is ChatApiErrorResponse => {
     if (!isRecord(value) || !isRecord(value.error)) {
@@ -230,6 +240,184 @@ const normalizeChatErrorResponse = async (response: Response): Promise<Response>
     });
 };
 
+const isSessionMessageResponse = (value: unknown): value is SessionMessageResponse => {
+    if (!isRecord(value)) {
+        return false;
+    }
+
+    return typeof value.id === 'string'
+        && typeof value.session_id === 'string'
+        && typeof value.role === 'string'
+        && typeof value.content === 'string'
+        && typeof value.created_at === 'string';
+};
+
+const isStoredSessionEnvelope = (
+    value: unknown,
+): value is {
+    message: {
+        role?: unknown;
+        content?: unknown;
+        tool_call_id?: unknown;
+        tool_calls?: unknown;
+    };
+} => isRecord(value) && isRecord(value.message);
+
+const isStoredConversationMessage = (
+    value: unknown,
+): value is {
+    role?: unknown;
+    content?: unknown;
+    tool_call_id?: unknown;
+    tool_calls?: unknown;
+} => isRecord(value) && ('content' in value || 'tool_calls' in value || 'tool_call_id' in value);
+
+const renderStoredToolCall = (value: unknown): string => {
+    if (!isRecord(value) || !isRecord(value.function) || typeof value.function.name !== 'string') {
+        return '';
+    }
+
+    const rawArguments = value.function.arguments;
+    const argumentsText = typeof rawArguments === 'string'
+        ? rawArguments
+        : JSON.stringify(rawArguments ?? '');
+    const callId = typeof value.id === 'string' && value.id.trim() ? ` id=${value.id.trim()}` : '';
+
+    return `tool_call${callId}: ${value.function.name}(${argumentsText})`;
+};
+
+const renderStoredContentPart = (value: unknown): string => {
+    if (!isRecord(value) || typeof value.type !== 'string') {
+        return typeof value === 'string' ? value : JSON.stringify(value ?? '');
+    }
+
+    switch (value.type) {
+        case 'text':
+        case 'input_text':
+        case 'output_text':
+        case 'refusal':
+            return typeof value.text === 'string' ? value.text : '';
+        case 'json':
+            return JSON.stringify(value.value ?? null);
+        case 'tool_result': {
+            const rendered = JSON.stringify(value.value ?? null);
+            const prefix =
+                typeof value.tool_call_id === 'string' && value.tool_call_id.trim()
+                    ? `tool_result[${value.tool_call_id.trim()}]`
+                    : 'tool_result';
+            return `${prefix}: ${rendered}`;
+        }
+        case 'image': {
+            const mime = typeof value.mime_type === 'string' && value.mime_type.trim()
+                ? value.mime_type.trim()
+                : 'unknown';
+            const source = typeof value.image_url === 'string' && value.image_url.trim()
+                ? value.image_url.trim()
+                : 'embedded';
+            const detail = typeof value.detail === 'string' && value.detail.trim()
+                ? ` detail=${value.detail.trim()}`
+                : '';
+            return `[image mime=${mime} src=${source}${detail}]`;
+        }
+        default:
+            return JSON.stringify(value);
+    }
+};
+
+const renderStoredMessageContent = (content: unknown): string => {
+    if (typeof content === 'string') {
+        return content;
+    }
+
+    if (isRecord(content) && typeof content.text === 'string') {
+        return content.text;
+    }
+
+    if (Array.isArray(content)) {
+        return content
+            .map(renderStoredContentPart)
+            .filter((part) => part.trim().length > 0)
+            .join('\n');
+    }
+
+    if (content === undefined || content === null) {
+        return '';
+    }
+
+    return JSON.stringify(content);
+};
+
+const toStoredSessionChatMessage = (
+    fallbackRole: string,
+    content: string,
+): Pick<ChatUiMessage, 'content' | 'role'> => {
+    const payload = JSON.parse(content) as unknown;
+    const message = isStoredSessionEnvelope(payload)
+        ? payload.message
+        : isStoredConversationMessage(payload)
+            ? payload
+            : null;
+
+    if (!message) {
+        return {
+            content,
+            role: fallbackRole as ChatUiMessage['role'],
+        };
+    }
+
+    const segments: string[] = [];
+    const body = renderStoredMessageContent(message.content);
+    if (body.trim()) {
+        segments.push(body);
+    }
+
+    if (typeof message.tool_call_id === 'string' && message.tool_call_id.trim()) {
+        segments.push(`tool_call_id: ${message.tool_call_id.trim()}`);
+    }
+
+    if (Array.isArray(message.tool_calls)) {
+        const toolCalls = message.tool_calls.map(renderStoredToolCall).filter((part) => part.trim().length > 0);
+        if (toolCalls.length > 0) {
+            segments.push(toolCalls.join('\n'));
+        }
+    }
+
+    return {
+        content: segments.join('\n'),
+        role: (typeof message.role === 'string' && message.role.trim()
+            ? message.role.trim()
+            : fallbackRole) as ChatUiMessage['role'],
+    };
+};
+
+const fetchSessionMessages = async (conversationKey?: string): Promise<SessionMessageResponse[]> => {
+    if (isEphemeralConversationKey(conversationKey)) {
+        return [];
+    }
+
+    try {
+        const response = await fetch(
+            `${SERVER_BASE_URL}/v1/sessions/${encodeURIComponent(conversationKey ?? '')}/messages`,
+        );
+
+        if (response.status === 404) {
+            return [];
+        }
+
+        if (!response.ok) {
+            throw new Error(`failed to load session messages: ${response.status}`);
+        }
+
+        const payload = await response.json().catch(() => []);
+        return Array.isArray(payload)
+            ? payload.filter((item): item is SessionMessageResponse => isSessionMessageResponse(item))
+            : [];
+    } catch (error) {
+        console.warn('failed to load session messages', { conversationKey, error });
+        return [];
+    }
+};
+
 class ContinueGenerationChatProvider extends DeepSeekChatProvider<
     ChatUiMessage,
     ChatRequestParams,
@@ -282,6 +470,21 @@ class ContinueGenerationChatProvider extends DeepSeekChatProvider<
 
 export const providerCaches = new Map<string, ContinueGenerationChatProvider>();
 
+export const clearConversationCache = (conversationKey: string) => {
+    if (isEphemeralConversationKey(conversationKey)) {
+        return;
+    }
+
+    const providerCachePrefix = `${conversationKey}::`;
+    Array.from(providerCaches.keys()).forEach((cacheKey) => {
+        if (cacheKey.startsWith(providerCachePrefix)) {
+            providerCaches.delete(cacheKey);
+        }
+    });
+
+    chatMessagesStoreHelper.delete(conversationKey);
+};
+
 export const providerFactory = (conversationKey: string, model: string) => {
     const cacheKey = `${conversationKey}::${model}`;
     if (!providerCaches.get(cacheKey)) {
@@ -298,7 +501,7 @@ export const providerFactory = (conversationKey: string, model: string) => {
                         params: {
                             stream: true,
                             model,
-                            id: conversationKey,
+                            ...(isEphemeralConversationKey(conversationKey) ? {} : { id: conversationKey }),
                         },
                     },
                 ),
@@ -308,11 +511,28 @@ export const providerFactory = (conversationKey: string, model: string) => {
     return providerCaches.get(cacheKey);
 };
 
-export const historyMessageFactory = (_conversationKey: string): DefaultMessageInfo<ChatUiMessage>[] => {
-  return [];
-};
+export const historyMessageFactory = async (info?: {
+    conversationKey?: string | number;
+}): Promise<DefaultMessageInfo<ChatUiMessage>[]> => {
+    const conversationKey = typeof info?.conversationKey === 'number'
+        ? String(info.conversationKey)
+        : info?.conversationKey;
+    const messages = await fetchSessionMessages(conversationKey);
 
-export const DEFAULT_CONVERSATION_KEY = 'default-conversation';
+    return messages.map((message) => ({
+        id: message.id,
+        message: (() => {
+            try {
+                return toStoredSessionChatMessage(message.role, message.content);
+            } catch {
+                return {
+                    role: message.role as ChatUiMessage['role'],
+                    content: message.content,
+                };
+            }
+        })(),
+    }));
+};
 
 export const DEFAULT_CONVERSATIONS_ITEMS: {
     key: string;
@@ -322,6 +542,6 @@ export const DEFAULT_CONVERSATIONS_ITEMS: {
     {
         key: DEFAULT_CONVERSATION_KEY,
         label: 'New chat',
-        group: 'default',
+        group: 'Workspace',
     },
 ];
