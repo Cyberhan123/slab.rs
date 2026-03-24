@@ -141,10 +141,21 @@ impl LlamaSampler {
     /// will filter logits so that only tokens valid according to the grammar
     /// can be selected by the final decision sampler.
     ///
-    /// Returns `true` when the grammar sampler was added successfully, or
-    /// `false` when `llama_sampler_init_grammar` returned `NULL` (invalid
-    /// GBNF string, empty string, or unsupported runtime).  On failure the
-    /// chain is left unchanged and unconstrained sampling continues normally.
+    /// Returns `true` when the grammar sampler was added successfully.
+    ///
+    /// Returns `false` in two cases:
+    /// * when converting `grammar_str` or `grammar_root` to a `CString` fails
+    ///   (i.e. either string contains an interior NUL byte), or
+    /// * when `llama_sampler_init_grammar` returns `NULL` (e.g. invalid GBNF
+    ///   string or unsupported runtime).
+    ///
+    /// An empty `grammar_str` does not cause `llama_sampler_init_grammar` to
+    /// return `NULL`; instead, it produces an empty grammar sampler.  In that
+    /// case this method returns `true`, but sampling remains effectively
+    /// unconstrained by grammar.
+    ///
+    /// On any failure the chain is left unchanged and unconstrained sampling
+    /// continues normally.
     ///
     /// # Safety
     /// `vocab` must be a valid, non-null pointer obtained from
@@ -301,12 +312,20 @@ impl SamplerChainBuilder {
 
         // Grammar sampler: filters logits so only grammar-valid tokens survive,
         // placed after temperature shaping and before the final selection step.
+        //
+        // NOTE: The grammar must define a `root` rule, which is used here as the
+        // start symbol.  If the grammar does not contain `root ::= ...`, grammar
+        // initialization will fail and we fall back to unconstrained sampling.
         if !grammar_str.is_empty()
             && !chain.try_add_grammar(vocab, grammar_str, "root")
         {
+            let grammar_len = grammar_str.chars().count();
+            let grammar_preview: String = grammar_str.chars().take(200).collect();
             tracing::warn!(
-                grammar = grammar_str,
-                "GBNF grammar initialization failed; falling back to unconstrained sampling"
+                grammar_len,
+                grammar_preview = grammar_preview.as_str(),
+                "GBNF grammar initialization failed (e.g., missing or invalid `root` rule); \
+                 falling back to unconstrained sampling"
             );
         }
 

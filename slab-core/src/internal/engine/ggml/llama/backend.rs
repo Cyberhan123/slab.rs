@@ -55,8 +55,8 @@ use slab_core_macros::backend_handler;
 ///
 /// Supports objects, arrays, strings, numbers, booleans and null.
 /// Based on the grammar shipped with llama.cpp examples.
-pub(crate) const GRAMMAR_JSON: &str = r#"root   ::= object
-value  ::= object | array | string | number | "true" | "false" | "null" | ws
+pub(crate) const GRAMMAR_JSON: &str = r#"root   ::= value
+value  ::= object | array | string | number | "true" | "false" | "null"
 object ::=
   "{" ws (
             string ":" ws value
@@ -86,7 +86,7 @@ object    ::=
             string ":" ws value
     ("," ws string ":" ws value)*
   )? "}" ws
-value     ::= object | array | string | number | "true" | "false" | "null" | ws
+value     ::= object | array | string | number | "true" | "false" | "null"
 array     ::=
   "[" ws (
             value
@@ -316,6 +316,7 @@ impl LlamaWorker {
         engine: &GGMLLlamaEngine,
         session_key: Option<&str>,
         full_prompt: String,
+        grammar: Option<String>,
     ) -> Result<PreparedSession, String> {
         let Some(raw_key) = session_key else {
             return Ok(PreparedSession {
@@ -353,7 +354,16 @@ impl LlamaWorker {
         }
 
         if sid.is_none() {
-            sid = Some(engine.create_session().await.map_err(|e| e.to_string())?);
+            // Create a new session with the grammar constraint applied to the
+            // sampler chain.  If the same key is later reused with a different
+            // grammar the session is reset (stale_sid path above) and a fresh
+            // session with the new grammar is created here.
+            sid = Some(
+                engine
+                    .create_session_with_grammar(grammar)
+                    .await
+                    .map_err(|e| e.to_string())?,
+            );
             delta_prompt = full_prompt.clone();
         }
 
@@ -551,7 +561,7 @@ impl LlamaWorker {
             Self::apply_chat_template_if_possible(engine.as_ref(), &prompt)
         };
         let prepared =
-            match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt).await {
+            match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt, grammar.clone()).await {
                 Ok(v) => v,
                 Err(e) => {
                     let _ = reply_tx.send(BackendReply::Error(e));
@@ -623,7 +633,7 @@ impl LlamaWorker {
             Self::apply_chat_template_if_possible(engine.as_ref(), prompt.as_ref())
         };
         let prepared =
-            match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt).await {
+            match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt, grammar.clone()).await {
                 Ok(v) => v,
                 Err(e) => {
                     let _ = reply_tx.send(BackendReply::Error(e));
@@ -729,7 +739,7 @@ pub(crate) fn spawn_backend_with_engine(
 
 #[cfg(test)]
 mod tests {
-    use super::{LlamaWorker, SessionBinding, extract_chat_messages, infer_add_assistant_prompt};
+    use super::{LlamaWorker, SessionBinding, extract_chat_messages, infer_add_assistant_prompt, resolve_grammar};
     use crate::internal::scheduler::backend::protocol::RuntimeControlSignal;
     use crate::internal::scheduler::types::Payload;
 
@@ -849,6 +859,71 @@ mod tests {
         assert!(
             worker.sessions.is_empty(),
             "global load should clear stale llama session mappings before model load"
+        );
+    }
+
+    // ── resolve_grammar ───────────────────────────────────────────────────────
+
+    #[test]
+    fn resolve_grammar_returns_none_when_no_grammar_options_set() {
+        let opts = serde_json::json!({ "max_tokens": 64 });
+        assert!(resolve_grammar(&opts).is_none(), "no grammar options should yield None");
+    }
+
+    #[test]
+    fn resolve_grammar_returns_raw_grammar_string() {
+        let gbnf = "root ::= \"hello\"";
+        let opts = serde_json::json!({ "grammar": gbnf });
+        assert_eq!(resolve_grammar(&opts).as_deref(), Some(gbnf));
+    }
+
+    #[test]
+    fn resolve_grammar_ignores_empty_grammar_string() {
+        let opts = serde_json::json!({ "grammar": "" });
+        assert!(resolve_grammar(&opts).is_none(), "empty grammar string should yield None");
+    }
+
+    #[test]
+    fn resolve_grammar_returns_json_grammar_when_flag_true() {
+        let opts = serde_json::json!({ "grammar_json": true });
+        let result = resolve_grammar(&opts);
+        assert!(result.is_some(), "grammar_json=true should yield Some");
+        assert!(
+            result.unwrap().contains("root"),
+            "JSON grammar should contain a root rule"
+        );
+    }
+
+    #[test]
+    fn resolve_grammar_returns_tool_call_grammar_when_flag_true() {
+        let opts = serde_json::json!({ "grammar_tool_call": true });
+        let result = resolve_grammar(&opts);
+        assert!(result.is_some(), "grammar_tool_call=true should yield Some");
+        assert!(
+            result.unwrap().contains("tool"),
+            "tool-call grammar should reference the tool key"
+        );
+    }
+
+    #[test]
+    fn resolve_grammar_raw_takes_precedence_over_json_flag() {
+        let gbnf = "root ::= \"raw\"";
+        let opts = serde_json::json!({ "grammar": gbnf, "grammar_json": true });
+        assert_eq!(
+            resolve_grammar(&opts).as_deref(),
+            Some(gbnf),
+            "raw grammar should win over grammar_json flag"
+        );
+    }
+
+    #[test]
+    fn resolve_grammar_json_flag_takes_precedence_over_tool_call_flag() {
+        let opts = serde_json::json!({ "grammar_json": true, "grammar_tool_call": true });
+        let result = resolve_grammar(&opts).expect("should yield Some");
+        // JSON grammar contains `value` rule; tool-call grammar contains `arguments` literal.
+        assert!(
+            !result.contains("arguments"),
+            "grammar_json should take precedence over grammar_tool_call"
         );
     }
 }

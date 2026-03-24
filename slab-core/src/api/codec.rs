@@ -631,6 +631,95 @@ mod tests {
         );
     }
 
+    // ── grammar encoding ──────────────────────────────────────────────────────
+
+    #[test]
+    fn encode_text_generation_request_includes_raw_grammar() {
+        let gbnf = "root ::= \"hello\"";
+        let request = TextGenerationRequest {
+            prompt: "hi".to_owned(),
+            grammar: Some(gbnf.to_owned()),
+            ..Default::default()
+        };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+        assert_eq!(
+            opts.get("grammar").and_then(|v| v.as_str()),
+            Some(gbnf),
+            "raw grammar string should be present in options"
+        );
+        assert!(opts.get("grammar_json").is_none(), "grammar_json should be absent");
+        assert!(opts.get("grammar_tool_call").is_none(), "grammar_tool_call should be absent");
+    }
+
+    #[test]
+    fn encode_text_generation_request_includes_grammar_json_flag() {
+        let request = TextGenerationRequest {
+            prompt: "hi".to_owned(),
+            grammar_json: true,
+            ..Default::default()
+        };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+        assert_eq!(
+            opts.get("grammar_json").and_then(|v| v.as_bool()),
+            Some(true),
+            "grammar_json flag should be present in options"
+        );
+    }
+
+    #[test]
+    fn encode_text_generation_request_includes_grammar_tool_call_flag() {
+        let request = TextGenerationRequest {
+            prompt: "hi".to_owned(),
+            grammar_tool_call: true,
+            ..Default::default()
+        };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+        assert_eq!(
+            opts.get("grammar_tool_call").and_then(|v| v.as_bool()),
+            Some(true),
+            "grammar_tool_call flag should be present in options"
+        );
+    }
+
+    #[test]
+    fn encode_text_generation_request_grammar_flags_absent_when_not_set() {
+        let request = TextGenerationRequest {
+            prompt: "hi".to_owned(),
+            ..Default::default()
+        };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+        assert!(opts.get("grammar").is_none(), "grammar should be absent when not set");
+        assert!(opts.get("grammar_json").is_none(), "grammar_json should be absent when false");
+        assert!(
+            opts.get("grammar_tool_call").is_none(),
+            "grammar_tool_call should be absent when false"
+        );
+    }
+
     #[test]
     fn decode_image_generation_response_accepts_unified_image_entries() {
         let encoded = base64::engine::general_purpose::STANDARD.encode(b"mock-image");
