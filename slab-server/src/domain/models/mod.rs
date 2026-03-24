@@ -22,8 +22,8 @@ pub use chat::{
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
     ChatModelSource, ChatReasoningEffort, ChatResultChoice, ChatStreamChunk, ChatVerbosity,
     ConversationContentPart, ConversationMessage, ConversationMessageContent, ConversationToolCall,
-    ConversationToolFunction, TextCompletionCommand, TextCompletionOutput,
-    TextCompletionResult, TextResultChoice,
+    ConversationToolFunction, StructuredOutput, StructuredOutputJsonSchema, TextCompletionCommand,
+    TextCompletionOutput, TextCompletionResult, TextResultChoice,
 };
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{ImageGenerationCommand, ImageGenerationMode};

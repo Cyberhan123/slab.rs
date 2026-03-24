@@ -111,9 +111,7 @@ pub struct ChatMessage {
 
 impl ChatMessage {
     pub fn has_meaningful_payload(&self) -> bool {
-        self.content
-            .as_ref()
-            .is_some_and(ChatMessageContent::has_meaningful_content)
+        self.content.as_ref().is_some_and(ChatMessageContent::has_meaningful_content)
             || !self.tool_calls.is_empty()
     }
 
@@ -259,15 +257,6 @@ pub struct ChatResponseFormat {
     pub json_schema: Option<ChatResponseJsonSchema>,
 }
 
-impl ChatResponseFormat {
-    pub fn requests_json_output(&self) -> bool {
-        matches!(
-            self.format_type,
-            ChatResponseFormatType::JsonObject | ChatResponseFormatType::JsonSchema
-        )
-    }
-}
-
 /// Request body for `POST /v1/chat/completions`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 #[validate(schema(function = "validate_chat_completion_request"))]
@@ -332,20 +321,6 @@ pub struct ChatCompletionRequest {
     pub verbosity: Option<ChatVerbosity>,
 }
 
-impl ChatCompletionRequest {
-    pub fn normalized_stop(&self) -> Vec<String> {
-        self.stop.as_ref().map(StopSequences::normalized).unwrap_or_default()
-    }
-
-    pub fn grammar_json_requested(&self) -> bool {
-        self.json_schema.is_some()
-            || self
-                .response_format
-                .as_ref()
-                .is_some_and(ChatResponseFormat::requests_json_output)
-    }
-}
-
 /// Request body for `POST /v1/completions`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 #[validate(schema(function = "validate_completion_request"))]
@@ -387,20 +362,6 @@ pub struct CompletionRequest {
     /// Legacy llama.cpp-compatible top-level JSON schema field.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub json_schema: Option<Value>,
-}
-
-impl CompletionRequest {
-    pub fn normalized_stop(&self) -> Vec<String> {
-        self.stop.as_ref().map(StopSequences::normalized).unwrap_or_default()
-    }
-
-    pub fn grammar_json_requested(&self) -> bool {
-        self.json_schema.is_some()
-            || self
-                .response_format
-                .as_ref()
-                .is_some_and(ChatResponseFormat::requests_json_output)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -545,7 +506,9 @@ impl From<ChatContentPart> for DomainConversationContentPart {
     fn from(value: ChatContentPart) -> Self {
         match value {
             ChatContentPart::Text { text } => DomainConversationContentPart::Text { text },
-            ChatContentPart::InputText { text } => DomainConversationContentPart::InputText { text },
+            ChatContentPart::InputText { text } => {
+                DomainConversationContentPart::InputText { text }
+            }
             ChatContentPart::OutputText { text } => {
                 DomainConversationContentPart::OutputText { text }
             }
@@ -597,21 +560,13 @@ impl From<ChatToolFunction> for DomainConversationToolFunction {
 
 impl From<DomainConversationToolCall> for ChatToolCall {
     fn from(value: DomainConversationToolCall) -> Self {
-        Self {
-            id: value.id,
-            r#type: value.r#type,
-            function: value.function.into(),
-        }
+        Self { id: value.id, r#type: value.r#type, function: value.function.into() }
     }
 }
 
 impl From<ChatToolCall> for DomainConversationToolCall {
     fn from(value: ChatToolCall) -> Self {
-        Self {
-            id: value.id,
-            r#type: value.r#type,
-            function: value.function.into(),
-        }
+        Self { id: value.id, r#type: value.r#type, function: value.function.into() }
     }
 }
 
@@ -746,10 +701,7 @@ fn validate_chat_completion_request(
             "streaming with stop is not supported for chat completions",
         ));
     }
-    validate_structured_output(
-        request.response_format.as_ref(),
-        request.json_schema.as_ref(),
-    )?;
+    validate_structured_output(request.response_format.as_ref(), request.json_schema.as_ref())?;
 
     let Some(user_message) = request
         .messages
@@ -786,10 +738,7 @@ fn validate_completion_request(request: &CompletionRequest) -> Result<(), Valida
             "streaming with n > 1 is not supported",
         ));
     }
-    validate_structured_output(
-        request.response_format.as_ref(),
-        request.json_schema.as_ref(),
-    )?;
+    validate_structured_output(request.response_format.as_ref(), request.json_schema.as_ref())?;
 
     let prompt = request.prompt.trim();
     if prompt.len() > MAX_PROMPT_BYTES {
@@ -846,16 +795,14 @@ fn validate_schema_like(field: &str, schema: &Value) -> Result<(), ValidationErr
 }
 
 fn validate_json_schema_type(field: &str, value: &Value) -> Result<(), ValidationError> {
-    let allowed = [
-        "string", "number", "integer", "boolean", "object", "array", "null",
-    ];
+    let allowed = ["string", "number", "integer", "boolean", "object", "array", "null"];
 
     match value {
         Value::String(kind) if allowed.contains(&kind.as_str()) => Ok(()),
         Value::Array(items)
-            if items.iter().all(|item| {
-                item.as_str().is_some_and(|kind| allowed.contains(&kind))
-            }) =>
+            if items
+                .iter()
+                .all(|item| item.as_str().is_some_and(|kind| allowed.contains(&kind))) =>
         {
             Ok(())
         }
@@ -872,13 +819,6 @@ fn validation_error(code: &'static str, message: &str) -> ValidationError {
     error
 }
 
-fn normalize_stop_values<'a>(
-    values: impl IntoIterator<Item = &'a str>,
-) -> Vec<String> {
-    values
-        .into_iter()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
-        .collect()
+fn normalize_stop_values<'a>(values: impl IntoIterator<Item = &'a str>) -> Vec<String> {
+    values.into_iter().map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned).collect()
 }
