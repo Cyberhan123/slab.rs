@@ -189,7 +189,7 @@ pub fn decode_chat_request(
         top_p: None,
         session_key: (!request.session_key.is_empty()).then_some(request.session_key.clone()),
         stream,
-        options: Default::default(),
+        ..Default::default()
     })
 }
 

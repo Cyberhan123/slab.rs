@@ -156,14 +156,14 @@ pub(super) async fn create_chat_completion(
                     &model_name_for_tokens,
                     &token,
                 )),
-                Ok(CloudDelta::Reasoning(token)) => ChatStreamChunk::Data(
-                    super::build_reasoning_chunk(
+                Ok(CloudDelta::Reasoning(token)) => {
+                    ChatStreamChunk::Data(super::build_reasoning_chunk(
                         &completion_id_for_tokens,
                         created_ts,
                         &model_name_for_tokens,
                         &token,
-                    ),
-                ),
+                    ))
+                }
                 Err(error) => ChatStreamChunk::Comment(error.to_string()),
             }
         });
@@ -492,7 +492,8 @@ fn build_genai_client_for_target(target: &ResolvedCloudModel) -> GenaiClient {
 }
 
 fn build_genai_chat_request(messages: &[DomainConversationMessage]) -> GenaiChatRequest {
-    let mapped: Vec<GenaiChatMessage> = messages.iter().map(conversation_message_to_genai).collect();
+    let mapped: Vec<GenaiChatMessage> =
+        messages.iter().map(conversation_message_to_genai).collect();
     GenaiChatRequest::new(mapped)
 }
 

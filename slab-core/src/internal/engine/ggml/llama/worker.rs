@@ -12,6 +12,8 @@ use super::{GGMLLlamaEngineError, SessionId, StreamChunk};
 pub(super) enum WorkerCommand {
     CreateSession {
         session_id: SessionId,
+        /// Optional GBNF grammar string used to build the per-session sampler.
+        grammar: Option<String>,
         reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
     AppendInput {
@@ -184,7 +186,7 @@ impl InferenceWorkerState {
 
     fn handle_command(&mut self, cmd: WorkerCommand) {
         match cmd {
-            WorkerCommand::CreateSession { session_id, reply_tx } => {
+            WorkerCommand::CreateSession { session_id, grammar, reply_tx } => {
                 // Prefer a recycled sequence ID; only mint a new one when the
                 // free-list is empty, to keep the seq_id space bounded.
                 let seq_id = if let Some(reused) = self.free_seq_ids.pop() {
@@ -199,7 +201,7 @@ impl InferenceWorkerState {
                     }));
                     return;
                 };
-                let sampler = self.model.new_sampler();
+                let sampler = self.model.new_sampler_with_grammar(grammar.as_deref());
                 self.sessions.insert(
                     session_id,
                     SessionState {
