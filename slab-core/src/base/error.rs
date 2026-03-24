@@ -46,6 +46,10 @@ pub enum CoreError {
     #[error("operation timed out")]
     Timeout,
 
+    /// A task was cancelled before completing.
+    #[error("task cancelled")]
+    Cancelled,
+
     /// Failed to load a shared library for a backend.
     #[error("library load failed for backend '{backend}': {message}")]
     LibraryLoadFailed { backend: String, message: String },
