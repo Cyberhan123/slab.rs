@@ -59,14 +59,46 @@ impl AppState {
         store: Arc<crate::infra::db::AnyStore>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
-        let context = Arc::new(AppContext::new(config, pmid, grpc, store, model_auto_unload));
+        let context = Arc::new(AppContext::new(
+            Arc::clone(&config),
+            Arc::clone(&pmid),
+            Arc::clone(&grpc),
+            Arc::clone(&store),
+            Arc::clone(&model_auto_unload),
+        ));
+
+        // Build the AgentControl with port adapters and register built-in tools.
+        let agent_control = Arc::new(build_agent_control(&context, Arc::clone(&store)));
+        let agent_service = crate::domain::services::AgentService::new(agent_control);
+
         let services = Arc::new(crate::domain::services::AppServices::new(
             (*context.model_state).clone(),
             (*context.worker_state).clone(),
+            agent_service,
         ));
 
         Self { context, services }
     }
+}
+
+/// Construct the [`slab_agent::AgentControl`] singleton, wiring up the port
+/// adapters and registering built-in tools.
+fn build_agent_control(
+    ctx: &AppContext,
+    store: Arc<crate::infra::db::AnyStore>,
+) -> slab_agent::AgentControl {
+    use slab_agent::{AgentControl, ToolRouter};
+    use crate::infra::agent_adapter::{NoopNotifyAdapter, ServerLlmAdapter};
+
+    let llm = Arc::new(ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
+    let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
+    let notify = Arc::new(NoopNotifyAdapter);
+
+    // Register built-in tools.
+    let mut tool_router = ToolRouter::new();
+    tool_router.register(Box::new(slab_agent::tools::EchoTool));
+
+    AgentControl::new(llm, store_adapter, notify, Arc::new(tool_router), 32, 4)
 }
 
 impl FromRef<Arc<AppState>> for ModelState {
@@ -164,3 +196,10 @@ impl FromRef<Arc<AppState>> for crate::domain::services::SetupService {
         input.services.setup.clone()
     }
 }
+
+impl FromRef<Arc<AppState>> for crate::domain::services::AgentService {
+    fn from_ref(input: &Arc<AppState>) -> Self {
+        input.services.agent.clone()
+    }
+}
+
