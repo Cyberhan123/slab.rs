@@ -110,6 +110,19 @@ pub(crate) fn encode_text_generation_request(
     insert_option(&mut options, "session_key", request.session_key.clone());
     insert_option(&mut options, "stream", request.stream);
 
+    // Pass structured chat messages and the template flag to the backend so
+    // it can apply the model's embedded chat template instead of relying on
+    // the server-side pre-rendered prompt.
+    if request.apply_chat_template && !request.chat_messages.is_empty() {
+        insert_option(&mut options, "apply_chat_template", true);
+        let messages_json: Vec<Value> = request
+            .chat_messages
+            .iter()
+            .map(|m| serde_json::json!({ "role": m.role, "content": m.content }))
+            .collect();
+        options.insert("chat_messages".to_owned(), Value::Array(messages_json));
+    }
+
     Ok((input, Payload::Json(Value::Object(options))))
 }
 
@@ -506,6 +519,108 @@ fn decode_embedding_tensor(value: &Value, output_name: &str) -> Result<Vec<f32>,
 mod tests {
     use super::*;
     use serde_json::json;
+    use slab_types::chat::ConversationMessage;
+
+    fn make_llama_driver() -> ResolvedDriver {
+        use crate::internal::dispatch::{DriverLoadStyle, ResolvedDriver};
+        use crate::model::ModelFamily;
+        use slab_types::runtime::Capability;
+        ResolvedDriver {
+            driver_id: "ggml.llama".to_owned(),
+            backend_id: "llama".to_owned(),
+            family: ModelFamily::Llama,
+            capability: Capability::TextGeneration,
+            supports_streaming: true,
+            load_style: DriverLoadStyle::DynamicLibraryThenModel,
+        }
+    }
+
+    #[test]
+    fn encode_text_generation_request_includes_chat_messages_when_flag_set() {
+        let request = TextGenerationRequest {
+            prompt: "fallback".to_owned(),
+            chat_messages: vec![
+                ConversationMessage { role: "user".to_owned(), content: "hello".to_owned() },
+            ],
+            apply_chat_template: true,
+            ..Default::default()
+        };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+
+        assert_eq!(
+            opts.get("apply_chat_template").and_then(|v| v.as_bool()),
+            Some(true),
+            "options should include apply_chat_template=true"
+        );
+        let messages = opts.get("chat_messages").expect("options should include chat_messages");
+        let arr = messages.as_array().expect("chat_messages should be an array");
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["role"], "user");
+        assert_eq!(arr[0]["content"], "hello");
+    }
+
+    #[test]
+    fn encode_text_generation_request_omits_chat_fields_when_flag_false() {
+        let request = TextGenerationRequest {
+            prompt: "just a prompt".to_owned(),
+            chat_messages: vec![
+                ConversationMessage { role: "user".to_owned(), content: "hi".to_owned() },
+            ],
+            apply_chat_template: false,
+            ..Default::default()
+        };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+
+        assert!(
+            opts.get("apply_chat_template").is_none(),
+            "apply_chat_template should be absent when flag is false"
+        );
+        assert!(
+            opts.get("chat_messages").is_none(),
+            "chat_messages should be absent when flag is false"
+        );
+    }
+
+    #[test]
+    fn encode_text_generation_request_omits_chat_fields_when_messages_empty() {
+        let request = TextGenerationRequest {
+            prompt: "just a prompt".to_owned(),
+            chat_messages: vec![],
+            apply_chat_template: true,
+            ..Default::default()
+        };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+
+        assert!(
+            opts.get("apply_chat_template").is_none(),
+            "apply_chat_template should be absent when messages list is empty"
+        );
+        assert!(
+            opts.get("chat_messages").is_none(),
+            "chat_messages should be absent when messages list is empty"
+        );
+    }
 
     #[test]
     fn decode_image_generation_response_accepts_unified_image_entries() {

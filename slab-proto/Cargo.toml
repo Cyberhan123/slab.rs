@@ -12,12 +12,12 @@ license.workspace = true
 path = "src/lib.rs"
 
 [build-dependencies]
-tonic-build = "0.12"
-protoc-bin-vendored = "3"
+tonic-build = { workspace = true }
+protoc-bin-vendored = { workspace = true }
 
 [dependencies]
-tonic = { version = "0.12", features = ["transport"] }
-prost = "0.13"
+tonic = { workspace = true }
+prost = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
