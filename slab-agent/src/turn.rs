@@ -111,14 +111,23 @@ pub(crate) async fn execute_turn(
                 (format!("tool not found: {}", tc.name), ToolCallStatus::Failed)
             }
             Some(handler) => {
-                let args: serde_json::Value =
-                    serde_json::from_str(&tc.arguments).unwrap_or(serde_json::Value::Null);
-                match handler.execute(&ctx, &args).await {
-                    Ok(out) => (out.content, ToolCallStatus::Completed),
+                match serde_json::from_str::<serde_json::Value>(&tc.arguments) {
                     Err(e) => {
-                        warn!(thread_id, tool = %tc.name, error = %e, "tool execution failed");
-                        (e.to_string(), ToolCallStatus::Failed)
+                        warn!(
+                            thread_id,
+                            tool = %tc.name,
+                            error = %e,
+                            "failed to parse tool call arguments as JSON"
+                        );
+                        (format!("invalid tool call arguments: {e}"), ToolCallStatus::Failed)
                     }
+                    Ok(args) => match handler.execute(&ctx, &args).await {
+                        Ok(out) => (out.content, ToolCallStatus::Completed),
+                        Err(e) => {
+                            warn!(thread_id, tool = %tc.name, error = %e, "tool execution failed");
+                            (e.to_string(), ToolCallStatus::Failed)
+                        }
+                    },
                 }
             }
         };

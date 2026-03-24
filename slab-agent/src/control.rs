@@ -19,6 +19,9 @@ use crate::{
 
 struct ThreadEntry {
     status_rx: watch::Receiver<ThreadStatus>,
+    /// Shared sender — lets the controller push the `Shutdown` status even
+    /// after the spawned task has been aborted.
+    status_tx: Arc<watch::Sender<ThreadStatus>>,
     abort: tokio::task::AbortHandle,
 }
 
@@ -42,7 +45,8 @@ impl AgentControl {
     /// Create a new controller.
     ///
     /// - `max_threads`: hard cap on concurrently active threads (across all depths).
-    /// - `max_depth`: maximum child nesting depth (0-based; root agents are depth 0).
+    /// - `max_depth`: maximum allowed child nesting depth (inclusive, 0-based; root
+    ///   agents are depth 0).
     pub fn new(
         llm: Arc<dyn LlmPort>,
         store: Arc<dyn AgentStorePort>,
@@ -76,7 +80,8 @@ impl AgentControl {
 
     /// Spawn a child agent thread with an explicit parent and depth.
     ///
-    /// Returns an error if `depth` meets or exceeds `max_depth`.
+    /// Returns an error if `depth` exceeds `max_depth`.  `max_depth` is
+    /// inclusive: a `max_depth` of 3 allows depths 0 through 3.
     pub async fn spawn_child(
         &self,
         session_id: String,
@@ -85,7 +90,7 @@ impl AgentControl {
         config: AgentConfig,
         messages: Vec<ConversationMessage>,
     ) -> Result<String, AgentError> {
-        if depth >= self.max_depth {
+        if depth > self.max_depth {
             return Err(AgentError::DepthLimitExceeded {
                 current: depth,
                 max: self.max_depth,
@@ -107,7 +112,8 @@ impl AgentControl {
             .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))
     }
 
-    /// Abort a running thread and remove it from the registry.
+    /// Abort a running thread, broadcast the `Shutdown` status, persist it,
+    /// and remove the entry from the registry.
     pub async fn shutdown(&self, thread_id: &str) -> Result<(), AgentError> {
         let entry = self
             .threads
@@ -115,7 +121,21 @@ impl AgentControl {
             .await
             .remove(thread_id)
             .ok_or_else(|| AgentError::ThreadNotFound(thread_id.to_owned()))?;
+
+        // Signal the terminal status before aborting so all watch subscribers
+        // see `Shutdown` rather than the last intermediate status.
+        if let Err(err) = entry.status_tx.send(ThreadStatus::Shutdown) {
+            warn!(?err, thread_id, "failed to send Shutdown status before aborting thread");
+        }
         entry.abort.abort();
+
+        // Persist and fan-out the Shutdown transition.
+        self.notify.on_status_change(thread_id, ThreadStatus::Shutdown).await;
+        self.store
+            .update_thread_status(thread_id, ThreadStatus::Shutdown, Some("shutdown"))
+            .await
+            .ok();
+
         Ok(())
     }
 
@@ -134,16 +154,9 @@ impl AgentControl {
         config: AgentConfig,
         messages: Vec<ConversationMessage>,
     ) -> Result<String, AgentError> {
-        let current = self.active_thread_count().await;
-        if current >= self.max_threads {
-            return Err(AgentError::ThreadLimitExceeded {
-                current,
-                max: self.max_threads,
-            });
-        }
-
         let (thread, status_rx) = AgentThread::new(session_id, parent_id, depth, config);
         let thread_id = thread.id.clone();
+        let status_tx = Arc::clone(&thread.status_tx);
 
         let llm = Arc::clone(&self.llm);
         let store = Arc::clone(&self.store);
@@ -152,8 +165,9 @@ impl AgentControl {
         let threads_cleanup = Arc::clone(&self.threads);
         let id_cleanup = thread_id.clone();
 
-        // Spawn the thread task.  The task removes itself from the registry
-        // when it finishes so that `active_thread_count` stays accurate.
+        // Spawn the thread task first to obtain the AbortHandle.
+        // The task removes itself from the registry when it finishes so that
+        // `active_thread_count` stays accurate.
         let join_handle = tokio::spawn(async move {
             let result = thread.run(messages, llm, store, notify, tools).await;
             if let Err(ref e) = result {
@@ -165,13 +179,19 @@ impl AgentControl {
 
         let abort = join_handle.abort_handle();
 
-        // Insert *after* spawning.  The spawned task will not run until the
-        // current task yields, so the entry is always present before the task
-        // can attempt to remove it.
-        self.threads
-            .write()
-            .await
-            .insert(thread_id.clone(), ThreadEntry { status_rx, abort });
+        // Atomically check the concurrency limit and insert the entry under the
+        // same write guard to prevent TOCTOU races between concurrent spawns.
+        // If the limit is already reached, abort the just-spawned task and bail.
+        let mut guard = self.threads.write().await;
+        if guard.len() >= self.max_threads {
+            abort.abort();
+            return Err(AgentError::ThreadLimitExceeded {
+                current: guard.len(),
+                max: self.max_threads,
+            });
+        }
+        guard.insert(thread_id.clone(), ThreadEntry { status_rx, status_tx, abort });
+        drop(guard);
 
         Ok(thread_id)
     }

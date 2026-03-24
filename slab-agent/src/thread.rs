@@ -31,7 +31,8 @@ pub struct AgentThread {
     pub depth: u32,
     /// Runtime configuration for this thread.
     pub config: AgentConfig,
-    status_tx: watch::Sender<ThreadStatus>,
+    /// Shared sender so the controller can also signal status changes (e.g. Shutdown).
+    pub(crate) status_tx: Arc<watch::Sender<ThreadStatus>>,
 }
 
 impl AgentThread {
@@ -43,7 +44,8 @@ impl AgentThread {
         config: AgentConfig,
     ) -> (Self, watch::Receiver<ThreadStatus>) {
         let id = Uuid::new_v4().to_string();
-        let (status_tx, status_rx) = watch::channel(ThreadStatus::Pending);
+        let (status_tx_inner, status_rx) = watch::channel(ThreadStatus::Pending);
+        let status_tx = Arc::new(status_tx_inner);
         let thread = Self { id, session_id, parent_id, depth, config, status_tx };
         (thread, status_rx)
     }
@@ -71,6 +73,12 @@ impl AgentThread {
         let thread_id = self.id.clone();
         let now = Utc::now().to_rfc3339();
 
+        // Fail early if the config cannot be serialized — a swallowed error here
+        // would silently persist an empty config_json and make debugging impossible.
+        let config_json = serde_json::to_string(&self.config).map_err(|e| {
+            AgentError::Internal(format!("failed to serialize agent config: {e}"))
+        })?;
+
         // Persist initial snapshot.
         let snapshot = ThreadSnapshot {
             id: thread_id.clone(),
@@ -79,8 +87,7 @@ impl AgentThread {
             depth: self.depth,
             status: ThreadStatus::Pending,
             role_name: None,
-            config_json: serde_json::to_string(&self.config)
-                .unwrap_or_else(|_| "{}".to_owned()),
+            config_json,
             completion_text: None,
             created_at: now.clone(),
             updated_at: now,
@@ -90,6 +97,13 @@ impl AgentThread {
         }
 
         self.set_status(ThreadStatus::Running, &notify).await;
+
+        // Persist the Running transition so the stored status matches the in-memory state.
+        if let Err(e) =
+            store.update_thread_status(&thread_id, ThreadStatus::Running, None).await
+        {
+            error!(thread_id, error = %e, "failed to persist running status");
+        }
 
         // Inject system prompt as the first message, if not already present.
         if let Some(ref system_prompt) = self.config.system_prompt {
