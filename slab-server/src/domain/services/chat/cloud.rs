@@ -2,7 +2,8 @@ use futures::{stream, StreamExt};
 use genai::adapter::AdapterKind;
 use genai::chat::{
     ChatMessage as GenaiChatMessage, ChatOptions as GenaiChatOptions,
-    ChatRequest as GenaiChatRequest, ChatStreamEvent as GenaiChatStreamEvent,
+    ChatRequest as GenaiChatRequest, ChatResponseFormat as GenaiChatResponseFormat,
+    ChatStreamEvent as GenaiChatStreamEvent, JsonSpec as GenaiJsonSpec,
     ReasoningEffort as GenaiReasoningEffort, Verbosity as GenaiVerbosity,
 };
 use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
@@ -12,15 +13,16 @@ use genai::{
 use serde_json::{json, Value};
 use slab_types::inference::TextGenerationResponse;
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
     ChatModelOption, ChatModelSource, ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
-    ConversationMessage as DomainConversationMessage, UnifiedModel, UnifiedModelStatus,
+    ConversationMessage as DomainConversationMessage, StructuredOutput, UnifiedModel,
+    UnifiedModelStatus,
 };
 use crate::error::ServerError;
 use crate::infra::db::ModelStore;
@@ -38,11 +40,12 @@ struct ResolvedCloudModel {
     remote_model: String,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(super) struct CloudChatRequestConfig {
     pub(super) max_tokens: u32,
     pub(super) temperature: f32,
     pub(super) top_p: Option<f32>,
+    pub(super) structured_output: Option<StructuredOutput>,
     pub(super) reasoning_effort: Option<ChatReasoningEffort>,
     pub(super) verbosity: Option<ChatVerbosity>,
     pub(super) stream: bool,
@@ -134,6 +137,8 @@ pub(super) async fn create_chat_completion(
     let trace_http = state.config().cloud_http_trace;
 
     if config.stream {
+        let max_tokens = config.max_tokens;
+        let include_usage = config.include_usage;
         let backend_stream = cloud_chat_stream(&target, messages, config, trace_http).await?;
         let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
         let created_ts = chrono::Utc::now().timestamp();
@@ -172,14 +177,14 @@ pub(super) async fn create_chat_completion(
                         &token,
                     ))
                 }
-                Ok(CloudDelta::Reasoning(token)) => ChatStreamChunk::Data(
-                    super::build_reasoning_chunk(
+                Ok(CloudDelta::Reasoning(token)) => {
+                    ChatStreamChunk::Data(super::build_reasoning_chunk(
                         &completion_id_for_tokens,
                         created_ts,
                         &model_name_for_tokens,
                         &token,
-                    ),
-                ),
+                    ))
+                }
                 Err(error) => {
                     token_stream_error_flag.store(true, Ordering::SeqCst);
                     ChatStreamChunk::Data(super::build_error_chunk(&error.to_string()))
@@ -195,7 +200,7 @@ pub(super) async fn create_chat_completion(
             } else {
                 let finish_reason = super::finish_reason_from_token_budget(
                     finish_chunk_completion_tokens.load(Ordering::SeqCst),
-                    config.max_tokens,
+                    max_tokens,
                 );
                 Some(ChatStreamChunk::Data(super::build_finish_chunk(
                     &completion_id_for_finish,
@@ -209,7 +214,7 @@ pub(super) async fn create_chat_completion(
         let usage_chunk_error_flag = Arc::clone(&error_flag);
         let usage_chunk_completion_tokens = Arc::clone(&completion_tokens);
         let usage_chunk = stream::once(async move {
-            if !config.include_usage || usage_chunk_error_flag.load(Ordering::SeqCst) {
+            if !include_usage || usage_chunk_error_flag.load(Ordering::SeqCst) {
                 None
             } else {
                 let usage = super::build_estimated_usage(
@@ -578,13 +583,15 @@ fn conversation_message_to_genai(message: &DomainConversationMessage) -> GenaiCh
 fn render_messages_for_usage(messages: &[DomainConversationMessage]) -> String {
     messages
         .iter()
-        .map(|message| format!("{}: {}", normalize_openai_role(&message.role), message.rendered_text()))
+        .map(|message| {
+            format!("{}: {}", normalize_openai_role(&message.role), message.rendered_text())
+        })
         .collect::<Vec<_>>()
         .join("\n")
 }
 
 fn build_genai_chat_options(
-    config: CloudChatRequestConfig,
+    config: &CloudChatRequestConfig,
     capture_raw_body: bool,
 ) -> GenaiChatOptions {
     let mut options = GenaiChatOptions::default()
@@ -599,6 +606,11 @@ fn build_genai_chat_options(
     }
     if let Some(verbosity) = config.verbosity {
         options = options.with_verbosity(map_verbosity(verbosity));
+    }
+    if let Some(response_format) =
+        structured_output_to_genai_response_format(config.structured_output.as_ref())
+    {
+        options = options.with_response_format(response_format);
     }
 
     if capture_raw_body {
@@ -640,14 +652,14 @@ async fn cloud_chat_completion(
         "sending cloud chat completion request via genai"
     );
 
-    let trace = trace_http.then(|| build_cloud_http_trace_context(target, messages, config));
+    let trace = trace_http.then(|| build_cloud_http_trace_context(target, messages, &config));
     if let Some(trace) = trace.as_ref() {
         log_cloud_http_request(target, trace, false);
     }
 
     let client = build_genai_client_for_target(target);
     let request = build_genai_chat_request(messages);
-    let options = build_genai_chat_options(config, trace_http);
+    let options = build_genai_chat_options(&config, trace_http);
 
     let response =
         client.exec_chat(&target.remote_model, request, Some(&options)).await.map_err(|error| {
@@ -691,14 +703,14 @@ async fn cloud_chat_stream(
         "opening cloud chat stream via genai"
     );
 
-    let trace = trace_http.then(|| build_cloud_http_trace_context(target, messages, config));
+    let trace = trace_http.then(|| build_cloud_http_trace_context(target, messages, &config));
     if let Some(trace) = trace.as_ref() {
         log_cloud_http_request(target, trace, true);
     }
 
     let client = build_genai_client_for_target(target);
     let request = build_genai_chat_request(messages);
-    let options = build_genai_chat_options(config, false);
+    let options = build_genai_chat_options(&config, false);
     let response = client
         .exec_chat_stream(&target.remote_model, request, Some(&options))
         .await
@@ -762,7 +774,7 @@ fn build_openai_chat_completions_url(api_base: &str) -> String {
 fn build_cloud_http_trace_context(
     target: &ResolvedCloudModel,
     messages: &[DomainConversationMessage],
-    config: CloudChatRequestConfig,
+    config: &CloudChatRequestConfig,
 ) -> CloudHttpTraceContext {
     let request_headers = redact_headers(build_cloud_http_request_headers(target));
     let request_body =
@@ -788,7 +800,7 @@ fn build_cloud_http_request_headers(target: &ResolvedCloudModel) -> BTreeMap<Str
 fn build_cloud_http_request_body(
     target: &ResolvedCloudModel,
     messages: &[DomainConversationMessage],
-    config: CloudChatRequestConfig,
+    config: &CloudChatRequestConfig,
 ) -> Value {
     let mut payload = json!({
         "model": target.remote_model,
@@ -815,8 +827,63 @@ fn build_cloud_http_request_body(
     if let Some(verbosity) = config.verbosity {
         payload["verbosity"] = json!(verbosity.as_str());
     }
+    if let Some(response_format) =
+        structured_output_to_openai_response_format(config.structured_output.as_ref())
+    {
+        payload["response_format"] = response_format;
+    }
 
     payload
+}
+
+fn structured_output_to_genai_response_format(
+    value: Option<&StructuredOutput>,
+) -> Option<GenaiChatResponseFormat> {
+    match value {
+        Some(StructuredOutput::JsonObject) => Some(GenaiChatResponseFormat::JsonMode),
+        Some(StructuredOutput::JsonSchema(schema)) => {
+            let mut spec = GenaiJsonSpec::new(schema.name.clone(), schema.schema.clone());
+            if let Some(description) = schema.description.as_deref() {
+                spec = spec.with_description(description);
+            }
+            Some(spec.into())
+        }
+        None => None,
+    }
+}
+
+fn structured_output_to_openai_response_format(value: Option<&StructuredOutput>) -> Option<Value> {
+    match value {
+        Some(StructuredOutput::JsonObject) => Some(json!({ "type": "json_object" })),
+        Some(StructuredOutput::JsonSchema(schema)) => Some(json!({
+            "type": "json_schema",
+            "json_schema": {
+                "name": schema.name,
+                "strict": true,
+                "schema": enforce_closed_object_schema(&schema.schema),
+            }
+        })),
+        None => None,
+    }
+}
+
+fn enforce_closed_object_schema(value: &Value) -> Value {
+    match value {
+        Value::Object(map) => {
+            let mut normalized = map
+                .iter()
+                .map(|(key, value)| (key.clone(), enforce_closed_object_schema(value)))
+                .collect::<serde_json::Map<_, _>>();
+            if normalized.get("type").and_then(Value::as_str) == Some("object") {
+                normalized.insert("additionalProperties".to_owned(), Value::Bool(false));
+            }
+            Value::Object(normalized)
+        }
+        Value::Array(values) => {
+            Value::Array(values.iter().map(enforce_closed_object_schema).collect())
+        }
+        _ => value.clone(),
+    }
 }
 
 fn normalize_openai_role(role: &str) -> &str {
@@ -1068,9 +1135,16 @@ fn redact_secret_json(value: &Value) -> String {
 #[cfg(test)]
 mod test {
     use super::{
-        build_openai_chat_completions_url, cloud_option_id, ensure_genai_endpoint_base,
-        redact_header_value,
+        build_cloud_http_request_body, build_openai_chat_completions_url, cloud_option_id,
+        ensure_genai_endpoint_base, redact_header_value,
+        structured_output_to_genai_response_format, CloudChatRequestConfig,
+        GenaiChatResponseFormat, ResolvedCloudModel,
     };
+    use crate::domain::models::{
+        ConversationMessage as DomainConversationMessage, ConversationMessageContent,
+        StructuredOutput, StructuredOutputJsonSchema,
+    };
+    use serde_json::json;
 
     #[test]
     fn cloud_option_id_has_prefix() {
@@ -1099,5 +1173,69 @@ mod test {
             redact_header_value("authorization", "Bearer secret-token-value"),
             "Bearer secr...ue (redacted,len=18)"
         );
+    }
+
+    #[test]
+    fn structured_output_json_object_maps_to_genai_json_mode() {
+        let mapped =
+            structured_output_to_genai_response_format(Some(&StructuredOutput::JsonObject));
+
+        assert!(matches!(mapped, Some(GenaiChatResponseFormat::JsonMode)));
+    }
+
+    #[test]
+    fn cloud_http_request_body_includes_json_schema_response_format() {
+        let payload = build_cloud_http_request_body(
+            &make_target(),
+            &[make_message("user", "hello")],
+            &CloudChatRequestConfig {
+                max_tokens: 64,
+                temperature: 0.7,
+                top_p: None,
+                structured_output: Some(StructuredOutput::JsonSchema(StructuredOutputJsonSchema {
+                    name: "example_schema".to_owned(),
+                    description: Some("example".to_owned()),
+                    strict: Some(true),
+                    schema: json!({
+                        "type": "object",
+                        "properties": {
+                            "answer": { "type": "string" }
+                        }
+                    }),
+                })),
+                reasoning_effort: None,
+                verbosity: None,
+                stream: false,
+                include_usage: false,
+            },
+        );
+
+        assert_eq!(payload["response_format"]["type"], "json_schema");
+        assert_eq!(payload["response_format"]["json_schema"]["name"], "example_schema");
+        assert_eq!(payload["response_format"]["json_schema"]["strict"], true);
+        assert_eq!(
+            payload["response_format"]["json_schema"]["schema"]["additionalProperties"],
+            false
+        );
+    }
+
+    fn make_target() -> ResolvedCloudModel {
+        ResolvedCloudModel {
+            provider_id: "openai".to_owned(),
+            provider_name: "OpenAI".to_owned(),
+            api_base: "https://api.openai.com/v1".to_owned(),
+            api_key: "secret".to_owned(),
+            remote_model: "gpt-4.1-mini".to_owned(),
+        }
+    }
+
+    fn make_message(role: &str, text: &str) -> DomainConversationMessage {
+        DomainConversationMessage {
+            role: role.to_owned(),
+            content: ConversationMessageContent::Text(text.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }
     }
 }

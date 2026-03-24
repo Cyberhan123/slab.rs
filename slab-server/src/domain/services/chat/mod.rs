@@ -14,7 +14,7 @@ use crate::context::ModelState;
 use crate::domain::models::{
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
     ChatResultChoice, ChatStreamChunk, ConversationMessage as DomainConversationMessage,
-    ConversationMessageContent, TextCompletionCommand, TextCompletionOutput,
+    ConversationMessageContent, StructuredOutput, TextCompletionCommand, TextCompletionOutput,
     TextCompletionResult, TextResultChoice,
 };
 use crate::error::ServerError;
@@ -298,6 +298,22 @@ fn merge_usage(total: &mut Option<TextGenerationUsage>, next: Option<TextGenerat
     }
 }
 
+fn validate_cloud_structured_output(
+    structured_output: Option<&StructuredOutput>,
+) -> Result<(), ServerError> {
+    let Some(StructuredOutput::JsonSchema(schema)) = structured_output else {
+        return Ok(());
+    };
+
+    if matches!(schema.strict, Some(false)) {
+        return Err(ServerError::NotImplemented(
+            "cloud structured outputs currently require strict=true".into(),
+        ));
+    }
+
+    Ok(())
+}
+
 fn into_text_completion_stream(
     id: String,
     created: i64,
@@ -328,9 +344,7 @@ async fn create_chat_completion_with_state(
     command: ChatCompletionCommand,
 ) -> Result<ChatCompletionOutput, ServerError> {
     if command.stream && command.n > 1 {
-        return Err(ServerError::NotImplemented(
-            "streaming with n > 1 is not supported".into(),
-        ));
+        return Err(ServerError::NotImplemented("streaming with n > 1 is not supported".into()));
     }
     if command.stream && !command.stop.is_empty() {
         return Err(ServerError::NotImplemented(
@@ -351,10 +365,13 @@ async fn create_chat_completion_with_state(
     let temperature = command.temperature.unwrap_or(0.7);
     let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
 
-    if route_to_cloud && (command.grammar.is_some() || command.grammar_json) {
+    if route_to_cloud && command.grammar.is_some() {
         return Err(ServerError::NotImplemented(
-            "cloud structured outputs are not supported for chat completions yet".into(),
+            "cloud raw grammar constraints are not supported for chat completions".into(),
         ));
+    }
+    if route_to_cloud {
+        validate_cloud_structured_output(command.structured_output.as_ref())?;
     }
 
     debug!(
@@ -394,6 +411,7 @@ async fn create_chat_completion_with_state(
                     max_tokens,
                     temperature,
                     top_p: command.top_p,
+                    structured_output: command.structured_output.clone(),
                     reasoning_effort: command.reasoning_effort,
                     verbosity: command.verbosity,
                     stream: true,
@@ -456,6 +474,7 @@ async fn create_chat_completion_with_state(
                 max_tokens,
                 temperature,
                 command.top_p,
+                command.structured_output.clone(),
                 command.reasoning_effort,
                 command.verbosity,
             )
@@ -540,9 +559,7 @@ async fn create_text_completion_with_state(
     command: TextCompletionCommand,
 ) -> Result<TextCompletionOutput, ServerError> {
     if command.stream && command.n > 1 {
-        return Err(ServerError::NotImplemented(
-            "streaming with n > 1 is not supported".into(),
-        ));
+        return Err(ServerError::NotImplemented("streaming with n > 1 is not supported".into()));
     }
 
     let resolved_model = resolve_requested_model(&state, &command.model).await?;
@@ -550,10 +567,13 @@ async fn create_text_completion_with_state(
     let temperature = command.temperature.unwrap_or(0.7);
     let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
 
-    if route_to_cloud && (command.grammar.is_some() || command.grammar_json) {
+    if route_to_cloud && command.grammar.is_some() {
         return Err(ServerError::NotImplemented(
-            "cloud structured outputs are not supported for text completions yet".into(),
+            "cloud raw grammar constraints are not supported for text completions".into(),
         ));
+    }
+    if route_to_cloud {
+        validate_cloud_structured_output(command.structured_output.as_ref())?;
     }
 
     debug!(
@@ -575,6 +595,7 @@ async fn create_text_completion_with_state(
                     max_tokens,
                     temperature,
                     top_p: command.top_p,
+                    structured_output: command.structured_output.clone(),
                     reasoning_effort: None,
                     verbosity: None,
                     stream: false,
@@ -621,9 +642,10 @@ async fn create_text_completion_with_state(
     };
 
     if command.stream {
-        let first_choice = response.choices.first().cloned().ok_or_else(|| {
-            ServerError::Internal("text completion produced no choices".into())
-        })?;
+        let first_choice =
+            response.choices.first().cloned().ok_or_else(|| {
+                ServerError::Internal("text completion produced no choices".into())
+            })?;
         return Ok(into_text_completion_stream(
             response.id,
             response.created,
@@ -643,6 +665,7 @@ async fn generate_cloud_chat_text(
     max_tokens: u32,
     temperature: f32,
     top_p: Option<f32>,
+    structured_output: Option<StructuredOutput>,
     reasoning_effort: Option<crate::domain::models::ChatReasoningEffort>,
     verbosity: Option<crate::domain::models::ChatVerbosity>,
 ) -> Result<TextGenerationResponse, ServerError> {
@@ -654,6 +677,7 @@ async fn generate_cloud_chat_text(
             max_tokens,
             temperature,
             top_p,
+            structured_output,
             reasoning_effort,
             verbosity,
             stream: false,
@@ -753,6 +777,7 @@ mod test {
             stop: Vec::new(),
             grammar: None,
             grammar_json: false,
+            structured_output: None,
             reasoning_effort: None,
             verbosity: None,
             id: None,
@@ -809,5 +834,19 @@ mod test {
 
         assert!(matched);
         assert_eq!(trimmed, "hello ");
+    }
+
+    #[test]
+    fn cloud_structured_output_rejects_strict_false() {
+        let result = validate_cloud_structured_output(Some(&StructuredOutput::JsonSchema(
+            crate::domain::models::StructuredOutputJsonSchema {
+                name: "example".into(),
+                description: None,
+                strict: Some(false),
+                schema: serde_json::json!({ "type": "object" }),
+            },
+        )));
+
+        assert!(matches!(result, Err(ServerError::NotImplemented(_))));
     }
 }

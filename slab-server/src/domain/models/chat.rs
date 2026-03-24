@@ -1,16 +1,19 @@
 pub use slab_types::chat::{
     ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationContentPart,
-    ConversationMessage, ConversationMessageContent, ConversationToolCall, ConversationToolFunction,
+    ConversationMessage, ConversationMessageContent, ConversationToolCall,
+    ConversationToolFunction,
 };
 pub use slab_types::inference::TextGenerationUsage;
 
 use crate::api::v1::chat::schema::{
     ChatCompletionRequest, ChatReasoningEffort as ApiChatReasoningEffort,
+    ChatResponseFormat as ApiChatResponseFormat, ChatResponseFormatType, ChatResponseJsonSchema,
     ChatStreamOptions as ApiChatStreamOptions, ChatThinkingConfig as ApiChatThinkingConfig,
     ChatThinkingType as ApiChatThinkingType, ChatVerbosity as ApiChatVerbosity, CompletionRequest,
 };
 use crate::infra::db;
 use futures::stream::BoxStream;
+use serde_json::Value;
 
 pub enum ChatStreamChunk {
     Data(String),
@@ -50,6 +53,7 @@ pub struct ChatCompletionCommand {
     pub stop: Vec<String>,
     pub grammar: Option<String>,
     pub grammar_json: bool,
+    pub structured_output: Option<StructuredOutput>,
     pub reasoning_effort: Option<ChatReasoningEffort>,
     pub verbosity: Option<ChatVerbosity>,
     pub stream: bool,
@@ -67,7 +71,38 @@ pub struct TextCompletionCommand {
     pub stop: Vec<String>,
     pub grammar: Option<String>,
     pub grammar_json: bool,
+    pub structured_output: Option<StructuredOutput>,
     pub stream: bool,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum StructuredOutput {
+    JsonObject,
+    JsonSchema(StructuredOutputJsonSchema),
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct StructuredOutputJsonSchema {
+    pub name: String,
+    pub description: Option<String>,
+    pub strict: Option<bool>,
+    pub schema: Value,
+}
+
+impl StructuredOutputJsonSchema {
+    fn new(
+        name: Option<String>,
+        description: Option<String>,
+        strict: Option<bool>,
+        schema: Value,
+    ) -> Self {
+        Self {
+            name: sanitize_structured_output_name(name.as_deref()),
+            description: normalize_optional_text(description),
+            strict,
+            schema,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -159,32 +194,54 @@ impl From<ApiChatStreamOptions> for ChatStreamOptions {
 
 impl From<ChatCompletionRequest> for ChatCompletionCommand {
     fn from(request: ChatCompletionRequest) -> Self {
-        let reasoning_effort = request
-            .reasoning_effort
-            .map(Into::into)
-            .or_else(|| request.thinking.as_ref().and_then(reasoning_effort_from_thinking));
-        let verbosity = request
-            .verbosity
-            .map(Into::into)
-            .or_else(|| request.thinking.as_ref().and_then(verbosity_from_thinking));
-        let grammar_json = request.grammar_json_requested();
-        let stop = request.normalized_stop();
-
-        Self {
-            id: request.id,
-            model: request.model.trim().to_owned(),
-            messages: request.messages.into_iter().map(Into::into).collect(),
-            max_tokens: request.max_tokens,
-            temperature: request.temperature,
-            top_p: request.top_p,
-            n: request.n.unwrap_or(1),
+        let ChatCompletionRequest {
+            id,
+            model,
+            messages,
+            stream,
+            stream_options,
+            max_tokens,
+            temperature,
+            top_p,
+            n,
             stop,
-            grammar: request.grammar,
-            grammar_json,
+            grammar,
+            response_format,
+            json_schema,
+            thinking,
             reasoning_effort,
             verbosity,
-            stream: request.stream,
-            stream_options: request.stream_options.map(Into::into).unwrap_or_default(),
+        } = request;
+
+        let reasoning_effort = reasoning_effort
+            .map(Into::into)
+            .or_else(|| thinking.as_ref().and_then(reasoning_effort_from_thinking));
+        let verbosity = verbosity
+            .map(Into::into)
+            .or_else(|| thinking.as_ref().and_then(verbosity_from_thinking));
+        let structured_output = structured_output_from_api(response_format, json_schema);
+        let grammar_json = structured_output.is_some();
+        let stop = stop
+            .as_ref()
+            .map(crate::api::v1::chat::schema::StopSequences::normalized)
+            .unwrap_or_default();
+
+        Self {
+            id,
+            model: model.trim().to_owned(),
+            messages: messages.into_iter().map(Into::into).collect(),
+            max_tokens,
+            temperature,
+            top_p,
+            n: n.unwrap_or(1),
+            stop,
+            grammar,
+            grammar_json,
+            structured_output,
+            reasoning_effort,
+            verbosity,
+            stream,
+            stream_options: stream_options.map(Into::into).unwrap_or_default(),
         }
     }
 }
@@ -207,32 +264,133 @@ fn verbosity_from_thinking(thinking: &ApiChatThinkingConfig) -> Option<ChatVerbo
 
 impl From<CompletionRequest> for TextCompletionCommand {
     fn from(request: CompletionRequest) -> Self {
-        let grammar_json = request.grammar_json_requested();
-        let stop = request.normalized_stop();
+        let CompletionRequest {
+            model,
+            prompt,
+            max_tokens,
+            temperature,
+            top_p,
+            n,
+            stop,
+            stream,
+            grammar,
+            response_format,
+            json_schema,
+        } = request;
+        let structured_output = structured_output_from_api(response_format, json_schema);
+        let grammar_json = structured_output.is_some();
+        let stop = stop
+            .as_ref()
+            .map(crate::api::v1::chat::schema::StopSequences::normalized)
+            .unwrap_or_default();
 
         Self {
-            model: request.model.trim().to_owned(),
-            prompt: request.prompt,
-            max_tokens: request.max_tokens,
-            temperature: request.temperature,
-            top_p: request.top_p,
-            n: request.n.unwrap_or(1),
+            model: model.trim().to_owned(),
+            prompt,
+            max_tokens,
+            temperature,
+            top_p,
+            n: n.unwrap_or(1),
             stop,
-            grammar: request.grammar,
+            grammar,
             grammar_json,
-            stream: request.stream,
+            structured_output,
+            stream,
         }
+    }
+}
+
+const DEFAULT_STRUCTURED_OUTPUT_NAME: &str = "slab_structured_output";
+
+fn structured_output_from_api(
+    response_format: Option<ApiChatResponseFormat>,
+    json_schema: Option<Value>,
+) -> Option<StructuredOutput> {
+    if let Some(schema) = json_schema {
+        return Some(StructuredOutput::JsonSchema(StructuredOutputJsonSchema::new(
+            None, None, None, schema,
+        )));
+    }
+
+    let response_format = response_format?;
+    match response_format.format_type {
+        ChatResponseFormatType::Text => None,
+        ChatResponseFormatType::JsonObject => response_format
+            .json_schema
+            .map(structured_output_json_schema_from_api)
+            .map(StructuredOutput::JsonSchema)
+            .or_else(|| {
+                response_format.schema.map(|schema| {
+                    StructuredOutput::JsonSchema(StructuredOutputJsonSchema::new(
+                        None, None, None, schema,
+                    ))
+                })
+            })
+            .or(Some(StructuredOutput::JsonObject)),
+        ChatResponseFormatType::JsonSchema => response_format
+            .json_schema
+            .map(structured_output_json_schema_from_api)
+            .map(StructuredOutput::JsonSchema)
+            .or_else(|| {
+                response_format.schema.map(|schema| {
+                    StructuredOutput::JsonSchema(StructuredOutputJsonSchema::new(
+                        None, None, None, schema,
+                    ))
+                })
+            })
+            .or(Some(StructuredOutput::JsonObject)),
+    }
+}
+
+fn structured_output_json_schema_from_api(
+    value: ChatResponseJsonSchema,
+) -> StructuredOutputJsonSchema {
+    StructuredOutputJsonSchema::new(value.name, value.description, value.strict, value.schema)
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    })
+}
+
+fn sanitize_structured_output_name(value: Option<&str>) -> String {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return DEFAULT_STRUCTURED_OUTPUT_NAME.to_owned();
+    };
+
+    let mut sanitized = String::with_capacity(value.len());
+    for ch in value.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
+            sanitized.push(ch);
+        } else if !sanitized.ends_with('_') {
+            sanitized.push('_');
+        }
+    }
+
+    let sanitized = sanitized.trim_matches('_');
+    if sanitized.is_empty() {
+        DEFAULT_STRUCTURED_OUTPUT_NAME.to_owned()
+    } else {
+        sanitized.to_owned()
     }
 }
 
 #[cfg(test)]
 mod test {
     use super::{
-        ChatCompletionCommand, ChatReasoningEffort, ChatVerbosity, TextCompletionCommand,
+        ChatCompletionCommand, ChatReasoningEffort, ChatVerbosity, StructuredOutput,
+        TextCompletionCommand,
     };
     use crate::api::v1::chat::schema::{
         ChatCompletionRequest, ChatMessage, ChatResponseFormat, ChatResponseFormatType,
-        ChatStreamOptions, ChatThinkingConfig, ChatThinkingType, CompletionRequest,
+        ChatResponseJsonSchema, ChatStreamOptions, ChatThinkingConfig, ChatThinkingType,
+        CompletionRequest,
     };
     use serde_json::json;
 
@@ -338,6 +496,25 @@ mod test {
         let command = ChatCompletionCommand::from(request);
 
         assert!(command.grammar_json);
+        assert_eq!(command.structured_output, Some(StructuredOutput::JsonObject));
+    }
+
+    #[test]
+    fn response_format_schema_maps_to_structured_json_schema() {
+        let mut request = make_request();
+        request.response_format = Some(ChatResponseFormat {
+            format_type: ChatResponseFormatType::JsonObject,
+            schema: Some(json!({ "const": "42" })),
+            json_schema: None,
+        });
+
+        let command = ChatCompletionCommand::from(request);
+
+        assert!(command.grammar_json);
+        assert!(matches!(
+            command.structured_output,
+            Some(StructuredOutput::JsonSchema(ref schema)) if schema.schema == json!({ "const": "42" })
+        ));
     }
 
     #[test]
@@ -348,14 +525,42 @@ mod test {
         let command = ChatCompletionCommand::from(request);
 
         assert!(command.grammar_json);
+        assert!(matches!(
+            command.structured_output,
+            Some(StructuredOutput::JsonSchema(ref schema)) if schema.name == "slab_structured_output"
+        ));
+    }
+
+    #[test]
+    fn response_format_json_schema_preserves_metadata() {
+        let mut request = make_request();
+        request.response_format = Some(ChatResponseFormat {
+            format_type: ChatResponseFormatType::JsonSchema,
+            schema: None,
+            json_schema: Some(ChatResponseJsonSchema {
+                name: Some("team schema/v1".to_owned()),
+                description: Some("  example schema  ".to_owned()),
+                strict: Some(false),
+                schema: json!({ "type": "object" }),
+            }),
+        });
+
+        let command = ChatCompletionCommand::from(request);
+
+        assert!(matches!(
+            command.structured_output,
+            Some(StructuredOutput::JsonSchema(ref schema))
+                if schema.name == "team_schema_v1"
+                    && schema.description.as_deref() == Some("example schema")
+                    && schema.strict == Some(false)
+                    && schema.schema == json!({ "type": "object" })
+        ));
     }
 
     #[test]
     fn stop_string_normalizes_to_vec() {
         let mut request = make_request();
-        request.stop = Some(crate::api::v1::chat::schema::StopSequences::Single(
-            "END".to_owned(),
-        ));
+        request.stop = Some(crate::api::v1::chat::schema::StopSequences::Single("END".to_owned()));
 
         let command = ChatCompletionCommand::from(request);
 
@@ -381,5 +586,6 @@ mod test {
         let command = TextCompletionCommand::from(request);
 
         assert!(command.grammar_json);
+        assert_eq!(command.structured_output, Some(StructuredOutput::JsonObject));
     }
 }
