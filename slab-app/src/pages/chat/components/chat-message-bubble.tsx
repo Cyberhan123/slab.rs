@@ -1,4 +1,4 @@
-import { BotMessageSquare, Copy, RefreshCcw, UserRound } from "lucide-react"
+import { BotMessageSquare, Copy, Play, RefreshCcw, UserRound } from "lucide-react"
 import XMarkdown from "@ant-design/x-markdown"
 
 import { Button } from "@/components/ui/button"
@@ -55,12 +55,14 @@ function parseThinkingContent(rawContent: string): ParsedThinkingContent {
 type ChatMessageBubbleProps = {
   item: ChatMessageRecord
   markdownClassName?: string
+  onContinue?: (id: string | number) => void
   onRetry?: (id: string | number) => void
 }
 
 export function ChatMessageBubble({
   item,
   markdownClassName,
+  onContinue,
   onRetry,
 }: ChatMessageBubbleProps) {
   const role = item.message.role
@@ -69,6 +71,7 @@ export function ChatMessageBubble({
   const { thinking, answer, thinkingLoading } = parseThinkingContent(rawContent)
   const hasNextChunk = item.status === "updating"
   const isBusy = item.status === "loading" || item.status === "updating"
+  const isAborted = item.status === "abort"
 
   const copyMessage = async () => {
     await navigator.clipboard.writeText(rawContent)
@@ -93,7 +96,7 @@ export function ChatMessageBubble({
             )}
           </span>
           <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-            {isAssistant ? "Ethereal Assistant" : "User"}
+            {isAssistant ? "Assistant" : "User"}
           </span>
         </div>
 
@@ -156,6 +159,18 @@ export function ChatMessageBubble({
             <Copy className="size-3.5" />
             Copy
           </Button>
+          {isAssistant && !isBusy && isAborted && onContinue ? (
+            <Button
+              type="button"
+              variant="quiet"
+              size="sm"
+              className="h-7 rounded-full px-3 text-[11px] text-muted-foreground hover:text-foreground"
+              onClick={() => onContinue(item.id)}
+            >
+              <Play className="size-3.5" />
+              Continue
+            </Button>
+          ) : null}
           {isAssistant && !isBusy && onRetry ? (
             <Button
               type="button"

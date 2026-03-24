@@ -276,6 +276,9 @@ pub struct ChatCompletionRequest {
     #[validate(length(min = 1, message = "messages must not be empty"))]
     #[validate(nested)]
     pub messages: Vec<ChatMessage>,
+    /// When `true`, continue generating from the last assistant message instead of starting a new turn.
+    #[serde(default)]
+    pub continue_generation: bool,
     /// When `true`, the response is streamed token-by-token using SSE.
     #[serde(default)]
     pub stream: bool,
@@ -726,6 +729,27 @@ fn validate_chat_completion_request(
             .into(),
         );
         return Err(error);
+    }
+
+    if request.continue_generation {
+        let Some(last_message) = request
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.has_meaningful_payload())
+        else {
+            return Err(validation_error(
+                "invalid_continue_generation",
+                "continue_generation requires a non-empty assistant message",
+            ));
+        };
+
+        if last_message.role != "assistant" || last_message.rendered_text().trim().is_empty() {
+            return Err(validation_error(
+                "invalid_continue_generation",
+                "continue_generation requires the last meaningful message to be a non-empty assistant message",
+            ));
+        }
     }
 
     Ok(())

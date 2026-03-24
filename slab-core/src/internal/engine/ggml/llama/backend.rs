@@ -39,7 +39,7 @@ use std::sync::Arc;
 use serde::Deserialize;
 use slab_llama::ChatMessage as LlamaChatMessage;
 use slab_types::chat::ConversationMessage;
-use tokio::sync::{broadcast, mpsc};
+use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::internal::engine::ggml::llama::adapter::GGMLLlamaEngine;
 use crate::internal::engine::ggml::llama::errors::SessionId;
@@ -191,14 +191,17 @@ fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
 
 /// Deserialize a `chat_messages` JSON array from the options map into a
 /// `Vec<LlamaChatMessage>`.  Returns an empty Vec when the key is absent or
-/// the value cannot be parsed.
+/// the value is not an array.
 fn extract_chat_messages(opts: &serde_json::Value) -> Vec<LlamaChatMessage> {
     let Some(raw) = opts.get("chat_messages") else {
         return Vec::new();
     };
 
-    serde_json::from_value::<Vec<ConversationMessage>>(raw.clone())
-        .unwrap_or_default()
+    raw.as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|value| serde_json::from_value::<ConversationMessage>(value.clone()).ok())
+        .filter(|message| !message.role.trim().is_empty() && message.has_meaningful_content())
         .into_iter()
         .map(|message| LlamaChatMessage {
             role: normalize_chat_role_for_template(&message.role).to_owned(),
@@ -312,7 +315,7 @@ impl LlamaWorker {
                 return;
             }
         };
-        let BackendRequest { input, reply_tx, .. } = req;
+        let BackendRequest { input, cancel_rx, reply_tx, .. } = req;
         let opts = invocation.options.to_serde_value();
         let max_tokens =
             opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
@@ -328,6 +331,7 @@ impl LlamaWorker {
             apply_chat_template,
             chat_messages,
             grammar,
+            cancel_rx,
             reply_tx,
         )
         .await;
@@ -627,6 +631,7 @@ impl LlamaWorker {
         apply_chat_template: bool,
         chat_messages: Vec<LlamaChatMessage>,
         grammar: Option<String>,
+        cancel_rx: watch::Receiver<bool>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -675,6 +680,7 @@ impl LlamaWorker {
 
         let (update_tx, update_rx) = tokio::sync::oneshot::channel::<Option<SessionUpdate>>();
         let engine_for_spawn = Arc::clone(&engine);
+        let mut cancel_rx = cancel_rx;
 
         tokio::spawn(async move {
             use crate::internal::engine::ggml::llama::StreamChunk as LlamaChunk;
@@ -686,32 +692,70 @@ impl LlamaWorker {
                     let mut completed = false;
                     let mut forward_failed = false;
                     let mut stream_error = false;
-                    while let Some(chunk) = llama_rx.recv().await {
-                        let mapped = match chunk {
-                            LlamaChunk::Token(t) => {
-                                generated.push_str(&t);
-                                StreamChunk::Token(t)
+                    let mut cancelled = false;
+                    loop {
+                        tokio::select! {
+                            cancel_changed = cancel_rx.changed(), if !completed && !stream_error && !forward_failed => {
+                                let cancel_requested = if cancel_changed.is_ok() {
+                                    *cancel_rx.borrow()
+                                } else {
+                                    false
+                                };
+                                if cancel_requested {
+                                    cancelled = true;
+                                    if let Err(error) = engine_for_spawn.cancel_generate(new_sid).await {
+                                        tracing::warn!(
+                                            session_id = new_sid,
+                                            error = %error,
+                                            "failed to cancel llama generation"
+                                        );
+                                    }
+                                } else if cancel_changed.is_ok() {
+                                    continue;
+                                }
+                                break;
                             }
-                            LlamaChunk::Done => {
-                                completed = true;
-                                StreamChunk::Done
-                            }
-                            LlamaChunk::Error(e) => {
-                                stream_error = true;
-                                StreamChunk::Error(e)
-                            }
-                        };
+                            chunk = llama_rx.recv() => {
+                                let Some(chunk) = chunk else {
+                                    break;
+                                };
 
-                        if proto_tx.send(mapped).await.is_err() {
-                            forward_failed = true;
-                            break;
-                        }
-                        if completed || stream_error {
-                            break;
+                                let mapped = match chunk {
+                                    LlamaChunk::Token(t) => {
+                                        generated.push_str(&t);
+                                        StreamChunk::Token(t)
+                                    }
+                                    LlamaChunk::Done => {
+                                        completed = true;
+                                        StreamChunk::Done
+                                    }
+                                    LlamaChunk::Error(e) => {
+                                        stream_error = true;
+                                        StreamChunk::Error(e)
+                                    }
+                                };
+
+                                if proto_tx.send(mapped).await.is_err() {
+                                    forward_failed = true;
+                                    if !completed && !stream_error {
+                                        if let Err(error) = engine_for_spawn.cancel_generate(new_sid).await {
+                                            tracing::warn!(
+                                                session_id = new_sid,
+                                                error = %error,
+                                                "failed to cancel llama generation after downstream disconnect"
+                                            );
+                                        }
+                                    }
+                                    break;
+                                }
+                                if completed || stream_error {
+                                    break;
+                                }
+                            }
                         }
                     }
                     let update = if let Some(key) = key {
-                        if completed && !forward_failed && !stream_error {
+                        if completed && !forward_failed && !stream_error && !cancelled {
                             let mut cached_prompt =
                                 String::with_capacity(full_prompt.len() + generated.len());
                             cached_prompt.push_str(&full_prompt);

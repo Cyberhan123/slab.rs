@@ -46,6 +46,7 @@ pub struct ChatCompletionCommand {
     pub id: Option<String>,
     pub model: String,
     pub messages: Vec<ConversationMessage>,
+    pub continue_generation: bool,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
     pub top_p: Option<f32>,
@@ -198,6 +199,7 @@ impl From<ChatCompletionRequest> for ChatCompletionCommand {
             id,
             model,
             messages,
+            continue_generation,
             stream,
             stream_options,
             max_tokens,
@@ -230,6 +232,7 @@ impl From<ChatCompletionRequest> for ChatCompletionCommand {
             id,
             model: model.trim().to_owned(),
             messages: messages.into_iter().map(Into::into).collect(),
+            continue_generation,
             max_tokens,
             temperature,
             top_p,
@@ -407,6 +410,7 @@ mod test {
                 tool_call_id: None,
                 tool_calls: Vec::new(),
             }],
+            continue_generation: false,
             stream: true,
             stream_options: Some(ChatStreamOptions { include_usage: true }),
             max_tokens: None,
@@ -482,6 +486,16 @@ mod test {
 
         assert!(matches!(command.reasoning_effort, Some(ChatReasoningEffort::High)));
         assert!(matches!(command.verbosity, Some(ChatVerbosity::Low)));
+    }
+
+    #[test]
+    fn continue_generation_flag_is_preserved() {
+        let mut request = make_request();
+        request.continue_generation = true;
+
+        let command = ChatCompletionCommand::from(request);
+
+        assert!(command.continue_generation);
     }
 
     #[test]

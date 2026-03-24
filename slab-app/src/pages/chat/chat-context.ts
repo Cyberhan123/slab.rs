@@ -21,6 +21,20 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undef
 
 type ChatApiError = components['schemas']['OpenAiError'];
 type ChatApiErrorResponse = components['schemas']['OpenAiErrorResponse'];
+type ProviderTransformParamsOptions = Parameters<
+    DeepSeekChatProvider<
+        ChatUiMessage,
+        ChatRequestParams,
+        Partial<Record<SSEFields, XModelResponse>>
+    >['transformParams']
+>[1];
+type ProviderTransformMessageInfo = Parameters<
+    DeepSeekChatProvider<
+        ChatUiMessage,
+        ChatRequestParams,
+        Partial<Record<SSEFields, XModelResponse>>
+    >['transformMessage']
+>[0];
 
 export type ChatRequestErrorType = ChatApiError['type'];
 
@@ -32,6 +46,13 @@ export type ChatUiMessage = XModelMessage & {
 };
 
 export type ChatMessageRecord = MessageInfo<ChatUiMessage>;
+export type ChatRequestParams = XModelParams & {
+    continue_generation?: boolean;
+    thinking?: {
+        type: 'enabled' | 'disabled';
+    };
+    userAction?: string;
+};
 
 export type ChatRequestErrorInfo = {
     error: ChatApiError;
@@ -92,7 +113,7 @@ export const getChatRequestErrorMeta = (
 };
 
 export const getChatMessageTextContent = (
-    message?: Pick<ChatUiMessage, 'content'> | null,
+    message?: Pick<XModelMessage, 'content'> | null,
 ): string => {
     const content = message?.content;
 
@@ -105,6 +126,71 @@ export const getChatMessageTextContent = (
     }
 
     return '';
+};
+
+export const toChatRequestMessage = (
+    message?: Pick<XModelMessage, 'role' | 'content'> | null,
+): XModelMessage | null => {
+    if (!message) {
+        return null;
+    }
+
+    return {
+        role: message.role,
+        content: typeof message.content === 'string'
+            ? message.content
+            : {
+                text: message.content?.text ?? '',
+                type: message.content?.type ?? 'text',
+            },
+    };
+};
+
+export const toChatRequestMessages = (
+    messages?: Array<Pick<XModelMessage, 'role' | 'content'> | null | undefined>,
+): XModelMessage[] => {
+    return (messages ?? [])
+        .map(toChatRequestMessage)
+        .filter((message): message is XModelMessage => Boolean(message));
+};
+
+export const getContinueGenerationPrefix = (
+    messages?: Array<Pick<XModelMessage, 'role' | 'content'> | null | undefined>,
+): string => {
+    for (let index = (messages?.length ?? 0) - 1; index >= 0; index -= 1) {
+        const message = messages?.[index];
+        if (!message) {
+            continue;
+        }
+
+        const content = getChatMessageTextContent(message);
+        if (!content.trim()) {
+            continue;
+        }
+
+        return message.role === 'assistant' ? content : '';
+    }
+
+    return '';
+};
+
+const mergeContinuationContent = (prefix: string, generated: string): string => {
+    if (!prefix) {
+        return generated;
+    }
+
+    if (!generated) {
+        return prefix;
+    }
+
+    const maxOverlap = Math.min(prefix.length, generated.length);
+    for (let size = maxOverlap; size > 0; size -= 1) {
+        if (prefix.slice(-size) === generated.slice(0, size)) {
+            return `${prefix}${generated.slice(size)}`;
+        }
+    }
+
+    return `${prefix}${generated}`;
 };
 
 const toChatRequestErrorInfo = (
@@ -144,18 +230,65 @@ const normalizeChatErrorResponse = async (response: Response): Promise<Response>
     });
 };
 
-export const providerCaches = new Map<
-    string,
-    DeepSeekChatProvider<ChatUiMessage, XModelParams, Partial<Record<SSEFields, XModelResponse>>>
->();
+class ContinueGenerationChatProvider extends DeepSeekChatProvider<
+    ChatUiMessage,
+    ChatRequestParams,
+    Partial<Record<SSEFields, XModelResponse>>
+> {
+    private pendingContinuationPrefix = '';
+
+    override transformParams(
+        requestParams: Partial<ChatRequestParams>,
+        options: ProviderTransformParamsOptions,
+    ): ChatRequestParams {
+        const requestMessages = requestParams.continue_generation && requestParams.messages?.length
+            ? requestParams.messages
+            : this.getMessages();
+
+        this.pendingContinuationPrefix = requestParams.continue_generation
+            ? getContinueGenerationPrefix(requestParams.messages)
+            : '';
+
+        return {
+            ...(options?.params || {}),
+            ...requestParams,
+            messages: toChatRequestMessages(requestMessages),
+        };
+    }
+
+    override transformLocalMessage(requestParams: Partial<ChatRequestParams>): ChatUiMessage[] {
+        if (requestParams?.continue_generation) {
+            return [];
+        }
+
+        return super.transformLocalMessage(requestParams);
+    }
+
+    override transformMessage(info: ProviderTransformMessageInfo): ChatUiMessage {
+        const message = super.transformMessage(info);
+        if (!this.pendingContinuationPrefix) {
+            return message;
+        }
+
+        const prefix = this.pendingContinuationPrefix;
+        this.pendingContinuationPrefix = '';
+
+        return {
+            ...message,
+            content: mergeContinuationContent(prefix, getChatMessageTextContent(message)),
+        };
+    }
+}
+
+export const providerCaches = new Map<string, ContinueGenerationChatProvider>();
 
 export const providerFactory = (conversationKey: string, model: string) => {
     const cacheKey = `${conversationKey}::${model}`;
     if (!providerCaches.get(cacheKey)) {
         providerCaches.set(
             cacheKey,
-            new DeepSeekChatProvider<ChatUiMessage, XModelParams, Partial<Record<SSEFields, XModelResponse>>>({
-                request: XRequest<XModelParams, Partial<Record<SSEFields, XModelResponse>>, ChatUiMessage>(
+            new ContinueGenerationChatProvider({
+                request: XRequest<ChatRequestParams, Partial<Record<SSEFields, XModelResponse>>, ChatUiMessage>(
                     `${API_BASE_URL}/v1/chat/completions`,
                     {
                         manual: true,

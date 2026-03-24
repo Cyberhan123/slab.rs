@@ -56,10 +56,18 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
 
         let pipeline = self.pipeline_for_backend(BackendKind::Llama).await?;
         let request = convert::decode_chat_request(&req, true).map_err(proto_to_status)?;
-        let backend_stream = pipeline.stream_text_generation(request).await.map_err(|error| {
+        let stream_handle = pipeline.submit_text_generation(request).await.map_err(|error| {
             error!(error = %error, "llama text generation stream setup failed");
             runtime_to_status(error)
         })?;
+        let backend_stream = match stream_handle.take_stream().await {
+            Ok(stream) => stream,
+            Err(error) => {
+                stream_handle.cancel_and_purge().await;
+                error!(error = %error, "llama text generation stream handle failed");
+                return Err(runtime_to_status(error));
+            }
+        };
 
         let (tx, rx) = mpsc::channel::<Result<pb::ChatStreamChunk, Status>>(32);
         tokio::spawn(
@@ -85,7 +93,8 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
                     };
 
                     if tx.send(Ok(message)).await.is_err() {
-                        debug!("llama stream receiver dropped; stopping relay");
+                        debug!("llama stream receiver dropped; cancelling runtime task");
+                        stream_handle.cancel_and_purge().await;
                         return;
                     }
                 }
@@ -100,6 +109,7 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
                         metadata: Default::default(),
                     })))
                     .await;
+                stream_handle.purge().await;
             }
             .instrument(tracing::Span::current()),
         );

@@ -328,6 +328,7 @@ function Chat() {
     isRequesting,
     abort,
     onReload,
+    onContinue,
     activeConversation,
     handleSubmit,
   } = useChat(curConversation, selectedModelId || "slab-llama", deepThink, ensureChatModelReady)
@@ -339,6 +340,16 @@ function Chat() {
     downloadModelMutation.isPending
 
   const safeMessages: ChatMessageRecord[] = messages ?? []
+  const latestMessage = safeMessages[safeMessages.length - 1]
+  const latestContinuableMessageId =
+    latestMessage?.message.role === "assistant" && latestMessage.status === "abort"
+      ? (() => {
+          const content = getChatMessageTextContent(latestMessage.message).trim()
+          return content && content !== locale.requestAborted && content !== locale.noData
+            ? latestMessage.id
+            : undefined
+        })()
+      : undefined
   const selectedModel = modelOptions.find((item) => item.id === selectedModelId)
   const latestUserMessage = safeMessages
     .slice()
@@ -561,6 +572,7 @@ function Chat() {
                     key={item.id}
                     item={item}
                     markdownClassName={markdownThemeClassName}
+                    onContinue={item.id === latestContinuableMessageId ? onContinue : undefined}
                     onRetry={(id) =>
                       onReload(id, {
                         userAction: "retry",
