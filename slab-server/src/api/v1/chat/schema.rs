@@ -5,6 +5,7 @@
 //! multimodal and tool-calling work.
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
@@ -16,6 +17,7 @@ use crate::domain::models::{
     ConversationMessageContent as DomainConversationMessageContent,
     ConversationToolCall as DomainConversationToolCall,
     ConversationToolFunction as DomainConversationToolFunction,
+    TextCompletionResult as DomainTextCompletionResult, TextResultChoice as DomainTextResultChoice,
 };
 use slab_types::inference::TextGenerationUsage;
 
@@ -205,6 +207,67 @@ fn default_include_usage() -> bool {
     true
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(untagged)]
+pub enum StopSequences {
+    Single(String),
+    Multiple(Vec<String>),
+}
+
+impl StopSequences {
+    pub fn normalized(&self) -> Vec<String> {
+        match self {
+            Self::Single(value) => normalize_stop_values(std::iter::once(value.as_str())),
+            Self::Multiple(values) => normalize_stop_values(values.iter().map(String::as_str)),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Single(value) => value.trim().is_empty(),
+            Self::Multiple(values) => values.iter().all(|value| value.trim().is_empty()),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatResponseFormatType {
+    Text,
+    JsonObject,
+    JsonSchema,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatResponseJsonSchema {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub strict: Option<bool>,
+    pub schema: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatResponseFormat {
+    #[serde(rename = "type")]
+    pub format_type: ChatResponseFormatType,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub schema: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub json_schema: Option<ChatResponseJsonSchema>,
+}
+
+impl ChatResponseFormat {
+    pub fn requests_json_output(&self) -> bool {
+        matches!(
+            self.format_type,
+            ChatResponseFormatType::JsonObject | ChatResponseFormatType::JsonSchema
+        )
+    }
+}
+
 /// Request body for `POST /v1/chat/completions`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 #[validate(schema(function = "validate_chat_completion_request"))]
@@ -218,10 +281,7 @@ pub struct ChatCompletionRequest {
     pub id: Option<String>,
     /// Unified model identifier from `/v1/models`.
     /// `GET /v1/chat/models` returns picker options that reuse the same ids.
-    #[validate(custom(
-        function = "crate::api::validation::validate_non_blank",
-        message = "model must not be empty"
-    ))]
+    #[serde(default)]
     pub model: String,
     /// Conversation history; the last user message is used as the prompt.
     #[validate(length(min = 1, message = "messages must not be empty"))]
@@ -241,6 +301,26 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 0.0, max = 2.0, message = "temperature must be between 0.0 and 2.0"))]
     pub temperature: Option<f32>,
+    /// Nucleus sampling threshold in (0, 1].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0.0, max = 1.0, message = "top_p must be between 0.0 and 1.0"))]
+    pub top_p: Option<f32>,
+    /// Number of completions to generate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, message = "n must be at least 1"))]
+    pub n: Option<u32>,
+    /// Optional stop sequences.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub stop: Option<StopSequences>,
+    /// Raw grammar passed through to the local llama backend.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub grammar: Option<String>,
+    /// OpenAI-style structured output hint.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub response_format: Option<ChatResponseFormat>,
+    /// Legacy llama.cpp-compatible top-level JSON schema field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub json_schema: Option<Value>,
     /// Optional client-side thinking toggle. Accepted for compatibility with Ant Design X providers.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub thinking: Option<ChatThinkingConfig>,
@@ -250,6 +330,77 @@ pub struct ChatCompletionRequest {
     /// Optional provider verbosity override.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub verbosity: Option<ChatVerbosity>,
+}
+
+impl ChatCompletionRequest {
+    pub fn normalized_stop(&self) -> Vec<String> {
+        self.stop.as_ref().map(StopSequences::normalized).unwrap_or_default()
+    }
+
+    pub fn grammar_json_requested(&self) -> bool {
+        self.json_schema.is_some()
+            || self
+                .response_format
+                .as_ref()
+                .is_some_and(ChatResponseFormat::requests_json_output)
+    }
+}
+
+/// Request body for `POST /v1/completions`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+#[validate(schema(function = "validate_completion_request"))]
+pub struct CompletionRequest {
+    /// Unified model identifier from `/v1/models`.
+    /// When omitted, the first available chat-compatible model is used.
+    #[serde(default)]
+    pub model: String,
+    /// Raw prompt for completion-style generation.
+    pub prompt: String,
+    /// Maximum tokens to generate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, max = 4096, message = "max_tokens must be between 1 and 4096"))]
+    pub max_tokens: Option<u32>,
+    /// Sampling temperature in [0, 2].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0.0, max = 2.0, message = "temperature must be between 0.0 and 2.0"))]
+    pub temperature: Option<f32>,
+    /// Nucleus sampling threshold in (0, 1].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0.0, max = 1.0, message = "top_p must be between 0.0 and 1.0"))]
+    pub top_p: Option<f32>,
+    /// Number of completions to generate.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 1, message = "n must be at least 1"))]
+    pub n: Option<u32>,
+    /// Optional stop sequences.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub stop: Option<StopSequences>,
+    /// Stream the result using SSE.
+    #[serde(default)]
+    pub stream: bool,
+    /// Raw grammar passed through to the local llama backend.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub grammar: Option<String>,
+    /// OpenAI-style structured output hint.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub response_format: Option<ChatResponseFormat>,
+    /// Legacy llama.cpp-compatible top-level JSON schema field.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub json_schema: Option<Value>,
+}
+
+impl CompletionRequest {
+    pub fn normalized_stop(&self) -> Vec<String> {
+        self.stop.as_ref().map(StopSequences::normalized).unwrap_or_default()
+    }
+
+    pub fn grammar_json_requested(&self) -> bool {
+        self.json_schema.is_some()
+            || self
+                .response_format
+                .as_ref()
+                .is_some_and(ChatResponseFormat::requests_json_output)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -291,8 +442,42 @@ pub struct ChatCompletionResponse {
     pub created: i64,
     /// Model that produced the completion.
     pub model: String,
+    /// Backend/system fingerprint for compatibility with OpenAI clients.
+    pub system_fingerprint: String,
     /// Generated choices.
     pub choices: Vec<ChatChoice>,
+    /// Usage statistics for the request.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub usage: Option<ChatCompletionUsage>,
+}
+
+/// A single choice in the text completion response.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CompletionChoice {
+    /// Zero-based index of this choice.
+    pub index: u32,
+    /// Generated text for this choice.
+    pub text: String,
+    /// Why generation stopped (`"stop"`, `"length"`, ...).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub finish_reason: Option<String>,
+}
+
+/// Response body for `POST /v1/completions`.
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct CompletionResponse {
+    /// Unique identifier for this completion.
+    pub id: String,
+    /// Always `"text_completion"`.
+    pub object: String,
+    /// Unix timestamp of when the response was created.
+    pub created: i64,
+    /// Model that produced the completion.
+    pub model: String,
+    /// Backend/system fingerprint for compatibility with OpenAI clients.
+    pub system_fingerprint: String,
+    /// Generated choices.
+    pub choices: Vec<CompletionChoice>,
     /// Usage statistics for the request.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub usage: Option<ChatCompletionUsage>,
@@ -464,6 +649,12 @@ impl From<DomainChatResultChoice> for ChatChoice {
     }
 }
 
+impl From<DomainTextResultChoice> for CompletionChoice {
+    fn from(choice: DomainTextResultChoice) -> Self {
+        Self { index: choice.index, text: choice.text, finish_reason: choice.finish_reason }
+    }
+}
+
 impl From<TextGenerationUsage> for ChatCompletionUsage {
     fn from(value: TextGenerationUsage) -> Self {
         Self {
@@ -485,6 +676,21 @@ impl From<DomainChatCompletionResult> for ChatCompletionResponse {
             object: result.object,
             created: result.created,
             model: result.model,
+            system_fingerprint: result.system_fingerprint,
+            choices: result.choices.into_iter().map(Into::into).collect(),
+            usage: result.usage.map(Into::into),
+        }
+    }
+}
+
+impl From<DomainTextCompletionResult> for CompletionResponse {
+    fn from(result: DomainTextCompletionResult) -> Self {
+        Self {
+            id: result.id,
+            object: result.object,
+            created: result.created,
+            model: result.model,
+            system_fingerprint: result.system_fingerprint,
             choices: result.choices.into_iter().map(Into::into).collect(),
             usage: result.usage.map(Into::into),
         }
@@ -528,6 +734,23 @@ fn validate_chat_message(message: &ChatMessage) -> Result<(), ValidationError> {
 fn validate_chat_completion_request(
     request: &ChatCompletionRequest,
 ) -> Result<(), ValidationError> {
+    if request.stream && request.n.unwrap_or(1) > 1 {
+        return Err(validation_error(
+            "unsupported_combination",
+            "streaming with n > 1 is not supported",
+        ));
+    }
+    if request.stream && request.stop.as_ref().is_some_and(|stop| !stop.is_empty()) {
+        return Err(validation_error(
+            "unsupported_combination",
+            "streaming with stop is not supported for chat completions",
+        ));
+    }
+    validate_structured_output(
+        request.response_format.as_ref(),
+        request.json_schema.as_ref(),
+    )?;
+
     let Some(user_message) = request
         .messages
         .iter()
@@ -554,4 +777,108 @@ fn validate_chat_completion_request(
     }
 
     Ok(())
+}
+
+fn validate_completion_request(request: &CompletionRequest) -> Result<(), ValidationError> {
+    if request.stream && request.n.unwrap_or(1) > 1 {
+        return Err(validation_error(
+            "unsupported_combination",
+            "streaming with n > 1 is not supported",
+        ));
+    }
+    validate_structured_output(
+        request.response_format.as_ref(),
+        request.json_schema.as_ref(),
+    )?;
+
+    let prompt = request.prompt.trim();
+    if prompt.len() > MAX_PROMPT_BYTES {
+        return Err(validation_error(
+            "prompt_too_large",
+            &format!(
+                "prompt is too large ({} bytes); maximum is {} bytes",
+                prompt.len(),
+                MAX_PROMPT_BYTES
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_structured_output(
+    response_format: Option<&ChatResponseFormat>,
+    json_schema: Option<&Value>,
+) -> Result<(), ValidationError> {
+    if let Some(schema) = json_schema {
+        validate_schema_like("json_schema", schema)?;
+    }
+
+    let Some(response_format) = response_format else {
+        return Ok(());
+    };
+
+    if let Some(schema) = response_format.schema.as_ref() {
+        validate_schema_like("response_format.schema", schema)?;
+    }
+
+    if let Some(json_schema) = response_format.json_schema.as_ref() {
+        validate_schema_like("response_format.json_schema.schema", &json_schema.schema)?;
+    }
+
+    Ok(())
+}
+
+fn validate_schema_like(field: &str, schema: &Value) -> Result<(), ValidationError> {
+    match schema {
+        Value::Bool(_) => Ok(()),
+        Value::Object(object) => {
+            if let Some(value) = object.get("type") {
+                validate_json_schema_type(field, value)?;
+            }
+            Ok(())
+        }
+        _ => Err(validation_error(
+            "invalid_schema",
+            &format!("{field} must be a JSON object or boolean"),
+        )),
+    }
+}
+
+fn validate_json_schema_type(field: &str, value: &Value) -> Result<(), ValidationError> {
+    let allowed = [
+        "string", "number", "integer", "boolean", "object", "array", "null",
+    ];
+
+    match value {
+        Value::String(kind) if allowed.contains(&kind.as_str()) => Ok(()),
+        Value::Array(items)
+            if items.iter().all(|item| {
+                item.as_str().is_some_and(|kind| allowed.contains(&kind))
+            }) =>
+        {
+            Ok(())
+        }
+        _ => Err(validation_error(
+            "invalid_schema",
+            &format!("{field} type must be a valid JSON Schema type"),
+        )),
+    }
+}
+
+fn validation_error(code: &'static str, message: &str) -> ValidationError {
+    let mut error = ValidationError::new(code);
+    error.message = Some(message.to_owned().into());
+    error
+}
+
+fn normalize_stop_values<'a>(
+    values: impl IntoIterator<Item = &'a str>,
+) -> Vec<String> {
+    values
+        .into_iter()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned)
+        .collect()
 }
