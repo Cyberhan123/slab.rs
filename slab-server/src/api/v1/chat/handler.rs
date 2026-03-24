@@ -14,21 +14,25 @@ use utoipa::OpenApi;
 use crate::api::v1::chat::schema::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatCompletionUsage, ChatContentPart,
     ChatMessage as OpenAiMessage, ChatMessageContent, ChatModelOption, ChatModelSource,
-    ChatPromptTokensDetails, ChatReasoningEffort, ChatStreamOptions, ChatThinkingConfig,
-    ChatThinkingType, ChatToolCall, ChatToolFunction, ChatVerbosity, OpenAiErrorResponse,
+    ChatPromptTokensDetails, ChatReasoningEffort, ChatResponseFormat, ChatResponseFormatType,
+    ChatResponseJsonSchema, ChatStreamOptions, ChatThinkingConfig, ChatThinkingType, ChatToolCall,
+    ChatToolFunction, ChatVerbosity, CompletionChoice, CompletionRequest, CompletionResponse,
+    OpenAiErrorResponse, StopSequences,
 };
 use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
-use crate::domain::models::ChatCompletionOutput;
+use crate::domain::models::{ChatCompletionOutput, ChatStreamChunk, TextCompletionOutput};
 use crate::domain::services::ChatService;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(chat_completions, list_chat_models),
+    paths(chat_completions, completions, list_chat_models),
     components(schemas(
         ChatCompletionRequest,
         ChatCompletionResponse,
+        CompletionRequest,
+        CompletionResponse,
         ChatCompletionUsage,
         ChatModelOption,
         ChatModelSource,
@@ -36,12 +40,17 @@ use crate::error::ServerError;
         ChatMessageContent,
         OpenAiMessage,
         ChatChoice,
+        CompletionChoice,
         ChatPromptTokensDetails,
         ChatThinkingConfig,
         ChatThinkingType,
         ChatReasoningEffort,
         ChatVerbosity,
+        ChatResponseFormat,
+        ChatResponseFormatType,
+        ChatResponseJsonSchema,
         ChatStreamOptions,
+        StopSequences,
         ChatToolCall,
         ChatToolFunction,
         OpenAiErrorResponse
@@ -53,6 +62,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/chat/models", get(list_chat_models))
         .route("/chat/completions", post(chat_completions))
+        .route("/completions", post(completions))
 }
 
 #[utoipa::path(
@@ -90,16 +100,42 @@ async fn chat_completions(
         Ok(ChatCompletionOutput::Json(response)) => {
             Json(ChatCompletionResponse::from(response)).into_response()
         }
-        Ok(ChatCompletionOutput::Stream(stream)) => {
-            let event_stream = stream.map(|chunk| -> Result<Event, Infallible> {
-                Ok(Event::default().data(match chunk {
-                    crate::domain::models::ChatStreamChunk::Data(data) => data,
-                }))
-            });
-            Sse::new(event_stream).into_response()
-        }
+        Ok(ChatCompletionOutput::Stream(stream)) => sse_response(stream),
         Err(error) => openai_error_response(error),
     }
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/completions",
+    tag = "chat",
+    request_body = CompletionRequest,
+    responses(
+        (status = 200, description = "Text completion generated", body = CompletionResponse),
+        (status = 400, description = "Bad request", body = OpenAiErrorResponse),
+        (status = 500, description = "Backend error", body = OpenAiErrorResponse),
+    )
+)]
+async fn completions(
+    State(service): State<ChatService>,
+    ValidatedJson(req): ValidatedJson<CompletionRequest>,
+) -> Response {
+    match service.create_text_completion(req.into()).await {
+        Ok(TextCompletionOutput::Json(response)) => {
+            Json(CompletionResponse::from(response)).into_response()
+        }
+        Ok(TextCompletionOutput::Stream(stream)) => sse_response(stream),
+        Err(error) => openai_error_response(error),
+    }
+}
+
+fn sse_response(stream: futures::stream::BoxStream<'static, ChatStreamChunk>) -> Response {
+    let event_stream = stream.map(|chunk| -> Result<Event, Infallible> {
+        Ok(Event::default().data(match chunk {
+            ChatStreamChunk::Data(data) => data,
+        }))
+    });
+    Sse::new(event_stream).into_response()
 }
 
 fn openai_error_response(error: ServerError) -> Response {

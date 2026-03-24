@@ -5,7 +5,7 @@ mod local;
 mod template;
 
 use chrono::Utc;
-use futures::stream::BoxStream;
+use futures::stream::{self, BoxStream};
 use slab_types::inference::{TextGenerationResponse, TextGenerationUsage};
 use tracing::{debug, info};
 use uuid::Uuid;
@@ -14,13 +14,15 @@ use crate::context::ModelState;
 use crate::domain::models::{
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
     ChatResultChoice, ChatStreamChunk, ConversationMessage as DomainConversationMessage,
-    ConversationMessageContent,
+    ConversationMessageContent, TextCompletionCommand, TextCompletionOutput,
+    TextCompletionResult, TextResultChoice,
 };
 use crate::error::ServerError;
 use crate::infra::db::{ChatMessage, ChatStore};
 
 const LLAMA_BACKEND_ID: &str = "ggml.llama";
 const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
+const SYSTEM_FINGERPRINT: &str = "b-slab";
 
 enum GeneratedChatOutput {
     Text(TextGenerationResponse),
@@ -47,6 +49,13 @@ impl ChatService {
     ) -> Result<ChatCompletionOutput, ServerError> {
         create_chat_completion_with_state(self.state.clone(), command).await
     }
+
+    pub async fn create_text_completion(
+        &self,
+        command: TextCompletionCommand,
+    ) -> Result<TextCompletionOutput, ServerError> {
+        create_text_completion_with_state(self.state.clone(), command).await
+    }
 }
 
 /// Build an OpenAI-compatible `chat.completion.chunk` SSE data payload.
@@ -56,6 +65,7 @@ fn build_chunk(id: &str, created: i64, model: &str, token: &str) -> String {
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
+        "system_fingerprint": SYSTEM_FINGERPRINT,
         "choices": [{
             "index": 0,
             "delta": { "content": token },
@@ -72,6 +82,7 @@ fn build_role_chunk(id: &str, created: i64, model: &str) -> String {
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
+        "system_fingerprint": SYSTEM_FINGERPRINT,
         "choices": [{
             "index": 0,
             "delta": { "role": "assistant" },
@@ -88,6 +99,7 @@ fn build_reasoning_chunk(id: &str, created: i64, model: &str, token: &str) -> St
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
+        "system_fingerprint": SYSTEM_FINGERPRINT,
         "choices": [{
             "index": 0,
             "delta": { "reasoning_content": token },
@@ -104,6 +116,7 @@ fn build_finish_chunk(id: &str, created: i64, model: &str, finish_reason: &str) 
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
+        "system_fingerprint": SYSTEM_FINGERPRINT,
         "choices": [{
             "index": 0,
             "delta": {},
@@ -119,8 +132,53 @@ fn build_usage_chunk(id: &str, created: i64, model: &str, usage: &TextGeneration
         "object": "chat.completion.chunk",
         "created": created,
         "model": model,
+        "system_fingerprint": SYSTEM_FINGERPRINT,
         "choices": [],
         "usage": usage_to_json(usage)
+    })
+    .to_string()
+}
+
+fn build_text_completion_chunk(
+    id: &str,
+    created: i64,
+    model: &str,
+    index: u32,
+    text: &str,
+) -> String {
+    serde_json::json!({
+        "id": id,
+        "object": "text_completion",
+        "created": created,
+        "model": model,
+        "system_fingerprint": SYSTEM_FINGERPRINT,
+        "choices": [{
+            "index": index,
+            "text": text,
+            "finish_reason": null
+        }]
+    })
+    .to_string()
+}
+
+fn build_text_completion_finish_chunk(
+    id: &str,
+    created: i64,
+    model: &str,
+    index: u32,
+    finish_reason: &str,
+) -> String {
+    serde_json::json!({
+        "id": id,
+        "object": "text_completion",
+        "created": created,
+        "model": model,
+        "system_fingerprint": SYSTEM_FINGERPRINT,
+        "choices": [{
+            "index": index,
+            "text": "",
+            "finish_reason": finish_reason
+        }]
     })
     .to_string()
 }
@@ -186,10 +244,101 @@ pub(super) fn build_estimated_usage(
     }
 }
 
+async fn resolve_requested_model(
+    state: &ModelState,
+    requested_model: &str,
+) -> Result<String, ServerError> {
+    let trimmed = requested_model.trim();
+    if !trimmed.is_empty() {
+        return Ok(trimmed.to_owned());
+    }
+
+    let options = cloud::list_chat_models(state).await?;
+    let preferred = options
+        .iter()
+        .find(|item| item.downloaded || item.provider_id.is_some())
+        .or_else(|| options.first());
+
+    preferred
+        .map(|item| item.id.clone())
+        .ok_or_else(|| ServerError::BadRequest("no chat-compatible models are configured".into()))
+}
+
+fn apply_stop_sequences(text: &str, stop: &[String]) -> (String, bool) {
+    let Some((index, _)) = stop
+        .iter()
+        .filter(|value| !value.is_empty())
+        .filter_map(|value| text.find(value).map(|index| (index, value)))
+        .min_by_key(|(index, _)| *index)
+    else {
+        return (text.to_owned(), false);
+    };
+
+    (text[..index].to_owned(), true)
+}
+
+fn merge_usage(total: &mut Option<TextGenerationUsage>, next: Option<TextGenerationUsage>) {
+    let Some(next) = next else {
+        return;
+    };
+
+    match total {
+        Some(total) => {
+            total.prompt_tokens = total.prompt_tokens.saturating_add(next.prompt_tokens);
+            total.completion_tokens =
+                total.completion_tokens.saturating_add(next.completion_tokens);
+            total.total_tokens = total.total_tokens.saturating_add(next.total_tokens);
+            total.prompt_tokens_details.cached_tokens = total
+                .prompt_tokens_details
+                .cached_tokens
+                .saturating_add(next.prompt_tokens_details.cached_tokens);
+            total.estimated |= next.estimated;
+        }
+        None => *total = Some(next),
+    }
+}
+
+fn into_text_completion_stream(
+    id: String,
+    created: i64,
+    model: String,
+    text: String,
+    finish_reason: String,
+) -> TextCompletionOutput {
+    let mut chunks = Vec::new();
+    if !text.is_empty() {
+        chunks.push(ChatStreamChunk::Data(build_text_completion_chunk(
+            &id, created, &model, 0, &text,
+        )));
+    }
+    chunks.push(ChatStreamChunk::Data(build_text_completion_finish_chunk(
+        &id,
+        created,
+        &model,
+        0,
+        &finish_reason,
+    )));
+    chunks.push(ChatStreamChunk::Data("[DONE]".into()));
+
+    TextCompletionOutput::Stream(Box::pin(stream::iter(chunks)))
+}
+
 async fn create_chat_completion_with_state(
     state: ModelState,
     command: ChatCompletionCommand,
 ) -> Result<ChatCompletionOutput, ServerError> {
+    if command.stream && command.n > 1 {
+        return Err(ServerError::NotImplemented(
+            "streaming with n > 1 is not supported".into(),
+        ));
+    }
+    if command.stream && !command.stop.is_empty() {
+        return Err(ServerError::NotImplemented(
+            "streaming with stop is not supported for chat completions".into(),
+        ));
+    }
+
+    let resolved_model = resolve_requested_model(&state, &command.model).await?;
     let user_content = command
         .messages
         .iter()
@@ -200,9 +349,16 @@ async fn create_chat_completion_with_state(
 
     let max_tokens = command.max_tokens.unwrap_or(512);
     let temperature = command.temperature.unwrap_or(0.7);
+    let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
+
+    if route_to_cloud && (command.grammar.is_some() || command.grammar_json) {
+        return Err(ServerError::NotImplemented(
+            "cloud structured outputs are not supported for chat completions yet".into(),
+        ));
+    }
 
     debug!(
-        model = %command.model,
+        model = %resolved_model,
         prompt_len = user_content.len(),
         stream = command.stream,
         session_id = ?command.id,
@@ -228,69 +384,106 @@ async fn create_chat_completion_with_state(
             );
     }
 
-    let generated = if cloud::should_route_to_cloud(&state, &command.model).await? {
-        cloud::create_chat_completion(
-            &state,
-            &command.model,
-            &resolved_messages,
-            cloud::CloudChatRequestConfig {
+    if command.stream {
+        let generated = if route_to_cloud {
+            cloud::create_chat_completion(
+                &state,
+                &resolved_model,
+                &resolved_messages,
+                cloud::CloudChatRequestConfig {
+                    max_tokens,
+                    temperature,
+                    top_p: command.top_p,
+                    reasoning_effort: command.reasoning_effort,
+                    verbosity: command.verbosity,
+                    stream: true,
+                    include_usage: command.stream_options.include_usage,
+                },
+            )
+            .await?
+        } else {
+            local::create_chat_completion(
+                &state,
+                &resolved_model,
+                command.id.as_deref(),
+                &resolved_messages,
                 max_tokens,
                 temperature,
-                reasoning_effort: command.reasoning_effort,
-                verbosity: command.verbosity,
-                stream: command.stream,
-                include_usage: command.stream_options.include_usage,
-            },
-        )
-        .await?
-    } else {
-        local::create_chat_completion(
-            &state,
-            &command.model,
-            command.id.as_deref(),
-            &resolved_messages,
-            max_tokens,
-            temperature,
-            command.stream,
-            command.stream_options.include_usage,
-        )
-        .await?
-    };
+                command.top_p,
+                command.grammar.clone(),
+                command.grammar_json,
+                true,
+                command.stream_options.include_usage,
+            )
+            .await?
+        };
 
-    let generated = match generated {
-        GeneratedChatOutput::Text(text) => text,
-        GeneratedChatOutput::Stream(stream) => return Ok(ChatCompletionOutput::Stream(stream)),
-    };
-
-    info!(
-        model = %command.model,
-        output_len = generated.text.len(),
-        "chat completion done"
-    );
-
-    if let Some(session_id) = command.id.as_deref() {
-        state
-            .store()
-            .append_message(ChatMessage {
-                id: Uuid::new_v4().to_string(),
-                session_id: session_id.to_owned(),
-                role: "assistant".into(),
-                content: generated.text.clone(),
-                created_at: Utc::now(),
-            })
-            .await
-            .unwrap_or_else(
-                |error| tracing::warn!(error = %error, "failed to persist assistant message"),
-            );
+        return match generated {
+            GeneratedChatOutput::Text(text) => {
+                let response = ChatCompletionResult {
+                    id: format!("chatcmpl-{}", Uuid::new_v4()),
+                    object: "chat.completion".into(),
+                    created: Utc::now().timestamp(),
+                    model: resolved_model,
+                    system_fingerprint: SYSTEM_FINGERPRINT.into(),
+                    choices: vec![ChatResultChoice {
+                        index: 0,
+                        message: DomainConversationMessage {
+                            role: "assistant".into(),
+                            content: ConversationMessageContent::Text(text.text),
+                            name: None,
+                            tool_call_id: None,
+                            tool_calls: Vec::new(),
+                        },
+                        finish_reason: text.finish_reason.or(Some("stop".into())),
+                    }],
+                    usage: text.usage,
+                };
+                Ok(ChatCompletionOutput::Json(response))
+            }
+            GeneratedChatOutput::Stream(stream) => Ok(ChatCompletionOutput::Stream(stream)),
+        };
     }
 
-    let response = ChatCompletionResult {
-        id: format!("chatcmpl-{}", Uuid::new_v4()),
-        object: "chat.completion".into(),
-        created: Utc::now().timestamp(),
-        model: command.model,
-        choices: vec![ChatResultChoice {
-            index: 0,
+    let mut choices = Vec::new();
+    let mut usage = None;
+    for index in 0..command.n {
+        let mut generated = if route_to_cloud {
+            generate_cloud_chat_text(
+                &state,
+                &resolved_model,
+                &resolved_messages,
+                max_tokens,
+                temperature,
+                command.top_p,
+                command.reasoning_effort,
+                command.verbosity,
+            )
+            .await?
+        } else {
+            generate_local_chat_text(
+                &state,
+                &resolved_model,
+                command.id.as_deref(),
+                &resolved_messages,
+                max_tokens,
+                temperature,
+                command.top_p,
+                command.grammar.clone(),
+                command.grammar_json,
+            )
+            .await?
+        };
+
+        let (trimmed_text, stop_matched) = apply_stop_sequences(&generated.text, &command.stop);
+        if stop_matched {
+            generated.text = trimmed_text;
+            generated.finish_reason = Some("stop".into());
+        }
+
+        merge_usage(&mut usage, generated.usage.clone());
+        choices.push(ChatResultChoice {
+            index,
             message: DomainConversationMessage {
                 role: "assistant".into(),
                 content: ConversationMessageContent::Text(generated.text),
@@ -299,11 +492,214 @@ async fn create_chat_completion_with_state(
                 tool_calls: Vec::new(),
             },
             finish_reason: generated.finish_reason.or(Some("stop".into())),
-        }],
-        usage: generated.usage,
+        });
+    }
+
+    info!(
+        model = %resolved_model,
+        output_len = choices
+            .first()
+            .map(|choice| choice.message.rendered_text().len())
+            .unwrap_or_default(),
+        "chat completion done"
+    );
+
+    if let Some(session_id) = command.id.as_deref() {
+        if let Some(first_choice) = choices.first() {
+            state
+                .store()
+                .append_message(ChatMessage {
+                    id: Uuid::new_v4().to_string(),
+                    session_id: session_id.to_owned(),
+                    role: "assistant".into(),
+                    content: first_choice.message.rendered_text(),
+                    created_at: Utc::now(),
+                })
+                .await
+                .unwrap_or_else(
+                    |error| tracing::warn!(error = %error, "failed to persist assistant message"),
+                );
+        }
+    }
+
+    let response = ChatCompletionResult {
+        id: format!("chatcmpl-{}", Uuid::new_v4()),
+        object: "chat.completion".into(),
+        created: Utc::now().timestamp(),
+        model: resolved_model,
+        system_fingerprint: SYSTEM_FINGERPRINT.into(),
+        choices,
+        usage,
     };
 
     Ok(ChatCompletionOutput::Json(response))
+}
+
+async fn create_text_completion_with_state(
+    state: ModelState,
+    command: TextCompletionCommand,
+) -> Result<TextCompletionOutput, ServerError> {
+    if command.stream && command.n > 1 {
+        return Err(ServerError::NotImplemented(
+            "streaming with n > 1 is not supported".into(),
+        ));
+    }
+
+    let resolved_model = resolve_requested_model(&state, &command.model).await?;
+    let max_tokens = command.max_tokens.unwrap_or(512);
+    let temperature = command.temperature.unwrap_or(0.7);
+    let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
+
+    if route_to_cloud && (command.grammar.is_some() || command.grammar_json) {
+        return Err(ServerError::NotImplemented(
+            "cloud structured outputs are not supported for text completions yet".into(),
+        ));
+    }
+
+    debug!(
+        model = %resolved_model,
+        prompt_len = command.prompt.len(),
+        stream = command.stream,
+        "text completion request"
+    );
+
+    let mut choices = Vec::new();
+    let mut usage = None;
+    for index in 0..command.n {
+        let mut generated = if route_to_cloud {
+            cloud::create_text_completion(
+                &state,
+                &resolved_model,
+                &command.prompt,
+                cloud::CloudChatRequestConfig {
+                    max_tokens,
+                    temperature,
+                    top_p: command.top_p,
+                    reasoning_effort: None,
+                    verbosity: None,
+                    stream: false,
+                    include_usage: false,
+                },
+            )
+            .await?
+        } else {
+            local::create_text_completion(
+                &state,
+                &resolved_model,
+                &command.prompt,
+                max_tokens,
+                temperature,
+                command.top_p,
+                command.grammar.clone(),
+                command.grammar_json,
+            )
+            .await?
+        };
+
+        let (trimmed_text, stop_matched) = apply_stop_sequences(&generated.text, &command.stop);
+        if stop_matched {
+            generated.text = trimmed_text;
+            generated.finish_reason = Some("stop".into());
+        }
+
+        merge_usage(&mut usage, generated.usage.clone());
+        choices.push(TextResultChoice {
+            index,
+            text: generated.text,
+            finish_reason: generated.finish_reason.or(Some("stop".into())),
+        });
+    }
+
+    let response = TextCompletionResult {
+        id: format!("cmpl-{}", Uuid::new_v4()),
+        object: "text_completion".into(),
+        created: Utc::now().timestamp(),
+        model: resolved_model.clone(),
+        system_fingerprint: SYSTEM_FINGERPRINT.into(),
+        choices,
+        usage,
+    };
+
+    if command.stream {
+        let first_choice = response.choices.first().cloned().ok_or_else(|| {
+            ServerError::Internal("text completion produced no choices".into())
+        })?;
+        return Ok(into_text_completion_stream(
+            response.id,
+            response.created,
+            resolved_model,
+            first_choice.text,
+            first_choice.finish_reason.unwrap_or_else(|| "stop".into()),
+        ));
+    }
+
+    Ok(TextCompletionOutput::Json(response))
+}
+
+async fn generate_cloud_chat_text(
+    state: &ModelState,
+    model: &str,
+    messages: &[DomainConversationMessage],
+    max_tokens: u32,
+    temperature: f32,
+    top_p: Option<f32>,
+    reasoning_effort: Option<crate::domain::models::ChatReasoningEffort>,
+    verbosity: Option<crate::domain::models::ChatVerbosity>,
+) -> Result<TextGenerationResponse, ServerError> {
+    match cloud::create_chat_completion(
+        state,
+        model,
+        messages,
+        cloud::CloudChatRequestConfig {
+            max_tokens,
+            temperature,
+            top_p,
+            reasoning_effort,
+            verbosity,
+            stream: false,
+            include_usage: false,
+        },
+    )
+    .await?
+    {
+        GeneratedChatOutput::Text(text) => Ok(text),
+        GeneratedChatOutput::Stream(_) => Err(ServerError::Internal(
+            "cloud chat completion unexpectedly returned a stream".into(),
+        )),
+    }
+}
+
+async fn generate_local_chat_text(
+    state: &ModelState,
+    model: &str,
+    session_id: Option<&str>,
+    messages: &[DomainConversationMessage],
+    max_tokens: u32,
+    temperature: f32,
+    top_p: Option<f32>,
+    grammar: Option<String>,
+    grammar_json: bool,
+) -> Result<TextGenerationResponse, ServerError> {
+    match local::create_chat_completion(
+        state,
+        model,
+        session_id,
+        messages,
+        max_tokens,
+        temperature,
+        top_p,
+        grammar,
+        grammar_json,
+        false,
+        false,
+    )
+    .await?
+    {
+        GeneratedChatOutput::Text(text) => Ok(text),
+        GeneratedChatOutput::Stream(_) => Err(ServerError::Internal(
+            "local chat completion unexpectedly returned a stream".into(),
+        )),
+    }
 }
 
 /// Merge history from DB and current request messages while avoiding duplicates.
@@ -352,6 +748,11 @@ mod test {
             stream: false,
             max_tokens: None,
             temperature: None,
+            top_p: None,
+            n: 1,
+            stop: Vec::new(),
+            grammar: None,
+            grammar_json: false,
             reasoning_effort: None,
             verbosity: None,
             id: None,
@@ -395,9 +796,18 @@ mod test {
         assert_eq!(value["object"], "chat.completion.chunk");
         assert_eq!(value["created"], 1_700_000_000_i64);
         assert_eq!(value["model"], "slab-llama");
+        assert_eq!(value["system_fingerprint"], SYSTEM_FINGERPRINT);
         let choice = &value["choices"][0];
         assert_eq!(choice["index"], 0);
         assert_eq!(choice["delta"]["content"], "Hello");
         assert!(choice["finish_reason"].is_null());
+    }
+
+    #[test]
+    fn apply_stop_sequences_truncates_at_first_match() {
+        let (trimmed, matched) = apply_stop_sequences("hello STOP world", &["STOP".into()]);
+
+        assert!(matched);
+        assert_eq!(trimmed, "hello ");
     }
 }

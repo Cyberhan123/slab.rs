@@ -7,7 +7,7 @@ pub use slab_types::inference::TextGenerationUsage;
 use crate::api::v1::chat::schema::{
     ChatCompletionRequest, ChatReasoningEffort as ApiChatReasoningEffort,
     ChatStreamOptions as ApiChatStreamOptions, ChatThinkingConfig as ApiChatThinkingConfig,
-    ChatThinkingType as ApiChatThinkingType, ChatVerbosity as ApiChatVerbosity,
+    ChatThinkingType as ApiChatThinkingType, ChatVerbosity as ApiChatVerbosity, CompletionRequest,
 };
 use crate::infra::db;
 use futures::stream::BoxStream;
@@ -18,6 +18,11 @@ pub enum ChatStreamChunk {
 
 pub enum ChatCompletionOutput {
     Json(ChatCompletionResult),
+    Stream(BoxStream<'static, ChatStreamChunk>),
+}
+
+pub enum TextCompletionOutput {
+    Json(TextCompletionResult),
     Stream(BoxStream<'static, ChatStreamChunk>),
 }
 
@@ -40,10 +45,29 @@ pub struct ChatCompletionCommand {
     pub messages: Vec<ConversationMessage>,
     pub max_tokens: Option<u32>,
     pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub n: u32,
+    pub stop: Vec<String>,
+    pub grammar: Option<String>,
+    pub grammar_json: bool,
     pub reasoning_effort: Option<ChatReasoningEffort>,
     pub verbosity: Option<ChatVerbosity>,
     pub stream: bool,
     pub stream_options: ChatStreamOptions,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextCompletionCommand {
+    pub model: String,
+    pub prompt: String,
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub n: u32,
+    pub stop: Vec<String>,
+    pub grammar: Option<String>,
+    pub grammar_json: bool,
+    pub stream: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -70,7 +94,26 @@ pub struct ChatCompletionResult {
     pub object: String,
     pub created: i64,
     pub model: String,
+    pub system_fingerprint: String,
     pub choices: Vec<ChatResultChoice>,
+    pub usage: Option<TextGenerationUsage>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextResultChoice {
+    pub index: u32,
+    pub text: String,
+    pub finish_reason: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TextCompletionResult {
+    pub id: String,
+    pub object: String,
+    pub created: i64,
+    pub model: String,
+    pub system_fingerprint: String,
+    pub choices: Vec<TextResultChoice>,
     pub usage: Option<TextGenerationUsage>,
 }
 
@@ -124,13 +167,20 @@ impl From<ChatCompletionRequest> for ChatCompletionCommand {
             .verbosity
             .map(Into::into)
             .or_else(|| request.thinking.as_ref().and_then(verbosity_from_thinking));
+        let grammar_json = request.grammar_json_requested();
+        let stop = request.normalized_stop();
 
         Self {
             id: request.id,
-            model: request.model,
+            model: request.model.trim().to_owned(),
             messages: request.messages.into_iter().map(Into::into).collect(),
             max_tokens: request.max_tokens,
             temperature: request.temperature,
+            top_p: request.top_p,
+            n: request.n.unwrap_or(1),
+            stop,
+            grammar: request.grammar,
+            grammar_json,
             reasoning_effort,
             verbosity,
             stream: request.stream,
@@ -155,13 +205,36 @@ fn verbosity_from_thinking(thinking: &ApiChatThinkingConfig) -> Option<ChatVerbo
     }
 }
 
+impl From<CompletionRequest> for TextCompletionCommand {
+    fn from(request: CompletionRequest) -> Self {
+        let grammar_json = request.grammar_json_requested();
+        let stop = request.normalized_stop();
+
+        Self {
+            model: request.model.trim().to_owned(),
+            prompt: request.prompt,
+            max_tokens: request.max_tokens,
+            temperature: request.temperature,
+            top_p: request.top_p,
+            n: request.n.unwrap_or(1),
+            stop,
+            grammar: request.grammar,
+            grammar_json,
+            stream: request.stream,
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
-    use super::{ChatCompletionCommand, ChatReasoningEffort, ChatVerbosity};
-    use crate::api::v1::chat::schema::{
-        ChatCompletionRequest, ChatMessage, ChatStreamOptions, ChatThinkingConfig,
-        ChatThinkingType,
+    use super::{
+        ChatCompletionCommand, ChatReasoningEffort, ChatVerbosity, TextCompletionCommand,
     };
+    use crate::api::v1::chat::schema::{
+        ChatCompletionRequest, ChatMessage, ChatResponseFormat, ChatResponseFormatType,
+        ChatStreamOptions, ChatThinkingConfig, ChatThinkingType, CompletionRequest,
+    };
+    use serde_json::json;
 
     fn make_request() -> ChatCompletionRequest {
         ChatCompletionRequest {
@@ -180,9 +253,31 @@ mod test {
             stream_options: Some(ChatStreamOptions { include_usage: true }),
             max_tokens: None,
             temperature: None,
+            top_p: None,
+            n: None,
+            stop: None,
+            grammar: None,
+            response_format: None,
+            json_schema: None,
             thinking: None,
             reasoning_effort: None,
             verbosity: None,
+        }
+    }
+
+    fn make_completion_request() -> CompletionRequest {
+        CompletionRequest {
+            model: "cloud/provider/model".to_owned(),
+            prompt: "hello".to_owned(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            n: None,
+            stop: None,
+            stream: false,
+            grammar: None,
+            response_format: None,
+            json_schema: None,
         }
     }
 
@@ -229,5 +324,62 @@ mod test {
 
         assert!(matches!(command.reasoning_effort, Some(ChatReasoningEffort::High)));
         assert!(matches!(command.verbosity, Some(ChatVerbosity::Low)));
+    }
+
+    #[test]
+    fn response_format_json_object_maps_to_grammar_json() {
+        let mut request = make_request();
+        request.response_format = Some(ChatResponseFormat {
+            format_type: ChatResponseFormatType::JsonObject,
+            schema: None,
+            json_schema: None,
+        });
+
+        let command = ChatCompletionCommand::from(request);
+
+        assert!(command.grammar_json);
+    }
+
+    #[test]
+    fn json_schema_field_maps_to_grammar_json() {
+        let mut request = make_request();
+        request.json_schema = Some(json!({ "const": "42" }));
+
+        let command = ChatCompletionCommand::from(request);
+
+        assert!(command.grammar_json);
+    }
+
+    #[test]
+    fn stop_string_normalizes_to_vec() {
+        let mut request = make_request();
+        request.stop = Some(crate::api::v1::chat::schema::StopSequences::Single(
+            "END".to_owned(),
+        ));
+
+        let command = ChatCompletionCommand::from(request);
+
+        assert_eq!(command.stop, vec!["END".to_owned()]);
+    }
+
+    #[test]
+    fn completion_request_defaults_n_to_one() {
+        let command = TextCompletionCommand::from(make_completion_request());
+
+        assert_eq!(command.n, 1);
+    }
+
+    #[test]
+    fn completion_response_format_maps_to_grammar_json() {
+        let mut request = make_completion_request();
+        request.response_format = Some(ChatResponseFormat {
+            format_type: ChatResponseFormatType::JsonObject,
+            schema: None,
+            json_schema: None,
+        });
+
+        let command = TextCompletionCommand::from(request);
+
+        assert!(command.grammar_json);
     }
 }

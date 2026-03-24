@@ -42,6 +42,7 @@ struct ResolvedCloudModel {
 pub(super) struct CloudChatRequestConfig {
     pub(super) max_tokens: u32,
     pub(super) temperature: f32,
+    pub(super) top_p: Option<f32>,
     pub(super) reasoning_effort: Option<ChatReasoningEffort>,
     pub(super) verbosity: Option<ChatVerbosity>,
     pub(super) stream: bool,
@@ -236,6 +237,24 @@ pub(super) async fn create_chat_completion(
 
     let generated = cloud_chat_completion(&target, messages, config, trace_http).await?;
     Ok(GeneratedChatOutput::Text(generated))
+}
+
+pub(super) async fn create_text_completion(
+    state: &ModelState,
+    requested_model: &str,
+    prompt: &str,
+    config: CloudChatRequestConfig,
+) -> Result<TextGenerationResponse, ServerError> {
+    let target = resolve_cloud_model(state, requested_model).await?;
+    let messages = vec![DomainConversationMessage {
+        role: "user".to_owned(),
+        content: slab_types::chat::ConversationMessageContent::Text(prompt.to_owned()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+    }];
+
+    cloud_chat_completion(&target, &messages, config, state.config().cloud_http_trace).await
 }
 
 #[cfg(test)]
@@ -572,6 +591,9 @@ fn build_genai_chat_options(
         .with_max_tokens(config.max_tokens)
         .with_temperature(f64::from(config.temperature));
 
+    if let Some(top_p) = config.top_p {
+        options = options.with_top_p(f64::from(top_p));
+    }
     if let Some(reasoning_effort) = config.reasoning_effort {
         options = options.with_reasoning_effort(map_reasoning_effort(reasoning_effort));
     }
@@ -784,6 +806,9 @@ fn build_cloud_http_request_body(
         "temperature": f64::from(config.temperature),
     });
 
+    if let Some(top_p) = config.top_p {
+        payload["top_p"] = json!(f64::from(top_p));
+    }
     if let Some(reasoning_effort) = config.reasoning_effort {
         payload["reasoning_effort"] = json!(reasoning_effort.as_str());
     }

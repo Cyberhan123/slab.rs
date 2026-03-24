@@ -24,6 +24,9 @@ pub(super) async fn create_chat_completion(
     messages: &[DomainConversationMessage],
     max_tokens: u32,
     temperature: f32,
+    top_p: Option<f32>,
+    grammar: Option<String>,
+    grammar_json: bool,
     stream: bool,
     include_usage: bool,
 ) -> Result<GeneratedChatOutput, ServerError> {
@@ -36,9 +39,11 @@ pub(super) async fn create_chat_completion(
         apply_chat_template: true,
         max_tokens: Some(max_tokens),
         temperature: Some(temperature),
-        top_p: None,
+        top_p,
         session_key: session_id.map(str::to_owned),
         stream,
+        grammar,
+        grammar_json,
         ..Default::default()
     };
     let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
@@ -191,6 +196,58 @@ pub(super) async fn create_chat_completion(
     });
 
     Ok(GeneratedChatOutput::Text(response))
+}
+
+pub(super) async fn create_text_completion(
+    state: &ModelState,
+    model: &str,
+    prompt: &str,
+    max_tokens: u32,
+    temperature: f32,
+    top_p: Option<f32>,
+    grammar: Option<String>,
+    grammar_json: bool,
+) -> Result<slab_types::inference::TextGenerationResponse, ServerError> {
+    let request = TextGenerationRequest {
+        prompt: prompt.to_owned(),
+        system_prompt: None,
+        chat_messages: Vec::new(),
+        apply_chat_template: false,
+        max_tokens: Some(max_tokens),
+        temperature: Some(temperature),
+        top_p,
+        stream: false,
+        grammar,
+        grammar_json,
+        ..Default::default()
+    };
+    let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
+
+    let llama_channel = state.grpc().chat_channel().ok_or_else(|| {
+        ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
+    })?;
+
+    let _usage_guard =
+        state.auto_unload().acquire_for_inference(super::LLAMA_BACKEND_ID).await.map_err(
+            |error| ServerError::BackendNotReady(format!("llama backend not ready: {error}")),
+        )?;
+
+    let generated = rpc::client::chat(llama_channel, grpc_request)
+        .await
+        .map_err(|error| ServerError::Internal(format!("grpc chat failed: {error}")))?;
+    let mut response = convert::decode_chat_response(&generated);
+
+    let usage = response
+        .usage
+        .clone()
+        .unwrap_or_else(|| super::build_estimated_usage(prompt, &response.text, response.tokens_used));
+    response.tokens_used.get_or_insert(usage.completion_tokens);
+    response.usage = Some(usage.clone());
+    response.finish_reason.get_or_insert_with(|| {
+        super::finish_reason_from_token_budget(usage.completion_tokens, max_tokens)
+    });
+
+    Ok(response)
 }
 
 async fn resolve_prompt_template_context(
