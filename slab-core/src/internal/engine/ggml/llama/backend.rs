@@ -97,6 +97,31 @@ fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
+/// Deserialize a `chat_messages` JSON array from the options map into a
+/// `Vec<LlamaChatMessage>`.  Returns an empty Vec when the key is absent or
+/// the value cannot be parsed.
+fn extract_chat_messages(opts: &serde_json::Value) -> Vec<LlamaChatMessage> {
+    let Some(arr) = opts.get("chat_messages").and_then(|v| v.as_array()) else {
+        return Vec::new();
+    };
+    arr.iter()
+        .filter_map(|v| {
+            let role = v.get("role").and_then(|r| r.as_str())?.to_owned();
+            let content = v.get("content").and_then(|c| c.as_str())?.to_owned();
+            Some(LlamaChatMessage { role, content })
+        })
+        .collect()
+}
+
+/// Infer the `add_assistant_prompt` flag from the message list.
+///
+/// Returns `false` when the last message already has role `"assistant"` (i.e.
+/// an assistant-prefill / regeneration scenario where the template should not
+/// append another opening assistant turn).  Returns `true` in all other cases.
+fn infer_add_assistant_prompt(messages: &[LlamaChatMessage]) -> bool {
+    messages.last().map(|m| m.role != "assistant").unwrap_or(true)
+}
+
 struct LlamaWorker {
     /// The engine: wraps both the library handle and inference workers.
     /// - `None` → library not loaded.
@@ -160,7 +185,10 @@ impl LlamaWorker {
         let max_tokens =
             opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
         let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
-        self.handle_inference(input, max_tokens, session_key, reply_tx).await;
+        let apply_chat_template =
+            opts.get("apply_chat_template").and_then(|v| v.as_bool()).unwrap_or(false);
+        let chat_messages = extract_chat_messages(&opts);
+        self.handle_inference(input, max_tokens, session_key, apply_chat_template, chat_messages, reply_tx).await;
     }
 
     #[on_event(InferenceStream)]
@@ -177,7 +205,10 @@ impl LlamaWorker {
         let max_tokens =
             opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
         let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
-        self.handle_inference_stream(input, max_tokens, session_key, reply_tx).await;
+        let apply_chat_template =
+            opts.get("apply_chat_template").and_then(|v| v.as_bool()).unwrap_or(false);
+        let chat_messages = extract_chat_messages(&opts);
+        self.handle_inference_stream(input, max_tokens, session_key, apply_chat_template, chat_messages, reply_tx).await;
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -391,6 +422,8 @@ impl LlamaWorker {
         input: Payload,
         max_tokens: usize,
         session_key: Option<String>,
+        apply_chat_template: bool,
+        chat_messages: Vec<LlamaChatMessage>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -408,7 +441,21 @@ impl LlamaWorker {
                 return;
             }
         };
-        let prompt = Self::apply_chat_template_if_possible(engine.as_ref(), &prompt);
+        let prompt = if apply_chat_template && !chat_messages.is_empty() {
+            let add_assistant = infer_add_assistant_prompt(&chat_messages);
+            match engine.apply_chat_template(&chat_messages, add_assistant) {
+                Ok(applied) => applied,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to apply embedded chat template; falling back to raw prompt"
+                    );
+                    prompt
+                }
+            }
+        } else {
+            Self::apply_chat_template_if_possible(engine.as_ref(), &prompt)
+        };
         let prepared =
             match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt).await {
                 Ok(v) => v,
@@ -446,6 +493,8 @@ impl LlamaWorker {
         input: Payload,
         max_tokens: usize,
         session_key: Option<String>,
+        apply_chat_template: bool,
+        chat_messages: Vec<LlamaChatMessage>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -463,7 +512,21 @@ impl LlamaWorker {
                 return;
             }
         };
-        let prompt = Self::apply_chat_template_if_possible(engine.as_ref(), prompt.as_ref());
+        let prompt = if apply_chat_template && !chat_messages.is_empty() {
+            let add_assistant = infer_add_assistant_prompt(&chat_messages);
+            match engine.apply_chat_template(&chat_messages, add_assistant) {
+                Ok(applied) => applied,
+                Err(e) => {
+                    tracing::warn!(
+                        error = %e,
+                        "failed to apply embedded chat template; falling back to raw prompt"
+                    );
+                    prompt.as_ref().to_owned()
+                }
+            }
+        } else {
+            Self::apply_chat_template_if_possible(engine.as_ref(), prompt.as_ref())
+        };
         let prepared =
             match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt).await {
                 Ok(v) => v,
@@ -571,9 +634,91 @@ pub(crate) fn spawn_backend_with_engine(
 
 #[cfg(test)]
 mod tests {
-    use super::{LlamaWorker, SessionBinding};
+    use super::{LlamaWorker, SessionBinding, extract_chat_messages, infer_add_assistant_prompt};
     use crate::internal::scheduler::backend::protocol::RuntimeControlSignal;
     use crate::internal::scheduler::types::Payload;
+
+    // ── infer_add_assistant_prompt ────────────────────────────────────────────
+
+    fn msg(role: &str, content: &str) -> super::LlamaChatMessage {
+        super::LlamaChatMessage { role: role.to_owned(), content: content.to_owned() }
+    }
+
+    #[test]
+    fn infer_add_assistant_returns_true_for_empty_messages() {
+        assert!(infer_add_assistant_prompt(&[]), "empty list should default to add_assistant=true");
+    }
+
+    #[test]
+    fn infer_add_assistant_returns_true_when_last_role_is_user() {
+        let messages = vec![msg("user", "hello")];
+        assert!(
+            infer_add_assistant_prompt(&messages),
+            "user-last messages should yield add_assistant=true"
+        );
+    }
+
+    #[test]
+    fn infer_add_assistant_returns_false_when_last_role_is_assistant() {
+        let messages = vec![msg("user", "hello"), msg("assistant", "hi there")];
+        assert!(
+            !infer_add_assistant_prompt(&messages),
+            "assistant-last messages (prefill) should yield add_assistant=false"
+        );
+    }
+
+    // ── extract_chat_messages ─────────────────────────────────────────────────
+
+    #[test]
+    fn extract_chat_messages_returns_empty_when_key_absent() {
+        let opts = serde_json::json!({ "other_key": "value" });
+        let result = extract_chat_messages(&opts);
+        assert!(result.is_empty(), "missing key should yield empty vec");
+    }
+
+    #[test]
+    fn extract_chat_messages_returns_empty_when_value_is_not_array() {
+        let opts = serde_json::json!({ "chat_messages": "not an array" });
+        let result = extract_chat_messages(&opts);
+        assert!(result.is_empty(), "non-array value should yield empty vec");
+    }
+
+    #[test]
+    fn extract_chat_messages_skips_malformed_entries() {
+        let opts = serde_json::json!({
+            "chat_messages": [
+                { "role": "user", "content": "hello" },
+                { "role": "user" },             // missing content → skipped
+                { "content": "no role" },       // missing role → skipped
+                42,                             // wrong type → skipped
+            ]
+        });
+        let result = extract_chat_messages(&opts);
+        assert_eq!(result.len(), 1);
+        assert_eq!(result[0].role, "user");
+        assert_eq!(result[0].content, "hello");
+    }
+
+    #[test]
+    fn extract_chat_messages_round_trips_valid_array() {
+        let opts = serde_json::json!({
+            "chat_messages": [
+                { "role": "system", "content": "You are a helpful assistant." },
+                { "role": "user", "content": "Hi!" },
+                { "role": "assistant", "content": "Hello there!" },
+            ]
+        });
+        let result = extract_chat_messages(&opts);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].role, "system");
+        assert_eq!(result[0].content, "You are a helpful assistant.");
+        assert_eq!(result[1].role, "user");
+        assert_eq!(result[1].content, "Hi!");
+        assert_eq!(result[2].role, "assistant");
+        assert_eq!(result[2].content, "Hello there!");
+    }
+
+    // ── LlamaWorker session management ────────────────────────────────────────
 
     #[tokio::test]
     async fn runtime_global_unload_clears_sessions() {

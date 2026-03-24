@@ -39,6 +39,11 @@ jobs:
 
       - name: Cache Cargo registry and target directories
         uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: copilot-linux-x86_64
+          cache-all-crates: "true"
+          cache-workspace-crates: "true"
+          cache-on-failure: "true"
 
       - name: Prefetch Rust dependencies
         run: cargo fetch

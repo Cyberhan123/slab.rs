@@ -12,12 +12,27 @@ service LlamaService {
   rpc ReloadLibrary(ReloadLibraryRequest) returns (ModelStatusResponse);
 }
 
+// A single structured chat message (role + content) used for chat-template
+// aware inference.  The backend passes these directly to the model's embedded
+// chat template when `apply_chat_template` is true.
+message ChatMessage {
+  string role = 1;
+  string content = 2;
+}
+
 message ChatRequest {
   string prompt = 1;
   string model = 2;
   uint32 max_tokens = 3;
   float temperature = 4;
   string session_key = 5;
+  // Structured conversation messages.  When non-empty and
+  // `apply_chat_template` is true the runtime passes these to the model's
+  // embedded chat template instead of using the raw `prompt` string.
+  repeated ChatMessage messages = 6;
+  // When true, the llama backend applies the model's own embedded chat
+  // template to `messages` and uses the result as the inference prompt.
+  bool apply_chat_template = 7;
 }
 
 message ChatResponse {

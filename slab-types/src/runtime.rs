@@ -145,7 +145,7 @@ impl ModelSpec {
     }
 }
 
-fn default_num_workers() -> u32 {
+const fn default_num_workers() -> u32 {
     1
 }
 
