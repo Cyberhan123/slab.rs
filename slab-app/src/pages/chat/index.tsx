@@ -727,7 +727,7 @@ function Chat() {
       return
     }
 
-    const session = await createEmptySession({ openSheet: true, select: true })
+    const session = await createEmptySession({ select: true })
     if (session) {
       setDraft("")
     }
@@ -821,7 +821,7 @@ function Chat() {
     <XProvider locale={locale}>
       <ChatContext.Provider value={{ onReload }}>
         <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--shell-card)]">
-          <div className="pointer-events-none absolute right-4 top-4 hidden xl:block">
+          <div className="pointer-events-none absolute right-4 top-4 z-20 hidden xl:block">
             <div className="pointer-events-auto">
               <ChatSessionSummaryCard
                 items={sessionSummaryItems}
@@ -853,7 +853,7 @@ function Chat() {
           </div>
 
           <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-8 pt-2 md:px-8 xl:px-0">
+            <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-24 pt-2 md:px-8 md:pb-28 xl:px-0">
               {isSessionBootstrapping || (isHistoryLoading && safeMessages.length === 0) ? (
                 <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
                   <div className="max-w-md space-y-3">
@@ -926,7 +926,6 @@ function Chat() {
               setCurConversation(key)
               setIsSessionSheetOpen(false)
             }}
-            onCreate={handleCreateConversation}
             onDelete={handleDeleteConversation}
           />
         </div>

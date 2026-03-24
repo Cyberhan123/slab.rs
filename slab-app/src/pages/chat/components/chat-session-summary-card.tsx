@@ -1,4 +1,4 @@
-import { FolderOpen, MessageSquareDot, Plus } from "lucide-react"
+import { FolderOpen, MessageSquareDot } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -37,8 +37,8 @@ export function ChatSessionSummaryCard({
           onClick={onNewSession}
           disabled={disableNewSession}
         >
-          <Plus className="size-3.5" />
-          <span className="sr-only">New session</span>
+          <MessageSquareDot className="size-3.5" />
+          <span className="sr-only">Create session</span>
         </Button>
       </div>
 
