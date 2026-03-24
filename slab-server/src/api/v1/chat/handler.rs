@@ -158,6 +158,9 @@ fn openai_error_response(error: ServerError) -> Response {
         ServerError::NotImplemented(message) => {
             (StatusCode::NOT_IMPLEMENTED, message, "invalid_request_error", Some("not_implemented"))
         }
+        ServerError::TooManyRequests(message) => {
+            (StatusCode::TOO_MANY_REQUESTS, message, "rate_limit_error", Some("too_many_requests"))
+        }
         ServerError::Runtime(_) | ServerError::Database(_) | ServerError::Internal(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal server error".to_owned(),

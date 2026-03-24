@@ -11,6 +11,7 @@ use crate::api::v1::agent::schema::{
     AgentInputRequest, AgentInputResponse, AgentShutdownResponse, AgentStatusResponse,
     SpawnAgentRequest, SpawnAgentResponse,
 };
+use crate::api::validation::ValidatedJson;
 use crate::context::AppState;
 use crate::domain::services::AgentService;
 use crate::error::ServerError;
@@ -56,7 +57,7 @@ pub fn router() -> Router<Arc<AppState>> {
 )]
 async fn spawn_agent(
     State(service): State<AgentService>,
-    Json(req): Json<SpawnAgentRequest>,
+    ValidatedJson(req): ValidatedJson<SpawnAgentRequest>,
 ) -> Result<(axum::http::StatusCode, Json<SpawnAgentResponse>), ServerError> {
     let messages: Vec<slab_types::ConversationMessage> =
         req.messages.into_iter().map(Into::into).collect();
@@ -74,8 +75,6 @@ async fn spawn_agent(
     ),
     request_body = AgentInputRequest,
     responses(
-        (status = 200, description = "Input accepted", body = AgentInputResponse),
-        (status = 404, description = "Thread not found"),
         (status = 501, description = "Not implemented"),
     )
 )]
@@ -83,12 +82,15 @@ async fn agent_input(
     State(_service): State<AgentService>,
     Path(_id): Path<String>,
     Json(_req): Json<AgentInputRequest>,
-) -> Result<Json<AgentInputResponse>, ServerError> {
-    Ok(Json(AgentInputResponse {
-        accepted: false,
-        message: "send_input is not yet implemented; the agent runs autonomously once spawned"
-            .into(),
-    }))
+) -> Result<(axum::http::StatusCode, Json<AgentInputResponse>), ServerError> {
+    Ok((
+        axum::http::StatusCode::NOT_IMPLEMENTED,
+        Json(AgentInputResponse {
+            accepted: false,
+            message: "send_input is not yet implemented; the agent runs autonomously once spawned"
+                .into(),
+        }),
+    ))
 }
 
 #[utoipa::path(

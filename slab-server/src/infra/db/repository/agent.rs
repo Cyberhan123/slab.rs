@@ -19,11 +19,15 @@ fn status_str(s: ThreadStatus) -> &'static str {
 
 fn parse_status(s: &str) -> ThreadStatus {
     match s {
+        "pending" => ThreadStatus::Pending,
         "running" => ThreadStatus::Running,
         "completed" => ThreadStatus::Completed,
         "errored" => ThreadStatus::Errored,
         "shutdown" => ThreadStatus::Shutdown,
-        _ => ThreadStatus::Pending,
+        other => {
+            tracing::warn!(raw = other, "unknown agent thread status in database; defaulting to Pending");
+            ThreadStatus::Pending
+        }
     }
 }
 
@@ -80,8 +84,14 @@ impl AgentStorePort for SqlxStore {
               completion_text, created_at, updated_at) \
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10) \
              ON CONFLICT(id) DO UPDATE SET \
+               session_id=excluded.session_id, \
+               parent_id=excluded.parent_id, \
+               depth=excluded.depth, \
                status=excluded.status, \
+               role_name=excluded.role_name, \
+               config_json=excluded.config_json, \
                completion_text=excluded.completion_text, \
+               created_at=excluded.created_at, \
                updated_at=excluded.updated_at",
         )
         .bind(&snapshot.id)
