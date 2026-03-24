@@ -159,9 +159,13 @@ pub fn encode_chat_request(
         model: model.into(),
         max_tokens: request.max_tokens.unwrap_or_default(),
         temperature: request.temperature.unwrap_or_default(),
+        top_p: request.top_p.unwrap_or_default(),
         session_key: request.session_key.clone().unwrap_or_default(),
         messages,
         apply_chat_template: request.apply_chat_template,
+        grammar: request.grammar.clone().unwrap_or_default(),
+        grammar_json: request.grammar_json,
+        grammar_tool_call: request.grammar_tool_call,
     }
 }
 
@@ -190,9 +194,12 @@ pub fn decode_chat_request(
         apply_chat_template: request.apply_chat_template,
         max_tokens: (request.max_tokens > 0).then_some(request.max_tokens),
         temperature: (request.temperature > 0.0).then_some(request.temperature),
-        top_p: None,
+        top_p: (request.top_p > 0.0).then_some(request.top_p),
         session_key: (!request.session_key.is_empty()).then_some(request.session_key.clone()),
         stream,
+        grammar: (!request.grammar.is_empty()).then_some(request.grammar.clone()),
+        grammar_json: request.grammar_json,
+        grammar_tool_call: request.grammar_tool_call,
         ..Default::default()
     })
 }

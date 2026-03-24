@@ -87,6 +87,19 @@ message ChatRequest {
   // When true, the llama backend applies the model's own embedded chat
   // template to `messages` and uses the result as the inference prompt.
   bool apply_chat_template = 7;
+  // Nucleus sampling probability mass.
+  // Values <= 0.0 are treated as unset (use backend default).
+  // Note: the same sentinel-value convention used by the `temperature` field.
+  float top_p = 8;
+  // Raw GBNF grammar string to constrain token sampling.
+  // Empty string means no grammar constraint.
+  string grammar = 9;
+  // When true, constrain output to well-formed JSON using the built-in JSON grammar.
+  // Ignored when `grammar` is non-empty.
+  bool grammar_json = 10;
+  // When true, constrain output to a tool-call envelope using the built-in grammar.
+  // Ignored when `grammar` is non-empty or `grammar_json` is true.
+  bool grammar_tool_call = 11;
 }
 
 message ChatResponse {
