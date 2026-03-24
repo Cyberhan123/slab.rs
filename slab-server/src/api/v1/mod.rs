@@ -1,3 +1,4 @@
+pub mod agent;
 pub mod audio;
 pub mod backend;
 pub mod chat;
@@ -25,6 +26,7 @@ pub struct V1Api;
 /// Routes nested under `/v1`.
 pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
     Router::new()
+        .merge(agent::router())
         .merge(chat::router())
         .merge(models::router())
         .merge(session::router())
@@ -41,6 +43,7 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
 
 pub fn api_docs() -> utoipa::openapi::OpenApi {
     let mut spec = V1Api::openapi();
+    spec.merge(agent::AgentApi::openapi());
     spec.merge(chat::ChatApi::openapi());
     spec.merge(models::ModelsApi::openapi());
     spec.merge(session::SessionApi::openapi());

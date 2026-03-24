@@ -7944,6 +7944,7 @@ version = "0.0.1"
 dependencies = [
  "all-smi",
  "anyhow",
+ "async-trait",
  "axum 0.8.8",
  "base64 0.22.1",
  "bytemuck",
@@ -7964,6 +7965,7 @@ dependencies = [
  "reqwest 0.13.2",
  "serde",
  "serde_json",
+ "slab-agent",
  "slab-core",
  "slab-libfetch",
  "slab-proto",
