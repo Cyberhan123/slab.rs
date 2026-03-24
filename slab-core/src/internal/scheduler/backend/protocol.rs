@@ -136,8 +136,6 @@ pub enum RuntimeControlSignal {
     GlobalUnload { op_id: u64 },
 }
 
-impl RuntimeControlSignal {}
-
 /// Unified control-bus command type for backend worker control channels.
 #[derive(Clone, Debug)]
 pub enum WorkerCommand {

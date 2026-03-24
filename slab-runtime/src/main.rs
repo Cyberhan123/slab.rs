@@ -106,17 +106,22 @@ impl EnabledBackends {
 
 impl std::fmt::Display for EnabledBackends {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut names = Vec::new();
-        if self.llama {
-            names.push("llama");
+        let mut first = true;
+        for name in [
+            self.llama.then_some("llama"),
+            self.whisper.then_some("whisper"),
+            self.diffusion.then_some("diffusion"),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            if !first {
+                f.write_str(",")?;
+            }
+            f.write_str(name)?;
+            first = false;
         }
-        if self.whisper {
-            names.push("whisper");
-        }
-        if self.diffusion {
-            names.push("diffusion");
-        }
-        f.write_str(&names.join(","))
+        Ok(())
     }
 }
 
@@ -155,6 +160,8 @@ fn init_tracing(
     log_json: bool,
     log_file: Option<&Path>,
 ) -> anyhow::Result<Vec<WorkerGuard>> {
+    use tracing_subscriber::Layer;
+
     let env_filter = match tracing_subscriber::EnvFilter::try_from_default_env() {
         Ok(f) => f,
         Err(_) => match log_level.parse::<tracing_subscriber::EnvFilter>() {
@@ -166,7 +173,17 @@ fn init_tracing(
         },
     };
 
+    let stdout_layer: Box<dyn Layer<_> + Send + Sync> = if log_json {
+        Box::new(
+            tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true),
+        )
+    } else {
+        Box::new(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
+    };
+
     let mut guards = Vec::new();
+
+    let registry = tracing_subscriber::registry().with(env_filter).with(stdout_layer);
 
     if let Some(path) = log_file {
         if let Some(parent) = path.parent() {
@@ -181,44 +198,28 @@ fn init_tracing(
         let (file_writer, guard) = tracing_appender::non_blocking(file);
         guards.push(guard);
 
-        if log_json {
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(
-                    tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true),
-                )
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .json()
-                        .with_ansi(false)
-                        .with_target(true)
-                        .with_thread_ids(true)
-                        .with_writer(file_writer),
-                )
-                .init();
+        let file_layer: Box<dyn Layer<_> + Send + Sync> = if log_json {
+            Box::new(
+                tracing_subscriber::fmt::layer()
+                    .json()
+                    .with_ansi(false)
+                    .with_target(true)
+                    .with_thread_ids(true)
+                    .with_writer(file_writer),
+            )
         } else {
-            tracing_subscriber::registry()
-                .with(env_filter)
-                .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
-                .with(
-                    tracing_subscriber::fmt::layer()
-                        .with_ansi(false)
-                        .with_target(true)
-                        .with_thread_ids(true)
-                        .with_writer(file_writer),
-                )
-                .init();
-        }
-    } else if log_json {
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true))
-            .init();
+            Box::new(
+                tracing_subscriber::fmt::layer()
+                    .with_ansi(false)
+                    .with_target(true)
+                    .with_thread_ids(true)
+                    .with_writer(file_writer),
+            )
+        };
+
+        registry.with(file_layer).init();
     } else {
-        tracing_subscriber::registry()
-            .with(env_filter)
-            .with(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
-            .init();
+        registry.init();
     }
 
     Ok(guards)
