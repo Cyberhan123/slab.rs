@@ -548,9 +548,10 @@ mod tests {
     fn encode_text_generation_request_includes_chat_messages_when_flag_set() {
         let request = TextGenerationRequest {
             prompt: "fallback".to_owned(),
-            chat_messages: vec![
-                ConversationMessage { role: "user".to_owned(), content: "hello".to_owned() },
-            ],
+            chat_messages: vec![ConversationMessage {
+                role: "user".to_owned(),
+                content: "hello".to_owned(),
+            }],
             apply_chat_template: true,
             ..Default::default()
         };
@@ -579,9 +580,10 @@ mod tests {
     fn encode_text_generation_request_omits_chat_fields_when_flag_false() {
         let request = TextGenerationRequest {
             prompt: "just a prompt".to_owned(),
-            chat_messages: vec![
-                ConversationMessage { role: "user".to_owned(), content: "hi".to_owned() },
-            ],
+            chat_messages: vec![ConversationMessage {
+                role: "user".to_owned(),
+                content: "hi".to_owned(),
+            }],
             apply_chat_template: false,
             ..Default::default()
         };
@@ -701,10 +703,7 @@ mod tests {
 
     #[test]
     fn encode_text_generation_request_grammar_flags_absent_when_not_set() {
-        let request = TextGenerationRequest {
-            prompt: "hi".to_owned(),
-            ..Default::default()
-        };
+        let request = TextGenerationRequest { prompt: "hi".to_owned(), ..Default::default() };
         let driver = make_llama_driver();
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");

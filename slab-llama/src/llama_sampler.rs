@@ -316,9 +316,7 @@ impl SamplerChainBuilder {
         // NOTE: The grammar must define a `root` rule, which is used here as the
         // start symbol.  If the grammar does not contain `root ::= ...`, grammar
         // initialization will fail and we fall back to unconstrained sampling.
-        if !grammar_str.is_empty()
-            && !chain.try_add_grammar(vocab, grammar_str, "root")
-        {
+        if !grammar_str.is_empty() && !chain.try_add_grammar(vocab, grammar_str, "root") {
             let grammar_len = grammar_str.chars().count();
             let grammar_preview: String = grammar_str.chars().take(200).collect();
             tracing::warn!(
