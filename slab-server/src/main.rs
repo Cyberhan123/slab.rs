@@ -202,11 +202,10 @@ fn init_tracing(
             })?;
         }
 
-        let file = OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .with_context(|| format!("failed to open slab-server log file '{}'", path.display()))?;
+        let file =
+            OpenOptions::new().create(true).append(true).open(path).with_context(|| {
+                format!("failed to open slab-server log file '{}'", path.display())
+            })?;
         let (file_writer, guard) = tracing_appender::non_blocking(file);
         guards.push(guard);
 

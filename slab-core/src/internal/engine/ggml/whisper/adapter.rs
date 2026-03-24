@@ -1,4 +1,8 @@
 use crate::internal::engine;
+use slab_subtitle::{
+    timetypes::{TimePoint, TimeSpan},
+    SubtitleEntry,
+};
 use slab_whisper::{
     SamplingStrategy, Whisper, WhisperContext, WhisperContextParameters, WhisperError,
     WhisperVadParams,
@@ -7,10 +11,6 @@ use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use slab_subtitle::{
-    timetypes::{TimePoint, TimeSpan},
-    SubtitleEntry,
-};
 use thiserror::Error;
 use tracing::info;
 

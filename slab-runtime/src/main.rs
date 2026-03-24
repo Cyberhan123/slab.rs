@@ -174,9 +174,7 @@ fn init_tracing(
     };
 
     let stdout_layer: Box<dyn Layer<_> + Send + Sync> = if log_json {
-        Box::new(
-            tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true),
-        )
+        Box::new(tracing_subscriber::fmt::layer().json().with_target(true).with_thread_ids(true))
     } else {
         Box::new(tracing_subscriber::fmt::layer().with_target(true).with_thread_ids(true))
     };

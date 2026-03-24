@@ -280,7 +280,16 @@ impl LlamaWorker {
             opts.get("apply_chat_template").and_then(|v| v.as_bool()).unwrap_or(false);
         let chat_messages = extract_chat_messages(&opts);
         let grammar = resolve_grammar(&opts);
-        self.handle_inference(input, max_tokens, session_key, apply_chat_template, chat_messages, grammar, reply_tx).await;
+        self.handle_inference(
+            input,
+            max_tokens,
+            session_key,
+            apply_chat_template,
+            chat_messages,
+            grammar,
+            reply_tx,
+        )
+        .await;
     }
 
     #[on_event(InferenceStream)]
@@ -301,7 +310,16 @@ impl LlamaWorker {
             opts.get("apply_chat_template").and_then(|v| v.as_bool()).unwrap_or(false);
         let chat_messages = extract_chat_messages(&opts);
         let grammar = resolve_grammar(&opts);
-        self.handle_inference_stream(input, max_tokens, session_key, apply_chat_template, chat_messages, grammar, reply_tx).await;
+        self.handle_inference_stream(
+            input,
+            max_tokens,
+            session_key,
+            apply_chat_template,
+            chat_messages,
+            grammar,
+            reply_tx,
+        )
+        .await;
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -358,12 +376,8 @@ impl LlamaWorker {
             // sampler chain.  If the same key is later reused with a different
             // grammar the session is reset (stale_sid path above) and a fresh
             // session with the new grammar is created here.
-            sid = Some(
-                engine
-                    .create_session_with_grammar(grammar)
-                    .await
-                    .map_err(|e| e.to_string())?,
-            );
+            sid =
+                Some(engine.create_session_with_grammar(grammar).await.map_err(|e| e.to_string())?);
             delta_prompt = full_prompt.clone();
         }
 
@@ -560,14 +574,16 @@ impl LlamaWorker {
         } else {
             Self::apply_chat_template_if_possible(engine.as_ref(), &prompt)
         };
-        let prepared =
-            match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt, grammar.clone()).await {
-                Ok(v) => v,
-                Err(e) => {
-                    let _ = reply_tx.send(BackendReply::Error(e));
-                    return;
-                }
-            };
+        let prepared = match self
+            .prepare_session(engine.as_ref(), session_key.as_deref(), prompt, grammar.clone())
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e));
+                return;
+            }
+        };
 
         match engine.inference(&prepared.delta_prompt, max_tokens, prepared.sid, grammar).await {
             Ok(text) => {
@@ -632,14 +648,16 @@ impl LlamaWorker {
         } else {
             Self::apply_chat_template_if_possible(engine.as_ref(), prompt.as_ref())
         };
-        let prepared =
-            match self.prepare_session(engine.as_ref(), session_key.as_deref(), prompt, grammar.clone()).await {
-                Ok(v) => v,
-                Err(e) => {
-                    let _ = reply_tx.send(BackendReply::Error(e));
-                    return;
-                }
-            };
+        let prepared = match self
+            .prepare_session(engine.as_ref(), session_key.as_deref(), prompt, grammar.clone())
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e));
+                return;
+            }
+        };
 
         let (proto_tx, proto_rx) = mpsc::channel::<StreamChunk>(64);
         let _ = reply_tx.send(BackendReply::Stream(proto_rx));
@@ -739,7 +757,10 @@ pub(crate) fn spawn_backend_with_engine(
 
 #[cfg(test)]
 mod tests {
-    use super::{LlamaWorker, SessionBinding, extract_chat_messages, infer_add_assistant_prompt, resolve_grammar};
+    use super::{
+        extract_chat_messages, infer_add_assistant_prompt, resolve_grammar, LlamaWorker,
+        SessionBinding,
+    };
     use crate::internal::scheduler::backend::protocol::RuntimeControlSignal;
     use crate::internal::scheduler::types::Payload;
 
@@ -888,10 +909,7 @@ mod tests {
         let opts = serde_json::json!({ "grammar_json": true });
         let result = resolve_grammar(&opts);
         assert!(result.is_some(), "grammar_json=true should yield Some");
-        assert!(
-            result.unwrap().contains("root"),
-            "JSON grammar should contain a root rule"
-        );
+        assert!(result.unwrap().contains("root"), "JSON grammar should contain a root rule");
     }
 
     #[test]

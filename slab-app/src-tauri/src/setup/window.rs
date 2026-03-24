@@ -2,8 +2,8 @@ use tauri::Manager;
 use tauri_plugin_decorum::WebviewWindowExt;
 
 pub fn setup_windows(app: &mut tauri::App) -> tauri::Result<()> {
-     let main_window = app.get_webview_window("main").unwrap();
-     main_window.create_overlay_titlebar().unwrap();
+    let main_window = app.get_webview_window("main").unwrap();
+    main_window.create_overlay_titlebar().unwrap();
     // Some macOS-specific helpers
     #[cfg(target_os = "macos")]
     {

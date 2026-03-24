@@ -31,10 +31,7 @@ enum GlobalCommand {
         reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
     #[allow(dead_code)]
-    Cancel {
-        session_id: SessionId,
-        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
-    },
+    Cancel { session_id: SessionId, reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>> },
 }
 
 /// Consumes the global ingress queue and routes commands to inference workers.
@@ -63,7 +60,11 @@ impl MasterWorkerState {
 
                     let (ack_tx, ack_rx) = oneshot::channel();
                     if self.worker_txs[worker_id]
-                        .send(WorkerCommand::CreateSession { session_id, grammar, reply_tx: ack_tx })
+                        .send(WorkerCommand::CreateSession {
+                            session_id,
+                            grammar,
+                            reply_tx: ack_tx,
+                        })
                         .await
                         .is_err()
                     {

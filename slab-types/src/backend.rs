@@ -104,10 +104,7 @@ mod tests {
 
     #[test]
     fn parses_short_backend_aliases() {
-        assert_eq!(
-            RuntimeBackendId::from_str("ggml-llama").unwrap(),
-            RuntimeBackendId::GgmlLlama
-        );
+        assert_eq!(RuntimeBackendId::from_str("ggml-llama").unwrap(), RuntimeBackendId::GgmlLlama);
         assert_eq!(
             RuntimeBackendId::from_str("ggml-whisper").unwrap(),
             RuntimeBackendId::GgmlWhisper

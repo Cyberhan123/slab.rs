@@ -1,4 +1,4 @@
-import { MoreHorizontal, Trash2 } from "lucide-react"
+import { MoreHorizontal, Plus, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -31,6 +31,7 @@ type ChatSessionSheetProps = {
   currentConversation: string
   activeConversation?: string
   onSelect: (key: string) => void
+  onCreate: () => void
   onDelete: (key: string) => void
 }
 
@@ -41,6 +42,7 @@ export function ChatSessionSheet({
   currentConversation,
   activeConversation,
   onSelect,
+  onCreate,
   onDelete,
 }: ChatSessionSheetProps) {
   return (
@@ -57,6 +59,10 @@ export function ChatSessionSheet({
                 Create, switch, and clean up conversations without leaving the chat stage.
               </SheetDescription>
             </div>
+            <Button variant="outline" size="sm" className="shrink-0" onClick={onCreate}>
+              <Plus className="size-4" />
+              New chat
+            </Button>
           </div>
         </SheetHeader>
 

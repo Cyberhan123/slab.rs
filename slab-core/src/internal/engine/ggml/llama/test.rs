@@ -55,7 +55,8 @@ async fn make_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
 async fn test_llama_inference() {
     let service = make_service(1).await;
 
-    let result = service.inference("Hello, my name is", 64, None, None).await.expect("inference failed");
+    let result =
+        service.inference("Hello, my name is", 64, None, None).await.expect("inference failed");
 
     println!("Generated: {result}");
     assert!(!result.is_empty(), "expected non-empty output");
@@ -246,8 +247,7 @@ fn llama_lib_dir() -> PathBuf {
 /// Return the path to the small test model bundled in `testdata/llama/models`.
 #[cfg(target_os = "linux")]
 fn local_model_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../testdata/llama/models/stories15M.Q4_0.gguf")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../testdata/llama/models/stories15M.Q4_0.gguf")
 }
 
 /// Load the llama dynamic library from the local testdata directory directly.
@@ -343,9 +343,7 @@ fn test_tokenize_roundtrip() {
     assert!(!tokens.is_empty(), "tokenization should produce at least one token");
     println!("Token ids: {tokens:?}");
 
-    let roundtrip = model
-        .tokens_to_str(&tokens, false, false)
-        .expect("detokenize failed");
+    let roundtrip = model.tokens_to_str(&tokens, false, false).expect("detokenize failed");
     assert!(!roundtrip.is_empty(), "detokenized text should not be empty");
 
     // The roundtrip is allowed to differ in leading whitespace/casing but must
@@ -505,9 +503,7 @@ async fn test_chat_template_format() {
     match service.apply_chat_template(&messages, true) {
         Err(e) => {
             // stories-15M has no embedded chat template; this branch is expected.
-            println!(
-                "Model has no embedded chat template (expected for stories-15M); error: {e}"
-            );
+            println!("Model has no embedded chat template (expected for stories-15M); error: {e}");
         }
         Ok(formatted) => {
             panic!(
@@ -528,8 +524,7 @@ async fn test_kv_cache_multiturn_local() {
     let sid = service.create_session().await.expect("create_session failed");
 
     service.append_input(sid, "Once upon a time".to_string()).await.expect("first append failed");
-    let mut stream1 =
-        service.generate_stream(sid, 16).await.expect("first generate_stream failed");
+    let mut stream1 = service.generate_stream(sid, 16).await.expect("first generate_stream failed");
     let mut turn1 = String::new();
     while let Some(chunk) = stream1.recv().await {
         match chunk {
