@@ -135,6 +135,53 @@ impl LlamaSampler {
         self
     }
 
+    /// Attempt to add a GBNF grammar sampler to the chain.
+    ///
+    /// The grammar sampler is inserted at the current tail of the chain and
+    /// will filter logits so that only tokens valid according to the grammar
+    /// can be selected by the final decision sampler.
+    ///
+    /// Returns `true` when the grammar sampler was added successfully.
+    ///
+    /// Returns `false` in two cases:
+    /// * when converting `grammar_str` or `grammar_root` to a `CString` fails
+    ///   (i.e. either string contains an interior NUL byte), or
+    /// * when `llama_sampler_init_grammar` returns `NULL` (e.g. invalid GBNF
+    ///   string or unsupported runtime).
+    ///
+    /// An empty `grammar_str` does not cause `llama_sampler_init_grammar` to
+    /// return `NULL`; instead, it produces an empty grammar sampler.  In that
+    /// case this method returns `true`, but sampling remains effectively
+    /// unconstrained by grammar.
+    ///
+    /// On any failure the chain is left unchanged and unconstrained sampling
+    /// continues normally.
+    ///
+    /// # Safety
+    /// `vocab` must be a valid, non-null pointer obtained from
+    /// `llama_model_get_vocab` and must outlive this sampler chain.
+    pub fn try_add_grammar(
+        &mut self,
+        vocab: *const slab_llama_sys::llama_vocab,
+        grammar_str: &str,
+        grammar_root: &str,
+    ) -> bool {
+        let Ok(c_grammar) = std::ffi::CString::new(grammar_str) else {
+            return false;
+        };
+        let Ok(c_root) = std::ffi::CString::new(grammar_root) else {
+            return false;
+        };
+        let s = unsafe {
+            self.lib.llama_sampler_init_grammar(vocab, c_grammar.as_ptr(), c_root.as_ptr())
+        };
+        if s.is_null() {
+            return false;
+        }
+        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        true
+    }
+
     /// Sample the next token from the context at position `idx` in the last
     /// decoded batch.
     ///
@@ -227,6 +274,60 @@ impl SamplerChainBuilder {
         chain = chain.add_temp(self.temperature);
         chain = chain.add_dist(self.seed);
 
+        chain
+    }
+
+    /// Build a [`LlamaSampler`] chain with an optional GBNF grammar constraint.
+    ///
+    /// The grammar sampler is inserted after the temperature sampler and
+    /// before the final distribution sampler so that the grammar filters
+    /// logits on the already-shaped distribution.
+    ///
+    /// If `grammar_str` is non-empty and grammar initialisation fails (e.g.
+    /// invalid GBNF, null vocab pointer, or unsupported runtime) a warning is
+    /// logged and the chain falls back to standard unconstrained sampling.
+    ///
+    /// # Safety
+    /// `vocab` must be a valid, non-null pointer that outlives this sampler chain.
+    pub fn build_with_grammar(
+        self,
+        vocab: *const slab_llama_sys::llama_vocab,
+        grammar_str: &str,
+    ) -> LlamaSampler {
+        let mut chain = LlamaSampler::chain_new(Arc::clone(&self.lib));
+
+        if self.repeat_penalty != 1.0 || self.repeat_last_n != 0 {
+            chain = chain.add_penalties(self.repeat_last_n, self.repeat_penalty, 0.0, 0.0);
+        }
+        if self.top_k > 0 {
+            chain = chain.add_top_k(self.top_k);
+        }
+        if self.top_p < 1.0 {
+            chain = chain.add_top_p(self.top_p, 1);
+        }
+        if self.min_p > 0.0 {
+            chain = chain.add_min_p(self.min_p, 1);
+        }
+        chain = chain.add_temp(self.temperature);
+
+        // Grammar sampler: filters logits so only grammar-valid tokens survive,
+        // placed after temperature shaping and before the final selection step.
+        //
+        // NOTE: The grammar must define a `root` rule, which is used here as the
+        // start symbol.  If the grammar does not contain `root ::= ...`, grammar
+        // initialization will fail and we fall back to unconstrained sampling.
+        if !grammar_str.is_empty() && !chain.try_add_grammar(vocab, grammar_str, "root") {
+            let grammar_len = grammar_str.chars().count();
+            let grammar_preview: String = grammar_str.chars().take(200).collect();
+            tracing::warn!(
+                grammar_len,
+                grammar_preview = grammar_preview.as_str(),
+                "GBNF grammar initialization failed (e.g., missing or invalid `root` rule); \
+                 falling back to unconstrained sampling"
+            );
+        }
+
+        chain = chain.add_dist(self.seed);
         chain
     }
 }

@@ -41,7 +41,7 @@ pub(super) async fn create_chat_completion(
         top_p: None,
         session_key: session_id.map(str::to_owned),
         stream,
-        options: Default::default(),
+        ..Default::default()
     };
     let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
 

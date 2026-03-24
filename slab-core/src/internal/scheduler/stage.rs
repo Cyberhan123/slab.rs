@@ -67,20 +67,17 @@ impl CpuStage {
     pub async fn run(&self, input: Payload) -> Result<Payload, CoreError> {
         let work = Arc::clone(&self.work);
         let name = self.name.clone();
-        let result = tokio::task::spawn_blocking(move || work(input))
-            .await
-            .map_err(|_| CoreError::CpuStageFailed {
+        let result = tokio::task::spawn_blocking(move || work(input)).await.map_err(|_| {
+            CoreError::CpuStageFailed {
                 stage_name: name.clone(),
                 message: "spawn_blocking task panicked".into(),
-            })?;
+            }
+        })?;
         // Attach stage context to any error that does not already carry it so
         // that callers can always identify which stage failed.
         result.map_err(|e| match e {
             CoreError::CpuStageFailed { .. } => e,
-            other => CoreError::CpuStageFailed {
-                stage_name: name,
-                message: other.to_string(),
-            },
+            other => CoreError::CpuStageFailed { stage_name: name, message: other.to_string() },
         })
     }
 }

@@ -38,6 +38,31 @@ pub struct TextGenerationRequest {
     pub session_key: Option<String>,
     #[serde(default)]
     pub stream: bool,
+    /// Raw GBNF grammar string to constrain token sampling.
+    ///
+    /// When set, the llama backend injects a grammar sampler into the
+    /// sampling chain so that every generated token is guaranteed to be valid
+    /// according to the grammar.  If grammar initialization fails for any
+    /// reason (invalid GBNF, unsupported backend, etc.) a warning is logged
+    /// and generation falls back to unconstrained sampling.
+    ///
+    /// Takes precedence over `grammar_json` and `grammar_tool_call`.
+    #[serde(default)]
+    pub grammar: Option<String>,
+    /// When `true`, apply the built-in JSON grammar so the model output is
+    /// constrained to well-formed JSON.
+    ///
+    /// Ignored when `grammar` is also set.  Falls back to unconstrained
+    /// sampling if grammar initialization fails.
+    #[serde(default)]
+    pub grammar_json: bool,
+    /// When `true`, apply the built-in tool-call envelope grammar which
+    /// constrains output to `{"tool":"<name>","arguments":{...}}`.
+    ///
+    /// Ignored when `grammar` or `grammar_json` is set.  Falls back to
+    /// unconstrained sampling if grammar initialization fails.
+    #[serde(default)]
+    pub grammar_tool_call: bool,
     #[serde(default)]
     pub options: JsonOptions,
 }

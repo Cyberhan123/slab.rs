@@ -123,6 +123,15 @@ pub(crate) fn encode_text_generation_request(
         options.insert("chat_messages".to_owned(), Value::Array(messages_json));
     }
 
+    // Transport grammar constraint fields to the backend.
+    insert_option(&mut options, "grammar", request.grammar.clone());
+    if request.grammar_json {
+        insert_option(&mut options, "grammar_json", true);
+    }
+    if request.grammar_tool_call {
+        insert_option(&mut options, "grammar_tool_call", true);
+    }
+
     Ok((input, Payload::Json(Value::Object(options))))
 }
 
@@ -539,9 +548,10 @@ mod tests {
     fn encode_text_generation_request_includes_chat_messages_when_flag_set() {
         let request = TextGenerationRequest {
             prompt: "fallback".to_owned(),
-            chat_messages: vec![
-                ConversationMessage { role: "user".to_owned(), content: "hello".to_owned() },
-            ],
+            chat_messages: vec![ConversationMessage {
+                role: "user".to_owned(),
+                content: "hello".to_owned(),
+            }],
             apply_chat_template: true,
             ..Default::default()
         };
@@ -570,9 +580,10 @@ mod tests {
     fn encode_text_generation_request_omits_chat_fields_when_flag_false() {
         let request = TextGenerationRequest {
             prompt: "just a prompt".to_owned(),
-            chat_messages: vec![
-                ConversationMessage { role: "user".to_owned(), content: "hi".to_owned() },
-            ],
+            chat_messages: vec![ConversationMessage {
+                role: "user".to_owned(),
+                content: "hi".to_owned(),
+            }],
             apply_chat_template: false,
             ..Default::default()
         };
@@ -619,6 +630,92 @@ mod tests {
         assert!(
             opts.get("chat_messages").is_none(),
             "chat_messages should be absent when messages list is empty"
+        );
+    }
+
+    // ── grammar encoding ──────────────────────────────────────────────────────
+
+    #[test]
+    fn encode_text_generation_request_includes_raw_grammar() {
+        let gbnf = "root ::= \"hello\"";
+        let request = TextGenerationRequest {
+            prompt: "hi".to_owned(),
+            grammar: Some(gbnf.to_owned()),
+            ..Default::default()
+        };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+        assert_eq!(
+            opts.get("grammar").and_then(|v| v.as_str()),
+            Some(gbnf),
+            "raw grammar string should be present in options"
+        );
+        assert!(opts.get("grammar_json").is_none(), "grammar_json should be absent");
+        assert!(opts.get("grammar_tool_call").is_none(), "grammar_tool_call should be absent");
+    }
+
+    #[test]
+    fn encode_text_generation_request_includes_grammar_json_flag() {
+        let request = TextGenerationRequest {
+            prompt: "hi".to_owned(),
+            grammar_json: true,
+            ..Default::default()
+        };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+        assert_eq!(
+            opts.get("grammar_json").and_then(|v| v.as_bool()),
+            Some(true),
+            "grammar_json flag should be present in options"
+        );
+    }
+
+    #[test]
+    fn encode_text_generation_request_includes_grammar_tool_call_flag() {
+        let request = TextGenerationRequest {
+            prompt: "hi".to_owned(),
+            grammar_tool_call: true,
+            ..Default::default()
+        };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+        assert_eq!(
+            opts.get("grammar_tool_call").and_then(|v| v.as_bool()),
+            Some(true),
+            "grammar_tool_call flag should be present in options"
+        );
+    }
+
+    #[test]
+    fn encode_text_generation_request_grammar_flags_absent_when_not_set() {
+        let request = TextGenerationRequest { prompt: "hi".to_owned(), ..Default::default() };
+        let driver = make_llama_driver();
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &driver).expect("encode should succeed");
+        let opts = match opts_payload {
+            Payload::Json(Value::Object(m)) => m,
+            other => panic!("expected JSON object options, got {other:?}"),
+        };
+        assert!(opts.get("grammar").is_none(), "grammar should be absent when not set");
+        assert!(opts.get("grammar_json").is_none(), "grammar_json should be absent when false");
+        assert!(
+            opts.get("grammar_tool_call").is_none(),
+            "grammar_tool_call should be absent when false"
         );
     }
 

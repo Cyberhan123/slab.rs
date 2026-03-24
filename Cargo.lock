@@ -7869,6 +7869,7 @@ dependencies = [
  "libloading 0.8.9",
  "slab-llama-sys",
  "thiserror 2.0.18",
+ "tracing",
 ]
 
 [[package]]

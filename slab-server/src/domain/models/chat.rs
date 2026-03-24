@@ -1,4 +1,6 @@
-pub use slab_types::chat::{ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationMessage};
+pub use slab_types::chat::{
+    ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationMessage,
+};
 
 use crate::api::v1::chat::schema::{
     ChatCompletionRequest, ChatMessage, ChatReasoningEffort as ApiChatReasoningEffort,

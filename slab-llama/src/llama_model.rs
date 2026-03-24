@@ -387,6 +387,25 @@ impl LlamaModel {
         SamplerChainBuilder::new(Arc::clone(&self.inner.lib)).build()
     }
 
+    /// Create a sampler chain with an optional GBNF grammar constraint.
+    ///
+    /// When `grammar` is `Some(gbnf)` the grammar sampler is inserted into the
+    /// chain after the temperature sampler and before the final distribution
+    /// sampler.  If grammar initialisation fails (invalid GBNF, null vocab, or
+    /// unsupported runtime) a warning is logged and the chain falls back to
+    /// standard unconstrained sampling — identical to calling [`new_sampler`].
+    ///
+    /// When `grammar` is `None` this is equivalent to [`new_sampler`].
+    ///
+    /// [`new_sampler`]: LlamaModel::new_sampler
+    pub fn new_sampler_with_grammar(&self, grammar: Option<&str>) -> LlamaSampler {
+        match grammar {
+            None | Some("") => SamplerChainBuilder::new(Arc::clone(&self.inner.lib)).build(),
+            Some(grammar_str) => SamplerChainBuilder::new(Arc::clone(&self.inner.lib))
+                .build_with_grammar(self.vocab(), grammar_str),
+        }
+    }
+
     /// Retrieve a metadata value by key.
     ///
     /// # Returns

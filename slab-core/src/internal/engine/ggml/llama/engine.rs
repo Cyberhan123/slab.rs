@@ -11,6 +11,8 @@ use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 /// Commands sent by API callers to the global ingress queue (master worker).
 enum GlobalCommand {
     CreateSession {
+        /// Optional GBNF grammar string forwarded to the sampler builder.
+        grammar: Option<String>,
         reply_tx: oneshot::Sender<Result<SessionId, GGMLLlamaEngineError>>,
     },
     AppendInput {
@@ -29,10 +31,7 @@ enum GlobalCommand {
         reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
     },
     #[allow(dead_code)]
-    Cancel {
-        session_id: SessionId,
-        reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>>,
-    },
+    Cancel { session_id: SessionId, reply_tx: oneshot::Sender<Result<(), GGMLLlamaEngineError>> },
 }
 
 /// Consumes the global ingress queue and routes commands to inference workers.
@@ -53,7 +52,7 @@ impl MasterWorkerState {
     async fn run(mut self) {
         while let Some(cmd) = self.global_rx.recv().await {
             match cmd {
-                GlobalCommand::CreateSession { reply_tx } => {
+                GlobalCommand::CreateSession { grammar, reply_tx } => {
                     let session_id = self.next_session_id;
                     self.next_session_id += 1;
                     let worker_id = self.next_worker % self.worker_txs.len();
@@ -61,7 +60,11 @@ impl MasterWorkerState {
 
                     let (ack_tx, ack_rx) = oneshot::channel();
                     if self.worker_txs[worker_id]
-                        .send(WorkerCommand::CreateSession { session_id, reply_tx: ack_tx })
+                        .send(WorkerCommand::CreateSession {
+                            session_id,
+                            grammar,
+                            reply_tx: ack_tx,
+                        })
                         .await
                         .is_err()
                     {
@@ -312,9 +315,22 @@ impl LlamaInferenceEngine {
     ///
     /// Returns the [`SessionId`] to use in subsequent API calls.
     pub(super) async fn create_session(&self) -> Result<SessionId, GGMLLlamaEngineError> {
+        self.create_session_with_grammar(None).await
+    }
+
+    /// Create a new inference session with an optional GBNF grammar constraint.
+    ///
+    /// When `grammar` is `Some(gbnf)` the per-session sampler chain is built
+    /// with the grammar sampler injected before the final distribution sampler.
+    /// If grammar initialisation fails the sampler falls back to unconstrained
+    /// sampling (a warning is emitted by the worker).
+    pub(super) async fn create_session_with_grammar(
+        &self,
+        grammar: Option<String>,
+    ) -> Result<SessionId, GGMLLlamaEngineError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
-            .send(GlobalCommand::CreateSession { reply_tx })
+            .send(GlobalCommand::CreateSession { grammar, reply_tx })
             .await
             .map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?;
         reply_rx.await.map_err(|_| GGMLLlamaEngineError::WorkerShutdown)?

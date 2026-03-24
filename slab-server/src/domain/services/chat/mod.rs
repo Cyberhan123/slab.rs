@@ -322,5 +322,4 @@ mod test {
         assert_eq!(choice["delta"]["content"], "Hello");
         assert!(choice["finish_reason"].is_null());
     }
-
 }

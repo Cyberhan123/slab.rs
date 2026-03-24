@@ -47,7 +47,10 @@ fn split_prefill(
     }
 }
 
-fn render_simple(messages: &[DomainConversationMessage], assistant_prefill: Option<&str>) -> String {
+fn render_simple(
+    messages: &[DomainConversationMessage],
+    assistant_prefill: Option<&str>,
+) -> String {
     let mut parts: Vec<String> = messages
         .iter()
         .map(|message| format!("{}: {}", capitalize_role(&message.role), message.content))
@@ -63,7 +66,10 @@ fn render_simple(messages: &[DomainConversationMessage], assistant_prefill: Opti
     parts.join("\n")
 }
 
-fn render_chatml(messages: &[DomainConversationMessage], assistant_prefill: Option<&str>) -> String {
+fn render_chatml(
+    messages: &[DomainConversationMessage],
+    assistant_prefill: Option<&str>,
+) -> String {
     let mut prompt = String::new();
     for message in messages {
         prompt.push_str("<|im_start|>");
@@ -79,7 +85,10 @@ fn render_chatml(messages: &[DomainConversationMessage], assistant_prefill: Opti
     prompt
 }
 
-fn render_llama3(messages: &[DomainConversationMessage], assistant_prefill: Option<&str>) -> String {
+fn render_llama3(
+    messages: &[DomainConversationMessage],
+    assistant_prefill: Option<&str>,
+) -> String {
     let mut prompt = String::from("<|begin_of_text|>");
     for message in messages {
         prompt.push_str("<|start_header_id|>");
