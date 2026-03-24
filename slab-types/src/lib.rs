@@ -1,6 +1,7 @@
 //! `slab-types` - shared semantic types, JSON schema definitions, and the PMID catalog.
 //!
 //! # Modules
+//! - [`agent`] shared agent lifecycle and tool-call status enums.
 //! - [`backend`] runtime-facing backend identifiers.
 //! - [`chat`] shared chat conversation and inference-control types.
 //! - [`common`] universal building blocks: [`common::Id`], [`common::Timestamp`].
@@ -12,6 +13,7 @@
 //! - [`settings`] PMID catalog and typed configuration snapshots for the settings system.
 //! - [`whisper`] shared whisper VAD and decode option types.
 
+pub mod agent;
 pub mod backend;
 pub mod chat;
 pub mod common;
@@ -24,6 +26,7 @@ pub mod settings;
 pub mod whisper;
 
 pub use backend::RuntimeBackendId;
+pub use agent::{AgentThreadStatus, ToolCallStatus};
 pub use chat::{
     ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationContentPart,
     ConversationMessage, ConversationMessageContent, ConversationToolCall, ConversationToolFunction,

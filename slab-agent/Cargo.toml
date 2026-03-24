@@ -1,0 +1,25 @@
+[package]
+name = "slab-agent"
+version.workspace = true
+edition.workspace = true
+description = "Agent orchestration layer for slab.rs"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license = "AGPL-3.0-only"
+
+[dependencies]
+slab-types    = { workspace = true }
+tokio         = { workspace = true }
+futures       = { workspace = true }
+async-trait   = { workspace = true }
+serde         = { workspace = true }
+serde_json    = { workspace = true }
+uuid          = { workspace = true }
+chrono        = { workspace = true }
+tracing       = { workspace = true }
+thiserror     = { workspace = true }
+
+[dev-dependencies]
+tokio         = { workspace = true, features = ["test-util"] }
+tracing-test  = { workspace = true }
