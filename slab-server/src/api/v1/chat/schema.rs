@@ -732,11 +732,8 @@ fn validate_chat_completion_request(
     }
 
     if request.continue_generation {
-        let Some(last_message) = request
-            .messages
-            .iter()
-            .rev()
-            .find(|message| message.has_meaningful_payload())
+        let Some(last_message) =
+            request.messages.iter().rev().find(|message| message.has_meaningful_payload())
         else {
             return Err(validation_error(
                 "invalid_continue_generation",

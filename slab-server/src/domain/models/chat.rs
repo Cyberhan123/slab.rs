@@ -3,7 +3,7 @@ pub use slab_types::chat::{
     ConversationMessage, ConversationMessageContent, ConversationToolCall,
     ConversationToolFunction,
 };
-pub use slab_types::inference::TextGenerationUsage;
+pub use slab_types::inference::{TextGenerationResponse, TextGenerationUsage};
 
 use crate::api::v1::chat::schema::{
     ChatCompletionRequest, ChatReasoningEffort as ApiChatReasoningEffort,
@@ -13,7 +13,11 @@ use crate::api::v1::chat::schema::{
 };
 use crate::infra::db;
 use futures::stream::BoxStream;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
+
+const SESSION_MESSAGE_STORAGE_VERSION: u8 = 1;
+const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
 
 pub enum ChatStreamChunk {
     Data(String),
@@ -153,16 +157,115 @@ pub struct TextCompletionResult {
     pub usage: Option<TextGenerationUsage>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredSessionMessage {
+    version: u8,
+    message: ConversationMessage,
+}
+
 impl From<db::ChatMessage> for ConversationMessage {
     fn from(message: db::ChatMessage) -> Self {
-        Self {
-            role: message.role,
-            content: ConversationMessageContent::Text(message.content),
+        deserialize_session_message(&message.role, &message.content)
+    }
+}
+
+pub fn serialize_session_message(message: &ConversationMessage) -> String {
+    if can_store_as_plain_text(message) {
+        return match &message.content {
+            ConversationMessageContent::Text(text) => text.clone(),
+            ConversationMessageContent::Parts(_) => String::new(),
+        };
+    }
+
+    serde_json::to_string(&StoredSessionMessage {
+        version: SESSION_MESSAGE_STORAGE_VERSION,
+        message: message.clone(),
+    })
+    .unwrap_or_else(|_| message.rendered_text())
+}
+
+pub fn deserialize_session_message(role: &str, content: &str) -> ConversationMessage {
+    let trimmed = content.trim();
+
+    if let Ok(stored) = serde_json::from_str::<StoredSessionMessage>(trimmed) {
+        if stored.version == SESSION_MESSAGE_STORAGE_VERSION {
+            return stored.message;
+        }
+    }
+
+    if let Ok(message) = serde_json::from_str::<ConversationMessage>(trimmed) {
+        return message;
+    }
+
+    if let Ok(parsed_content) = serde_json::from_str::<ConversationMessageContent>(trimmed) {
+        return ConversationMessage {
+            role: role.to_owned(),
+            content: parsed_content,
             name: None,
             tool_call_id: None,
             tool_calls: Vec::new(),
-        }
+        };
     }
+
+    ConversationMessage {
+        role: role.to_owned(),
+        content: ConversationMessageContent::Text(content.to_owned()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+    }
+}
+
+pub fn assistant_message_from_text_response(
+    response: &TextGenerationResponse,
+) -> ConversationMessage {
+    let reasoning = response
+        .metadata
+        .get(REASONING_CONTENT_METADATA_KEY)
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    ConversationMessage {
+        role: "assistant".into(),
+        content: ConversationMessageContent::Text(format_assistant_content(
+            reasoning,
+            response.text.trim_end_matches('\0'),
+        )),
+        name: None,
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+    }
+}
+
+pub fn assistant_message_from_parts(content: &str, reasoning: Option<&str>) -> ConversationMessage {
+    ConversationMessage {
+        role: "assistant".into(),
+        content: ConversationMessageContent::Text(format_assistant_content(reasoning, content)),
+        name: None,
+        tool_call_id: None,
+        tool_calls: Vec::new(),
+    }
+}
+
+fn can_store_as_plain_text(message: &ConversationMessage) -> bool {
+    matches!(message.content, ConversationMessageContent::Text(_))
+        && message.name.is_none()
+        && message.tool_call_id.is_none()
+        && message.tool_calls.is_empty()
+}
+
+fn format_assistant_content(reasoning: Option<&str>, content: &str) -> String {
+    let trimmed_content = content.trim_end();
+    let Some(reasoning) = reasoning.map(str::trim).filter(|value| !value.is_empty()) else {
+        return trimmed_content.to_owned();
+    };
+
+    if trimmed_content.is_empty() {
+        return format!("<think status=\"done\">\n\n{reasoning}\n\n</think>");
+    }
+
+    format!("<think status=\"done\">\n\n{reasoning}\n\n</think>\n\n{trimmed_content}")
 }
 
 impl From<ApiChatReasoningEffort> for ChatReasoningEffort {
@@ -387,8 +490,9 @@ fn sanitize_structured_output_name(value: Option<&str>) -> String {
 #[cfg(test)]
 mod test {
     use super::{
-        ChatCompletionCommand, ChatReasoningEffort, ChatVerbosity, StructuredOutput,
-        TextCompletionCommand,
+        ChatCompletionCommand, ChatReasoningEffort, ChatVerbosity, ConversationContentPart,
+        ConversationMessage, ConversationMessageContent, ConversationToolCall,
+        ConversationToolFunction, StructuredOutput, TextCompletionCommand,
     };
     use crate::api::v1::chat::schema::{
         ChatCompletionRequest, ChatMessage, ChatResponseFormat, ChatResponseFormatType,
@@ -396,6 +500,7 @@ mod test {
         CompletionRequest,
     };
     use serde_json::json;
+    use slab_types::inference::TextGenerationResponse;
 
     fn make_request() -> ChatCompletionRequest {
         ChatCompletionRequest {
@@ -601,5 +706,80 @@ mod test {
 
         assert!(command.grammar_json);
         assert_eq!(command.structured_output, Some(StructuredOutput::JsonObject));
+    }
+
+    #[test]
+    fn structured_session_messages_round_trip_through_json_storage() {
+        let message = ConversationMessage {
+            role: "assistant".into(),
+            content: ConversationMessageContent::Parts(vec![
+                ConversationContentPart::OutputText { text: "template reply".into() },
+                ConversationContentPart::Json {
+                    value: json!({
+                        "kind": "chat_template",
+                        "items": ["alpha", 1],
+                    }),
+                },
+            ]),
+            name: Some("planner".into()),
+            tool_call_id: None,
+            tool_calls: vec![ConversationToolCall {
+                id: Some("call-1".into()),
+                r#type: "function".into(),
+                function: ConversationToolFunction {
+                    name: "save_template".into(),
+                    arguments: "{\"mode\":\"json\"}".into(),
+                },
+            }],
+        };
+
+        let stored = super::serialize_session_message(&message);
+        let restored = super::deserialize_session_message("assistant", &stored);
+
+        assert!(serde_json::from_str::<serde_json::Value>(&stored).is_ok());
+        assert_eq!(restored, message);
+    }
+
+    #[test]
+    fn content_only_json_payload_restores_with_fallback_role() {
+        let content = ConversationMessageContent::Parts(vec![
+            ConversationContentPart::InputText { text: "hello".into() },
+            ConversationContentPart::Json {
+                value: json!({
+                    "kind": "chat_template",
+                    "version": 1,
+                }),
+            },
+        ]);
+        let stored = serde_json::to_string(&content).expect("content should serialize");
+
+        let restored = super::deserialize_session_message("user", &stored);
+
+        assert_eq!(restored.role, "user");
+        assert_eq!(restored.content, content);
+    }
+
+    #[test]
+    fn assistant_reasoning_is_embedded_in_session_text_content() {
+        let mut metadata = slab_types::inference::JsonOptions::default();
+        metadata.insert("reasoning_content".into(), json!("step by step"));
+        let response = TextGenerationResponse {
+            text: "final answer".into(),
+            finish_reason: Some("stop".into()),
+            tokens_used: None,
+            usage: None,
+            metadata,
+        };
+
+        let message = super::assistant_message_from_text_response(&response);
+
+        assert!(matches!(
+            message.content,
+            ConversationMessageContent::Text(ref text)
+                if text.contains("<think status=\"done\">")
+                    && text.contains("step by step")
+                    && text.ends_with("final answer")
+        ));
+        assert!(super::serialize_session_message(&message).contains("<think status=\"done\">"));
     }
 }

@@ -763,10 +763,7 @@ async fn load_model_with_state(
     let response = rpc::client::load_model(channel, &resolved_target.canonical_backend, grpc_req)
         .await
         .map_err(|error| map_grpc_model_error(action, error))?;
-    state
-        .auto_unload()
-        .notify_model_loaded(&resolved_target.canonical_backend, load_spec)
-        .await;
+    state.auto_unload().notify_model_loaded(&resolved_target.canonical_backend, load_spec).await;
 
     decode_model_status(response)
 }
@@ -775,7 +772,9 @@ async fn resolve_model_load_target(
     state: &ModelState,
     command: &ModelLoadCommand,
 ) -> Result<ResolvedModelLoadTarget, ServerError> {
-    if let Some(model_id) = command.model_id.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(model_id) =
+        command.model_id.as_deref().map(str::trim).filter(|value| !value.is_empty())
+    {
         let model = resolve_local_catalog_model(state, model_id).await?;
         let backend_id = resolve_local_backend_from_model(&model)?;
         let model_path = resolve_local_model_path(&model)?;
@@ -813,7 +812,9 @@ async fn resolve_unload_backend(
     state: &ModelState,
     command: &ModelLoadCommand,
 ) -> Result<String, ServerError> {
-    if let Some(model_id) = command.model_id.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+    if let Some(model_id) =
+        command.model_id.as_deref().map(str::trim).filter(|value| !value.is_empty())
+    {
         let model = resolve_local_catalog_model(state, model_id).await?;
         let backend_id = resolve_local_backend_from_model(&model)?;
         let (canonical_backend, _) = resolve_backend_channel(state, &backend_id)?;
