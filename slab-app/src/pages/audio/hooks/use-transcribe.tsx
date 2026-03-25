@@ -36,7 +36,19 @@ export type TranscribeOptions = {
 
 const useTranscribe = () => {
     const isTauri = useIsTauri();
-    const { isPending, isError, error, mutateAsync } = api.useMutation('post', '/v1/audio/transcriptions');
+    // Generated typings currently point this endpoint at CompletionRequest.
+    const { isPending, isError, error, mutateAsync } = api.useMutation('post', '/v1/audio/transcriptions') as unknown as {
+        isPending: boolean;
+        isError: boolean;
+        error: unknown;
+        mutateAsync: (options: {
+            body: {
+                path: string;
+                vad?: TranscribeVadSettings;
+                decode?: TranscribeOptions["decode"];
+            };
+        }) => Promise<{ operation_id: string }>;
+    };
 
     const handleTranscribe = async (
         value: File | string,
@@ -64,7 +76,7 @@ const useTranscribe = () => {
 
         const response = await mutateAsync({
             body
-        }) as { operation_id: string };
+        });
 
         return response;
     }

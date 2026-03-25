@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 
-import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { usePageHeader, usePageHeaderModelPicker } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import {
   API_BASE_URL,
@@ -92,12 +92,30 @@ export function useImageGeneration() {
 
   const isGenerating = isSubmitting || isPolling;
   const isBusy = isGenerating || isPreparingModel;
+  const headerModelPicker = useMemo(
+    () => ({
+      value: selectedModelId,
+      options: modelOptions.map((model) => ({
+        id: model.id,
+        label: model.label,
+      })),
+      onValueChange: setSelectedModelId,
+      groupLabel: 'Image Models',
+      placeholder: 'Select model',
+      loading: catalogLoading,
+      disabled: catalogLoading || isBusy || modelOptions.length === 0,
+      emptyLabel: 'No diffusion models',
+    }),
+    [catalogLoading, isBusy, modelOptions, selectedModelId, setSelectedModelId],
+  );
   const parsedWidth = Number.parseInt(widthStr, 10) || 512;
   const parsedHeight = Number.parseInt(heightStr, 10) || 512;
   const activeDimensionPreset =
     DIMENSION_PRESETS.find(
       (preset) => preset.width === parsedWidth && preset.height === parsedHeight,
     )?.label ?? null;
+
+  usePageHeaderModelPicker(headerModelPicker);
 
   const handleDimensionPreset = useCallback((width: number, height: number) => {
     setWidthStr(String(width));
@@ -303,7 +321,6 @@ export function useImageGeneration() {
   return {
     activeDimensionPreset,
     advancedOpen,
-    catalogLoading,
     cfgScale,
     clipSkip,
     eta,
@@ -321,7 +338,6 @@ export function useImageGeneration() {
     isGenerating,
     isPreparingModel,
     mode,
-    modelOptions,
     negativePrompt,
     numImages,
     parsedHeight,
@@ -345,7 +361,6 @@ export function useImageGeneration() {
     setSampleMethod,
     setScheduler,
     setSeed,
-    setSelectedModelId,
     setSteps,
     setStrength,
     setWidthStr,

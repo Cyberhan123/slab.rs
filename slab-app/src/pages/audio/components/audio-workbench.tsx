@@ -41,8 +41,6 @@ export type AudioWorkbenchProps = {
   navigate: NavigateFunction;
   preparingStage: PreparingStage;
   previewRows: Array<{ label: string; value: string; accent: boolean; chip: boolean }>;
-  selectedModel: CatalogModel | undefined;
-  selectedModelId: string;
   selectedVadModel: CatalogModel | undefined;
   selectedVadModelId: string;
   setDecodeEntropyThold: (value: string) => void;
@@ -62,7 +60,6 @@ export type AudioWorkbenchProps = {
   setDecodeTokenTimestamps: (value: boolean) => void;
   setDecodeWordThold: (value: string) => void;
   setEnableVad: (value: boolean) => void;
-  setSelectedModelId: (value: string) => void;
   setSelectedVadModelId: (value: string) => void;
   setShowDecodeOptions: (value: boolean) => void;
   setVadMaxSpeechDurationS: (value: string) => void;
@@ -81,7 +78,6 @@ export type AudioWorkbenchProps = {
   vadSpeechPadMs: string;
   vadThreshold: string;
   webFileInputRef: RefObject<HTMLInputElement | null>;
-  whisperTranscribeModels: CatalogModel[];
   whisperVadModels: CatalogModel[];
 };
 

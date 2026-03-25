@@ -7,7 +7,7 @@ import useFile, { type SelectedFile } from '@/hooks/use-file';
 import useIsTauri from '@/hooks/use-tauri';
 import api from '@/lib/api';
 import { inferWhisperVadModel, toCatalogModelList } from '@/lib/api/models';
-import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { usePageHeader, usePageHeaderModelPicker } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } from './use-transcribe';
 import {
@@ -99,7 +99,25 @@ export function useAudio() {
     transcribe.isPending ||
     loadModelMutation.isPending ||
     downloadModelMutation.isPending;
+  const headerModelPicker = useMemo(
+    () => ({
+      value: selectedModelId,
+      options: whisperTranscribeModels.map((model) => ({
+        id: model.id,
+        label: model.display_name,
+      })),
+      onValueChange: setSelectedModelId,
+      groupLabel: 'Whisper Models',
+      placeholder: 'Select model',
+      loading: catalogModelsLoading,
+      disabled: catalogModelsLoading || isBusy || whisperTranscribeModels.length === 0,
+      emptyLabel: 'No whisper models',
+    }),
+    [catalogModelsLoading, isBusy, selectedModelId, setSelectedModelId, whisperTranscribeModels],
+  );
   const webFileInputRef = useRef<HTMLInputElement>(null);
+
+  usePageHeaderModelPicker(headerModelPicker);
 
   useEffect(() => {
     if (whisperTranscribeModels.length === 0) {
@@ -488,8 +506,6 @@ export function useAudio() {
     navigate,
     preparingStage,
     previewRows,
-    selectedModel,
-    selectedModelId,
     selectedVadModel,
     selectedVadModelId,
     setDecodeEntropyThold,
@@ -509,7 +525,6 @@ export function useAudio() {
     setDecodeTokenTimestamps,
     setDecodeWordThold,
     setEnableVad,
-    setSelectedModelId,
     setSelectedVadModelId,
     setShowDecodeOptions,
     setVadMaxSpeechDurationS,
@@ -528,7 +543,6 @@ export function useAudio() {
     vadSpeechPadMs,
     vadThreshold,
     webFileInputRef,
-    whisperTranscribeModels,
     whisperVadModels,
   };
 }

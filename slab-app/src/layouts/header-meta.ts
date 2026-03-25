@@ -42,8 +42,8 @@ export const PAGE_HEADER_META = {
     icon: Mic,
   },
   chat: {
-    title: "Chat",
-    subtitle: "Talk with AI models in one workspace",
+    title: "Assistant",
+    subtitle: "Talk with AI Assistants",
     icon: BotMessageSquare,
   },
   hub: {

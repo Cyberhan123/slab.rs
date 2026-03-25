@@ -68,6 +68,7 @@ export function usePageHeaderModelPicker(
   const value = modelPicker?.value;
   const options = modelPicker?.options;
   const onValueChange = modelPicker?.onValueChange;
+  const groupLabel = modelPicker?.groupLabel;
   const placeholder = modelPicker?.placeholder;
   const loading = modelPicker?.loading;
   const disabled = modelPicker?.disabled;
@@ -87,6 +88,7 @@ export function usePageHeaderModelPicker(
     clearModelPicker,
     disabled,
     emptyLabel,
+    groupLabel,
     id,
     isActive,
     loading,

@@ -30,11 +30,12 @@ export default function Header({ variant = "default" }: HeaderProps) {
     ? subtitleParts.slice(1).join(" - ") || "Active Workspace"
     : "Slab Desktop"
   const selectedModelOption = modelPicker?.options.find((option) => option.id === modelPicker.value)
+  const hasSelectableModelOptions = modelPicker?.options.some((option) => !option.disabled) ?? false
   const modelPickerPlaceholder = modelPicker?.loading
     ? "Loading models..."
     : modelPicker?.placeholder ?? "Select model"
   const modelPickerDisabled =
-    modelPicker?.disabled || modelPicker == null || modelPicker.options.length === 0
+    modelPicker?.disabled || modelPicker == null || !hasSelectableModelOptions
 
   return (
     <header
@@ -77,14 +78,14 @@ export default function Header({ variant = "default" }: HeaderProps) {
                 className="max-h-80 min-w-[18rem]"
               >
                 <SelectGroup>
-                  <SelectLabel>Chat Models</SelectLabel>
+                  <SelectLabel>{modelPicker.groupLabel ?? "Models"}</SelectLabel>
                   {modelPicker.options.length === 0 ? (
                     <SelectItem value="__no_models__" disabled>
                       {modelPicker.emptyLabel ?? "No models available"}
                     </SelectItem>
                   ) : (
                     modelPicker.options.map((option) => (
-                      <SelectItem key={option.id} value={option.id}>
+                      <SelectItem key={option.id} value={option.id} disabled={option.disabled}>
                         {option.label}
                       </SelectItem>
                     ))
