@@ -14,9 +14,12 @@ flate2 = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2 = { workspace = true }
 tar = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
 # NOTE: Only deflate-compressed ZIP archives are supported. Other compression
 # methods (e.g., bzip2, LZMA) are not enabled to avoid a link conflict with
 # the lzma-sys crate already pulled in by ffmpeg-sidecar in this workspace.

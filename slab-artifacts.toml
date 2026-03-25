@@ -1,0 +1,53 @@
+# slab-artifacts.toml
+# Declarative artifact manifest for slab ML backend libraries.
+# Asset patterns use template variables: {version}, {os}, {arch}, {variant}
+
+[metadata]
+schema_version = "1"
+
+[artifacts.llama]
+repo = "ggml-org/llama.cpp"
+version = "b8069"
+lib_name = "llama"
+# Asset name pattern with template variables: {version}, {os}, {arch}, {variant}
+asset_pattern = "llama-{version}-bin-{os}-{variant}-{arch}.zip"
+
+[artifacts.llama.variants]
+cpu    = { os = ["windows", "linux", "macos"], arch = ["x86_64", "aarch64"] }
+cuda   = { os = ["windows", "linux"],          arch = ["x86_64"] }
+vulkan = { os = ["windows", "linux"],          arch = ["x86_64"] }
+metal  = { os = ["macos"],                     arch = ["aarch64"] }
+
+# Optional: SHA256 checksums per "os-variant-arch" key
+[artifacts.llama.checksums]
+# "windows-cpu-x86_64" = "sha256:abcdef..."
+
+[artifacts.whisper]
+repo = "ggml-org/whisper.cpp"
+version = "v1.8.3"
+lib_name = "whisper"
+asset_pattern = "whisper-{version}-bin-{os}-{variant}-{arch}.zip"
+
+[artifacts.whisper.variants]
+cpu    = { os = ["windows", "linux", "macos"], arch = ["x86_64", "aarch64"] }
+cuda   = { os = ["windows", "linux"],          arch = ["x86_64"] }
+vulkan = { os = ["windows", "linux"],          arch = ["x86_64"] }
+metal  = { os = ["macos"],                     arch = ["aarch64"] }
+
+[artifacts.whisper.checksums]
+# "linux-cuda-x86_64" = "sha256:abcdef..."
+
+[artifacts.diffusion]
+repo = "leejet/stable-diffusion.cpp"
+version = "master-504-636d3cb"
+lib_name = "stable-diffusion"
+asset_pattern = "sd-{version}-bin-{os}-{variant}-{arch}.zip"
+
+[artifacts.diffusion.variants]
+cpu    = { os = ["windows", "linux", "macos"], arch = ["x86_64", "aarch64"] }
+cuda   = { os = ["windows", "linux"],          arch = ["x86_64"] }
+vulkan = { os = ["windows", "linux"],          arch = ["x86_64"] }
+metal  = { os = ["macos"],                     arch = ["aarch64"] }
+
+[artifacts.diffusion.checksums]
+# "macos-metal-aarch64" = "sha256:abcdef..."
