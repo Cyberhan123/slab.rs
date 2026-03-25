@@ -3,7 +3,7 @@ import { toast } from 'sonner';
 
 import api from '@/lib/api';
 import { toCatalogModelList } from '@/lib/api/models';
-import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { usePageHeader, usePageHeaderModelPicker } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import {
   API_BASE_URL,
@@ -77,7 +77,7 @@ export function useVideoGeneration() {
     const exists = diffusionModels.some((model) => model.id === selectedModelId);
     if (!selectedModelId || !exists) {
       const downloaded = diffusionModels.find((model) => model.downloaded);
-      setSelectedModelId(downloaded?.id ?? diffusionModels[0].id);
+      setSelectedModelId(downloaded?.id ?? '');
     }
   }, [catalogModels, selectedModelId]);
 
@@ -85,8 +85,26 @@ export function useVideoGeneration() {
     () => modelOptions.find((model) => model.id === selectedModelId),
     [modelOptions, selectedModelId],
   );
-
   const isGenerating = isSubmitting || isPolling;
+  const headerModelPicker = useMemo(
+    () => ({
+      value: selectedModelId,
+      options: modelOptions.map((model) => ({
+        id: model.id,
+        label: model.downloaded ? model.label : `${model.label} (Download in Hub)`,
+        disabled: !model.downloaded,
+      })),
+      onValueChange: setSelectedModelId,
+      groupLabel: 'Video Models',
+      placeholder: 'Select model',
+      loading: catalogLoading,
+      disabled: catalogLoading || isGenerating || !modelOptions.some((model) => model.downloaded),
+      emptyLabel: 'No diffusion models',
+    }),
+    [catalogLoading, isGenerating, modelOptions, selectedModelId, setSelectedModelId],
+  );
+
+  usePageHeaderModelPicker(headerModelPicker);
 
   const loadInitImageFile = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -325,7 +343,6 @@ export function useVideoGeneration() {
 
   return {
     advancedOpen,
-    catalogLoading,
     cfgScale,
     footerHint,
     fps,
@@ -338,17 +355,16 @@ export function useVideoGeneration() {
     handleSubmit,
     heightStr,
     heightValue,
+    hasSelectedModel: Boolean(selectedModel?.local_path),
     immersivePreview,
     initImageDataUri,
     initImageInputRef,
     isGenerating,
-    modelOptions,
     negativePrompt,
     prompt,
     sampleMethod,
     scheduler,
     seed,
-    selectedModelId,
     setAdvancedOpen,
     setCfgScale,
     setFps,
@@ -362,7 +378,6 @@ export function useVideoGeneration() {
     setSampleMethod,
     setScheduler,
     setSeed,
-    setSelectedModelId,
     setSteps,
     setStrength,
     setWidthStr,

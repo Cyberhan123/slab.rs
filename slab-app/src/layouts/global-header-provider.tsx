@@ -20,12 +20,14 @@ type HeaderMetaEntry = {
 export type HeaderModelPickerOption = {
   id: string;
   label: string;
+  disabled?: boolean;
 };
 
 export type HeaderModelPicker = {
   value: string;
   options: HeaderModelPickerOption[];
   onValueChange: (value: string) => void;
+  groupLabel?: string;
   placeholder?: string;
   loading?: boolean;
   disabled?: boolean;

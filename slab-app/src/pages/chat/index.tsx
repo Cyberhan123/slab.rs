@@ -640,6 +640,7 @@ function Chat() {
         label: model.label,
       })),
       onValueChange: setSelectedModelId,
+      groupLabel: "Chat Models",
       placeholder: "Select model",
       loading: modelLoading,
       disabled:

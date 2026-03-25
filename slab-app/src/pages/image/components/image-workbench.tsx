@@ -34,7 +34,6 @@ import {
 } from '@/components/ui/collapsible';
 import { SplitWorkbench } from '@/components/ui/workspace';
 import { cn } from '@/lib/utils';
-import type { ImageModelOption } from '../hooks/use-image-model-preparation';
 import {
   DIMENSION_PRESETS,
   SAMPLE_METHODS,
@@ -49,7 +48,6 @@ import { SliderField } from './slider-field';
 type ImageWorkbenchProps = {
   activeDimensionPreset: string | null;
   advancedOpen: boolean;
-  catalogLoading: boolean;
   cfgScale: number;
   clipSkip: number;
   eta: number;
@@ -67,7 +65,6 @@ type ImageWorkbenchProps = {
   isGenerating: boolean;
   isPreparingModel: boolean;
   mode: 'txt2img' | 'img2img';
-  modelOptions: ImageModelOption[];
   negativePrompt: string;
   numImages: number;
   parsedHeight: number;
@@ -91,7 +88,6 @@ type ImageWorkbenchProps = {
   setSampleMethod: (value: string) => void;
   setScheduler: (value: string) => void;
   setSeed: (value: number) => void;
-  setSelectedModelId: (value: string) => void;
   setSteps: (value: number) => void;
   setStrength: (value: number) => void;
   setWidthStr: (value: string) => void;
@@ -105,7 +101,6 @@ type ImageWorkbenchProps = {
 export function ImageWorkbench({
   activeDimensionPreset,
   advancedOpen,
-  catalogLoading,
   cfgScale,
   clipSkip,
   eta,
@@ -123,7 +118,6 @@ export function ImageWorkbench({
   isGenerating,
   isPreparingModel,
   mode,
-  modelOptions,
   negativePrompt,
   numImages,
   parsedHeight,
@@ -147,7 +141,6 @@ export function ImageWorkbench({
   setSampleMethod,
   setScheduler,
   setSeed,
-  setSelectedModelId,
   setSteps,
   setStrength,
   setWidthStr,
@@ -165,12 +158,15 @@ export function ImageWorkbench({
           sidebarClassName="space-y-0"
           mainClassName="min-h-full xl:min-h-0"
           sidebar={
-            <aside className="flex h-full flex-col rounded-[28px] border border-border/60 bg-[var(--surface-soft)] px-5 py-5 xl:min-h-0 xl:overflow-hidden xl:rounded-none xl:border-0 xl:border-r xl:border-border/50 xl:px-6 xl:py-6">
+            <aside className="flex h-full min-h-[520px] flex-col rounded-[28px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-[0_20px_50px_-38px_color-mix(in_oklab,var(--foreground)_35%,transparent)] xl:min-h-0 xl:overflow-hidden">
               <div className="flex h-full min-h-0 flex-col">
                 <div className="space-y-6 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-2">
                   <div className="space-y-4">
                     <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
                       Generation Parameters
+                    </p>
+                    <p className="text-xs leading-5 text-muted-foreground">
+                      Choose the active diffusion model from the global header.
                     </p>
                     <Tabs
                       value={mode}
@@ -248,38 +244,6 @@ export function ImageWorkbench({
                         </div>
                       </TabsContent>
                     </Tabs>
-                  </div>
-
-                  <div className="space-y-2.5">
-                    <Label className={SIDEBAR_LABEL_CLASSNAME}>Model</Label>
-                    <Select
-                      value={selectedModelId}
-                      onValueChange={setSelectedModelId}
-                      disabled={isBusy || modelOptions.length === 0}
-                    >
-                      <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
-                        <SelectValue
-                          placeholder={catalogLoading ? 'Loading models...' : 'Select model'}
-                        />
-                      </SelectTrigger>
-                      <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-[0_24px_48px_-34px_color-mix(in_oklab,var(--foreground)_32%,transparent)]">
-                        {modelOptions.length === 0 ? (
-                          <SelectItem value="__none" disabled>
-                            No diffusion models found
-                          </SelectItem>
-                        ) : (
-                          modelOptions.map((model) => (
-                            <SelectItem key={model.id} value={model.id}>
-                              <span className="flex min-w-0 items-center gap-2">
-                                <span className="truncate">{model.label}</span>
-                                {model.pending ? <Badge variant="chip">Downloading</Badge> : null}
-                                {!model.downloaded ? <Badge variant="chip">Not local</Badge> : null}
-                              </span>
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
                   </div>
 
                   <div className="space-y-2.5">

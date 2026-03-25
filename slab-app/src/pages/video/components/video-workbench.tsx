@@ -9,7 +9,6 @@ import {
   X,
 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import {
   Collapsible,
@@ -27,7 +26,7 @@ import {
 import { Slider } from '@/components/ui/slider';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { FRAME_OPTIONS, FPS_OPTIONS, SAMPLE_METHODS, SCHEDULERS, type ModelOption } from '../const';
+import { FRAME_OPTIONS, FPS_OPTIONS, SAMPLE_METHODS, SCHEDULERS } from '../const';
 import { FieldLabel } from './field-label';
 import { ResolutionSliderField } from './resolution-slider-field';
 import { SliderField } from './slider-field';
@@ -36,7 +35,6 @@ import { ToolbarIconButton } from './toolbar-icon-button';
 
 export type VideoWorkbenchProps = {
   advancedOpen: boolean;
-  catalogLoading: boolean;
   cfgScale: number;
   footerHint: string;
   fps: number;
@@ -49,17 +47,16 @@ export type VideoWorkbenchProps = {
   handleSubmit: () => void | Promise<void>;
   heightStr: string;
   heightValue: number;
+  hasSelectedModel: boolean;
   immersivePreview: boolean;
   initImageDataUri: string | null;
   initImageInputRef: React.RefObject<HTMLInputElement | null>;
   isGenerating: boolean;
-  modelOptions: ModelOption[];
   negativePrompt: string;
   prompt: string;
   sampleMethod: string;
   scheduler: string;
   seed: number;
-  selectedModelId: string;
   setAdvancedOpen: (open: boolean) => void;
   setCfgScale: (value: number) => void;
   setFps: (value: number) => void;
@@ -73,7 +70,6 @@ export type VideoWorkbenchProps = {
   setSampleMethod: (value: string) => void;
   setScheduler: (value: string) => void;
   setSeed: (value: number) => void;
-  setSelectedModelId: (value: string) => void;
   setSteps: (value: number) => void;
   setStrength: (value: number) => void;
   setWidthStr: (value: string) => void;
@@ -89,7 +85,6 @@ export type VideoWorkbenchProps = {
 
 export function VideoWorkbench({
   advancedOpen,
-  catalogLoading,
   cfgScale,
   footerHint,
   fps,
@@ -102,17 +97,16 @@ export function VideoWorkbench({
   handleSubmit,
   heightStr,
   heightValue,
+  hasSelectedModel,
   immersivePreview,
   initImageDataUri,
   initImageInputRef,
   isGenerating,
-  modelOptions,
   negativePrompt,
   prompt,
   sampleMethod,
   scheduler,
   seed,
-  selectedModelId,
   setAdvancedOpen,
   setCfgScale,
   setFps,
@@ -126,7 +120,6 @@ export function VideoWorkbench({
   setSampleMethod,
   setScheduler,
   setSeed,
-  setSelectedModelId,
   setSteps,
   setStrength,
   setWidthStr,
@@ -147,6 +140,9 @@ export function VideoWorkbench({
             <div className="pb-6">
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
                 Configuration
+              </p>
+              <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                Choose the active diffusion model from the global header.
               </p>
             </div>
 
@@ -309,40 +305,6 @@ export function VideoWorkbench({
                 </CollapsibleTrigger>
 
                 <CollapsibleContent className="space-y-5 pt-4">
-                  <div className="space-y-2.5">
-                    <FieldLabel>Render Model</FieldLabel>
-                    <Select value={selectedModelId} onValueChange={setSelectedModelId}>
-                      <SelectTrigger
-                        variant="soft"
-                        className="h-12 w-full rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-sm font-medium shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)]"
-                      >
-                        <SelectValue
-                          placeholder={catalogLoading ? 'Loading models...' : 'Select model'}
-                        />
-                      </SelectTrigger>
-                      <SelectContent variant="soft">
-                        {modelOptions.length === 0 ? (
-                          <SelectItem value="__none" disabled>
-                            No diffusion models found
-                          </SelectItem>
-                        ) : (
-                          modelOptions.map((model) => (
-                            <SelectItem
-                              key={model.id}
-                              value={model.id}
-                              disabled={!model.downloaded}
-                            >
-                              <span className="flex min-w-0 items-center gap-2">
-                                <span className="truncate">{model.label}</span>
-                                {!model.downloaded ? <Badge variant="chip">Not downloaded</Badge> : null}
-                              </span>
-                            </SelectItem>
-                          ))
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-
                   <div className="grid gap-4 sm:grid-cols-2">
                     <SliderField
                       label="CFG Scale"
@@ -460,7 +422,7 @@ export function VideoWorkbench({
                 size="pill"
                 className="h-[68px] w-full rounded-[18px] text-base font-semibold shadow-[0_24px_40px_-18px_color-mix(in_oklab,var(--brand-teal)_58%,transparent)]"
                 onClick={handleSubmit}
-                disabled={isGenerating || !prompt.trim()}
+                disabled={isGenerating || !prompt.trim() || !hasSelectedModel}
               >
                 {isGenerating ? (
                   <>
