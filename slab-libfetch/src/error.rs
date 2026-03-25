@@ -30,4 +30,12 @@ pub enum FetchError {
     /// The currently installed asset belongs to a different repository.
     #[error("Installed asset is for a different repository: {0}")]
     RepositoryMismatch(String),
+
+    /// The manifest file could not be read or parsed.
+    #[error("Manifest error: {0}")]
+    ManifestError(String),
+
+    /// A downloaded artifact's SHA256 digest does not match the expected value.
+    #[error("Checksum mismatch: expected {expected}, got {actual}")]
+    ChecksumMismatch { expected: String, actual: String },
 }
