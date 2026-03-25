@@ -69,8 +69,17 @@ impl Manifest {
 
     /// Parse a manifest from a TOML string.
     pub fn from_str(content: &str) -> Result<Self, FetchError> {
-        toml::from_str(content)
-            .map_err(|e| FetchError::ManifestError(format!("TOML parse error: {}", e)))
+        let manifest: Self = toml::from_str(content)
+            .map_err(|e| FetchError::ManifestError(format!("TOML parse error: {}", e)))?;
+
+        if manifest.metadata.schema_version != "1" {
+            return Err(FetchError::ManifestError(format!(
+                "unsupported manifest schema_version '{}', expected '1'",
+                manifest.metadata.schema_version
+            )));
+        }
+
+        Ok(manifest)
     }
 
     /// Look up an artifact by name.
@@ -142,7 +151,7 @@ pub fn resolve_current(
     let platform = Platform::current().ok_or_else(|| {
         FetchError::ManifestError("unsupported OS or architecture".to_string())
     })?;
-    let variant = Variant::detect_best(&platform.os);
+    let variant = Variant::detect_best(&platform);
     manifest.artifact(artifact_name)?.resolve(&platform, &variant)
 }
 
@@ -235,6 +244,29 @@ metal  = { os = ["macos"],                     arch = ["aarch64"] }
     fn test_parse_error_on_invalid_toml() {
         let err = Manifest::from_str("not valid toml ][").unwrap_err();
         assert!(err.to_string().contains("TOML"));
+    }
+
+    #[test]
+    fn test_unsupported_schema_version_rejected() {
+        let toml = r#"
+[metadata]
+schema_version = "2"
+
+[artifacts.llama]
+repo = "ggml-org/llama.cpp"
+version = "b8069"
+lib_name = "llama"
+asset_pattern = "llama-{version}-bin-{os}-{variant}-{arch}.zip"
+
+[artifacts.llama.variants]
+cpu = { os = ["linux"], arch = ["x86_64"] }
+"#;
+        let err = Manifest::from_str(toml).unwrap_err();
+        assert!(
+            err.to_string().contains("schema_version"),
+            "error should mention schema_version, got: {}",
+            err
+        );
     }
 
     #[test]
