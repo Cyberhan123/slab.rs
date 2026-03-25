@@ -1,6 +1,10 @@
 use crate::downloader::Downloader;
 use crate::error::FetchError;
 use crate::install::{Install, VersionInfo};
+use crate::manifest::{Manifest, ResolvedArtifact};
+use crate::platform::Platform;
+use crate::variant::Variant;
+use crate::verify::verify_sha256;
 use std::env;
 use std::path::{Path, PathBuf};
 
@@ -39,6 +43,8 @@ pub struct VersionApi {
     repo: String,
     version: String,
     is_latest: bool,
+    /// Pre-resolved artifact from a manifest (optional).
+    resolved_artifact: Option<ResolvedArtifact>,
 }
 
 impl Default for Api {
@@ -97,17 +103,66 @@ impl Api {
     pub fn repo(self, repo: impl Into<String>) -> RepoApi {
         RepoApi { api: self, repo: repo.into() }
     }
+
+    /// Create a `VersionApi` pre-configured from a manifest entry.
+    ///
+    /// Looks up `artifact_name` in `manifest`, auto-detects the current
+    /// platform and best variant, and constructs a `VersionApi` ready for
+    /// downloading.
+    pub fn from_manifest(
+        self,
+        manifest: &Manifest,
+        artifact_name: &str,
+    ) -> Result<VersionApi, FetchError> {
+        let platform = Platform::current().ok_or_else(|| {
+            FetchError::ManifestError("unsupported OS or architecture".to_string())
+        })?;
+        let variant = Variant::detect_best(&platform.os);
+        self.from_manifest_with_platform(manifest, artifact_name, &platform, &variant)
+    }
+
+    /// Create a `VersionApi` pre-configured from a manifest entry with an
+    /// explicit `platform` and `variant`.
+    pub fn from_manifest_with_platform(
+        self,
+        manifest: &Manifest,
+        artifact_name: &str,
+        platform: &Platform,
+        variant: &Variant,
+    ) -> Result<VersionApi, FetchError> {
+        let spec = manifest.artifact(artifact_name)?;
+        let resolved = spec.resolve(platform, variant)?;
+        Ok(VersionApi {
+            api: self,
+            repo: resolved.repo.clone(),
+            version: resolved.version.clone(),
+            is_latest: false,
+            resolved_artifact: Some(resolved),
+        })
+    }
 }
 
 impl RepoApi {
     /// Target the latest release.
     pub fn latest(self) -> VersionApi {
-        VersionApi { api: self.api, repo: self.repo, version: String::new(), is_latest: true }
+        VersionApi {
+            api: self.api,
+            repo: self.repo,
+            version: String::new(),
+            is_latest: true,
+            resolved_artifact: None,
+        }
     }
 
     /// Target a specific release tag (e.g. `"v3.5.1"`).
     pub fn version(self, version: impl Into<String>) -> VersionApi {
-        VersionApi { api: self.api, repo: self.repo, version: version.into(), is_latest: false }
+        VersionApi {
+            api: self.api,
+            repo: self.repo,
+            version: version.into(),
+            is_latest: false,
+            resolved_artifact: None,
+        }
     }
 
     /// Return the installed version information from `version.json`.
@@ -140,6 +195,103 @@ impl VersionApi {
 
         let install = Install::new(&self.repo, &self.api.install_dir);
         install.install_asset(&downloader, &asset_name, &version, self.is_latest).await
+    }
+
+    /// Download and extract the artifact described by a previously resolved
+    /// manifest entry, with SHA256 checksum verification.
+    ///
+    /// This method is intended for use after creating a `VersionApi` via
+    /// [`Api::from_manifest`] or [`Api::from_manifest_with_platform`].  It
+    /// uses the pre-resolved asset name from the manifest and verifies the
+    /// downloaded bytes against the checksum (if one is present in the
+    /// manifest).  When no checksum is declared a tracing warning is emitted.
+    ///
+    /// `platform` and `variant` are used only for progress output.
+    pub async fn install_with_platform(
+        self,
+        platform: &Platform,
+        variant: &Variant,
+    ) -> Result<PathBuf, FetchError> {
+        let resolved = self.resolved_artifact.as_ref().ok_or_else(|| {
+            FetchError::ManifestError(
+                "install_with_platform requires a VersionApi created via Api::from_manifest"
+                    .to_string(),
+            )
+        })?;
+
+        let downloader = Downloader::new(
+            &self.repo,
+            self.api.retry_count,
+            self.api.retry_delay_secs,
+            self.api.proxy.clone(),
+            self.api.show_progress,
+        );
+
+        if self.api.show_progress {
+            println!(
+                "🚀 Installing {} for {}-{} ({} variant)…",
+                resolved.asset_name, platform.os, platform.arch, variant
+            );
+        }
+
+        let install = Install::new(&self.repo, &self.api.install_dir);
+
+        // Skip if already at the right version.
+        if install.already_installed() {
+            if let Ok(info) = install.get_installed_version() {
+                if info.tag_name == resolved.version && info.repo == self.repo {
+                    if self.api.show_progress {
+                        println!("✅ Version {} already installed, skipping.", resolved.version);
+                    }
+                    return Ok(self.api.install_dir.clone());
+                }
+            }
+            // Different version — reinstall.
+            if self.api.install_dir.exists() {
+                std::fs::remove_dir_all(&self.api.install_dir)?;
+            }
+        }
+
+        // Download the raw bytes so we can verify before extracting.
+        let bytes = downloader.download_asset_bytes(&resolved.asset_name, &resolved.version).await?;
+
+        // Checksum verification.
+        match &resolved.checksum {
+            Some(expected) => {
+                verify_sha256(&bytes, expected)?;
+                if self.api.show_progress {
+                    println!("✅ Checksum verified.");
+                }
+            }
+            None => {
+                tracing::warn!(
+                    asset = %resolved.asset_name,
+                    "no checksum declared in manifest; skipping integrity verification"
+                );
+            }
+        }
+
+        std::fs::create_dir_all(&self.api.install_dir)?;
+        if resolved.asset_name.ends_with(".zip") {
+            crate::downloader::extract_zip(&bytes, &self.api.install_dir)?;
+        } else if resolved.asset_name.ends_with(".tar.gz")
+            || resolved.asset_name.ends_with(".tgz")
+        {
+            crate::downloader::extract_tar_gz_strip_top(&bytes, &self.api.install_dir)?;
+        } else {
+            std::fs::write(
+                self.api.install_dir.join(&resolved.asset_name),
+                &bytes,
+            )?;
+        }
+
+        install.create_version_file(&resolved.version)?;
+
+        if self.api.show_progress {
+            println!("✨ {} installed successfully.", resolved.asset_name);
+        }
+
+        Ok(self.api.install_dir.clone())
     }
 
     /// Download header files from the source tarball and extract them to

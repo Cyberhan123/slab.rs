@@ -102,13 +102,7 @@ impl Downloader {
         version: &str,
         dest: &Path,
     ) -> Result<(), FetchError> {
-        let url = self.asset_url(asset_name, version);
-
-        if self.show_progress {
-            println!("🚀 正在从 {} 下载...", url);
-        }
-
-        let bytes = self.client.get(&url).send().await?.error_for_status()?.bytes().await?;
+        let bytes = self.download_asset_bytes(asset_name, version).await?;
 
         std::fs::create_dir_all(dest)?;
 
@@ -125,6 +119,22 @@ impl Downloader {
         }
 
         Ok(())
+    }
+
+    /// Download a release asset and return the raw bytes without extracting.
+    pub async fn download_asset_bytes(
+        &self,
+        asset_name: &str,
+        version: &str,
+    ) -> Result<Vec<u8>, FetchError> {
+        let url = self.asset_url(asset_name, version);
+
+        if self.show_progress {
+            println!("🚀 正在从 {} 下载...", url);
+        }
+
+        let bytes = self.client.get(&url).send().await?.error_for_status()?.bytes().await?;
+        Ok(bytes.to_vec())
     }
 
     /// Download the source tarball for `version` and extract header files into `dest`.
