@@ -28,8 +28,12 @@ pub mod error;
 pub mod port;
 pub mod thread;
 pub mod tool;
+pub mod tools;
 
 mod turn;
+
+#[cfg(test)]
+mod tests;
 
 pub use config::AgentConfig;
 pub use control::AgentControl;

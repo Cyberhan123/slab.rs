@@ -14,6 +14,7 @@ path = "src/main.rs"
 
 [dependencies]
 # Core AI runtime
+slab-agent    = { workspace = true }
 slab-core     = { workspace = true }
 slab-proto    = { workspace = true }
 slab-types    = { workspace = true }
@@ -64,6 +65,7 @@ anyhow    = { workspace = true }
 validator = { version = "0.19", features = ["derive"] }
 
 # Misc
+async-trait   = { workspace = true }
 base64    = { workspace = true }
 bytemuck  = { workspace = true }
 strum = { workspace = true }
