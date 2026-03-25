@@ -11,6 +11,7 @@ mod setup;
 mod system;
 mod task;
 mod video;
+pub mod agent;
 
 pub use audio::AudioService;
 pub use backend::BackendService;
@@ -25,6 +26,7 @@ pub use setup::SetupService;
 pub use system::SystemService;
 pub use task::TaskApplicationService;
 pub use video::VideoService;
+pub use agent::AgentService;
 
 use crate::context::{ModelState, WorkerState};
 
@@ -42,10 +44,11 @@ pub struct AppServices {
     pub system: SystemService,
     pub task_application: TaskApplicationService,
     pub video: VideoService,
+    pub agent: AgentService,
 }
 
 impl AppServices {
-    pub fn new(model_state: ModelState, worker_state: WorkerState) -> Self {
+    pub fn new(model_state: ModelState, worker_state: WorkerState, agent: AgentService) -> Self {
         Self {
             audio: AudioService::new(worker_state.clone()),
             backend: BackendService::new(model_state.clone(), worker_state.clone()),
@@ -59,6 +62,7 @@ impl AppServices {
             system: SystemService::new(),
             task_application: TaskApplicationService::new(worker_state.clone()),
             video: VideoService::new(worker_state),
+            agent,
         }
     }
 }
