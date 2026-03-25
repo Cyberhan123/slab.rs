@@ -7,7 +7,7 @@ use sha2::{Digest, Sha256};
 /// Returns `Ok(())` on a match or `Err(FetchError::ChecksumMismatch)` on
 /// mismatch.
 pub fn verify_sha256(data: &[u8], expected: &str) -> Result<(), FetchError> {
-    let hex_expected = expected.strip_prefix("sha256:").unwrap_or(expected);
+    let hex_expected = expected.trim().strip_prefix("sha256:").unwrap_or(expected.trim());
 
     let mut hasher = Sha256::new();
     hasher.update(data);
@@ -60,5 +60,14 @@ mod tests {
         // SHA256 of empty input
         let empty_sha256 = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
         assert!(verify_sha256(b"", empty_sha256).is_ok());
+    }
+
+    #[test]
+    fn test_verify_sha256_trims_whitespace() {
+        // Checksums copied from tools often have a trailing newline.
+        let with_newline = format!("sha256:{}\n", HELLO_SHA256);
+        assert!(verify_sha256(b"hello", &with_newline).is_ok());
+        let with_spaces = format!("  {}  ", HELLO_SHA256);
+        assert!(verify_sha256(b"hello", &with_spaces).is_ok());
     }
 }

@@ -12,19 +12,27 @@ pub enum Variant {
 }
 
 impl Variant {
-    /// Detect the best available compute backend for the given OS.
+    /// Detect the best available compute backend for the given OS and arch.
     ///
     /// Detection order:
-    /// - macOS  → Metal
-    /// - Windows/Linux → CUDA (if `nvcc`, `nvidia-smi`, or `CUDA_PATH` found)
-    ///                 → Vulkan (if `vulkaninfo` or `VULKAN_SDK` found)
-    ///                 → CPU fallback
+    /// - macOS + aarch64 → Metal
+    /// - macOS + x86_64  → CPU (Metal is not available on Intel macOS)
+    /// - Windows/Linux   → CUDA (if `nvcc`, `nvidia-smi`, or `CUDA_PATH` found)
+    ///                   → Vulkan (if `vulkaninfo` or `VULKAN_SDK` found)
+    ///                   → CPU fallback
     ///
     /// CUDA and Vulkan detection results are cached for the lifetime of the
     /// process to avoid repeated subprocess spawns.
-    pub fn detect_best(os: &Os) -> Self {
-        match os {
-            Os::MacOS => Self::Metal,
+    pub fn detect_best(platform: &crate::platform::Platform) -> Self {
+        use crate::platform::Arch;
+        match &platform.os {
+            Os::MacOS => {
+                if platform.arch == Arch::Aarch64 {
+                    Self::Metal
+                } else {
+                    Self::Cpu
+                }
+            }
             Os::Windows | Os::Linux => {
                 if has_cuda() {
                     return Self::Cuda;
@@ -72,6 +80,11 @@ impl fmt::Display for Variant {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::platform::{Arch, Platform};
+
+    fn platform(os: Os, arch: Arch) -> Platform {
+        Platform { os, arch }
+    }
 
     #[test]
     fn test_variant_display() {
@@ -82,21 +95,33 @@ mod tests {
     }
 
     #[test]
-    fn test_detect_best_macos_returns_metal() {
-        assert_eq!(Variant::detect_best(&Os::MacOS), Variant::Metal);
+    fn test_detect_best_macos_aarch64_returns_metal() {
+        assert_eq!(
+            Variant::detect_best(&platform(Os::MacOS, Arch::Aarch64)),
+            Variant::Metal
+        );
+    }
+
+    #[test]
+    fn test_detect_best_macos_x86_64_returns_cpu() {
+        // Intel macOS: Metal is only available for Apple Silicon.
+        assert_eq!(
+            Variant::detect_best(&platform(Os::MacOS, Arch::X86_64)),
+            Variant::Cpu
+        );
     }
 
     #[test]
     fn test_detect_best_returns_cpu_or_gpu_variant() {
         // On Linux/Windows the result depends on the environment; we just
         // verify it returns one of the valid variants for that OS.
-        let result = Variant::detect_best(&Os::Linux);
+        let result = Variant::detect_best(&platform(Os::Linux, Arch::X86_64));
         assert!(
             matches!(result, Variant::Cpu | Variant::Cuda | Variant::Vulkan),
             "unexpected variant: {:?}",
             result
         );
-        let result = Variant::detect_best(&Os::Windows);
+        let result = Variant::detect_best(&platform(Os::Windows, Arch::X86_64));
         assert!(
             matches!(result, Variant::Cpu | Variant::Cuda | Variant::Vulkan),
             "unexpected variant: {:?}",

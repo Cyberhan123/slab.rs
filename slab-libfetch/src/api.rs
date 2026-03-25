@@ -45,6 +45,10 @@ pub struct VersionApi {
     is_latest: bool,
     /// Pre-resolved artifact from a manifest (optional).
     resolved_artifact: Option<ResolvedArtifact>,
+    /// Platform used when resolving the artifact (for progress output).
+    resolved_platform: Option<Platform>,
+    /// Variant used when resolving the artifact (for progress output).
+    resolved_variant: Option<Variant>,
 }
 
 impl Default for Api {
@@ -117,7 +121,7 @@ impl Api {
         let platform = Platform::current().ok_or_else(|| {
             FetchError::ManifestError("unsupported OS or architecture".to_string())
         })?;
-        let variant = Variant::detect_best(&platform.os);
+        let variant = Variant::detect_best(&platform);
         self.from_manifest_with_platform(manifest, artifact_name, &platform, &variant)
     }
 
@@ -138,6 +142,8 @@ impl Api {
             version: resolved.version.clone(),
             is_latest: false,
             resolved_artifact: Some(resolved),
+            resolved_platform: Some(platform.clone()),
+            resolved_variant: Some(variant.clone()),
         })
     }
 }
@@ -151,6 +157,8 @@ impl RepoApi {
             version: String::new(),
             is_latest: true,
             resolved_artifact: None,
+            resolved_platform: None,
+            resolved_variant: None,
         }
     }
 
@@ -162,6 +170,8 @@ impl RepoApi {
             version: version.into(),
             is_latest: false,
             resolved_artifact: None,
+            resolved_platform: None,
+            resolved_variant: None,
         }
     }
 
@@ -202,16 +212,11 @@ impl VersionApi {
     ///
     /// This method is intended for use after creating a `VersionApi` via
     /// [`Api::from_manifest`] or [`Api::from_manifest_with_platform`].  It
-    /// uses the pre-resolved asset name from the manifest and verifies the
-    /// downloaded bytes against the checksum (if one is present in the
-    /// manifest).  When no checksum is declared a tracing warning is emitted.
-    ///
-    /// `platform` and `variant` are used only for progress output.
-    pub async fn install_with_platform(
-        self,
-        platform: &Platform,
-        variant: &Variant,
-    ) -> Result<PathBuf, FetchError> {
+    /// uses the pre-resolved asset name and platform/variant from the manifest
+    /// and verifies the downloaded bytes against the checksum (if one is
+    /// present in the manifest).  When no checksum is declared a tracing
+    /// warning is emitted.
+    pub async fn install_with_platform(self) -> Result<PathBuf, FetchError> {
         let resolved = self.resolved_artifact.as_ref().ok_or_else(|| {
             FetchError::ManifestError(
                 "install_with_platform requires a VersionApi created via Api::from_manifest"
@@ -228,27 +233,46 @@ impl VersionApi {
         );
 
         if self.api.show_progress {
+            let platform_str = self
+                .resolved_platform
+                .as_ref()
+                .map(|p| p.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            let variant_str = self
+                .resolved_variant
+                .as_ref()
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
             println!(
-                "🚀 Installing {} for {}-{} ({} variant)…",
-                resolved.asset_name, platform.os, platform.arch, variant
+                "🚀 Installing {} for {} ({} variant)…",
+                resolved.asset_name, platform_str, variant_str
             );
         }
 
         let install = Install::new(&self.repo, &self.api.install_dir);
 
-        // Skip if already at the right version.
+        // Check existing installation: enforce repo match, skip on same version.
         if install.already_installed() {
-            if let Ok(info) = install.get_installed_version() {
-                if info.tag_name == resolved.version && info.repo == self.repo {
-                    if self.api.show_progress {
-                        println!("✅ Version {} already installed, skipping.", resolved.version);
+            match install.get_installed_version() {
+                Ok(info) => {
+                    if info.repo != self.repo {
+                        return Err(FetchError::RepositoryMismatch(info.repo));
                     }
-                    return Ok(self.api.install_dir.clone());
+                    if info.tag_name == resolved.version {
+                        if self.api.show_progress {
+                            println!(
+                                "✅ Version {} already installed, skipping.",
+                                resolved.version
+                            );
+                        }
+                        return Ok(self.api.install_dir.clone());
+                    }
+                    // Same repo but different version — reinstall.
+                    if self.api.install_dir.exists() {
+                        std::fs::remove_dir_all(&self.api.install_dir)?;
+                    }
                 }
-            }
-            // Different version — reinstall.
-            if self.api.install_dir.exists() {
-                std::fs::remove_dir_all(&self.api.install_dir)?;
+                Err(e) => return Err(e),
             }
         }
 
