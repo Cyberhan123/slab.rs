@@ -70,7 +70,7 @@ mod tests {
             .unwrap();
     }
 
-    /// Integration test: load the workspace-level `slab-artifacts.toml` and
+    /// Integration test: load the workspace-level `vendor/slab-artifacts.toml` and
     /// verify that all declared artifacts can be resolved against at least one
     /// valid platform/variant combination.
     #[test]
@@ -80,6 +80,7 @@ mod tests {
         let manifest_path = std::path::Path::new(manifest_dir)
             .parent()
             .expect("workspace root")
+            .join("vendor")
             .join("slab-artifacts.toml");
 
         let manifest = Manifest::from_file(&manifest_path).unwrap_or_else(|e| {

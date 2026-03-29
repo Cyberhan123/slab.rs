@@ -7821,6 +7821,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-build-utils"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "cargo_metadata 0.23.1",
+ "slab-libfetch",
+ "tokio",
+]
+
+[[package]]
 name = "slab-core"
 version = "0.0.1"
 dependencies = [
@@ -7883,8 +7893,7 @@ version = "0.0.1"
 dependencies = [
  "bindgen",
  "libloading 0.8.9",
- "slab-libfetch",
- "tokio",
+ "slab-build-utils",
 ]
 
 [[package]]
@@ -7906,8 +7915,7 @@ version = "0.0.1"
 dependencies = [
  "bindgen",
  "libloading 0.8.9",
- "slab-libfetch",
- "tokio",
+ "slab-build-utils",
 ]
 
 [[package]]
@@ -7945,10 +7953,8 @@ name = "slab-llama-sys"
 version = "0.0.1"
 dependencies = [
  "bindgen",
- "cargo_metadata 0.23.1",
  "libloading 0.8.9",
- "slab-libfetch",
- "tokio",
+ "slab-build-utils",
 ]
 
 [[package]]
@@ -8081,10 +8087,8 @@ name = "slab-whisper-sys"
 version = "0.0.1"
 dependencies = [
  "bindgen",
- "cargo_metadata 0.23.1",
  "libloading 0.8.9",
- "slab-libfetch",
- "tokio",
+ "slab-build-utils",
 ]
 
 [[package]]

@@ -1,16 +1,15 @@
 [package]
-name = "slab-diffusion-sys"
+name = "slab-build-utils"
 version.workspace = true
 edition.workspace = true
 description.workspace = true
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-license.workspace = true
-
-[build-dependencies]
-slab-build-utils = { workspace = true }
-bindgen = { workspace = true }
+license = "AGPL-3.0-only"
 
 [dependencies]
-libloading = { workspace = true }
+anyhow = { workspace = true }
+cargo_metadata = { workspace = true }
+slab-libfetch = { workspace = true }
+tokio = { workspace = true }
