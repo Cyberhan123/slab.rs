@@ -164,12 +164,14 @@ async fn load_config(settings: &SettingsProvider) -> Result<PmidConfig, ServerEr
             },
             performance: DiffusionPerformanceConfig {
                 flash_attn: settings.get_bool(PMID.diffusion.performance.flash_attn()).await?,
-                keep_vae_on_cpu: settings
-                    .get_bool(PMID.diffusion.performance.keep_vae_on_cpu())
-                    .await?,
-                keep_clip_on_cpu: settings
-                    .get_bool(PMID.diffusion.performance.keep_clip_on_cpu())
-                    .await?,
+                vae_device: settings
+                    .get_optional_string(PMID.diffusion.performance.vae_device())
+                    .await?
+                    .unwrap_or_default(),
+                clip_device: settings
+                    .get_optional_string(PMID.diffusion.performance.clip_device())
+                    .await?
+                    .unwrap_or_default(),
                 offload_params_to_cpu: settings
                     .get_bool(PMID.diffusion.performance.offload_params_to_cpu())
                     .await?,

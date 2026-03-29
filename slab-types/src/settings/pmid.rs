@@ -101,8 +101,8 @@ impl PmidCatalog {
             self.diffusion.paths.clip_g(),
             self.diffusion.paths.t5xxl(),
             self.diffusion.performance.flash_attn(),
-            self.diffusion.performance.keep_vae_on_cpu(),
-            self.diffusion.performance.keep_clip_on_cpu(),
+            self.diffusion.performance.vae_device(),
+            self.diffusion.performance.clip_device(),
             self.diffusion.performance.offload_params_to_cpu(),
         ]
     }
@@ -376,12 +376,12 @@ impl DiffusionPerformancePmids {
         SettingPmid::from_segments(["diffusion", "performance", "flash_attn"])
     }
 
-    pub fn keep_vae_on_cpu(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "performance", "keep_vae_on_cpu"])
+    pub fn vae_device(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "performance", "vae_device"])
     }
 
-    pub fn keep_clip_on_cpu(self) -> SettingPmid {
-        SettingPmid::from_segments(["diffusion", "performance", "keep_clip_on_cpu"])
+    pub fn clip_device(self) -> SettingPmid {
+        SettingPmid::from_segments(["diffusion", "performance", "clip_device"])
     }
 
     pub fn offload_params_to_cpu(self) -> SettingPmid {

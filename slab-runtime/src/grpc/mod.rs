@@ -275,14 +275,10 @@ fn build_model_spec(backend: BackendKind, load_spec: &RuntimeModelLoadSpec) -> M
                 insert_opt_path_option(&mut spec, "t5xxl_path", diffusion.t5xxl_path.as_ref());
                 spec.load_options
                     .insert("flash_attn".to_owned(), serde_json::json!(diffusion.flash_attn));
-                spec.load_options.insert(
-                    "keep_vae_on_cpu".to_owned(),
-                    serde_json::json!(diffusion.keep_vae_on_cpu),
-                );
-                spec.load_options.insert(
-                    "keep_clip_on_cpu".to_owned(),
-                    serde_json::json!(diffusion.keep_clip_on_cpu),
-                );
+                spec.load_options
+                    .insert("vae_device".to_owned(), serde_json::json!(diffusion.vae_device));
+                spec.load_options
+                    .insert("clip_device".to_owned(), serde_json::json!(diffusion.clip_device));
                 spec.load_options.insert(
                     "offload_params_to_cpu".to_owned(),
                     serde_json::json!(diffusion.offload_params_to_cpu),
@@ -329,14 +325,10 @@ fn update_model_spec_from_load_spec(
                 replace_opt_path_option(spec, "t5xxl_path", diffusion.t5xxl_path.as_ref());
                 spec.load_options
                     .insert("flash_attn".to_owned(), serde_json::json!(diffusion.flash_attn));
-                spec.load_options.insert(
-                    "keep_vae_on_cpu".to_owned(),
-                    serde_json::json!(diffusion.keep_vae_on_cpu),
-                );
-                spec.load_options.insert(
-                    "keep_clip_on_cpu".to_owned(),
-                    serde_json::json!(diffusion.keep_clip_on_cpu),
-                );
+                spec.load_options
+                    .insert("vae_device".to_owned(), serde_json::json!(diffusion.vae_device));
+                spec.load_options
+                    .insert("clip_device".to_owned(), serde_json::json!(diffusion.clip_device));
                 spec.load_options.insert(
                     "offload_params_to_cpu".to_owned(),
                     serde_json::json!(diffusion.offload_params_to_cpu),

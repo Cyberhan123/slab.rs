@@ -16,8 +16,8 @@ message ModelLoadRequest {
   string clip_g_path = 15;
   string t5xxl_path = 16;
   bool flash_attn = 17;
-  bool keep_vae_on_cpu = 18;
-  bool keep_clip_on_cpu = 19;
+  string vae_device = 18;
+  string clip_device = 19;
   bool offload_params_to_cpu = 20;
 }
 

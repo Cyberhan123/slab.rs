@@ -683,8 +683,8 @@ async fn resolve_diffusion_context_params(
         clip_g_path: paths.clip_g.map(PathBuf::from),
         t5xxl_path: paths.t5xxl.map(PathBuf::from),
         flash_attn: performance.flash_attn,
-        keep_vae_on_cpu: performance.keep_vae_on_cpu,
-        keep_clip_on_cpu: performance.keep_clip_on_cpu,
+        vae_device: performance.vae_device,
+        clip_device: performance.clip_device,
         offload_params_to_cpu: performance.offload_params_to_cpu,
     }))
 }

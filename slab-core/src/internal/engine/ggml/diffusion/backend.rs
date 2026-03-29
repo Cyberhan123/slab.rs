@@ -16,8 +16,8 @@
 //!   "vae_path": "",
 //!   "taesd_path": "",
 //!   "flash_attn": false,
-//!   "keep_vae_on_cpu": false,
-//!   "keep_clip_on_cpu": false,
+//!   "vae_device": "",
+//!   "clip_device": "",
 //!   "offload_params_to_cpu": false
 //! }
 //! ```
@@ -276,8 +276,8 @@ impl DiffusionWorker {
             ctx_params.clip_vision_path = config.clip_vision_path;
             ctx_params.control_net_path = config.control_net_path;
             ctx_params.flash_attn = config.flash_attn;
-            ctx_params.keep_vae_on_cpu = config.keep_vae_on_cpu;
-            ctx_params.keep_clip_on_cpu = config.keep_clip_on_cpu;
+            ctx_params.vae_device = config.vae_device.clone();
+            ctx_params.clip_device = config.clip_device.clone();
             ctx_params.offload_params_to_cpu = config.offload_params_to_cpu;
             ctx_params.enable_mmap = config.enable_mmap;
             if config.n_threads != 0 {
@@ -471,8 +471,8 @@ impl DiffusionWorker {
                     ctx_params.clip_vision_path = config.clip_vision_path.clone();
                     ctx_params.control_net_path = config.control_net_path.clone();
                     ctx_params.flash_attn = config.flash_attn;
-                    ctx_params.keep_vae_on_cpu = config.keep_vae_on_cpu;
-                    ctx_params.keep_clip_on_cpu = config.keep_clip_on_cpu;
+                    ctx_params.vae_device = config.vae_device.clone();
+                    ctx_params.clip_device = config.clip_device.clone();
                     ctx_params.offload_params_to_cpu = config.offload_params_to_cpu;
                     ctx_params.enable_mmap = config.enable_mmap;
                     if config.n_threads != 0 {

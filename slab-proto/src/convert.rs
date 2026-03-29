@@ -66,8 +66,8 @@ pub fn encode_model_load_request(spec: &RuntimeModelLoadSpec) -> pb::ModelLoadRe
         clip_g_path: opt_path_to_string(diffusion.clip_g_path),
         t5xxl_path: opt_path_to_string(diffusion.t5xxl_path),
         flash_attn: diffusion.flash_attn,
-        keep_vae_on_cpu: diffusion.keep_vae_on_cpu,
-        keep_clip_on_cpu: diffusion.keep_clip_on_cpu,
+        vae_device: diffusion.vae_device.clone(),
+        clip_device: diffusion.clip_device.clone(),
         offload_params_to_cpu: diffusion.offload_params_to_cpu,
     }
 }
@@ -111,8 +111,8 @@ pub fn decode_reload_library_request(
         clip_g_path: String::new(),
         t5xxl_path: String::new(),
         flash_attn: false,
-        keep_vae_on_cpu: false,
-        keep_clip_on_cpu: false,
+        vae_device: String::new(),
+        clip_device: String::new(),
         offload_params_to_cpu: false,
     })?;
 
@@ -689,8 +689,8 @@ fn diffusion_load_options_from_model_load_request(
         clip_g_path: non_empty_path(&request.clip_g_path),
         t5xxl_path: non_empty_path(&request.t5xxl_path),
         flash_attn: request.flash_attn,
-        keep_vae_on_cpu: request.keep_vae_on_cpu,
-        keep_clip_on_cpu: request.keep_clip_on_cpu,
+        vae_device: request.vae_device.clone(),
+        clip_device: request.clip_device.clone(),
         offload_params_to_cpu: request.offload_params_to_cpu,
     };
 
@@ -702,8 +702,8 @@ fn diffusion_load_options_from_model_load_request(
         || options.clip_g_path.is_some()
         || options.t5xxl_path.is_some()
         || options.flash_attn
-        || options.keep_vae_on_cpu
-        || options.keep_clip_on_cpu
+        || !options.vae_device.is_empty()
+        || !options.clip_device.is_empty()
         || options.offload_params_to_cpu;
 
     has_any_value.then_some(options)
@@ -846,8 +846,8 @@ mod tests {
                 clip_g_path: None,
                 t5xxl_path: None,
                 flash_attn: true,
-                keep_vae_on_cpu: true,
-                keep_clip_on_cpu: false,
+                vae_device: String::from("cpu"),
+                clip_device: String::new(),
                 offload_params_to_cpu: true,
             }),
         };

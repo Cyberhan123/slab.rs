@@ -141,6 +141,9 @@ impl Diffusion {
         let taesd_cs = params::opt_cstring(&params.taesd_path);
         let control_net_cs = params::opt_cstring(&params.control_net_path);
         let photo_maker_cs = params::opt_cstring(&params.photo_maker_path);
+        let vae_device_cs = params::opt_cstring(&params.vae_device);
+        let clip_device_cs = params::opt_cstring(&params.clip_device);
+        let control_net_device_cs = params::opt_cstring(&params.control_net_device);
 
         let mut c_params: slab_diffusion_sys::sd_ctx_params_t = unsafe { std::mem::zeroed() };
         unsafe { self.lib.sd_ctx_params_init(&mut c_params) };
@@ -168,9 +171,9 @@ impl Diffusion {
         c_params.lora_apply_mode = params.lora_apply_mode;
         c_params.offload_params_to_cpu = params.offload_params_to_cpu;
         c_params.enable_mmap = params.enable_mmap;
-        c_params.keep_clip_on_cpu = params.keep_clip_on_cpu;
-        c_params.keep_control_net_on_cpu = params.keep_control_net_on_cpu;
-        c_params.keep_vae_on_cpu = params.keep_vae_on_cpu;
+        c_params.clip_device = params::ptr_or_null(&clip_device_cs);
+        c_params.control_net_device = params::ptr_or_null(&control_net_device_cs);
+        c_params.vae_device = params::ptr_or_null(&vae_device_cs);
         c_params.vae_decode_only = params.vae_decode_only;
         c_params.free_params_immediately = false;
         c_params.tae_preview_only = params.taesd_preview_only;

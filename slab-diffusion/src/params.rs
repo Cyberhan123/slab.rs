@@ -127,14 +127,14 @@ pub struct SdContextParams {
     /// LoRA application mode.
     pub lora_apply_mode: LoraApplyMode,
 
-    /// Keep the VAE model in CPU RAM to save VRAM.
-    pub keep_vae_on_cpu: bool,
+    /// Device string for the VAE model (e.g. "cuda:0"). Empty means default.
+    pub vae_device: String,
 
-    /// Keep the CLIP model(s) in CPU RAM to save VRAM.
-    pub keep_clip_on_cpu: bool,
+    /// Device string for the CLIP model(s) (e.g. "cuda:0"). Empty means default.
+    pub clip_device: String,
 
-    /// Keep the ControlNet model in CPU RAM to save VRAM.
-    pub keep_control_net_on_cpu: bool,
+    /// Device string for the ControlNet model (e.g. "cuda:0"). Empty means default.
+    pub control_net_device: String,
 
     /// Offload model parameters to CPU and load on demand into GPU.
     pub offload_params_to_cpu: bool,
@@ -176,9 +176,9 @@ impl Default for SdContextParams {
             rng_type: RNG_STD_DEFAULT,
             prediction: PREDICTION_COUNT,
             lora_apply_mode: LORA_APPLY_AUTO,
-            keep_vae_on_cpu: false,
-            keep_clip_on_cpu: false,
-            keep_control_net_on_cpu: false,
+            vae_device: String::new(),
+            clip_device: String::new(),
+            control_net_device: String::new(),
             offload_params_to_cpu: false,
             enable_mmap: false,
             vae_decode_only: true,

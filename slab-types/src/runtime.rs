@@ -169,9 +169,9 @@ pub struct DiffusionLoadOptions {
     #[serde(default)]
     pub flash_attn: bool,
     #[serde(default)]
-    pub keep_vae_on_cpu: bool,
+    pub vae_device: String,
     #[serde(default)]
-    pub keep_clip_on_cpu: bool,
+    pub clip_device: String,
     #[serde(default)]
     pub offload_params_to_cpu: bool,
 }
