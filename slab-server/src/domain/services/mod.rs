@@ -1,3 +1,4 @@
+pub mod agent;
 mod audio;
 mod backend;
 mod chat;
@@ -11,8 +12,8 @@ mod setup;
 mod system;
 mod task;
 mod video;
-pub mod agent;
 
+pub use agent::AgentService;
 pub use audio::AudioService;
 pub use backend::BackendService;
 pub use chat::ChatService;
@@ -26,7 +27,6 @@ pub use setup::SetupService;
 pub use system::SystemService;
 pub use task::TaskApplicationService;
 pub use video::VideoService;
-pub use agent::AgentService;
 
 use crate::context::{ModelState, WorkerState};
 

@@ -58,11 +58,7 @@ impl Manifest {
     /// Parse a manifest from a TOML file on disk.
     pub fn from_file(path: impl AsRef<Path>) -> Result<Self, FetchError> {
         let content = std::fs::read_to_string(path.as_ref()).map_err(|e| {
-            FetchError::ManifestError(format!(
-                "cannot read manifest {:?}: {}",
-                path.as_ref(),
-                e
-            ))
+            FetchError::ManifestError(format!("cannot read manifest {:?}: {}", path.as_ref(), e))
         })?;
         Self::from_str(&content)
     }
@@ -148,9 +144,8 @@ pub fn resolve_current(
     manifest: &Manifest,
     artifact_name: &str,
 ) -> Result<ResolvedArtifact, FetchError> {
-    let platform = Platform::current().ok_or_else(|| {
-        FetchError::ManifestError("unsupported OS or architecture".to_string())
-    })?;
+    let platform = Platform::current()
+        .ok_or_else(|| FetchError::ManifestError("unsupported OS or architecture".to_string()))?;
     let variant = Variant::detect_best(&platform);
     manifest.artifact(artifact_name)?.resolve(&platform, &variant)
 }

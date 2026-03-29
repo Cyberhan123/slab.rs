@@ -10,7 +10,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use slab_agent::config::AgentConfig;
 use slab_agent::error::AgentError;
-use slab_agent::port::{AgentNotifyPort, LlmPort, LlmResponse, ParsedToolCall, ThreadStatus, ToolSpec};
+use slab_agent::port::{
+    AgentNotifyPort, LlmPort, LlmResponse, ParsedToolCall, ThreadStatus, ToolSpec,
+};
 use slab_types::{ConversationMessage, ConversationMessageContent};
 use tracing::warn;
 use uuid::Uuid;
@@ -73,16 +75,20 @@ impl LlmPort for ServerLlmAdapter {
 
         match output {
             ChatCompletionOutput::Json(result) => {
-                let choice = result.choices.into_iter().next().ok_or_else(|| {
-                    AgentError::Llm("LLM returned an empty choices array".into())
-                })?;
+                let choice =
+                    result.choices.into_iter().next().ok_or_else(|| {
+                        AgentError::Llm("LLM returned an empty choices array".into())
+                    })?;
 
                 let tool_calls: Vec<ParsedToolCall> = choice
                     .message
                     .tool_calls
                     .into_iter()
                     .map(|tc| ParsedToolCall {
-                        id: tc.id.filter(|s| !s.is_empty()).unwrap_or_else(|| Uuid::new_v4().to_string()),
+                        id: tc
+                            .id
+                            .filter(|s| !s.is_empty())
+                            .unwrap_or_else(|| Uuid::new_v4().to_string()),
                         name: tc.function.name,
                         arguments: tc.function.arguments,
                     })
@@ -93,11 +99,7 @@ impl LlmPort for ServerLlmAdapter {
                     _ => None,
                 };
 
-                Ok(LlmResponse {
-                    content,
-                    tool_calls,
-                    finish_reason: choice.finish_reason,
-                })
+                Ok(LlmResponse { content, tool_calls, finish_reason: choice.finish_reason })
             }
             ChatCompletionOutput::Stream(_) => Err(AgentError::Llm(
                 "ServerLlmAdapter received an unexpected streaming response".into(),

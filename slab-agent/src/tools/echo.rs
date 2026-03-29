@@ -43,11 +43,7 @@ impl ToolHandler for EchoTool {
         _ctx: &ToolContext,
         arguments: &Value,
     ) -> Result<ToolOutput, AgentError> {
-        let message = arguments
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("")
-            .to_owned();
+        let message = arguments.get("message").and_then(Value::as_str).unwrap_or("").to_owned();
         Ok(ToolOutput { content: message, metadata: None })
     }
 }

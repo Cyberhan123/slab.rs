@@ -838,10 +838,8 @@ mod tests {
             .await
             .expect("streaming task should submit");
 
-        let mut stream = stream_handle
-            .take_stream()
-            .await
-            .expect("stream handle should be available");
+        let mut stream =
+            stream_handle.take_stream().await.expect("stream handle should be available");
 
         let first_chunk = tokio::time::timeout(Duration::from_secs(1), stream.next())
             .await

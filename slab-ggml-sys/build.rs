@@ -2,36 +2,27 @@
 
 extern crate bindgen;
 
-use cargo_metadata::MetadataCommand;
 use slab_libfetch::fetch_header;
 use std::env;
 use std::path::PathBuf;
-fn get_workspace_root() -> std::path::PathBuf {
-    let metadata = MetadataCommand::new().no_deps().exec().expect("Could not fetch cargo metadata");
 
-    metadata.workspace_root.into_std_path_buf()
-}
 fn main() {
-    let manifest_dir = get_workspace_root();
-    let ggml_include_path = manifest_dir.join("slab-ggml-sys/target/ggml/include");
-    let include_path = PathBuf::from("target/whisper");
+    let include_path = PathBuf::from("target/ggml");
 
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
-        fetch_header("seasonjs", "whisper.cpp-build", Some("v1.8.4"), include_path.as_path())
+        fetch_header("seasonjs", "ggml.cpp-build", Some("v0.9.8"), include_path.as_path())
             .await
-            .expect("Failed to fetch whisper headers");
+            .expect("Failed to fetch ggml headers");
     });
 
-    println!("cargo:rerun-if-changed={}", ggml_include_path.display());
     println!("cargo:rerun-if-changed={}", include_path.display());
 
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
         .clang_arg(format!("-I{}", include_path.join("include").display()))
-        .clang_arg(format!("-I{}", ggml_include_path.display()))
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .dynamic_library_name("WhisperLib")
+        .dynamic_library_name("GGmlLib")
         .generate();
 
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());

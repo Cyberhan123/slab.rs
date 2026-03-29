@@ -5,8 +5,8 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use slab_types::{
-    agent::ToolCallStatus, ConversationMessage, ConversationMessageContent,
-    ConversationToolCall, ConversationToolFunction,
+    agent::ToolCallStatus, ConversationMessage, ConversationMessageContent, ConversationToolCall,
+    ConversationToolFunction,
 };
 
 use crate::{
@@ -34,18 +34,12 @@ pub(crate) async fn execute_turn(
     let tool_specs: Vec<_> = if config.allowed_tools.is_empty() {
         tools.tool_specs()
     } else {
-        tools
-            .tool_specs()
-            .into_iter()
-            .filter(|s| config.allowed_tools.contains(&s.name))
-            .collect()
+        tools.tool_specs().into_iter().filter(|s| config.allowed_tools.contains(&s.name)).collect()
     };
 
     debug!(thread_id, turn_index, "executing turn");
 
-    let response = llm
-        .chat_completion(&config.model, messages, &tool_specs, config)
-        .await?;
+    let response = llm.chat_completion(&config.model, messages, &tool_specs, config).await?;
 
     if response.tool_calls.is_empty() {
         // Model produced a final answer — no more turns required.
@@ -76,9 +70,7 @@ pub(crate) async fn execute_turn(
 
     messages.push(ConversationMessage {
         role: "assistant".to_owned(),
-        content: ConversationMessageContent::Text(
-            response.content.unwrap_or_default(),
-        ),
+        content: ConversationMessageContent::Text(response.content.unwrap_or_default()),
         name: None,
         tool_call_id: None,
         tool_calls: assistant_tool_calls,
@@ -110,26 +102,24 @@ pub(crate) async fn execute_turn(
                 warn!(thread_id, tool = %tc.name, "tool not found");
                 (format!("tool not found: {}", tc.name), ToolCallStatus::Failed)
             }
-            Some(handler) => {
-                match serde_json::from_str::<serde_json::Value>(&tc.arguments) {
-                    Err(e) => {
-                        warn!(
-                            thread_id,
-                            tool = %tc.name,
-                            error = %e,
-                            "failed to parse tool call arguments as JSON"
-                        );
-                        (format!("invalid tool call arguments: {e}"), ToolCallStatus::Failed)
-                    }
-                    Ok(args) => match handler.execute(&ctx, &args).await {
-                        Ok(out) => (out.content, ToolCallStatus::Completed),
-                        Err(e) => {
-                            warn!(thread_id, tool = %tc.name, error = %e, "tool execution failed");
-                            (e.to_string(), ToolCallStatus::Failed)
-                        }
-                    },
+            Some(handler) => match serde_json::from_str::<serde_json::Value>(&tc.arguments) {
+                Err(e) => {
+                    warn!(
+                        thread_id,
+                        tool = %tc.name,
+                        error = %e,
+                        "failed to parse tool call arguments as JSON"
+                    );
+                    (format!("invalid tool call arguments: {e}"), ToolCallStatus::Failed)
                 }
-            }
+                Ok(args) => match handler.execute(&ctx, &args).await {
+                    Ok(out) => (out.content, ToolCallStatus::Completed),
+                    Err(e) => {
+                        warn!(thread_id, tool = %tc.name, error = %e, "tool execution failed");
+                        (e.to_string(), ToolCallStatus::Failed)
+                    }
+                },
+            },
         };
 
         let completed_at = Utc::now().to_rfc3339();
