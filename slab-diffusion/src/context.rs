@@ -92,16 +92,17 @@ impl SdContext {
             },
         };
 
-        let sample_params = slab_diffusion_sys::sd_sample_params_t {
-            guidance,
-            scheduler,
-            sample_method,
-            sample_steps: params.sample_steps,
-            eta: params.eta,
-            shifted_timestep: 0,
-            custom_sigmas: ptr::null_mut(),
-            custom_sigmas_count: 0,
-        };
+        let mut sample_params: slab_diffusion_sys::sd_sample_params_t = unsafe { std::mem::zeroed() };
+        unsafe { self.lib.sd_sample_params_init(&mut sample_params) };
+        sample_params.guidance = guidance;
+        sample_params.scheduler = scheduler;
+        sample_params.sample_method = sample_method;
+        sample_params.sample_steps = params.sample_steps;
+        sample_params.eta = params.eta;
+        sample_params.shifted_timestep = 0;
+        sample_params.custom_sigmas = ptr::null_mut();
+        sample_params.custom_sigmas_count = 0;
+        sample_params.flow_shift = params.flow_shift;
 
         // Build the init image struct (img2img / vid_gen).
         // We store a mutable copy of the data so we can hand a raw pointer to
@@ -158,25 +159,25 @@ impl SdContext {
             style_strength: 20.0,
         };
 
-        let cache = slab_diffusion_sys::sd_cache_params_t {
-            mode: slab_diffusion_sys::sd_cache_mode_t_SD_CACHE_DISABLED,
-            reuse_threshold: 1.0,
-            start_percent: 0.15,
-            end_percent: 0.95,
-            error_decay_rate: 1.0,
-            use_relative_threshold: true,
-            reset_error_on_compute: true,
-            Fn_compute_blocks: 8,
-            Bn_compute_blocks: 0,
-            residual_diff_threshold: 0.08,
-            max_warmup_steps: 8,
-            max_cached_steps: -1,
-            max_continuous_cached_steps: -1,
-            taylorseer_n_derivatives: 1,
-            taylorseer_skip_interval: 1,
-            scm_mask: ptr::null(),
-            scm_policy_dynamic: true,
-        };
+        let mut cache: slab_diffusion_sys::sd_cache_params_t = unsafe { std::mem::zeroed() };
+        unsafe { self.lib.sd_cache_params_init(&mut cache) };
+        cache.mode = slab_diffusion_sys::sd_cache_mode_t_SD_CACHE_DISABLED;
+        cache.reuse_threshold = 1.0;
+        cache.start_percent = 0.15;
+        cache.end_percent = 0.95;
+        cache.error_decay_rate = 1.0;
+        cache.use_relative_threshold = true;
+        cache.reset_error_on_compute = true;
+        cache.Fn_compute_blocks = 8;
+        cache.Bn_compute_blocks = 0;
+        cache.residual_diff_threshold = 0.08;
+        cache.max_warmup_steps = 8;
+        cache.max_cached_steps = -1;
+        cache.max_continuous_cached_steps = -1;
+        cache.taylorseer_n_derivatives = 1;
+        cache.taylorseer_skip_interval = 1;
+        cache.scm_mask = ptr::null();
+        cache.scm_policy_dynamic = true;
 
         let gen_params = slab_diffusion_sys::sd_img_gen_params_t {
             loras: ptr::null(),

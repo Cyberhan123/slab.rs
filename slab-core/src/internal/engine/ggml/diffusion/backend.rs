@@ -128,6 +128,8 @@ struct GenImageParams {
     strength: f32,
     #[serde(default)]
     eta: f32,
+    #[serde(default = "default_flow_shift")]
+    flow_shift: f32,
     #[serde(default = "default_batch_count")]
     batch_count: i32,
     /// Base64-encoded raw RGB pixel data for img2img / video generation.
@@ -169,6 +171,9 @@ fn default_scheduler() -> String {
 }
 fn default_strength() -> f32 {
     0.75
+}
+fn default_flow_shift() -> f32 {
+    f32::INFINITY
 }
 fn default_batch_count() -> i32 {
     1
@@ -386,6 +391,7 @@ impl DiffusionWorker {
                 clip_skip: gen_params.clip_skip,
                 strength: gen_params.strength,
                 eta: gen_params.eta,
+                flow_shift: gen_params.flow_shift,
                 batch_count: gen_params.batch_count.max(1),
                 init_image,
             };

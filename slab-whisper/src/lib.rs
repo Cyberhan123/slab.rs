@@ -1,4 +1,3 @@
-use libloading::Library;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -23,7 +22,7 @@ pub use whisper_ctx::DtwMode;
 pub use whisper_ctx::DtwModelPreset;
 pub use whisper_ctx::DtwParameters;
 pub use whisper_ctx::WhisperContextParameters;
-use whisper_ctx::WhisperInnerContext;
+
 pub use whisper_ctx_wrapper::WhisperContext;
 pub use whisper_grammar::{WhisperGrammarElement, WhisperGrammarElementType};
 pub use whisper_params::{FullParams, SamplingStrategy, SegmentCallbackData};
@@ -44,110 +43,14 @@ pub type WhisperAbortCallback = slab_whisper_sys::ggml_abort_callback;
 pub type WhisperLogCallback = slab_whisper_sys::ggml_log_callback;
 pub type DtwAhead = slab_whisper_sys::whisper_ahead;
 
+use slab_ggml::GGML;
+use whisper_ctx::WhisperInnerContext;
+
 #[derive(Clone)]
 pub struct Whisper {
     lib: Arc<slab_whisper_sys::WhisperLib>,
     // Keep ggml.dll loaded when backend symbols are resolved from it.
-    _ggml_lib: Option<Arc<Library>>,
-}
-
-fn load_ggml_backend(
-    path: &Path,
-    whisper_lib: &slab_whisper_sys::WhisperLib,
-) -> Result<Option<Arc<Library>>, WhisperError> {
-    let whisper_dir_path =
-        path.parent().ok_or(WhisperError::InitBackendError("Invalid path".to_string()))?;
-    if !whisper_dir_path.is_dir() {
-        return Err(WhisperError::InitBackendError(format!(
-            "Whisper directory does not exist: {}",
-            whisper_dir_path.display()
-        )));
-    }
-    use std::ffi::CString;
-    let c_str = CString::new(
-        whisper_dir_path
-            .to_str()
-            .ok_or(WhisperError::InitBackendError("Invalid path".to_string()))?,
-    )?;
-
-    if let Ok(ggml_backend_load_all_from_path) =
-        whisper_lib.ggml_backend_load_all_from_path.as_ref()
-    {
-        unsafe { ggml_backend_load_all_from_path(c_str.as_ptr()) };
-
-        let reg_count = whisper_lib.ggml_backend_reg_count.as_ref().ok().map(|f| unsafe { f() });
-        let dev_count = whisper_lib.ggml_backend_dev_count.as_ref().ok().map(|f| unsafe { f() });
-
-        if matches!((reg_count, dev_count), (Some(0), Some(0))) {
-            return Err(WhisperError::InitBackendError(format!(
-                "No GGML backends/devices were registered from directory: {}. Ensure ggml-*.dll files match whisper.dll version.",
-                whisper_dir_path.display()
-            )));
-        }
-        return Ok(None);
-    }
-
-    #[cfg(windows)]
-    {
-        use libloading::os::windows::{
-            Library as WinLibrary, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-            LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
-        };
-        use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
-        let ggml_path = whisper_dir_path.join(format!("{}ggml{}", DLL_PREFIX, DLL_SUFFIX));
-        let ggml_lib: libloading::Library = unsafe {
-            WinLibrary::load_with_flags(
-                ggml_path.as_path(),
-                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-            )?
-            .into()
-        };
-
-        let ggml_backend_load_all_from_path: unsafe extern "C" fn(
-            dir_path: *const ::std::os::raw::c_char,
-        ) = unsafe {
-            *ggml_lib.get(b"ggml_backend_load_all_from_path\0").map_err(|e| {
-                WhisperError::InitBackendError(format!(
-                    "Missing ggml symbol ggml_backend_load_all_from_path: {}",
-                    e
-                ))
-            })?
-        };
-        let ggml_backend_reg_count: unsafe extern "C" fn() -> usize = unsafe {
-            *ggml_lib.get(b"ggml_backend_reg_count\0").map_err(|e| {
-                WhisperError::InitBackendError(format!(
-                    "Missing ggml symbol ggml_backend_reg_count: {}",
-                    e
-                ))
-            })?
-        };
-        let ggml_backend_dev_count: unsafe extern "C" fn() -> usize = unsafe {
-            *ggml_lib.get(b"ggml_backend_dev_count\0").map_err(|e| {
-                WhisperError::InitBackendError(format!(
-                    "Missing ggml symbol ggml_backend_dev_count: {}",
-                    e
-                ))
-            })?
-        };
-
-        unsafe { ggml_backend_load_all_from_path(c_str.as_ptr()) };
-        let reg_count = unsafe { ggml_backend_reg_count() };
-        let dev_count = unsafe { ggml_backend_dev_count() };
-        if reg_count == 0 && dev_count == 0 {
-            return Err(WhisperError::InitBackendError(format!(
-                "No GGML backends/devices were registered from directory: {}. Ensure ggml-*.dll files match whisper.dll version.",
-                whisper_dir_path.display()
-            )));
-        }
-        Ok(Some(Arc::new(ggml_lib)))
-    }
-
-    #[cfg(not(windows))]
-    {
-        Err(WhisperError::InitBackendError(
-            "Missing ggml_backend_load_all_from_path in whisper library and ggml fallback is only implemented on Windows.".to_string(),
-        ))
-    }
+    _ggml_lib: Option<Arc<GGML>>,
 }
 
 impl Whisper {
@@ -168,8 +71,10 @@ impl Whisper {
             };
 
             let whisper_lib = unsafe { slab_whisper_sys::WhisperLib::from_library(lib)? };
-            let ggml_lib = load_ggml_backend(path.as_ref(), &whisper_lib)?;
-
+            let ggml_lib = GGML::new_with(path.as_ref()).ok().map(Arc::new);
+            if let Some(ggml_lib) = &ggml_lib {
+                ggml_lib.load_all_backend();
+            }
             Ok(Self { lib: Arc::new(whisper_lib), _ggml_lib: ggml_lib })
         }
 
@@ -177,7 +82,10 @@ impl Whisper {
         {
             let raw_lib = unsafe { libloading::Library::new(path.as_ref())? };
             let lib = unsafe { slab_whisper_sys::WhisperLib::from_library(raw_lib)? };
-            let ggml_lib = load_ggml_backend(path.as_ref(), &lib)?;
+            let ggml_lib = GGML::new_with(path.as_ref()).ok().map(Arc::new);
+            if let Some(ggml_lib) = &ggml_lib {
+                ggml_lib.load_all_backend();
+            }
             Ok(Self { lib: Arc::new(lib), _ggml_lib: ggml_lib })
         }
     }

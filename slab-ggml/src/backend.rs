@@ -1,5 +1,4 @@
 use std::fmt;
-use std::path::Path;
 use std::{fmt::Debug, sync::Arc};
 
 #[derive(Clone)]
