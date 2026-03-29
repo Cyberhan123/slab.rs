@@ -1,9 +1,9 @@
 use std::fmt;
-use std::{fmt::Debug, sync::Arc};
+use std::{fmt::Debug, rc::Rc};
 
 #[derive(Clone)]
 pub struct GGMLBackendReg {
-    pub(crate) reg: Arc<slab_ggml_sys::ggml_backend_reg_t>,
+    pub(crate) _reg: Rc<slab_ggml_sys::ggml_backend_reg_t>,
 }
 
 impl GGMLBackendReg {}

@@ -14,7 +14,7 @@ use crate::{
     error::AgentError,
     port::{AgentNotifyPort, AgentStorePort, LlmPort, ThreadSnapshot, ThreadStatus},
     tool::ToolRouter,
-    turn::execute_turn,
+    turn::{execute_turn, TurnExecutionContext},
 };
 
 /// A single agent conversation thread.
@@ -126,14 +126,16 @@ impl AgentThread {
         'turns: for turn_index in 0..self.config.max_turns {
             debug!(thread_id, turn_index, "starting turn");
             match execute_turn(
-                &thread_id,
-                turn_index,
-                self.depth,
+                TurnExecutionContext {
+                    thread_id: &thread_id,
+                    turn_index,
+                    depth: self.depth,
+                    config: &self.config,
+                    llm: llm.as_ref(),
+                    tools: tools.as_ref(),
+                    store: store.as_ref(),
+                },
                 &mut messages,
-                &self.config,
-                llm.as_ref(),
-                tools.as_ref(),
-                store.as_ref(),
             )
             .await
             {

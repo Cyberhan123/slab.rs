@@ -27,10 +27,8 @@ pub use slab_diffusion_sys::sd_log_level_t as SdLogLevel;
 
 pub use slab_diffusion_sys::{
     lora_apply_mode_t_LORA_APPLY_AUTO as LORA_APPLY_AUTO,
-    prediction_t_PREDICTION_COUNT as PREDICTION_COUNT,
-    rng_type_t_CPU_RNG as RNG_CPU,
-    rng_type_t_CUDA_RNG as RNG_CUDA,
-    rng_type_t_RNG_TYPE_COUNT as RNG_TYPE_COUNT,
+    prediction_t_PREDICTION_COUNT as PREDICTION_COUNT, rng_type_t_CPU_RNG as RNG_CPU,
+    rng_type_t_CUDA_RNG as RNG_CUDA, rng_type_t_RNG_TYPE_COUNT as RNG_TYPE_COUNT,
     rng_type_t_STD_DEFAULT_RNG as RNG_STD_DEFAULT,
     sample_method_t_DPM2_SAMPLE_METHOD as SAMPLE_DPM2,
     sample_method_t_DPMPP2M_SAMPLE_METHOD as SAMPLE_DPM_PP_2M,
@@ -46,8 +44,7 @@ pub use slab_diffusion_sys::{
     scheduler_t_AYS_SCHEDULER as SCHEDULER_AYS,
     scheduler_t_DISCRETE_SCHEDULER as SCHEDULER_DISCRETE,
     scheduler_t_EXPONENTIAL_SCHEDULER as SCHEDULER_EXPONENTIAL,
-    scheduler_t_GITS_SCHEDULER as SCHEDULER_GITS,
-    scheduler_t_KARRAS_SCHEDULER as SCHEDULER_KARRAS,
+    scheduler_t_GITS_SCHEDULER as SCHEDULER_GITS, scheduler_t_KARRAS_SCHEDULER as SCHEDULER_KARRAS,
     scheduler_t_SCHEDULER_COUNT as SCHEDULER_COUNT,
     sd_cache_mode_t_SD_CACHE_DISABLED as CACHE_DISABLED,
     sd_type_t_SD_TYPE_COUNT as WEIGHT_TYPE_AUTO,

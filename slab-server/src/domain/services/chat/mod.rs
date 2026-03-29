@@ -555,15 +555,17 @@ async fn create_chat_completion_with_state(
             local::create_chat_completion(
                 &state,
                 &resolved_model,
-                command.id.as_deref(),
                 &resolved_messages,
-                max_tokens,
-                temperature,
-                command.top_p,
-                command.grammar.clone(),
-                command.grammar_json,
-                true,
-                command.stream_options.include_usage,
+                local::LocalChatRequestConfig {
+                    session_id: command.id.clone(),
+                    max_tokens,
+                    temperature,
+                    top_p: command.top_p,
+                    grammar: command.grammar.clone(),
+                    grammar_json: command.grammar_json,
+                    stream: true,
+                    include_usage: command.stream_options.include_usage,
+                },
             )
             .await?
         };
@@ -610,25 +612,33 @@ async fn create_chat_completion_with_state(
                 &state,
                 &resolved_model,
                 &resolved_messages,
-                max_tokens,
-                temperature,
-                command.top_p,
-                command.structured_output.clone(),
-                command.reasoning_effort,
-                command.verbosity,
+                cloud::CloudChatRequestConfig {
+                    max_tokens,
+                    temperature,
+                    top_p: command.top_p,
+                    structured_output: command.structured_output.clone(),
+                    reasoning_effort: command.reasoning_effort,
+                    verbosity: command.verbosity,
+                    stream: false,
+                    include_usage: false,
+                },
             )
             .await?
         } else {
             generate_local_chat_text(
                 &state,
                 &resolved_model,
-                command.id.as_deref(),
                 &resolved_messages,
-                max_tokens,
-                temperature,
-                command.top_p,
-                command.grammar.clone(),
-                command.grammar_json,
+                local::LocalChatRequestConfig {
+                    session_id: command.id.clone(),
+                    max_tokens,
+                    temperature,
+                    top_p: command.top_p,
+                    grammar: command.grammar.clone(),
+                    grammar_json: command.grammar_json,
+                    stream: false,
+                    include_usage: false,
+                },
             )
             .await?
         };
@@ -730,11 +740,13 @@ async fn create_text_completion_with_state(
                 &state,
                 &resolved_model,
                 &command.prompt,
-                max_tokens,
-                temperature,
-                command.top_p,
-                command.grammar.clone(),
-                command.grammar_json,
+                local::LocalTextRequestConfig {
+                    max_tokens,
+                    temperature,
+                    top_p: command.top_p,
+                    grammar: command.grammar.clone(),
+                    grammar_json: command.grammar_json,
+                },
             )
             .await?
         };
@@ -784,30 +796,9 @@ async fn generate_cloud_chat_text(
     state: &ModelState,
     model: &str,
     messages: &[DomainConversationMessage],
-    max_tokens: u32,
-    temperature: f32,
-    top_p: Option<f32>,
-    structured_output: Option<StructuredOutput>,
-    reasoning_effort: Option<crate::domain::models::ChatReasoningEffort>,
-    verbosity: Option<crate::domain::models::ChatVerbosity>,
+    config: cloud::CloudChatRequestConfig,
 ) -> Result<TextGenerationResponse, ServerError> {
-    match cloud::create_chat_completion(
-        state,
-        model,
-        messages,
-        cloud::CloudChatRequestConfig {
-            max_tokens,
-            temperature,
-            top_p,
-            structured_output,
-            reasoning_effort,
-            verbosity,
-            stream: false,
-            include_usage: false,
-        },
-    )
-    .await?
-    {
+    match cloud::create_chat_completion(state, model, messages, config).await? {
         GeneratedChatOutput::Text(text) => Ok(text),
         GeneratedChatOutput::Stream(_) => Err(ServerError::Internal(
             "cloud chat completion unexpectedly returned a stream".into(),
@@ -818,29 +809,10 @@ async fn generate_cloud_chat_text(
 async fn generate_local_chat_text(
     state: &ModelState,
     model: &str,
-    session_id: Option<&str>,
     messages: &[DomainConversationMessage],
-    max_tokens: u32,
-    temperature: f32,
-    top_p: Option<f32>,
-    grammar: Option<String>,
-    grammar_json: bool,
+    config: local::LocalChatRequestConfig,
 ) -> Result<TextGenerationResponse, ServerError> {
-    match local::create_chat_completion(
-        state,
-        model,
-        session_id,
-        messages,
-        max_tokens,
-        temperature,
-        top_p,
-        grammar,
-        grammar_json,
-        false,
-        false,
-    )
-    .await?
-    {
+    match local::create_chat_completion(state, model, messages, config).await? {
         GeneratedChatOutput::Text(text) => Ok(text),
         GeneratedChatOutput::Stream(_) => Err(ServerError::Internal(
             "local chat completion unexpectedly returned a stream".into(),

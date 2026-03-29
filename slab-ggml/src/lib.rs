@@ -2,10 +2,10 @@ mod backend;
 mod error;
 pub use backend::GGMLBackendReg;
 pub use error::GGMLError;
-use slab_ggml_sys;
 use std::ffi::CStr;
 use std::fmt;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -73,19 +73,13 @@ impl GGML {
         unsafe { self.lib.ggml_backend_load_all() };
     }
 
-    pub fn load_all_backend_from_path(
-        &self,
-        path: &str,
-    ) -> Result<(), GGMLError> {
+    pub fn load_all_backend_from_path(&self, path: &str) -> Result<(), GGMLError> {
         let c_path = std::ffi::CString::new(path)?;
         unsafe { self.lib.ggml_backend_load_all_from_path(c_path.as_ptr()) };
         Ok(())
     }
 
-    pub fn ggml_backend_load(
-        &self,
-        path: &str,
-    ) -> Result<GGMLBackendReg, GGMLError> {
+    pub fn ggml_backend_load(&self, path: &str) -> Result<GGMLBackendReg, GGMLError> {
         let c_backend = std::ffi::CString::new(path)?;
         let reg = unsafe { self.lib.ggml_backend_load(c_backend.as_ptr()) };
 
@@ -93,7 +87,7 @@ impl GGML {
             return Err(GGMLError::NullPointer);
         }
 
-        Ok(GGMLBackendReg { reg: Arc::new(reg) })
+        Ok(GGMLBackendReg { _reg: Rc::new(reg) })
     }
 }
 

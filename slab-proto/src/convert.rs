@@ -172,8 +172,9 @@ pub fn decode_chat_request(
     // Require a non-empty prompt, or (apply_chat_template && non-empty messages).
     let prompt_empty = request.prompt.trim().is_empty();
     let messages_empty = request.messages.is_empty();
+    let allow_empty_prompt = request.apply_chat_template && !messages_empty;
 
-    if prompt_empty && !(request.apply_chat_template && !messages_empty) {
+    if prompt_empty && !allow_empty_prompt {
         return Err(ProtoConversionError::EmptyField { field: "prompt" });
     }
 

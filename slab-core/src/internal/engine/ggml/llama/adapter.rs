@@ -147,6 +147,7 @@ impl GGMLLlamaEngine {
     }
 
     /// Create a new session on the underlying inference engine.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn create_session(&self) -> Result<SessionId, engine::EngineError> {
         let engine = self.require_engine()?;
         engine.create_session().await.map_err(Into::into)

@@ -4,6 +4,7 @@ use crate::variant::Variant;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
+use std::str::FromStr;
 
 /// Top-level structure of `slab-artifacts.toml`.
 #[derive(Debug, Deserialize)]
@@ -60,11 +61,26 @@ impl Manifest {
         let content = std::fs::read_to_string(path.as_ref()).map_err(|e| {
             FetchError::ManifestError(format!("cannot read manifest {:?}: {}", path.as_ref(), e))
         })?;
-        Self::from_str(&content)
+        Self::parse(&content)
     }
 
     /// Parse a manifest from a TOML string.
-    pub fn from_str(content: &str) -> Result<Self, FetchError> {
+    pub fn parse(content: &str) -> Result<Self, FetchError> {
+        content.parse()
+    }
+
+    /// Look up an artifact by name.
+    pub fn artifact(&self, name: &str) -> Result<&ArtifactSpec, FetchError> {
+        self.artifacts.get(name).ok_or_else(|| {
+            FetchError::ManifestError(format!("artifact '{}' not found in manifest", name))
+        })
+    }
+}
+
+impl FromStr for Manifest {
+    type Err = FetchError;
+
+    fn from_str(content: &str) -> Result<Self, Self::Err> {
         let manifest: Self = toml::from_str(content)
             .map_err(|e| FetchError::ManifestError(format!("TOML parse error: {}", e)))?;
 
@@ -76,13 +92,6 @@ impl Manifest {
         }
 
         Ok(manifest)
-    }
-
-    /// Look up an artifact by name.
-    pub fn artifact(&self, name: &str) -> Result<&ArtifactSpec, FetchError> {
-        self.artifacts.get(name).ok_or_else(|| {
-            FetchError::ManifestError(format!("artifact '{}' not found in manifest", name))
-        })
     }
 }
 
@@ -182,14 +191,14 @@ metal  = { os = ["macos"],                     arch = ["aarch64"] }
 
     #[test]
     fn test_parse_manifest() {
-        let m = Manifest::from_str(SAMPLE_TOML).unwrap();
+        let m = Manifest::parse(SAMPLE_TOML).unwrap();
         assert_eq!(m.metadata.schema_version, "1");
         assert!(m.artifacts.contains_key("llama"));
     }
 
     #[test]
     fn test_resolve_cpu_linux_x86_64() {
-        let m = Manifest::from_str(SAMPLE_TOML).unwrap();
+        let m = Manifest::parse(SAMPLE_TOML).unwrap();
         let spec = m.artifact("llama").unwrap();
         let platform = make_platform(Os::Linux, Arch::X86_64);
         let resolved = spec.resolve(&platform, &Variant::Cpu).unwrap();
@@ -201,7 +210,7 @@ metal  = { os = ["macos"],                     arch = ["aarch64"] }
 
     #[test]
     fn test_resolve_metal_macos_aarch64() {
-        let m = Manifest::from_str(SAMPLE_TOML).unwrap();
+        let m = Manifest::parse(SAMPLE_TOML).unwrap();
         let spec = m.artifact("llama").unwrap();
         let platform = make_platform(Os::MacOS, Arch::Aarch64);
         let resolved = spec.resolve(&platform, &Variant::Metal).unwrap();
@@ -211,7 +220,7 @@ metal  = { os = ["macos"],                     arch = ["aarch64"] }
 
     #[test]
     fn test_resolve_invalid_variant_for_os() {
-        let m = Manifest::from_str(SAMPLE_TOML).unwrap();
+        let m = Manifest::parse(SAMPLE_TOML).unwrap();
         let spec = m.artifact("llama").unwrap();
         let platform = make_platform(Os::Linux, Arch::X86_64);
         let err = spec.resolve(&platform, &Variant::Metal).unwrap_err();
@@ -220,7 +229,7 @@ metal  = { os = ["macos"],                     arch = ["aarch64"] }
 
     #[test]
     fn test_resolve_invalid_arch_for_variant() {
-        let m = Manifest::from_str(SAMPLE_TOML).unwrap();
+        let m = Manifest::parse(SAMPLE_TOML).unwrap();
         let spec = m.artifact("llama").unwrap();
         // CUDA is only available for x86_64
         let platform = make_platform(Os::Linux, Arch::Aarch64);
@@ -230,14 +239,14 @@ metal  = { os = ["macos"],                     arch = ["aarch64"] }
 
     #[test]
     fn test_missing_artifact_name() {
-        let m = Manifest::from_str(SAMPLE_TOML).unwrap();
+        let m = Manifest::parse(SAMPLE_TOML).unwrap();
         let err = m.artifact("nonexistent").unwrap_err();
         assert!(err.to_string().contains("nonexistent"));
     }
 
     #[test]
     fn test_parse_error_on_invalid_toml() {
-        let err = Manifest::from_str("not valid toml ][").unwrap_err();
+        let err = Manifest::parse("not valid toml ][").unwrap_err();
         assert!(err.to_string().contains("TOML"));
     }
 
@@ -256,7 +265,7 @@ asset_pattern = "llama-{version}-bin-{os}-{variant}-{arch}.zip"
 [artifacts.llama.variants]
 cpu = { os = ["linux"], arch = ["x86_64"] }
 "#;
-        let err = Manifest::from_str(toml).unwrap_err();
+        let err = Manifest::parse(toml).unwrap_err();
         assert!(
             err.to_string().contains("schema_version"),
             "error should mention schema_version, got: {}",
@@ -281,7 +290,7 @@ asset_pattern = "llama-{version}-bin-{os}-{variant}-{arch}.zip"
 [artifacts.llama.variants]
 cpu = { os = ["linux"], arch = ["x86_64"] }
 "#;
-        let m = Manifest::from_str(toml_with_extra).unwrap();
+        let m = Manifest::parse(toml_with_extra).unwrap();
         assert_eq!(m.metadata.schema_version, "1");
     }
 

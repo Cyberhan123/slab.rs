@@ -314,6 +314,7 @@ impl LlamaInferenceEngine {
     /// Create a new inference session.
     ///
     /// Returns the [`SessionId`] to use in subsequent API calls.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) async fn create_session(&self) -> Result<SessionId, GGMLLlamaEngineError> {
         self.create_session_with_grammar(None).await
     }
