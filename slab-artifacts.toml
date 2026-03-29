@@ -1,53 +1,97 @@
 # slab-artifacts.toml
 # Declarative artifact manifest for slab ML backend libraries.
-# Asset patterns use template variables: {version}, {os}, {arch}, {variant}
+# Asset patterns use template variables: {version}, {os}, {arch}, optional
+# {variant}, and {extension}.
+# Target availability is organised by OS -> arch -> variants. When `variants` is
+# omitted or `[]`, the artifact is treated as variant-less for that OS/arch pair.
+# Each target may also declare `extension` and `checksum` / `checksums`.
 
 [metadata]
 schema_version = "1"
 
+[artifacts.ggml]
+repo = "seasonjs/ggml.cpp-build"
+version = "v0.9.8"
+lib_name = "ggml"
+# Asset name pattern with template variables: {version}, {os}, {arch}, {variant}
+asset_pattern = "ggml-{version}-{os}-{arch}.{extension}"
+
+[artifacts.ggml.targets.windows.x86_64]
+variants = []
+extension = "zip"
+# checksums= "sha256:abcdef..."
+
+[artifacts.ggml.targets.linux.x86_64]
+variants = []
+extension = "tar.gz"
+# checksums= "sha256:abcdef..."
+
+[artifacts.ggml.targets.macos.aarch64]
+variants = []
+extension = "tar.gz"
+# checksums= "sha256:abcdef..."
+
 [artifacts.llama]
-repo = "ggml-org/llama.cpp"
-version = "b8069"
+repo = "seasonjs/llama.cpp-build"
+version = "v8464"
 lib_name = "llama"
 # Asset name pattern with template variables: {version}, {os}, {arch}, {variant}
-asset_pattern = "llama-{version}-bin-{os}-{variant}-{arch}.zip"
+asset_pattern = "llama-sdk-{version}-{os}-{arch}.{extension}"
 
-[artifacts.llama.variants]
-cpu    = { os = ["windows", "linux", "macos"], arch = ["x86_64", "aarch64"] }
-cuda   = { os = ["windows", "linux"],          arch = ["x86_64"] }
-vulkan = { os = ["windows", "linux"],          arch = ["x86_64"] }
-metal  = { os = ["macos"],                     arch = ["aarch64"] }
+[artifacts.llama.targets.windows.x86_64]
+variants = []
+extension = "zip"
+# checksums= "sha256:abcdef..."
 
-# Optional: SHA256 checksums per "os-variant-arch" key
-[artifacts.llama.checksums]
-# "windows-cpu-x86_64" = "sha256:abcdef..."
+[artifacts.llama.targets.linux.x86_64]
+variants = []
+extension = "tar.gz"
+# checksums= "sha256:abcdef..."
+
+[artifacts.llama.targets.macos.aarch64]
+variants = []
+extension = "tar.gz"
+# checksums= "sha256:abcdef..."
 
 [artifacts.whisper]
-repo = "ggml-org/whisper.cpp"
-version = "v1.8.3"
+repo = "seasonjs/whisper.cpp-build"
+version = "v1.8.4"
 lib_name = "whisper"
-asset_pattern = "whisper-{version}-bin-{os}-{variant}-{arch}.zip"
+asset_pattern = "whisper-sdk-{os}-{arch}.{extension}"
 
-[artifacts.whisper.variants]
-cpu    = { os = ["windows", "linux", "macos"], arch = ["x86_64", "aarch64"] }
-cuda   = { os = ["windows", "linux"],          arch = ["x86_64"] }
-vulkan = { os = ["windows", "linux"],          arch = ["x86_64"] }
-metal  = { os = ["macos"],                     arch = ["aarch64"] }
+[artifacts.whisper.targets.windows.x86_64]
+variants = []
+extension = "zip"
+# checksums = "sha256:abcdef..."
 
-[artifacts.whisper.checksums]
-# "linux-cuda-x86_64" = "sha256:abcdef..."
+[artifacts.whisper.targets.linux.x86_64]
+variants = []
+extension = "tar.gz"
+# checksums = "sha256:abcdef..."
+
+[artifacts.whisper.targets.macos.aarch64]
+variants = []
+extension = "tar.gz"
+# checksums = "sha256:abcdef..."
+
 
 [artifacts.diffusion]
-repo = "leejet/stable-diffusion.cpp"
-version = "master-504-636d3cb"
+repo = "seasonjs/stable-diffusion.cpp-build"
+version = "v0527541"
 lib_name = "stable-diffusion"
-asset_pattern = "sd-{version}-bin-{os}-{variant}-{arch}.zip"
+asset_pattern = "stable-diffusion-sdk-{os}-{arch}.{extension}"
 
-[artifacts.diffusion.variants]
-cpu    = { os = ["windows", "linux", "macos"], arch = ["x86_64", "aarch64"] }
-cuda   = { os = ["windows", "linux"],          arch = ["x86_64"] }
-vulkan = { os = ["windows", "linux"],          arch = ["x86_64"] }
-metal  = { os = ["macos"],                     arch = ["aarch64"] }
+[artifacts.diffusion.targets.windows.x86_64]
+variants = []
+extension = "zip"
+# checksums = "sha256:abcdef..."
 
-[artifacts.diffusion.checksums]
-# "macos-metal-aarch64" = "sha256:abcdef..."
+[artifacts.diffusion.targets.linux.x86_64]
+variants = []
+extension = "tar.gz"
+# checksums = "sha256:abcdef..."
+
+[artifacts.diffusion.targets.macos.aarch64]
+variants = []
+extension = "tar.gz"
+# checksums = "sha256:abcdef..."

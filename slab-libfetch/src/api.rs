@@ -346,7 +346,10 @@ impl VersionApi {
             if let Ok(info) = install.get_installed_version() {
                 if info.tag_name == version {
                     if self.api.show_progress {
-                        println!("✅ 版本 {} 的头文件已存在，跳过下载。", version);
+                        println!(
+                            "✅ The header file for version {} already exists; skip the download.",
+                            version
+                        );
                     }
                     return Ok(());
                 }
@@ -360,7 +363,7 @@ impl VersionApi {
         install.create_version_file(&version)?;
 
         if self.api.show_progress {
-            println!("✨ 版本 {} 的头文件已准备就绪。", version);
+            println!("✨ The header file for version {} is ready.", version);
         }
         Ok(())
     }
