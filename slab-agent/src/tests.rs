@@ -8,14 +8,16 @@
 
 use std::sync::{Arc, Mutex};
 
-use async_trait::async_trait;
+use crate::tools::EchoTool;
 use crate::{
     config::AgentConfig,
-    port::{AgentNotifyPort, AgentStorePort, LlmPort, LlmResponse, ParsedToolCall, ThreadStatus,
-           ThreadSnapshot, ToolCallRecord, ToolSpec},
+    port::{
+        AgentNotifyPort, AgentStorePort, LlmPort, LlmResponse, ParsedToolCall, ThreadSnapshot,
+        ThreadStatus, ToolCallRecord, ToolSpec,
+    },
     AgentControl, AgentError, ToolRouter,
 };
-use crate::tools::EchoTool;
+use async_trait::async_trait;
 use slab_types::ConversationMessage;
 
 // ── Mock LLM ─────────────────────────────────────────────────────────────────
@@ -136,16 +138,10 @@ async fn smoke_echo_tool_agent_completes() {
         tool_calls: vec![],
     }];
 
-    let config = AgentConfig {
-        model: "mock".into(),
-        max_turns: 5,
-        ..AgentConfig::default()
-    };
+    let config = AgentConfig { model: "mock".into(), max_turns: 5, ..AgentConfig::default() };
 
-    let thread_id = control
-        .spawn("session-1".into(), config, messages)
-        .await
-        .expect("spawn should succeed");
+    let thread_id =
+        control.spawn("session-1".into(), config, messages).await.expect("spawn should succeed");
 
     // Subscribe to status before the thread finishes.
     let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe should succeed");
@@ -155,7 +151,10 @@ async fn smoke_echo_tool_agent_completes() {
         loop {
             status_rx.changed().await.expect("status channel closed");
             let status = *status_rx.borrow();
-            if matches!(status, ThreadStatus::Completed | ThreadStatus::Errored | ThreadStatus::Shutdown) {
+            if matches!(
+                status,
+                ThreadStatus::Completed | ThreadStatus::Errored | ThreadStatus::Shutdown
+            ) {
                 return status;
             }
         }

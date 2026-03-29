@@ -90,8 +90,8 @@ fn build_agent_control(
     ctx: &AppContext,
     store: Arc<crate::infra::db::AnyStore>,
 ) -> slab_agent::AgentControl {
-    use slab_agent::{AgentControl, ToolRouter};
     use crate::infra::agent_adapter::{NoopNotifyAdapter, ServerLlmAdapter};
+    use slab_agent::{AgentControl, ToolRouter};
 
     let llm = Arc::new(ServerLlmAdapter::new(Arc::clone(&ctx.model_state)));
     let store_adapter: Arc<dyn slab_agent::port::AgentStorePort> = store;
@@ -205,4 +205,3 @@ impl FromRef<Arc<AppState>> for crate::domain::services::AgentService {
         input.services.agent.clone()
     }
 }
-

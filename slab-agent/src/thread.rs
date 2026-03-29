@@ -75,9 +75,8 @@ impl AgentThread {
 
         // Fail early if the config cannot be serialized — a swallowed error here
         // would silently persist an empty config_json and make debugging impossible.
-        let config_json = serde_json::to_string(&self.config).map_err(|e| {
-            AgentError::Internal(format!("failed to serialize agent config: {e}"))
-        })?;
+        let config_json = serde_json::to_string(&self.config)
+            .map_err(|e| AgentError::Internal(format!("failed to serialize agent config: {e}")))?;
 
         // Persist initial snapshot.
         let snapshot = ThreadSnapshot {
@@ -99,9 +98,7 @@ impl AgentThread {
         self.set_status(ThreadStatus::Running, &notify).await;
 
         // Persist the Running transition so the stored status matches the in-memory state.
-        if let Err(e) =
-            store.update_thread_status(&thread_id, ThreadStatus::Running, None).await
-        {
+        if let Err(e) = store.update_thread_status(&thread_id, ThreadStatus::Running, None).await {
             error!(thread_id, error = %e, "failed to persist running status");
         }
 
@@ -176,11 +173,7 @@ impl AgentThread {
         info!(thread_id, "thread completed");
         self.set_status(ThreadStatus::Completed, &notify).await;
         store
-            .update_thread_status(
-                &thread_id,
-                ThreadStatus::Completed,
-                completion_text.as_deref(),
-            )
+            .update_thread_status(&thread_id, ThreadStatus::Completed, completion_text.as_deref())
             .await
             .ok();
 

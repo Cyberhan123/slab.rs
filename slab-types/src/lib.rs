@@ -25,11 +25,12 @@ pub mod runtime;
 pub mod settings;
 pub mod whisper;
 
-pub use backend::RuntimeBackendId;
 pub use agent::{AgentThreadStatus, ToolCallStatus};
+pub use backend::RuntimeBackendId;
 pub use chat::{
     ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationContentPart,
-    ConversationMessage, ConversationMessageContent, ConversationToolCall, ConversationToolFunction,
+    ConversationMessage, ConversationMessageContent, ConversationToolCall,
+    ConversationToolFunction,
 };
 pub use common::{Id, Timestamp};
 pub use diffusion::{

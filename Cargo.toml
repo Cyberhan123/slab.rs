@@ -17,6 +17,8 @@ members = [
     "slab-types",
     "slab-server",
     "slab-subtitle",
+    "slab-ggml",
+    "slab-ggml-sys",
 ]
 
 exclude = [
@@ -46,6 +48,9 @@ slab-whisper-sys = { path = "./slab-whisper-sys", package = "slab-whisper-sys", 
 slab-libfetch = { path = "./slab-libfetch", package = "slab-libfetch", version = "0.0.1" }
 slab-core-macros = { path = "./slab-core-macros", package = "slab-core-macros", version = "0.0.1" }
 slab-subtitle = { path = "./slab-subtitle", package = "slab-subtitle", version = "0.0.1" }
+slab-ggml-sys = { path = "./slab-ggml-sys", package = "slab-ggml-sys", version = "0.0.1" }
+slab-ggml = { path = "./slab-ggml", package = "slab-ggml", version = "0.0.1" }
+
 combine = "4.6.7"
 anyhow = "1.0.101"
 bindgen = "0.72.1"
@@ -101,3 +106,4 @@ bytemuck = "1"
 strum = { version = "0.28.0", features = ["derive"] }
 clap = { version = "4.5.60", features = ["derive"] }
 protoc-bin-vendored = "3"
+cargo_metadata = "0.23.1"

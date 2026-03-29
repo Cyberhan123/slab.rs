@@ -56,9 +56,8 @@ fn has_cuda() -> bool {
 }
 
 fn has_vulkan() -> bool {
-    *VULKAN_AVAILABLE.get_or_init(|| {
-        std::env::var("VULKAN_SDK").is_ok() || tool_exists("vulkaninfo")
-    })
+    *VULKAN_AVAILABLE
+        .get_or_init(|| std::env::var("VULKAN_SDK").is_ok() || tool_exists("vulkaninfo"))
 }
 
 /// Returns `true` when `tool` can be found on PATH (any exit code is fine).
@@ -96,19 +95,13 @@ mod tests {
 
     #[test]
     fn test_detect_best_macos_aarch64_returns_metal() {
-        assert_eq!(
-            Variant::detect_best(&platform(Os::MacOS, Arch::Aarch64)),
-            Variant::Metal
-        );
+        assert_eq!(Variant::detect_best(&platform(Os::MacOS, Arch::Aarch64)), Variant::Metal);
     }
 
     #[test]
     fn test_detect_best_macos_x86_64_returns_cpu() {
         // Intel macOS: Metal is only available for Apple Silicon.
-        assert_eq!(
-            Variant::detect_best(&platform(Os::MacOS, Arch::X86_64)),
-            Variant::Cpu
-        );
+        assert_eq!(Variant::detect_best(&platform(Os::MacOS, Arch::X86_64)), Variant::Cpu);
     }
 
     #[test]

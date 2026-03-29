@@ -148,11 +148,7 @@ pub fn encode_chat_request(
         _ => request.prompt.clone(),
     };
 
-    let messages = request
-        .chat_messages
-        .iter()
-        .map(conversation_message_to_proto)
-        .collect();
+    let messages = request.chat_messages.iter().map(conversation_message_to_proto).collect();
 
     pb::ChatRequest {
         prompt,
@@ -181,11 +177,8 @@ pub fn decode_chat_request(
         return Err(ProtoConversionError::EmptyField { field: "prompt" });
     }
 
-    let chat_messages: Vec<ConversationMessage> = request
-        .messages
-        .iter()
-        .map(conversation_message_from_proto)
-        .collect();
+    let chat_messages: Vec<ConversationMessage> =
+        request.messages.iter().map(conversation_message_from_proto).collect();
 
     Ok(TextGenerationRequest {
         prompt: request.prompt.clone(),
@@ -216,7 +209,8 @@ pub fn encode_chat_response(response: &TextGenerationResponse) -> pb::ChatRespon
 pub fn decode_chat_response(response: &pb::ChatResponse) -> TextGenerationResponse {
     TextGenerationResponse {
         text: response.text.clone(),
-        finish_reason: (!response.finish_reason.is_empty()).then_some(response.finish_reason.clone()),
+        finish_reason: (!response.finish_reason.is_empty())
+            .then_some(response.finish_reason.clone()),
         tokens_used: (response.tokens_used > 0).then_some(response.tokens_used),
         usage: response.usage.as_ref().map(decode_usage),
         metadata: Default::default(),
@@ -352,9 +346,7 @@ fn conversation_content_part_from_proto(part: &pb::ChatContentPart) -> Conversat
         Some(Part::Json(value)) => {
             ConversationContentPart::Json { value: parse_json_or_null(&value.value_json) }
         }
-        Some(Part::Refusal(value)) => {
-            ConversationContentPart::Refusal { text: value.text.clone() }
-        }
+        Some(Part::Refusal(value)) => ConversationContentPart::Refusal { text: value.text.clone() },
         None => ConversationContentPart::Text { text: String::new() },
     }
 }
@@ -389,10 +381,7 @@ fn conversation_tool_function_from_proto(
         return ConversationToolFunction { name: String::new(), arguments: String::new() };
     };
 
-    ConversationToolFunction {
-        name: function.name.clone(),
-        arguments: function.arguments.clone(),
-    }
+    ConversationToolFunction { name: function.name.clone(), arguments: function.arguments.clone() }
 }
 
 fn parse_json_or_null(raw: &str) -> serde_json::Value {

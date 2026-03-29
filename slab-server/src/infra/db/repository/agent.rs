@@ -1,8 +1,8 @@
 //! SQL-backed implementation of [`AgentStorePort`] for the shared [`SqlxStore`].
 
 use async_trait::async_trait;
-use slab_agent::port::{AgentStorePort, ToolCallRecord, ThreadSnapshot};
 use slab_agent::port::ThreadStatus;
+use slab_agent::port::{AgentStorePort, ThreadSnapshot, ToolCallRecord};
 use slab_types::agent::ToolCallStatus;
 
 use super::SqlxStore;
@@ -25,7 +25,10 @@ fn parse_status(s: &str) -> ThreadStatus {
         "errored" => ThreadStatus::Errored,
         "shutdown" => ThreadStatus::Shutdown,
         other => {
-            tracing::warn!(raw = other, "unknown agent thread status in database; defaulting to Pending");
+            tracing::warn!(
+                raw = other,
+                "unknown agent thread status in database; defaulting to Pending"
+            );
             ThreadStatus::Pending
         }
     }
@@ -74,10 +77,7 @@ impl From<AgentThreadRow> for ThreadSnapshot {
 
 #[async_trait]
 impl AgentStorePort for SqlxStore {
-    async fn upsert_thread(
-        &self,
-        snapshot: &ThreadSnapshot,
-    ) -> Result<(), slab_agent::AgentError> {
+    async fn upsert_thread(&self, snapshot: &ThreadSnapshot) -> Result<(), slab_agent::AgentError> {
         sqlx::query(
             "INSERT INTO agent_threads \
              (id, session_id, parent_id, depth, status, role_name, config_json, \
@@ -110,10 +110,7 @@ impl AgentStorePort for SqlxStore {
         Ok(())
     }
 
-    async fn get_thread(
-        &self,
-        id: &str,
-    ) -> Result<Option<ThreadSnapshot>, slab_agent::AgentError> {
+    async fn get_thread(&self, id: &str) -> Result<Option<ThreadSnapshot>, slab_agent::AgentError> {
         let row: Option<AgentThreadRow> = sqlx::query_as(
             "SELECT id, session_id, parent_id, depth, status, role_name, \
              config_json, completion_text, created_at, updated_at \

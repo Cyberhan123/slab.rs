@@ -16,10 +16,7 @@ pub fn verify_sha256(data: &[u8], expected: &str) -> Result<(), FetchError> {
     if digest.eq_ignore_ascii_case(hex_expected) {
         Ok(())
     } else {
-        Err(FetchError::ChecksumMismatch {
-            expected: hex_expected.to_string(),
-            actual: digest,
-        })
+        Err(FetchError::ChecksumMismatch { expected: hex_expected.to_string(), actual: digest })
     }
 }
 
@@ -45,10 +42,16 @@ mod tests {
 
     #[test]
     fn test_verify_sha256_mismatch() {
-        let result = verify_sha256(b"hello", "sha256:0000000000000000000000000000000000000000000000000000000000000000");
+        let result = verify_sha256(
+            b"hello",
+            "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+        );
         match result {
             Err(FetchError::ChecksumMismatch { expected, actual }) => {
-                assert_eq!(expected, "0000000000000000000000000000000000000000000000000000000000000000");
+                assert_eq!(
+                    expected,
+                    "0000000000000000000000000000000000000000000000000000000000000000"
+                );
                 assert_eq!(actual, HELLO_SHA256);
             }
             other => panic!("expected ChecksumMismatch, got {:?}", other),

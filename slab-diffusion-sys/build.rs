@@ -11,9 +11,9 @@ fn main() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async {
         fetch_header(
-            "leejet",
-            "stable-diffusion.cpp",
-            Some("master-504-636d3cb"),
+            "seasonjs",
+            "stable-diffusion.cpp-build",
+            Some("v0527541"),
             include_path.as_path(),
         )
         .await

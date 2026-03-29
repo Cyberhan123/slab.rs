@@ -117,7 +117,8 @@ pub(crate) fn encode_text_generation_request(
         insert_option(&mut options, "apply_chat_template", true);
         options.insert(
             "chat_messages".to_owned(),
-            serde_json::to_value(&request.chat_messages).unwrap_or_else(|_| Value::Array(Vec::new())),
+            serde_json::to_value(&request.chat_messages)
+                .unwrap_or_else(|_| Value::Array(Vec::new())),
         );
     }
 
@@ -165,10 +166,7 @@ pub(crate) fn decode_text_generation_response(
                 .get("tokens_used")
                 .and_then(Value::as_u64)
                 .and_then(|value| u32::try_from(value).ok()),
-            usage: value
-                .get("usage")
-                .cloned()
-                .and_then(|usage| serde_json::from_value(usage).ok()),
+            usage: value.get("usage").cloned().and_then(|usage| serde_json::from_value(usage).ok()),
             metadata: BTreeMap::new(),
         }),
         other => Err(CoreError::ResultDecodeFailed {

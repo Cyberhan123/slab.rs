@@ -48,9 +48,15 @@ impl Default for ConversationMessageContent {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ConversationContentPart {
-    Text { text: String },
-    InputText { text: String },
-    OutputText { text: String },
+    Text {
+        text: String,
+    },
+    InputText {
+        text: String,
+    },
+    OutputText {
+        text: String,
+    },
     Image {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         image_url: Option<String>,
@@ -64,8 +70,12 @@ pub enum ConversationContentPart {
         tool_call_id: Option<String>,
         value: serde_json::Value,
     },
-    Json { value: serde_json::Value },
-    Refusal { text: String },
+    Json {
+        value: serde_json::Value,
+    },
+    Refusal {
+        text: String,
+    },
 }
 
 /// Assistant tool-call envelope.
@@ -198,7 +208,9 @@ impl ConversationContentPart {
                     .unwrap_or_else(|| "tool_result".to_owned());
                 format!("{prefix}: {rendered}")
             }
-            Self::Json { value } => serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned()),
+            Self::Json { value } => {
+                serde_json::to_string(value).unwrap_or_else(|_| "null".to_owned())
+            }
             Self::Refusal { text } => format!("[refusal] {text}"),
         }
     }

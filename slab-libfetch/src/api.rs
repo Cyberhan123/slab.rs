@@ -277,7 +277,8 @@ impl VersionApi {
         }
 
         // Download the raw bytes so we can verify before extracting.
-        let bytes = downloader.download_asset_bytes(&resolved.asset_name, &resolved.version).await?;
+        let bytes =
+            downloader.download_asset_bytes(&resolved.asset_name, &resolved.version).await?;
 
         // Checksum verification.
         match &resolved.checksum {
@@ -298,15 +299,11 @@ impl VersionApi {
         std::fs::create_dir_all(&self.api.install_dir)?;
         if resolved.asset_name.ends_with(".zip") {
             crate::downloader::extract_zip(&bytes, &self.api.install_dir)?;
-        } else if resolved.asset_name.ends_with(".tar.gz")
-            || resolved.asset_name.ends_with(".tgz")
+        } else if resolved.asset_name.ends_with(".tar.gz") || resolved.asset_name.ends_with(".tgz")
         {
             crate::downloader::extract_tar_gz_strip_top(&bytes, &self.api.install_dir)?;
         } else {
-            std::fs::write(
-                self.api.install_dir.join(&resolved.asset_name),
-                &bytes,
-            )?;
+            std::fs::write(self.api.install_dir.join(&resolved.asset_name), &bytes)?;
         }
 
         install.create_version_file(&resolved.version)?;

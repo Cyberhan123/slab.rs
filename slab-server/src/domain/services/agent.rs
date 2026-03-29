@@ -32,10 +32,7 @@ impl AgentService {
         config: AgentConfig,
         messages: Vec<ConversationMessage>,
     ) -> Result<String, ServerError> {
-        self.control
-            .spawn(session_id, config, messages)
-            .await
-            .map_err(agent_err_to_server)
+        self.control.spawn(session_id, config, messages).await.map_err(agent_err_to_server)
     }
 
     /// Get the current status of an agent thread.
@@ -83,11 +80,9 @@ fn agent_err_to_server(e: AgentError) -> ServerError {
         AgentError::ThreadNotFound(id) => {
             ServerError::NotFound(format!("agent thread not found: {id}"))
         }
-        AgentError::ThreadLimitExceeded { current, max } => {
-            ServerError::TooManyRequests(format!(
-                "thread limit exceeded: {current}/{max} concurrent threads active"
-            ))
-        }
+        AgentError::ThreadLimitExceeded { current, max } => ServerError::TooManyRequests(format!(
+            "thread limit exceeded: {current}/{max} concurrent threads active"
+        )),
         AgentError::DepthLimitExceeded { current, max } => {
             ServerError::BadRequest(format!("depth limit exceeded: {current}/{max}"))
         }

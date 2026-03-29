@@ -91,10 +91,7 @@ impl AgentControl {
         messages: Vec<ConversationMessage>,
     ) -> Result<String, AgentError> {
         if depth > self.max_depth {
-            return Err(AgentError::DepthLimitExceeded {
-                current: depth,
-                max: self.max_depth,
-            });
+            return Err(AgentError::DepthLimitExceeded { current: depth, max: self.max_depth });
         }
         self.spawn_inner(session_id, Some(parent_id), depth, config, messages).await
     }
