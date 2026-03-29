@@ -56,6 +56,8 @@ Apache-2.0:
 - `slab-diffusion-sys`
 - `slab-llama-sys`
 - `slab-whisper-sys`
+- `slab-ggml-sys`
+- `slab-types`
 
 See [LICENSE](./LICENSE).
 
@@ -68,5 +70,11 @@ AGPL-3.0-only:
 - `slab-runtime`
 - `slab-server`
 - `slab-whisper`
+- `slab-agent`
+- `slab-ggml`
+- `slab-build-utils`
 
 Each AGPL component contains its own `LICENSE` file in that directory.
+
+# AI Usage Restriction:
+The author reserves all rights to the software. No individual or third party may use any artificial intelligence technology to imitate or tamper with the software or use it for commercial purposes without the author's express written consent.
