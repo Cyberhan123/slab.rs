@@ -14,7 +14,7 @@ pub use params::*;
 
 /// A handle to the dynamically-loaded `stable-diffusion` shared library.
 ///
-/// Cheap to clone – all clones share the same underlying [`Arc`].
+/// Cheap to clone; all clones share the same underlying [`Arc`].
 ///
 /// # Example
 /// ```no_run
@@ -128,7 +128,6 @@ impl Diffusion {
     /// Returns [`DiffusionError::ContextCreationFailed`] when the native
     /// `new_sd_ctx` call returns a null pointer (e.g. invalid model path).
     pub fn new_context(&self, params: &SdContextParams) -> Result<SdContext, DiffusionError> {
-        // ── Build CStrings (must outlive the C call) ───────────────────────────
         let model_cs = params::opt_cstring(&params.model_path);
         let diffusion_model_cs = params::opt_cstring(&params.diffusion_model_path);
         let clip_l_cs = params::opt_cstring(&params.clip_l_path);
@@ -143,56 +142,49 @@ impl Diffusion {
         let control_net_cs = params::opt_cstring(&params.control_net_path);
         let photo_maker_cs = params::opt_cstring(&params.photo_maker_path);
 
-        let c_params = slab_diffusion_sys::sd_ctx_params_t {
-            model_path: params::ptr_or_null(&model_cs),
-            diffusion_model_path: params::ptr_or_null(&diffusion_model_cs),
-            clip_l_path: params::ptr_or_null(&clip_l_cs),
-            clip_g_path: params::ptr_or_null(&clip_g_cs),
-            t5xxl_path: params::ptr_or_null(&t5xxl_cs),
-            llm_path: params::ptr_or_null(&llm_cs),
-            llm_vision_path: params::ptr_or_null(&llm_vision_cs),
-            clip_vision_path: params::ptr_or_null(&clip_vision_cs),
-            high_noise_diffusion_model_path: params::ptr_or_null(&high_noise_cs),
-            vae_path: params::ptr_or_null(&vae_cs),
-            taesd_path: params::ptr_or_null(&taesd_cs),
-            control_net_path: params::ptr_or_null(&control_net_cs),
-            photo_maker_path: params::ptr_or_null(&photo_maker_cs),
-            // embeddings / loras not supported at this level (use raw API)
-            embeddings: ptr::null(),
-            embedding_count: 0,
-            tensor_type_rules: ptr::null(),
-            // Compute settings
-            n_threads: params.n_threads,
-            wtype: params.weight_type,
-            rng_type: params.rng_type,
-            sampler_rng_type: slab_diffusion_sys::rng_type_t_RNG_TYPE_COUNT,
-            prediction: params.prediction,
-            lora_apply_mode: params.lora_apply_mode,
-            // Memory flags
-            offload_params_to_cpu: params.offload_params_to_cpu,
-            enable_mmap: params.enable_mmap,
-            keep_clip_on_cpu: params.keep_clip_on_cpu,
-            keep_control_net_on_cpu: params.keep_control_net_on_cpu,
-            keep_vae_on_cpu: params.keep_vae_on_cpu,
-            // Decode flags
-            vae_decode_only: params.vae_decode_only,
-            free_params_immediately: false,
-            tae_preview_only: params.taesd_preview_only,
-            // Attention
-            flash_attn: params.flash_attn,
-            diffusion_flash_attn: params.diffusion_flash_attn,
-            // Other flags – conservative defaults
-            diffusion_conv_direct: false,
-            vae_conv_direct: false,
-            circular_x: false,
-            circular_y: false,
-            force_sdxl_vae_conv_scale: false,
-            chroma_use_dit_mask: true,
-            chroma_use_t5_mask: false,
-            chroma_t5_mask_pad: 1,
-            qwen_image_zero_cond_t: false,
-            flow_shift: params.flow_shift,
-        };
+        let mut c_params: slab_diffusion_sys::sd_ctx_params_t = unsafe { std::mem::zeroed() };
+        unsafe { self.lib.sd_ctx_params_init(&mut c_params) };
+        c_params.model_path = params::ptr_or_null(&model_cs);
+        c_params.diffusion_model_path = params::ptr_or_null(&diffusion_model_cs);
+        c_params.clip_l_path = params::ptr_or_null(&clip_l_cs);
+        c_params.clip_g_path = params::ptr_or_null(&clip_g_cs);
+        c_params.t5xxl_path = params::ptr_or_null(&t5xxl_cs);
+        c_params.llm_path = params::ptr_or_null(&llm_cs);
+        c_params.llm_vision_path = params::ptr_or_null(&llm_vision_cs);
+        c_params.clip_vision_path = params::ptr_or_null(&clip_vision_cs);
+        c_params.high_noise_diffusion_model_path = params::ptr_or_null(&high_noise_cs);
+        c_params.vae_path = params::ptr_or_null(&vae_cs);
+        c_params.taesd_path = params::ptr_or_null(&taesd_cs);
+        c_params.control_net_path = params::ptr_or_null(&control_net_cs);
+        c_params.photo_maker_path = params::ptr_or_null(&photo_maker_cs);
+        c_params.embeddings = ptr::null();
+        c_params.embedding_count = 0;
+        c_params.tensor_type_rules = ptr::null();
+        c_params.n_threads = params.n_threads;
+        c_params.wtype = params.weight_type;
+        c_params.rng_type = params.rng_type;
+        c_params.sampler_rng_type = slab_diffusion_sys::rng_type_t_RNG_TYPE_COUNT;
+        c_params.prediction = params.prediction;
+        c_params.lora_apply_mode = params.lora_apply_mode;
+        c_params.offload_params_to_cpu = params.offload_params_to_cpu;
+        c_params.enable_mmap = params.enable_mmap;
+        c_params.keep_clip_on_cpu = params.keep_clip_on_cpu;
+        c_params.keep_control_net_on_cpu = params.keep_control_net_on_cpu;
+        c_params.keep_vae_on_cpu = params.keep_vae_on_cpu;
+        c_params.vae_decode_only = params.vae_decode_only;
+        c_params.free_params_immediately = false;
+        c_params.tae_preview_only = params.taesd_preview_only;
+        c_params.flash_attn = params.flash_attn;
+        c_params.diffusion_flash_attn = params.diffusion_flash_attn;
+        c_params.diffusion_conv_direct = false;
+        c_params.vae_conv_direct = false;
+        c_params.circular_x = false;
+        c_params.circular_y = false;
+        c_params.force_sdxl_vae_conv_scale = false;
+        c_params.chroma_use_dit_mask = true;
+        c_params.chroma_use_t5_mask = false;
+        c_params.chroma_t5_mask_pad = 1;
+        c_params.qwen_image_zero_cond_t = false;
 
         let ctx = unsafe { self.lib.new_sd_ctx(&c_params) };
         if ctx.is_null() {

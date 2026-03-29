@@ -4,7 +4,7 @@ pub use backend::GGMLBackendReg;
 pub use error::GGMLError;
 use slab_ggml_sys;
 use std::ffi::CStr;
-use std::fmt::{self, Result};
+use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -42,10 +42,29 @@ impl GGML {
         }
     }
 
+    /// Load ggml after verifying the library directory exists.
+    pub fn new_with<P: AsRef<Path>>(path: P) -> Result<Self, GGMLError> {
+        let path = path.as_ref();
+        let Some(lib_dir) = path.parent() else {
+            return Err(GGMLError::NullPointer);
+        };
+
+        if !lib_dir.is_dir() {
+            return Err(GGMLError::NullPointer);
+        }
+
+        Self::new(path)
+    }
+
+    /// Backward-compatible typo alias for `new_with`.
+    pub fn new_wih<P: AsRef<Path>>(path: P) -> Result<Self, GGMLError> {
+        Self::new_with(path)
+    }
+
     pub fn version(&self) -> Result<&'static str, GGMLError> {
         let ptr = unsafe { self.lib.ggml_version() };
         if ptr.is_null() {
-            return Err(GGMLError::NullPointer());
+            return Err(GGMLError::NullPointer);
         }
         Ok(unsafe { CStr::from_ptr(ptr) }.to_str()?)
     }
@@ -54,13 +73,19 @@ impl GGML {
         unsafe { self.lib.ggml_backend_load_all() };
     }
 
-    pub fn load_all_backend_from_path(&self, path: &str) -> Result<(), GGMLError> {
+    pub fn load_all_backend_from_path(
+        &self,
+        path: &str,
+    ) -> Result<(), GGMLError> {
         let c_path = std::ffi::CString::new(path)?;
         unsafe { self.lib.ggml_backend_load_all_from_path(c_path.as_ptr()) };
         Ok(())
     }
 
-    pub fn ggml_backend_load(&self, path: &str) -> Result<GGMLBackendReg, GGMLError> {
+    pub fn ggml_backend_load(
+        &self,
+        path: &str,
+    ) -> Result<GGMLBackendReg, GGMLError> {
         let c_backend = std::ffi::CString::new(path)?;
         let reg = unsafe { self.lib.ggml_backend_load(c_backend.as_ptr()) };
 

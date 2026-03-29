@@ -10,6 +10,7 @@ license = "AGPL-3.0-only"
 
 [dependencies]
 slab-whisper-sys = { workspace = true }
+slab-ggml = { workspace = true }
 libloading = { workspace = true }
 thiserror = { workspace = true }
 log = { workspace = true, optional = true }
