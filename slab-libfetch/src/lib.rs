@@ -10,7 +10,9 @@ pub mod verify;
 pub use api::{Api, RepoApi, VersionApi};
 pub use error::FetchError;
 pub use install::VersionInfo;
-pub use manifest::{ArtifactSpec, Manifest, ManifestMetadata, ResolvedArtifact, VariantMatrix};
+pub use manifest::{
+    ArtifactSpec, ArtifactTarget, Manifest, ManifestMetadata, ResolvedArtifact, VariantMatrix,
+};
 pub use platform::{Arch, Os, Platform};
 pub use variant::Variant;
 
@@ -87,22 +89,28 @@ mod tests {
         assert_eq!(manifest.metadata.schema_version, "1");
 
         // Each declared artifact must be resolvable for at least one platform.
-        let test_cases: &[(&str, Os, Arch, Variant)] = &[
-            ("llama", Os::Linux, Arch::X86_64, Variant::Cpu),
-            ("llama", Os::MacOS, Arch::Aarch64, Variant::Metal),
-            ("whisper", Os::Linux, Arch::X86_64, Variant::Cpu),
-            ("whisper", Os::Windows, Arch::X86_64, Variant::Cuda),
-            ("diffusion", Os::Linux, Arch::X86_64, Variant::Vulkan),
+        let test_cases: &[(&str, Os, Arch, Variant, &str)] = &[
+            ("ggml", Os::Windows, Arch::X86_64, Variant::Cpu, ".zip"),
+            ("llama", Os::Linux, Arch::X86_64, Variant::Cpu, ".tar.gz"),
+            ("whisper", Os::MacOS, Arch::Aarch64, Variant::Metal, ".tar.gz"),
+            ("diffusion", Os::Linux, Arch::X86_64, Variant::Vulkan, ".tar.gz"),
         ];
 
-        for (name, os, arch, variant) in test_cases {
+        for (name, os, arch, variant, expected_extension) in test_cases {
             let platform = Platform { os: os.clone(), arch: arch.clone() };
             let spec = manifest.artifact(name).unwrap_or_else(|e| {
                 panic!("artifact '{}' not found: {}", name, e);
             });
-            spec.resolve(&platform, variant).unwrap_or_else(|e| {
+            let resolved = spec.resolve(&platform, variant).unwrap_or_else(|e| {
                 panic!("failed to resolve {} for {}-{} ({}): {}", name, os, arch, variant, e);
             });
+            assert!(
+                resolved.asset_name.ends_with(expected_extension),
+                "expected {} to end with {}, got {}",
+                name,
+                expected_extension,
+                resolved.asset_name
+            );
         }
     }
 }
