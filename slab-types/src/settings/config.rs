@@ -164,7 +164,7 @@ pub struct DiffusionPathsConfig {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DiffusionPerformanceConfig {
     pub flash_attn: bool,
-    pub keep_vae_on_cpu: bool,
-    pub keep_clip_on_cpu: bool,
+    pub vae_device: String,
+    pub clip_device: String,
     pub offload_params_to_cpu: bool,
 }

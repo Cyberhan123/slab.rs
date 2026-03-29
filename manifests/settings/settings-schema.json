@@ -805,38 +805,38 @@
               }
             },
             {
-              "pmid": "diffusion.performance.keep_vae_on_cpu",
-              "label": "Diffusion Keep VAE On CPU",
-              "description_md": "Reduce VRAM usage by keeping VAE on CPU.",
+              "pmid": "diffusion.performance.vae_device",
+              "label": "Diffusion VAE Device",
+              "description_md": "Device string for the VAE model (e.g. \"cuda:0\"). Empty means default.",
               "editable": true,
               "search_terms": [
                 "diffusion",
                 "vae",
-                "cpu",
+                "device",
                 "memory"
               ],
-              "storage_kind": "boolean",
+              "storage_kind": "string",
               "schema": {
-                "type": "boolean",
-                "default_value": false,
+                "type": "string",
+                "default_value": "",
                 "order": 20
               }
             },
             {
-              "pmid": "diffusion.performance.keep_clip_on_cpu",
-              "label": "Diffusion Keep CLIP On CPU",
-              "description_md": "Reduce VRAM usage by keeping CLIP on CPU.",
+              "pmid": "diffusion.performance.clip_device",
+              "label": "Diffusion CLIP Device",
+              "description_md": "Device string for the CLIP model (e.g. \"cuda:0\"). Empty means default.",
               "editable": true,
               "search_terms": [
                 "diffusion",
                 "clip",
-                "cpu",
+                "device",
                 "memory"
               ],
-              "storage_kind": "boolean",
+              "storage_kind": "string",
               "schema": {
-                "type": "boolean",
-                "default_value": false,
+                "type": "string",
+                "default_value": "",
                 "order": 30
               }
             },
