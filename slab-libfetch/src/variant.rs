@@ -15,11 +15,11 @@ impl Variant {
     /// Detect the best available compute backend for the given OS and arch.
     ///
     /// Detection order:
-    /// - macOS + aarch64 → Metal
-    /// - macOS + x86_64  → CPU (Metal is not available on Intel macOS)
-    /// - Windows/Linux   → CUDA (if `nvcc`, `nvidia-smi`, or `CUDA_PATH` found)
-    ///                   → Vulkan (if `vulkaninfo` or `VULKAN_SDK` found)
-    ///                   → CPU fallback
+    /// - macOS + aarch64 -> Metal
+    /// - macOS + x86_64 -> CPU (Metal is not available on Intel macOS)
+    /// - Windows/Linux -> prefer CUDA when `nvcc`, `nvidia-smi`, or `CUDA_PATH`
+    ///   is found; otherwise prefer Vulkan when `vulkaninfo` or `VULKAN_SDK`
+    ///   is found; otherwise fall back to CPU.
     ///
     /// CUDA and Vulkan detection results are cached for the lifetime of the
     /// process to avoid repeated subprocess spawns.

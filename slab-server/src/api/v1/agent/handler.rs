@@ -81,8 +81,9 @@ async fn spawn_agent(
 async fn agent_input(
     State(_service): State<AgentService>,
     Path(_id): Path<String>,
-    Json(_req): Json<AgentInputRequest>,
+    Json(req): Json<AgentInputRequest>,
 ) -> Result<(axum::http::StatusCode, Json<AgentInputResponse>), ServerError> {
+    let _content = req.content;
     Ok((
         axum::http::StatusCode::NOT_IMPLEMENTED,
         Json(AgentInputResponse {

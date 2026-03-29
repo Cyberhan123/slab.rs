@@ -70,6 +70,7 @@ impl AgentService {
     }
 
     /// Return the number of currently active threads.
+    #[allow(dead_code)]
     pub async fn active_thread_count(&self) -> usize {
         self.control.active_thread_count().await
     }

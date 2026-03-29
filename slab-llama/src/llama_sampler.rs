@@ -160,7 +160,7 @@ impl LlamaSampler {
     /// # Safety
     /// `vocab` must be a valid, non-null pointer obtained from
     /// `llama_model_get_vocab` and must outlive this sampler chain.
-    pub fn try_add_grammar(
+    pub(crate) fn try_add_grammar(
         &mut self,
         vocab: *const slab_llama_sys::llama_vocab,
         grammar_str: &str,
@@ -289,7 +289,7 @@ impl SamplerChainBuilder {
     ///
     /// # Safety
     /// `vocab` must be a valid, non-null pointer that outlives this sampler chain.
-    pub fn build_with_grammar(
+    pub(crate) fn build_with_grammar(
         self,
         vocab: *const slab_llama_sys::llama_vocab,
         grammar_str: &str,

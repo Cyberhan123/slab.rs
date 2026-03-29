@@ -17,18 +17,32 @@ use crate::infra::rpc;
 
 use super::GeneratedChatOutput;
 
+#[derive(Debug, Clone)]
+pub(super) struct LocalChatRequestConfig {
+    pub(super) session_id: Option<String>,
+    pub(super) max_tokens: u32,
+    pub(super) temperature: f32,
+    pub(super) top_p: Option<f32>,
+    pub(super) grammar: Option<String>,
+    pub(super) grammar_json: bool,
+    pub(super) stream: bool,
+    pub(super) include_usage: bool,
+}
+
+#[derive(Debug, Clone)]
+pub(super) struct LocalTextRequestConfig {
+    pub(super) max_tokens: u32,
+    pub(super) temperature: f32,
+    pub(super) top_p: Option<f32>,
+    pub(super) grammar: Option<String>,
+    pub(super) grammar_json: bool,
+}
+
 pub(super) async fn create_chat_completion(
     state: &ModelState,
     model: &str,
-    session_id: Option<&str>,
     messages: &[DomainConversationMessage],
-    max_tokens: u32,
-    temperature: f32,
-    top_p: Option<f32>,
-    grammar: Option<String>,
-    grammar_json: bool,
-    stream: bool,
-    include_usage: bool,
+    config: LocalChatRequestConfig,
 ) -> Result<GeneratedChatOutput, ServerError> {
     let prompt_template_context = resolve_prompt_template_context(state, model).await?;
     let prompt = super::template::build_prompt(messages, prompt_template_context.as_ref());
@@ -37,13 +51,13 @@ pub(super) async fn create_chat_completion(
         system_prompt: None,
         chat_messages: messages.to_vec(),
         apply_chat_template: true,
-        max_tokens: Some(max_tokens),
-        temperature: Some(temperature),
-        top_p,
-        session_key: session_id.map(str::to_owned),
-        stream,
-        grammar,
-        grammar_json,
+        max_tokens: Some(config.max_tokens),
+        temperature: Some(config.temperature),
+        top_p: config.top_p,
+        session_key: config.session_id.clone(),
+        stream: config.stream,
+        grammar: config.grammar.clone(),
+        grammar_json: config.grammar_json,
         ..Default::default()
     };
     let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
@@ -52,7 +66,7 @@ pub(super) async fn create_chat_completion(
         ServerError::BackendNotReady("llama gRPC endpoint is not configured".into())
     })?;
 
-    if stream {
+    if config.stream {
         let usage_guard =
             state.auto_unload().acquire_for_inference(super::LLAMA_BACKEND_ID).await.map_err(
                 |error| ServerError::BackendNotReady(format!("llama backend not ready: {error}")),
@@ -129,7 +143,7 @@ pub(super) async fn create_chat_completion(
             } else {
                 let finish_reason = super::finish_reason_from_token_budget(
                     finish_chunk_completion_tokens.load(Ordering::SeqCst),
-                    max_tokens,
+                    config.max_tokens,
                 );
                 Some(ChatStreamChunk::Data(super::build_finish_chunk(
                     &completion_id_for_finish,
@@ -144,7 +158,7 @@ pub(super) async fn create_chat_completion(
         let usage_chunk_error_flag = Arc::clone(&error_flag);
         let usage_chunk_completion_tokens = Arc::clone(&completion_tokens);
         let usage_chunk = stream::once(async move {
-            if !include_usage || usage_chunk_error_flag.load(Ordering::SeqCst) {
+            if !config.include_usage || usage_chunk_error_flag.load(Ordering::SeqCst) {
                 None
             } else {
                 let usage = super::build_estimated_usage(
@@ -191,7 +205,7 @@ pub(super) async fn create_chat_completion(
     response.tokens_used.get_or_insert(usage.completion_tokens);
     response.usage = Some(usage.clone());
     response.finish_reason.get_or_insert_with(|| {
-        super::finish_reason_from_token_budget(usage.completion_tokens, max_tokens)
+        super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens)
     });
 
     Ok(GeneratedChatOutput::Text(response))
@@ -201,23 +215,19 @@ pub(super) async fn create_text_completion(
     state: &ModelState,
     model: &str,
     prompt: &str,
-    max_tokens: u32,
-    temperature: f32,
-    top_p: Option<f32>,
-    grammar: Option<String>,
-    grammar_json: bool,
+    config: LocalTextRequestConfig,
 ) -> Result<slab_types::inference::TextGenerationResponse, ServerError> {
     let request = TextGenerationRequest {
         prompt: prompt.to_owned(),
         system_prompt: None,
         chat_messages: Vec::new(),
         apply_chat_template: false,
-        max_tokens: Some(max_tokens),
-        temperature: Some(temperature),
-        top_p,
+        max_tokens: Some(config.max_tokens),
+        temperature: Some(config.temperature),
+        top_p: config.top_p,
         stream: false,
-        grammar,
-        grammar_json,
+        grammar: config.grammar,
+        grammar_json: config.grammar_json,
         ..Default::default()
     };
     let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
@@ -242,7 +252,7 @@ pub(super) async fn create_text_completion(
     response.tokens_used.get_or_insert(usage.completion_tokens);
     response.usage = Some(usage.clone());
     response.finish_reason.get_or_insert_with(|| {
-        super::finish_reason_from_token_budget(usage.completion_tokens, max_tokens)
+        super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens)
     });
 
     Ok(response)

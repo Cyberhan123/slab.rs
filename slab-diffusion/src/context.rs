@@ -92,7 +92,8 @@ impl SdContext {
             },
         };
 
-        let mut sample_params: slab_diffusion_sys::sd_sample_params_t = unsafe { std::mem::zeroed() };
+        let mut sample_params: slab_diffusion_sys::sd_sample_params_t =
+            unsafe { std::mem::zeroed() };
         unsafe { self.lib.sd_sample_params_init(&mut sample_params) };
         sample_params.guidance = guidance;
         sample_params.scheduler = scheduler;

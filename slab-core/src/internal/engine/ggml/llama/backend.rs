@@ -146,6 +146,33 @@ struct ParsedChatPrompt {
     add_assistant_prompt: bool,
 }
 
+struct InferenceOptions {
+    max_tokens: usize,
+    session_key: Option<String>,
+    apply_chat_template: bool,
+    chat_messages: Vec<LlamaChatMessage>,
+    grammar: Option<String>,
+}
+
+impl InferenceOptions {
+    fn from_options(opts: &serde_json::Value) -> Self {
+        Self {
+            max_tokens: opts
+                .get("max_tokens")
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or(256),
+            session_key: opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned),
+            apply_chat_template: opts
+                .get("apply_chat_template")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false),
+            chat_messages: extract_chat_messages(opts),
+            grammar: resolve_grammar(opts),
+        }
+    }
+}
+
 fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
     // Only attempt template application for the legacy "Role: content" prompt shape.
     if !(prompt.contains("User:") || prompt.contains("Assistant:") || prompt.contains("System:")) {
@@ -202,7 +229,6 @@ fn extract_chat_messages(opts: &serde_json::Value) -> Vec<LlamaChatMessage> {
         .flatten()
         .filter_map(|value| serde_json::from_value::<ConversationMessage>(value.clone()).ok())
         .filter(|message| !message.role.trim().is_empty() && message.has_meaningful_content())
-        .into_iter()
         .map(|message| LlamaChatMessage {
             role: normalize_chat_role_for_template(&message.role).to_owned(),
             content: message.rendered_text(),
@@ -287,23 +313,8 @@ impl LlamaWorker {
         };
         let BackendRequest { input, reply_tx, .. } = req;
         let opts = invocation.options.to_serde_value();
-        let max_tokens =
-            opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
-        let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
-        let apply_chat_template =
-            opts.get("apply_chat_template").and_then(|v| v.as_bool()).unwrap_or(false);
-        let chat_messages = extract_chat_messages(&opts);
-        let grammar = resolve_grammar(&opts);
-        self.handle_inference(
-            input,
-            max_tokens,
-            session_key,
-            apply_chat_template,
-            chat_messages,
-            grammar,
-            reply_tx,
-        )
-        .await;
+        let options = InferenceOptions::from_options(&opts);
+        self.handle_inference(input, options, reply_tx).await;
     }
 
     #[on_event(InferenceStream)]
@@ -317,24 +328,8 @@ impl LlamaWorker {
         };
         let BackendRequest { input, cancel_rx, reply_tx, .. } = req;
         let opts = invocation.options.to_serde_value();
-        let max_tokens =
-            opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
-        let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
-        let apply_chat_template =
-            opts.get("apply_chat_template").and_then(|v| v.as_bool()).unwrap_or(false);
-        let chat_messages = extract_chat_messages(&opts);
-        let grammar = resolve_grammar(&opts);
-        self.handle_inference_stream(
-            input,
-            max_tokens,
-            session_key,
-            apply_chat_template,
-            chat_messages,
-            grammar,
-            cancel_rx,
-            reply_tx,
-        )
-        .await;
+        let options = InferenceOptions::from_options(&opts);
+        self.handle_inference_stream(input, options, cancel_rx, reply_tx).await;
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -552,13 +547,16 @@ impl LlamaWorker {
     async fn handle_inference(
         &mut self,
         input: Payload,
-        max_tokens: usize,
-        session_key: Option<String>,
-        apply_chat_template: bool,
-        chat_messages: Vec<LlamaChatMessage>,
-        grammar: Option<String>,
+        options: InferenceOptions,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
+        let InferenceOptions {
+            max_tokens,
+            session_key,
+            apply_chat_template,
+            chat_messages,
+            grammar,
+        } = options;
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
@@ -626,14 +624,17 @@ impl LlamaWorker {
     async fn handle_inference_stream(
         &mut self,
         input: Payload,
-        max_tokens: usize,
-        session_key: Option<String>,
-        apply_chat_template: bool,
-        chat_messages: Vec<LlamaChatMessage>,
-        grammar: Option<String>,
+        options: InferenceOptions,
         cancel_rx: watch::Receiver<bool>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
+        let InferenceOptions {
+            max_tokens,
+            session_key,
+            apply_chat_template,
+            chat_messages,
+            grammar,
+        } = options;
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
