@@ -13,9 +13,8 @@ include = [
 ]
 
 [build-dependencies]
-slab-libfetch = { workspace = true }
+slab-build-utils = { workspace = true }
 bindgen = { workspace = true }
-tokio = { workspace = true }
 
 [dependencies]
 libloading = { workspace = true }

@@ -2,29 +2,20 @@
 
 extern crate bindgen;
 
-use slab_libfetch::fetch_header;
+use slab_build_utils::ensure_vendor_layout;
 use std::env;
 use std::path::PathBuf;
 
 fn main() {
-    let include_path = PathBuf::from("target/diffusion");
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    rt.block_on(async {
-        fetch_header(
-            "seasonjs",
-            "stable-diffusion.cpp-build",
-            Some("v0527541"),
-            include_path.as_path(),
-        )
-        .await
-        .expect("Failed to fetch diffusion headers");
-    });
+    println!("cargo:rerun-if-changed=wrapper.h");
+    println!("cargo:rerun-if-changed=src/bindings.rs");
 
-    println!("cargo:rerun-if-changed={}", include_path.display());
+    let layout =
+        ensure_vendor_layout("diffusion", &[]).expect("Failed to prepare diffusion vendor layout");
 
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
-        .clang_arg(format!("-I{}", include_path.join("include").display()))
+        .clang_arg(format!("-I{}", layout.primary.include_dir.display()))
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .dynamic_library_name("DiffusionLib")
         .generate();
@@ -39,7 +30,6 @@ fn main() {
         Err(e) => {
             println!("cargo:warning=Unable to generate bindings: {}", e);
             println!("cargo:warning=Using bundled bindings.rs, which may be out of date");
-            // copy src/bindings.rs to OUT_DIR
             std::fs::copy("src/bindings.rs", out.join("bindings.rs"))
                 .expect("Unable to copy bindings.rs");
         }

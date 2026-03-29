@@ -10,6 +10,11 @@ desktop.ini
 /target
 /testdata/whisper
 slab-libfetch/target/
+slab-*-sys/target/
+
+## Vendor cache
+vendor/*
+!vendor/slab-artifacts.toml
 
 ## SQLite Databases
 *.db

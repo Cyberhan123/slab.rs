@@ -5,6 +5,7 @@ members = [
     "slab-proto",
     "slab-runtime",
     "slab-agent",
+    "slab-build-utils",
     "slab-diffusion", 
     "slab-diffusion-sys",
     "slab-libfetch",
@@ -46,6 +47,7 @@ slab-llama-sys = { path = "./slab-llama-sys", package = "slab-llama-sys", versio
 slab-whisper = { path = "./slab-whisper", package = "slab-whisper", version = "0.0.1" }
 slab-whisper-sys = { path = "./slab-whisper-sys", package = "slab-whisper-sys", version = "0.0.1" }
 slab-libfetch = { path = "./slab-libfetch", package = "slab-libfetch", version = "0.0.1" }
+slab-build-utils = { path = "./slab-build-utils", package = "slab-build-utils", version = "0.0.1" }
 slab-core-macros = { path = "./slab-core-macros", package = "slab-core-macros", version = "0.0.1" }
 slab-subtitle = { path = "./slab-subtitle", package = "slab-subtitle", version = "0.0.1" }
 slab-ggml-sys = { path = "./slab-ggml-sys", package = "slab-ggml-sys", version = "0.0.1" }
