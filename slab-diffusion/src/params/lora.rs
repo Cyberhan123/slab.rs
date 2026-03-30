@@ -1,4 +1,3 @@
-use slab_diffusion_sys::sd_lora_t;
 use slab_diffusion_sys::lora_apply_mode_t;
 /// lora parameters must keep code order
 #[rustfmt::skip]
@@ -31,14 +30,4 @@ pub struct Lora {
     pub is_high_noise: bool,
     pub multiplier: f32,
     pub path: &'static str,
-}
-
-impl From<Lora> for sd_lora_t {
-    fn from(lora: Lora) -> Self {
-        sd_lora_t {
-            is_high_noise: lora.is_high_noise,
-            multiplier: lora.multiplier,
-            path: std::ffi::CString::new(lora.path).unwrap().into_raw(),
-        }
-    }
 }

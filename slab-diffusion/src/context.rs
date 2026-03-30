@@ -4,18 +4,36 @@ use std::sync::Arc;
 use libc::free;
 
 use crate::error::DiffusionError;
-use crate::params::{Image, ImgParams, SampleMethod, Scheduler, Video, VideoParams};
+use crate::params::{
+    owned_image_from_raw, ContextParams, Image, ImgParams, SampleMethod, Scheduler, Video,
+    VideoParams,
+};
 
 /// A Stable Diffusion inference context.
 ///
-/// Wraps a raw `sd_ctx_t*` produced by `new_sd_ctx`.  The underlying context
+/// Wraps a raw `sd_ctx_t*` produced by `new_sd_ctx`. The underlying context
 /// is freed when this value is dropped.
 pub struct Context {
     pub(crate) ctx: *mut slab_diffusion_sys::sd_ctx_t,
     pub(crate) lib: Arc<slab_diffusion_sys::DiffusionLib>,
+    pub(crate) _params: ContextParams,
 }
 
 impl Context {
+    fn collect_images(
+        images_ptr: *mut slab_diffusion_sys::sd_image_t,
+        image_count: usize,
+    ) -> Vec<Image> {
+        let images = unsafe { slice::from_raw_parts(images_ptr, image_count) }
+            .iter()
+            .copied()
+            .map(owned_image_from_raw)
+            .collect();
+
+        unsafe { free(images_ptr.cast()) };
+        images
+    }
+
     /// Return the default sampling method recommended by the loaded model.
     pub fn get_default_sample_method(&self) -> SampleMethod {
         let sample_method: slab_diffusion_sys::sample_method_t =
@@ -46,34 +64,7 @@ impl Context {
         }
 
         let batch = params.get_batch_count() as usize;
-
-        // Copy pixel data into Rust-owned SdImage values.
-        // stable-diffusion.cpp allocates image data with standard malloc;
-        // libc::free is therefore the correct deallocation function.
-        let images: Vec<Image> = unsafe {
-            slice::from_raw_parts(images_ptr, batch)
-                .iter()
-                .map(|img| {
-                    let len = (img.width as usize)
-                        .saturating_mul(img.height as usize)
-                        .saturating_mul(img.channel as usize);
-                    let data = if img.data.is_null() || len == 0 {
-                        Vec::new()
-                    } else {
-                        let bytes = slice::from_raw_parts(img.data, len);
-                        let owned = bytes.to_vec();
-                        free(img.data as *mut libc::c_void);
-                        owned
-                    };
-                    Image { width: img.width, height: img.height, channel: img.channel, data }
-                })
-                .collect()
-        };
-
-        // Free the sd_image_t array itself (pixel data was freed above).
-        unsafe { free(images_ptr as *mut libc::c_void) };
-
-        Ok(images)
+        Ok(Self::collect_images(images_ptr, batch))
     }
 
     pub fn generate_video(&self, params: VideoParams) -> Result<Video, DiffusionError> {
@@ -87,29 +78,12 @@ impl Context {
             return Err(DiffusionError::GenerationFailed);
         }
 
-        let frames: Vec<Image> = unsafe {
-            slice::from_raw_parts(frames_ptr, num_frames_out as usize)
-                .iter()
-                .map(|img| {
-                    let len = (img.width as usize)
-                        .saturating_mul(img.height as usize)
-                        .saturating_mul(img.channel as usize);
-                    let data = if img.data.is_null() || len == 0 {
-                        Vec::new()
-                    } else {
-                        let bytes = slice::from_raw_parts(img.data, len);
-                        let owned = bytes.to_vec();
-                        free(img.data as *mut libc::c_void);
-                        owned
-                    };
-                    Image { width: img.width, height: img.height, channel: img.channel, data }
-                })
-                .collect()
-        };
+        let frame_count = usize::try_from(num_frames_out).map_err(|_| {
+            unsafe { free(frames_ptr.cast()) };
+            DiffusionError::GenerationFailed
+        })?;
 
-        // Free the sd_image_t array itself (pixel data was freed above).
-        unsafe { free(frames_ptr as *mut libc::c_void) };
-
+        let frames = Self::collect_images(frames_ptr, frame_count);
         Ok(Video { frames, num_frames: num_frames_out })
     }
 }
@@ -123,7 +97,7 @@ impl Drop for Context {
 }
 
 // Each sd_ctx_t owns its own model weights and intermediate tensors; there is
-// no shared mutable state between separate context instances.  Callers should
+// no shared mutable state between separate context instances. Callers should
 // use one Context per thread for concurrent inference.
 // See: https://github.com/leejet/stable-diffusion.cpp (README / architecture)
 unsafe impl Send for Context {}

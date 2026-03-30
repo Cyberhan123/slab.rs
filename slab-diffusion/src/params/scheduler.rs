@@ -60,5 +60,4 @@ impl From<scheduler_t> for Scheduler {
             _ => Scheduler::UNKNOWN, // Handle unknown values gracefully
         }
     }
-    
 }

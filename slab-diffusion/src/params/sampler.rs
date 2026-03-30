@@ -1,32 +1,33 @@
 use crate::params::guidance::GuidanceParams;
 use crate::params::scheduler::Scheduler;
+use crate::params::support::copy_and_free_c_string;
 use crate::Diffusion;
 use slab_diffusion_sys::sample_method_t;
 use slab_diffusion_sys::sd_sample_params_t;
+use std::ptr;
 
-// Sampling parameters must keep code order
 #[rustfmt::skip]
 use slab_diffusion_sys::{
-    sample_method_t_EULER_SAMPLE_METHOD,
-    sample_method_t_EULER_A_SAMPLE_METHOD,
-    sample_method_t_HEUN_SAMPLE_METHOD,
-    sample_method_t_DPM2_SAMPLE_METHOD,
-    sample_method_t_DPMPP2S_A_SAMPLE_METHOD,
+    sample_method_t_DDIM_TRAILING_SAMPLE_METHOD,
     sample_method_t_DPMPP2M_SAMPLE_METHOD,
     sample_method_t_DPMPP2Mv2_SAMPLE_METHOD,
+    sample_method_t_DPMPP2S_A_SAMPLE_METHOD,
+    sample_method_t_DPM2_SAMPLE_METHOD,
+    sample_method_t_EULER_A_SAMPLE_METHOD,
+    sample_method_t_EULER_SAMPLE_METHOD,
+    sample_method_t_HEUN_SAMPLE_METHOD,
     sample_method_t_IPNDM_SAMPLE_METHOD,
     sample_method_t_IPNDM_V_SAMPLE_METHOD,
     sample_method_t_LCM_SAMPLE_METHOD,
-    sample_method_t_DDIM_TRAILING_SAMPLE_METHOD,
-    sample_method_t_TCD_SAMPLE_METHOD,
-    sample_method_t_RES_MULTISTEP_SAMPLE_METHOD,
     sample_method_t_RES_2S_SAMPLE_METHOD,
+    sample_method_t_RES_MULTISTEP_SAMPLE_METHOD,
     sample_method_t_SAMPLE_METHOD_COUNT,
+    sample_method_t_TCD_SAMPLE_METHOD,
 };
 
 #[allow(non_camel_case_types)]
-#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
-#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
+#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))]
+#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum SampleMethod {
     Euler = sample_method_t_EULER_SAMPLE_METHOD,
@@ -78,54 +79,66 @@ impl From<sample_method_t> for SampleMethod {
             sample_method_t_TCD_SAMPLE_METHOD => SampleMethod::TCD,
             sample_method_t_RES_MULTISTEP_SAMPLE_METHOD => SampleMethod::RES_MULTISTEP,
             sample_method_t_RES_2S_SAMPLE_METHOD => SampleMethod::RES_2S,
-            _ => SampleMethod::Unknown, // Handle unknown values gracefully
+            _ => SampleMethod::Unknown,
         }
     }
 }
 
 /// Rust mirror of `sd_sample_params_t`.
-#[derive(Debug, Clone)]
 pub struct SampleParams {
-    // pub guidance: GuidanceParams,
-    // pub scheduler: Scheduler,
-    // pub sample_method: Option<SampleMethod>,
-    // pub sample_steps: i32,
-    // pub eta: f32,
-    // pub shifted_timestep: i32,
-    // pub custom_sigmas: Vec<f32>,
-    // pub flow_shift: Option<f32>,
     pub(crate) fp: Box<sd_sample_params_t>,
-    // instance: Diffusion,
+    guidance: Option<GuidanceParams>,
+    custom_sigmas: Vec<f32>,
+}
+
+impl Clone for SampleParams {
+    fn clone(&self) -> Self {
+        let mut cloned = Self {
+            fp: self.fp.clone(),
+            guidance: self.guidance.clone(),
+            custom_sigmas: self.custom_sigmas.clone(),
+        };
+        cloned.sync_backing();
+        cloned
+    }
+}
+
+impl std::fmt::Debug for SampleParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SampleParams").finish_non_exhaustive()
+    }
 }
 
 impl Diffusion {
     pub fn new_sample_params(&self) -> SampleParams {
-        let mut fp_box = Box::new(unsafe { std::mem::zeroed::<sd_sample_params_t>() });
-        let ptr: *mut sd_sample_params_t = Box::into_raw(fp_box);
-        unsafe {
-            self.lib.sd_sample_params_init(ptr);
-            fp_box = Box::from_raw(ptr);
-        }
-        SampleParams {
-            fp: fp_box,
-            // instance: self.clone()
-        }
+        let mut fp = Box::new(unsafe { std::mem::zeroed::<sd_sample_params_t>() });
+        unsafe { self.lib.sd_sample_params_init(fp.as_mut()) };
+        SampleParams { fp, guidance: None, custom_sigmas: Vec::new() }
     }
 
-    pub fn sample_params_to_str(&self, sample_params: SampleParams) -> Option<&'static str> {
+    pub fn sample_params_to_str(&self, sample_params: &SampleParams) -> Option<String> {
         let c_buf = unsafe { self.lib.sd_sample_params_to_str(&*sample_params.fp) };
-        if c_buf.is_null() {
-            None
-        } else {
-            let c_str = unsafe { std::ffi::CStr::from_ptr(c_buf) };
-            Some(c_str.to_str().unwrap())
-        }
+        copy_and_free_c_string(c_buf)
     }
 }
 
 impl SampleParams {
+    pub(crate) fn sync_backing(&mut self) {
+        if let Some(guidance) = self.guidance.as_ref() {
+            self.fp.guidance = guidance.build_c_params();
+        }
+
+        self.fp.custom_sigmas = if self.custom_sigmas.is_empty() {
+            ptr::null_mut()
+        } else {
+            self.custom_sigmas.as_mut_ptr()
+        };
+        self.fp.custom_sigmas_count = self.custom_sigmas.len().min(i32::MAX as usize) as i32;
+    }
+
     pub fn set_guidance(&mut self, guidance: GuidanceParams) {
-        self.fp.guidance = guidance.into();
+        self.guidance = Some(guidance);
+        self.sync_backing();
     }
 
     pub fn set_scheduler(&mut self, scheduler: Scheduler) {
@@ -148,10 +161,9 @@ impl SampleParams {
         self.fp.shifted_timestep = timestep;
     }
 
-    //TODO: check lifetime of sigmas vec
-    pub fn set_custom_sigmas(&mut self, mut sigmas: Vec<f32>) {
-        self.fp.custom_sigmas = sigmas.as_mut_ptr();
-        self.fp.custom_sigmas_count = sigmas.len() as i32;
+    pub fn set_custom_sigmas(&mut self, sigmas: Vec<f32>) {
+        self.custom_sigmas = sigmas;
+        self.sync_backing();
     }
 
     pub fn set_flow_shift(&mut self, flow_shift: f32) {
