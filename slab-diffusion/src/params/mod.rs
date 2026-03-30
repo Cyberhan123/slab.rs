@@ -5,43 +5,40 @@ mod guidance;
 mod image;
 mod lora;
 mod pm;
-mod scheduler;
-mod vae_tiling;
-mod video_params;
-mod slg;
 mod prediction;
 mod sampler;
+mod scheduler;
+mod slg;
+mod support;
+mod vae_tiling;
+mod video_params;
 
-pub use embedding::{
-    Embedding,
-};
-pub use context::{
-    ContextParams,
-};
-pub use image::{    
-    Image,
-    ImgParams,
-};
-pub use pm::PmParams;
-pub use scheduler::Scheduler; 
-pub use guidance::GuidanceParams;
-pub use prediction::Prediction;
-pub use lora::{ Lora, LoraApplyMode};
+pub(crate) use image::owned_image_from_raw;
+pub(crate) use support::image_view;
+
 pub use cache::CacheParams;
-pub use vae_tiling::TilingParams;
-pub use sampler::{  SampleMethod, SampleParams};
-pub use slg::SlgParams;
-pub use video_params::{ VideoParams, Video};
+pub use context::ContextParams;
+pub use embedding::Embedding;
+pub use guidance::GuidanceParams;
+pub use image::{Image, ImgParams};
+pub use lora::{Lora, LoraApplyMode};
+pub use pm::PmParams;
+pub use prediction::Prediction;
+pub use sampler::{SampleMethod, SampleParams};
+pub use scheduler::Scheduler;
 /// Log level emitted by the native library.
 use slab_diffusion_sys::sd_log_level_t;
+pub use slg::SlgParams;
+pub use vae_tiling::TilingParams;
+pub use video_params::{Video, VideoParams};
 
 // log level parameters must keep code order
 #[rustfmt::skip]
 use slab_diffusion_sys::{
-    sd_log_level_t_SD_LOG_DEBUG, 
+    sd_log_level_t_SD_LOG_DEBUG,
     sd_log_level_t_SD_LOG_INFO,
     sd_log_level_t_SD_LOG_WARN,
-    sd_log_level_t_SD_LOG_ERROR, 
+    sd_log_level_t_SD_LOG_ERROR,
 };
 
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
@@ -65,10 +62,10 @@ use slab_diffusion_sys::rng_type_t;
 // RNG type parameters must keep code order
 #[rustfmt::skip]
 use slab_diffusion_sys::{
-    rng_type_t_STD_DEFAULT_RNG, 
+    rng_type_t_STD_DEFAULT_RNG,
     rng_type_t_CUDA_RNG,
     rng_type_t_CPU_RNG,
-    rng_type_t_RNG_TYPE_COUNT, 
+    rng_type_t_RNG_TYPE_COUNT,
 };
 
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu

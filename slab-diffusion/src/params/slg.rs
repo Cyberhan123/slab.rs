@@ -1,5 +1,6 @@
 /// Self-guidance layer configuration.
 use slab_diffusion_sys::sd_slg_params_t;
+use std::ptr;
 
 #[derive(Debug, Clone)]
 pub struct SlgParams {
@@ -10,9 +11,13 @@ pub struct SlgParams {
 }
 
 impl SlgParams {
-    pub(crate) fn to_c_params(&mut self) -> sd_slg_params_t {
+    pub(crate) fn build_c_params(&self) -> sd_slg_params_t {
         sd_slg_params_t {
-            layers: self.layers.as_mut_ptr(),
+            layers: if self.layers.is_empty() {
+                ptr::null_mut()
+            } else {
+                self.layers.as_ptr().cast_mut()
+            },
             layer_count: self.layers.len(),
             layer_start: self.layer_start,
             layer_end: self.layer_end,

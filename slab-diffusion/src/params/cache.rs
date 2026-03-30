@@ -1,31 +1,33 @@
-/// Cache mode for inference acceleration.
-use slab_diffusion_sys::{   sd_cache_mode_t, sd_cache_params_t};
+use std::ffi::CString;
+use std::ptr;
 
-/// cache parameters must keep code order
-#[rustfmt::skip]
-use slab_diffusion_sys::{
-    sd_cache_mode_t_SD_CACHE_DISABLED,
-    sd_cache_mode_t_SD_CACHE_EASYCACHE,
-    sd_cache_mode_t_SD_CACHE_UCACHE,
-    sd_cache_mode_t_SD_CACHE_DBCACHE,
-    sd_cache_mode_t_SD_CACHE_TAYLORSEER,
-    sd_cache_mode_t_SD_CACHE_CACHE_DIT,
-    sd_cache_mode_t_SD_CACHE_SPECTRUM,
-};
+use slab_diffusion_sys::{sd_cache_mode_t, sd_cache_params_t};
 
+use crate::params::support::{c_string_ptr, new_c_string};
 use crate::Diffusion;
 
-#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
-#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
+#[rustfmt::skip]
+use slab_diffusion_sys::{
+    sd_cache_mode_t_SD_CACHE_CACHE_DIT,
+    sd_cache_mode_t_SD_CACHE_DBCACHE,
+    sd_cache_mode_t_SD_CACHE_DISABLED,
+    sd_cache_mode_t_SD_CACHE_EASYCACHE,
+    sd_cache_mode_t_SD_CACHE_SPECTRUM,
+    sd_cache_mode_t_SD_CACHE_TAYLORSEER,
+    sd_cache_mode_t_SD_CACHE_UCACHE,
+};
+
+#[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))]
+#[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))]
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
 pub enum CacheMode {
-    DISABLED = sd_cache_mode_t_SD_CACHE_DISABLED,
-    EASYCACHE = sd_cache_mode_t_SD_CACHE_EASYCACHE,
-    UCACHE = sd_cache_mode_t_SD_CACHE_UCACHE,
-    DBCACHE = sd_cache_mode_t_SD_CACHE_DBCACHE,
-    TAYLORSEER = sd_cache_mode_t_SD_CACHE_TAYLORSEER,
-    DIT = sd_cache_mode_t_SD_CACHE_CACHE_DIT,
-    SPECTRUM = sd_cache_mode_t_SD_CACHE_SPECTRUM,
+    Disabled = sd_cache_mode_t_SD_CACHE_DISABLED,
+    EasyCache = sd_cache_mode_t_SD_CACHE_EASYCACHE,
+    UCache = sd_cache_mode_t_SD_CACHE_UCACHE,
+    DBCache = sd_cache_mode_t_SD_CACHE_DBCACHE,
+    TaylorSeer = sd_cache_mode_t_SD_CACHE_TAYLORSEER,
+    Dit = sd_cache_mode_t_SD_CACHE_CACHE_DIT,
+    Spectrum = sd_cache_mode_t_SD_CACHE_SPECTRUM,
 }
 
 impl From<CacheMode> for sd_cache_mode_t {
@@ -35,63 +37,33 @@ impl From<CacheMode> for sd_cache_mode_t {
 }
 
 /// Cache tuning parameters.
-#[derive(Clone)]
-
 pub struct CacheParams {
-    // pub mode: Option<String>,
-    // pub reuse_threshold: Option<f32>,
-    // pub start_percent:  Option<f32>,
-    // pub end_percent: Option<f32>,
-    // pub error_decay_rate: Option<f32>,
-    // pub use_relative_threshold: Option<bool>,
-    // pub reset_error_on_compute: Option<bool>,
-    // pub fn_compute_blocks: Option<i32>,
-    // pub bn_compute_blocks: Option<i32>,
-    // pub residual_diff_threshold: Option<f32>,
-    // pub max_warmup_steps: Option<i32>,
-    // pub max_cached_steps: Option<i32>,
-    // pub max_continuous_cached_steps: Option<i32>,
-    // pub taylorseer_n_derivatives: Option<i32>,
-    // pub taylorseer_skip_interval: Option<i32>,
-    // #[builder(setter(into, strip_option), default)]
-    // pub scm_mask: Option<String>,
-    // pub scm_policy_dynamic: bool,
-    // #[builder(setter(strip_option), default)]
-    // pub spectrum_w: Option<f32>,
-    // #[builder(setter(strip_option), default)]
-    // pub spectrum_m: Option<i32>,
-    // #[builder(setter(strip_option), default)]
-    // pub spectrum_lam: Option<f32>,
-    // #[builder(setter(strip_option), default)]
-    // pub spectrum_window_size: Option<i32>,
-    // #[builder(setter(strip_option), default)]
-    // pub spectrum_flex_window: Option<f32>,
-    // #[builder(setter(strip_option), default)]
-    // pub spectrum_warmup_steps: Option<i32>,
-    // #[builder(setter(strip_option), default)]
-    // pub spectrum_stop_percent: Option<f32>,
-
     pub(crate) fp: Box<sd_cache_params_t>,
-    // instance: Diffusion
+    scm_mask: Option<CString>,
+}
+
+impl Clone for CacheParams {
+    fn clone(&self) -> Self {
+        let mut cloned = Self { fp: self.fp.clone(), scm_mask: self.scm_mask.clone() };
+        cloned.sync_backing();
+        cloned
+    }
 }
 
 impl Diffusion {
     pub fn new_cache_params(&self) -> CacheParams {
-            let mut fp_box = Box::new(unsafe { std::mem::zeroed::<sd_cache_params_t>() });
-        let ptr: *mut sd_cache_params_t = Box::into_raw(fp_box);
-        unsafe {
-            self.lib.sd_cache_params_init(ptr);
-            fp_box = Box::from_raw(ptr);
-        }
-        CacheParams { 
-            fp: fp_box, 
-            // instance: self.clone() 
-        }
+        let mut fp = Box::new(unsafe { std::mem::zeroed::<sd_cache_params_t>() });
+        unsafe { self.lib.sd_cache_params_init(fp.as_mut()) };
+        CacheParams { fp, scm_mask: None }
     }
 }
 
 impl CacheParams {
-   pub fn set_mode(&mut self, mode: CacheMode) {
+    pub(crate) fn sync_backing(&mut self) {
+        self.fp.scm_mask = self.scm_mask.as_ref().map_or(ptr::null(), c_string_ptr);
+    }
+
+    pub fn set_mode(&mut self, mode: CacheMode) {
         self.fp.mode = mode.into();
     }
 
@@ -152,8 +124,8 @@ impl CacheParams {
     }
 
     pub fn set_scm_mask(&mut self, scm_mask: String) {
-        let c_string = std::ffi::CString::new(scm_mask).unwrap();
-        self.fp.scm_mask = c_string.into_raw();
+        self.scm_mask = Some(new_c_string(&scm_mask));
+        self.sync_backing();
     }
 
     pub fn set_scm_policy_dynamic(&mut self, scm_policy_dynamic: bool) {

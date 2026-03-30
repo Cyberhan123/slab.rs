@@ -12,14 +12,14 @@ pub use context::Context;
 pub use error::DiffusionError;
 pub use params::*;
 pub use upscaler::UpscalerContext;
-    
+
 /// A handle to the dynamically-loaded `stable-diffusion` shared library.
 ///
 /// Cheap to clone; all clones share the same underlying [`Arc`].
 ///
 /// # Example
 /// ```no_run
-/// use slab_diffusion::{Diffusion, ContextParams, Image, ImgParams};
+/// use slab_diffusion::{Diffusion, ImgParams, SampleMethod};
 ///
 /// let sd = Diffusion::new("/usr/lib/libstable-diffusion.so").unwrap();
 /// let params = sd.new_context_params();
@@ -28,7 +28,7 @@ pub use upscaler::UpscalerContext;
 /// image_params.set_width(256);
 /// image_params.set_height(256);
 /// image_params.set_prompt("A lovely cat");
-/// let sample_params = sd.new_sample_params();
+/// let mut sample_params = sd.new_sample_params();
 /// sample_params.set_sample_steps(15);
 /// sample_params.set_sample_method(SampleMethod::DPM2);
 /// image_params.set_sample_params(sample_params);
@@ -135,14 +135,14 @@ impl Diffusion {
     /// # Errors
     /// Returns [`DiffusionError::ContextCreationFailed`] when the native
     /// `new_sd_ctx` call returns a null pointer (e.g. invalid model path).
-    pub fn new_context(&self, params: ContextParams) -> Result<Context, DiffusionError> {
+    pub fn new_context(&self, mut params: ContextParams) -> Result<Context, DiffusionError> {
+        params.sync_backing();
         let ctx = unsafe { self.lib.new_sd_ctx(&*params.fp) };
         if ctx.is_null() {
             return Err(DiffusionError::ContextCreationFailed);
         }
-        Ok(Context { ctx, lib: self.lib.clone() })
+        Ok(Context { ctx, lib: self.lib.clone(), _params: params })
     }
-
 }
 
 impl fmt::Debug for Diffusion {
