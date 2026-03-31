@@ -43,11 +43,8 @@ impl BackendService {
             .into_iter()
             .map(|name| {
                 let backend_str = name.to_string();
-                let status = if self.model_state.grpc().has_backend(name) {
-                    "ready"
-                } else {
-                    "disabled"
-                };
+                let status =
+                    if self.model_state.grpc().has_backend(name) { "ready" } else { "disabled" };
                 BackendStatusView { backend: backend_str, status: status.into() }
             })
             .collect();
@@ -152,9 +149,10 @@ impl BackendService {
             ))
         })?;
         let grpc_req = convert::encode_reload_library_request(&req.spec);
-        let response = rpc::client::reload_library(channel, req.backend_id, grpc_req)
-            .await
-            .map_err(|error| ServerError::Internal(format!("grpc reload_library failed: {error}")))?;
+        let response =
+            rpc::client::reload_library(channel, req.backend_id, grpc_req).await.map_err(
+                |error| ServerError::Internal(format!("grpc reload_library failed: {error}")),
+            )?;
 
         let status = convert::decode_model_status_response(&response).map_err(|error| {
             ServerError::Internal(format!("invalid model status response from runtime: {error}"))

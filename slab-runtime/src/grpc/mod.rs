@@ -159,7 +159,11 @@ impl GrpcServiceImpl {
 
 #[allow(deprecated)]
 fn reload_request_model_path(request: &pb::ReloadLibraryRequest) -> &str {
-    request.load.as_ref().map(|load| load.model_path.as_str()).unwrap_or(request.model_path.as_str())
+    request
+        .load
+        .as_ref()
+        .map(|load| load.model_path.as_str())
+        .unwrap_or(request.model_path.as_str())
 }
 
 impl RuntimeState {

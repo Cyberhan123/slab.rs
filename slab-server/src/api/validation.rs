@@ -1,8 +1,8 @@
 use axum::extract::rejection::{JsonRejection, QueryRejection};
 use axum::extract::{FromRequest, FromRequestParts, Json, Query, Request};
 use serde::de::DeserializeOwned;
-use std::str::FromStr;
 use slab_types::RuntimeBackendId;
+use std::str::FromStr;
 use validator::{Validate, ValidationError};
 
 use crate::error::ServerError;
@@ -90,9 +90,7 @@ pub fn validate_positive_u32(value: u32) -> Result<(), ValidationError> {
 
 pub fn validate_backend_id(value: &str) -> Result<(), ValidationError> {
     validate_non_blank(value)?;
-    RuntimeBackendId::from_str(value)
-        .map(|_| ())
-        .map_err(|_| ValidationError::new("backend_id"))
+    RuntimeBackendId::from_str(value).map(|_| ()).map_err(|_| ValidationError::new("backend_id"))
 }
 
 pub fn validate_chat_role(value: &str) -> Result<(), ValidationError> {

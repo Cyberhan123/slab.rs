@@ -11,9 +11,9 @@ use tracing::{info, warn};
 
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
-    AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand, DeletedModelView,
-    DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus,
-    StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
+    AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand,
+    DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec,
+    ModelStatus, StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
 };
 use crate::error::ServerError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
@@ -723,8 +723,7 @@ async fn load_model_with_state(
 
     let (_, channel) = resolve_backend_channel(&state, resolved_target.backend_id)?;
     let (num_workers, worker_source) =
-        resolve_model_workers(&state, resolved_target.backend_id, command.num_workers)
-            .await?;
+        resolve_model_workers(&state, resolved_target.backend_id, command.num_workers).await?;
     let (context_length, context_source) =
         resolve_llama_context_length(&state, resolved_target.backend_id).await?;
 
@@ -743,8 +742,7 @@ async fn load_model_with_state(
         model_path: PathBuf::from(resolved_target.model_path.clone()),
         num_workers,
         context_length: (context_length > 0).then_some(context_length),
-        diffusion: resolve_diffusion_context_params(&state, resolved_target.backend_id)
-            .await?,
+        diffusion: resolve_diffusion_context_params(&state, resolved_target.backend_id).await?,
     };
     let grpc_req = build_model_load_request(&load_spec);
     let response = rpc::client::load_model(channel, resolved_target.backend_id, grpc_req)
@@ -765,11 +763,7 @@ async fn resolve_model_load_target(
         let model = resolve_local_catalog_model(state, model_id).await?;
         let backend_id = resolve_local_backend_from_model(&model)?;
         let model_path = resolve_local_model_path(&model)?;
-        return Ok(ResolvedModelLoadTarget {
-            backend_id,
-            model_path,
-            model_id: Some(model.id),
-        });
+        return Ok(ResolvedModelLoadTarget { backend_id, model_path, model_id: Some(model.id) });
     }
 
     let backend_id = command

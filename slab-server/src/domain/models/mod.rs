@@ -25,9 +25,8 @@ pub use chat::{
     ChatStreamOptions, ChatVerbosity, CloudChatParams, CommonChatParams, ConversationContentPart,
     ConversationMessage, ConversationMessageContent, ConversationToolCall,
     ConversationToolFunction, LocalChatParams, StructuredOutput, TextCompletionCommand,
-    TextCompletionOutput, TextCompletionResult, TextResultChoice,
-    assistant_message_from_parts, assistant_message_from_text_response,
-    deserialize_session_message, serialize_session_message,
+    TextCompletionOutput, TextCompletionResult, TextResultChoice, assistant_message_from_parts,
+    assistant_message_from_text_response, deserialize_session_message, serialize_session_message,
 };
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{ImageGenerationCommand, ImageGenerationMode};

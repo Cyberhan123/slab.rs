@@ -20,9 +20,9 @@ use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatModelCapabilities, ChatModelOption, ChatModelSource, ChatReasoningEffort,
-    ChatStreamChunk, ChatVerbosity, ConversationMessage as DomainConversationMessage,
-    StructuredOutput, UnifiedModel, UnifiedModelStatus,
+    ChatModelCapabilities, ChatModelOption, ChatModelSource, ChatReasoningEffort, ChatStreamChunk,
+    ChatVerbosity, ConversationMessage as DomainConversationMessage, StructuredOutput,
+    UnifiedModel, UnifiedModelStatus,
 };
 use crate::error::ServerError;
 use crate::infra::db::ModelStore;
@@ -472,9 +472,7 @@ async fn find_cloud_catalog_model(
     if let Some((provider_id, legacy_model_id)) = parse_legacy_cloud_option_id(requested_model) {
         warn!(
             requested_model,
-            provider_id,
-            legacy_model_id,
-            "legacy cloud model id shim hit; prefer catalog model.id"
+            provider_id, legacy_model_id, "legacy cloud model id shim hit; prefer catalog model.id"
         );
         let records = state.store().list_models().await?;
         for record in records {

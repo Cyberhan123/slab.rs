@@ -1,7 +1,6 @@
 pub use slab_types::chat::{
     ChatModelCapabilities, ChatModelSource, ChatReasoningEffort, ChatVerbosity,
-    ConversationContentPart,
-    ConversationMessage, ConversationMessageContent, ConversationToolCall,
+    ConversationContentPart, ConversationMessage, ConversationMessageContent, ConversationToolCall,
     ConversationToolFunction,
 };
 pub use slab_types::inference::{TextGenerationResponse, TextGenerationUsage};

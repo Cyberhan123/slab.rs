@@ -190,12 +190,8 @@ impl ModelAutoUnloadManager {
             return;
         };
 
-        match rpc::client::unload_model(
-            channel,
-            backend_id,
-            rpc::pb::ModelUnloadRequest::default(),
-        )
-        .await
+        match rpc::client::unload_model(channel, backend_id, rpc::pb::ModelUnloadRequest::default())
+            .await
         {
             Ok(_) => {
                 info!(
