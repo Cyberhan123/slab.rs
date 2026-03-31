@@ -186,12 +186,11 @@ pub fn serialize_session_message(message: &ConversationMessage) -> String {
 pub fn deserialize_session_message(role: &str, content: &str) -> ConversationMessage {
     let trimmed = content.trim();
 
-    if let Ok(stored) = serde_json::from_str::<StoredSessionMessageV2>(trimmed) {
-        if stored.version == SESSION_MESSAGE_STORAGE_VERSION
-            && stored.kind == SESSION_MESSAGE_STORAGE_KIND
-        {
-            return stored.message;
-        }
+    if let Ok(stored) = serde_json::from_str::<StoredSessionMessageV2>(trimmed)
+        && stored.version == SESSION_MESSAGE_STORAGE_VERSION
+        && stored.kind == SESSION_MESSAGE_STORAGE_KIND
+    {
+        return stored.message;
     }
 
     if let Ok(stored) = serde_json::from_str::<StoredSessionMessageV1>(trimmed)

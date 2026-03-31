@@ -78,9 +78,30 @@ impl GGML {
         unsafe { self.lib.ggml_backend_load_all() };
     }
 
+    pub fn try_load_all_backend(&self) -> Result<(), GGMLError> {
+        let load_all = self.lib.ggml_backend_load_all.as_ref().map_err(|error| {
+            GGMLError::MissingSymbol { symbol: "ggml_backend_load_all", message: error.to_string() }
+        })?;
+        unsafe { load_all() };
+        Ok(())
+    }
+
     pub fn load_all_backend_from_path(&self, path: &str) -> Result<(), GGMLError> {
         let c_path = std::ffi::CString::new(path)?;
         unsafe { self.lib.ggml_backend_load_all_from_path(c_path.as_ptr()) };
+        Ok(())
+    }
+
+    pub fn try_load_all_backend_from_path(&self, path: &str) -> Result<(), GGMLError> {
+        let c_path = std::ffi::CString::new(path)?;
+        let load_all_from_path =
+            self.lib.ggml_backend_load_all_from_path.as_ref().map_err(|error| {
+                GGMLError::MissingSymbol {
+                    symbol: "ggml_backend_load_all_from_path",
+                    message: error.to_string(),
+                }
+            })?;
+        unsafe { load_all_from_path(c_path.as_ptr()) };
         Ok(())
     }
 
