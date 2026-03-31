@@ -9,7 +9,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("cargo:rerun-if-changed={proto}");
     }
     let protoc = protoc_bin_vendored::protoc_bin_path()?;
-    std::env::set_var("PROTOC", protoc);
+    // SAFETY: this build script is single-threaded and sets PROTOC before invoking
+    // downstream build tooling, so no concurrent environment access is introduced here.
+    unsafe {
+        std::env::set_var("PROTOC", protoc);
+    }
     tonic_build::configure()
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
         .build_server(true)
