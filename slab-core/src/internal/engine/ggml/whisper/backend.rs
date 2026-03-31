@@ -10,17 +10,15 @@
 //! | `"model.unload"`   | `UnloadModel`    | Drop the model handle; call model.load to restore. |
 //! | `"inference"`      | `Inference`      | Transcribe audio; input is packed `f32` PCM.       |
 //!
-//! ### `model.load` input JSON
-//! ```json
-//! { "model_path": "/path/to/model.bin" }
-//! ```
+//! ### `model.load` input payload
+//! Uses a typed [`slab_types::GgmlWhisperLoadConfig`] payload inside `slab-core`,
+//! with JSON deserialization kept as a compatibility fallback.
 
 use std::sync::Arc;
 
 use serde::Deserialize;
 use tokio::sync::broadcast;
 
-use crate::internal::engine::ggml::config::ModelLoadConfig;
 use crate::internal::engine::ggml::whisper::adapter::{
     GGMLWhisperEngine, WhisperDecodeConfig, WhisperVadConfig,
 };
@@ -30,6 +28,7 @@ use crate::internal::scheduler::backend::protocol::{
 };
 use crate::internal::scheduler::types::Payload;
 use slab_core_macros::backend_handler;
+use slab_types::GgmlWhisperLoadConfig;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -246,7 +245,7 @@ impl WhisperWorker {
             }
         };
 
-        let config: ModelLoadConfig = match input.to_json() {
+        let config: GgmlWhisperLoadConfig = match input.to_typed() {
             Ok(c) => c,
             Err(e) => {
                 let _ =
@@ -388,7 +387,7 @@ impl WhisperWorker {
         let Some(snapshot) = cmd.deployment() else {
             return;
         };
-        let config: ModelLoadConfig = match snapshot.model_config() {
+        let config: GgmlWhisperLoadConfig = match snapshot.typed_model_config() {
             Ok(config) => config,
             Err(error) => {
                 tracing::warn!(error = %error, "whisper worker: invalid model deployment snapshot");
@@ -405,7 +404,7 @@ impl WhisperWorker {
                 });
                 if let Err(e) = result {
                     tracing::warn!(
-                        model_path,
+                        model_path = %model_path.display(),
                         error = %e,
                         "whisper worker: broadcast LoadModel failed"
                     );
@@ -451,5 +450,40 @@ impl WhisperWorker {
             e.unload();
         }
         self.last_model_config = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn deployment_snapshot_reads_typed_whisper_model_config() {
+        let snapshot = DeploymentSnapshot::with_model(
+            7,
+            Payload::typed(GgmlWhisperLoadConfig { model_path: PathBuf::from("model.bin") }),
+        );
+
+        let config = snapshot
+            .typed_model_config::<GgmlWhisperLoadConfig>()
+            .expect("typed deployment snapshot should decode");
+
+        assert_eq!(config.model_path, PathBuf::from("model.bin"));
+    }
+
+    #[test]
+    fn deployment_snapshot_typed_model_config_falls_back_to_json() {
+        let snapshot = DeploymentSnapshot::with_model(
+            8,
+            Payload::json(serde_json::json!({ "model_path": "legacy-model.bin" })),
+        );
+
+        let config = snapshot
+            .typed_model_config::<GgmlWhisperLoadConfig>()
+            .expect("json deployment snapshot should still decode through typed helper");
+
+        assert_eq!(config.model_path, PathBuf::from("legacy-model.bin"));
     }
 }
