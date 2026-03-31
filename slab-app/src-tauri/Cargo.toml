@@ -33,7 +33,7 @@ reqwest = { workspace = true, features = ["blocking"] }
 tokio = { workspace = true }
 tauri-plugin-shell = "2"
 log = { workspace = true }
-extism = "1.12.0"
+extism = "1.21.0"
 sha2 = "0.10"
 hex = "0.4"
 mime_guess = "2.0"
