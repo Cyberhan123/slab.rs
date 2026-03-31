@@ -29,14 +29,8 @@ impl std::fmt::Debug for GrpcGateway {
             self.backend_channels.keys().map(|backend| backend.canonical_id()).collect();
         backends.sort_unstable();
         f.debug_struct("GrpcGateway")
-            .field(
-                "chat",
-                &self.backend_channels.contains_key(&RuntimeBackendId::GgmlLlama),
-            )
-            .field(
-                "chat_stream",
-                &self.backend_channels.contains_key(&RuntimeBackendId::GgmlLlama),
-            )
+            .field("chat", &self.backend_channels.contains_key(&RuntimeBackendId::GgmlLlama))
+            .field("chat_stream", &self.backend_channels.contains_key(&RuntimeBackendId::GgmlLlama))
             .field(
                 "transcribe",
                 &self.backend_channels.contains_key(&RuntimeBackendId::GgmlWhisper),
