@@ -28,6 +28,18 @@ jobs:
       - name: Cache Cargo registry & build artifacts
         uses: Swatinem/rust-cache@v2
 
+      - name: Cache vendored native artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/ggml
+            vendor/llama
+            vendor/whisper
+            vendor/diffusion
+          key: ${{ runner.os }}-vendor-${{ hashFiles('vendor/slab-artifacts.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-vendor-
+
       # Linux system libraries required by some crates (e.g. OpenSSL, GTK for Tauri)
       - name: Install Linux system deps
         if: runner.os == 'Linux'
@@ -65,8 +77,20 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Cache Bun install artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/.cache/bun/install/cache
+            ~/Library/Caches/Bun/install/cache
+            slab-app/node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('slab-app/bun.lock', 'slab-app/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Type-check & build
         run: bun run build

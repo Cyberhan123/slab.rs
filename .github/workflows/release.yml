@@ -45,6 +45,18 @@ jobs:
         with:
           key: release-${{ matrix.target }}
 
+      - name: Cache vendored native artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            vendor/ggml
+            vendor/llama
+            vendor/whisper
+            vendor/diffusion
+          key: release-${{ matrix.target }}-vendor-${{ hashFiles('vendor/slab-artifacts.toml') }}
+          restore-keys: |
+            release-${{ matrix.target }}-vendor-
+
       - name: Install Linux system deps
         if: runner.os == 'Linux'
         run: |
@@ -133,6 +145,18 @@ jobs:
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Cache Bun install artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            ~/.cache/bun/install/cache
+            ~/Library/Caches/Bun/install/cache
+            slab-app/node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('slab-app/bun.lock', 'slab-app/package.json') }}
+          restore-keys: |
+            ${{ runner.os }}-bun-
+
       - name: Download server binaries
         uses: actions/download-artifact@v4
         with:
@@ -163,7 +187,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: slab-app
-        run: bun install
+        run: bun install --frozen-lockfile
 
       - name: Build Tauri app
         working-directory: slab-app
