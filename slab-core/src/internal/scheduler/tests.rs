@@ -18,11 +18,11 @@ fn payload_clone_does_not_copy_bytes() {
     let p1 = Payload::Bytes(Arc::clone(&data));
     let p2 = p1.clone();
     // Both variants should share the same underlying allocation.
-    if let (Payload::Bytes(a), Payload::Bytes(b)) = (p1, p2) {
+    match (p1, p2) { (Payload::Bytes(a), Payload::Bytes(b)) => {
         assert!(Arc::ptr_eq(&a, &b), "clone should share Arc pointer");
-    } else {
+    } _ => {
         panic!("unexpected payload variant");
-    }
+    }}
 }
 
 #[tokio::test]

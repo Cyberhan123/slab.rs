@@ -187,9 +187,9 @@ impl<'a> WhisperSegment<'a> {
     /// # Safety
     /// You must ensure `token` is in bounds for this [`WhisperSegment`].
     /// If it is not, this is immediate Undefined Behaviour.
-    pub unsafe fn get_token_unchecked(&self, token: c_int) -> WhisperToken<'_, '_> {
+    pub unsafe fn get_token_unchecked(&self, token: c_int) -> WhisperToken<'_, '_> { unsafe {
         self.instance.new_unchecked_token(self, token)
-    }
+    }}
 }
 
 /// Write the contents of this segment to the output.

@@ -214,7 +214,7 @@ pub async fn generate_video(channel: Channel, req: pb::VideoRequest) -> anyhow::
 // log-and-propagate boilerplate for every backend branch.
 // ---------------------------------------------------------------------------
 macro_rules! grpc_call {
-    ($rpc:literal, $client_fn:ident, $channel:expr, $method:ident, $req:expr) => {{
+    ($rpc:literal, $client_fn:ident, $channel:expr_2021, $method:ident, $req:expr_2021) => {{
         let (mut client, request_id) = $client_fn($channel);
         let result = client.$method($req).await.map_err(|s: tonic::Status| {
             log_grpc_error($rpc, &request_id, &s);

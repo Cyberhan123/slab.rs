@@ -265,7 +265,7 @@ fn encode_tensor_to_base64(
         |reason: String| OnnxEngineError::TensorEncode { name: name.to_string(), reason };
 
     macro_rules! extract_and_encode {
-        ($rust_ty:ty, $dtype_str:expr) => {{
+        ($rust_ty:ty, $dtype_str:expr_2021) => {{
             let (_shape, data) =
                 value.try_extract_tensor::<$rust_ty>().map_err(|e| encode_err(e.to_string()))?;
             let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();

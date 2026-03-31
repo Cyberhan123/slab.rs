@@ -178,13 +178,13 @@ impl Orchestrator {
                 }
 
                 OrchestratorCommand::Cancel { task_id } => {
-                    if let Some(tx) = storage.get_cancel_tx(task_id).await {
+                    match storage.get_cancel_tx(task_id).await { Some(tx) => {
                         // Signal cancellation to running task.
                         let _ = tx.send(true);
                         info!(task_id, "cancellation requested");
-                    } else {
+                    } _ => {
                         warn!(task_id, "cancel: task not found");
-                    }
+                    }}
                 }
             }
         }

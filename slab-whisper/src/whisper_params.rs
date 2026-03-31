@@ -598,10 +598,10 @@ impl<'a, 'b> FullParams<'a, 'b> {
             user_data: *mut c_void,
         ) where
             F: FnMut(i32),
-        {
+        { unsafe {
             let user_data = &mut *(user_data as *mut F);
             user_data(progress);
-        }
+        }}
 
         match closure.into() {
             Some(closure) => {
@@ -639,10 +639,10 @@ impl<'a, 'b> FullParams<'a, 'b> {
         unsafe extern "C" fn trampoline<F>(user_data: *mut c_void) -> bool
         where
             F: FnMut() -> bool,
-        {
+        { unsafe {
             let user_data = &mut *(user_data as *mut F);
             user_data()
-        }
+        }}
 
         match closure.into() {
             Some(closure) => {
