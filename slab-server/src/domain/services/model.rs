@@ -1,19 +1,19 @@
 use std::path::PathBuf;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use chrono::Utc;
 use hf_hub::api::sync::{Api, ApiBuilder};
 use slab_proto::convert;
+use slab_types::RuntimeBackendId;
 use slab_types::runtime::DiffusionLoadOptions;
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
-    AcceptedOperation, AvailableModelsQuery, AvailableModelsView, BackendId, CreateModelCommand,
-    DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec,
-    ModelStatus, StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
+    AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand, DeletedModelView,
+    DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus,
+    StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
 };
 use crate::error::ServerError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
@@ -25,7 +25,7 @@ const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 
 #[derive(Debug, Clone)]
 struct ResolvedModelLoadTarget {
-    canonical_backend: String,
+    backend_id: RuntimeBackendId,
     model_path: String,
     model_id: Option<String>,
 }
@@ -128,17 +128,14 @@ impl ModelService {
         &self,
         command: ModelLoadCommand,
     ) -> Result<ModelStatus, ServerError> {
-        let canonical_backend = resolve_unload_backend(&self.model_state, &command).await?;
-        info!(backend = %canonical_backend, model_id = ?command.model_id, "unloading model");
+        let backend_id = resolve_unload_backend(&self.model_state, &command).await?;
+        info!(backend = %backend_id, model_id = ?command.model_id, "unloading model");
 
-        let (_, channel) = resolve_backend_channel(&self.model_state, &canonical_backend)?;
-        let response =
-            rpc::client::unload_model(channel, &canonical_backend, pb::ModelUnloadRequest {})
-                .await
-                .map_err(|error| {
-                    ServerError::Internal(format!("grpc unload_model failed: {error}"))
-                })?;
-        self.model_state.auto_unload().notify_model_unloaded(&canonical_backend).await;
+        let (_, channel) = resolve_backend_channel(&self.model_state, backend_id)?;
+        let response = rpc::client::unload_model(channel, backend_id, pb::ModelUnloadRequest {})
+            .await
+            .map_err(|error| ServerError::Internal(format!("grpc unload_model failed: {error}")))?;
+        self.model_state.auto_unload().notify_model_unloaded(backend_id).await;
 
         decode_model_status(response)
     }
@@ -235,8 +232,7 @@ impl ModelService {
             ))
         })?;
 
-        let canonical_backend_id =
-            BackendId::from_str(&backend_id).map(|b| b.to_string()).unwrap_or(backend_id.clone());
+        let canonical_backend_id = backend_id.to_string();
 
         let repo_id = model.spec.repo_id.clone().ok_or_else(|| {
             ServerError::BadRequest(format!(
@@ -472,11 +468,8 @@ impl ModelService {
 
 /// Derive the gRPC backend id from a local provider string.
 /// e.g. `"local.ggml.llama"` -> `"ggml.llama"`.
-fn backend_id_from_provider(provider: &str) -> Option<String> {
-    provider
-        .strip_prefix("local.")
-        .and_then(|backend| BackendId::from_str(backend).ok())
-        .map(|backend| backend.to_string())
+fn backend_id_from_provider(provider: &str) -> Option<RuntimeBackendId> {
+    provider.strip_prefix("local.").and_then(|backend| backend.parse().ok())
 }
 
 fn provider_id_from_provider(provider: &str) -> Option<String> {
@@ -605,20 +598,18 @@ fn validate_existing_model_file(path: &str) -> Result<(), ServerError> {
 
 fn resolve_backend_channel(
     state: &ModelState,
-    backend_id: &str,
-) -> Result<(String, Channel), ServerError> {
-    let backend = BackendId::from_str(backend_id)
-        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
-    let canonical_backend = backend.to_string();
-    let channel = state.grpc().backend_channel(&canonical_backend).ok_or_else(|| {
+    backend_id: RuntimeBackendId,
+) -> Result<(RuntimeBackendId, Channel), ServerError> {
+    let canonical_backend = backend_id.to_string();
+    let channel = state.grpc().backend_channel(backend_id).ok_or_else(|| {
         ServerError::BackendNotReady(format!("{canonical_backend} gRPC endpoint is not configured"))
     })?;
-    Ok((canonical_backend, channel))
+    Ok((backend_id, channel))
 }
 
 async fn resolve_model_workers(
     state: &ModelState,
-    canonical_backend: &str,
+    backend_id: RuntimeBackendId,
     requested_workers: Option<u32>,
 ) -> Result<(u32, &'static str), ServerError> {
     if let Some(workers) = requested_workers {
@@ -630,10 +621,10 @@ async fn resolve_model_workers(
 
     let configured_workers = {
         let config = state.pmid().config();
-        match canonical_backend {
-            "ggml.llama" => Some(config.runtime.llama.num_workers),
-            "ggml.whisper" => Some(config.runtime.whisper.num_workers),
-            "ggml.diffusion" => Some(config.runtime.diffusion.num_workers),
+        match backend_id {
+            RuntimeBackendId::GgmlLlama => Some(config.runtime.llama.num_workers),
+            RuntimeBackendId::GgmlWhisper => Some(config.runtime.whisper.num_workers),
+            RuntimeBackendId::GgmlDiffusion => Some(config.runtime.diffusion.num_workers),
             _ => None,
         }
     };
@@ -645,9 +636,9 @@ async fn resolve_model_workers(
 
 async fn resolve_llama_context_length(
     state: &ModelState,
-    canonical_backend: &str,
+    backend_id: RuntimeBackendId,
 ) -> Result<(u32, &'static str), ServerError> {
-    if canonical_backend != "ggml.llama" {
+    if backend_id != RuntimeBackendId::GgmlLlama {
         return Ok((0, "not_applicable"));
     }
 
@@ -660,9 +651,9 @@ async fn resolve_llama_context_length(
 
 async fn resolve_diffusion_context_params(
     state: &ModelState,
-    canonical_backend: &str,
+    backend_id: RuntimeBackendId,
 ) -> Result<Option<DiffusionLoadOptions>, ServerError> {
-    if canonical_backend != "ggml.diffusion" {
+    if backend_id != RuntimeBackendId::GgmlDiffusion {
         return Ok(None);
     }
 
@@ -730,15 +721,15 @@ async fn load_model_with_state(
     validate_path("model_path", &resolved_target.model_path)?;
     validate_existing_model_file(&resolved_target.model_path)?;
 
-    let (_, channel) = resolve_backend_channel(&state, &resolved_target.canonical_backend)?;
+    let (_, channel) = resolve_backend_channel(&state, resolved_target.backend_id)?;
     let (num_workers, worker_source) =
-        resolve_model_workers(&state, &resolved_target.canonical_backend, command.num_workers)
+        resolve_model_workers(&state, resolved_target.backend_id, command.num_workers)
             .await?;
     let (context_length, context_source) =
-        resolve_llama_context_length(&state, &resolved_target.canonical_backend).await?;
+        resolve_llama_context_length(&state, resolved_target.backend_id).await?;
 
     info!(
-        backend = %resolved_target.canonical_backend,
+        backend = %resolved_target.backend_id,
         model_id = ?resolved_target.model_id,
         model_path = %resolved_target.model_path,
         workers = num_workers,
@@ -752,14 +743,14 @@ async fn load_model_with_state(
         model_path: PathBuf::from(resolved_target.model_path.clone()),
         num_workers,
         context_length: (context_length > 0).then_some(context_length),
-        diffusion: resolve_diffusion_context_params(&state, &resolved_target.canonical_backend)
+        diffusion: resolve_diffusion_context_params(&state, resolved_target.backend_id)
             .await?,
     };
     let grpc_req = build_model_load_request(&load_spec);
-    let response = rpc::client::load_model(channel, &resolved_target.canonical_backend, grpc_req)
+    let response = rpc::client::load_model(channel, resolved_target.backend_id, grpc_req)
         .await
         .map_err(|error| map_grpc_model_error(action, error))?;
-    state.auto_unload().notify_model_loaded(&resolved_target.canonical_backend, load_spec).await;
+    state.auto_unload().notify_model_loaded(resolved_target.backend_id, load_spec).await;
 
     decode_model_status(response)
 }
@@ -774,9 +765,8 @@ async fn resolve_model_load_target(
         let model = resolve_local_catalog_model(state, model_id).await?;
         let backend_id = resolve_local_backend_from_model(&model)?;
         let model_path = resolve_local_model_path(&model)?;
-        let (canonical_backend, _) = resolve_backend_channel(state, &backend_id)?;
         return Ok(ResolvedModelLoadTarget {
-            canonical_backend,
+            backend_id,
             model_path,
             model_id: Some(model.id),
         });
@@ -799,22 +789,25 @@ async fn resolve_model_load_target(
             ServerError::BadRequest("model_path is required when model_id is not provided".into())
         })?
         .to_owned();
-    let (canonical_backend, _) = resolve_backend_channel(state, backend_id)?;
+    let backend_id: RuntimeBackendId = backend_id
+        .parse()
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
+    let (backend_id, _) = resolve_backend_channel(state, backend_id)?;
 
-    Ok(ResolvedModelLoadTarget { canonical_backend, model_path, model_id: None })
+    Ok(ResolvedModelLoadTarget { backend_id, model_path, model_id: None })
 }
 
 async fn resolve_unload_backend(
     state: &ModelState,
     command: &ModelLoadCommand,
-) -> Result<String, ServerError> {
+) -> Result<RuntimeBackendId, ServerError> {
     if let Some(model_id) =
         command.model_id.as_deref().map(str::trim).filter(|value| !value.is_empty())
     {
         let model = resolve_local_catalog_model(state, model_id).await?;
         let backend_id = resolve_local_backend_from_model(&model)?;
-        let (canonical_backend, _) = resolve_backend_channel(state, &backend_id)?;
-        return Ok(canonical_backend);
+        let (backend_id, _) = resolve_backend_channel(state, backend_id)?;
+        return Ok(backend_id);
     }
 
     let backend_id = command
@@ -825,8 +818,11 @@ async fn resolve_unload_backend(
         .ok_or_else(|| {
             ServerError::BadRequest("backend_id is required when model_id is not provided".into())
         })?;
-    let (canonical_backend, _) = resolve_backend_channel(state, backend_id)?;
-    Ok(canonical_backend)
+    let backend_id: RuntimeBackendId = backend_id
+        .parse()
+        .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
+    let (backend_id, _) = resolve_backend_channel(state, backend_id)?;
+    Ok(backend_id)
 }
 
 async fn resolve_local_catalog_model(
@@ -844,7 +840,7 @@ async fn resolve_local_catalog_model(
     Ok(model)
 }
 
-fn resolve_local_backend_from_model(model: &UnifiedModel) -> Result<String, ServerError> {
+fn resolve_local_backend_from_model(model: &UnifiedModel) -> Result<RuntimeBackendId, ServerError> {
     backend_id_from_provider(&model.provider).ok_or_else(|| {
         ServerError::BadRequest(format!(
             "model '{}' uses provider '{}' and cannot be managed with local runtime lifecycle endpoints",

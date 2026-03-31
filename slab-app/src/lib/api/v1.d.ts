@@ -711,10 +711,16 @@ export interface components {
             tool_calls?: components["schemas"]["ChatToolCall"][];
         };
         ChatMessageContent: string | components["schemas"]["ChatContentPart"][];
+        ChatModelCapabilities: {
+            raw_grammar: boolean;
+            reasoning_controls: boolean;
+            structured_output: boolean;
+        };
         /** @description A selectable chat model option from `GET /v1/chat/models`. */
         ChatModelOption: {
             /** @description Backend id when `source = local`, e.g. `"ggml.llama"`. */
             backend_id?: string | null;
+            capabilities: components["schemas"]["ChatModelCapabilities"];
             /** @description User-facing display label. */
             display_name: string;
             /** @description Whether model artifacts are already downloaded locally. */
@@ -1150,9 +1156,33 @@ export interface components {
             /** Format: double */
             output: number;
         };
+        ReloadDiffusionLoadOptionsRequest: {
+            clip_device?: string | null;
+            clip_g_path?: string | null;
+            clip_l_path?: string | null;
+            diffusion_model_path?: string | null;
+            flash_attn?: boolean;
+            lora_model_dir?: string | null;
+            offload_params_to_cpu?: boolean;
+            t5xxl_path?: string | null;
+            taesd_path?: string | null;
+            vae_device?: string | null;
+            vae_path?: string | null;
+        };
         ReloadLibRequest: {
             backend_id: string;
+            /** Format: int32 */
+            context_length?: number | null;
             lib_path: string;
+            load?: components["schemas"]["ReloadModelLoadRequest"] | null;
+            model_path?: string | null;
+            /** Format: int32 */
+            num_workers?: number | null;
+        };
+        ReloadModelLoadRequest: {
+            /** Format: int32 */
+            context_length?: number | null;
+            diffusion?: components["schemas"]["ReloadDiffusionLoadOptionsRequest"] | null;
             model_path: string;
             /** Format: int32 */
             num_workers?: number;
@@ -1262,7 +1292,7 @@ export interface components {
             created_at: string;
             error_msg?: string | null;
             id: string;
-            status: string;
+            status: components["schemas"]["TaskStatus"];
             task_type: string;
             updated_at: string;
         };
@@ -1289,6 +1319,8 @@ export interface components {
             /** @description Absolute path to the assembled MP4 video file for video task results. */
             video_path?: string | null;
         };
+        /** @enum {string} */
+        TaskStatus: "pending" | "running" | "succeeded" | "failed" | "cancelled" | "interrupted";
         TaskTypeQuery: {
             type?: string | null;
         };

@@ -12,13 +12,17 @@ use validator::{Validate, ValidationError};
 use crate::domain::models::{
     ChatCompletionCommand as DomainChatCompletionCommand,
     ChatCompletionResult as DomainChatCompletionResult, ChatModelOption as DomainChatModelOption,
+    ChatModelCapabilities as DomainChatModelCapabilities,
     ChatModelSource as DomainChatModelSource, ChatReasoningEffort as DomainChatReasoningEffort,
     ChatResultChoice as DomainChatResultChoice, ChatStreamOptions as DomainChatStreamOptions,
-    ChatVerbosity as DomainChatVerbosity, ConversationContentPart as DomainConversationContentPart,
+    ChatVerbosity as DomainChatVerbosity, CloudChatParams as DomainCloudChatParams,
+    CommonChatParams as DomainCommonChatParams,
+    ConversationContentPart as DomainConversationContentPart,
     ConversationMessage as DomainConversationMessage,
     ConversationMessageContent as DomainConversationMessageContent,
     ConversationToolCall as DomainConversationToolCall,
     ConversationToolFunction as DomainConversationToolFunction,
+    LocalChatParams as DomainLocalChatParams,
     StructuredOutput as DomainStructuredOutput,
     StructuredOutputJsonSchema as DomainStructuredOutputJsonSchema,
     TextCompletionCommand as DomainTextCompletionCommand,
@@ -481,6 +485,8 @@ pub struct ChatModelOption {
     pub downloaded: bool,
     /// Whether a model download task is running.
     pub pending: bool,
+    /// Route-level feature flags for this model option.
+    pub capabilities: ChatModelCapabilities,
     /// Backend id when `source = local`, e.g. `"ggml.llama"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend_id: Option<String>,
@@ -490,6 +496,13 @@ pub struct ChatModelOption {
     /// Cloud provider name when `source = cloud`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ChatModelCapabilities {
+    pub raw_grammar: bool,
+    pub structured_output: bool,
+    pub reasoning_controls: bool,
 }
 
 impl From<DomainConversationContentPart> for ChatContentPart {
@@ -635,7 +648,6 @@ impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
             .map(Into::into)
             .or_else(|| thinking.as_ref().and_then(verbosity_from_thinking));
         let structured_output = structured_output_from_api(response_format, json_schema);
-        let grammar_json = structured_output.is_some();
         let stop = stop.as_ref().map(StopSequences::normalized).unwrap_or_default();
 
         Self {
@@ -643,18 +655,24 @@ impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
             model: model.trim().to_owned(),
             messages: messages.into_iter().map(Into::into).collect(),
             continue_generation,
-            max_tokens,
-            temperature,
-            top_p,
-            n: n.unwrap_or(1),
-            stop,
-            grammar,
-            grammar_json,
-            structured_output,
-            reasoning_effort,
-            verbosity,
-            stream,
-            stream_options: stream_options.map(Into::into).unwrap_or_default(),
+            common: DomainCommonChatParams {
+                max_tokens,
+                temperature,
+                top_p,
+                n: n.unwrap_or(1),
+                stream,
+                stop,
+                stream_options: stream_options.map(Into::into).unwrap_or_default(),
+            },
+            local: DomainLocalChatParams {
+                grammar,
+                structured_output: structured_output.clone(),
+            },
+            cloud: DomainCloudChatParams {
+                reasoning_effort,
+                verbosity,
+                structured_output,
+            },
         }
     }
 }
@@ -675,21 +693,29 @@ impl From<CompletionRequest> for DomainTextCompletionCommand {
             json_schema,
         } = request;
         let structured_output = structured_output_from_api(response_format, json_schema);
-        let grammar_json = structured_output.is_some();
         let stop = stop.as_ref().map(StopSequences::normalized).unwrap_or_default();
 
         Self {
             model: model.trim().to_owned(),
             prompt,
-            max_tokens,
-            temperature,
-            top_p,
-            n: n.unwrap_or(1),
-            stop,
-            grammar,
-            grammar_json,
-            structured_output,
-            stream,
+            common: DomainCommonChatParams {
+                max_tokens,
+                temperature,
+                top_p,
+                n: n.unwrap_or(1),
+                stream,
+                stop,
+                stream_options: DomainChatStreamOptions::default(),
+            },
+            local: DomainLocalChatParams {
+                grammar,
+                structured_output: structured_output.clone(),
+            },
+            cloud: DomainCloudChatParams {
+                reasoning_effort: None,
+                verbosity: None,
+                structured_output,
+            },
         }
     }
 }
@@ -785,6 +811,16 @@ impl From<DomainChatModelSource> for ChatModelSource {
     }
 }
 
+impl From<DomainChatModelCapabilities> for ChatModelCapabilities {
+    fn from(value: DomainChatModelCapabilities) -> Self {
+        Self {
+            raw_grammar: value.raw_grammar,
+            structured_output: value.structured_output,
+            reasoning_controls: value.reasoning_controls,
+        }
+    }
+}
+
 impl From<DomainChatModelOption> for ChatModelOption {
     fn from(value: DomainChatModelOption) -> Self {
         Self {
@@ -793,6 +829,7 @@ impl From<DomainChatModelOption> for ChatModelOption {
             source: value.source.into(),
             downloaded: value.downloaded,
             pending: value.pending,
+            capabilities: value.capabilities.into(),
             backend_id: value.backend_id,
             provider_id: value.provider_id,
             provider_name: value.provider_name,
@@ -1087,7 +1124,10 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(matches!(command.reasoning_effort, Some(DomainChatReasoningEffort::None)));
+        assert!(matches!(
+            command.cloud.reasoning_effort,
+            Some(DomainChatReasoningEffort::None)
+        ));
     }
 
     #[test]
@@ -1101,7 +1141,10 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(matches!(command.reasoning_effort, Some(DomainChatReasoningEffort::Medium)));
+        assert!(matches!(
+            command.cloud.reasoning_effort,
+            Some(DomainChatReasoningEffort::Medium)
+        ));
     }
 
     #[test]
@@ -1117,8 +1160,11 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(matches!(command.reasoning_effort, Some(DomainChatReasoningEffort::High)));
-        assert!(matches!(command.verbosity, Some(DomainChatVerbosity::Low)));
+        assert!(matches!(
+            command.cloud.reasoning_effort,
+            Some(DomainChatReasoningEffort::High)
+        ));
+        assert!(matches!(command.cloud.verbosity, Some(DomainChatVerbosity::Low)));
     }
 
     #[test]
@@ -1142,8 +1188,9 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(command.grammar_json);
-        assert_eq!(command.structured_output, Some(DomainStructuredOutput::JsonObject));
+        assert_eq!(command.local.grammar, None);
+        assert_eq!(command.local.structured_output, Some(DomainStructuredOutput::JsonObject));
+        assert_eq!(command.cloud.structured_output, Some(DomainStructuredOutput::JsonObject));
     }
 
     #[test]
@@ -1157,9 +1204,8 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(command.grammar_json);
         assert!(matches!(
-            command.structured_output,
+            command.local.structured_output,
             Some(DomainStructuredOutput::JsonSchema(ref schema))
                 if schema.schema == json!({ "const": "42" })
         ));
@@ -1172,9 +1218,8 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(command.grammar_json);
         assert!(matches!(
-            command.structured_output,
+            command.local.structured_output,
             Some(DomainStructuredOutput::JsonSchema(ref schema))
                 if schema.name == "slab_structured_output"
         ));
@@ -1197,7 +1242,7 @@ mod tests {
         let command = DomainChatCompletionCommand::from(request);
 
         assert!(matches!(
-            command.structured_output,
+            command.cloud.structured_output,
             Some(DomainStructuredOutput::JsonSchema(ref schema))
                 if schema.name == "team_schema_v1"
                     && schema.description.as_deref() == Some("example schema")
@@ -1213,14 +1258,14 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert_eq!(command.stop, vec!["END".to_owned()]);
+        assert_eq!(command.common.stop, vec!["END".to_owned()]);
     }
 
     #[test]
     fn completion_request_defaults_n_to_one() {
         let command = DomainTextCompletionCommand::from(make_completion_request());
 
-        assert_eq!(command.n, 1);
+        assert_eq!(command.common.n, 1);
     }
 
     #[test]
@@ -1234,7 +1279,7 @@ mod tests {
 
         let command = DomainTextCompletionCommand::from(request);
 
-        assert!(command.grammar_json);
-        assert_eq!(command.structured_output, Some(DomainStructuredOutput::JsonObject));
+        assert_eq!(command.local.structured_output, Some(DomainStructuredOutput::JsonObject));
+        assert_eq!(command.cloud.structured_output, Some(DomainStructuredOutput::JsonObject));
     }
 }

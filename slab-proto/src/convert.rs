@@ -86,12 +86,14 @@ pub fn decode_model_load_request(
     })
 }
 
+#[allow(deprecated)]
 pub fn encode_reload_library_request(spec: &RuntimeModelReloadSpec) -> pb::ReloadLibraryRequest {
     pb::ReloadLibraryRequest {
         lib_path: path_to_string(&spec.lib_path),
-        model_path: path_to_string(&spec.load.model_path),
-        num_workers: spec.load.num_workers.max(1),
-        context_length: spec.load.context_length.unwrap_or(0),
+        load: Some(encode_model_load_request(&spec.load)),
+        model_path: String::new(),
+        num_workers: 0,
+        context_length: 0,
     }
 }
 
@@ -99,22 +101,10 @@ pub fn decode_reload_library_request(
     request: &pb::ReloadLibraryRequest,
 ) -> Result<RuntimeModelReloadSpec, ProtoConversionError> {
     ensure_non_empty(&request.lib_path, "lib_path")?;
-    let load = decode_model_load_request(&pb::ModelLoadRequest {
-        model_path: request.model_path.clone(),
-        num_workers: request.num_workers,
-        context_length: request.context_length,
-        diffusion_model_path: String::new(),
-        vae_path: String::new(),
-        taesd_path: String::new(),
-        lora_model_dir: String::new(),
-        clip_l_path: String::new(),
-        clip_g_path: String::new(),
-        t5xxl_path: String::new(),
-        flash_attn: false,
-        vae_device: String::new(),
-        clip_device: String::new(),
-        offload_params_to_cpu: false,
-    })?;
+    let load = match request.load.as_ref() {
+        Some(load) => decode_model_load_request(load)?,
+        None => decode_legacy_reload_library_load(request)?,
+    };
 
     Ok(RuntimeModelReloadSpec { lib_path: PathBuf::from(&request.lib_path), load })
 }
@@ -225,6 +215,16 @@ pub fn encode_chat_stream_chunk(chunk: &TextGenerationChunk) -> pb::ChatStreamCh
         done: chunk.done,
         finish_reason: chunk.finish_reason.clone().unwrap_or_default(),
         usage: chunk.usage.as_ref().map(encode_usage),
+    }
+}
+
+pub fn decode_chat_stream_chunk(chunk: &pb::ChatStreamChunk) -> TextGenerationChunk {
+    TextGenerationChunk {
+        delta: chunk.token.clone(),
+        done: chunk.done,
+        finish_reason: (!chunk.finish_reason.is_empty()).then_some(chunk.finish_reason.clone()),
+        usage: chunk.usage.as_ref().map(decode_usage),
+        metadata: Default::default(),
     }
 }
 
@@ -709,6 +709,20 @@ fn diffusion_load_options_from_model_load_request(
     has_any_value.then_some(options)
 }
 
+#[allow(deprecated)]
+fn decode_legacy_reload_library_load(
+    request: &pb::ReloadLibraryRequest,
+) -> Result<RuntimeModelLoadSpec, ProtoConversionError> {
+    ensure_non_empty(&request.model_path, "model_path")?;
+
+    Ok(RuntimeModelLoadSpec {
+        model_path: PathBuf::from(&request.model_path),
+        num_workers: request.num_workers.max(1),
+        context_length: (request.context_length > 0).then_some(request.context_length),
+        diffusion: None,
+    })
+}
+
 fn raw_image_input_from_proto_parts(
     data: &[u8],
     width: u32,
@@ -856,6 +870,56 @@ mod tests {
         let roundtrip = decode_model_load_request(&request).unwrap();
 
         assert_eq!(roundtrip, spec);
+    }
+
+    #[test]
+    fn reload_spec_round_trips_nested_load_fields() {
+        let spec = RuntimeModelReloadSpec {
+            lib_path: PathBuf::from("C:/runtime/llama.dll"),
+            load: RuntimeModelLoadSpec {
+                model_path: PathBuf::from("C:/models/model.gguf"),
+                num_workers: 2,
+                context_length: Some(4096),
+                diffusion: Some(DiffusionLoadOptions {
+                    diffusion_model_path: Some(PathBuf::from("C:/models/diffusion.safetensors")),
+                    vae_path: Some(PathBuf::from("C:/models/vae.safetensors")),
+                    taesd_path: None,
+                    lora_model_dir: Some(PathBuf::from("C:/models/lora")),
+                    clip_l_path: None,
+                    clip_g_path: Some(PathBuf::from("C:/models/clip-g.safetensors")),
+                    t5xxl_path: None,
+                    flash_attn: true,
+                    vae_device: "cpu".to_owned(),
+                    clip_device: "cuda".to_owned(),
+                    offload_params_to_cpu: true,
+                }),
+            },
+        };
+
+        let request = encode_reload_library_request(&spec);
+        let roundtrip = decode_reload_library_request(&request).unwrap();
+
+        assert_eq!(roundtrip, spec);
+    }
+
+    #[test]
+    #[allow(deprecated)]
+    fn reload_spec_decodes_legacy_flattened_fields() {
+        let request = pb::ReloadLibraryRequest {
+            lib_path: "C:/runtime/llama.dll".to_owned(),
+            load: None,
+            model_path: "C:/models/model.gguf".to_owned(),
+            num_workers: 0,
+            context_length: 2048,
+        };
+
+        let roundtrip = decode_reload_library_request(&request).unwrap();
+
+        assert_eq!(roundtrip.lib_path, PathBuf::from("C:/runtime/llama.dll"));
+        assert_eq!(roundtrip.load.model_path, PathBuf::from("C:/models/model.gguf"));
+        assert_eq!(roundtrip.load.num_workers, 1);
+        assert_eq!(roundtrip.load.context_length, Some(2048));
+        assert_eq!(roundtrip.load.diffusion, None);
     }
 
     #[test]

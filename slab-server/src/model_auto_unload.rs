@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use slab_proto::convert;
+use slab_types::RuntimeBackendId;
 use slab_types::runtime::RuntimeModelLoadSpec;
 use tracing::{debug, info, warn};
 
@@ -22,13 +23,13 @@ struct BackendRefState {
 pub struct ModelAutoUnloadManager {
     pmid: Arc<crate::domain::services::PmidService>,
     grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
-    states: tokio::sync::Mutex<HashMap<String, BackendRefState>>,
+    states: tokio::sync::Mutex<HashMap<RuntimeBackendId, BackendRefState>>,
 }
 
 #[derive(Debug)]
 pub struct ModelUsageGuard {
     manager: Arc<ModelAutoUnloadManager>,
-    backend_id: String,
+    backend_id: RuntimeBackendId,
     released: bool,
 }
 
@@ -50,10 +51,10 @@ impl ModelAutoUnloadManager {
         Self { pmid, grpc, states: tokio::sync::Mutex::new(HashMap::new()) }
     }
 
-    pub async fn acquire(self: &Arc<Self>, backend_id: &str) -> ModelUsageGuard {
-        let backend = canonical_backend_id(backend_id).to_owned();
+    pub async fn acquire(self: &Arc<Self>, backend_id: RuntimeBackendId) -> ModelUsageGuard {
+        let backend = backend_id;
         let mut states = self.states.lock().await;
-        let state = states.entry(backend.clone()).or_default();
+        let state = states.entry(backend).or_default();
         state.active_refs = state.active_refs.saturating_add(1);
         state.idle_seq = state.idle_seq.saturating_add(1);
         debug!(
@@ -69,12 +70,12 @@ impl ModelAutoUnloadManager {
 
     pub async fn acquire_for_inference(
         self: &Arc<Self>,
-        backend_id: &str,
+        backend_id: RuntimeBackendId,
     ) -> Result<ModelUsageGuard, String> {
-        let backend = canonical_backend_id(backend_id).to_owned();
-        let guard = self.acquire(&backend).await;
+        let backend = backend_id;
+        let guard = self.acquire(backend).await;
 
-        if let Err(error) = self.try_reload_if_needed(&backend).await {
+        if let Err(error) = self.try_reload_if_needed(backend).await {
             drop(guard);
             return Err(error);
         }
@@ -82,13 +83,17 @@ impl ModelAutoUnloadManager {
         Ok(guard)
     }
 
-    pub async fn notify_model_loaded(self: &Arc<Self>, backend_id: &str, spec: LoadedModelSpec) {
-        let backend = canonical_backend_id(backend_id).to_owned();
+    pub async fn notify_model_loaded(
+        self: &Arc<Self>,
+        backend_id: RuntimeBackendId,
+        spec: LoadedModelSpec,
+    ) {
+        let backend = backend_id;
         let mut should_schedule = None;
 
         {
             let mut states = self.states.lock().await;
-            let state = states.entry(backend.clone()).or_default();
+            let state = states.entry(backend).or_default();
             state.idle_seq = state.idle_seq.saturating_add(1);
             state.auto_unloaded = false;
             state.last_loaded = Some(spec);
@@ -102,27 +107,27 @@ impl ModelAutoUnloadManager {
         }
     }
 
-    pub async fn notify_model_unloaded(self: &Arc<Self>, backend_id: &str) {
-        let backend = canonical_backend_id(backend_id).to_owned();
+    pub async fn notify_model_unloaded(self: &Arc<Self>, backend_id: RuntimeBackendId) {
+        let backend = backend_id;
         let mut states = self.states.lock().await;
-        let state = states.entry(backend.clone()).or_default();
+        let state = states.entry(backend).or_default();
         state.idle_seq = state.idle_seq.saturating_add(1);
         state.auto_unloaded = false;
         debug!(backend = %backend, "model unload state updated (manual)");
     }
 
-    fn release_ref(self: &Arc<Self>, backend_id: String) {
+    fn release_ref(self: &Arc<Self>, backend_id: RuntimeBackendId) {
         let manager = Arc::clone(self);
         tokio::spawn(async move {
             manager.release_ref_async(backend_id).await;
         });
     }
 
-    async fn release_ref_async(self: Arc<Self>, backend_id: String) {
+    async fn release_ref_async(self: Arc<Self>, backend_id: RuntimeBackendId) {
         let mut should_schedule = None;
         {
             let mut states = self.states.lock().await;
-            let state = states.entry(backend_id.clone()).or_default();
+            let state = states.entry(backend_id).or_default();
             if state.active_refs == 0 {
                 warn!(
                     backend = %backend_id,
@@ -148,14 +153,14 @@ impl ModelAutoUnloadManager {
         }
     }
 
-    fn spawn_idle_timer(self: &Arc<Self>, backend_id: String, idle_seq: u64) {
+    fn spawn_idle_timer(self: &Arc<Self>, backend_id: RuntimeBackendId, idle_seq: u64) {
         let manager = Arc::clone(self);
         tokio::spawn(async move {
             manager.run_idle_timer(backend_id, idle_seq).await;
         });
     }
 
-    async fn run_idle_timer(self: Arc<Self>, backend_id: String, idle_seq: u64) {
+    async fn run_idle_timer(self: Arc<Self>, backend_id: RuntimeBackendId, idle_seq: u64) {
         let Some(idle_duration) = self.resolve_idle_timeout().await else {
             return;
         };
@@ -177,7 +182,7 @@ impl ModelAutoUnloadManager {
             return;
         }
 
-        let Some(channel) = self.grpc.backend_channel(&backend_id) else {
+        let Some(channel) = self.grpc.backend_channel(backend_id) else {
             warn!(
                 backend = %backend_id,
                 "skipping auto-unload because backend channel is unavailable"
@@ -187,7 +192,7 @@ impl ModelAutoUnloadManager {
 
         match rpc::client::unload_model(
             channel,
-            &backend_id,
+            backend_id,
             rpc::pb::ModelUnloadRequest::default(),
         )
         .await
@@ -199,7 +204,7 @@ impl ModelAutoUnloadManager {
                     idle_seconds = idle_duration.as_secs(),
                     "auto-unloaded model after idle timeout"
                 );
-                self.mark_auto_unloaded(&backend_id).await;
+                self.mark_auto_unloaded(backend_id).await;
             }
             Err(error) => {
                 warn!(
@@ -212,20 +217,20 @@ impl ModelAutoUnloadManager {
         }
     }
 
-    async fn mark_auto_unloaded(&self, backend_id: &str) {
-        let backend = canonical_backend_id(backend_id).to_owned();
+    async fn mark_auto_unloaded(&self, backend_id: RuntimeBackendId) {
+        let backend = backend_id;
         let mut states = self.states.lock().await;
-        let state = states.entry(backend.clone()).or_default();
+        let state = states.entry(backend).or_default();
         state.idle_seq = state.idle_seq.saturating_add(1);
         state.auto_unloaded = true;
         debug!(backend = %backend, "model unload state updated (auto)");
     }
 
-    async fn try_reload_if_needed(&self, backend_id: &str) -> Result<(), String> {
-        let backend = canonical_backend_id(backend_id).to_owned();
+    async fn try_reload_if_needed(&self, backend_id: RuntimeBackendId) -> Result<(), String> {
+        let backend = backend_id;
         let spec = {
             let mut states = self.states.lock().await;
-            let state = states.entry(backend.clone()).or_default();
+            let state = states.entry(backend).or_default();
             if !state.auto_unloaded {
                 return Ok(());
             }
@@ -241,16 +246,16 @@ impl ModelAutoUnloadManager {
             spec
         };
 
-        let Some(channel) = self.grpc.backend_channel(&backend) else {
+        let Some(channel) = self.grpc.backend_channel(backend) else {
             let mut states = self.states.lock().await;
-            let state = states.entry(backend.clone()).or_default();
+            let state = states.entry(backend).or_default();
             state.auto_unloaded = true;
             return Err(format!("backend channel unavailable for auto-reload: {backend}"));
         };
 
         let req = build_model_load_request(&spec);
 
-        match rpc::client::load_model(channel, &backend, req).await {
+        match rpc::client::load_model(channel, backend, req).await {
             Ok(_) => {
                 info!(
                     backend = %backend,
@@ -267,7 +272,7 @@ impl ModelAutoUnloadManager {
             }
             Err(error) => {
                 let mut states = self.states.lock().await;
-                let state = states.entry(backend.clone()).or_default();
+                let state = states.entry(backend).or_default();
                 state.auto_unloaded = true;
                 Err(format!("auto-reload failed for {backend}: {error}"))
             }
@@ -286,15 +291,6 @@ impl ModelAutoUnloadManager {
 
     async fn auto_unload_enabled(&self) -> bool {
         self.pmid.config().runtime.model_auto_unload.enabled
-    }
-}
-
-fn canonical_backend_id(backend_id: &str) -> &str {
-    match backend_id.trim().to_ascii_lowercase().as_str() {
-        "llama" | "ggml.llama" => "ggml.llama",
-        "whisper" | "ggml.whisper" => "ggml.whisper",
-        "diffusion" | "ggml.diffusion" => "ggml.diffusion",
-        _ => backend_id,
     }
 }
 

@@ -109,5 +109,5 @@ async fn reload_lib(
     State(service): State<BackendService>,
     ValidatedJson(req): ValidatedJson<ReloadLibRequest>,
 ) -> Result<Json<BackendStatusResponse>, ServerError> {
-    Ok(Json(service.reload_lib(req.into()).await?.into()))
+    Ok(Json(service.reload_lib(req.try_into()?).await?.into()))
 }

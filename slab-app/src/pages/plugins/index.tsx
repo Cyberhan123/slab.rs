@@ -11,6 +11,7 @@ import { Badge } from "@/components/ui/badge";
 import { usePageHeader } from "@/hooks/use-global-header-meta";
 import { isTauri } from "@/hooks/use-tauri";
 import { PAGE_HEADER_META } from "@/layouts/header-meta";
+import { SERVER_BASE_URL } from "@/lib/config";
 import {
   pluginApiRequest,
   pluginCall,
@@ -391,7 +392,7 @@ export default function Plugins() {
                   Probe /health
                 </Button>
                 <span className="text-xs text-muted-foreground">
-                  Host proxy target is fixed to <code>http://127.0.0.1:3000</code>.
+                  Host proxy target is fixed to <code>{SERVER_BASE_URL}</code>.
                 </span>
               </div>
               <Textarea

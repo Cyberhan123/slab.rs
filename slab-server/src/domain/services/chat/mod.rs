@@ -7,7 +7,8 @@ mod template;
 use chrono::Utc;
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
-use serde_json::Value;
+use serde_json::{Value, json};
+use slab_types::RuntimeBackendId;
 use slab_types::inference::{TextGenerationResponse, TextGenerationUsage};
 use std::sync::{Arc, Mutex};
 use tracing::{debug, info};
@@ -24,7 +25,7 @@ use crate::domain::models::{
 use crate::error::ServerError;
 use crate::infra::db::{ChatMessage, ChatStore};
 
-const LLAMA_BACKEND_ID: &str = "ggml.llama";
+const LLAMA_BACKEND_ID: RuntimeBackendId = RuntimeBackendId::GgmlLlama;
 const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
 const SYSTEM_FINGERPRINT: &str = "b-slab";
 
@@ -427,9 +428,69 @@ fn validate_cloud_structured_output(
     };
 
     if matches!(schema.strict, Some(false)) {
-        return Err(ServerError::NotImplemented(
-            "cloud structured outputs currently require strict=true".into(),
+        return Err(unsupported_chat_parameter(
+            "response_format.json_schema.strict",
+            "cloud structured outputs currently require strict=true",
         ));
+    }
+
+    Ok(())
+}
+
+fn unsupported_chat_parameter(param: &str, message: impl Into<String>) -> ServerError {
+    ServerError::BadRequestData {
+        message: message.into(),
+        data: json!({
+            "error_type": "invalid_request_error",
+            "code": "unsupported_chat_parameter",
+            "param": param,
+        }),
+    }
+}
+
+fn validate_chat_route_params(
+    route_to_cloud: bool,
+    command: &ChatCompletionCommand,
+) -> Result<(), ServerError> {
+    if route_to_cloud {
+        if command.local.grammar.is_some() {
+            return Err(unsupported_chat_parameter(
+                "grammar",
+                "cloud chat completions do not support raw grammar constraints",
+            ));
+        }
+        validate_cloud_structured_output(command.cloud.structured_output.as_ref())?;
+        return Ok(());
+    }
+
+    if command.cloud.reasoning_effort.is_some() {
+        return Err(unsupported_chat_parameter(
+            "reasoning_effort",
+            "local chat completions do not support reasoning controls",
+        ));
+    }
+    if command.cloud.verbosity.is_some() {
+        return Err(unsupported_chat_parameter(
+            "verbosity",
+            "local chat completions do not support verbosity controls",
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_text_route_params(
+    route_to_cloud: bool,
+    command: &TextCompletionCommand,
+) -> Result<(), ServerError> {
+    if route_to_cloud {
+        if command.local.grammar.is_some() {
+            return Err(unsupported_chat_parameter(
+                "grammar",
+                "cloud text completions do not support raw grammar constraints",
+            ));
+        }
+        validate_cloud_structured_output(command.cloud.structured_output.as_ref())?;
     }
 
     Ok(())
@@ -464,10 +525,10 @@ async fn create_chat_completion_with_state(
     state: ModelState,
     command: ChatCompletionCommand,
 ) -> Result<ChatCompletionOutput, ServerError> {
-    if command.stream && command.n > 1 {
+    if command.common.stream && command.common.n > 1 {
         return Err(ServerError::NotImplemented("streaming with n > 1 is not supported".into()));
     }
-    if command.stream && !command.stop.is_empty() {
+    if command.common.stream && !command.common.stop.is_empty() {
         return Err(ServerError::NotImplemented(
             "streaming with stop is not supported for chat completions".into(),
         ));
@@ -483,23 +544,15 @@ async fn create_chat_completion_with_state(
         .map(DomainConversationMessage::rendered_text)
         .unwrap_or_default();
 
-    let max_tokens = command.max_tokens.unwrap_or(512);
-    let temperature = command.temperature.unwrap_or(0.7);
+    let max_tokens = command.common.max_tokens.unwrap_or(512);
+    let temperature = command.common.temperature.unwrap_or(0.7);
     let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
-
-    if route_to_cloud && command.grammar.is_some() {
-        return Err(ServerError::NotImplemented(
-            "cloud raw grammar constraints are not supported for chat completions".into(),
-        ));
-    }
-    if route_to_cloud {
-        validate_cloud_structured_output(command.structured_output.as_ref())?;
-    }
+    validate_chat_route_params(route_to_cloud, &command)?;
 
     debug!(
         model = %resolved_model,
         prompt_len = user_content.len(),
-        stream = command.stream,
+        stream = command.common.stream,
         continue_generation,
         session_id = ?command.id,
         "chat completion request"
@@ -533,7 +586,7 @@ async fn create_chat_completion_with_state(
         }
     }
 
-    if command.stream {
+    if command.common.stream {
         let generated = if route_to_cloud {
             cloud::create_chat_completion(
                 &state,
@@ -542,12 +595,12 @@ async fn create_chat_completion_with_state(
                 cloud::CloudChatRequestConfig {
                     max_tokens,
                     temperature,
-                    top_p: command.top_p,
-                    structured_output: command.structured_output.clone(),
-                    reasoning_effort: command.reasoning_effort,
-                    verbosity: command.verbosity,
+                    top_p: command.common.top_p,
+                    structured_output: command.cloud.structured_output.clone(),
+                    reasoning_effort: command.cloud.reasoning_effort,
+                    verbosity: command.cloud.verbosity,
                     stream: true,
-                    include_usage: command.stream_options.include_usage,
+                    include_usage: command.common.stream_options.include_usage,
                 },
             )
             .await?
@@ -560,11 +613,11 @@ async fn create_chat_completion_with_state(
                     session_id: command.id.clone(),
                     max_tokens,
                     temperature,
-                    top_p: command.top_p,
-                    grammar: command.grammar.clone(),
-                    grammar_json: command.grammar_json,
+                    top_p: command.common.top_p,
+                    grammar: command.local.grammar.clone(),
+                    grammar_json: command.local.structured_output.is_some(),
                     stream: true,
-                    include_usage: command.stream_options.include_usage,
+                    include_usage: command.common.stream_options.include_usage,
                 },
             )
             .await?
@@ -606,7 +659,7 @@ async fn create_chat_completion_with_state(
 
     let mut choices = Vec::new();
     let mut usage = None;
-    for index in 0..command.n {
+    for index in 0..command.common.n {
         let mut generated = if route_to_cloud {
             generate_cloud_chat_text(
                 &state,
@@ -615,10 +668,10 @@ async fn create_chat_completion_with_state(
                 cloud::CloudChatRequestConfig {
                     max_tokens,
                     temperature,
-                    top_p: command.top_p,
-                    structured_output: command.structured_output.clone(),
-                    reasoning_effort: command.reasoning_effort,
-                    verbosity: command.verbosity,
+                    top_p: command.common.top_p,
+                    structured_output: command.cloud.structured_output.clone(),
+                    reasoning_effort: command.cloud.reasoning_effort,
+                    verbosity: command.cloud.verbosity,
                     stream: false,
                     include_usage: false,
                 },
@@ -633,9 +686,9 @@ async fn create_chat_completion_with_state(
                     session_id: command.id.clone(),
                     max_tokens,
                     temperature,
-                    top_p: command.top_p,
-                    grammar: command.grammar.clone(),
-                    grammar_json: command.grammar_json,
+                    top_p: command.common.top_p,
+                    grammar: command.local.grammar.clone(),
+                    grammar_json: command.local.structured_output.is_some(),
                     stream: false,
                     include_usage: false,
                 },
@@ -643,7 +696,8 @@ async fn create_chat_completion_with_state(
             .await?
         };
 
-        let (trimmed_text, stop_matched) = apply_stop_sequences(&generated.text, &command.stop);
+        let (trimmed_text, stop_matched) =
+            apply_stop_sequences(&generated.text, &command.common.stop);
         if stop_matched {
             generated.text = trimmed_text;
             generated.finish_reason = Some("stop".into());
@@ -690,34 +744,26 @@ async fn create_text_completion_with_state(
     state: ModelState,
     command: TextCompletionCommand,
 ) -> Result<TextCompletionOutput, ServerError> {
-    if command.stream && command.n > 1 {
+    if command.common.stream && command.common.n > 1 {
         return Err(ServerError::NotImplemented("streaming with n > 1 is not supported".into()));
     }
 
     let resolved_model = resolve_requested_model(&state, &command.model).await?;
-    let max_tokens = command.max_tokens.unwrap_or(512);
-    let temperature = command.temperature.unwrap_or(0.7);
+    let max_tokens = command.common.max_tokens.unwrap_or(512);
+    let temperature = command.common.temperature.unwrap_or(0.7);
     let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
-
-    if route_to_cloud && command.grammar.is_some() {
-        return Err(ServerError::NotImplemented(
-            "cloud raw grammar constraints are not supported for text completions".into(),
-        ));
-    }
-    if route_to_cloud {
-        validate_cloud_structured_output(command.structured_output.as_ref())?;
-    }
+    validate_text_route_params(route_to_cloud, &command)?;
 
     debug!(
         model = %resolved_model,
         prompt_len = command.prompt.len(),
-        stream = command.stream,
+        stream = command.common.stream,
         "text completion request"
     );
 
     let mut choices = Vec::new();
     let mut usage = None;
-    for index in 0..command.n {
+    for index in 0..command.common.n {
         let mut generated = if route_to_cloud {
             cloud::create_text_completion(
                 &state,
@@ -726,8 +772,8 @@ async fn create_text_completion_with_state(
                 cloud::CloudChatRequestConfig {
                     max_tokens,
                     temperature,
-                    top_p: command.top_p,
-                    structured_output: command.structured_output.clone(),
+                    top_p: command.common.top_p,
+                    structured_output: command.cloud.structured_output.clone(),
                     reasoning_effort: None,
                     verbosity: None,
                     stream: false,
@@ -743,15 +789,16 @@ async fn create_text_completion_with_state(
                 local::LocalTextRequestConfig {
                     max_tokens,
                     temperature,
-                    top_p: command.top_p,
-                    grammar: command.grammar.clone(),
-                    grammar_json: command.grammar_json,
+                    top_p: command.common.top_p,
+                    grammar: command.local.grammar.clone(),
+                    grammar_json: command.local.structured_output.is_some(),
                 },
             )
             .await?
         };
 
-        let (trimmed_text, stop_matched) = apply_stop_sequences(&generated.text, &command.stop);
+        let (trimmed_text, stop_matched) =
+            apply_stop_sequences(&generated.text, &command.common.stop);
         if stop_matched {
             generated.text = trimmed_text;
             generated.finish_reason = Some("stop".into());
@@ -775,7 +822,7 @@ async fn create_text_completion_with_state(
         usage,
     };
 
-    if command.stream {
+    if command.common.stream {
         let first_choice =
             response.choices.first().cloned().ok_or_else(|| {
                 ServerError::Internal("text completion produced no choices".into())
@@ -862,34 +909,42 @@ mod test {
                 tool_calls: Vec::new(),
             }],
             continue_generation: false,
-            stream: false,
-            max_tokens: None,
-            temperature: None,
-            top_p: None,
-            n: 1,
-            stop: Vec::new(),
-            grammar: None,
-            grammar_json: false,
-            structured_output: None,
-            reasoning_effort: None,
-            verbosity: None,
+            common: crate::domain::models::CommonChatParams {
+                max_tokens: None,
+                temperature: None,
+                top_p: None,
+                n: 1,
+                stream: false,
+                stop: Vec::new(),
+                stream_options: Default::default(),
+            },
+            local: crate::domain::models::LocalChatParams {
+                grammar: None,
+                structured_output: None,
+            },
+            cloud: crate::domain::models::CloudChatParams {
+                reasoning_effort: None,
+                verbosity: None,
+                structured_output: None,
+            },
             id: None,
-            stream_options: Default::default(),
         }
     }
 
     #[test]
     fn validate_max_tokens_zero() {
-        let req = ChatCompletionCommand { max_tokens: Some(0), ..make_command("user", "hello") };
-        assert_eq!(req.max_tokens, Some(0));
-        let max_tokens = req.max_tokens.unwrap_or(512);
+        let mut req = make_command("user", "hello");
+        req.common.max_tokens = Some(0);
+        assert_eq!(req.common.max_tokens, Some(0));
+        let max_tokens = req.common.max_tokens.unwrap_or(512);
         assert!(max_tokens == 0 || max_tokens > 4096, "should be out of range");
     }
 
     #[test]
     fn validate_max_tokens_too_large() {
-        let req = ChatCompletionCommand { max_tokens: Some(9999), ..make_command("user", "hello") };
-        let max_tokens = req.max_tokens.unwrap_or(512);
+        let mut req = make_command("user", "hello");
+        req.common.max_tokens = Some(9999);
+        let max_tokens = req.common.max_tokens.unwrap_or(512);
         assert!(max_tokens > 4096, "should be out of range");
     }
 
@@ -940,7 +995,27 @@ mod test {
             },
         )));
 
-        assert!(matches!(result, Err(ServerError::NotImplemented(_))));
+        assert!(matches!(result, Err(ServerError::BadRequestData { .. })));
+    }
+
+    #[test]
+    fn local_route_rejects_reasoning_controls() {
+        let mut command = make_command("user", "hello");
+        command.cloud.reasoning_effort = Some(crate::domain::models::ChatReasoningEffort::Low);
+
+        let result = validate_chat_route_params(false, &command);
+
+        assert!(matches!(result, Err(ServerError::BadRequestData { .. })));
+    }
+
+    #[test]
+    fn cloud_route_rejects_raw_grammar() {
+        let mut command = make_command("user", "hello");
+        command.local.grammar = Some("root ::= \"ok\"".into());
+
+        let result = validate_chat_route_params(true, &command);
+
+        assert!(matches!(result, Err(ServerError::BadRequestData { .. })));
     }
 
     #[test]

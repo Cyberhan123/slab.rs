@@ -8,6 +8,7 @@ use super::registry::{
     LoadedPlugin, PluginRegistryState, is_path_within_root, normalize_relative_path,
 };
 use super::types::{PluginNetworkManifest, PluginNetworkMode};
+use crate::setup::ApiEndpointConfig;
 
 pub fn register_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     builder.register_asynchronous_uri_scheme_protocol(
@@ -108,7 +109,8 @@ pub fn handle_protocol_request<R: Runtime>(
 
     let content_type = mime_guess::from_path(&asset_path).first_or_octet_stream().to_string();
     let csp = if content_type.starts_with("text/html") {
-        Some(build_plugin_csp(&plugin.manifest.network))
+        let api_endpoint = app_handle.state::<ApiEndpointConfig>().inner().clone();
+        Some(build_plugin_csp(&plugin.manifest.network, &api_endpoint))
     } else {
         None
     };
@@ -207,12 +209,8 @@ fn build_text_response(
     )
 }
 
-fn build_plugin_csp(network: &PluginNetworkManifest) -> String {
-    let mut connect_src = vec![
-        "'self'".to_string(),
-        "http://127.0.0.1:3000".to_string(),
-        "http://localhost:3000".to_string(),
-    ];
+fn build_plugin_csp(network: &PluginNetworkManifest, api_endpoint: &ApiEndpointConfig) -> String {
+    let mut connect_src = api_endpoint.connect_src.clone();
 
     if network.mode == PluginNetworkMode::Allowlist {
         for host in &network.allow_hosts {
@@ -245,11 +243,15 @@ mod tests {
 
     #[test]
     fn csp_blocks_external_by_default() {
-        let csp = build_plugin_csp(&PluginNetworkManifest {
-            mode: PluginNetworkMode::Blocked,
-            allow_hosts: Vec::new(),
-        });
+        let csp = build_plugin_csp(
+            &PluginNetworkManifest {
+                mode: PluginNetworkMode::Blocked,
+                allow_hosts: Vec::new(),
+            },
+            &ApiEndpointConfig::desktop(),
+        );
         assert!(csp.contains("default-src 'none'"));
         assert!(!csp.contains("https://example.com"));
+        assert!(csp.contains("http://127.0.0.1:3000"));
     }
 }

@@ -1,10 +1,10 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use slab_proto::convert;
-use slab_types::inference::TextGenerationRequest;
+use slab_types::inference::{TextGenerationRequest, TextGenerationUsage};
 use uuid::Uuid;
 
 use crate::context::ModelState;
@@ -16,6 +16,12 @@ use crate::infra::db::ModelStore;
 use crate::infra::rpc;
 
 use super::GeneratedChatOutput;
+
+#[derive(Debug, Clone, Default)]
+struct LocalStreamTerminalMetadata {
+    finish_reason: Option<String>,
+    usage: Option<TextGenerationUsage>,
+}
 
 #[derive(Debug, Clone)]
 pub(super) struct LocalChatRequestConfig {
@@ -91,6 +97,7 @@ pub(super) async fn create_chat_completion(
 
         let error_flag = Arc::new(AtomicBool::new(false));
         let completion_tokens = Arc::new(AtomicU32::new(0));
+        let terminal_metadata = Arc::new(Mutex::new(LocalStreamTerminalMetadata::default()));
 
         let role_chunk = stream::once(async move {
             ChatStreamChunk::Data(super::build_role_chunk(
@@ -102,20 +109,33 @@ pub(super) async fn create_chat_completion(
 
         let token_stream_error_flag = Arc::clone(&error_flag);
         let token_stream_completion_tokens = Arc::clone(&completion_tokens);
+        let token_stream_terminal_metadata = Arc::clone(&terminal_metadata);
         let token_stream = backend_stream.filter_map(move |chunk| {
             let completion_id = completion_id_for_tokens.clone();
             let model_name = model_name_for_tokens.clone();
             let error_flag = Arc::clone(&token_stream_error_flag);
             let completion_tokens = Arc::clone(&token_stream_completion_tokens);
+            let terminal_metadata = Arc::clone(&token_stream_terminal_metadata);
             async move {
                 match chunk {
                     Ok(message) if !message.error.is_empty() => {
                         error_flag.store(true, Ordering::SeqCst);
                         Some(ChatStreamChunk::Data(super::build_error_chunk(&message.error)))
                     }
-                    Ok(message) if message.done => None,
                     Ok(message) => {
-                        if message.token.is_empty() {
+                        let decoded = convert::decode_chat_stream_chunk(&message);
+                        if decoded.done {
+                            let mut terminal = terminal_metadata
+                                .lock()
+                                .expect("local chat terminal metadata lock poisoned");
+                            if decoded.finish_reason.is_some() {
+                                terminal.finish_reason = decoded.finish_reason;
+                            }
+                            if decoded.usage.is_some() {
+                                terminal.usage = decoded.usage;
+                            }
+                            None
+                        } else if decoded.delta.is_empty() {
                             None
                         } else {
                             completion_tokens.fetch_add(1, Ordering::SeqCst);
@@ -123,7 +143,7 @@ pub(super) async fn create_chat_completion(
                                 &completion_id,
                                 created_ts,
                                 &model_name,
-                                &message.token,
+                                &decoded.delta,
                             )))
                         }
                     }
@@ -137,14 +157,22 @@ pub(super) async fn create_chat_completion(
 
         let finish_chunk_error_flag = Arc::clone(&error_flag);
         let finish_chunk_completion_tokens = Arc::clone(&completion_tokens);
+        let finish_chunk_terminal_metadata = Arc::clone(&terminal_metadata);
         let finish_chunk = stream::once(async move {
             if finish_chunk_error_flag.load(Ordering::SeqCst) {
                 None
             } else {
-                let finish_reason = super::finish_reason_from_token_budget(
-                    finish_chunk_completion_tokens.load(Ordering::SeqCst),
-                    config.max_tokens,
-                );
+                let finish_reason = finish_chunk_terminal_metadata
+                    .lock()
+                    .expect("local chat terminal metadata lock poisoned")
+                    .finish_reason
+                    .clone()
+                    .unwrap_or_else(|| {
+                        super::finish_reason_from_token_budget(
+                            finish_chunk_completion_tokens.load(Ordering::SeqCst),
+                            config.max_tokens,
+                        )
+                    });
                 Some(ChatStreamChunk::Data(super::build_finish_chunk(
                     &completion_id_for_finish,
                     created_ts,
@@ -157,15 +185,23 @@ pub(super) async fn create_chat_completion(
 
         let usage_chunk_error_flag = Arc::clone(&error_flag);
         let usage_chunk_completion_tokens = Arc::clone(&completion_tokens);
+        let usage_chunk_terminal_metadata = Arc::clone(&terminal_metadata);
         let usage_chunk = stream::once(async move {
             if !config.include_usage || usage_chunk_error_flag.load(Ordering::SeqCst) {
                 None
             } else {
-                let usage = super::build_estimated_usage(
-                    &prompt_for_usage,
-                    "",
-                    Some(usage_chunk_completion_tokens.load(Ordering::SeqCst)),
-                );
+                let usage = usage_chunk_terminal_metadata
+                    .lock()
+                    .expect("local chat terminal metadata lock poisoned")
+                    .usage
+                    .clone()
+                    .unwrap_or_else(|| {
+                        super::build_estimated_usage(
+                            &prompt_for_usage,
+                            "",
+                            Some(usage_chunk_completion_tokens.load(Ordering::SeqCst)),
+                        )
+                    });
                 Some(ChatStreamChunk::Data(super::build_usage_chunk(
                     &completion_id_for_usage,
                     created_ts,

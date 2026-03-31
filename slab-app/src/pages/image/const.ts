@@ -1,6 +1,6 @@
-export const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ??
-  'http://localhost:3000';
+import { SERVER_BASE_URL } from '@/lib/config';
+
+export const API_BASE_URL = SERVER_BASE_URL;
 
 export const SAMPLE_METHODS = [
   { value: 'auto', label: 'Auto' },

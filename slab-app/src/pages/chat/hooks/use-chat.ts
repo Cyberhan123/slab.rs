@@ -18,6 +18,7 @@ export const useChat = (
   conversationKey: string,
   model: string,
   deepThink: boolean,
+  supportsReasoningControls: boolean,
   beforeRequest?: () => Promise<void> | void
 ) => {
   const [activeConversation, setActiveConversation] = useState<string>()
@@ -63,21 +64,33 @@ export const useChat = (
       }
 
       return {
-        content: getChatRequestErrorMessage(errorInfo) || error.message || locale.requestFailed,
+        content:
+          getChatRequestErrorMessage(error) ||
+          getChatRequestErrorMessage(errorInfo) ||
+          error.message ||
+          locale.requestFailed,
+        ...getChatRequestErrorMeta(error),
         ...getChatRequestErrorMeta(errorInfo),
         role: 'assistant',
       }
     },
   })
 
+  const buildThinkingParams = (): Partial<Pick<ChatRequestParams, 'thinking'>> =>
+    supportsReasoningControls
+      ? {
+          thinking: {
+            type: deepThink ? 'enabled' : 'disabled',
+          },
+        }
+      : {}
+
   const withRequestDefaults = (
     requestParams?: Partial<ChatRequestParams>
   ): Partial<ChatRequestParams> => ({
     ...(requestParams ?? {}),
     model,
-    thinking: {
-      type: deepThink ? 'enabled' : 'disabled',
-    },
+    ...buildThinkingParams(),
   })
 
   const runWithPreparedModel = (callback: () => void) => {
@@ -97,9 +110,7 @@ export const useChat = (
       onRequest({
         model,
         messages: [{ role: 'user', content: val }],
-        thinking: {
-          type: deepThink ? 'enabled' : 'disabled',
-        },
+        ...buildThinkingParams(),
       })
       setActiveConversation(resolvedConversationKey)
     } catch (_e) {

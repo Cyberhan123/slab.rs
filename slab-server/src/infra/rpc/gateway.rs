@@ -3,6 +3,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use hyper_util::rt::TokioIo;
+use slab_types::RuntimeBackendId;
 use tonic::transport::{Channel, Endpoint};
 use tower::service_fn;
 
@@ -10,10 +11,6 @@ use crate::config::Config;
 
 const CONNECT_ATTEMPTS: usize = 30;
 const CONNECT_RETRY_DELAY: Duration = Duration::from_millis(100);
-
-const BACKEND_LLAMA: &str = "ggml.llama";
-const BACKEND_WHISPER: &str = "ggml.whisper";
-const BACKEND_DIFFUSION: &str = "ggml.diffusion";
 
 #[derive(Debug, Clone)]
 enum GrpcEndpoint {
@@ -23,18 +20,31 @@ enum GrpcEndpoint {
 
 #[derive(Clone, Default)]
 pub struct GrpcGateway {
-    backend_channels: HashMap<String, Channel>,
+    backend_channels: HashMap<RuntimeBackendId, Channel>,
 }
 
 impl std::fmt::Debug for GrpcGateway {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let mut backends: Vec<&str> = self.backend_channels.keys().map(String::as_str).collect();
+        let mut backends: Vec<&str> =
+            self.backend_channels.keys().map(|backend| backend.canonical_id()).collect();
         backends.sort_unstable();
         f.debug_struct("GrpcGateway")
-            .field("chat", &self.backend_channels.contains_key(BACKEND_LLAMA))
-            .field("chat_stream", &self.backend_channels.contains_key(BACKEND_LLAMA))
-            .field("transcribe", &self.backend_channels.contains_key(BACKEND_WHISPER))
-            .field("generate_image", &self.backend_channels.contains_key(BACKEND_DIFFUSION))
+            .field(
+                "chat",
+                &self.backend_channels.contains_key(&RuntimeBackendId::GgmlLlama),
+            )
+            .field(
+                "chat_stream",
+                &self.backend_channels.contains_key(&RuntimeBackendId::GgmlLlama),
+            )
+            .field(
+                "transcribe",
+                &self.backend_channels.contains_key(&RuntimeBackendId::GgmlWhisper),
+            )
+            .field(
+                "generate_image",
+                &self.backend_channels.contains_key(&RuntimeBackendId::GgmlDiffusion),
+            )
             .field("backends", &backends)
             .finish()
     }
@@ -45,12 +55,12 @@ impl GrpcGateway {
         let mut gateway = Self::default();
 
         for (backend_id, endpoint) in [
-            (BACKEND_LLAMA, config.llama_grpc_endpoint.as_deref()),
-            (BACKEND_WHISPER, config.whisper_grpc_endpoint.as_deref()),
-            (BACKEND_DIFFUSION, config.diffusion_grpc_endpoint.as_deref()),
+            (RuntimeBackendId::GgmlLlama, config.llama_grpc_endpoint.as_deref()),
+            (RuntimeBackendId::GgmlWhisper, config.whisper_grpc_endpoint.as_deref()),
+            (RuntimeBackendId::GgmlDiffusion, config.diffusion_grpc_endpoint.as_deref()),
         ] {
             if let Some(channel) = connect_optional(endpoint).await? {
-                gateway.backend_channels.insert(backend_id.to_string(), channel);
+                gateway.backend_channels.insert(backend_id, channel);
             }
         }
 
@@ -58,24 +68,23 @@ impl GrpcGateway {
     }
 
     pub fn chat_channel(&self) -> Option<Channel> {
-        self.backend_channel(BACKEND_LLAMA)
+        self.backend_channel(RuntimeBackendId::GgmlLlama)
     }
 
     pub fn transcribe_channel(&self) -> Option<Channel> {
-        self.backend_channel(BACKEND_WHISPER)
+        self.backend_channel(RuntimeBackendId::GgmlWhisper)
     }
 
     pub fn generate_image_channel(&self) -> Option<Channel> {
-        self.backend_channel(BACKEND_DIFFUSION)
+        self.backend_channel(RuntimeBackendId::GgmlDiffusion)
     }
 
-    pub fn backend_channel(&self, backend_id: &str) -> Option<Channel> {
-        let key = canonical_backend_id(backend_id)?;
-        self.backend_channels.get(key).cloned()
+    pub fn backend_channel(&self, backend_id: RuntimeBackendId) -> Option<Channel> {
+        self.backend_channels.get(&backend_id).cloned()
     }
 
-    pub fn has_backend(&self, backend_id: &str) -> bool {
-        canonical_backend_id(backend_id).is_some_and(|key| self.backend_channels.contains_key(key))
+    pub fn has_backend(&self, backend_id: RuntimeBackendId) -> bool {
+        self.backend_channels.contains_key(&backend_id)
     }
 }
 
@@ -108,15 +117,6 @@ async fn connect_channel(endpoint: &str) -> anyhow::Result<Channel> {
     let err =
         last_error.map(|e| e.to_string()).unwrap_or_else(|| "unknown connection error".to_string());
     anyhow::bail!("failed to connect to gRPC endpoint {}: {err}", endpoint.as_display());
-}
-
-fn canonical_backend_id(backend_id: &str) -> Option<&'static str> {
-    match backend_id.trim().to_ascii_lowercase().as_str() {
-        "ggml.llama" | "llama" => Some(BACKEND_LLAMA),
-        "ggml.whisper" | "whisper" => Some(BACKEND_WHISPER),
-        "ggml.diffusion" | "diffusion" => Some(BACKEND_DIFFUSION),
-        _ => None,
-    }
 }
 
 impl GrpcEndpoint {

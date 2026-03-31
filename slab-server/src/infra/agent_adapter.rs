@@ -18,7 +18,10 @@ use tracing::warn;
 use uuid::Uuid;
 
 use crate::context::ModelState;
-use crate::domain::models::{ChatCompletionCommand, ChatCompletionOutput, ChatStreamOptions};
+use crate::domain::models::{
+    ChatCompletionCommand, ChatCompletionOutput, ChatStreamOptions, CloudChatParams,
+    CommonChatParams, LocalChatParams,
+};
 
 // ── ServerLlmAdapter ─────────────────────────────────────────────────────────
 
@@ -53,18 +56,24 @@ impl LlmPort for ServerLlmAdapter {
             model: model.to_owned(),
             messages: messages.to_vec(),
             continue_generation: false,
-            max_tokens: Some(config.max_tokens),
-            temperature: Some(config.temperature),
-            top_p: None,
-            n: 1,
-            stop: vec![],
-            grammar: None,
-            grammar_json: false,
-            structured_output: None,
-            reasoning_effort: None,
-            verbosity: None,
-            stream: false,
-            stream_options: ChatStreamOptions::default(),
+            common: CommonChatParams {
+                max_tokens: Some(config.max_tokens),
+                temperature: Some(config.temperature),
+                top_p: None,
+                n: 1,
+                stream: false,
+                stop: vec![],
+                stream_options: ChatStreamOptions::default(),
+            },
+            local: LocalChatParams {
+                grammar: None,
+                structured_output: None,
+            },
+            cloud: CloudChatParams {
+                reasoning_effort: None,
+                verbosity: None,
+                structured_output: None,
+            },
         };
 
         let svc = crate::domain::services::ChatService::new((*self.state).clone());

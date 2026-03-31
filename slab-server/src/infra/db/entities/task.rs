@@ -1,11 +1,13 @@
 use chrono::{DateTime, Utc};
 
+use crate::domain::models::TaskStatus;
+
 /// A row in the `tasks` table.
 #[derive(Debug, Clone)]
 pub struct TaskRecord {
     pub id: String,
     pub task_type: String,
-    pub status: String,
+    pub status: TaskStatus,
     /// Optional related model_catalog.id for model download tasks.
     pub model_id: Option<String>,
     pub input_data: Option<String>,

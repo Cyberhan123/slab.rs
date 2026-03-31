@@ -14,11 +14,10 @@
     "security": {
       "csp": {
         "default-src": "'self' asset:",
-        "script-src": "'self' asset: http://localhost:3000 blob: 'unsafe-eval'",
+        "script-src": "'self' asset: http://127.0.0.1:3000 blob: 'unsafe-eval'",
         "connect-src": [
           "'self'",
-          "http://127.0.0.1:3000",
-          "http://localhost:3000"
+          "http://127.0.0.1:3000"
         ],
         "font-src": "'self' asset:",
         "img-src": "'self' asset: http://asset.localhost blob: data:",

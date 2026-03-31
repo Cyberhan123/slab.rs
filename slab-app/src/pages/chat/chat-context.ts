@@ -41,6 +41,31 @@ type ProviderTransformMessageInfo = Parameters<
 
 export type ChatRequestErrorType = ChatApiError['type'];
 
+export class ChatTransportError extends Error {
+    readonly transport_status: number;
+    readonly code?: ChatApiError['code'];
+    readonly param?: ChatApiError['param'];
+    readonly request_id?: string | null;
+    readonly error_type?: ChatRequestErrorType;
+
+    constructor(options: {
+        message: string;
+        transport_status: number;
+        code?: ChatApiError['code'];
+        param?: ChatApiError['param'];
+        request_id?: string | null;
+        error_type?: ChatRequestErrorType;
+    }) {
+        super(options.message);
+        this.name = 'ChatTransportError';
+        this.transport_status = options.transport_status;
+        this.code = options.code;
+        this.param = options.param;
+        this.request_id = options.request_id;
+        this.error_type = options.error_type;
+    }
+}
+
 export type ChatUiMessage = XModelMessage & {
     errorCode?: ChatApiError['code'];
     errorParam?: ChatApiError['param'];
@@ -104,12 +129,29 @@ export const isChatRequestErrorInfo = (value: unknown): value is ChatRequestErro
         && (!('param' in value.error) || value.error.param === null || typeof value.error.param === 'string');
 };
 
-export const getChatRequestErrorMessage = (value: unknown): string | undefined =>
-    isChatRequestErrorInfo(value) ? value.error.message : undefined;
+export const isChatTransportError = (value: unknown): value is ChatTransportError =>
+    value instanceof ChatTransportError;
+
+export const getChatRequestErrorMessage = (value: unknown): string | undefined => {
+    if (isChatTransportError(value)) {
+        return value.message;
+    }
+
+    return isChatRequestErrorInfo(value) ? value.error.message : undefined;
+};
 
 export const getChatRequestErrorMeta = (
     value: unknown,
 ): Pick<ChatUiMessage, 'errorCode' | 'errorParam' | 'errorStatus' | 'errorType'> => {
+    if (isChatTransportError(value)) {
+        return {
+            errorCode: value.code ?? undefined,
+            errorParam: value.param ?? undefined,
+            errorStatus: value.transport_status,
+            errorType: value.error_type,
+        };
+    }
+
     if (!isChatRequestErrorInfo(value)) {
         return {};
     }
@@ -203,41 +245,44 @@ const mergeContinuationContent = (prefix: string, generated: string): string => 
     return `${prefix}${generated}`;
 };
 
-const toChatRequestErrorInfo = (
-    response: Response,
-    payload: ChatApiErrorResponse,
-): ChatRequestErrorInfo => ({
-    error: payload.error,
-    message: payload.error.message,
-    name: payload.error.type,
-    status: response.status,
-    statusText: response.statusText,
-    success: false,
-});
+const getResponseRequestId = (response: Response): string | null => {
+    const requestId = response.headers.get('x-request-id') ?? response.headers.get('x-requestid');
+    const trimmed = requestId?.trim();
+    return trimmed ? trimmed : null;
+};
 
-const normalizeChatErrorResponse = async (response: Response): Promise<Response> => {
+const buildChatTransportError = async (response: Response): Promise<ChatTransportError> => {
+    const contentType = response.headers.get('content-type') ?? '';
+    const request_id = getResponseRequestId(response);
+
+    if (contentType.includes('application/json')) {
+        const payload = await response.clone().json().catch(() => null);
+        if (isChatApiErrorResponse(payload)) {
+            return new ChatTransportError({
+                message: payload.error.message,
+                transport_status: response.status,
+                code: payload.error.code ?? undefined,
+                param: payload.error.param ?? undefined,
+                request_id,
+                error_type: payload.error.type,
+            });
+        }
+    }
+
+    const rawBody = await response.clone().text().catch(() => '');
+    return new ChatTransportError({
+        message: rawBody.trim() || response.statusText || `HTTP ${response.status}`,
+        transport_status: response.status,
+        request_id,
+    });
+};
+
+const adaptChatTransportResponse = async (response: Response): Promise<Response> => {
     if (response.ok) {
         return response;
     }
 
-    const contentType = response.headers.get('content-type') ?? '';
-    if (!contentType.includes('application/json')) {
-        return response;
-    }
-
-    const payload = await response.clone().json().catch(() => null);
-    if (!isChatApiErrorResponse(payload)) {
-        return response;
-    }
-
-    const headers = new Headers(response.headers);
-    headers.set('content-type', 'application/json');
-
-    return new Response(JSON.stringify(toChatRequestErrorInfo(response, payload)), {
-        headers,
-        status: 200,
-        statusText: 'OK',
-    });
+    throw await buildChatTransportError(response);
 };
 
 const isSessionMessageResponse = (value: unknown): value is SessionMessageResponse => {
@@ -496,7 +541,7 @@ export const providerFactory = (conversationKey: string, model: string) => {
                     {
                         manual: true,
                         middlewares: {
-                            onResponse: normalizeChatErrorResponse,
+                            onResponse: adaptChatTransportResponse,
                         },
                         params: {
                             stream: true,

@@ -1,7 +1,7 @@
 use tracing::info;
 
 use crate::context::WorkerState;
-use crate::domain::models::{TaskResult, TaskView};
+use crate::domain::models::{TaskResult, TaskStatus, TaskView};
 use crate::error::ServerError;
 use crate::infra::db::TaskStore;
 
@@ -39,8 +39,8 @@ impl TaskApplicationService {
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("task {id} not found")))?;
 
-        match record.status.as_str() {
-            "succeeded" => Ok(record
+        match record.status {
+            TaskStatus::Succeeded => Ok(record
                 .result_data
                 .map(|data| {
                     deserialize_task_result(&data).unwrap_or(TaskResult {
@@ -51,9 +51,9 @@ impl TaskApplicationService {
                     })
                 })
                 .unwrap_or(TaskResult { image: None, images: None, video_path: None, text: None })),
-            status => {
-                Err(ServerError::BadRequest(format!("task is not succeeded (status: {status})")))
-            }
+            status => Err(ServerError::BadRequest(format!(
+                "task is not succeeded (status: {status})"
+            ))),
         }
     }
 
@@ -65,14 +65,14 @@ impl TaskApplicationService {
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("task {id} not found")))?;
 
-        if !is_cancellable(&record.status) {
+        if !record.status.is_cancellable() {
             return Err(ServerError::BadRequest(format!(
                 "task {id} is not cancellable (status: {})",
                 record.status
             )));
         }
 
-        self.state.store().update_task_status(id, "cancelled", None, None).await?;
+        self.state.store().update_task_status(id, TaskStatus::Cancelled, None, None).await?;
         self.state.cancel_operation(id);
 
         info!(task_id = %id, "task cancelled");
@@ -91,7 +91,7 @@ impl TaskApplicationService {
             .await?
             .ok_or_else(|| ServerError::NotFound(format!("task {id} not found")))?;
 
-        if !is_restartable(&record.status) {
+        if !record.status.is_restartable() {
             return Err(ServerError::BadRequest(format!(
                 "task {id} cannot be restarted (status: {})",
                 record.status
@@ -100,14 +100,6 @@ impl TaskApplicationService {
 
         Ok(())
     }
-}
-
-fn is_cancellable(status: &str) -> bool {
-    matches!(status, "pending" | "running")
-}
-
-fn is_restartable(status: &str) -> bool {
-    matches!(status, "failed" | "cancelled" | "interrupted")
 }
 
 fn deserialize_task_result(raw: &str) -> Result<TaskResult, serde_json::Error> {
