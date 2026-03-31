@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use slab_proto::convert;
+use slab_types::RuntimeBackendId;
 use slab_types::diffusion::DiffusionVideoRequest;
 use slab_types::media::RawImageInput;
 use tracing::{debug, info, warn};
@@ -81,7 +82,10 @@ impl VideoService {
                     let operation_id = operation.id().to_owned();
 
                     let _usage_guard =
-                        match model_auto_unload.acquire_for_inference("ggml.diffusion").await {
+                        match model_auto_unload
+                            .acquire_for_inference(RuntimeBackendId::GgmlDiffusion)
+                            .await
+                        {
                             Ok(guard) => guard,
                             Err(error) => {
                                 let message = format!("diffusion backend not ready: {error}");

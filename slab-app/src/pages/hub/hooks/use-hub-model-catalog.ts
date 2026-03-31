@@ -3,9 +3,8 @@ import { toast } from 'sonner';
 
 import api, { getErrorMessage } from '@/lib/api';
 import { inferWhisperVadModel, toCatalogModelList, type CatalogModelStatus } from '@/lib/api/models';
+import { SERVER_BASE_URL } from '@/lib/config';
 
-const API_BASE_URL =
-  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:3000';
 const DEFAULT_VISIBLE_COUNT = 10;
 export const CATEGORY_OPTIONS = [
   { value: 'all', label: 'All models' },
@@ -285,7 +284,7 @@ async function readJsonFile(file: File): Promise<unknown> {
 }
 
 async function importModelConfig(payload: unknown): Promise<ImportedModelResponse | null> {
-  const response = await fetch(new URL('/v1/models/import', API_BASE_URL), {
+  const response = await fetch(new URL('/v1/models/import', `${SERVER_BASE_URL}/`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',

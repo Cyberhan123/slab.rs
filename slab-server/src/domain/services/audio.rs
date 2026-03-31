@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use slab_types::RuntimeBackendId;
 use tracing::{debug, warn};
 
 use crate::context::{SubmitOperation, WorkerState};
@@ -50,7 +51,10 @@ impl AudioService {
                 move |operation| async move {
                     let operation_id = operation.id().to_owned();
                     let _usage_guard =
-                        match model_auto_unload.acquire_for_inference("ggml.whisper").await {
+                        match model_auto_unload
+                            .acquire_for_inference(RuntimeBackendId::GgmlWhisper)
+                            .await
+                        {
                             Ok(guard) => guard,
                             Err(error) => {
                                 let msg = format!("whisper backend not ready: {error}");

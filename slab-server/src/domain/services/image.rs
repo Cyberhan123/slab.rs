@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use slab_proto::convert;
+use slab_types::RuntimeBackendId;
 use slab_types::diffusion::DiffusionImageRequest;
 use slab_types::media::RawImageInput;
 use tracing::{debug, warn};
@@ -101,7 +102,10 @@ impl ImageService {
                 move |operation| async move {
                     let operation_id = operation.id().to_owned();
                     let _usage_guard =
-                        match model_auto_unload.acquire_for_inference("ggml.diffusion").await {
+                        match model_auto_unload
+                            .acquire_for_inference(RuntimeBackendId::GgmlDiffusion)
+                            .await
+                        {
                             Ok(guard) => guard,
                             Err(error) => {
                                 let message = format!("diffusion backend not ready: {error}");

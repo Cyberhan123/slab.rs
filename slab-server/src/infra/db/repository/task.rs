@@ -1,8 +1,11 @@
 use super::AnyStore;
+use crate::domain::models::{TaskPayloadEnvelope, TaskStatus};
 use crate::infra::db::entities::TaskRecord;
 
 use chrono::Utc;
+use serde_json::Value;
 use std::future::Future;
+use std::str::FromStr;
 
 type TaskRow = (
     String,
@@ -17,6 +20,9 @@ type TaskRow = (
     String,
 );
 
+const TASK_PAYLOAD_KIND: &str = "task_result";
+const TASK_PAYLOAD_VERSION: u32 = 1;
+
 pub trait TaskStore: Send + Sync + 'static {
     fn insert_task(
         &self,
@@ -25,7 +31,7 @@ pub trait TaskStore: Send + Sync + 'static {
     fn update_task_status(
         &self,
         id: &str,
-        status: &str,
+        status: TaskStatus,
         result_data: Option<&str>,
         error_msg: Option<&str>,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
@@ -50,10 +56,10 @@ impl TaskStore for AnyStore {
         )
         .bind(&record.id)
         .bind(&record.task_type)
-        .bind(&record.status)
+        .bind(record.status.as_str())
         .bind(&record.model_id)
         .bind(&record.input_data)
-        .bind(&record.result_data)
+        .bind(encode_task_payload(record.result_data.as_deref()))
         .bind(&record.error_msg)
         .bind(record.core_task_id)
         .bind(&created_at)
@@ -66,7 +72,7 @@ impl TaskStore for AnyStore {
     async fn update_task_status(
         &self,
         id: &str,
-        status: &str,
+        status: TaskStatus,
         result_data: Option<&str>,
         error_msg: Option<&str>,
     ) -> Result<(), sqlx::Error> {
@@ -74,8 +80,8 @@ impl TaskStore for AnyStore {
         sqlx::query(
             "UPDATE tasks SET status = ?1, result_data = ?2, error_msg = ?3, updated_at = ?4 WHERE id = ?5",
         )
-        .bind(status)
-        .bind(result_data)
+        .bind(status.as_str())
+        .bind(encode_task_payload(result_data))
         .bind(error_msg)
         .bind(&updated_at)
         .bind(id)
@@ -97,10 +103,10 @@ impl TaskStore for AnyStore {
             TaskRecord {
                 id,
                 task_type,
-                status,
+                status: decode_task_status(&status),
                 model_id,
                 input_data,
-                result_data,
+                result_data: decode_task_payload(result_data),
                 error_msg,
                 core_task_id,
                 created_at: created_at.parse().unwrap_or_else(|e: chrono::ParseError| {
@@ -138,10 +144,10 @@ impl TaskStore for AnyStore {
                 TaskRecord {
                     id,
                     task_type,
-                    status,
+                    status: decode_task_status(&status),
                     model_id,
                     input_data,
-                    result_data,
+                    result_data: decode_task_payload(result_data),
                     error_msg,
                     core_task_id,
                     created_at: created_at.parse().unwrap_or_else(|e: chrono::ParseError| {
@@ -167,5 +173,71 @@ impl TaskStore for AnyStore {
         .execute(&self.pool)
         .await?;
         Ok(result.rows_affected())
+    }
+}
+
+fn encode_task_payload(raw: Option<&str>) -> Option<String> {
+    let raw = raw?;
+    let data = serde_json::from_str::<Value>(raw).unwrap_or_else(|_| Value::String(raw.to_owned()));
+
+    serde_json::to_string(&TaskPayloadEnvelope {
+        kind: TASK_PAYLOAD_KIND.to_owned(),
+        version: TASK_PAYLOAD_VERSION,
+        data,
+    })
+    .ok()
+    .or_else(|| Some(raw.to_owned()))
+}
+
+fn decode_task_payload(raw: Option<String>) -> Option<String> {
+    let raw = raw?;
+    let Ok(envelope) = serde_json::from_str::<TaskPayloadEnvelope>(&raw) else {
+        return Some(raw);
+    };
+
+    if envelope.version != TASK_PAYLOAD_VERSION || envelope.kind.trim().is_empty() {
+        return Some(raw);
+    }
+
+    match envelope.data {
+        Value::String(value) => Some(value),
+        value => serde_json::to_string(&value).ok().or(Some(raw)),
+    }
+}
+
+fn decode_task_status(raw: &str) -> TaskStatus {
+    TaskStatus::from_str(raw).unwrap_or_else(|_| {
+        tracing::warn!(status = %raw, "unknown task status stored in repository; defaulting to failed");
+        TaskStatus::Failed
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{decode_task_payload, encode_task_payload};
+
+    #[test]
+    fn envelope_round_trips_json_payload() {
+        let raw = r#"{"image":"data:image/png;base64,abc"}"#;
+        let encoded = encode_task_payload(Some(raw)).expect("encoded payload");
+
+        let decoded = decode_task_payload(Some(encoded)).expect("decoded payload");
+        assert_eq!(decoded, raw);
+    }
+
+    #[test]
+    fn envelope_round_trips_plain_text_payload() {
+        let raw = "plain text payload";
+        let encoded = encode_task_payload(Some(raw)).expect("encoded payload");
+
+        let decoded = decode_task_payload(Some(encoded)).expect("decoded payload");
+        assert_eq!(decoded, raw);
+    }
+
+    #[test]
+    fn decode_task_payload_preserves_legacy_json() {
+        let raw = String::from(r#"{"text":"legacy"}"#);
+        let decoded = decode_task_payload(Some(raw.clone())).expect("decoded payload");
+        assert_eq!(decoded, raw);
     }
 }

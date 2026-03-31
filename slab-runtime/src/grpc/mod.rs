@@ -110,7 +110,11 @@ impl GrpcServiceImpl {
         Ok(model_status_response(backend, "unloaded"))
     }
 
-    #[instrument(skip_all, fields(backend = backend.canonical_id(), lib_path = %request.lib_path, model_path = %request.model_path))]
+    #[instrument(skip_all, fields(
+        backend = backend.canonical_id(),
+        lib_path = %request.lib_path,
+        model_path = %reload_request_model_path(&request)
+    ))]
     pub(super) async fn reload_library_for_backend(
         &self,
         backend: BackendKind,
@@ -151,6 +155,11 @@ impl GrpcServiceImpl {
 
         Ok(model_status_response(backend, "loaded"))
     }
+}
+
+#[allow(deprecated)]
+fn reload_request_model_path(request: &pb::ReloadLibraryRequest) -> &str {
+    request.load.as_ref().map(|load| load.model_path.as_str()).unwrap_or(request.model_path.as_str())
 }
 
 impl RuntimeState {

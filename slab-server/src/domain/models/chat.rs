@@ -1,5 +1,6 @@
 pub use slab_types::chat::{
-    ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationContentPart,
+    ChatModelCapabilities, ChatModelSource, ChatReasoningEffort, ChatVerbosity,
+    ConversationContentPart,
     ConversationMessage, ConversationMessageContent, ConversationToolCall,
     ConversationToolFunction,
 };
@@ -9,7 +10,8 @@ use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-const SESSION_MESSAGE_STORAGE_VERSION: u8 = 1;
+const SESSION_MESSAGE_STORAGE_VERSION: u8 = 2;
+const SESSION_MESSAGE_STORAGE_KIND: &str = "conversation_message";
 const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
 
 pub enum ChatStreamChunk {
@@ -33,9 +35,34 @@ pub struct ChatModelOption {
     pub source: ChatModelSource,
     pub downloaded: bool,
     pub pending: bool,
+    pub capabilities: ChatModelCapabilities,
     pub backend_id: Option<String>,
     pub provider_id: Option<String>,
     pub provider_name: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct CommonChatParams {
+    pub max_tokens: Option<u32>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub n: u32,
+    pub stream: bool,
+    pub stop: Vec<String>,
+    pub stream_options: ChatStreamOptions,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LocalChatParams {
+    pub grammar: Option<String>,
+    pub structured_output: Option<StructuredOutput>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct CloudChatParams {
+    pub reasoning_effort: Option<ChatReasoningEffort>,
+    pub verbosity: Option<ChatVerbosity>,
+    pub structured_output: Option<StructuredOutput>,
 }
 
 #[derive(Debug, Clone)]
@@ -44,33 +71,18 @@ pub struct ChatCompletionCommand {
     pub model: String,
     pub messages: Vec<ConversationMessage>,
     pub continue_generation: bool,
-    pub max_tokens: Option<u32>,
-    pub temperature: Option<f32>,
-    pub top_p: Option<f32>,
-    pub n: u32,
-    pub stop: Vec<String>,
-    pub grammar: Option<String>,
-    pub grammar_json: bool,
-    pub structured_output: Option<StructuredOutput>,
-    pub reasoning_effort: Option<ChatReasoningEffort>,
-    pub verbosity: Option<ChatVerbosity>,
-    pub stream: bool,
-    pub stream_options: ChatStreamOptions,
+    pub common: CommonChatParams,
+    pub local: LocalChatParams,
+    pub cloud: CloudChatParams,
 }
 
 #[derive(Debug, Clone)]
 pub struct TextCompletionCommand {
     pub model: String,
     pub prompt: String,
-    pub max_tokens: Option<u32>,
-    pub temperature: Option<f32>,
-    pub top_p: Option<f32>,
-    pub n: u32,
-    pub stop: Vec<String>,
-    pub grammar: Option<String>,
-    pub grammar_json: bool,
-    pub structured_output: Option<StructuredOutput>,
-    pub stream: bool,
+    pub common: CommonChatParams,
+    pub local: LocalChatParams,
+    pub cloud: CloudChatParams,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -151,21 +163,22 @@ pub struct TextCompletionResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct StoredSessionMessage {
+struct StoredSessionMessageV1 {
     version: u8,
     message: ConversationMessage,
 }
 
-pub fn serialize_session_message(message: &ConversationMessage) -> String {
-    if can_store_as_plain_text(message) {
-        return match &message.content {
-            ConversationMessageContent::Text(text) => text.clone(),
-            ConversationMessageContent::Parts(_) => String::new(),
-        };
-    }
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StoredSessionMessageV2 {
+    version: u8,
+    kind: String,
+    message: ConversationMessage,
+}
 
-    serde_json::to_string(&StoredSessionMessage {
+pub fn serialize_session_message(message: &ConversationMessage) -> String {
+    serde_json::to_string(&StoredSessionMessageV2 {
         version: SESSION_MESSAGE_STORAGE_VERSION,
+        kind: SESSION_MESSAGE_STORAGE_KIND.to_owned(),
         message: message.clone(),
     })
     .unwrap_or_else(|_| message.rendered_text())
@@ -174,8 +187,16 @@ pub fn serialize_session_message(message: &ConversationMessage) -> String {
 pub fn deserialize_session_message(role: &str, content: &str) -> ConversationMessage {
     let trimmed = content.trim();
 
-    if let Ok(stored) = serde_json::from_str::<StoredSessionMessage>(trimmed)
-        && stored.version == SESSION_MESSAGE_STORAGE_VERSION
+    if let Ok(stored) = serde_json::from_str::<StoredSessionMessageV2>(trimmed) {
+        if stored.version == SESSION_MESSAGE_STORAGE_VERSION
+            && stored.kind == SESSION_MESSAGE_STORAGE_KIND
+        {
+            return stored.message;
+        }
+    }
+
+    if let Ok(stored) = serde_json::from_str::<StoredSessionMessageV1>(trimmed)
+        && stored.version == 1
     {
         return stored.message;
     }
@@ -233,13 +254,6 @@ pub fn assistant_message_from_parts(content: &str, reasoning: Option<&str>) -> C
         tool_call_id: None,
         tool_calls: Vec::new(),
     }
-}
-
-fn can_store_as_plain_text(message: &ConversationMessage) -> bool {
-    matches!(message.content, ConversationMessageContent::Text(_))
-        && message.name.is_none()
-        && message.tool_call_id.is_none()
-        && message.tool_calls.is_empty()
 }
 
 fn format_assistant_content(reasoning: Option<&str>, content: &str) -> String {
@@ -325,6 +339,24 @@ mod test {
 
         assert!(serde_json::from_str::<serde_json::Value>(&stored).is_ok());
         assert_eq!(restored, message);
+    }
+
+    #[test]
+    fn plain_text_messages_now_persist_as_v2_json_envelope() {
+        let message = ConversationMessage {
+            role: "assistant".into(),
+            content: ConversationMessageContent::Text("hello".into()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        };
+
+        let stored = super::serialize_session_message(&message);
+        let payload: serde_json::Value = serde_json::from_str(&stored).expect("json envelope");
+
+        assert_eq!(payload["version"], 2);
+        assert_eq!(payload["kind"], "conversation_message");
+        assert_eq!(super::deserialize_session_message("assistant", &stored), message);
     }
 
     #[test]

@@ -15,8 +15,8 @@ use super::types::{
     PluginApiRequest, PluginApiResponse, PluginCallRequest, PluginCallResponse, PluginEmitRequest,
     PluginEventPayload, PluginNetworkMode,
 };
+use crate::setup::ApiEndpointConfig;
 
-const DEFAULT_API_BASE_URL: &str = "http://127.0.0.1:3000";
 const DEFAULT_HTTP_TIMEOUT_MS: u64 = 15_000;
 const MAX_HTTP_TIMEOUT_MS: u64 = 60_000;
 const MAX_API_RESPONSE_BYTES: usize = 1024 * 1024;
@@ -28,16 +28,21 @@ struct RuntimeInstance {
 pub struct PluginRuntimeManager {
     instances: Mutex<HashMap<String, RuntimeInstance>>,
     blocking_http_client: BlockingHttpClient,
+    api_endpoint: ApiEndpointConfig,
 }
 
 impl PluginRuntimeManager {
-    pub fn new() -> Result<Self, String> {
+    pub fn new(api_endpoint: ApiEndpointConfig) -> Result<Self, String> {
         let blocking_http_client = BlockingHttpClient::builder()
             .timeout(Duration::from_millis(DEFAULT_HTTP_TIMEOUT_MS))
             .build()
             .map_err(|e| format!("failed to build blocking HTTP client: {e}"))?;
 
-        Ok(Self { instances: Mutex::new(HashMap::new()), blocking_http_client })
+        Ok(Self {
+            instances: Mutex::new(HashMap::new()),
+            blocking_http_client,
+            api_endpoint,
+        })
     }
 
     pub fn call_plugin(
@@ -53,7 +58,12 @@ impl PluginRuntimeManager {
 
         if !guard.contains_key(&plugin.manifest.id) {
             let instance = RuntimeInstance {
-                plugin: build_extism_plugin(app_handle, plugin, self.blocking_http_client.clone())?,
+                plugin: build_extism_plugin(
+                    app_handle,
+                    plugin,
+                    self.blocking_http_client.clone(),
+                    self.api_endpoint.clone(),
+                )?,
             };
             guard.insert(plugin.manifest.id.clone(), instance);
         }
@@ -84,6 +94,7 @@ struct HostFunctionContext {
     plugin_id: String,
     app_handle: AppHandle,
     blocking_http_client: BlockingHttpClient,
+    api_endpoint: ApiEndpointConfig,
 }
 
 extism::host_fn!(slab_api_request(context: HostFunctionContext; payload: String) -> String {
@@ -97,7 +108,13 @@ extism::host_fn!(slab_api_request(context: HostFunctionContext; payload: String)
 
     let api_request: PluginApiRequest =
         serde_json::from_str(&payload).map_err(|e| extism::Error::msg(format!("invalid API payload: {e}")))?;
-    let response = execute_plugin_api_request_blocking(&blocking_http_client, &api_request)
+    let api_endpoint = {
+        let guard = context
+            .lock()
+            .map_err(|_| extism::Error::msg("failed to lock extism host context"))?;
+        guard.api_endpoint.clone()
+    };
+    let response = execute_plugin_api_request_blocking(&blocking_http_client, &api_endpoint, &api_request)
         .map_err(extism::Error::msg)?;
     serde_json::to_string(&response).map_err(extism::Error::from)
 });
@@ -131,6 +148,7 @@ fn build_extism_plugin(
     app_handle: &AppHandle,
     plugin: &LoadedPlugin,
     blocking_http_client: BlockingHttpClient,
+    api_endpoint: ApiEndpointConfig,
 ) -> Result<Plugin, String> {
     let mut manifest = ExtismManifest::new([Wasm::file(plugin.wasm_entry_path.clone())]);
     manifest = manifest
@@ -147,6 +165,7 @@ fn build_extism_plugin(
         plugin_id: plugin.manifest.id.clone(),
         app_handle: app_handle.clone(),
         blocking_http_client,
+        api_endpoint,
     };
     let user_data = UserData::new(context);
 
@@ -165,11 +184,12 @@ fn build_extism_plugin(
 }
 
 pub async fn execute_plugin_api_request_async(
+    api_endpoint: &ApiEndpointConfig,
     request: &PluginApiRequest,
 ) -> Result<PluginApiResponse, String> {
     let method = reqwest::Method::from_bytes(request.method.as_bytes())
         .map_err(|e| format!("invalid HTTP method `{}`: {e}", request.method))?;
-    let url = build_upstream_url(&request.path)?;
+    let url = build_upstream_url(api_endpoint, &request.path)?;
     let timeout_ms = request.timeout_ms.unwrap_or(DEFAULT_HTTP_TIMEOUT_MS).min(MAX_HTTP_TIMEOUT_MS);
 
     let client = AsyncHttpClient::builder()
@@ -190,11 +210,12 @@ pub async fn execute_plugin_api_request_async(
 
 fn execute_plugin_api_request_blocking(
     client: &BlockingHttpClient,
+    api_endpoint: &ApiEndpointConfig,
     request: &PluginApiRequest,
 ) -> Result<PluginApiResponse, String> {
     let method = reqwest::Method::from_bytes(request.method.as_bytes())
         .map_err(|e| format!("invalid HTTP method `{}`: {e}", request.method))?;
-    let url = build_upstream_url(&request.path)?;
+    let url = build_upstream_url(api_endpoint, &request.path)?;
     let headers = sanitize_request_headers(&request.headers)?;
     let mut request_builder = client.request(method, url).headers(headers);
 
@@ -207,7 +228,7 @@ fn execute_plugin_api_request_blocking(
     response_to_plugin_api_response_blocking(response)
 }
 
-fn build_upstream_url(path: &str) -> Result<String, String> {
+fn build_upstream_url(api_endpoint: &ApiEndpointConfig, path: &str) -> Result<String, String> {
     if !path.starts_with('/') {
         return Err("API path must start with `/`".to_string());
     }
@@ -216,7 +237,7 @@ fn build_upstream_url(path: &str) -> Result<String, String> {
         return Err("absolute URLs are not allowed".to_string());
     }
 
-    Ok(format!("{DEFAULT_API_BASE_URL}{path}"))
+    Ok(format!("{}{}", api_endpoint.api_base_url().trim_end_matches('/'), path))
 }
 
 fn sanitize_request_headers(headers: &HashMap<String, String>) -> Result<HeaderMap, String> {

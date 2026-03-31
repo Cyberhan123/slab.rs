@@ -26,6 +26,7 @@ type ChatComposerProps = {
   isRequesting: boolean
   disabled?: boolean
   deepThink: boolean
+  reasoningSupported: boolean
   setDeepThink: (value: boolean) => void
   onGenerateImage: () => void
   statusLabel: string
@@ -39,6 +40,7 @@ export function ChatComposer({
   isRequesting,
   disabled = false,
   deepThink,
+  reasoningSupported,
   setDeepThink,
   onGenerateImage,
   statusLabel,
@@ -150,17 +152,24 @@ export function ChatComposer({
 
           <button
             type="button"
-            disabled={disabled}
+            disabled={disabled || !reasoningSupported}
             aria-pressed={deepThink}
             onClick={() => setDeepThink(!deepThink)}
             className={cn(
               "inline-flex items-center gap-1.5 text-[11px] font-bold transition",
-              deepThink ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+              reasoningSupported && deepThink
+                ? "text-foreground"
+                : "text-muted-foreground hover:text-foreground",
               disabled && "cursor-not-allowed opacity-60"
             )}
           >
-            <WandSparkles className={cn("size-3", deepThink && "text-[var(--brand-teal)]")} />
-            {deepThink ? "Deep Think On" : "Deep Think"}
+            <WandSparkles
+              className={cn(
+                "size-3",
+                reasoningSupported && deepThink && "text-[var(--brand-teal)]"
+              )}
+            />
+            {!reasoningSupported ? "Deep Think Unavailable" : deepThink ? "Deep Think On" : "Deep Think"}
           </button>
 
           <button

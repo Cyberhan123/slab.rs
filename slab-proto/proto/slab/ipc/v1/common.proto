@@ -25,9 +25,12 @@ message ModelUnloadRequest {}
 
 message ReloadLibraryRequest {
   string lib_path = 1;
-  string model_path = 2;
-  uint32 num_workers = 3;
-  uint32 context_length = 4;
+  ModelLoadRequest load = 2;
+
+  // Deprecated flattened compatibility fields retained for one release window.
+  string model_path = 10 [deprecated = true];
+  uint32 num_workers = 11 [deprecated = true];
+  uint32 context_length = 12 [deprecated = true];
 }
 
 message ModelStatusResponse {

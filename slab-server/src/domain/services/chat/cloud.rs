@@ -20,9 +20,9 @@ use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatModelOption, ChatModelSource, ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
-    ConversationMessage as DomainConversationMessage, StructuredOutput, UnifiedModel,
-    UnifiedModelStatus,
+    ChatModelCapabilities, ChatModelOption, ChatModelSource, ChatReasoningEffort,
+    ChatStreamChunk, ChatVerbosity, ConversationMessage as DomainConversationMessage,
+    StructuredOutput, UnifiedModel, UnifiedModelStatus,
 };
 use crate::error::ServerError;
 use crate::infra::db::ModelStore;
@@ -380,7 +380,8 @@ fn build_local_chat_model_option(model: &UnifiedModel) -> Option<ChatModelOption
         source: ChatModelSource::Local,
         downloaded: local_model_downloaded(model),
         pending: local_model_pending(model),
-        backend_id: Some(super::LLAMA_BACKEND_ID.to_owned()),
+        capabilities: ChatModelCapabilities::local(),
+        backend_id: Some(super::LLAMA_BACKEND_ID.to_string()),
         provider_id: None,
         provider_name: None,
     })
@@ -420,6 +421,7 @@ fn build_cloud_chat_model_option(
         source: ChatModelSource::Cloud,
         downloaded: true,
         pending: false,
+        capabilities: ChatModelCapabilities::cloud(),
         backend_id: None,
         provider_id: Some(provider_id),
         provider_name: Some(provider.name.clone()),
@@ -468,6 +470,12 @@ async fn find_cloud_catalog_model(
     requested_model: &str,
 ) -> Result<Option<UnifiedModel>, ServerError> {
     if let Some((provider_id, legacy_model_id)) = parse_legacy_cloud_option_id(requested_model) {
+        warn!(
+            requested_model,
+            provider_id,
+            legacy_model_id,
+            "legacy cloud model id shim hit; prefer catalog model.id"
+        );
         let records = state.store().list_models().await?;
         for record in records {
             let model: UnifiedModel = match record.try_into() {

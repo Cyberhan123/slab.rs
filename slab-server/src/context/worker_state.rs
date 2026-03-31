@@ -9,6 +9,7 @@ use uuid::Uuid;
 
 use crate::error::ServerError;
 use crate::infra::db::{TaskRecord, TaskStore};
+use crate::domain::models::TaskStatus;
 
 #[derive(Default)]
 pub struct OperationManager {
@@ -67,7 +68,7 @@ impl OperationManager {
 #[derive(Debug, Clone)]
 pub struct SubmitOperation {
     pub task_type: String,
-    pub initial_status: &'static str,
+    pub initial_status: TaskStatus,
     pub model_id: Option<String>,
     pub input_data: Option<String>,
 }
@@ -78,7 +79,12 @@ impl SubmitOperation {
         model_id: Option<String>,
         input_data: Option<String>,
     ) -> Self {
-        Self { task_type: task_type.into(), initial_status: "pending", model_id, input_data }
+        Self {
+            task_type: task_type.into(),
+            initial_status: TaskStatus::Pending,
+            model_id,
+            input_data,
+        }
     }
 
     pub fn running(
@@ -86,7 +92,12 @@ impl SubmitOperation {
         model_id: Option<String>,
         input_data: Option<String>,
     ) -> Self {
-        Self { task_type: task_type.into(), initial_status: "running", model_id, input_data }
+        Self {
+            task_type: task_type.into(),
+            initial_status: TaskStatus::Running,
+            model_id,
+            input_data,
+        }
     }
 }
 
@@ -103,7 +114,7 @@ impl OperationContext {
 
     pub async fn update_status(
         &self,
-        status: &str,
+        status: TaskStatus,
         result_data: Option<&str>,
         error_msg: Option<&str>,
     ) -> Result<(), ServerError> {
@@ -112,21 +123,21 @@ impl OperationContext {
     }
 
     pub async fn mark_running(&self) -> Result<(), ServerError> {
-        self.update_status("running", None, None).await
+        self.update_status(TaskStatus::Running, None, None).await
     }
 
     pub async fn mark_succeeded(&self, payload: &str) -> Result<(), ServerError> {
-        self.update_status("succeeded", Some(payload), None).await
+        self.update_status(TaskStatus::Succeeded, Some(payload), None).await
     }
 
     pub async fn mark_failed(&self, error_msg: &str) -> Result<(), ServerError> {
-        self.update_status("failed", None, Some(error_msg)).await
+        self.update_status(TaskStatus::Failed, None, Some(error_msg)).await
     }
 
     pub async fn is_cancelled(&self) -> bool {
         matches!(
             self.store.get_task(&self.operation_id).await,
-            Ok(Some(record)) if record.status == "cancelled"
+            Ok(Some(record)) if record.status == TaskStatus::Cancelled
         )
     }
 }
@@ -185,7 +196,7 @@ impl WorkerState {
             .insert_task(TaskRecord {
                 id: operation_id.clone(),
                 task_type: operation.task_type,
-                status: operation.initial_status.into(),
+                status: operation.initial_status,
                 model_id: operation.model_id,
                 input_data: operation.input_data,
                 result_data: None,

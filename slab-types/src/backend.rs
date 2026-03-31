@@ -21,6 +21,16 @@ pub enum RuntimeBackendId {
 }
 
 impl RuntimeBackendId {
+    pub const ALL: [Self; 7] = [
+        Self::GgmlLlama,
+        Self::GgmlWhisper,
+        Self::GgmlDiffusion,
+        Self::CandleLlama,
+        Self::CandleWhisper,
+        Self::CandleDiffusion,
+        Self::Onnx,
+    ];
+
     /// Return the canonical backend identifier used by runtime and server wiring.
     pub const fn canonical_id(self) -> &'static str {
         match self {
@@ -45,6 +55,10 @@ impl RuntimeBackendId {
             Self::CandleDiffusion => "candle-diffusion",
             Self::Onnx => "onnx",
         }
+    }
+
+    pub const fn is_runtime_worker_backend(self) -> bool {
+        matches!(self, Self::GgmlLlama | Self::GgmlWhisper | Self::GgmlDiffusion)
     }
 }
 
@@ -136,6 +150,13 @@ mod tests {
             RuntimeBackendId::from_str("diffusion").unwrap(),
             RuntimeBackendId::GgmlDiffusion
         );
+    }
+
+    #[test]
+    fn exposes_all_backends_once() {
+        assert_eq!(RuntimeBackendId::ALL.len(), 7);
+        assert_eq!(RuntimeBackendId::ALL[0], RuntimeBackendId::GgmlLlama);
+        assert!(RuntimeBackendId::ALL.contains(&RuntimeBackendId::Onnx));
     }
 
     #[test]

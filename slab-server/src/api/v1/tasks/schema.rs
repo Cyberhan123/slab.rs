@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
-use crate::domain::models::{AcceptedOperation, TaskResult, TaskView};
+use crate::domain::models::{
+    AcceptedOperation, TaskResult, TaskStatus as DomainTaskStatus, TaskView,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct OperationAcceptedResponse {
@@ -48,10 +50,21 @@ pub struct TaskTypeQuery {
 pub struct TaskResponse {
     pub id: String,
     pub task_type: String,
-    pub status: String,
+    pub status: TaskStatus,
     pub error_msg: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskStatus {
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+    Cancelled,
+    Interrupted,
 }
 
 impl From<AcceptedOperation> for OperationAcceptedResponse {
@@ -76,10 +89,23 @@ impl From<TaskView> for TaskResponse {
         Self {
             id: view.id,
             task_type: view.task_type,
-            status: view.status,
+            status: view.status.into(),
             error_msg: view.error_msg,
             created_at: view.created_at,
             updated_at: view.updated_at,
+        }
+    }
+}
+
+impl From<DomainTaskStatus> for TaskStatus {
+    fn from(value: DomainTaskStatus) -> Self {
+        match value {
+            DomainTaskStatus::Pending => Self::Pending,
+            DomainTaskStatus::Running => Self::Running,
+            DomainTaskStatus::Succeeded => Self::Succeeded,
+            DomainTaskStatus::Failed => Self::Failed,
+            DomainTaskStatus::Cancelled => Self::Cancelled,
+            DomainTaskStatus::Interrupted => Self::Interrupted,
         }
     }
 }

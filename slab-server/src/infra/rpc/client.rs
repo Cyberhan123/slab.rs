@@ -1,4 +1,5 @@
 use anyhow::Context;
+use slab_types::RuntimeBackendId;
 use tonic::service::Interceptor;
 use tonic::transport::Channel;
 use tracing::{debug, warn};
@@ -115,12 +116,12 @@ enum BackendKind {
 }
 
 impl BackendKind {
-    fn parse(raw: &str) -> anyhow::Result<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "ggml.llama" | "llama" => Ok(Self::Llama),
-            "ggml.whisper" | "whisper" => Ok(Self::Whisper),
-            "ggml.diffusion" | "diffusion" => Ok(Self::Diffusion),
-            _ => anyhow::bail!("unknown backend_id: {raw}"),
+    fn from_backend_id(value: RuntimeBackendId) -> anyhow::Result<Self> {
+        match value {
+            RuntimeBackendId::GgmlLlama => Ok(Self::Llama),
+            RuntimeBackendId::GgmlWhisper => Ok(Self::Whisper),
+            RuntimeBackendId::GgmlDiffusion => Ok(Self::Diffusion),
+            other => anyhow::bail!("backend {} is not served by the gRPC runtime", other),
         }
     }
 }
@@ -226,11 +227,11 @@ macro_rules! grpc_call {
 
 pub async fn load_model(
     channel: Channel,
-    backend_id: &str,
+    backend_id: RuntimeBackendId,
     req: pb::ModelLoadRequest,
 ) -> anyhow::Result<pb::ModelStatusResponse> {
-    let backend = BackendKind::parse(backend_id)?;
-    debug!(backend_id, model_path = %req.model_path, "sending gRPC load_model request");
+    let backend = BackendKind::from_backend_id(backend_id)?;
+    debug!(backend = %backend_id, model_path = %req.model_path, "sending gRPC load_model request");
 
     let (response, request_id) = match backend {
         BackendKind::Llama => grpc_call!("load_model", llama_client, channel, load_model, req),
@@ -248,11 +249,11 @@ pub async fn load_model(
 
 pub async fn unload_model(
     channel: Channel,
-    backend_id: &str,
+    backend_id: RuntimeBackendId,
     req: pb::ModelUnloadRequest,
 ) -> anyhow::Result<pb::ModelStatusResponse> {
-    let backend = BackendKind::parse(backend_id)?;
-    debug!(backend_id, "sending gRPC unload_model request");
+    let backend = BackendKind::from_backend_id(backend_id)?;
+    debug!(backend = %backend_id, "sending gRPC unload_model request");
 
     let (response, request_id) = match backend {
         BackendKind::Llama => grpc_call!("unload_model", llama_client, channel, unload_model, req),
@@ -272,11 +273,19 @@ pub async fn unload_model(
 
 pub async fn reload_library(
     channel: Channel,
-    backend_id: &str,
+    backend_id: RuntimeBackendId,
     req: pb::ReloadLibraryRequest,
 ) -> anyhow::Result<pb::ModelStatusResponse> {
-    let backend = BackendKind::parse(backend_id)?;
-    debug!(backend_id, lib_path = %req.lib_path, "sending gRPC reload_library request");
+    let backend = BackendKind::from_backend_id(backend_id)?;
+    #[allow(deprecated)]
+    let model_path =
+        req.load.as_ref().map(|load| load.model_path.as_str()).unwrap_or(req.model_path.as_str());
+    debug!(
+        backend = %backend_id,
+        lib_path = %req.lib_path,
+        model_path,
+        "sending gRPC reload_library request"
+    );
 
     let (response, request_id) = match backend {
         BackendKind::Llama => {

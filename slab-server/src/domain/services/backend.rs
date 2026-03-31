@@ -1,15 +1,11 @@
-use std::path::PathBuf;
-use std::str::FromStr;
-
 use slab_proto::convert;
-use slab_types::runtime::{RuntimeModelLoadSpec, RuntimeModelReloadSpec};
-use strum::IntoEnumIterator;
+use slab_types::RuntimeBackendId;
 use tracing::{info, warn};
 
 use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
-    AcceptedOperation, BackendId, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
+    AcceptedOperation, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
     ReloadBackendLibCommand,
 };
 use crate::error::ServerError;
@@ -33,11 +29,8 @@ impl BackendService {
         &self,
         query: BackendStatusQuery,
     ) -> Result<BackendStatusView, ServerError> {
-        let backend = BackendId::from_str(&query.backend_id).map_err(|_| {
-            ServerError::BadRequest(format!("unknown backend_id: {}", query.backend_id))
-        })?;
-        let canonical_backend = backend.to_string();
-        let status = if self.model_state.grpc().has_backend(&canonical_backend) {
+        let canonical_backend = query.backend_id.to_string();
+        let status = if self.model_state.grpc().has_backend(query.backend_id) {
             "ready"
         } else {
             "disabled"
@@ -46,10 +39,11 @@ impl BackendService {
     }
 
     pub async fn list_backends(&self) -> Result<Vec<BackendStatusView>, ServerError> {
-        let backends = BackendId::iter()
+        let backends = RuntimeBackendId::ALL
+            .into_iter()
             .map(|name| {
                 let backend_str = name.to_string();
-                let status = if self.model_state.grpc().has_backend(&backend_str) {
+                let status = if self.model_state.grpc().has_backend(name) {
                     "ready"
                 } else {
                     "disabled"
@@ -77,24 +71,21 @@ impl BackendService {
             ));
         }
 
-        let backend_id = BackendId::from_str(&req.backend_id).map_err(|_| {
-            ServerError::BadRequest(format!("unknown backend_id: {}", req.backend_id))
-        })?;
-
-        let (owner, repo, default_tag, default_asset_fn) = windows_download_spec(backend_id)
+        let (owner, repo, default_tag, default_asset_fn) = windows_download_spec(req.backend_id)
             .ok_or_else(|| {
-                ServerError::BadRequest(format!("unsupported backend_id: {backend_id}"))
+                ServerError::BadRequest(format!("unsupported backend_id: {}", req.backend_id))
             })?;
 
         let config = self.model_state.pmid().config();
-        let backend_settings = match backend_id {
-            BackendId::GgmlLlama => config.setup.backends.ggml_llama,
-            BackendId::GgmlWhisper => config.setup.backends.ggml_whisper,
-            BackendId::GgmlDiffusion => config.setup.backends.ggml_diffusion,
-            BackendId::CandleLlama => config.setup.backends.candle_llama,
-            BackendId::CandleWhisper => config.setup.backends.candle_whisper,
-            BackendId::CandleDiffusion => config.setup.backends.candle_diffusion,
-            BackendId::Onnx => config.setup.backends.onnx,
+        let backend_settings = match req.backend_id {
+            RuntimeBackendId::GgmlLlama => config.setup.backends.ggml_llama,
+            RuntimeBackendId::GgmlWhisper => config.setup.backends.ggml_whisper,
+            RuntimeBackendId::GgmlDiffusion => config.setup.backends.ggml_diffusion,
+            RuntimeBackendId::CandleLlama => config.setup.backends.candle_llama,
+            RuntimeBackendId::CandleWhisper => config.setup.backends.candle_whisper,
+            RuntimeBackendId::CandleDiffusion => config.setup.backends.candle_diffusion,
+            RuntimeBackendId::Onnx => config.setup.backends.onnx,
+            _ => config.setup.backends.onnx,
         };
         let tag = backend_settings
             .tag
@@ -109,7 +100,7 @@ impl BackendService {
         let target_dir = backends_dir.unwrap_or(req.target_dir);
 
         let input_data = serde_json::json!({
-            "backend_id": req.backend_id,
+            "backend_id": req.backend_id.canonical_id(),
             "owner": owner,
             "repo": repo,
             "tag": tag,
@@ -140,33 +131,30 @@ impl BackendService {
         &self,
         req: ReloadBackendLibCommand,
     ) -> Result<BackendStatusView, ServerError> {
-        let backend_id = req.backend_id.clone();
+        info!(
+            backend = %req.backend_id,
+            lib_path = %req.spec.lib_path.display(),
+            model_path = %req.spec.load.model_path.display(),
+            "reloading lib"
+        );
 
-        info!(backend = %backend_id, lib_path = %req.lib_path, "reloading lib");
+        if req.uses_legacy_flattened_load {
+            warn!(
+                backend = %req.backend_id,
+                "legacy flattened reload payload used; prefer {{ lib_path, load }}"
+            );
+        }
 
-        let backend = BackendId::from_str(&backend_id)
-            .map_err(|_| ServerError::BadRequest(format!("unknown backend: {backend_id}")))?;
-        let canonical_backend = backend.to_string();
-        let channel =
-            self.model_state.grpc().backend_channel(&canonical_backend).ok_or_else(|| {
-                ServerError::BackendNotReady(format!(
-                    "{canonical_backend} gRPC endpoint is not configured"
-                ))
-            })?;
-        let reload_spec = RuntimeModelReloadSpec {
-            lib_path: PathBuf::from(req.lib_path),
-            load: RuntimeModelLoadSpec {
-                model_path: PathBuf::from(req.model_path),
-                num_workers: req.num_workers,
-                context_length: None,
-                diffusion: None,
-            },
-        };
-        let grpc_req = convert::encode_reload_library_request(&reload_spec);
-        let response =
-            rpc::client::reload_library(channel, &canonical_backend, grpc_req).await.map_err(
-                |error| ServerError::Internal(format!("grpc reload_library failed: {error}")),
-            )?;
+        let canonical_backend = req.backend_id.to_string();
+        let channel = self.model_state.grpc().backend_channel(req.backend_id).ok_or_else(|| {
+            ServerError::BackendNotReady(format!(
+                "{canonical_backend} gRPC endpoint is not configured"
+            ))
+        })?;
+        let grpc_req = convert::encode_reload_library_request(&req.spec);
+        let response = rpc::client::reload_library(channel, req.backend_id, grpc_req)
+            .await
+            .map_err(|error| ServerError::Internal(format!("grpc reload_library failed: {error}")))?;
 
         let status = convert::decode_model_status_response(&response).map_err(|error| {
             ServerError::Internal(format!("invalid model status response from runtime: {error}"))
@@ -178,25 +166,26 @@ impl BackendService {
 
 // ── static download specs (fallback defaults) ────────────────────────────────
 
-fn windows_download_spec(backend_id: BackendId) -> Option<WindowsDownloadSpec> {
+fn windows_download_spec(backend_id: RuntimeBackendId) -> Option<WindowsDownloadSpec> {
     match backend_id {
-        BackendId::GgmlLlama => Some(("ggml-org", "llama.cpp", "b8069", |version: &str| {
+        RuntimeBackendId::GgmlLlama => Some(("ggml-org", "llama.cpp", "b8069", |version: &str| {
             format!("llama-{version}-bin-win-cpu-x64.zip")
         })),
-        BackendId::GgmlWhisper => Some(("ggml-org", "whisper.cpp", "v1.8.3", |_| {
+        RuntimeBackendId::GgmlWhisper => Some(("ggml-org", "whisper.cpp", "v1.8.3", |_| {
             "whisper-cublas-12.4.0-bin-x64.zip".to_string()
         })),
-        BackendId::GgmlDiffusion => {
+        RuntimeBackendId::GgmlDiffusion => {
             Some(("leejet", "stable-diffusion.cpp", "master-504-636d3cb", |version: &str| {
                 format!("stable-diffusion-{version}-bin-win-cpu-x64.zip")
             }))
         }
-        BackendId::CandleDiffusion
-        | BackendId::CandleLlama
-        | BackendId::CandleWhisper
-        | BackendId::Onnx => Some(("slab", "slab-buildin", "v0.1.0", |version: &str| {
+        RuntimeBackendId::CandleDiffusion
+        | RuntimeBackendId::CandleLlama
+        | RuntimeBackendId::CandleWhisper
+        | RuntimeBackendId::Onnx => Some(("slab", "slab-buildin", "v0.1.0", |version: &str| {
             format!("slab-buildin-{version}-bin-win-x64.zip")
         })), // no download specs for candle backends or onnx
+        _ => None,
     }
 }
 
@@ -280,7 +269,7 @@ mod test {
     #[test]
     fn windows_download_spec_llama() {
         let (owner, repo, tag, asset) =
-            windows_download_spec(BackendId::GgmlLlama).expect("llama preset");
+            windows_download_spec(RuntimeBackendId::GgmlLlama).expect("llama preset");
         assert_eq!(owner, "ggml-org");
         assert_eq!(repo, "llama.cpp");
         assert_eq!(tag, "b8069");
@@ -290,7 +279,7 @@ mod test {
     #[test]
     fn windows_download_spec_whisper() {
         let (owner, repo, tag, asset) =
-            windows_download_spec(BackendId::GgmlWhisper).expect("whisper preset");
+            windows_download_spec(RuntimeBackendId::GgmlWhisper).expect("whisper preset");
         assert_eq!(owner, "ggml-org");
         assert_eq!(repo, "whisper.cpp");
         assert_eq!(tag, "v1.8.3");
@@ -300,7 +289,7 @@ mod test {
     #[test]
     fn windows_download_spec_diffusion() {
         let (owner, repo, tag, asset) =
-            windows_download_spec(BackendId::GgmlDiffusion).expect("diffusion preset");
+            windows_download_spec(RuntimeBackendId::GgmlDiffusion).expect("diffusion preset");
         assert_eq!(owner, "leejet");
         assert_eq!(repo, "stable-diffusion.cpp");
         assert_eq!(tag, "master-504-636d3cb");

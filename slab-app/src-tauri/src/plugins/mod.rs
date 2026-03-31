@@ -6,6 +6,8 @@ mod view;
 
 use tauri::{AppHandle, Manager, Runtime, State, Window};
 
+use crate::setup::ApiEndpointConfig;
+
 pub use types::{
     PluginApiRequest, PluginApiResponse, PluginCallRequest, PluginCallResponse, PluginInfo,
     PluginMountViewRequest, PluginMountViewResponse, PluginUnmountViewRequest,
@@ -20,10 +22,13 @@ pub fn register_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Build
     protocol::register_protocol(builder)
 }
 
-pub fn init<R: Runtime>(app: &mut tauri::App<R>) -> Result<(), String> {
+pub fn init<R: Runtime>(
+    app: &mut tauri::App<R>,
+    api_endpoint: ApiEndpointConfig,
+) -> Result<(), String> {
     let plugins_root = resolve_plugins_root()?;
     let registry = PluginRegistryState::new(plugins_root)?;
-    let runtime = PluginRuntimeManager::new()?;
+    let runtime = PluginRuntimeManager::new(api_endpoint)?;
     app.manage(registry);
     app.manage(runtime);
     app.manage(PluginViewManager::default());
@@ -77,6 +82,9 @@ pub fn plugin_call(
 }
 
 #[tauri::command]
-pub async fn plugin_api_request(request: PluginApiRequest) -> Result<PluginApiResponse, String> {
-    execute_plugin_api_request_async(&request).await
+pub async fn plugin_api_request(
+    api_endpoint: State<'_, ApiEndpointConfig>,
+    request: PluginApiRequest,
+) -> Result<PluginApiResponse, String> {
+    execute_plugin_api_request_async(api_endpoint.inner(), &request).await
 }

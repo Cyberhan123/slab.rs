@@ -13,7 +13,8 @@ use utoipa::OpenApi;
 
 use crate::api::v1::chat::schema::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatCompletionUsage,
-    ChatContentPart, ChatMessage as OpenAiMessage, ChatMessageContent, ChatModelOption,
+    ChatContentPart, ChatMessage as OpenAiMessage, ChatMessageContent, ChatModelCapabilities,
+    ChatModelOption,
     ChatModelSource, ChatPromptTokensDetails, ChatReasoningEffort, ChatResponseFormat,
     ChatResponseFormatType, ChatResponseJsonSchema, ChatStreamOptions, ChatThinkingConfig,
     ChatThinkingType, ChatToolCall, ChatToolFunction, ChatVerbosity, CompletionChoice,
@@ -34,6 +35,7 @@ use crate::error::ServerError;
         CompletionRequest,
         CompletionResponse,
         ChatCompletionUsage,
+        ChatModelCapabilities,
         ChatModelOption,
         ChatModelSource,
         ChatContentPart,
@@ -139,32 +141,63 @@ fn sse_response(stream: futures::stream::BoxStream<'static, ChatStreamChunk>) ->
 }
 
 fn openai_error_response(error: ServerError) -> Response {
-    let (status, message, error_type, code) = match error {
+    let (status, message, error_type, code, param) = match error {
         ServerError::NotFound(message) => {
-            (StatusCode::NOT_FOUND, message, "invalid_request_error", Some("not_found"))
+            (
+                StatusCode::NOT_FOUND,
+                message,
+                "invalid_request_error".to_owned(),
+                Some("not_found".to_owned()),
+                None,
+            )
         }
         ServerError::BadRequest(message) => {
-            (StatusCode::BAD_REQUEST, message, "invalid_request_error", Some("bad_request"))
+            (
+                StatusCode::BAD_REQUEST,
+                message,
+                "invalid_request_error".to_owned(),
+                Some("bad_request".to_owned()),
+                None,
+            )
         }
-        ServerError::BadRequestData { message, .. } => {
-            (StatusCode::BAD_REQUEST, message, "invalid_request_error", Some("bad_request"))
-        }
+        ServerError::BadRequestData { message, data } => (
+            StatusCode::BAD_REQUEST,
+            message,
+            string_field(&data, "error_type")
+                .unwrap_or_else(|| "invalid_request_error".to_owned()),
+            string_field(&data, "code").or(Some("bad_request".to_owned())),
+            string_field(&data, "param"),
+        ),
         ServerError::BackendNotReady(message) => (
             StatusCode::SERVICE_UNAVAILABLE,
             message,
-            "service_unavailable_error",
-            Some("backend_not_ready"),
+            "service_unavailable_error".to_owned(),
+            Some("backend_not_ready".to_owned()),
+            None,
         ),
         ServerError::NotImplemented(message) => {
-            (StatusCode::NOT_IMPLEMENTED, message, "invalid_request_error", Some("not_implemented"))
+            (
+                StatusCode::NOT_IMPLEMENTED,
+                message,
+                "invalid_request_error".to_owned(),
+                Some("not_implemented".to_owned()),
+                None,
+            )
         }
         ServerError::TooManyRequests(message) => {
-            (StatusCode::TOO_MANY_REQUESTS, message, "rate_limit_error", Some("too_many_requests"))
+            (
+                StatusCode::TOO_MANY_REQUESTS,
+                message,
+                "rate_limit_error".to_owned(),
+                Some("too_many_requests".to_owned()),
+                None,
+            )
         }
         ServerError::Runtime(_) | ServerError::Database(_) | ServerError::Internal(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal server error".to_owned(),
-            "server_error",
+            "server_error".to_owned(),
+            None,
             None,
         ),
     };
@@ -175,10 +208,14 @@ fn openai_error_response(error: ServerError) -> Response {
             "error": {
                 "message": message,
                 "type": error_type,
-                "param": serde_json::Value::Null,
+                "param": param,
                 "code": code,
             }
         })),
     )
         .into_response()
+}
+
+fn string_field(value: &serde_json::Value, field: &str) -> Option<String> {
+    value.get(field).and_then(serde_json::Value::as_str).map(str::to_owned)
 }

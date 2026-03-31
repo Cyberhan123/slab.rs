@@ -1,4 +1,5 @@
 use futures::StreamExt;
+use slab_types::inference::{TextGenerationUsage, TextPromptTokensDetails};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
@@ -55,6 +56,8 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         );
 
         let pipeline = self.pipeline_for_backend(BackendKind::Llama).await?;
+        let max_tokens = req.max_tokens;
+        let prompt_for_usage = req.prompt.clone();
         let request = convert::decode_chat_request(&req, true).map_err(proto_to_status)?;
         let stream_handle = pipeline.submit_text_generation(request).await.map_err(|error| {
             error!(error = %error, "llama text generation stream setup failed");
@@ -100,12 +103,15 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
                 }
 
                 debug!(token_count, "llama chat_stream relay finished");
+                let completion_tokens = u32::try_from(token_count).unwrap_or(u32::MAX);
+                let finish_reason = finish_reason_from_token_budget(completion_tokens, max_tokens);
+                let usage = build_estimated_usage(&prompt_for_usage, completion_tokens);
                 let _ = tx
                     .send(Ok(convert::encode_chat_stream_chunk(&TextGenerationChunk {
                         delta: String::new(),
                         done: true,
-                        finish_reason: None,
-                        usage: None,
+                        finish_reason: Some(finish_reason),
+                        usage: Some(usage),
                         metadata: Default::default(),
                     })))
                     .await;
@@ -156,5 +162,37 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         let status =
             self.reload_library_for_backend(BackendKind::Llama, request.into_inner()).await?;
         Ok(Response::new(status))
+    }
+}
+
+fn estimate_token_count(text: &str) -> u32 {
+    let trimmed = text.trim();
+    if trimmed.is_empty() {
+        return 0;
+    }
+
+    let bytes = trimmed.len() as u32;
+    let whitespace_groups = trimmed.split_whitespace().count() as u32;
+    let byte_estimate = bytes.div_ceil(4);
+    byte_estimate.max(whitespace_groups).max(1)
+}
+
+fn finish_reason_from_token_budget(completion_tokens: u32, max_tokens: u32) -> String {
+    if completion_tokens >= max_tokens && max_tokens > 0 {
+        "length".to_owned()
+    } else {
+        "stop".to_owned()
+    }
+}
+
+fn build_estimated_usage(prompt: &str, completion_tokens: u32) -> TextGenerationUsage {
+    let prompt_tokens = estimate_token_count(prompt);
+
+    TextGenerationUsage {
+        prompt_tokens,
+        completion_tokens,
+        total_tokens: prompt_tokens.saturating_add(completion_tokens),
+        prompt_tokens_details: TextPromptTokensDetails::default(),
+        estimated: true,
     }
 }
