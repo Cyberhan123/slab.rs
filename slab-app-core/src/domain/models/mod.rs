@@ -30,7 +30,7 @@ pub use chat::{
     deserialize_session_message, serialize_session_message,
 };
 pub use ffmpeg::FfmpegConvertCommand;
-pub use image::{ImageGenerationCommand, ImageGenerationMode};
+pub use image::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
 pub use model::{
     AvailableModelsQuery, AvailableModelsView, CreateModelCommand, DeletedModelView,
     DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus, Pricing,
@@ -47,4 +47,4 @@ pub use settings::{
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
 pub use task::{AcceptedOperation, TaskPayloadEnvelope, TaskResult, TaskStatus, TaskView};
-pub use video::VideoGenerationCommand;
+pub use video::{DecodedVideoInitImage, VideoGenerationCommand};

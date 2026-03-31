@@ -9,7 +9,7 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
-use crate::domain::models::{
+use slab_app_core::domain::models::{
     ChatCompletionCommand as DomainChatCompletionCommand,
     ChatCompletionResult as DomainChatCompletionResult, ChatModelOption as DomainChatModelOption,
     ChatModelCapabilities as DomainChatModelCapabilities,
@@ -1061,7 +1061,7 @@ mod tests {
         ChatResponseFormat, ChatResponseFormatType, ChatResponseJsonSchema, ChatStreamOptions,
         ChatThinkingConfig, ChatThinkingType, ChatVerbosity, CompletionRequest, StopSequences,
     };
-    use crate::domain::models::{
+    use slab_app_core::domain::models::{
         ChatCompletionCommand as DomainChatCompletionCommand,
         ChatReasoningEffort as DomainChatReasoningEffort, ChatVerbosity as DomainChatVerbosity,
         StructuredOutput as DomainStructuredOutput,

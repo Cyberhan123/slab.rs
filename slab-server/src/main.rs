@@ -2,12 +2,7 @@
 //! Runs in supervisor mode by default.
 
 mod api;
-mod config;
-mod context;
-mod domain;
 mod error;
-mod infra;
-mod model_auto_unload;
 
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
@@ -25,11 +20,11 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::config::Config;
-use crate::context::AppState;
-use crate::infra::db::{AnyStore, TaskStore};
-use crate::infra::rpc::gateway::GrpcGateway;
-use crate::infra::settings::SettingsProvider;
+use slab_app_core::config::Config;
+use slab_app_core::context::AppState;
+use slab_app_core::infra::db::{AnyStore, TaskStore};
+use slab_app_core::infra::rpc::gateway::GrpcGateway;
+use slab_app_core::infra::settings::SettingsProvider;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "slab-server", version, about = "Slab supervisor and HTTP gateway")]
@@ -274,7 +269,7 @@ where
         model_config_dir = %cfg.model_config_dir.display(),
         "model config directory ready"
     );
-    let pmid = Arc::new(crate::domain::services::PmidService::load(Arc::clone(&settings)).await?);
+    let pmid = Arc::new(slab_app_core::domain::services::PmidService::load(Arc::clone(&settings)).await?);
     info!("typed PMID config ready");
     let grpc = GrpcGateway::connect_from_config(&cfg)
         .await
@@ -282,7 +277,7 @@ where
 
     let grpc = Arc::new(grpc);
     let store = Arc::new(store.clone());
-    let model_auto_unload = Arc::new(model_auto_unload::ModelAutoUnloadManager::new(
+    let model_auto_unload = Arc::new(slab_app_core::model_auto_unload::ModelAutoUnloadManager::new(
         Arc::clone(&pmid),
         Arc::clone(&grpc),
     ));

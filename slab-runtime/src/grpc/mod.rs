@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use slab_core::api::{
+use slab_runtime_core::api::{
     Capability, CoreError, DriversConfig, ModelFamily, ModelSource, ModelSpec, Pipeline, Runtime,
     RuntimeBuilder,
 };
@@ -454,19 +454,19 @@ mod tests {
     #[test]
     fn engine_errors_map_to_internal_status() {
         let engine_io =
-            runtime_to_status(slab_core::api::CoreError::EngineIo("disk offline".into()));
+            runtime_to_status(slab_runtime_core::api::CoreError::EngineIo("disk offline".into()));
         assert_eq!(engine_io.code(), Code::Internal);
         assert!(engine_io.message().contains("engine I/O error"));
 
         let ggml =
-            runtime_to_status(slab_core::api::CoreError::GGMLEngine("session not found".into()));
+            runtime_to_status(slab_runtime_core::api::CoreError::GGMLEngine("session not found".into()));
         assert_eq!(ggml.code(), Code::Internal);
         assert!(ggml.message().contains("GGML engine error"));
     }
 
     #[test]
     fn cancelled_error_maps_to_cancelled_status() {
-        let status = runtime_to_status(slab_core::api::CoreError::Cancelled);
+        let status = runtime_to_status(slab_runtime_core::api::CoreError::Cancelled);
         assert_eq!(status.code(), Code::Cancelled);
         assert!(status.message().contains("task cancelled"));
     }

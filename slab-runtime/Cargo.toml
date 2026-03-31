@@ -13,7 +13,7 @@ name = "slab-runtime"
 path = "src/main.rs"
 
 [dependencies]
-slab-core = { workspace = true }
+slab-runtime-core = { workspace = true }
 slab-proto = { workspace = true }
 slab-types = { workspace = true }
 tokio = { workspace = true }
