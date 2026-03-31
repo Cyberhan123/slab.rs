@@ -100,7 +100,7 @@ pub struct StructuredOutputJsonSchema {
 }
 
 impl StructuredOutputJsonSchema {
-    pub(crate) fn new(
+    pub fn new(
         name: Option<String>,
         description: Option<String>,
         strict: Option<bool>,

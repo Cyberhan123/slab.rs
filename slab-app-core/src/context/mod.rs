@@ -101,3 +101,117 @@ fn build_agent_control(
 
     AgentControl::new(llm, store_adapter, notify, Arc::new(tool_router), 32, 4)
 }
+
+#[cfg(feature = "axum")]
+mod axum_extractors {
+    use std::sync::Arc;
+    use axum::extract::FromRef;
+    use crate::context::{AppConfig, AppState, ModelState, WorkerState};
+    use crate::domain::services::{
+        AgentService, AudioService, BackendService, ChatService, FfmpegService, ImageService,
+        ModelService, PmidService, SessionService, SettingsService, SetupService, SystemService,
+        TaskApplicationService, VideoService,
+    };
+
+    impl FromRef<Arc<AppState>> for ModelState {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            (*input.context.model_state).clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for WorkerState {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            (*input.context.worker_state).clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for AppConfig {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            (*input.context.config).clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for PmidService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            (*input.context.pmid).clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for AudioService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.audio.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for BackendService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.backend.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for ChatService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.chat.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for FfmpegService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.ffmpeg.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for ImageService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.image.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for ModelService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.model.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for SettingsService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.settings.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for SessionService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.session.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for SystemService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.system.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for TaskApplicationService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.task_application.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for VideoService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.video.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for SetupService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.setup.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for AgentService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.agent.clone()
+        }
+    }
+}

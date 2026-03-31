@@ -14,6 +14,7 @@ members = [
     "slab-whisper",
     "slab-whisper-sys",
     "slab-core-macros",
+    "slab-app-core",
     "slab-core",
     "slab-types",
     "slab-server",
@@ -36,7 +37,8 @@ categories = ["science"]
 license = "Apache-2.0"
 
 [workspace.dependencies]
-slab-core = { path = "./slab-core", package = "slab-core", version = "0.0.1" }
+slab-runtime-core = { path = "./slab-core", package = "slab-runtime-core", version = "0.0.1" }
+slab-app-core = { path = "./slab-app-core", package = "slab-app-core", version = "0.0.1" }
 slab-agent = { path = "./slab-agent", package = "slab-agent", version = "0.0.1" }
 slab-proto = { path = "./slab-proto", package = "slab-proto", version = "0.0.1" }
 slab-types = { path = "./slab-types", package = "slab-types", version = "0.0.1" }

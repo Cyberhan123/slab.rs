@@ -1,4 +1,4 @@
-use crate::context::AppState;
+use slab_app_core::context::AppState;
 use axum::{
     extract::{Request, State},
     http::{StatusCode, header::AUTHORIZATION},

@@ -41,7 +41,7 @@ mod error_codes {
 pub enum ServerError {
     /// Propagated from slab-core's AI runtime.
     #[error("runtime error: {0}")]
-    Runtime(#[from] slab_core::api::CoreError),
+    Runtime(#[from] slab_runtime_core::api::CoreError),
 
     /// Propagated from the SQLite (or other) store.
     #[error("database error: {0}")]
@@ -112,12 +112,12 @@ impl IntoResponse for ServerError {
             ServerError::Runtime(e) => {
                 error!(error = %e, "AI runtime error");
                 let message = match e {
-                    slab_core::api::CoreError::NotInitialized
-                    | slab_core::api::CoreError::ModelNotLoaded => {
+                    slab_runtime_core::api::CoreError::NotInitialized
+                    | slab_runtime_core::api::CoreError::ModelNotLoaded => {
                         "Backend not initialized. Please ensure the Whisper library and model are loaded. \
                         Set SLAB_WHISPER_LIB_DIR environment variable or use POST /v1/backends/reload".to_owned()
                     }
-                    slab_core::api::CoreError::LibraryLoadFailed { backend, .. } => {
+                    slab_runtime_core::api::CoreError::LibraryLoadFailed { backend, .. } => {
                         format!("{} library failed to load. Check SLAB_{}_LIB_DIR environment variable.",
                             backend, backend.to_uppercase().replace(".", "_"))
                     }
@@ -150,6 +150,31 @@ impl IntoResponse for ServerError {
         (status, Json(error_response)).into_response()
     }
 }
+
+impl From<slab_app_core::error::AppCoreError> for ServerError {
+    fn from(e: slab_app_core::error::AppCoreError) -> Self {
+        match e {
+            slab_app_core::error::AppCoreError::Runtime(e) => ServerError::Runtime(e),
+            slab_app_core::error::AppCoreError::Database(e) => ServerError::Database(e),
+            slab_app_core::error::AppCoreError::NotFound(m) => ServerError::NotFound(m),
+            slab_app_core::error::AppCoreError::BadRequest(m) => ServerError::BadRequest(m),
+            slab_app_core::error::AppCoreError::BadRequestData { message, data } => {
+                ServerError::BadRequestData { message, data }
+            }
+            slab_app_core::error::AppCoreError::BackendNotReady(m) => {
+                ServerError::BackendNotReady(m)
+            }
+            slab_app_core::error::AppCoreError::NotImplemented(m) => {
+                ServerError::NotImplemented(m)
+            }
+            slab_app_core::error::AppCoreError::TooManyRequests(m) => {
+                ServerError::TooManyRequests(m)
+            }
+            slab_app_core::error::AppCoreError::Internal(m) => ServerError::Internal(m),
+        }
+    }
+}
+
 
 impl From<anyhow::Error> for ServerError {
     fn from(e: anyhow::Error) -> Self {

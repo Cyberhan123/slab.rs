@@ -3,7 +3,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::models::{GpuDeviceSnapshot, GpuStatusSnapshot};
+use slab_app_core::domain::models::{GpuDeviceSnapshot, GpuStatusSnapshot};
 
 /// Per-GPU snapshot from `all-smi`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]

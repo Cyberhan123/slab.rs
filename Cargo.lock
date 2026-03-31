@@ -7811,6 +7811,7 @@ dependencies = [
  "all-smi",
  "anyhow",
  "async-trait",
+ "axum",
  "base64 0.22.1",
  "bytemuck",
  "bytes",

@@ -11,8 +11,8 @@ use crate::api::v1::audio::schema::{
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::ValidatedJson;
-use crate::context::AppState;
-use crate::domain::services::AudioService;
+use slab_app_core::context::AppState;
+use slab_app_core::domain::services::AudioService;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
