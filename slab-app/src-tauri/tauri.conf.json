@@ -41,7 +41,7 @@
       "icons/icon.ico"
     ],
     "resources": [
-      "resources/**/*.dll"
+      "resources/libs/**/*"
     ],
     "externalBin": [
       "binaries/slab-server",

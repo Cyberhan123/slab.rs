@@ -19,6 +19,7 @@ name = "slab_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
+slab-build-utils = { workspace = true }
 tauri-build = { version = "2", features = [] }
 
 [dependencies]

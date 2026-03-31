@@ -129,17 +129,16 @@ mod test {
         match env::current_exe() {
             Ok(exe_path) => {
                 let whisper_lib_name = format!("{}whisper{}", DLL_PREFIX, DLL_SUFFIX);
-                let dir =
-                    exe_path.parent().unwrap().parent().unwrap().join("resources\\lib\\whisper");
+                let dir = exe_path.parent().unwrap().parent().unwrap().join("resources\\libs");
                 let whisper_dll_path = dir.join(&whisper_lib_name);
-                println!("可执行文件目录: {:?}", dir);
-                println!("Whisper DLL 路径: {:?}", whisper_dll_path);
+                println!("The executable file directory is: {:?}", dir);
+                println!("Whisper DLL path: {:?}", whisper_dll_path);
                 match Whisper::new(whisper_dll_path) {
-                    Ok(_) => println!("成功加载 Whisper 库！"),
-                    Err(e) => println!("加载 Whisper 库失败: {}", e),
+                    Ok(_) => println!("Successfully loaded Whisper library!"),
+                    Err(e) => println!("Failed to load Whisper library: {}", e),
                 }
             }
-            Err(e) => println!("获取路径失败: {}", e),
+            Err(e) => println!("Failed to get current executable path: {}", e),
         };
     }
 }

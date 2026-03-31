@@ -61,7 +61,7 @@ pub fn shutdown_server_sidecar<R: tauri::Runtime>(app_handle: &tauri::AppHandle<
 
 pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle();
-    let lib_path = app.path().resolve("resources/lib", BaseDirectory::Resource)?;
+    let lib_path = app.path().resolve("resources/libs", BaseDirectory::Resource)?;
     let lib_path_str = lib_path.to_str().ok_or("invalid lib path")?;
     let config_base_dir = config_dir().unwrap_or_else(|| PathBuf::from(".")).join("Slab");
     std::fs::create_dir_all(&config_base_dir)?;
