@@ -7,12 +7,11 @@ use validator::{Validate, ValidationError};
 use crate::domain::models::{
     AvailableModelsQuery as DomainAvailableModelsQuery,
     CreateModelCommand as DomainCreateModelCommand,
-    DownloadModelCommand as DomainDownloadModelCommand,
-    ListModelsFilter as DomainListModelsFilter,
-    ModelLoadCommand as DomainModelLoadCommand,
-    ModelSpec as DomainModelSpec, ModelStatus as DomainModelStatus,
-    RuntimePresets as DomainRuntimePresets, UnifiedModel as DomainUnifiedModel,
-    UnifiedModelStatus as DomainUnifiedModelStatus, UpdateModelCommand as DomainUpdateModelCommand,
+    DownloadModelCommand as DomainDownloadModelCommand, ListModelsFilter as DomainListModelsFilter,
+    ModelLoadCommand as DomainModelLoadCommand, ModelSpec as DomainModelSpec,
+    ModelStatus as DomainModelStatus, RuntimePresets as DomainRuntimePresets,
+    UnifiedModel as DomainUnifiedModel, UnifiedModelStatus as DomainUnifiedModelStatus,
+    UpdateModelCommand as DomainUpdateModelCommand,
 };
 
 // ---------------------------------------------------------------------------
@@ -346,10 +345,9 @@ impl From<ModelSpecRequest> for DomainModelSpec {
         Self {
             provider_id: req.provider_id,
             remote_model_id: req.remote_model_id,
-            pricing: req.pricing.map(|p| crate::domain::models::Pricing {
-                input: p.input,
-                output: p.output,
-            }),
+            pricing: req
+                .pricing
+                .map(|p| crate::domain::models::Pricing { input: p.input, output: p.output }),
             repo_id: req.repo_id,
             filename: req.filename,
             local_path: req.local_path,
