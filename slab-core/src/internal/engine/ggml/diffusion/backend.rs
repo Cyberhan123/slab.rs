@@ -13,6 +13,7 @@
 //! Uses a typed [`slab_types::GgmlDiffusionLoadConfig`] payload inside `slab-core`.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use slab_diffusion::{GuidanceParams, Image as DiffusionImage, SampleMethod, Scheduler, SlgParams};
 use slab_types::{
@@ -239,11 +240,31 @@ impl DiffusionWorker {
         let config: GgmlDiffusionLoadConfig = match input.to_typed() {
             Ok(c) => c,
             Err(e) => {
+                tracing::warn!(
+                    worker_id = self.worker_id,
+                    seq_id,
+                    error = %e,
+                    "diffusion model.load rejected: invalid typed config"
+                );
                 let _ =
                     reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
                 return;
             }
         };
+
+        tracing::info!(
+            worker_id = self.worker_id,
+            seq_id,
+            model_path = %config.model_path.display(),
+            diffusion_model_path = ?config.diffusion_model_path.as_ref().map(|p| p.display().to_string()),
+            vae_path = ?config.vae_path.as_ref().map(|p| p.display().to_string()),
+            flash_attn = config.flash_attn,
+            offload_params_to_cpu = config.offload_params_to_cpu,
+            n_threads = ?config.n_threads,
+            "diffusion model.load started"
+        );
+
+        let started_at = Instant::now();
 
         // Model loading is CPU/I-O bound; use block_in_place on this thread.
         let result = tokio::task::block_in_place(|| {
@@ -260,10 +281,23 @@ impl DiffusionWorker {
                     sync: SyncMessage::Deployment(deployment),
                     sender_id: self.worker_id,
                 }));
+                tracing::info!(
+                    worker_id = self.worker_id,
+                    seq_id,
+                    elapsed_ms = started_at.elapsed().as_millis(),
+                    "diffusion model.load completed"
+                );
                 let _ =
                     reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
             }
             Err(e) => {
+                tracing::error!(
+                    worker_id = self.worker_id,
+                    seq_id,
+                    elapsed_ms = started_at.elapsed().as_millis(),
+                    error = %e,
+                    "diffusion model.load failed"
+                );
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
             }
         }
