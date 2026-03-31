@@ -13,6 +13,11 @@ pub struct GGML {
     pub(crate) lib: Arc<slab_ggml_sys::GGmlLib>,
 }
 
+/// Safety: `GGML` is thread-safe because it only contains an `Arc` to the underlying library, 
+/// which is immutable and can be safely shared across threads. 
+unsafe impl Send for GGML {}
+unsafe impl Sync for GGML {}
+
 impl GGML {
     /// Load the `ggml` shared library from `path`.
     ///

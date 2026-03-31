@@ -12,10 +12,9 @@ use validator::{Validate, ValidationError};
 use crate::domain::models::{
     ChatCompletionCommand as DomainChatCompletionCommand,
     ChatCompletionResult as DomainChatCompletionResult, ChatModelOption as DomainChatModelOption,
-    ChatModelSource as DomainChatModelSource,
-    ChatReasoningEffort as DomainChatReasoningEffort, ChatResultChoice as DomainChatResultChoice,
-    ChatStreamOptions as DomainChatStreamOptions, ChatVerbosity as DomainChatVerbosity,
-    ConversationContentPart as DomainConversationContentPart,
+    ChatModelSource as DomainChatModelSource, ChatReasoningEffort as DomainChatReasoningEffort,
+    ChatResultChoice as DomainChatResultChoice, ChatStreamOptions as DomainChatStreamOptions,
+    ChatVerbosity as DomainChatVerbosity, ConversationContentPart as DomainConversationContentPart,
     ConversationMessage as DomainConversationMessage,
     ConversationMessageContent as DomainConversationMessageContent,
     ConversationToolCall as DomainConversationToolCall,
@@ -967,10 +966,9 @@ fn reasoning_effort_from_thinking(
 ) -> Option<DomainChatReasoningEffort> {
     match thinking.mode {
         ChatThinkingType::Disabled => Some(DomainChatReasoningEffort::None),
-        ChatThinkingType::Enabled => thinking
-            .reasoning_effort
-            .map(Into::into)
-            .or(Some(DomainChatReasoningEffort::Medium)),
+        ChatThinkingType::Enabled => {
+            thinking.reasoning_effort.map(Into::into).or(Some(DomainChatReasoningEffort::Medium))
+        }
     }
 }
 
@@ -1028,8 +1026,8 @@ mod tests {
     };
     use crate::domain::models::{
         ChatCompletionCommand as DomainChatCompletionCommand,
-        ChatReasoningEffort as DomainChatReasoningEffort,
-        ChatVerbosity as DomainChatVerbosity, StructuredOutput as DomainStructuredOutput,
+        ChatReasoningEffort as DomainChatReasoningEffort, ChatVerbosity as DomainChatVerbosity,
+        StructuredOutput as DomainStructuredOutput,
         TextCompletionCommand as DomainTextCompletionCommand,
     };
     use serde_json::json;
@@ -1089,10 +1087,7 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(matches!(
-            command.reasoning_effort,
-            Some(DomainChatReasoningEffort::None)
-        ));
+        assert!(matches!(command.reasoning_effort, Some(DomainChatReasoningEffort::None)));
     }
 
     #[test]
@@ -1106,10 +1101,7 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(matches!(
-            command.reasoning_effort,
-            Some(DomainChatReasoningEffort::Medium)
-        ));
+        assert!(matches!(command.reasoning_effort, Some(DomainChatReasoningEffort::Medium)));
     }
 
     #[test]
@@ -1125,10 +1117,7 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(matches!(
-            command.reasoning_effort,
-            Some(DomainChatReasoningEffort::High)
-        ));
+        assert!(matches!(command.reasoning_effort, Some(DomainChatReasoningEffort::High)));
         assert!(matches!(command.verbosity, Some(DomainChatVerbosity::Low)));
     }
 

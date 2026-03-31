@@ -1,8 +1,6 @@
 use chrono::{DateTime, Utc};
 
-use crate::domain::models::{
-    ModelSpec, RuntimePresets, UnifiedModel, UnifiedModelStatus,
-};
+use crate::domain::models::{ModelSpec, RuntimePresets, UnifiedModel, UnifiedModelStatus};
 
 /// A model entry in the unified `models` table.
 /// Both local and cloud models share this structure.
