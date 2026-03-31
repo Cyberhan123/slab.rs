@@ -1,0 +1,55 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Slab",
+  "version": "0.1.0",
+  "identifier": "cn.cyberhan.slab",
+  "build": {
+    "beforeDevCommand": "bun run --filter @slab/desktop dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "bun run --filter @slab/desktop build",
+    "frontendDist": "../../packages/slab-desktop/dist"
+  },
+  "app": {
+    "withGlobalTauri": true,
+    "security": {
+      "csp": {
+        "default-src": "'self' asset:",
+        "script-src": "'self' asset: http://127.0.0.1:3000 blob: 'unsafe-eval'",
+        "connect-src": [
+          "'self'",
+          "http://127.0.0.1:3000"
+        ],
+        "font-src": "'self' asset:",
+        "img-src": "'self' asset: http://asset.localhost blob: data:",
+        "style-src": "'unsafe-inline' 'self'"
+      },
+      "capabilities": [
+        "main-window",
+        "plugin-webview"
+      ]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": "all",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "resources": [
+      "resources/libs/**/*"
+    ],
+    "externalBin": [
+      "binaries/slab-server",
+      "binaries/slab-runtime"
+    ],
+    "copyright": "Copyright (c) 2026 CyberHan",
+    "category": "Utility"
+  },
+  "plugins": {
+    "opener": {}
+  }
+}

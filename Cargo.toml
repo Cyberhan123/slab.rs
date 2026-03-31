@@ -1,29 +1,29 @@
 [workspace]
 resolver = "2"
 members = [
-    "slab-app/src-tauri",
-    "slab-proto",
+    "bin/slab-app/src-tauri",
+    "crates/slab-proto",
     "slab-runtime",
-    "slab-agent",
-    "slab-build-utils",
-    "slab-diffusion", 
-    "slab-diffusion-sys",
-    "slab-libfetch",
-    "slab-llama",
-    "slab-llama-sys",
-    "slab-whisper",
-    "slab-whisper-sys",
-    "slab-core-macros",
-    "slab-core",
-    "slab-types",
+    "crates/slab-agent",
+    "crates/slab-build-utils",
+    "crates/slab-diffusion", 
+    "crates/slab-diffusion-sys",
+    "crates/slab-libfetch",
+    "crates/slab-llama",
+    "crates/slab-llama-sys",
+    "crates/slab-whisper",
+    "crates/slab-whisper-sys",
+    "crates/slab-core-macros",
+    "crates/slab-core",
+    "crates/slab-types",
     "slab-server",
-    "slab-subtitle",
-    "slab-ggml",
-    "slab-ggml-sys",
+    "crates/slab-subtitle",
+    "crates/slab-ggml",
+    "crates/slab-ggml-sys",
 ]
 
 exclude = [
-    "slab-app/src",
+    "packages/slab-desktop/src",
 ]
 
 [workspace.package]
@@ -36,22 +36,22 @@ categories = ["science"]
 license = "Apache-2.0"
 
 [workspace.dependencies]
-slab-core = { path = "./slab-core", package = "slab-core", version = "0.0.1" }
-slab-agent = { path = "./slab-agent", package = "slab-agent", version = "0.0.1" }
-slab-proto = { path = "./slab-proto", package = "slab-proto", version = "0.0.1" }
-slab-types = { path = "./slab-types", package = "slab-types", version = "0.0.1" }
-slab-diffusion-sys = { path = "./slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.0.1" }
-slab-diffusion = { path = "./slab-diffusion", package = "slab-diffusion", version = "0.0.1" }
-slab-llama = { path = "./slab-llama", package = "slab-llama", version = "0.0.1" }
-slab-llama-sys = { path = "./slab-llama-sys", package = "slab-llama-sys", version = "0.0.1" }
-slab-whisper = { path = "./slab-whisper", package = "slab-whisper", version = "0.0.1" }
-slab-whisper-sys = { path = "./slab-whisper-sys", package = "slab-whisper-sys", version = "0.0.1" }
-slab-libfetch = { path = "./slab-libfetch", package = "slab-libfetch", version = "0.0.1" }
-slab-build-utils = { path = "./slab-build-utils", package = "slab-build-utils", version = "0.0.1" }
-slab-core-macros = { path = "./slab-core-macros", package = "slab-core-macros", version = "0.0.1" }
-slab-subtitle = { path = "./slab-subtitle", package = "slab-subtitle", version = "0.0.1" }
-slab-ggml-sys = { path = "./slab-ggml-sys", package = "slab-ggml-sys", version = "0.0.1" }
-slab-ggml = { path = "./slab-ggml", package = "slab-ggml", version = "0.0.1" }
+slab-core = { path = "./crates/slab-core", package = "slab-core", version = "0.0.1" }
+slab-agent = { path = "./crates/slab-agent", package = "slab-agent", version = "0.0.1" }
+slab-proto = { path = "./crates/slab-proto", package = "slab-proto", version = "0.0.1" }
+slab-types = { path = "./crates/slab-types", package = "slab-types", version = "0.0.1" }
+slab-diffusion-sys = { path = "./crates/slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.0.1" }
+slab-diffusion = { path = "./crates/slab-diffusion", package = "slab-diffusion", version = "0.0.1" }
+slab-llama = { path = "./crates/slab-llama", package = "slab-llama", version = "0.0.1" }
+slab-llama-sys = { path = "./crates/slab-llama-sys", package = "slab-llama-sys", version = "0.0.1" }
+slab-whisper = { path = "./crates/slab-whisper", package = "slab-whisper", version = "0.0.1" }
+slab-whisper-sys = { path = "./crates/slab-whisper-sys", package = "slab-whisper-sys", version = "0.0.1" }
+slab-libfetch = { path = "./crates/slab-libfetch", package = "slab-libfetch", version = "0.0.1" }
+slab-build-utils = { path = "./crates/slab-build-utils", package = "slab-build-utils", version = "0.0.1" }
+slab-core-macros = { path = "./crates/slab-core-macros", package = "slab-core-macros", version = "0.0.1" }
+slab-subtitle = { path = "./crates/slab-subtitle", package = "slab-subtitle", version = "0.0.1" }
+slab-ggml-sys = { path = "./crates/slab-ggml-sys", package = "slab-ggml-sys", version = "0.0.1" }
+slab-ggml = { path = "./crates/slab-ggml", package = "slab-ggml", version = "0.0.1" }
 
 combine = "4.6.7"
 anyhow = "1.0.102"
