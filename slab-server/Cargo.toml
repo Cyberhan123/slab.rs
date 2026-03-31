@@ -62,7 +62,7 @@ tracing-appender   = { workspace = true }
 # Error handling
 thiserror = { workspace = true }
 anyhow    = { workspace = true }
-validator = { version = "0.19", features = ["derive"] }
+validator = { version = "0.20", features = ["derive"] }
 
 # Misc
 async-trait   = { workspace = true }
