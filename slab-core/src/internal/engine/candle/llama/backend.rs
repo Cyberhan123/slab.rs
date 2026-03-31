@@ -12,21 +12,15 @@
 //! | `"inference"`        | `Inference`       | Unary text generation; input is UTF-8 prompt.   |
 //! | `"inference.stream"` | `InferenceStream` | Streaming text generation.                      |
 //!
-//! ### `model.load` input JSON
-//! ```json
-//! {
-//!   "model_path": "/path/to/model.gguf",
-//!   "tokenizer_path": "/path/to/tokenizer.json",
-//!   "seed": 0
-//! }
-//! ```
+//! ### `model.load` input payload
+//! Uses a typed [`slab_types::CandleLlamaLoadConfig`] payload inside `slab-core`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use slab_types::CandleLlamaLoadConfig;
 use tokio::sync::mpsc;
 
-use crate::internal::engine::candle::config::CandleLlamaModelLoadConfig;
 use crate::internal::engine::candle::llama::adapter::CandleLlamaEngine;
 use crate::internal::engine::candle::llama::errors::SessionId;
 use crate::internal::scheduler::backend::protocol::{
@@ -137,7 +131,7 @@ impl CandleLlamaWorker {
         input: Payload,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let config: CandleLlamaModelLoadConfig = match input.to_json() {
+        let config: CandleLlamaLoadConfig = match input.to_typed() {
             Ok(c) => c,
             Err(e) => {
                 let _ =
@@ -148,13 +142,13 @@ impl CandleLlamaWorker {
 
         let engine = Arc::new(CandleLlamaEngine::new(config.seed));
 
-        let tok_path = config.tokenizer_path.as_deref();
-        let model_path = config.model_path.clone();
+        let tokenizer_path = config.tokenizer_path;
+        let model_path = config.model_path;
         let seed = config.seed;
         let engine_clone = Arc::clone(&engine);
 
         let result = tokio::task::block_in_place(move || {
-            engine_clone.load_model(&model_path, tok_path, seed)
+            engine_clone.load_model(&model_path, tokenizer_path.as_deref(), seed)
         });
 
         match result {

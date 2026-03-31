@@ -81,10 +81,10 @@ impl CandleLlamaEngine {
     /// `tokenizer.json` in the same directory as the model file.
     fn resolve_tokenizer(
         model_path: &Path,
-        tokenizer_path: Option<&str>,
+        tokenizer_path: Option<&Path>,
     ) -> Result<PathBuf, EngineError> {
         if let Some(p) = tokenizer_path {
-            return Ok(PathBuf::from(p));
+            return Ok(p.to_path_buf());
         }
         let dir = model_path.parent().unwrap_or(Path::new("."));
         let candidate = dir.join("tokenizer.json");
@@ -100,29 +100,28 @@ impl CandleLlamaEngine {
     /// `tokenizer_path`, when `None`, falls back to `<model_dir>/tokenizer.json`.
     pub fn load_model(
         &self,
-        model_path: &str,
-        tokenizer_path: Option<&str>,
+        model_path: &Path,
+        tokenizer_path: Option<&Path>,
         seed: u64,
     ) -> Result<(), EngineError> {
-        let path = Path::new(model_path);
-        let tok_path = Self::resolve_tokenizer(path, tokenizer_path)?;
+        let tok_path = Self::resolve_tokenizer(model_path, tokenizer_path)?;
 
         #[cfg(feature = "candle")]
         {
             use candle_core::quantized::gguf_file;
             use std::fs::File;
 
-            tracing::info!(model_path, "loading candle llama model (GGUF)");
+            tracing::info!(model_path = %model_path.display(), "loading candle llama model (GGUF)");
 
             let mut model_file =
-                File::open(path).map_err(|e| CandleLlamaEngineError::LoadModel {
-                    model_path: model_path.to_owned(),
+                File::open(model_path).map_err(|e| CandleLlamaEngineError::LoadModel {
+                    model_path: model_path.display().to_string(),
                     message: e.to_string(),
                 })?;
 
             let gguf = gguf_file::Content::read(&mut model_file).map_err(|e| {
                 CandleLlamaEngineError::LoadModel {
-                    model_path: model_path.to_owned(),
+                    model_path: model_path.display().to_string(),
                     message: e.to_string(),
                 }
             })?;
@@ -130,7 +129,7 @@ impl CandleLlamaEngine {
             let device = Device::Cpu;
             let weights = ModelWeights::from_gguf(gguf, &mut model_file, &device).map_err(|e| {
                 CandleLlamaEngineError::LoadModel {
-                    model_path: model_path.to_owned(),
+                    model_path: model_path.display().to_string(),
                     message: e.to_string(),
                 }
             })?;
@@ -158,7 +157,7 @@ impl CandleLlamaEngine {
 
         #[cfg(not(feature = "candle"))]
         {
-            let _ = (tok_path, seed);
+            let _ = (model_path, tok_path, seed);
             tracing::warn!(
                 "candle feature is not enabled; model.load is a no-op for CandleLlamaEngine"
             );

@@ -10,10 +10,8 @@
 //! | `"model.unload"`    | `UnloadModel`    | Drop model weights from memory.               |
 //! | `"inference.image"` | `InferenceImage` | Generate an image; input is JSON params.      |
 //!
-//! ### `model.load` input JSON
-//! ```json
-//! { "model_path": "/path/to/unet.safetensors", "vae_path": null }
-//! ```
+//! ### `model.load` input payload
+//! Uses a typed [`slab_types::CandleDiffusionLoadConfig`] payload inside `slab-core`.
 //!
 //! ### `inference.image` input JSON
 //! ```json
@@ -32,9 +30,9 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use serde::Deserialize;
+use slab_types::CandleDiffusionLoadConfig;
 use tokio::sync::broadcast;
 
-use crate::internal::engine::candle::config::CandleDiffusionModelLoadConfig;
 use crate::internal::engine::candle::diffusion::adapter::{CandleDiffusionEngine, GenImageParams};
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
@@ -124,7 +122,7 @@ impl CandleDiffusionWorker {
         let Some(snapshot) = cmd.deployment() else {
             return;
         };
-        let config: CandleDiffusionModelLoadConfig = match snapshot.model_config() {
+        let config: CandleDiffusionLoadConfig = match snapshot.typed_model_config() {
             Ok(config) => config,
             Err(error) => {
                 tracing::warn!(error = %error, "candle.diffusion worker: invalid deployment snapshot");
@@ -145,7 +143,7 @@ impl CandleDiffusionWorker {
                 });
                 if let Err(e) = result {
                     tracing::warn!(
-                        model_path,
+                        model_path = %model_path.display(),
                         error = %e,
                         "candle.diffusion worker: broadcast LoadModel failed"
                     );
@@ -197,7 +195,7 @@ impl CandleDiffusionWorker {
         seq_id: u64,
     ) {
         let deployment = DeploymentSnapshot::with_model(seq_id, input.clone());
-        let config: CandleDiffusionModelLoadConfig = match input.to_json() {
+        let config: CandleDiffusionLoadConfig = match input.to_typed() {
             Ok(c) => c,
             Err(e) => {
                 let _ =
@@ -325,8 +323,14 @@ pub(crate) fn spawn_backend(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::CandleDiffusionWorker;
-    use crate::internal::scheduler::backend::protocol::{RuntimeControlSignal, WorkerCommand};
+    use crate::internal::scheduler::backend::protocol::{
+        DeploymentSnapshot, RuntimeControlSignal, WorkerCommand,
+    };
+    use crate::internal::scheduler::types::Payload;
+    use slab_types::CandleDiffusionLoadConfig;
     use tokio::sync::broadcast;
 
     fn make_worker() -> CandleDiffusionWorker {
@@ -339,5 +343,25 @@ mod tests {
         let mut worker = make_worker();
         worker.apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 }).await;
         // No panic – test passes.
+    }
+
+    #[test]
+    fn deployment_snapshot_reads_typed_candle_diffusion_model_config() {
+        let snapshot = DeploymentSnapshot::with_model(
+            6,
+            Payload::typed(CandleDiffusionLoadConfig {
+                model_path: PathBuf::from("model.safetensors"),
+                vae_path: Some(PathBuf::from("vae.safetensors")),
+                sd_version: "v1-5".to_owned(),
+            }),
+        );
+
+        let config = snapshot
+            .typed_model_config::<CandleDiffusionLoadConfig>()
+            .expect("typed deployment snapshot should decode");
+
+        assert_eq!(config.model_path, PathBuf::from("model.safetensors"));
+        assert_eq!(config.vae_path, Some(PathBuf::from("vae.safetensors")));
+        assert_eq!(config.sd_version, "v1-5");
     }
 }

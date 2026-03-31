@@ -1,5 +1,7 @@
 use crate::internal::engine;
-use slab_diffusion::{Diffusion, DiffusionError, SdContextParams, SdImage, SdImgGenParams};
+use slab_diffusion::{
+    Context, ContextParams, Diffusion, DiffusionError, Image, ImgParams, SampleParams,
+};
 use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -49,12 +51,12 @@ pub enum GGMLDiffusionEngineError {
 pub struct GGMLDiffusionEngine {
     instance: Arc<Diffusion>,
     // Owned per-engine context; not shared across instances.
-    ctx: Option<slab_diffusion::SdContext>,
+    ctx: Option<Context>,
 }
 
 // SAFETY: GGMLDiffusionEngine is owned exclusively by its worker task.
 // `instance: Arc<Diffusion>` is an immutable library handle safe to move
-// between threads.  `ctx: Option<SdContext>` implements Send + Sync per
+// between threads.  `ctx: Option<Context>` implements Send + Sync per
 // the upstream stable-diffusion.cpp documentation (one context per thread).
 unsafe impl Send for GGMLDiffusionEngine {}
 unsafe impl Sync for GGMLDiffusionEngine {}
@@ -94,10 +96,22 @@ impl GGMLDiffusionEngine {
         Self::build_engine(&normalized)
     }
 
+    pub fn new_context_params(&self) -> ContextParams {
+        self.instance.new_context_params()
+    }
+
+    pub fn new_image_params(&self) -> ImgParams {
+        self.instance.new_image_params()
+    }
+
+    pub fn new_sample_params(&self) -> SampleParams {
+        self.instance.new_sample_params()
+    }
+
     /// Create (or replace) the Stable Diffusion inference context.
     ///
     /// Loading the model files specified in `params` may take several seconds.
-    pub fn new_context(&mut self, params: &SdContextParams) -> Result<(), engine::EngineError> {
+    pub fn new_context(&mut self, params: ContextParams) -> Result<(), engine::EngineError> {
         self.ctx = None;
 
         let ctx = self
@@ -112,10 +126,7 @@ impl GGMLDiffusionEngine {
     /// Generate one or more images from the supplied parameters.
     ///
     /// The returned `Vec` contains exactly `params.batch_count` images.
-    pub fn generate_image(
-        &self,
-        params: &SdImgGenParams,
-    ) -> Result<Vec<SdImage>, engine::EngineError> {
+    pub fn generate_image(&self, params: ImgParams) -> Result<Vec<Image>, engine::EngineError> {
         let ctx = self.ctx.as_ref().ok_or(GGMLDiffusionEngineError::ContextNotInitialized)?;
 
         ctx.generate_image(params)
@@ -175,18 +186,20 @@ mod test {
             return;
         }
 
-        let ctx_params = SdContextParams::with_model(model_path.to_str().unwrap());
-        ds.new_context(&ctx_params).expect("failed to create diffusion context");
+        let mut ctx_params = ds.new_context_params();
+        ctx_params.set_model_path(&model_path.to_string_lossy());
+        ds.new_context(ctx_params).expect("failed to create diffusion context");
 
-        let gen_params = SdImgGenParams {
-            prompt: "a lovely cat sitting on a roof".to_string(),
-            width: 256,
-            height: 256,
-            sample_steps: 4,
-            ..SdImgGenParams::default()
-        };
+        let mut sample_params = ds.new_sample_params();
+        sample_params.set_sample_steps(4);
 
-        let images = ds.generate_image(&gen_params).expect("generate_image failed");
+        let mut image_params = ds.new_image_params();
+        image_params.set_prompt("a lovely cat sitting on a roof");
+        image_params.set_width(256);
+        image_params.set_height(256);
+        image_params.set_sample_params(sample_params);
+
+        let images = ds.generate_image(image_params).expect("generate_image failed");
 
         assert_eq!(images.len(), 1);
         assert!(!images[0].data.is_empty());

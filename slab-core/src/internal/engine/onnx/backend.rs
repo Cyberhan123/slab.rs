@@ -11,15 +11,8 @@
 //! | `"model.unload"` | `UnloadModel`  | Drop the session and free model memory.            |
 //! | `"inference"`    | `Inference`    | Run a forward pass; input and output are JSON.     |
 //!
-//! ### `model.load` input JSON
-//! ```json
-//! {
-//!   "model_path": "/models/resnet50.onnx",
-//!   "execution_providers": ["CUDA", "CPU"],
-//!   "intra_op_num_threads": 4,
-//!   "inter_op_num_threads": 1
-//! }
-//! ```
+//! ### `model.load` input payload
+//! Uses a typed [`slab_types::OnnxLoadConfig`] payload inside `slab-core`.
 //!
 //! ### `inference` input JSON
 //! ```json
@@ -49,11 +42,12 @@
 
 use std::sync::Arc;
 
+use slab_types::OnnxLoadConfig;
 use tokio::sync::broadcast;
 use tracing::warn;
 
 use crate::internal::engine::onnx::adapter::OnnxEngine;
-use crate::internal::engine::onnx::config::{OnnxInferenceInput, OnnxModelLoadConfig};
+use crate::internal::engine::onnx::config::OnnxInferenceInput;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
@@ -80,11 +74,40 @@ pub(crate) struct OnnxWorker {
     /// The config used to load the current model.  Stored so that peer workers
     /// receiving a broadcast can reproduce the same session configuration
     /// (execution providers, thread counts, etc.).
-    current_config: Option<OnnxModelLoadConfig>,
+    current_config: Option<OnnxLoadConfig>,
     /// Broadcast sender shared among all workers.
     bc_tx: broadcast::Sender<WorkerCommand>,
     /// Stable index used to populate `sender_id` when broadcasting.
     worker_id: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn deployment_snapshot_reads_typed_onnx_model_config() {
+        let snapshot = DeploymentSnapshot::with_model(
+            9,
+            Payload::typed(OnnxLoadConfig {
+                model_path: PathBuf::from("model.onnx"),
+                execution_providers: vec!["CPU".to_owned()],
+                intra_op_num_threads: Some(4),
+                inter_op_num_threads: None,
+            }),
+        );
+
+        let config = snapshot
+            .typed_model_config::<OnnxLoadConfig>()
+            .expect("typed deployment snapshot should decode");
+
+        assert_eq!(config.model_path, PathBuf::from("model.onnx"));
+        assert_eq!(config.execution_providers, vec!["CPU".to_owned()]);
+        assert_eq!(config.intra_op_num_threads, Some(4));
+        assert_eq!(config.inter_op_num_threads, None);
+    }
 }
 
 #[backend_handler]
@@ -124,7 +147,7 @@ impl OnnxWorker {
         seq_id: u64,
     ) {
         let deployment = DeploymentSnapshot::with_model(seq_id, input.clone());
-        let config: OnnxModelLoadConfig = match input.to_json() {
+        let config: OnnxLoadConfig = match input.to_typed() {
             Ok(c) => c,
             Err(e) => {
                 let _ =
@@ -215,7 +238,7 @@ impl OnnxWorker {
         let Some(snapshot) = cmd.deployment() else {
             return;
         };
-        let config: OnnxModelLoadConfig = match snapshot.model_config() {
+        let config: OnnxLoadConfig = match snapshot.typed_model_config() {
             Ok(config) => config,
             Err(error) => {
                 warn!(error = %error, "ONNX worker: invalid deployment snapshot");
@@ -240,7 +263,7 @@ impl OnnxWorker {
             Err(e) => {
                 self.current_config = None;
                 warn!(
-                    model_path,
+                    model_path = %model_path.display(),
                     error = %e,
                     "ONNX worker: broadcast LoadModel failed"
                 );

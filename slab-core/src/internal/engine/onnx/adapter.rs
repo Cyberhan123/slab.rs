@@ -14,10 +14,11 @@ use ort::{
     value::{DynValue, Tensor, TensorElementType, ValueType},
 };
 use serde_json::{json, Value as JsonValue};
+use slab_types::OnnxLoadConfig;
 use tracing::{info, warn};
 
 use super::{
-    config::{OnnxInferenceInput, OnnxModelLoadConfig, TensorInput},
+    config::{OnnxInferenceInput, TensorInput},
     OnnxEngineError,
 };
 
@@ -43,12 +44,10 @@ impl OnnxEngine {
     /// Load the ONNX model at `config.model_path` and create a session.
     ///
     /// Any previously loaded session is replaced.
-    pub(crate) fn load_model(
-        &mut self,
-        config: OnnxModelLoadConfig,
-    ) -> Result<(), OnnxEngineError> {
+    pub(crate) fn load_model(&mut self, config: OnnxLoadConfig) -> Result<(), OnnxEngineError> {
+        let model_path = config.model_path.display().to_string();
         info!(
-            model = %config.model_path,
+            model = %config.model_path.display(),
             providers = ?config.execution_providers,
             "ONNX: loading model"
         );
@@ -77,37 +76,34 @@ impl OnnxEngine {
         }
 
         let mut builder = Session::builder()
-            .map_err(|e| OnnxEngineError::SessionCreate {
-                path: config.model_path.clone(),
-                source: e,
-            })?
+            .map_err(|e| OnnxEngineError::SessionCreate { path: model_path.clone(), source: e })?
             .with_optimization_level(GraphOptimizationLevel::All)
             .map_err(|e| OnnxEngineError::SessionCreate {
-                path: config.model_path.clone(),
+                path: model_path.clone(),
                 source: e.into(),
             })?;
 
-        if config.intra_op_num_threads > 0 {
-            builder = builder.with_intra_threads(config.intra_op_num_threads).map_err(|e| {
-                OnnxEngineError::SessionCreate { path: config.model_path.clone(), source: e.into() }
+        if let Some(intra_threads) = config.intra_op_num_threads {
+            builder = builder.with_intra_threads(intra_threads).map_err(|e| {
+                OnnxEngineError::SessionCreate { path: model_path.clone(), source: e.into() }
             })?;
         }
 
-        if config.inter_op_num_threads > 0 {
-            builder = builder.with_inter_threads(config.inter_op_num_threads).map_err(|e| {
-                OnnxEngineError::SessionCreate { path: config.model_path.clone(), source: e.into() }
+        if let Some(inter_threads) = config.inter_op_num_threads {
+            builder = builder.with_inter_threads(inter_threads).map_err(|e| {
+                OnnxEngineError::SessionCreate { path: model_path.clone(), source: e.into() }
             })?;
         }
 
         builder = builder.with_execution_providers(ep_list).map_err(|e| {
-            OnnxEngineError::SessionCreate { path: config.model_path.clone(), source: e.into() }
+            OnnxEngineError::SessionCreate { path: model_path.clone(), source: e.into() }
         })?;
 
-        let session = builder.commit_from_file(&config.model_path).map_err(|e| {
-            OnnxEngineError::SessionCreate { path: config.model_path.clone(), source: e }
-        })?;
+        let session = builder
+            .commit_from_file(&config.model_path)
+            .map_err(|e| OnnxEngineError::SessionCreate { path: model_path.clone(), source: e })?;
 
-        info!(model = %config.model_path, "ONNX: model loaded");
+        info!(model = %config.model_path.display(), "ONNX: model loaded");
         self.session = Some(session);
         Ok(())
     }

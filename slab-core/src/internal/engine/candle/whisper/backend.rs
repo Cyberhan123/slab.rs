@@ -10,16 +10,14 @@
 //! | `"model.unload"` | `UnloadModel` | Drop model weights from memory.                |
 //! | `"inference"`    | `Inference`   | Transcribe f32 PCM audio; returns SRT-style.   |
 //!
-//! ### `model.load` input JSON
-//! ```json
-//! { "model_path": "/path/to/model.safetensors", "tokenizer_path": null }
-//! ```
+//! ### `model.load` input payload
+//! Uses a typed [`slab_types::CandleWhisperLoadConfig`] payload inside `slab-core`.
 
 use std::sync::Arc;
 
+use slab_types::CandleWhisperLoadConfig;
 use tokio::sync::broadcast;
 
-use crate::internal::engine::candle::config::CandleModelLoadConfig;
 use crate::internal::engine::candle::whisper::adapter::CandleWhisperEngine;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
@@ -74,7 +72,7 @@ impl CandleWhisperWorker {
         let Some(snapshot) = cmd.deployment() else {
             return;
         };
-        let config: CandleModelLoadConfig = match snapshot.model_config() {
+        let config: CandleWhisperLoadConfig = match snapshot.typed_model_config() {
             Ok(config) => config,
             Err(error) => {
                 tracing::warn!(error = %error, "candle.whisper worker: invalid deployment snapshot");
@@ -94,7 +92,7 @@ impl CandleWhisperWorker {
                 });
                 if let Err(e) = result {
                     tracing::warn!(
-                        model_path,
+                        model_path = %model_path.display(),
                         error = %e,
                         "candle.whisper worker: broadcast LoadModel failed"
                     );
@@ -146,7 +144,7 @@ impl CandleWhisperWorker {
         seq_id: u64,
     ) {
         let deployment = DeploymentSnapshot::with_model(seq_id, input.clone());
-        let config: CandleModelLoadConfig = match input.to_json() {
+        let config: CandleWhisperLoadConfig = match input.to_typed() {
             Ok(c) => c,
             Err(e) => {
                 let _ =
@@ -156,12 +154,13 @@ impl CandleWhisperWorker {
         };
 
         let engine = self.engine.get_or_insert_with(CandleWhisperEngine::new);
-        let tok_path = config.tokenizer_path.as_deref();
-        let model_path = config.model_path.clone();
+        let tokenizer_path = config.tokenizer_path;
+        let model_path = config.model_path;
         let engine_clone = engine.clone();
 
-        let result =
-            tokio::task::block_in_place(move || engine_clone.load_model(&model_path, tok_path));
+        let result = tokio::task::block_in_place(move || {
+            engine_clone.load_model(&model_path, tokenizer_path.as_deref())
+        });
 
         match result {
             Ok(()) => {
@@ -261,14 +260,37 @@ pub(crate) fn spawn_backend(
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::CandleWhisperWorker;
+    use crate::internal::scheduler::backend::protocol::DeploymentSnapshot;
     use crate::internal::scheduler::backend::protocol::RuntimeControlSignal;
     use crate::internal::scheduler::backend::protocol::WorkerCommand;
+    use crate::internal::scheduler::types::Payload;
+    use slab_types::CandleWhisperLoadConfig;
     use tokio::sync::broadcast;
 
     fn make_worker() -> CandleWhisperWorker {
         let (bc_tx, _bc_rx) = broadcast::channel::<WorkerCommand>(8);
         CandleWhisperWorker::new(None, bc_tx, 0)
+    }
+
+    #[test]
+    fn deployment_snapshot_reads_typed_candle_whisper_model_config() {
+        let snapshot = DeploymentSnapshot::with_model(
+            5,
+            Payload::typed(CandleWhisperLoadConfig {
+                model_path: PathBuf::from("model.safetensors"),
+                tokenizer_path: Some(PathBuf::from("tokenizer.json")),
+            }),
+        );
+
+        let config = snapshot
+            .typed_model_config::<CandleWhisperLoadConfig>()
+            .expect("typed deployment snapshot should decode");
+
+        assert_eq!(config.model_path, PathBuf::from("model.safetensors"));
+        assert_eq!(config.tokenizer_path, Some(PathBuf::from("tokenizer.json")));
     }
 
     #[tokio::test]
