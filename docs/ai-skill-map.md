@@ -15,7 +15,18 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
 - `shadcn-ui`
   Use for shared UI primitives, forms, dialogs, tables, and Tailwind-based component work.
 - `tauri-v2`
-  Use for `src-tauri`, Tauri commands, capabilities, IPC, plugins, and runtime integration.
+  Use for `slab-app/src-tauri`, sidecar startup, capabilities, permissions, Tauri commands, plugin webview runtime, and IPC details.
+
+## No Local Skill Needed
+
+- Agent control-plane work
+  Start in `slab-agent/**`, `slab-server/src/api/v1/agent/**`, and `slab-server/src/infra/agent_adapter.rs`.
+- Runtime and engine work
+  Start in `slab-runtime/**`, `slab-core/**`, `slab-llama/**`, `slab-whisper/**`, `slab-diffusion/**`, and `slab-ggml/**`.
+- Plugin package and bridge work
+  Start in `plugins/**`, `slab-app/src/pages/plugins/**`, `slab-app/src/lib/plugin-sdk.ts`, and `slab-app/src-tauri/src/plugins/**`.
+- Shared contracts, settings, and manifests
+  Start in `slab-types/**`, `slab-proto/**`, and `manifests/**`.
 
 ## Selection Order
 
@@ -25,10 +36,13 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
 - Chat Markdown rendering: `x-markdown`
 - Custom chat provider adaptation: `x-chat-provider` only after confirming request config alone is not enough
 - Shared frontend primitives or forms: `shadcn-ui`
-- Tauri host and permission work: `tauri-v2`
+- Tauri host, sidecar, capability, permission, or plugin webview work: `tauri-v2`
+- Agent/runtime/plugin package changes outside those frontend/Tauri concerns: work directly from the code.
 
 ## Common Pairings
 
 - Chat flow changes often need both `use-x-chat` and `x-request`.
 - Chat rendering changes sometimes pair `use-x-chat` with `x-markdown`.
 - A custom provider change should usually start with `use-x-chat` and `x-request`, then add `x-chat-provider` only if needed.
+- Plugin UI work often starts in `slab-app/src/pages/plugins/**` and adds `tauri-v2` only when the change crosses into `src-tauri`, capabilities, permissions, or plugin-view lifecycle code.
+- Agent changes usually touch both `slab-server/src/api/v1/agent/**` and `slab-agent/**` without any repo-local skill.
