@@ -5,9 +5,14 @@ use utoipa::{IntoParams, ToSchema};
 use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
+    AvailableModelsQuery as DomainAvailableModelsQuery,
+    CreateModelCommand as DomainCreateModelCommand,
+    DownloadModelCommand as DomainDownloadModelCommand,
+    ListModelsFilter as DomainListModelsFilter,
+    ModelLoadCommand as DomainModelLoadCommand,
     ModelSpec as DomainModelSpec, ModelStatus as DomainModelStatus,
     RuntimePresets as DomainRuntimePresets, UnifiedModel as DomainUnifiedModel,
-    UnifiedModelStatus as DomainUnifiedModelStatus,
+    UnifiedModelStatus as DomainUnifiedModelStatus, UpdateModelCommand as DomainUpdateModelCommand,
 };
 
 // ---------------------------------------------------------------------------
@@ -333,6 +338,119 @@ impl From<DomainUnifiedModel> for UnifiedModelResponse {
 impl From<DomainUnifiedModelStatus> for String {
     fn from(status: DomainUnifiedModelStatus) -> Self {
         status.as_str().to_owned()
+    }
+}
+
+impl From<ModelSpecRequest> for DomainModelSpec {
+    fn from(req: ModelSpecRequest) -> Self {
+        Self {
+            provider_id: req.provider_id,
+            remote_model_id: req.remote_model_id,
+            pricing: req.pricing.map(|p| crate::domain::models::Pricing {
+                input: p.input,
+                output: p.output,
+            }),
+            repo_id: req.repo_id,
+            filename: req.filename,
+            local_path: req.local_path,
+            context_window: req.context_window,
+            chat_template: req.chat_template,
+        }
+    }
+}
+
+impl From<RuntimePresetsRequest> for DomainRuntimePresets {
+    fn from(req: RuntimePresetsRequest) -> Self {
+        Self { temperature: req.temperature, top_p: req.top_p }
+    }
+}
+
+impl From<CreateModelRequest> for DomainCreateModelCommand {
+    fn from(req: CreateModelRequest) -> Self {
+        Self {
+            id: None,
+            display_name: req.display_name,
+            provider: req.provider,
+            status: req.status.and_then(|status| status.parse().ok()),
+            spec: req.spec.map(Into::into).unwrap_or_default(),
+            runtime_presets: req.runtime_presets.map(Into::into),
+        }
+    }
+}
+
+impl From<ImportModelConfigRequest> for DomainCreateModelCommand {
+    fn from(req: ImportModelConfigRequest) -> Self {
+        Self {
+            id: Some(req.id),
+            display_name: req.display_name,
+            provider: req.provider,
+            status: req.status.and_then(|status| status.parse().ok()),
+            spec: req.spec.into(),
+            runtime_presets: req.runtime_presets.map(Into::into),
+        }
+    }
+}
+
+impl From<UpdateModelRequest> for DomainUpdateModelCommand {
+    fn from(req: UpdateModelRequest) -> Self {
+        Self {
+            display_name: req.display_name,
+            provider: req.provider,
+            status: req.status.and_then(|status| status.parse().ok()),
+            spec: req.spec.map(Into::into),
+            runtime_presets: req.runtime_presets.map(Into::into),
+        }
+    }
+}
+
+impl From<LoadModelRequest> for DomainModelLoadCommand {
+    fn from(request: LoadModelRequest) -> Self {
+        Self {
+            model_id: request.model_id,
+            backend_id: request.backend_id,
+            model_path: request.model_path,
+            num_workers: request.num_workers,
+        }
+    }
+}
+
+impl From<SwitchModelRequest> for DomainModelLoadCommand {
+    fn from(request: SwitchModelRequest) -> Self {
+        Self {
+            model_id: request.model_id,
+            backend_id: request.backend_id,
+            model_path: request.model_path,
+            num_workers: request.num_workers,
+        }
+    }
+}
+
+impl From<UnloadModelRequest> for DomainModelLoadCommand {
+    fn from(request: UnloadModelRequest) -> Self {
+        Self {
+            model_id: request.model_id,
+            backend_id: request.backend_id,
+            model_path: None,
+            num_workers: None,
+        }
+    }
+}
+
+impl From<ListModelsQuery> for DomainListModelsFilter {
+    fn from(_query: ListModelsQuery) -> Self {
+        Self::default()
+    }
+}
+
+impl From<ListAvailableQuery> for DomainAvailableModelsQuery {
+    fn from(query: ListAvailableQuery) -> Self {
+        Self { repo_id: query.repo_id }
+    }
+}
+
+impl From<DownloadModelRequest> for DomainDownloadModelCommand {
+    fn from(req: DownloadModelRequest) -> Self {
+        Self { model_id: req.model_id }
     }
 }
 
