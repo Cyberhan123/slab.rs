@@ -464,12 +464,11 @@ impl InferenceWorkerState {
             if is_eog || remaining == 0 {
                 // Generation complete: optionally send the final piece, then Done.
                 if let Some(tx) = session.stream_tx.take() {
-                    if !is_eog {
-                        if let Ok(piece) = self.model.token_to_piece(token, true) {
-                            if !piece.is_empty() {
-                                let _ = tx.blocking_send(StreamChunk::Token(piece));
-                            }
-                        }
+                    if !is_eog
+                        && let Ok(piece) = self.model.token_to_piece(token, true)
+                        && !piece.is_empty()
+                    {
+                        let _ = tx.blocking_send(StreamChunk::Token(piece));
                     }
                     let _ = tx.blocking_send(StreamChunk::Done);
                 }

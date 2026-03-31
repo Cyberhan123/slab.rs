@@ -106,10 +106,10 @@ ws        ::= ([ \t\n] ws)?
 /// Returns `None` when no grammar option is set or when the raw grammar string
 /// is empty.
 fn resolve_grammar(opts: &TextGenerationOpOptions) -> Option<String> {
-    if let Some(g) = opts.grammar.as_deref() {
-        if !g.is_empty() {
-            return Some(g.to_owned());
-        }
+    if let Some(g) = opts.grammar.as_deref()
+        && !g.is_empty()
+    {
+        return Some(g.to_owned());
     }
     if opts.grammar_json {
         return Some(GRAMMAR_JSON.to_owned());
@@ -197,7 +197,6 @@ fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
 fn extract_chat_messages(opts: &TextGenerationOpOptions) -> Vec<LlamaChatMessage> {
     opts.chat_messages
         .iter()
-        .cloned()
         .filter(|message| !message.role.trim().is_empty() && message.has_meaningful_content())
         .map(|message| LlamaChatMessage {
             role: normalize_chat_role_for_template(&message.role).to_owned(),
@@ -721,14 +720,16 @@ impl LlamaWorker {
 
                                 if proto_tx.send(mapped).await.is_err() {
                                     forward_failed = true;
-                                    if !completed && !stream_error {
-                                        if let Err(error) = engine_for_spawn.cancel_generate(new_sid).await {
-                                            tracing::warn!(
-                                                session_id = new_sid,
-                                                error = %error,
-                                                "failed to cancel llama generation after downstream disconnect"
-                                            );
-                                        }
+                                    if !completed
+                                        && !stream_error
+                                        && let Err(error) =
+                                            engine_for_spawn.cancel_generate(new_sid).await
+                                    {
+                                        tracing::warn!(
+                                            session_id = new_sid,
+                                            error = %error,
+                                            "failed to cancel llama generation after downstream disconnect"
+                                        );
                                     }
                                     break;
                                 }

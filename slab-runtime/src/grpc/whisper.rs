@@ -122,10 +122,10 @@ fn build_whisper_inference_options(
             }
 
             let params = if let Some(params) = vad.params.as_ref() {
-                if let Some(threshold) = params.threshold {
-                    if !(0.0..=1.0).contains(&threshold) {
-                        return Err("vad.threshold must be between 0.0 and 1.0".to_owned());
-                    }
+                if let Some(threshold) = params.threshold
+                    && !(0.0..=1.0).contains(&threshold)
+                {
+                    return Err("vad.threshold must be between 0.0 and 1.0".to_owned());
                 }
 
                 for (name, value) in [
@@ -133,23 +133,23 @@ fn build_whisper_inference_options(
                     ("vad.min_silence_duration_ms", params.min_silence_duration_ms),
                     ("vad.speech_pad_ms", params.speech_pad_ms),
                 ] {
-                    if let Some(value) = value {
-                        if value < 0 {
-                            return Err(format!("{name} must be >= 0"));
-                        }
+                    if let Some(value) = value
+                        && value < 0
+                    {
+                        return Err(format!("{name} must be >= 0"));
                     }
                 }
 
-                if let Some(max_speech_duration_s) = params.max_speech_duration_s {
-                    if max_speech_duration_s <= 0.0 {
-                        return Err("vad.max_speech_duration_s must be > 0.0".to_owned());
-                    }
+                if let Some(max_speech_duration_s) = params.max_speech_duration_s
+                    && max_speech_duration_s <= 0.0
+                {
+                    return Err("vad.max_speech_duration_s must be > 0.0".to_owned());
                 }
 
-                if let Some(samples_overlap) = params.samples_overlap {
-                    if samples_overlap < 0.0 {
-                        return Err("vad.samples_overlap must be >= 0.0".to_owned());
-                    }
+                if let Some(samples_overlap) = params.samples_overlap
+                    && samples_overlap < 0.0
+                {
+                    return Err("vad.samples_overlap must be >= 0.0".to_owned());
                 }
 
                 Some(WhisperVadParams {
@@ -181,27 +181,27 @@ fn build_whisper_inference_options(
             ("decode.max_len", decode.max_len),
             ("decode.max_tokens", decode.max_tokens),
         ] {
-            if let Some(value) = value {
-                if value < 0 {
-                    return Err(format!("{name} must be >= 0"));
-                }
+            if let Some(value) = value
+                && value < 0
+            {
+                return Err(format!("{name} must be >= 0"));
             }
         }
 
-        if let Some(word_thold) = decode.word_thold {
-            if !(0.0..=1.0).contains(&word_thold) {
-                return Err("decode.word_thold must be between 0.0 and 1.0".to_owned());
-            }
+        if let Some(word_thold) = decode.word_thold
+            && !(0.0..=1.0).contains(&word_thold)
+        {
+            return Err("decode.word_thold must be between 0.0 and 1.0".to_owned());
         }
 
         for (name, value) in [
             ("decode.temperature", decode.temperature),
             ("decode.temperature_inc", decode.temperature_inc),
         ] {
-            if let Some(value) = value {
-                if value < 0.0 {
-                    return Err(format!("{name} must be >= 0.0"));
-                }
+            if let Some(value) = value
+                && value < 0.0
+            {
+                return Err(format!("{name} must be >= 0.0"));
             }
         }
 

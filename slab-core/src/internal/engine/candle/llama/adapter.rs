@@ -434,10 +434,10 @@ impl CandleLlamaEngine {
         }
 
         // Update session token cache.
-        if let Ok(mut state) = self.inner.write() {
-            if let Some(sess) = state.sessions.get_mut(&session_id) {
-                sess.tokens = all_tokens;
-            }
+        if let Ok(mut state) = self.inner.write()
+            && let Some(sess) = state.sessions.get_mut(&session_id)
+        {
+            sess.tokens = all_tokens;
         }
 
         send(StreamChunk::Done);

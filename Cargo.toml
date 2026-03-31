@@ -96,6 +96,8 @@ tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["cors", "trace", "request-id", "set-header", "util"] }
 tonic = { version = "0.14.5", features = ["transport"] }
 tonic-build = "0.14.5"
+tonic-prost = "0.14.5"
+tonic-prost-build = "0.14.5"
 prost = "0.14.3"
 http = "1"
 http-body-util = "0.1"

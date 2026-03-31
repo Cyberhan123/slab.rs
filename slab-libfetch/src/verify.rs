@@ -1,5 +1,6 @@
 use crate::error::FetchError;
 use sha2::{Digest, Sha256};
+use std::fmt::Write as _;
 
 /// Verify the SHA256 checksum of `data` against `expected`.
 ///
@@ -11,7 +12,11 @@ pub fn verify_sha256(data: &[u8], expected: &str) -> Result<(), FetchError> {
 
     let mut hasher = Sha256::new();
     hasher.update(data);
-    let digest = format!("{:x}", hasher.finalize());
+    let mut digest = String::with_capacity(64);
+    for byte in hasher.finalize() {
+        write!(&mut digest, "{byte:02x}")
+            .expect("writing a SHA-256 digest into a string cannot fail");
+    }
 
     if digest.eq_ignore_ascii_case(hex_expected) {
         Ok(())

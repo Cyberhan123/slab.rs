@@ -8023,7 +8023,8 @@ dependencies = [
  "slab-types",
  "thiserror 2.0.18",
  "tonic",
- "tonic-build",
+ "tonic-prost",
+ "tonic-prost-build",
 ]
 
 [[package]]

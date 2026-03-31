@@ -248,10 +248,10 @@ impl OnnxWorker {
         let model_path = config.model_path.clone();
 
         // Short-circuit: same model already loaded.
-        if let Some(cfg) = &self.current_config {
-            if cfg.model_path == model_path {
-                return;
-            }
+        if let Some(cfg) = &self.current_config
+            && cfg.model_path == model_path
+        {
+            return;
         }
 
         self.engine.unload();

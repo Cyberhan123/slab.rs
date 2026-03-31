@@ -123,11 +123,11 @@ fn render_simple(
         .map(|message| format!("{}: {}", display_role(&message.role), message.rendered_text()))
         .collect();
     let mut assistant = String::from("Assistant:");
-    if let Some(prefill) = assistant_prefill {
-        if !prefill.is_empty() {
-            assistant.push(' ');
-            assistant.push_str(prefill);
-        }
+    if let Some(prefill) = assistant_prefill
+        && !prefill.is_empty()
+    {
+        assistant.push(' ');
+        assistant.push_str(prefill);
     }
     parts.push(assistant);
     parts.join("\n")

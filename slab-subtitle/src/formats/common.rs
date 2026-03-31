@@ -74,13 +74,12 @@ where
     let mut result = Vec::new();
     for mut part in v {
         let mut push_part = true;
-        if let Some(last_part) = result.last_mut() {
-            if let Some(exchangeable_text) = extract_fn(last_part) {
-                if let Some(new_text) = extract_fn(&mut part) {
-                    exchangeable_text.push_str(new_text);
-                    push_part = false;
-                }
-            }
+        if let Some(last_part) = result.last_mut()
+            && let Some(exchangeable_text) = extract_fn(last_part)
+            && let Some(new_text) = extract_fn(&mut part)
+        {
+            exchangeable_text.push_str(new_text);
+            push_part = false;
         }
 
         if push_part {

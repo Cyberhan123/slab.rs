@@ -70,13 +70,12 @@ fn into_vad_config(vad: WhisperVadOptions) -> Result<Option<WhisperVadConfig>, S
     }
 
     let params = vad.params.unwrap_or_default();
-    if let Some(threshold) = params.threshold {
-        if !(0.0..=1.0).contains(&threshold) {
-            return Err(
-                "invalid whisper inference options: vad.threshold must be between 0.0 and 1.0"
-                    .into(),
-            );
-        }
+    if let Some(threshold) = params.threshold
+        && !(0.0..=1.0).contains(&threshold)
+    {
+        return Err(
+            "invalid whisper inference options: vad.threshold must be between 0.0 and 1.0".into()
+        );
     }
 
     for (name, value) in [
@@ -89,20 +88,18 @@ fn into_vad_config(vad: WhisperVadOptions) -> Result<Option<WhisperVadConfig>, S
         }
     }
 
-    if let Some(max_speech_duration_s) = params.max_speech_duration_s {
-        if max_speech_duration_s <= 0.0 {
-            return Err(
-                "invalid whisper inference options: vad.max_speech_duration_s must be > 0.0".into(),
-            );
-        }
+    if let Some(max_speech_duration_s) = params.max_speech_duration_s
+        && max_speech_duration_s <= 0.0
+    {
+        return Err(
+            "invalid whisper inference options: vad.max_speech_duration_s must be > 0.0".into()
+        );
     }
 
-    if let Some(samples_overlap) = params.samples_overlap {
-        if samples_overlap < 0.0 {
-            return Err(
-                "invalid whisper inference options: vad.samples_overlap must be >= 0.0".into()
-            );
-        }
+    if let Some(samples_overlap) = params.samples_overlap
+        && samples_overlap < 0.0
+    {
+        return Err("invalid whisper inference options: vad.samples_overlap must be >= 0.0".into());
     }
 
     Ok(Some(WhisperVadConfig {
@@ -128,13 +125,13 @@ fn into_decode_config(decode: WhisperDecodeOptions) -> Result<Option<WhisperDeco
         }
     }
 
-    if let Some(word_thold) = decode.word_thold {
-        if !(0.0..=1.0).contains(&word_thold) {
-            return Err(
-                "invalid whisper inference options: decode.word_thold must be between 0.0 and 1.0"
-                    .into(),
-            );
-        }
+    if let Some(word_thold) = decode.word_thold
+        && !(0.0..=1.0).contains(&word_thold)
+    {
+        return Err(
+            "invalid whisper inference options: decode.word_thold must be between 0.0 and 1.0"
+                .into(),
+        );
     }
 
     for (name, value) in [
@@ -394,20 +391,20 @@ impl WhisperWorker {
             }
         };
         let model_path = config.model_path;
-        if let Some(engine) = self.engine.as_mut() {
-            if !engine.is_model_loaded() {
-                let result = tokio::task::block_in_place(|| {
-                    use slab_whisper::WhisperContextParameters;
-                    let params = WhisperContextParameters::default();
-                    engine.new_context(&model_path, params)
-                });
-                if let Err(e) = result {
-                    tracing::warn!(
-                        model_path = %model_path.display(),
-                        error = %e,
-                        "whisper worker: broadcast LoadModel failed"
-                    );
-                }
+        if let Some(engine) = self.engine.as_mut()
+            && !engine.is_model_loaded()
+        {
+            let result = tokio::task::block_in_place(|| {
+                use slab_whisper::WhisperContextParameters;
+                let params = WhisperContextParameters::default();
+                engine.new_context(&model_path, params)
+            });
+            if let Err(e) = result {
+                tracing::warn!(
+                    model_path = %model_path.display(),
+                    error = %e,
+                    "whisper worker: broadcast LoadModel failed"
+                );
             }
         }
         self.last_model_config = snapshot.model.clone();
