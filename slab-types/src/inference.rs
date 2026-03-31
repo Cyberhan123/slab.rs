@@ -6,6 +6,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::chat::ConversationMessage;
+use crate::media::RawImageInput;
 use crate::whisper::{WhisperDecodeOptions, WhisperVadOptions};
 
 pub type JsonOptions = BTreeMap<String, serde_json::Value>;
@@ -89,6 +90,31 @@ pub struct TextGenerationRequest {
     pub options: JsonOptions,
 }
 
+/// Fully typed backend options derived from a text-generation request.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct TextGenerationOpOptions {
+    #[serde(default)]
+    pub max_tokens: Option<u32>,
+    #[serde(default)]
+    pub temperature: Option<f32>,
+    #[serde(default)]
+    pub top_p: Option<f32>,
+    #[serde(default)]
+    pub session_key: Option<String>,
+    #[serde(default)]
+    pub stream: bool,
+    #[serde(default)]
+    pub apply_chat_template: bool,
+    #[serde(default)]
+    pub chat_messages: Vec<ConversationMessage>,
+    #[serde(default)]
+    pub grammar: Option<String>,
+    #[serde(default)]
+    pub grammar_json: bool,
+    #[serde(default)]
+    pub grammar_tool_call: bool,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct TextGenerationResponse {
     pub text: String,
@@ -137,6 +163,19 @@ pub struct AudioTranscriptionRequest {
     pub options: JsonOptions,
 }
 
+/// Fully typed backend options derived from an audio-transcription request.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct AudioTranscriptionOpOptions {
+    #[serde(default)]
+    pub language: Option<String>,
+    #[serde(default)]
+    pub prompt: Option<String>,
+    #[serde(default)]
+    pub vad: Option<WhisperVadOptions>,
+    #[serde(default)]
+    pub decode: Option<WhisperDecodeOptions>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct AudioTranscriptionResponse {
     pub text: String,
@@ -155,14 +194,30 @@ pub struct ImageGenerationRequest {
     pub prompt: String,
     #[serde(default)]
     pub negative_prompt: Option<String>,
+    #[serde(default = "default_image_count")]
+    pub count: u32,
     pub width: u32,
     pub height: u32,
+    #[serde(default)]
+    pub cfg_scale: Option<f32>,
     #[serde(default)]
     pub steps: Option<i32>,
     #[serde(default)]
     pub guidance: Option<f32>,
     #[serde(default)]
     pub seed: Option<i64>,
+    #[serde(default)]
+    pub sample_method: Option<String>,
+    #[serde(default)]
+    pub scheduler: Option<String>,
+    #[serde(default)]
+    pub clip_skip: Option<i32>,
+    #[serde(default)]
+    pub strength: Option<f32>,
+    #[serde(default)]
+    pub eta: Option<f32>,
+    #[serde(default)]
+    pub init_image: Option<RawImageInput>,
     #[serde(default)]
     pub options: JsonOptions,
 }
@@ -172,14 +227,26 @@ impl Default for ImageGenerationRequest {
         Self {
             prompt: String::new(),
             negative_prompt: None,
+            count: default_image_count(),
             width: 512,
             height: 512,
+            cfg_scale: None,
             steps: Some(20),
             guidance: Some(7.5),
             seed: None,
+            sample_method: None,
+            scheduler: None,
+            clip_skip: None,
+            strength: None,
+            eta: None,
+            init_image: None,
             options: JsonOptions::default(),
         }
     }
+}
+
+const fn default_image_count() -> u32 {
+    1
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]

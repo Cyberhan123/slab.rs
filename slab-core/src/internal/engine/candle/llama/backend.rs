@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use slab_types::CandleLlamaLoadConfig;
+use slab_types::{CandleLlamaLoadConfig, TextGenerationOpOptions};
 use tokio::sync::mpsc;
 
 use crate::internal::engine::candle::llama::adapter::CandleLlamaEngine;
@@ -70,10 +70,17 @@ impl CandleLlamaWorker {
             }
         };
         let BackendRequest { input, reply_tx, .. } = req;
-        let opts = invocation.options.to_serde_value();
+        let opts: TextGenerationOpOptions = match invocation.options.to_typed() {
+            Ok(options) => options,
+            Err(error) => {
+                let _ = reply_tx
+                    .send(BackendReply::Error(format!("invalid text-generation options: {error}")));
+                return;
+            }
+        };
         let max_tokens =
-            opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
-        let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
+            opts.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
+        let session_key = opts.session_key;
         self.handle_inference(input, max_tokens, session_key, reply_tx).await;
     }
 
@@ -87,10 +94,17 @@ impl CandleLlamaWorker {
             }
         };
         let BackendRequest { input, reply_tx, .. } = req;
-        let opts = invocation.options.to_serde_value();
+        let opts: TextGenerationOpOptions = match invocation.options.to_typed() {
+            Ok(options) => options,
+            Err(error) => {
+                let _ = reply_tx
+                    .send(BackendReply::Error(format!("invalid text-generation options: {error}")));
+                return;
+            }
+        };
         let max_tokens =
-            opts.get("max_tokens").and_then(|v| v.as_u64()).map(|v| v as usize).unwrap_or(256);
-        let session_key = opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned);
+            opts.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
+        let session_key = opts.session_key;
         self.handle_inference_stream(input, max_tokens, session_key, reply_tx).await;
     }
 

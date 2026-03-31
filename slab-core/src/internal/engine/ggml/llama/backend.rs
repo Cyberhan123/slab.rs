@@ -36,8 +36,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use slab_llama::ChatMessage as LlamaChatMessage;
-use slab_types::chat::ConversationMessage;
-use slab_types::GgmlLlamaLoadConfig;
+use slab_types::{GgmlLlamaLoadConfig, TextGenerationOpOptions};
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::internal::engine::ggml::llama::adapter::GGMLLlamaEngine;
@@ -101,24 +100,21 @@ number    ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? (([eE] [-+]? [0-9]+))?
 ws        ::= ([ \t\n] ws)?
 "#;
 
-/// Resolve the active grammar string from the options map.
+/// Resolve the active grammar string from typed inference options.
 ///
 /// Priority: `grammar` (raw GBNF) > `grammar_json` > `grammar_tool_call`.
 /// Returns `None` when no grammar option is set or when the raw grammar string
 /// is empty.
-fn resolve_grammar(opts: &serde_json::Value) -> Option<String> {
-    // Highest priority: raw GBNF string.
-    if let Some(g) = opts.get("grammar").and_then(|v| v.as_str()) {
+fn resolve_grammar(opts: &TextGenerationOpOptions) -> Option<String> {
+    if let Some(g) = opts.grammar.as_deref() {
         if !g.is_empty() {
             return Some(g.to_owned());
         }
     }
-    // Second: built-in JSON grammar.
-    if opts.get("grammar_json").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if opts.grammar_json {
         return Some(GRAMMAR_JSON.to_owned());
     }
-    // Third: built-in tool-call grammar.
-    if opts.get("grammar_tool_call").and_then(|v| v.as_bool()).unwrap_or(false) {
+    if opts.grammar_tool_call {
         return Some(GRAMMAR_TOOL_CALL.to_owned());
     }
     None
@@ -140,18 +136,14 @@ struct InferenceOptions {
 }
 
 impl InferenceOptions {
-    fn from_options(opts: &serde_json::Value) -> Self {
+    fn from_options(opts: &TextGenerationOpOptions) -> Self {
         Self {
             max_tokens: opts
-                .get("max_tokens")
-                .and_then(|v| v.as_u64())
-                .map(|v| v as usize)
+                .max_tokens
+                .and_then(|value| usize::try_from(value).ok())
                 .unwrap_or(256),
-            session_key: opts.get("session_key").and_then(|s| s.as_str()).map(str::to_owned),
-            apply_chat_template: opts
-                .get("apply_chat_template")
-                .and_then(|v| v.as_bool())
-                .unwrap_or(false),
+            session_key: opts.session_key.clone(),
+            apply_chat_template: opts.apply_chat_template,
             chat_messages: extract_chat_messages(opts),
             grammar: resolve_grammar(opts),
         }
@@ -201,18 +193,11 @@ fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
-/// Deserialize a `chat_messages` JSON array from the options map into a
-/// `Vec<LlamaChatMessage>`.  Returns an empty Vec when the key is absent or
-/// the value is not an array.
-fn extract_chat_messages(opts: &serde_json::Value) -> Vec<LlamaChatMessage> {
-    let Some(raw) = opts.get("chat_messages") else {
-        return Vec::new();
-    };
-
-    raw.as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|value| serde_json::from_value::<ConversationMessage>(value.clone()).ok())
+/// Normalize typed chat messages into the backend chat-template representation.
+fn extract_chat_messages(opts: &TextGenerationOpOptions) -> Vec<LlamaChatMessage> {
+    opts.chat_messages
+        .iter()
+        .cloned()
         .filter(|message| !message.role.trim().is_empty() && message.has_meaningful_content())
         .map(|message| LlamaChatMessage {
             role: normalize_chat_role_for_template(&message.role).to_owned(),
@@ -297,8 +282,15 @@ impl LlamaWorker {
             }
         };
         let BackendRequest { input, reply_tx, .. } = req;
-        let opts = invocation.options.to_serde_value();
-        let options = InferenceOptions::from_options(&opts);
+        let raw_options: TextGenerationOpOptions = match invocation.options.to_typed() {
+            Ok(options) => options,
+            Err(error) => {
+                let _ = reply_tx
+                    .send(BackendReply::Error(format!("invalid text-generation options: {error}")));
+                return;
+            }
+        };
+        let options = InferenceOptions::from_options(&raw_options);
         self.handle_inference(input, options, reply_tx).await;
     }
 
@@ -312,8 +304,15 @@ impl LlamaWorker {
             }
         };
         let BackendRequest { input, cancel_rx, reply_tx, .. } = req;
-        let opts = invocation.options.to_serde_value();
-        let options = InferenceOptions::from_options(&opts);
+        let raw_options: TextGenerationOpOptions = match invocation.options.to_typed() {
+            Ok(options) => options,
+            Err(error) => {
+                let _ = reply_tx
+                    .send(BackendReply::Error(format!("invalid text-generation options: {error}")));
+                return;
+            }
+        };
+        let options = InferenceOptions::from_options(&raw_options);
         self.handle_inference_stream(input, options, cancel_rx, reply_tx).await;
     }
 
@@ -803,6 +802,8 @@ mod tests {
     };
     use crate::internal::scheduler::backend::protocol::RuntimeControlSignal;
     use crate::internal::scheduler::types::Payload;
+    use slab_types::chat::{ConversationMessage, ConversationMessageContent};
+    use slab_types::TextGenerationOpOptions;
 
     // ── infer_add_assistant_prompt ────────────────────────────────────────────
 
@@ -837,28 +838,46 @@ mod tests {
 
     #[test]
     fn extract_chat_messages_returns_empty_when_key_absent() {
-        let opts = serde_json::json!({ "other_key": "value" });
+        let opts = TextGenerationOpOptions::default();
         let result = extract_chat_messages(&opts);
         assert!(result.is_empty(), "missing key should yield empty vec");
     }
 
     #[test]
-    fn extract_chat_messages_returns_empty_when_value_is_not_array() {
-        let opts = serde_json::json!({ "chat_messages": "not an array" });
+    fn extract_chat_messages_returns_empty_when_messages_are_empty() {
+        let opts = TextGenerationOpOptions { chat_messages: Vec::new(), ..Default::default() };
         let result = extract_chat_messages(&opts);
-        assert!(result.is_empty(), "non-array value should yield empty vec");
+        assert!(result.is_empty(), "empty messages should yield empty vec");
     }
 
     #[test]
-    fn extract_chat_messages_skips_malformed_entries() {
-        let opts = serde_json::json!({
-            "chat_messages": [
-                { "role": "user", "content": "hello" },
-                { "role": "user" },             // missing content → skipped
-                { "content": "no role" },       // missing role → skipped
-                42,                             // wrong type → skipped
-            ]
-        });
+    fn extract_chat_messages_skips_semantically_empty_entries() {
+        let opts = TextGenerationOpOptions {
+            chat_messages: vec![
+                ConversationMessage {
+                    role: "user".to_owned(),
+                    content: ConversationMessageContent::Text("hello".to_owned()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                },
+                ConversationMessage {
+                    role: String::new(),
+                    content: ConversationMessageContent::Text("ignored".to_owned()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                },
+                ConversationMessage {
+                    role: "assistant".to_owned(),
+                    content: ConversationMessageContent::Text(String::new()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                },
+            ],
+            ..Default::default()
+        };
         let result = extract_chat_messages(&opts);
         assert_eq!(result.len(), 1);
         assert_eq!(result[0].role, "user");
@@ -867,13 +886,34 @@ mod tests {
 
     #[test]
     fn extract_chat_messages_round_trips_valid_array() {
-        let opts = serde_json::json!({
-            "chat_messages": [
-                { "role": "system", "content": "You are a helpful assistant." },
-                { "role": "user", "content": "Hi!" },
-                { "role": "assistant", "content": "Hello there!" },
-            ]
-        });
+        let opts = TextGenerationOpOptions {
+            chat_messages: vec![
+                ConversationMessage {
+                    role: "system".to_owned(),
+                    content: ConversationMessageContent::Text(
+                        "You are a helpful assistant.".to_owned(),
+                    ),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                },
+                ConversationMessage {
+                    role: "user".to_owned(),
+                    content: ConversationMessageContent::Text("Hi!".to_owned()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                },
+                ConversationMessage {
+                    role: "assistant".to_owned(),
+                    content: ConversationMessageContent::Text("Hello there!".to_owned()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: Vec::new(),
+                },
+            ],
+            ..Default::default()
+        };
         let result = extract_chat_messages(&opts);
         assert_eq!(result.len(), 3);
         assert_eq!(result[0].role, "system");
@@ -927,26 +967,26 @@ mod tests {
 
     #[test]
     fn resolve_grammar_returns_none_when_no_grammar_options_set() {
-        let opts = serde_json::json!({ "max_tokens": 64 });
+        let opts = TextGenerationOpOptions { max_tokens: Some(64), ..Default::default() };
         assert!(resolve_grammar(&opts).is_none(), "no grammar options should yield None");
     }
 
     #[test]
     fn resolve_grammar_returns_raw_grammar_string() {
         let gbnf = "root ::= \"hello\"";
-        let opts = serde_json::json!({ "grammar": gbnf });
+        let opts = TextGenerationOpOptions { grammar: Some(gbnf.to_owned()), ..Default::default() };
         assert_eq!(resolve_grammar(&opts).as_deref(), Some(gbnf));
     }
 
     #[test]
     fn resolve_grammar_ignores_empty_grammar_string() {
-        let opts = serde_json::json!({ "grammar": "" });
+        let opts = TextGenerationOpOptions { grammar: Some(String::new()), ..Default::default() };
         assert!(resolve_grammar(&opts).is_none(), "empty grammar string should yield None");
     }
 
     #[test]
     fn resolve_grammar_returns_json_grammar_when_flag_true() {
-        let opts = serde_json::json!({ "grammar_json": true });
+        let opts = TextGenerationOpOptions { grammar_json: true, ..Default::default() };
         let result = resolve_grammar(&opts);
         assert!(result.is_some(), "grammar_json=true should yield Some");
         assert!(result.unwrap().contains("root"), "JSON grammar should contain a root rule");
@@ -954,7 +994,7 @@ mod tests {
 
     #[test]
     fn resolve_grammar_returns_tool_call_grammar_when_flag_true() {
-        let opts = serde_json::json!({ "grammar_tool_call": true });
+        let opts = TextGenerationOpOptions { grammar_tool_call: true, ..Default::default() };
         let result = resolve_grammar(&opts);
         assert!(result.is_some(), "grammar_tool_call=true should yield Some");
         assert!(
@@ -966,7 +1006,11 @@ mod tests {
     #[test]
     fn resolve_grammar_raw_takes_precedence_over_json_flag() {
         let gbnf = "root ::= \"raw\"";
-        let opts = serde_json::json!({ "grammar": gbnf, "grammar_json": true });
+        let opts = TextGenerationOpOptions {
+            grammar: Some(gbnf.to_owned()),
+            grammar_json: true,
+            ..Default::default()
+        };
         assert_eq!(
             resolve_grammar(&opts).as_deref(),
             Some(gbnf),
@@ -976,7 +1020,11 @@ mod tests {
 
     #[test]
     fn resolve_grammar_json_flag_takes_precedence_over_tool_call_flag() {
-        let opts = serde_json::json!({ "grammar_json": true, "grammar_tool_call": true });
+        let opts = TextGenerationOpOptions {
+            grammar_json: true,
+            grammar_tool_call: true,
+            ..Default::default()
+        };
         let result = resolve_grammar(&opts).expect("should yield Some");
         // JSON grammar contains `value` rule; tool-call grammar contains `arguments` literal.
         assert!(

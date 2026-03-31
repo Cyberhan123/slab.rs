@@ -1,11 +1,9 @@
-use base64::Engine as _;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, instrument};
 
 use slab_core::api::ImageGenerationRequest;
 use slab_proto::{convert, slab::ipc::v1 as pb};
 use slab_types::diffusion::{DiffusionImageRequest, DiffusionVideoRequest};
-use slab_types::media::RawImageInput;
 
 use super::{extract_request_id, proto_to_status, runtime_to_status, BackendKind, GrpcServiceImpl};
 
@@ -141,88 +139,43 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
 }
 
 fn build_image_generation_request(req: &DiffusionImageRequest) -> ImageGenerationRequest {
-    let mut options = req.options.clone();
-    options.insert("batch_count".to_owned(), serde_json::json!(req.count.max(1)));
-
-    if let Some(cfg_scale) = req.cfg_scale {
-        options.insert("cfg_scale".to_owned(), serde_json::json!(cfg_scale));
-    }
-    if let Some(clip_skip) = req.clip_skip {
-        options.insert("clip_skip".to_owned(), serde_json::json!(clip_skip));
-    }
-    if let Some(strength) = req.strength {
-        options.insert("strength".to_owned(), serde_json::json!(strength));
-    }
-    if let Some(eta) = req.eta {
-        options.insert("eta".to_owned(), serde_json::json!(eta));
-    }
-    if let Some(sample_method) = req.sample_method.as_ref() {
-        options.insert("sample_method".to_owned(), serde_json::json!(sample_method));
-    }
-    if let Some(scheduler) = req.scheduler.as_ref() {
-        options.insert("scheduler".to_owned(), serde_json::json!(scheduler));
-    }
-    insert_init_image_options(&mut options, req.init_image.as_ref());
-
     ImageGenerationRequest {
         prompt: req.prompt.clone(),
         negative_prompt: req.negative_prompt.clone(),
+        count: req.count.max(1),
         width: req.width.max(1),
         height: req.height.max(1),
+        cfg_scale: req.cfg_scale,
         steps: req.steps.map(|s| s.max(1)),
         guidance: req.guidance,
         seed: req.seed,
-        options,
+        sample_method: req.sample_method.clone(),
+        scheduler: req.scheduler.clone(),
+        clip_skip: req.clip_skip,
+        strength: req.strength,
+        eta: req.eta,
+        init_image: req.init_image.clone(),
+        options: Default::default(),
     }
 }
 
 fn build_video_generation_request(req: &DiffusionVideoRequest) -> ImageGenerationRequest {
-    let mut options = req.options.clone();
-    options.insert("batch_count".to_owned(), serde_json::json!(req.video_frames.max(1)));
-    if let Some(cfg_scale) = req.cfg_scale {
-        options.insert("cfg_scale".to_owned(), serde_json::json!(cfg_scale));
-    }
-    if let Some(strength) = req.strength {
-        options.insert("strength".to_owned(), serde_json::json!(strength));
-    }
-    options.insert("fps".to_owned(), serde_json::json!(req.fps));
-
-    if let Some(sample_method) = req.sample_method.as_ref() {
-        options.insert("sample_method".to_owned(), serde_json::json!(sample_method));
-    }
-    if let Some(scheduler) = req.scheduler.as_ref() {
-        options.insert("scheduler".to_owned(), serde_json::json!(scheduler));
-    }
-    insert_init_image_options(&mut options, req.init_image.as_ref());
-
     ImageGenerationRequest {
         prompt: req.prompt.clone(),
         negative_prompt: req.negative_prompt.clone(),
+        count: req.video_frames.max(1) as u32,
         width: req.width.max(1),
         height: req.height.max(1),
+        cfg_scale: req.cfg_scale,
         steps: req.steps.map(|s| s.max(1)),
         guidance: req.guidance,
         seed: req.seed,
-        options,
+        sample_method: req.sample_method.clone(),
+        scheduler: req.scheduler.clone(),
+        clip_skip: None,
+        strength: req.strength,
+        eta: None,
+        init_image: req.init_image.clone(),
+        options: Default::default(),
     }
-}
-
-fn insert_init_image_options(
-    options: &mut slab_core::api::JsonOptions,
-    init_image: Option<&RawImageInput>,
-) {
-    let Some(init_image) = init_image else {
-        return;
-    };
-
-    options.insert(
-        "init_image_b64".to_owned(),
-        serde_json::json!(base64::engine::general_purpose::STANDARD.encode(&init_image.data)),
-    );
-    options.insert("init_image_width".to_owned(), serde_json::json!(init_image.width));
-    options.insert("init_image_height".to_owned(), serde_json::json!(init_image.height));
-    options.insert(
-        "init_image_channels".to_owned(),
-        serde_json::json!(u32::from(init_image.channels.max(1))),
-    );
 }

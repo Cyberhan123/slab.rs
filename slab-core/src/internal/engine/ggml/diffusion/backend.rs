@@ -8,37 +8,16 @@
 //! |---------------------|------------------|---------------------------------------------------|
 //! | `"model.load"`      | `LoadModel`      | Load a model from the engine.                     |
 //! | `"model.unload"`    | `UnloadModel`    | Drop the model handle; call model.load to restore. |
-//! | `"inference.image"` | `InferenceImage` | Image generation; input is JSON generation params. |
+//! | `"inference.image"` | `InferenceImage` | Image generation from typed diffusion params.     |
 //! ### `model.load` input payload
 //! Uses a typed [`slab_types::GgmlDiffusionLoadConfig`] payload inside `slab-core`.
-//!
-//! ### `inference.image` input JSON
-//! ```json
-//! {
-//!   "prompt": "a lovely cat",
-//!   "negative_prompt": "",
-//!   "width": 512,
-//!   "height": 512,
-//!   "cfg_scale": 7.0,
-//!   "guidance": 3.5,
-//!   "sample_steps": 20,
-//!   "seed": 42,
-//!   "sample_method": "auto",
-//!   "scheduler": "auto",
-//!   "clip_skip": 0,
-//!   "strength": 0.75,
-//!   "eta": 0.0,
-//!   "batch_count": 1,
-//!   "init_image_b64": null
-//! }
-//! ```
 
 use std::sync::Arc;
 
-use base64::Engine as _;
-use serde::Deserialize;
 use slab_diffusion::{GuidanceParams, Image as DiffusionImage, SampleMethod, Scheduler, SlgParams};
-use slab_types::GgmlDiffusionLoadConfig;
+use slab_types::{
+    DiffusionImageRequest, DiffusionImageResponse, GeneratedImage, GgmlDiffusionLoadConfig,
+};
 use tokio::sync::broadcast;
 
 use crate::internal::engine::ggml::diffusion::adapter::GGMLDiffusionEngine;
@@ -80,85 +59,8 @@ fn parse_scheduler(s: &str) -> Scheduler {
     }
 }
 
-#[derive(Deserialize)]
-struct GenImageParams {
-    prompt: String,
-    #[serde(default)]
-    negative_prompt: String,
-    #[serde(default = "default_width")]
-    width: u32,
-    #[serde(default = "default_height")]
-    height: u32,
-    #[serde(default = "default_steps")]
-    sample_steps: i32,
-    #[serde(default = "default_cfg_scale")]
-    cfg_scale: f32,
-    #[serde(default = "default_guidance")]
-    guidance: f32,
-    #[serde(default = "default_seed")]
-    seed: i64,
-    #[serde(default = "default_sample_method")]
-    sample_method: String,
-    #[serde(default = "default_scheduler")]
-    scheduler: String,
-    #[serde(default, rename = "clip_skip")]
-    _clip_skip: i32,
-    #[serde(default = "default_strength")]
-    strength: f32,
-    #[serde(default)]
-    eta: f32,
-    #[serde(default = "default_flow_shift")]
-    flow_shift: f32,
-    #[serde(default = "default_batch_count")]
-    batch_count: i32,
-    /// Base64-encoded raw RGB pixel data for img2img / video generation.
-    /// When present, `init_image_width`, `init_image_height`, and
-    /// `init_image_channels` must also be provided.
-    #[serde(default)]
-    init_image_b64: Option<String>,
-    #[serde(default)]
-    init_image_width: u32,
-    #[serde(default)]
-    init_image_height: u32,
-    #[serde(default = "default_channels")]
-    init_image_channels: u32,
-}
-
-fn default_width() -> u32 {
-    512
-}
-fn default_height() -> u32 {
-    512
-}
-fn default_steps() -> i32 {
-    20
-}
-fn default_cfg_scale() -> f32 {
-    7.0
-}
-fn default_guidance() -> f32 {
-    3.5
-}
-fn default_seed() -> i64 {
-    42
-}
-fn default_sample_method() -> String {
-    "auto".to_string()
-}
-fn default_scheduler() -> String {
-    "auto".to_string()
-}
-fn default_strength() -> f32 {
-    0.75
-}
 fn default_flow_shift() -> f32 {
     f32::INFINITY
-}
-fn default_batch_count() -> i32 {
-    1
-}
-fn default_channels() -> u32 {
-    3
 }
 
 fn build_context_params(
@@ -210,49 +112,52 @@ fn build_context_params(
 
 fn build_image_params(
     engine: &GGMLDiffusionEngine,
-    gen_params: GenImageParams,
+    gen_params: DiffusionImageRequest,
 ) -> Result<slab_diffusion::ImgParams, String> {
-    let init_image = if let Some(b64) = gen_params.init_image_b64 {
-        let data = base64::engine::general_purpose::STANDARD
-            .decode(b64)
-            .map_err(|e| format!("failed to decode init_image_b64: {e}"))?;
-        Some(DiffusionImage {
-            width: gen_params.init_image_width,
-            height: gen_params.init_image_height,
-            channel: gen_params.init_image_channels,
-            data,
-        })
-    } else {
-        None
-    };
+    let init_image = gen_params.init_image.as_ref().map(|image| DiffusionImage {
+        width: image.width,
+        height: image.height,
+        channel: u32::from(image.channels.max(1)),
+        data: image.data.clone(),
+    });
 
     let width = i32::try_from(gen_params.width)
         .map_err(|_| format!("width {} exceeds i32 range", gen_params.width))?;
     let height = i32::try_from(gen_params.height)
         .map_err(|_| format!("height {} exceeds i32 range", gen_params.height))?;
+    let sample_steps = gen_params.steps.unwrap_or(20).max(1);
+    let cfg_scale = gen_params.cfg_scale.unwrap_or(7.0);
+    let guidance = gen_params.guidance.unwrap_or(3.5);
+    let seed = gen_params.seed.unwrap_or(42);
+    let sample_method = gen_params.sample_method.as_deref().unwrap_or("auto");
+    let scheduler = gen_params.scheduler.as_deref().unwrap_or("auto");
+    let eta = gen_params.eta.unwrap_or(0.0);
+    let strength = gen_params.strength.unwrap_or(0.75);
+    let batch_count = i32::try_from(gen_params.count.max(1))
+        .map_err(|_| format!("count {} exceeds i32 range", gen_params.count))?;
 
     let mut sample_params = engine.new_sample_params();
-    sample_params.set_sample_steps(gen_params.sample_steps);
-    sample_params.set_sample_method(parse_sample_method(&gen_params.sample_method));
-    sample_params.set_scheduler(parse_scheduler(&gen_params.scheduler));
-    sample_params.set_eta(gen_params.eta);
-    sample_params.set_flow_shift(gen_params.flow_shift);
+    sample_params.set_sample_steps(sample_steps);
+    sample_params.set_sample_method(parse_sample_method(sample_method));
+    sample_params.set_scheduler(parse_scheduler(scheduler));
+    sample_params.set_eta(eta);
+    sample_params.set_flow_shift(default_flow_shift());
     sample_params.set_guidance(GuidanceParams {
-        txt_cfg: gen_params.cfg_scale,
-        img_cfg: gen_params.cfg_scale,
-        distilled_guidance: gen_params.guidance,
+        txt_cfg: cfg_scale,
+        img_cfg: cfg_scale,
+        distilled_guidance: guidance,
         slg: SlgParams { layers: Vec::new(), layer_start: 0.0, layer_end: 0.0, scale: 0.0 },
     });
 
     let mut params = engine.new_image_params();
     params.set_prompt(&gen_params.prompt);
-    params.set_negative_prompt(&gen_params.negative_prompt);
+    params.set_negative_prompt(gen_params.negative_prompt.as_deref().unwrap_or_default());
     params.set_width(width);
     params.set_height(height);
     params.set_sample_params(sample_params);
-    params.set_strength(gen_params.strength);
-    params.set_seed(gen_params.seed);
-    params.set_batch_count(gen_params.batch_count);
+    params.set_strength(strength);
+    params.set_seed(seed);
+    params.set_batch_count(batch_count);
     if let Some(init_image) = init_image {
         params.set_init_image(init_image);
     }
@@ -405,7 +310,7 @@ impl DiffusionWorker {
             }
         };
 
-        let gen_params: GenImageParams = match input.to_json() {
+        let gen_params: DiffusionImageRequest = match input.to_typed() {
             Ok(p) => p,
             Err(e) => {
                 let _ = reply_tx
@@ -431,17 +336,11 @@ impl DiffusionWorker {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
             }
             Ok(images) => {
-                // Encode each output image as a PNG file, then base64-encode that PNG
-                // so callers receive a standard image that can be decoded by any PNG
-                // library.  `SdImage.data` contains raw pixel bytes (width × height ×
-                // channel), NOT an image file — we must encode it ourselves.
-                let encoded: Vec<serde_json::Value> = images
+                let encoded: Vec<GeneratedImage> = images
                     .into_iter()
                     .filter(|img| !img.data.is_empty())
                     .filter_map(|img| {
                         let (w, h, channels) = (img.width, img.height, img.channel as u8);
-                        // Move `img.data` into the ImageBuffer — no clone needed since
-                        // `img` is consumed by `into_iter()`.
                         let dyn_img: Option<image::DynamicImage> = if channels == 3 {
                             image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(w, h, img.data)
                                 .map(image::DynamicImage::ImageRgb8)
@@ -457,17 +356,12 @@ impl DiffusionWorker {
                                 image::ImageFormat::Png,
                             )
                             .ok()?;
-                        let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-                        Some(serde_json::json!({
-                            "image": b64,
-                            "width": w,
-                            "height": h,
-                            "channels": channels,
-                        }))
+                        Some(GeneratedImage { bytes: png_bytes, width: w, height: h, channels })
                     })
                     .collect();
-                let payload = serde_json::json!({ "images": encoded });
-                let _ = reply_tx.send(BackendReply::Value(Payload::Json(payload)));
+                let payload =
+                    DiffusionImageResponse { images: encoded, metadata: Default::default() };
+                let _ = reply_tx.send(BackendReply::Value(Payload::typed(payload)));
             }
         }
     }
