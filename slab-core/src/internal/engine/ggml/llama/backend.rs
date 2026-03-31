@@ -44,7 +44,7 @@ use crate::internal::engine::ggml::llama::errors::SessionId;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
 };
-use crate::internal::scheduler::backend::runner::{spawn_runtime_worker, SharedIngressRx};
+use crate::internal::scheduler::backend::runner::{SharedIngressRx, spawn_runtime_worker};
 use crate::internal::scheduler::types::Payload;
 use slab_core_macros::backend_handler;
 
@@ -797,13 +797,13 @@ pub(crate) fn spawn_backend_with_engine(
 #[cfg(test)]
 mod tests {
     use super::{
-        extract_chat_messages, infer_add_assistant_prompt, resolve_grammar, LlamaWorker,
-        SessionBinding,
+        LlamaWorker, SessionBinding, extract_chat_messages, infer_add_assistant_prompt,
+        resolve_grammar,
     };
     use crate::internal::scheduler::backend::protocol::RuntimeControlSignal;
     use crate::internal::scheduler::types::Payload;
-    use slab_types::chat::{ConversationMessage, ConversationMessageContent};
     use slab_types::TextGenerationOpOptions;
+    use slab_types::chat::{ConversationMessage, ConversationMessageContent};
 
     // ── infer_add_assistant_prompt ────────────────────────────────────────────
 

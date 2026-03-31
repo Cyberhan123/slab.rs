@@ -13,8 +13,8 @@ pub use types::{
 };
 pub use view::PluginViewManager;
 
-use registry::{resolve_plugins_root, PluginRegistryState};
-use runtime::{execute_plugin_api_request_async, PluginRuntimeManager};
+use registry::{PluginRegistryState, resolve_plugins_root};
+use runtime::{PluginRuntimeManager, execute_plugin_api_request_async};
 
 pub fn register_protocol<R: Runtime>(builder: tauri::Builder<R>) -> tauri::Builder<R> {
     protocol::register_protocol(builder)

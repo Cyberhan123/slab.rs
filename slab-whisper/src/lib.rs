@@ -58,8 +58,8 @@ impl Whisper {
         #[cfg(windows)]
         {
             use libloading::os::windows::{
-                Library, LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR,
+                LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, Library,
             };
             let lib = unsafe {
                 Library::load_with_flags(

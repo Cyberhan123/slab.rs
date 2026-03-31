@@ -30,7 +30,9 @@ pub enum ErrorKind {
     DecodingError,
 
     /// The file format is not supported by this library.
-    #[error("could not determine character encoding from byte array (manually supply character encoding?)")]
+    #[error(
+        "could not determine character encoding from byte array (manually supply character encoding?)"
+    )]
     EncodingDetectionError,
 
     /// The attempted operation does not work on binary subtitle formats.

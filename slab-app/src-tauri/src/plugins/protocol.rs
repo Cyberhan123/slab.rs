@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 use std::fs;
 
-use tauri::http::{self, header, Method, StatusCode};
+use tauri::http::{self, Method, StatusCode, header};
 use tauri::{AppHandle, Manager, Runtime};
 
 use super::registry::{
-    is_path_within_root, normalize_relative_path, LoadedPlugin, PluginRegistryState,
+    LoadedPlugin, PluginRegistryState, is_path_within_root, normalize_relative_path,
 };
 use super::types::{PluginNetworkManifest, PluginNetworkMode};
 
@@ -47,7 +47,7 @@ pub fn handle_protocol_request<R: Runtime>(
                 "invalid plugin asset path",
                 Some("text/plain; charset=utf-8"),
                 None,
-            )
+            );
         }
     };
 
@@ -59,7 +59,7 @@ pub fn handle_protocol_request<R: Runtime>(
                 &error,
                 Some("text/plain; charset=utf-8"),
                 None,
-            )
+            );
         }
     };
 
@@ -71,7 +71,7 @@ pub fn handle_protocol_request<R: Runtime>(
                 &error,
                 Some("text/plain; charset=utf-8"),
                 None,
-            )
+            );
         }
     };
 
@@ -102,7 +102,7 @@ pub fn handle_protocol_request<R: Runtime>(
                 &format!("failed to read asset: {e}"),
                 Some("text/plain; charset=utf-8"),
                 None,
-            )
+            );
         }
     };
 

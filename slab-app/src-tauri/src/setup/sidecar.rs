@@ -1,16 +1,16 @@
 use std::path::PathBuf;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
     Arc, Mutex,
+    atomic::{AtomicBool, Ordering},
 };
 use std::time::Duration;
 
 use dirs_next::config_dir;
 use log::{error, info, warn};
-use tauri::path::BaseDirectory;
 use tauri::Manager;
-use tauri_plugin_shell::process::{CommandChild, CommandEvent};
+use tauri::path::BaseDirectory;
 use tauri_plugin_shell::ShellExt;
+use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
 pub struct SidecarState {
     child: Mutex<Option<CommandChild>>,

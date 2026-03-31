@@ -3,7 +3,7 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum::routing::{get, post};
-use axum::{middleware, Json, Router};
+use axum::{Json, Router, middleware};
 use utoipa::OpenApi;
 
 use crate::api::middleware::auth;

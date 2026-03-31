@@ -221,11 +221,7 @@ impl WhisperState {
                 lang_probs.as_mut_ptr(),
             )
         };
-        if ret < 0 {
-            Err(WhisperError::GenericError(ret))
-        } else {
-            Ok((ret, lang_probs))
-        }
+        if ret < 0 { Err(WhisperError::GenericError(ret)) } else { Ok((ret, lang_probs)) }
     }
 
     // logit functions
@@ -351,9 +347,9 @@ impl WhisperState {
     ///
     /// # Safety
     /// You must ensure `segment` is in bounds for this [`WhisperState`].
-    pub unsafe fn get_segment_unchecked(&self, segment: c_int) -> WhisperSegment<'_> { unsafe {
-        self.ctx.instance.new_unchecked_segment(self, segment)
-    }}
+    pub unsafe fn get_segment_unchecked(&self, segment: c_int) -> WhisperSegment<'_> {
+        unsafe { self.ctx.instance.new_unchecked_segment(self, segment) }
+    }
 
     /// Get an iterator over all segments.
     pub fn as_iter(&self) -> WhisperStateSegmentIterator<'_> {

@@ -1,5 +1,5 @@
 use crate::common_logging::{
-    generic_debug, generic_error, generic_info, generic_trace, generic_warn, GGMLLogLevel,
+    GGMLLogLevel, generic_debug, generic_error, generic_info, generic_trace, generic_warn,
 };
 use core::ffi::{c_char, c_void};
 use slab_whisper_sys::ggml_log_level;

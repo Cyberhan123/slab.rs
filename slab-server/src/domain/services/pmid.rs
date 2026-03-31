@@ -7,7 +7,7 @@ use slab_types::settings::{
 };
 
 use crate::domain::models::{
-    SettingPropertyView, SettingsDocumentView, UpdateSettingCommand, UpdateSettingOperation, PMID,
+    PMID, SettingPropertyView, SettingsDocumentView, UpdateSettingCommand, UpdateSettingOperation,
 };
 use crate::error::ServerError;
 use crate::infra::settings::SettingsProvider;
@@ -201,7 +201,7 @@ mod tests {
     use uuid::Uuid;
 
     use super::*;
-    use crate::domain::models::{SettingsValuesFile, PMID};
+    use crate::domain::models::{PMID, SettingsValuesFile};
 
     fn temp_settings_path() -> PathBuf {
         let base = std::env::temp_dir().join(format!("slab-pmid-test-{}", Uuid::new_v4()));

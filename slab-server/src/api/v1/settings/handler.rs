@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use axum::extract::{Path, State};
 use axum::routing::get;
-use axum::{middleware, Json, Router};
+use axum::{Json, Router, middleware};
 use serde::Deserialize;
 use utoipa::{IntoParams, OpenApi};
 use validator::Validate;

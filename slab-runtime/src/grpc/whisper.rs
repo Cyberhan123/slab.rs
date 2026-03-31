@@ -9,7 +9,7 @@ use slab_core::api::AudioTranscriptionRequest;
 use slab_proto::slab::ipc::v1 as pb;
 use slab_types::{WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams};
 
-use super::{extract_request_id, runtime_to_status, BackendKind, GrpcServiceImpl};
+use super::{BackendKind, GrpcServiceImpl, extract_request_id, runtime_to_status};
 
 #[tonic::async_trait]
 impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {

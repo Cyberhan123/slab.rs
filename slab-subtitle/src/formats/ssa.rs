@@ -7,7 +7,7 @@ use crate::{SubtitleEntry, SubtitleFileInterface};
 use crate::errors::Result as SubtitleParserResult;
 use crate::formats::common::*;
 use combine::parser::char::string;
-use combine::{any, count, eof, many, none_of, token, Parser};
+use combine::{Parser, any, count, eof, many, none_of, token};
 
 use crate::timetypes::{TimePoint, TimeSpan};
 use std::iter::once;

@@ -1,5 +1,5 @@
-use crate::whisper_state::WhisperSegment;
 use crate::WhisperState;
+use crate::whisper_state::WhisperSegment;
 use std::ffi::c_int;
 
 /// An iterator over a [`WhisperState`]'s result.

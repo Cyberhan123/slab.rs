@@ -1,13 +1,13 @@
 use std::marker::PhantomData;
 use std::sync::Arc;
 
-use futures::stream::{self, BoxStream};
 use futures::StreamExt;
+use futures::stream::{self, BoxStream};
 
 use crate::base::error::CoreError;
 use crate::base::types::{Payload, StreamChunk, TaskId, TaskStatus};
 use crate::internal::scheduler::orchestrator::{
-    Orchestrator, DEFAULT_WAIT_TIMEOUT, STREAM_INIT_TIMEOUT,
+    DEFAULT_WAIT_TIMEOUT, Orchestrator, STREAM_INIT_TIMEOUT,
 };
 use crate::internal::scheduler::storage::TaskStatusView;
 use crate::model::Capability;

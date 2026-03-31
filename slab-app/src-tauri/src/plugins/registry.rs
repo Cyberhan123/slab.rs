@@ -137,7 +137,7 @@ pub fn normalize_relative_path(raw: &str) -> Result<String, String> {
             }
             Component::CurDir => {}
             Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
-                return Err(format!("path `{raw}` is invalid"))
+                return Err(format!("path `{raw}` is invalid"));
             }
         }
     }

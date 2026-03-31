@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
+use crate::Llama;
 use crate::llama_context::LlamaContext;
 use crate::token::LlamaToken;
-use crate::Llama;
 
 /// A safe wrapper around a llama sampler chain.
 ///

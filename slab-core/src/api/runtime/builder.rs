@@ -5,7 +5,7 @@ use crate::internal::dispatch::DriverResolver;
 use crate::internal::scheduler::backend::admission::{ResourceManager, ResourceManagerConfig};
 use crate::internal::scheduler::orchestrator::Orchestrator;
 
-use super::builtins::{register_builtin_drivers, DriversConfig};
+use super::builtins::{DriversConfig, register_builtin_drivers};
 use super::registry::Runtime;
 
 #[derive(Debug, Clone)]

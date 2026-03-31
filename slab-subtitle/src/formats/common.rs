@@ -4,17 +4,13 @@
 
 use combine::parser::char::{char, digit};
 use combine::parser::token::{any, eof, satisfy};
-use combine::{many, many1, optional, Parser, Stream};
+use combine::{Parser, Stream, many, many1, optional};
 use std::fmt::Display;
 use std::str::FromStr;
 
 /// Returns the string without BOMs. Unchanged if string does not start with one.
 pub fn split_bom(s: &str) -> (&str, &str) {
-    if s.starts_with('\u{FEFF}') {
-        s.split_at(3)
-    } else {
-        ("", s)
-    }
+    if s.starts_with('\u{FEFF}') { s.split_at(3) } else { ("", s) }
 }
 
 #[test]
@@ -61,11 +57,7 @@ where
     p.to_string().trim().lines().map(str::trim).filter(|line| !line.is_empty()).fold(
         String::new(),
         |a: String, b: &str| {
-            if a.is_empty() {
-                b.to_string()
-            } else {
-                a + "; " + b
-            }
+            if a.is_empty() { b.to_string() } else { a + "; " + b }
         },
     )
 }

@@ -5,9 +5,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use extism::{Manifest as ExtismManifest, Plugin, PluginBuilder, UserData, Wasm};
+use reqwest::Client as AsyncHttpClient;
 use reqwest::blocking::Client as BlockingHttpClient;
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
-use reqwest::Client as AsyncHttpClient;
 use tauri::{AppHandle, Emitter};
 
 use super::registry::LoadedPlugin;

@@ -1,4 +1,4 @@
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use genai::adapter::AdapterKind;
 use genai::chat::{
     ChatMessage as GenaiChatMessage, ChatOptions as GenaiChatOptions,
@@ -10,11 +10,11 @@ use genai::resolver::{AuthData, Endpoint, ServiceTargetResolver};
 use genai::{
     Client as GenaiClient, ModelIden as GenaiModelIden, ServiceTarget as GenaiServiceTarget,
 };
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use slab_types::inference::TextGenerationResponse;
 use std::collections::BTreeMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -489,11 +489,7 @@ async fn find_cloud_catalog_model(
     };
     let model: UnifiedModel =
         record.try_into().map_err(|error: String| ServerError::Internal(error))?;
-    if is_cloud_catalog_model(&model) {
-        Ok(Some(model))
-    } else {
-        Ok(None)
-    }
+    if is_cloud_catalog_model(&model) { Ok(Some(model)) } else { Ok(None) }
 }
 
 fn parse_legacy_cloud_option_id(model_id: &str) -> Option<(&str, &str)> {
@@ -613,11 +609,7 @@ fn build_genai_chat_options(
         options = options.with_response_format(response_format);
     }
 
-    if capture_raw_body {
-        options.with_capture_raw_body(true)
-    } else {
-        options
-    }
+    if capture_raw_body { options.with_capture_raw_body(true) } else { options }
 }
 
 fn map_reasoning_effort(value: ChatReasoningEffort) -> GenaiReasoningEffort {
@@ -732,19 +724,11 @@ async fn cloud_chat_stream(
         let mapped = match item {
             Ok(GenaiChatStreamEvent::Chunk(chunk)) => {
                 let token = chunk.content;
-                if token.is_empty() {
-                    None
-                } else {
-                    Some(Ok(CloudDelta::Content(token)))
-                }
+                if token.is_empty() { None } else { Some(Ok(CloudDelta::Content(token))) }
             }
             Ok(GenaiChatStreamEvent::ReasoningChunk(chunk)) => {
                 let token = chunk.content;
-                if token.is_empty() {
-                    None
-                } else {
-                    Some(Ok(CloudDelta::Reasoning(token)))
-                }
+                if token.is_empty() { None } else { Some(Ok(CloudDelta::Reasoning(token))) }
             }
             Ok(GenaiChatStreamEvent::ToolCallChunk(_))
             | Ok(GenaiChatStreamEvent::ThoughtSignatureChunk(_))
@@ -1155,10 +1139,10 @@ fn redact_secret_json(value: &Value) -> String {
 #[cfg(test)]
 mod test {
     use super::{
+        CloudChatRequestConfig, GenaiChatResponseFormat, ResolvedCloudModel,
         build_cloud_http_request_body, build_openai_chat_completions_url, cloud_option_id,
         ensure_genai_endpoint_base, redact_header_value,
-        structured_output_to_genai_response_format, CloudChatRequestConfig,
-        GenaiChatResponseFormat, ResolvedCloudModel,
+        structured_output_to_genai_response_format,
     };
     use crate::domain::models::{
         ConversationMessage as DomainConversationMessage, ConversationMessageContent,

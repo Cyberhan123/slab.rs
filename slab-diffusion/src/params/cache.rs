@@ -3,8 +3,8 @@ use std::ptr;
 
 use slab_diffusion_sys::{sd_cache_mode_t, sd_cache_params_t};
 
-use crate::params::support::{c_string_ptr, new_c_string};
 use crate::Diffusion;
+use crate::params::support::{c_string_ptr, new_c_string};
 
 #[rustfmt::skip]
 use slab_diffusion_sys::{

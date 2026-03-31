@@ -26,7 +26,7 @@ use crate::internal::engine::candle::llama::errors::SessionId;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
 };
-use crate::internal::scheduler::backend::runner::{spawn_runtime_worker, SharedIngressRx};
+use crate::internal::scheduler::backend::runner::{SharedIngressRx, spawn_runtime_worker};
 use crate::internal::scheduler::types::Payload;
 use slab_core_macros::backend_handler;
 use tokio::sync::broadcast;

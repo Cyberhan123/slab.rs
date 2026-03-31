@@ -71,7 +71,7 @@ fn register_ggml_drivers(
 
     use crate::internal::engine::ggml::{
         diffusion::{DiffusionWorker, GGMLDiffusionEngine},
-        llama::{spawn_backend_with_engine as spawn_llama, GGMLLlamaEngine},
+        llama::{GGMLLlamaEngine, spawn_backend_with_engine as spawn_llama},
         whisper::{GGMLWhisperEngine, WhisperWorker},
     };
     use crate::internal::scheduler::backend::runner::spawn_workers;

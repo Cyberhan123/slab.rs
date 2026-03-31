@@ -2,11 +2,11 @@ use std::ptr;
 
 use slab_diffusion_sys::{sd_image_t, sd_lora_t, sd_vid_gen_params_t};
 
+use crate::Diffusion;
 use crate::params::support::{
     empty_image, image_view, new_c_string, sync_image_views, sync_lora_views,
 };
 use crate::params::{CacheParams, Image, Lora, SampleParams, TilingParams};
-use crate::Diffusion;
 
 #[derive(Debug, Clone, Default)]
 pub struct Video {

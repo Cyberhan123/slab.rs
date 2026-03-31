@@ -2,12 +2,12 @@ use futures::StreamExt;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
-use tracing::{debug, error, info, instrument, warn, Instrument};
+use tracing::{Instrument, debug, error, info, instrument, warn};
 
 use slab_core::api::TextGenerationChunk;
 use slab_proto::{convert, slab::ipc::v1 as pb};
 
-use super::{extract_request_id, proto_to_status, runtime_to_status, BackendKind, GrpcServiceImpl};
+use super::{BackendKind, GrpcServiceImpl, extract_request_id, proto_to_status, runtime_to_status};
 
 #[tonic::async_trait]
 impl pb::llama_service_server::LlamaService for GrpcServiceImpl {

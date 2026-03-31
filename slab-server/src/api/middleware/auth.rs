@@ -1,7 +1,7 @@
 use crate::context::AppState;
 use axum::{
     extract::{Request, State},
-    http::{header::AUTHORIZATION, StatusCode},
+    http::{StatusCode, header::AUTHORIZATION},
     middleware::Next,
     response::{IntoResponse, Response},
 };
@@ -26,9 +26,5 @@ pub async fn auth_middleware(
         Some(expected) => provided.map(|p| p == expected).unwrap_or(false),
     };
 
-    if is_authorized {
-        next.run(req).await
-    } else {
-        StatusCode::UNAUTHORIZED.into_response()
-    }
+    if is_authorized { next.run(req).await } else { StatusCode::UNAUTHORIZED.into_response() }
 }

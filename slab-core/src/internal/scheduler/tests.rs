@@ -18,11 +18,14 @@ fn payload_clone_does_not_copy_bytes() {
     let p1 = Payload::Bytes(Arc::clone(&data));
     let p2 = p1.clone();
     // Both variants should share the same underlying allocation.
-    match (p1, p2) { (Payload::Bytes(a), Payload::Bytes(b)) => {
-        assert!(Arc::ptr_eq(&a, &b), "clone should share Arc pointer");
-    } _ => {
-        panic!("unexpected payload variant");
-    }}
+    match (p1, p2) {
+        (Payload::Bytes(a), Payload::Bytes(b)) => {
+            assert!(Arc::ptr_eq(&a, &b), "clone should share Arc pointer");
+        }
+        _ => {
+            panic!("unexpected payload variant");
+        }
+    }
 }
 
 #[tokio::test]
@@ -504,9 +507,9 @@ async fn inconsistent_global_state_blocks_inference_submission() {
         .await;
 
     assert!(
-            matches!(result, Err(CoreError::GlobalStateInconsistent { op_id: seen }) if seen == op_id),
-            "inference submission should be rejected while global state is inconsistent, got {result:?}"
-        );
+        matches!(result, Err(CoreError::GlobalStateInconsistent { op_id: seen }) if seen == op_id),
+        "inference submission should be rejected while global state is inconsistent, got {result:?}"
+    );
 }
 
 #[tokio::test]

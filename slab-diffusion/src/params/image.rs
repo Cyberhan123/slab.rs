@@ -4,12 +4,12 @@ use std::slice;
 use libc::free;
 use slab_diffusion_sys::{sd_image_t, sd_img_gen_params_t, sd_lora_t};
 
+use crate::Diffusion;
 use crate::params::support::{
     copy_and_free_c_string, empty_image, image_view, new_c_string, sync_image_views,
     sync_lora_views,
 };
 use crate::params::{CacheParams, Lora, PmParams, SampleParams, TilingParams};
-use crate::Diffusion;
 
 /// Rust image container.
 #[derive(Debug, Clone, Default)]

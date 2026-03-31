@@ -8,7 +8,7 @@ use utoipa::OpenApi;
 use validator::Validate;
 
 use crate::api::v1::session::schema::{CreateSessionRequest, MessageResponse, SessionResponse};
-use crate::api::validation::{validate, ValidatedJson};
+use crate::api::validation::{ValidatedJson, validate};
 use crate::context::AppState;
 use crate::domain::services::SessionService;
 use crate::error::ServerError;

@@ -8,7 +8,7 @@ pub use config::{
     SetupBackendsConfig, SetupConfig, SetupFfmpegConfig,
 };
 pub use pmid::{
-    ChatPmids, DiffusionPathPmids, DiffusionPerformancePmids, DiffusionPmids, PmidCatalog,
+    ChatPmids, DiffusionPathPmids, DiffusionPerformancePmids, DiffusionPmids, PMID, PmidCatalog,
     RuntimeLlamaPmids, RuntimeModelAutoUnloadPmids, RuntimePmids, RuntimeWorkerPmids, SettingPmid,
-    SetupBackendPmids, SetupBackendReleasePmids, SetupFfmpegPmids, SetupPmids, PMID,
+    SetupBackendPmids, SetupBackendReleasePmids, SetupFfmpegPmids, SetupPmids,
 };

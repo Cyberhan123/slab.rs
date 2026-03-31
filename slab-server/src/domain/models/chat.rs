@@ -457,11 +457,7 @@ fn structured_output_json_schema_from_api(
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_owned())
-        }
+        if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
     })
 }
 

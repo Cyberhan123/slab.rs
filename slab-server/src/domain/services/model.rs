@@ -19,7 +19,7 @@ use crate::error::ServerError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
 use crate::infra::model_configs;
 use crate::infra::rpc::{self, pb};
-use crate::model_auto_unload::{build_model_load_request, LoadedModelSpec};
+use crate::model_auto_unload::{LoadedModelSpec, build_model_load_request};
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 
@@ -539,11 +539,7 @@ fn normalize_required_text(value: String, label: &str) -> Result<String, ServerE
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_owned())
-        }
+        if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
     })
 }
 

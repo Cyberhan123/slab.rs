@@ -245,11 +245,7 @@ macro_rules! create_time_type {
 
             /// Return the absolute value of the current time.
             pub fn abs(&self) -> $i {
-                if self.is_negative() {
-                    -*self
-                } else {
-                    *self
-                }
+                if self.is_negative() { -*self } else { *self }
             }
         }
 

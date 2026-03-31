@@ -1,6 +1,6 @@
 use crate::{WhisperError, WhisperSegment, WhisperTokenData, WhisperTokenId};
 use std::borrow::Cow;
-use std::ffi::{c_int, CStr};
+use std::ffi::{CStr, c_int};
 use std::fmt;
 
 use crate::Whisper;

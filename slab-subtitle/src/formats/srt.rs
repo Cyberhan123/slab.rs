@@ -9,7 +9,7 @@ use crate::{SubtitleEntry, SubtitleFileInterface};
 use crate::errors::Result as SubtitleParserResult;
 use crate::formats::common::*;
 use combine::parser::char::{char, string};
-use combine::{eof, skip_many, Parser};
+use combine::{Parser, eof, skip_many};
 
 use itertools::Itertools;
 
@@ -250,8 +250,8 @@ impl SrtFile {
 mod tests {
     #[test]
     fn create_srt_test() {
-        use crate::timetypes::{TimePoint, TimeSpan};
         use crate::SubtitleFileInterface;
+        use crate::timetypes::{TimePoint, TimeSpan};
 
         let lines = vec![
             (

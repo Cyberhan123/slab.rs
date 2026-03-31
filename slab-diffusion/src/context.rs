@@ -5,8 +5,8 @@ use libc::free;
 
 use crate::error::DiffusionError;
 use crate::params::{
-    owned_image_from_raw, ContextParams, Image, ImgParams, SampleMethod, Scheduler, Video,
-    VideoParams,
+    ContextParams, Image, ImgParams, SampleMethod, Scheduler, Video, VideoParams,
+    owned_image_from_raw,
 };
 
 /// A Stable Diffusion inference context.

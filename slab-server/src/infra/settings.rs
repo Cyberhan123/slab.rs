@@ -11,8 +11,8 @@ use uuid::Uuid;
 use slab_types::settings::CloudProviderConfig;
 
 use crate::domain::models::{
-    embedded_settings_schema, SettingDefinition, SettingsDocumentView, SettingsSchema,
-    SettingsSectionView, SettingsSubsectionView, SettingsValuesFile, UpdateSettingCommand,
+    SettingDefinition, SettingsDocumentView, SettingsSchema, SettingsSectionView,
+    SettingsSubsectionView, SettingsValuesFile, UpdateSettingCommand, embedded_settings_schema,
 };
 use crate::error::ServerError;
 
@@ -150,11 +150,7 @@ impl SettingsProvider {
         match value {
             serde_json::Value::String(value) => {
                 let trimmed = value.trim().to_owned();
-                if trimmed.is_empty() {
-                    Ok(None)
-                } else {
-                    Ok(Some(trimmed))
-                }
+                if trimmed.is_empty() { Ok(None) } else { Ok(Some(trimmed)) }
             }
             serde_json::Value::Null => Ok(None),
             other => Err(ServerError::Internal(format!(
@@ -414,7 +410,7 @@ fn replace_file(from: &Path, to: &Path) -> Result<(), ServerError> {
 #[cfg(windows)]
 fn replace_file(from: &Path, to: &Path) -> Result<(), ServerError> {
     use windows_sys::Win32::Storage::FileSystem::{
-        MoveFileExW, MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH,
+        MOVEFILE_REPLACE_EXISTING, MOVEFILE_WRITE_THROUGH, MoveFileExW,
     };
 
     let from_wide: Vec<u16> = from.as_os_str().encode_wide().chain(Some(0)).collect();

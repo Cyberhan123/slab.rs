@@ -1,4 +1,4 @@
-use std::ffi::{c_int, NulError};
+use std::ffi::{NulError, c_int};
 use std::str::Utf8Error;
 use thiserror::Error;
 
@@ -41,7 +41,9 @@ pub enum WhisperError {
     #[error("Invalid thread count.")]
     InvalidThreadCount,
     /// Invalid UTF-8 detected in a string from Whisper.
-    #[error("Invalid UTF-8 detected in a string from Whisper. Valid up to index {valid_up_to}, error length: {error_len:?}")]
+    #[error(
+        "Invalid UTF-8 detected in a string from Whisper. Valid up to index {valid_up_to}, error length: {error_len:?}"
+    )]
     InvalidUtf8 { error_len: Option<usize>, valid_up_to: usize },
     /// A null byte was detected in a user-provided string.
     #[error("A null byte was detected in a user-provided string. Index: {idx}")]
@@ -62,7 +64,9 @@ pub enum WhisperError {
     #[error("Input sample buffer was empty.")]
     NoSamples,
     /// Input and output slices were not the same length.
-    #[error("Input and output slices were not the same length. Input: {input_len}, Output: {output_len}")]
+    #[error(
+        "Input and output slices were not the same length. Input: {input_len}, Output: {output_len}"
+    )]
     InputOutputLengthMismatch { input_len: usize, output_len: usize },
     /// Input slice was not an even number of samples.
     #[error("Input slice was not an even number of samples: got {0} (must be an even number)")]

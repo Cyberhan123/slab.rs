@@ -1,3 +1,3 @@
 pub mod handler;
 
-pub use handler::{router, SettingsApi};
+pub use handler::{SettingsApi, router};
