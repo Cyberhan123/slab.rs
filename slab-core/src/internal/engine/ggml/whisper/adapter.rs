@@ -1,7 +1,7 @@
 use crate::internal::engine;
 use slab_subtitle::{
-    timetypes::{TimePoint, TimeSpan},
     SubtitleEntry,
+    timetypes::{TimePoint, TimeSpan},
 };
 use slab_whisper::{
     SamplingStrategy, Whisper, WhisperContext, WhisperContextParameters, WhisperError,

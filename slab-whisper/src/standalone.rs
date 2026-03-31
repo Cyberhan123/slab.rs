@@ -1,6 +1,6 @@
 //! Standalone functions that have no associated type.
 
-use std::ffi::{c_int, CStr, CString};
+use std::ffi::{CStr, CString, c_int};
 
 use crate::Whisper;
 
@@ -21,11 +21,7 @@ impl Whisper {
     pub fn get_lang_id(&self, lang: &str) -> Option<c_int> {
         let c_lang = CString::new(lang).expect("Language contains null byte");
         let ret = unsafe { self.lib.whisper_lang_id(c_lang.as_ptr()) };
-        if ret == -1 {
-            None
-        } else {
-            Some(ret)
-        }
+        if ret == -1 { None } else { Some(ret) }
     }
 
     /// Return the ID of the maximum language (ie the number of languages - 1)

@@ -16,7 +16,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{fs::OpenOptions, future::Future, io::ErrorKind};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use clap::Parser;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command as TokioCommand};
@@ -823,7 +823,7 @@ async fn shutdown_signal(listen_stdin: bool) {
 
     #[cfg(unix)]
     let terminate = async {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         match signal(SignalKind::terminate()) {
             Ok(mut s) => {
                 s.recv().await;

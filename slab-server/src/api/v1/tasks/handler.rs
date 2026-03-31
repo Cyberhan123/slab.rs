@@ -8,7 +8,7 @@ use utoipa::OpenApi;
 use validator::Validate;
 
 use crate::api::v1::tasks::schema::{TaskResponse, TaskResultPayload, TaskTypeQuery};
-use crate::api::validation::{validate, ValidatedQuery};
+use crate::api::validation::{ValidatedQuery, validate};
 use crate::context::AppState;
 use crate::domain::services::TaskApplicationService;
 use crate::error::ServerError;

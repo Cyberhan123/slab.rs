@@ -5,8 +5,8 @@ mod local;
 mod template;
 
 use chrono::Utc;
-use futures::stream::{self, BoxStream};
 use futures::StreamExt;
+use futures::stream::{self, BoxStream};
 use serde_json::Value;
 use slab_types::inference::{TextGenerationResponse, TextGenerationUsage};
 use std::sync::{Arc, Mutex};
@@ -15,11 +15,11 @@ use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    assistant_message_from_parts, assistant_message_from_text_response, serialize_session_message,
     ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
     ChatResultChoice, ChatStreamChunk, ConversationMessage as DomainConversationMessage,
     ConversationMessageContent, StructuredOutput, TextCompletionCommand, TextCompletionOutput,
-    TextCompletionResult, TextResultChoice,
+    TextCompletionResult, TextResultChoice, assistant_message_from_parts,
+    assistant_message_from_text_response, serialize_session_message,
 };
 use crate::error::ServerError;
 use crate::infra::db::{ChatMessage, ChatStore};

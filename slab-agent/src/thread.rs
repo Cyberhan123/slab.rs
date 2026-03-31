@@ -14,7 +14,7 @@ use crate::{
     error::AgentError,
     port::{AgentNotifyPort, AgentStorePort, LlmPort, ThreadSnapshot, ThreadStatus},
     tool::ToolRouter,
-    turn::{execute_turn, TurnExecutionContext},
+    turn::{TurnExecutionContext, execute_turn},
 };
 
 /// A single agent conversation thread.

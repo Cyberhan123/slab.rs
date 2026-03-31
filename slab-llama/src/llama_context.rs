@@ -1,12 +1,12 @@
 use std::ffi::CString;
 use std::sync::Arc;
 
+use crate::LlamaStateSeqFlags;
 use crate::error::LlamaError;
 use crate::llama_adapter::LlamaLoraAdapter;
 use crate::llama_batch::LlamaBatch;
 use crate::llama_model::LlamaModelInner;
 use crate::token::{LlamaSeqId, LlamaToken};
-use crate::LlamaStateSeqFlags;
 
 /// A safe wrapper around a llama inference context.
 ///
@@ -64,11 +64,7 @@ impl LlamaContext {
     pub fn decode(&mut self, batch: &mut LlamaBatch) -> Result<(), LlamaError> {
         let raw_batch = batch.as_llama_batch();
         let ret = unsafe { self.model.lib.llama_decode(self.ctx, raw_batch) };
-        if ret != 0 {
-            Err(LlamaError::DecodeFailed(ret))
-        } else {
-            Ok(())
-        }
+        if ret != 0 { Err(LlamaError::DecodeFailed(ret)) } else { Ok(()) }
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────────
@@ -201,11 +197,7 @@ impl LlamaContext {
         let ret = unsafe {
             self.model.lib.llama_set_adapters_lora(self.ctx, adapters_ptr, ptrs.len(), scales_ptr)
         };
-        if ret != 0 {
-            Err(LlamaError::SetAdaptersFailed(ret))
-        } else {
-            Ok(())
-        }
+        if ret != 0 { Err(LlamaError::SetAdaptersFailed(ret)) } else { Ok(()) }
     }
 
     // ── State management ─────────────────────────────────────────────────────
@@ -227,11 +219,7 @@ impl LlamaContext {
     pub fn state_get_data(&self, dst: &mut [u8]) -> Result<usize, LlamaError> {
         let n =
             unsafe { self.model.lib.llama_state_get_data(self.ctx, dst.as_mut_ptr(), dst.len()) };
-        if n == 0 {
-            Err(LlamaError::StateFailed)
-        } else {
-            Ok(n)
-        }
+        if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 
     /// Restore context state from `src`.
@@ -243,11 +231,7 @@ impl LlamaContext {
     /// Returns [`LlamaError::StateFailed`] if 0 bytes were consumed.
     pub fn state_set_data(&mut self, src: &[u8]) -> Result<usize, LlamaError> {
         let n = unsafe { self.model.lib.llama_state_set_data(self.ctx, src.as_ptr(), src.len()) };
-        if n == 0 {
-            Err(LlamaError::StateFailed)
-        } else {
-            Ok(n)
-        }
+        if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 
     /// Load context state and the prompt tokens from a session file.
@@ -304,11 +288,7 @@ impl LlamaContext {
         let ok = unsafe {
             self.model.lib.llama_state_save_file(self.ctx, c_path.as_ptr(), tokens_ptr, tokens_len)
         };
-        if !ok {
-            Err(LlamaError::StateFailed)
-        } else {
-            Ok(())
-        }
+        if !ok { Err(LlamaError::StateFailed) } else { Ok(()) }
     }
 
     // ── Per-sequence state ────────────────────────────────────────────────────
@@ -333,11 +313,7 @@ impl LlamaContext {
         let n = unsafe {
             self.model.lib.llama_state_seq_get_data(self.ctx, dst.as_mut_ptr(), dst.len(), seq_id)
         };
-        if n == 0 {
-            Err(LlamaError::StateFailed)
-        } else {
-            Ok(n)
-        }
+        if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 
     /// Restore the state of `dest_seq_id` from `src`.
@@ -355,11 +331,7 @@ impl LlamaContext {
         let n = unsafe {
             self.model.lib.llama_state_seq_set_data(self.ctx, src.as_ptr(), src.len(), dest_seq_id)
         };
-        if n == 0 {
-            Err(LlamaError::StateFailed)
-        } else {
-            Ok(n)
-        }
+        if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 
     /// Save the state of `seq_id` and the given tokens to a file.
@@ -388,11 +360,7 @@ impl LlamaContext {
                 tokens_len,
             )
         };
-        if n == 0 {
-            Err(LlamaError::StateFailed)
-        } else {
-            Ok(n)
-        }
+        if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 
     /// Load the state of `dest_seq_id` and the saved tokens from a file.
@@ -464,11 +432,7 @@ impl LlamaContext {
                 flags,
             )
         };
-        if n == 0 {
-            Err(LlamaError::StateFailed)
-        } else {
-            Ok(n)
-        }
+        if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 
     /// Restore the state of `dest_seq_id` from `src` with the given flags.
@@ -493,11 +457,7 @@ impl LlamaContext {
                 flags,
             )
         };
-        if n == 0 {
-            Err(LlamaError::StateFailed)
-        } else {
-            Ok(n)
-        }
+        if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 }
 

@@ -1,8 +1,8 @@
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 
 use chrono::Utc;
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use slab_proto::convert;
 use slab_types::inference::TextGenerationRequest;
 use uuid::Uuid;

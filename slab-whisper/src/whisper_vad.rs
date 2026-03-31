@@ -2,7 +2,7 @@ use crate::WhisperError;
 use slab_whisper_sys::{
     whisper_vad_context, whisper_vad_context_params, whisper_vad_params, whisper_vad_segments,
 };
-use std::ffi::{c_char, CString};
+use std::ffi::{CString, c_char};
 use std::os::raw::c_int;
 
 /// Configuration for Voice Activity Detection in `whisper.cpp`.
@@ -170,11 +170,7 @@ impl WhisperVadContext {
         let success =
             unsafe { self.instance.lib.whisper_vad_detect_speech(self.ptr, samples, len) };
 
-        if !success {
-            Err(WhisperError::GenericError(-1))
-        } else {
-            Ok(())
-        }
+        if !success { Err(WhisperError::GenericError(-1)) } else { Ok(()) }
     }
 
     /// Get an array of probabilities. Undocumented use.

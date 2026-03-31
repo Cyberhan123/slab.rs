@@ -1,4 +1,4 @@
 pub mod handler;
 pub mod schema;
 
-pub use handler::{router, FfmpegApi};
+pub use handler::{FfmpegApi, router};

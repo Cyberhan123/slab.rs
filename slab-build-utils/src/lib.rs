@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use cargo_metadata::MetadataCommand;
 use slab_libfetch::{Api, Manifest};
 use std::path::{Path, PathBuf};

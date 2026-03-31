@@ -1,7 +1,7 @@
+use crate::Diffusion;
 use crate::params::guidance::GuidanceParams;
 use crate::params::scheduler::Scheduler;
 use crate::params::support::copy_and_free_c_string;
-use crate::Diffusion;
 use slab_diffusion_sys::sample_method_t;
 use slab_diffusion_sys::sd_sample_params_t;
 use std::ptr;

@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::{RwLock, mpsc};
 
 use crate::internal::scheduler::backend::protocol::StreamHandle;
 use crate::internal::scheduler::types::{Payload, StageStatus, TaskId, TaskStatus};
@@ -111,11 +111,7 @@ impl ResultStorage {
         // the payload is taken; callers checking status will still see
         // "succeeded" rather than the misleading "pending" state.
         let old = std::mem::replace(&mut record.status, TaskStatus::ResultConsumed);
-        if let TaskStatus::Succeeded { result } = old {
-            Some(result)
-        } else {
-            None
-        }
+        if let TaskStatus::Succeeded { result } = old { Some(result) } else { None }
     }
 
     /// Consume and return the `StreamHandle` for a streaming task.

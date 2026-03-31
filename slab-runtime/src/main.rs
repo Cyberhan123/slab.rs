@@ -288,7 +288,7 @@ async fn shutdown_signal(listen_stdin: bool) {
 
     #[cfg(unix)]
     let terminate = async {
-        use tokio::signal::unix::{signal, SignalKind};
+        use tokio::signal::unix::{SignalKind, signal};
         match signal(SignalKind::terminate()) {
             Ok(mut s) => {
                 s.recv().await;

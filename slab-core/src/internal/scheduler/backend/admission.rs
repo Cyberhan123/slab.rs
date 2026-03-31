@@ -4,12 +4,12 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use tokio::sync::{
-    broadcast, mpsc, OwnedRwLockReadGuard, OwnedRwLockWriteGuard, OwnedSemaphorePermit, Semaphore,
+    OwnedRwLockReadGuard, OwnedRwLockWriteGuard, OwnedSemaphorePermit, Semaphore, broadcast, mpsc,
 };
 use tracing::warn;
 
 use crate::internal::scheduler::backend::protocol::{BackendRequest, WorkerCommand};
-use crate::internal::scheduler::backend::runner::{shared_ingress, SharedIngressRx};
+use crate::internal::scheduler::backend::runner::{SharedIngressRx, shared_ingress};
 use crate::internal::scheduler::types::{BackendLifecycleState, CoreError, GlobalConsistencyState};
 
 /// Inference lease: blocks management mutations and holds compute quota.

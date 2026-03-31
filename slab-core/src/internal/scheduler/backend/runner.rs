@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::{future::Future, pin::Pin};
 
 use async_trait::async_trait;
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{Mutex, broadcast, mpsc};
 
 use crate::internal::scheduler::backend::protocol::BackendReply;
 use crate::internal::scheduler::backend::protocol::{
@@ -216,18 +216,18 @@ pub fn spawn_workers<H, F>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
-    use tokio::sync::{broadcast, mpsc, watch, Mutex};
+    use tokio::sync::{Mutex, broadcast, mpsc, watch};
 
     use crate::internal::scheduler::backend::protocol::{
         BackendOp, BackendReply, BackendRequest, BackendRequestKind, PeerWorkerCommand,
         RuntimeControlSignal, SyncMessage, WorkerCommand,
     };
     use crate::internal::scheduler::backend::runner::{
-        shared_ingress, spawn_runtime_worker, RuntimeWorkerHandler,
+        RuntimeWorkerHandler, shared_ingress, spawn_runtime_worker,
     };
     use crate::internal::scheduler::types::Payload;
 

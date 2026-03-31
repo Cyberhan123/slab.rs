@@ -10,16 +10,16 @@ use std::collections::HashMap;
 use base64::Engine as _;
 use ort::{
     ep::ExecutionProviderDispatch,
-    session::{builder::GraphOptimizationLevel, Session},
+    session::{Session, builder::GraphOptimizationLevel},
     value::{DynValue, Tensor, TensorElementType, ValueType},
 };
-use serde_json::{json, Value as JsonValue};
+use serde_json::{Value as JsonValue, json};
 use slab_types::OnnxLoadConfig;
 use tracing::{info, warn};
 
 use super::{
-    config::{OnnxInferenceInput, TensorInput},
     OnnxEngineError,
+    config::{OnnxInferenceInput, TensorInput},
 };
 
 // ── OnnxEngine ────────────────────────────────────────────────────────────────
@@ -217,16 +217,15 @@ fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngi
                     ),
                 });
             }
-            Tensor::<u8>::from_array((shape, raw))
-                .map(|t| t.into_dyn())
-                .map_err(|e| OnnxEngineError::TensorDecode {
-                    name: name.to_string(),
-                    reason: e.to_string(),
-                })
+            Tensor::<u8>::from_array((shape, raw)).map(|t| t.into_dyn()).map_err(|e| {
+                OnnxEngineError::TensorDecode { name: name.to_string(), reason: e.to_string() }
+            })
         }
         other => Err(OnnxEngineError::TensorDecode {
             name: name.to_string(),
-            reason: format!("unsupported dtype '{other}'; supported dtypes: float32, float64, int32, int64, uint8"),
+            reason: format!(
+                "unsupported dtype '{other}'; supported dtypes: float32, float64, int32, int64, uint8"
+            ),
         }),
     }
 }
@@ -285,7 +284,7 @@ fn encode_tensor_to_base64(
             ("uint8", base64::engine::general_purpose::STANDARD.encode(&bytes))
         }
         other => {
-            return Err(encode_err(format!("unsupported output tensor element type: {other:?}")))
+            return Err(encode_err(format!("unsupported output tensor element type: {other:?}")));
         }
     };
 

@@ -1,4 +1,4 @@
 pub mod handler;
 pub mod schema;
 
-pub use handler::{router, SetupApi};
+pub use handler::{SetupApi, router};

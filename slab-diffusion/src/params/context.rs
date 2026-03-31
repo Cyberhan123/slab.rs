@@ -4,13 +4,13 @@ use std::ptr;
 use slab_diffusion_sys::sd_ctx_params_t;
 use slab_diffusion_sys::sd_embedding_t;
 
+use crate::Diffusion;
+use crate::RngType;
+use crate::WeightType;
 use crate::params::support::{
     c_string_ptr, copy_and_free_c_string, new_c_string, sync_embedding_views,
 };
 use crate::params::{Embedding, LoraApplyMode, Prediction};
-use crate::Diffusion;
-use crate::RngType;
-use crate::WeightType;
 
 pub struct ContextParams {
     pub(crate) fp: Box<sd_ctx_params_t>,

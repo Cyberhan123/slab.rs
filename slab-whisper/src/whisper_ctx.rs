@@ -1,7 +1,7 @@
-use crate::error::WhisperError;
 use crate::WhisperTokenId;
+use crate::error::WhisperError;
 use std::borrow::Cow;
-use std::ffi::{c_int, CStr, CString};
+use std::ffi::{CStr, CString, c_int};
 
 use crate::Whisper;
 

@@ -3,9 +3,9 @@ use std::sync::Arc;
 
 use slab_diffusion_sys::upscaler_ctx_t;
 
-use crate::params::{image_view, owned_image_from_raw, Image};
 use crate::Diffusion;
 use crate::DiffusionError;
+use crate::params::{Image, image_view, owned_image_from_raw};
 
 pub struct UpscalerContext {
     pub(crate) fp: *mut upscaler_ctx_t,

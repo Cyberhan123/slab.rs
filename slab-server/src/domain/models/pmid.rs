@@ -5,7 +5,7 @@ pub use slab_types::settings::PMID;
 mod tests {
     use std::collections::BTreeSet;
 
-    use slab_types::settings::{SettingPmid, PMID};
+    use slab_types::settings::{PMID, SettingPmid};
 
     use crate::domain::models::embedded_settings_schema;
 

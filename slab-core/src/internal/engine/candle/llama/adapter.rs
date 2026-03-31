@@ -282,7 +282,7 @@ impl CandleLlamaEngine {
                 StreamChunk::Token(t) => output.push_str(&t),
                 StreamChunk::Done => break,
                 StreamChunk::Error(e) => {
-                    return Err(CandleLlamaEngineError::InferenceStreamError { message: e }.into())
+                    return Err(CandleLlamaEngineError::InferenceStreamError { message: e }.into());
                 }
             }
         }

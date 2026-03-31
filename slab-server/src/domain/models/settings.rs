@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use utoipa::ToSchema;
 
 use super::settings_jsonschema::{
@@ -392,11 +392,7 @@ impl SettingDefinition {
         value: &Value,
     ) -> Result<Option<Value>, ServerError> {
         let canonical = self.canonicalize_runtime_value(value)?;
-        if canonical == *self.default_value() {
-            Ok(None)
-        } else {
-            Ok(Some(canonical))
-        }
+        if canonical == *self.default_value() { Ok(None) } else { Ok(Some(canonical)) }
     }
 
     fn validate_storage_shape(&self) -> Result<(), ServerError> {
@@ -609,11 +605,7 @@ fn canonicalize_string_value(value: &Value) -> Result<Value, &'static str> {
 fn normalize_optional_text(raw: Option<&str>) -> Option<String> {
     raw.and_then(|value| {
         let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_owned())
-        }
+        if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
     })
 }
 

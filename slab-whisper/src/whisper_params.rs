@@ -1,7 +1,7 @@
 use crate::whisper_grammar::WhisperGrammarElement;
 use crate::whisper_vad::WhisperVadParams;
 use slab_whisper_sys::whisper_token;
-use std::ffi::{c_char, c_float, c_int, CString};
+use std::ffi::{CString, c_char, c_float, c_int};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -428,7 +428,7 @@ impl<'a, 'b> FullParams<'a, 'b> {
         O: Into<Option<F>>,
     {
         use slab_whisper_sys::{whisper_context, whisper_state};
-        use std::ffi::{c_void, CStr};
+        use std::ffi::{CStr, c_void};
 
         struct CallbackWrapper {
             handler: Box<dyn FnMut(SegmentCallbackData)>,
@@ -502,7 +502,7 @@ impl<'a, 'b> FullParams<'a, 'b> {
         O: Into<Option<F>>,
     {
         use slab_whisper_sys::{whisper_context, whisper_state};
-        use std::ffi::{c_void, CStr};
+        use std::ffi::{CStr, c_void};
 
         struct CallbackWrapper {
             handler: Box<dyn FnMut(SegmentCallbackData)>,
@@ -598,10 +598,12 @@ impl<'a, 'b> FullParams<'a, 'b> {
             user_data: *mut c_void,
         ) where
             F: FnMut(i32),
-        { unsafe {
-            let user_data = &mut *(user_data as *mut F);
-            user_data(progress);
-        }}
+        {
+            unsafe {
+                let user_data = &mut *(user_data as *mut F);
+                user_data(progress);
+            }
+        }
 
         match closure.into() {
             Some(closure) => {
@@ -639,10 +641,12 @@ impl<'a, 'b> FullParams<'a, 'b> {
         unsafe extern "C" fn trampoline<F>(user_data: *mut c_void) -> bool
         where
             F: FnMut() -> bool,
-        { unsafe {
-            let user_data = &mut *(user_data as *mut F);
-            user_data()
-        }}
+        {
+            unsafe {
+                let user_data = &mut *(user_data as *mut F);
+                user_data()
+            }
+        }
 
         match closure.into() {
             Some(closure) => {

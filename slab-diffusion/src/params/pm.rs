@@ -3,8 +3,8 @@ use std::ptr;
 
 use slab_diffusion_sys::{sd_image_t, sd_pm_params_t};
 
-use crate::params::support::{c_string_ptr, new_c_string, sync_image_views};
 use crate::params::Image;
+use crate::params::support::{c_string_ptr, new_c_string, sync_image_views};
 
 /// Rust mirror of `sd_pm_params_t`.
 #[derive(Debug, Clone, Default)]

@@ -2,14 +2,14 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::Arc;
 
+use crate::Llama;
+use crate::LlamaSampler;
 use crate::context_params::LlamaContextParams;
 use crate::error::LlamaError;
 use crate::llama_adapter::LlamaLoraAdapter;
 use crate::llama_context::LlamaContext;
 use crate::llama_sampler::SamplerChainBuilder;
 use crate::token::LlamaToken;
-use crate::Llama;
-use crate::LlamaSampler;
 
 /// Inner (non-Clone) model data.  Wrapped in Arc so that LlamaContext can keep
 /// the model alive without copying the raw pointer.

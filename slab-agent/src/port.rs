@@ -6,8 +6,8 @@
 
 use async_trait::async_trait;
 
-use slab_types::agent::ToolCallStatus;
 use slab_types::ConversationMessage;
+use slab_types::agent::ToolCallStatus;
 
 use crate::config::AgentConfig;
 use crate::error::AgentError;

@@ -8,9 +8,9 @@
 //! detail but only a generic message is returned to the caller so that
 //! file paths, SQL, or other implementation details never leak to clients.
 
+use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::Json;
 use serde::Serialize;
 use thiserror::Error;
 use tracing::error;
@@ -171,11 +171,7 @@ fn format_validation_errors(errors: &ValidationErrors) -> String {
     let mut messages = Vec::new();
     collect_validation_messages("", errors, &mut messages);
 
-    if messages.is_empty() {
-        "request validation failed".to_owned()
-    } else {
-        messages.join("; ")
-    }
+    if messages.is_empty() { "request validation failed".to_owned() } else { messages.join("; ") }
 }
 
 fn collect_validation_messages(

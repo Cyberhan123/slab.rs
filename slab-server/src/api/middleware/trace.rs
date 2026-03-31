@@ -2,14 +2,14 @@ use crate::context::AppState;
 use axum::{
     body::{Body, Bytes},
     extract::{Request, State},
-    http::{header, HeaderValue},
+    http::{HeaderValue, header},
     middleware::Next,
     response::Response,
 };
 use http_body_util::BodyExt; // cargo add http_body_util
 use std::sync::Arc;
 use std::time::Instant;
-use tracing::{info, info_span, Instrument};
+use tracing::{Instrument, info, info_span};
 use uuid::Uuid;
 
 pub static X_TRACE_ID: &str = "x-trace-id";

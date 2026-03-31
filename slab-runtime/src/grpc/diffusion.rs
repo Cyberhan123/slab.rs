@@ -5,7 +5,7 @@ use slab_core::api::ImageGenerationRequest;
 use slab_proto::{convert, slab::ipc::v1 as pb};
 use slab_types::diffusion::{DiffusionImageRequest, DiffusionVideoRequest};
 
-use super::{extract_request_id, proto_to_status, runtime_to_status, BackendKind, GrpcServiceImpl};
+use super::{BackendKind, GrpcServiceImpl, extract_request_id, proto_to_status, runtime_to_status};
 
 #[tonic::async_trait]
 impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {

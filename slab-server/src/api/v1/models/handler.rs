@@ -14,7 +14,7 @@ use crate::api::v1::models::schema::{
     UnifiedModelResponse, UnloadModelRequest, UpdateModelRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
-use crate::api::validation::{validate, ValidatedJson, ValidatedQuery};
+use crate::api::validation::{ValidatedJson, ValidatedQuery, validate};
 use crate::context::AppState;
 use crate::domain::services::ModelService;
 use crate::error::ServerError;

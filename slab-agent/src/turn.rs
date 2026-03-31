@@ -5,8 +5,8 @@ use tracing::{debug, warn};
 use uuid::Uuid;
 
 use slab_types::{
-    agent::ToolCallStatus, ConversationMessage, ConversationMessageContent, ConversationToolCall,
-    ConversationToolFunction,
+    ConversationMessage, ConversationMessageContent, ConversationToolCall,
+    ConversationToolFunction, agent::ToolCallStatus,
 };
 
 use crate::{

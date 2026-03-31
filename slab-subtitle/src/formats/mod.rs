@@ -7,9 +7,9 @@ pub mod idx;
 pub mod srt;
 pub mod ssa;
 
-use crate::errors::*;
 use crate::SubtitleEntry;
 use crate::SubtitleFileInterface;
+use crate::errors::*;
 use chardet::{charset2encoding, detect};
 use encoding_rs::Encoding;
 use std::ffi::OsStr;
@@ -178,7 +178,9 @@ pub fn get_subtitle_format_by_extension_err(extension: Option<&OsStr>) -> Result
 pub fn get_subtitle_format(extension: Option<&OsStr>) -> Option<SubtitleFormat> {
     if extension == Some(OsStr::new("sub")) {
         // test for VobSub .sub magic number
-        panic!("we do not support .sub files, because they are ambiguous (could be either VobSub or MicroDVD) - use the content-aware `get_subtitle_format` function instead to handle this case correctly")
+        panic!(
+            "we do not support .sub files, because they are ambiguous (could be either VobSub or MicroDVD) - use the content-aware `get_subtitle_format` function instead to handle this case correctly"
+        )
     } else {
         get_subtitle_format_by_extension(extension)
     }
@@ -220,11 +222,7 @@ fn decode_bytes_to_string(content: &[u8], encoding: Option<&'static Encoding>) -
     };
 
     let (decoded, _, replaced) = det_encoding.decode(content);
-    if replaced {
-        Err(Error::from(ErrorKind::DecodingError))
-    } else {
-        Ok(decoded.into_owned())
-    }
+    if replaced { Err(Error::from(ErrorKind::DecodingError)) } else { Ok(decoded.into_owned()) }
 }
 
 /// Parse all subtitle formats, invoking the right parser given by `format`.

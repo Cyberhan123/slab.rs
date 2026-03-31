@@ -9,7 +9,7 @@ use crate::{SubtitleEntry, SubtitleFileInterface};
 
 use crate::errors::Result as SubtitleParserResult;
 use combine::parser::char::{digit, string};
-use combine::{any, eof, many, token, Parser};
+use combine::{Parser, any, eof, many, token};
 
 use crate::timetypes::{TimeDelta, TimePoint, TimeSpan};
 use std::iter::once;

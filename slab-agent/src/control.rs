@@ -2,7 +2,7 @@
 
 use std::{collections::HashMap, sync::Arc};
 
-use tokio::sync::{watch, RwLock};
+use tokio::sync::{RwLock, watch};
 use tracing::warn;
 
 use slab_types::ConversationMessage;

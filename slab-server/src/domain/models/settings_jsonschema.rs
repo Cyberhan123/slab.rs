@@ -1,4 +1,4 @@
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 
 use super::SettingValueType;
 use crate::error::ServerError;
@@ -69,11 +69,7 @@ pub(crate) fn chat_providers_validation_schema() -> Value {
 }
 
 pub(crate) fn normalize_json_pointer(path: String) -> String {
-    if path.is_empty() {
-        "/".to_owned()
-    } else {
-        path
-    }
+    if path.is_empty() { "/".to_owned() } else { path }
 }
 
 fn settings_document_validation_schema() -> Value {
