@@ -35,6 +35,7 @@ pub(crate) struct ResolvedDriver {
     pub family: ModelFamily,
     pub capability: Capability,
     pub supports_streaming: bool,
+    #[allow(dead_code)]
     pub load_style: DriverLoadStyle,
 }
 
