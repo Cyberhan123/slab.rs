@@ -68,6 +68,16 @@ impl DeploymentSnapshot {
             .ok_or_else(|| "deployment snapshot missing model config".to_owned())?
             .to_json()
     }
+
+    pub fn typed_model_config<T>(&self) -> Result<T, String>
+    where
+        T: serde::de::DeserializeOwned + Clone + Send + Sync + 'static,
+    {
+        self.model
+            .as_ref()
+            .ok_or_else(|| "deployment snapshot missing model config".to_owned())?
+            .to_typed()
+    }
 }
 
 /// Typed synchronization payload on the backend control bus.

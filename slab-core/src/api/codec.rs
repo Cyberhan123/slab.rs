@@ -1,5 +1,5 @@
 use std::collections::BTreeMap;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use image::{imageops::FilterType, DynamicImage, GenericImageView};
@@ -14,22 +14,21 @@ use crate::inference::{
 };
 use crate::internal::dispatch::{DriverLoadStyle, ResolvedDriver};
 use crate::model::{ModelFamily, ModelSource, ModelSpec};
+use slab_types::{GgmlLlamaLoadConfig, GgmlWhisperLoadConfig};
 
 pub(crate) fn encode_load_payload(
     spec: &ModelSpec,
     resolved: &ResolvedDriver,
 ) -> Result<Payload, CoreError> {
+    match resolved.driver_id.as_str() {
+        "ggml.llama" => return encode_ggml_llama_load_payload(spec),
+        "ggml.whisper" => return encode_ggml_whisper_load_payload(spec),
+        _ => {}
+    }
+
     let model_path = primary_model_path(spec)?;
 
     let payload = match resolved.driver_id.as_str() {
-        "ggml.llama" => serde_json::json!({
-            "model_path": model_path,
-            "num_workers": u64_option(spec, "num_workers").unwrap_or(1),
-            "context_length": u64_option(spec, "context_length").unwrap_or(4096),
-        }),
-        "ggml.whisper" => serde_json::json!({
-            "model_path": model_path,
-        }),
         "ggml.diffusion" => serde_json::json!({
             "model_path": model_path,
             "diffusion_model_path": artifact_or_option(spec, "diffusion_model", "diffusion_model_path").unwrap_or_default(),
@@ -80,6 +79,18 @@ pub(crate) fn encode_load_payload(
             Ok(Payload::json(payload))
         }
     }
+}
+
+fn encode_ggml_llama_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
+    Ok(Payload::typed(GgmlLlamaLoadConfig {
+        model_path: primary_model_path_buf(spec)?,
+        num_workers: usize_option(spec, "num_workers").unwrap_or(1),
+        context_length: optional_nonzero_u32_option(spec, "context_length")?,
+    }))
+}
+
+fn encode_ggml_whisper_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
+    Ok(Payload::typed(GgmlWhisperLoadConfig { model_path: primary_model_path_buf(spec)? }))
 }
 
 pub(crate) fn encode_text_generation_request(
@@ -346,6 +357,14 @@ fn primary_model_path(spec: &ModelSpec) -> Result<String, CoreError> {
     })
 }
 
+fn primary_model_path_buf(spec: &ModelSpec) -> Result<PathBuf, CoreError> {
+    spec.source.primary_path().map(Path::to_path_buf).ok_or_else(|| {
+        CoreError::SourceResolveFailed {
+            message: "model source does not expose a primary artifact".to_owned(),
+        }
+    })
+}
+
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
@@ -424,6 +443,15 @@ fn i32_option(spec: &ModelSpec, key: &str) -> Option<i32> {
         .or_else(|| {
             spec.load_options.get(key).and_then(Value::as_str).and_then(|value| value.parse().ok())
         })
+}
+
+fn optional_nonzero_u32_option(spec: &ModelSpec, key: &str) -> Result<Option<u32>, CoreError> {
+    match u64_option(spec, key) {
+        Some(0) | None => Ok(None),
+        Some(value) => u32::try_from(value).map(Some).map_err(|_| CoreError::InvalidModelSpec {
+            message: format!("load option `{key}` exceeds u32 range: {value}"),
+        }),
+    }
 }
 
 fn decode_image_generation_json(value: &Value) -> Result<Vec<Vec<u8>>, CoreError> {
@@ -535,19 +563,107 @@ mod tests {
     use super::*;
     use serde_json::json;
     use slab_types::chat::{ConversationMessage, ConversationMessageContent};
+    use slab_types::runtime::Capability;
+    use slab_types::{GgmlLlamaLoadConfig, GgmlWhisperLoadConfig};
+    use std::path::PathBuf;
 
-    fn make_llama_driver() -> ResolvedDriver {
+    fn make_driver(
+        driver_id: &str,
+        backend_id: &str,
+        family: ModelFamily,
+        capability: Capability,
+    ) -> ResolvedDriver {
         use crate::internal::dispatch::{DriverLoadStyle, ResolvedDriver};
-        use crate::model::ModelFamily;
-        use slab_types::runtime::Capability;
         ResolvedDriver {
-            driver_id: "ggml.llama".to_owned(),
-            backend_id: "llama".to_owned(),
-            family: ModelFamily::Llama,
-            capability: Capability::TextGeneration,
+            driver_id: driver_id.to_owned(),
+            backend_id: backend_id.to_owned(),
+            family,
+            capability,
             supports_streaming: true,
             load_style: DriverLoadStyle::DynamicLibraryThenModel,
         }
+    }
+
+    fn make_llama_driver() -> ResolvedDriver {
+        make_driver("ggml.llama", "llama", ModelFamily::Llama, Capability::TextGeneration)
+    }
+
+    fn make_spec(family: ModelFamily, capability: Capability, model_path: &str) -> ModelSpec {
+        ModelSpec::new(
+            family,
+            capability,
+            ModelSource::LocalPath { path: PathBuf::from(model_path) },
+        )
+    }
+
+    #[test]
+    fn encode_load_payload_uses_typed_payload_for_ggml_llama() {
+        let spec = make_spec(ModelFamily::Llama, Capability::TextGeneration, "model.gguf")
+            .with_load_option("num_workers", 3)
+            .with_load_option("context_length", 2048);
+
+        let payload =
+            encode_load_payload(&spec, &make_llama_driver()).expect("encode should succeed");
+        let config = payload
+            .to_typed::<GgmlLlamaLoadConfig>()
+            .expect("ggml.llama payload should decode as typed config");
+
+        assert_eq!(config.model_path, PathBuf::from("model.gguf"));
+        assert_eq!(config.num_workers, 3);
+        assert_eq!(config.context_length, Some(2048));
+    }
+
+    #[test]
+    fn encode_load_payload_uses_typed_payload_for_ggml_whisper() {
+        let spec = make_spec(ModelFamily::Whisper, Capability::AudioTranscription, "model.bin");
+        let driver = make_driver(
+            "ggml.whisper",
+            "whisper",
+            ModelFamily::Whisper,
+            Capability::AudioTranscription,
+        );
+
+        let payload = encode_load_payload(&spec, &driver).expect("encode should succeed");
+        let config = payload
+            .to_typed::<GgmlWhisperLoadConfig>()
+            .expect("ggml.whisper payload should decode as typed config");
+
+        assert_eq!(config.model_path, PathBuf::from("model.bin"));
+    }
+
+    #[test]
+    fn encode_load_payload_keeps_json_for_unmigrated_backends() {
+        let diffusion = encode_load_payload(
+            &make_spec(ModelFamily::Diffusion, Capability::ImageGeneration, "model.safetensors"),
+            &make_driver(
+                "ggml.diffusion",
+                "diffusion",
+                ModelFamily::Diffusion,
+                Capability::ImageGeneration,
+            ),
+        )
+        .expect("ggml.diffusion encode should succeed");
+
+        let candle = encode_load_payload(
+            &make_spec(ModelFamily::Llama, Capability::TextGeneration, "model.gguf"),
+            &make_driver(
+                "candle.llama",
+                "candle.llama",
+                ModelFamily::Llama,
+                Capability::TextGeneration,
+            ),
+        )
+        .expect("candle.llama encode should succeed");
+
+        let onnx = encode_load_payload(
+            &make_spec(ModelFamily::Onnx, Capability::TextGeneration, "model.onnx"),
+            &make_driver("onnx.text", "onnx.text", ModelFamily::Onnx, Capability::TextGeneration),
+        )
+        .expect("onnx.text encode should succeed");
+
+        assert!(matches!(diffusion, Payload::Json(_)), "ggml.diffusion should remain JSON");
+        assert!(matches!(candle, Payload::Json(_)), "candle.llama should remain JSON");
+        assert!(matches!(onnx, Payload::Json(_)), "onnx.text should remain JSON");
     }
 
     #[test]

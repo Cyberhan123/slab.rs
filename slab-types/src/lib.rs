@@ -20,6 +20,7 @@ pub mod common;
 pub mod diffusion;
 pub mod error;
 pub mod inference;
+pub mod load_config;
 pub mod media;
 pub mod runtime;
 pub mod settings;
@@ -42,6 +43,7 @@ pub use inference::{
     ImageGenerationResponse, JsonOptions, TextGenerationChunk, TextGenerationRequest,
     TextGenerationResponse,
 };
+pub use load_config::{GgmlLlamaLoadConfig, GgmlWhisperLoadConfig};
 pub use media::{GeneratedFrame, GeneratedImage, RawImageInput};
 pub use runtime::{
     Capability, DiffusionLoadOptions, DriverHints, ModelFamily, ModelSource, ModelSpec,

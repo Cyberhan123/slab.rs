@@ -12,10 +12,9 @@
 //! | `"inference"`        | `Inference`      | Unary text generation; input is UTF-8 prompt.  |
 //! | `"inference.stream"` | `InferenceStream`| Streaming text generation.                     |
 //!
-//! ### `model.load` input JSON
-//! ```json
-//! { "model_path": "/path/to/model.gguf", "num_workers": 1, "context_length": 4096 }
-//! ```
+//! ### `model.load` input payload
+//! Uses a typed [`slab_types::GgmlLlamaLoadConfig`] payload inside `slab-core`,
+//! with JSON deserialization kept as a compatibility fallback.
 //!
 //! ## Grammar constraints (optional)
 //!
@@ -36,9 +35,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use serde::Deserialize;
 use slab_llama::ChatMessage as LlamaChatMessage;
 use slab_types::chat::ConversationMessage;
+use slab_types::GgmlLlamaLoadConfig;
 use tokio::sync::{broadcast, mpsc, watch};
 
 use crate::internal::engine::ggml::llama::adapter::GGMLLlamaEngine;
@@ -126,20 +125,6 @@ fn resolve_grammar(opts: &serde_json::Value) -> Option<String> {
 }
 
 // ── Configurations ────────────────────────────────────────────────────────────
-
-/// Extended model-load config for llama; includes workers and context length.
-#[derive(Deserialize)]
-struct LlamaModelLoadConfig {
-    model_path: String,
-    #[serde(default = "default_workers")]
-    num_workers: usize,
-    #[serde(default)]
-    context_length: u32,
-}
-
-fn default_workers() -> usize {
-    1
-}
 
 struct ParsedChatPrompt {
     messages: Vec<LlamaChatMessage>,
@@ -449,7 +434,7 @@ impl LlamaWorker {
             }
         };
 
-        let config: LlamaModelLoadConfig = match input.to_json() {
+        let config: GgmlLlamaLoadConfig = match input.to_typed() {
             Ok(c) => c,
             Err(e) => {
                 let _ =
@@ -471,8 +456,7 @@ impl LlamaWorker {
         let result = tokio::task::block_in_place(|| {
             use slab_llama::{LlamaContextParams, LlamaModelParams};
             let mut ctx_params = LlamaContextParams::default();
-            if config.context_length > 0 {
-                let context_length = config.context_length;
+            if let Some(context_length) = config.context_length {
                 ctx_params.n_ctx = context_length;
                 if ctx_params.n_batch > context_length {
                     ctx_params.n_batch = context_length;
