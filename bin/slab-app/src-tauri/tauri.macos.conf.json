@@ -1,0 +1,12 @@
+{
+    "$schema": "https://schema.tauri.app/config/2",
+    "bundle": {
+        "active": true,
+        "macOS": {
+            "minimumSystemVersion": "12.0"
+        },
+        "resources": [
+            "resources/libs/**/*"
+        ]
+    }
+}

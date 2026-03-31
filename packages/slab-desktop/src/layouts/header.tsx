@@ -1,0 +1,126 @@
+import { History, Search } from "lucide-react"
+import { useGlobalHeaderState } from "@/hooks/use-global-header-meta"
+import { WindowControls } from "@/layouts/window-controls"
+import { cn } from "@/lib/utils"
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectLabel,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+
+type HeaderProps = {
+  variant?: "default" | "chat" | "minimal"
+}
+
+export default function Header({ variant = "default" }: HeaderProps) {
+  const {
+    meta: { title, subtitle },
+    modelPicker,
+  } = useGlobalHeaderState()
+  const isChatVariant = variant === "chat"
+  const isMinimalVariant = variant === "minimal"
+  const searchPlaceholder = isChatVariant ? "Search tasks..." : "Search pages, tools, or settings..."
+  const subtitleParts = isChatVariant ? subtitle.split(" - ") : [subtitle]
+  const displaySubtitle = subtitleParts[0] ?? subtitle
+  const shellContextLabel = isChatVariant
+    ? subtitleParts.slice(1).join(" - ") || "Active Workspace"
+    : "Slab Desktop"
+  const selectedModelOption = modelPicker?.options.find((option) => option.id === modelPicker.value)
+  const hasSelectableModelOptions = modelPicker?.options.some((option) => !option.disabled) ?? false
+  const modelPickerPlaceholder = modelPicker?.loading
+    ? "Loading models..."
+    : modelPicker?.placeholder ?? "Select model"
+  const modelPickerDisabled =
+    modelPicker?.disabled || modelPicker == null || !hasSelectableModelOptions
+
+  return (
+    <header
+      className={cn(
+        "shell-topbar flex h-[var(--shell-topbar-height)] items-center justify-between gap-4 pl-5 md:pl-8"
+      )}
+      data-tauri-drag-region="true"
+    >
+      <div className="flex min-w-0 items-center gap-3 md:gap-4">
+        <h2 className="shrink-0 text-[17px] font-extrabold tracking-[-0.045em] text-[var(--shell-title)] md:text-[18px]">
+          {title}
+        </h2>
+        <span className="hidden h-4 w-px shrink-0 bg-[var(--shell-divider)] sm:block" />
+        <p className="hidden max-w-[28rem] min-w-0 truncate text-[13px] font-medium leading-5 text-[var(--shell-subtitle)] xl:max-w-[34rem] sm:block">
+          {displaySubtitle}
+        </p>
+        {!isMinimalVariant ? (
+          modelPicker ? (
+            <Select
+              value={modelPicker.value || undefined}
+              onValueChange={modelPicker.onValueChange}
+              disabled={modelPickerDisabled}
+            >
+              <SelectTrigger
+                size="sm"
+                variant="pill"
+                title={selectedModelOption?.label ?? modelPickerPlaceholder}
+                className="shell-context hidden h-8 max-w-[18rem] shrink-0 border-border/30 bg-[var(--shell-card)]/92 pl-3 pr-2.5 text-[12px] font-semibold text-foreground/70 shadow-[var(--shell-elevation)] lg:flex"
+              >
+                <span className="size-2 shrink-0 rounded-full bg-[var(--brand-gold)]" />
+                <SelectValue
+                  placeholder={modelPickerPlaceholder}
+                  className="max-w-[11rem] truncate"
+                />
+              </SelectTrigger>
+              <SelectContent
+                variant="pill"
+                position="popper"
+                align="start"
+                className="max-h-80 min-w-[18rem]"
+              >
+                <SelectGroup>
+                  <SelectLabel>{modelPicker.groupLabel ?? "Models"}</SelectLabel>
+                  {modelPicker.options.length === 0 ? (
+                    <SelectItem value="__no_models__" disabled>
+                      {modelPicker.emptyLabel ?? "No models available"}
+                    </SelectItem>
+                  ) : (
+                    modelPicker.options.map((option) => (
+                      <SelectItem key={option.id} value={option.id} disabled={option.disabled}>
+                        {option.label}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="shell-context hidden h-8 shrink-0 items-center gap-2 rounded-full border border-border/30 bg-[var(--shell-card)]/92 pl-3 pr-2.5 text-[12px] font-semibold text-foreground/70 shadow-[var(--shell-elevation)] lg:inline-flex">
+              <span className="size-2 rounded-full bg-[var(--brand-gold)]" />
+              <span className="max-w-[11rem] truncate">{shellContextLabel}</span>
+            </div>
+          )
+        ) : null}
+      </div>
+
+      <div className="ml-auto flex min-w-0 items-center gap-3 md:gap-4">
+        {!isMinimalVariant ? (
+          <>
+            <div className="shell-search hidden h-8 min-w-[12rem] flex-1 items-center gap-2.5 rounded-full px-3.5 text-[12px] text-[var(--shell-search-foreground)] md:flex lg:w-64">
+              <Search className="size-3.5 shrink-0" />
+              <span className="truncate">{searchPlaceholder}</span>
+            </div>
+            <span className="hidden h-4 w-px shrink-0 bg-[var(--shell-divider)] md:block" />
+            <div
+              aria-hidden="true"
+              className="flex size-8 shrink-0 items-center justify-center rounded-full text-[var(--shell-rail-label)] transition hover:bg-[var(--shell-card)]/80 hover:text-[var(--shell-title)]"
+            >
+              <History className="size-4" />
+            </div>
+            <span className="hidden h-4 w-px shrink-0 bg-[var(--shell-divider)] md:block" />
+          </>
+        ) : null}
+        <WindowControls />
+      </div>
+    </header>
+  )
+}

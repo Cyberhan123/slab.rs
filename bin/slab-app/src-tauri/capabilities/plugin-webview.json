@@ -1,0 +1,13 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "plugin-webview",
+  "description": "Capability for sandboxed plugin child webviews",
+  "webviews": [
+    "plugin-*"
+  ],
+  "permissions": [
+    "core:event:default",
+    "allow-plugin-call",
+    "allow-plugin-api-request"
+  ]
+}

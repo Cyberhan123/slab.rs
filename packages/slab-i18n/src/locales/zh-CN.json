@@ -1,0 +1,21 @@
+{
+  "chat": {
+    "title": "聊天",
+    "send": "发送",
+    "inputPlaceholder": "输入消息...",
+    "agentName": "Ant Design X 助手"
+  },
+  "about": {
+    "title": "关于",
+    "description": "Slab 是一个基于 Ant Design X 的聊天应用"
+  },
+  "header": {
+    "home": "首页",
+    "about": "关于",
+    "chat": "聊天"
+  },
+  "sidebar": {
+    "newChat": "新建聊天",
+    "history": "历史记录"
+  }
+}

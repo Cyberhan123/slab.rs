@@ -1,0 +1,48 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Capability for the main host webview",
+  "webviews": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "core:window:allow-close",
+    "core:window:allow-center",
+    "core:window:allow-minimize",
+    "core:window:allow-maximize",
+    "core:window:allow-set-size",
+    "core:window:allow-set-focus",
+    "core:window:allow-is-maximized",
+    "core:window:allow-start-dragging",
+    "core:window:allow-toggle-maximize",
+    "opener:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "shell:default",
+    "mcp-bridge:default",
+    "allow-greet",
+    "allow-get-api-url",
+    "allow-check-backend-status",
+    "allow-get-system-info",
+    "allow-plugin-list",
+    "allow-plugin-mount-view",
+    "allow-plugin-update-view-bounds",
+    "allow-plugin-unmount-view",
+    "allow-plugin-call",
+    "allow-plugin-api-request",
+    "window-state:default",
+    "decorum:allow-show-snap-overlay",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "args": true,
+          "cmd": "",
+          "name": "binaries/slab-server",
+          "sidecar": true
+        }
+      ]
+    }
+  ]
+}
