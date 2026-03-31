@@ -8,29 +8,16 @@
 //! |---------------------|------------------|-----------------------------------------------|
 //! | `"model.load"`      | `LoadModel`      | Load Stable Diffusion model weights.          |
 //! | `"model.unload"`    | `UnloadModel`    | Drop model weights from memory.               |
-//! | `"inference.image"` | `InferenceImage` | Generate an image; input is JSON params.      |
+//! | `"inference.image"` | `InferenceImage` | Generate an image from typed diffusion params. |
 //!
 //! ### `model.load` input payload
 //! Uses a typed [`slab_types::CandleDiffusionLoadConfig`] payload inside `slab-core`.
 //!
-//! ### `inference.image` input JSON
-//! ```json
-//! {
-//!   "prompt": "a lovely cat",
-//!   "negative_prompt": "",
-//!   "width": 512,
-//!   "height": 512,
-//!   "cfg_scale": 7.5,
-//!   "sample_steps": 20,
-//!   "seed": 42
-//! }
-//! ```
-
 use std::sync::Arc;
 
-use base64::Engine as _;
-use serde::Deserialize;
-use slab_types::CandleDiffusionLoadConfig;
+use slab_types::{
+    CandleDiffusionLoadConfig, DiffusionImageRequest, DiffusionImageResponse, GeneratedImage,
+};
 use tokio::sync::broadcast;
 
 use crate::internal::engine::candle::diffusion::adapter::{CandleDiffusionEngine, GenImageParams};
@@ -43,39 +30,6 @@ use crate::internal::scheduler::types::Payload;
 use slab_core_macros::backend_handler;
 
 // ── Input parameters ──────────────────────────────────────────────────────────
-
-#[derive(Deserialize)]
-struct GenImageInput {
-    prompt: String,
-    #[serde(default)]
-    negative_prompt: String,
-    #[serde(default = "default_width")]
-    width: u32,
-    #[serde(default = "default_height")]
-    height: u32,
-    #[serde(default = "default_steps")]
-    sample_steps: usize,
-    #[serde(default = "default_cfg_scale")]
-    cfg_scale: f64,
-    #[serde(default = "default_seed")]
-    seed: u64,
-}
-
-fn default_width() -> u32 {
-    512
-}
-fn default_height() -> u32 {
-    512
-}
-fn default_steps() -> usize {
-    20
-}
-fn default_cfg_scale() -> f64 {
-    7.5
-}
-fn default_seed() -> u64 {
-    42
-}
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -264,7 +218,7 @@ impl CandleDiffusionWorker {
             }
         };
 
-        let raw: GenImageInput = match input.to_json() {
+        let raw: DiffusionImageRequest = match input.to_typed() {
             Ok(v) => v,
             Err(e) => {
                 let _ = reply_tx
@@ -280,25 +234,30 @@ impl CandleDiffusionWorker {
 
         let params = GenImageParams {
             prompt: raw.prompt,
-            negative_prompt: raw.negative_prompt,
+            negative_prompt: raw.negative_prompt.unwrap_or_default(),
             width: raw.width,
             height: raw.height,
-            steps: raw.sample_steps,
-            cfg_scale: raw.cfg_scale,
-            seed: raw.seed,
+            steps: raw.steps.unwrap_or(20).max(1) as usize,
+            cfg_scale: f64::from(raw.cfg_scale.or(raw.guidance).unwrap_or(7.5)),
+            seed: raw.seed.and_then(|value| u64::try_from(value).ok()).unwrap_or(42),
         };
+        let output_width = params.width;
+        let output_height = params.height;
 
         let result = tokio::task::block_in_place(move || engine.inference(&params));
 
         match result {
             Ok(png_bytes) => {
-                let b64 = base64::engine::general_purpose::STANDARD.encode(&png_bytes);
-                let json = serde_json::json!({
-                    "images": [{
-                        "image": b64,
-                    }]
-                });
-                let _ = reply_tx.send(BackendReply::Value(Payload::Json(json)));
+                let response = DiffusionImageResponse {
+                    images: vec![GeneratedImage {
+                        bytes: png_bytes,
+                        width: output_width,
+                        height: output_height,
+                        channels: 3,
+                    }],
+                    metadata: Default::default(),
+                };
+                let _ = reply_tx.send(BackendReply::Value(Payload::typed(response)));
             }
             Err(e) => {
                 let _ = reply_tx

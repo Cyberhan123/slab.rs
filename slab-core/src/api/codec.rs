@@ -3,20 +3,22 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
 use image::{imageops::FilterType, DynamicImage, GenericImageView};
-use serde_json::{Map, Value};
+use serde_json::Value;
 
 use crate::base::error::CoreError;
 use crate::base::types::{Payload, StreamChunk};
 use crate::inference::{
     AudioTranscriptionRequest, AudioTranscriptionResponse, ImageEmbeddingRequest,
-    ImageEmbeddingResponse, ImageGenerationRequest, ImageGenerationResponse, JsonOptions,
-    TextGenerationChunk, TextGenerationRequest, TextGenerationResponse,
+    ImageEmbeddingResponse, ImageGenerationRequest, ImageGenerationResponse, TextGenerationChunk,
+    TextGenerationRequest, TextGenerationResponse,
 };
 use crate::internal::dispatch::ResolvedDriver;
 use crate::model::{ModelFamily, ModelSpec};
 use slab_types::{
-    CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
+    AudioTranscriptionOpOptions, CandleDiffusionLoadConfig, CandleLlamaLoadConfig,
+    CandleWhisperLoadConfig, DiffusionImageRequest, DiffusionImageResponse,
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
+    TextGenerationOpOptions,
 };
 
 pub(crate) fn encode_load_payload(
@@ -126,35 +128,20 @@ pub(crate) fn encode_text_generation_request(
         })
     };
 
-    let mut options = map_from_json_options(&request.options);
-    insert_option(&mut options, "max_tokens", request.max_tokens);
-    insert_option(&mut options, "temperature", request.temperature);
-    insert_option(&mut options, "top_p", request.top_p);
-    insert_option(&mut options, "session_key", request.session_key.clone());
-    insert_option(&mut options, "stream", request.stream);
+    let options = TextGenerationOpOptions {
+        max_tokens: request.max_tokens,
+        temperature: request.temperature,
+        top_p: request.top_p,
+        session_key: request.session_key.clone(),
+        stream: request.stream,
+        apply_chat_template: request.apply_chat_template,
+        chat_messages: request.chat_messages.clone(),
+        grammar: request.grammar.clone(),
+        grammar_json: request.grammar_json,
+        grammar_tool_call: request.grammar_tool_call,
+    };
 
-    // Pass structured chat messages and the template flag to the backend so
-    // it can apply the model's embedded chat template instead of relying on
-    // the server-side pre-rendered prompt.
-    if request.apply_chat_template && !request.chat_messages.is_empty() {
-        insert_option(&mut options, "apply_chat_template", true);
-        options.insert(
-            "chat_messages".to_owned(),
-            serde_json::to_value(&request.chat_messages)
-                .unwrap_or_else(|_| Value::Array(Vec::new())),
-        );
-    }
-
-    // Transport grammar constraint fields to the backend.
-    insert_option(&mut options, "grammar", request.grammar.clone());
-    if request.grammar_json {
-        insert_option(&mut options, "grammar_json", true);
-    }
-    if request.grammar_tool_call {
-        insert_option(&mut options, "grammar_tool_call", true);
-    }
-
-    Ok((input, Payload::Json(Value::Object(options))))
+    Ok((input, Payload::typed(options)))
 }
 
 pub(crate) fn decode_text_generation_response(
@@ -222,10 +209,12 @@ pub(crate) fn decode_text_generation_chunk(
 }
 
 pub(crate) fn encode_audio_transcription_options(request: &AudioTranscriptionRequest) -> Payload {
-    let mut options = map_from_json_options(&request.options);
-    insert_option(&mut options, "language", request.language.clone());
-    insert_option(&mut options, "prompt", request.prompt.clone());
-    Payload::Json(Value::Object(options))
+    Payload::typed(AudioTranscriptionOpOptions {
+        language: request.language.clone(),
+        prompt: request.prompt.clone(),
+        vad: request.vad.clone(),
+        decode: request.decode.clone(),
+    })
 }
 
 pub(crate) fn decode_audio_transcription_response(
@@ -263,58 +252,23 @@ pub(crate) fn encode_image_generation_request(
     request: &ImageGenerationRequest,
     resolved: &ResolvedDriver,
 ) -> Result<(Payload, Payload), CoreError> {
-    let mut object = map_from_json_options(&request.options);
-    insert_option(&mut object, "prompt", request.prompt.clone());
-    insert_option(
-        &mut object,
-        "negative_prompt",
-        request.negative_prompt.clone().unwrap_or_default(),
-    );
-    insert_option(&mut object, "width", request.width);
-    insert_option(&mut object, "height", request.height);
-    insert_option(&mut object, "sample_steps", request.steps);
-    insert_option(&mut object, "seed", request.seed.unwrap_or(-1));
-
-    match resolved.driver_id.as_str() {
-        "candle.diffusion" => {
-            if !object.contains_key("cfg_scale") {
-                insert_option(&mut object, "cfg_scale", request.guidance.map(f64::from));
-            }
-        }
-        _ => {
-            if !object.contains_key("cfg_scale") {
-                insert_option(&mut object, "cfg_scale", request.guidance);
-            }
-            if !object.contains_key("guidance") {
-                insert_option(&mut object, "guidance", request.guidance);
-            }
-        }
-    }
-
-    Ok((Payload::Json(Value::Object(object)), Payload::None))
+    let input = build_diffusion_image_request(request, resolved);
+    Ok((Payload::typed(input), Payload::None))
 }
 
 pub(crate) fn decode_image_generation_response(
     payload: Payload,
 ) -> Result<ImageGenerationResponse, CoreError> {
-    let images = match payload {
-        Payload::Json(value) => decode_image_generation_json(&value)?,
-        Payload::Bytes(bytes) => {
-            if let Ok(value) = serde_json::from_slice::<Value>(&bytes) {
-                decode_image_generation_json(&value)?
-            } else {
-                vec![bytes.as_ref().to_vec()]
-            }
-        }
-        other => {
-            return Err(CoreError::ResultDecodeFailed {
-                task_kind: "image_generation".to_owned(),
-                message: format!("unsupported payload for image response: {other:?}"),
-            });
-        }
-    };
+    let response: DiffusionImageResponse =
+        payload.to_typed().map_err(|error| CoreError::ResultDecodeFailed {
+            task_kind: "image_generation".to_owned(),
+            message: format!("invalid typed diffusion image response: {error}"),
+        })?;
 
-    Ok(ImageGenerationResponse { images, metadata: BTreeMap::new() })
+    Ok(ImageGenerationResponse {
+        images: response.images.into_iter().map(|image| image.bytes).collect(),
+        metadata: response.metadata,
+    })
 }
 
 pub(crate) fn encode_image_embedding_request(
@@ -400,21 +354,6 @@ fn execution_providers(spec: &ModelSpec) -> Vec<String> {
     }
 }
 
-fn map_from_json_options(options: &JsonOptions) -> Map<String, Value> {
-    options.iter().map(|(key, value)| (key.clone(), value.clone())).collect()
-}
-
-fn insert_option<T>(map: &mut Map<String, Value>, key: &str, value: T)
-where
-    T: serde::Serialize,
-{
-    if let Ok(value) = serde_json::to_value(value) {
-        if !value.is_null() {
-            map.insert(key.to_owned(), value);
-        }
-    }
-}
-
 fn string_option(spec: &ModelSpec, key: &str) -> Option<String> {
     spec.load_options.get(key).and_then(|value| match value {
         Value::String(value) => Some(value.clone()),
@@ -471,38 +410,46 @@ fn optional_nonzero_u32_option(spec: &ModelSpec, key: &str) -> Result<Option<u32
     }
 }
 
-fn decode_image_generation_json(value: &Value) -> Result<Vec<Vec<u8>>, CoreError> {
-    if let Some(images) = value.get("images").and_then(Value::as_array) {
-        return images
-            .iter()
-            .map(|entry| match entry {
-                Value::Object(object) => object
-                    .get("image")
-                    .and_then(Value::as_str)
-                    .ok_or_else(|| CoreError::ResultDecodeFailed {
-                        task_kind: "image_generation".to_owned(),
-                        message: "image entry missing image field".to_owned(),
-                    })
-                    .and_then(|image| {
-                        base64::engine::general_purpose::STANDARD.decode(image).map_err(|error| {
-                            CoreError::ResultDecodeFailed {
-                                task_kind: "image_generation".to_owned(),
-                                message: format!("failed to decode image payload: {error}"),
-                            }
-                        })
-                    }),
-                _ => Err(CoreError::ResultDecodeFailed {
-                    task_kind: "image_generation".to_owned(),
-                    message: "unsupported image entry shape".to_owned(),
-                }),
-            })
-            .collect();
+fn build_diffusion_image_request(
+    request: &ImageGenerationRequest,
+    resolved: &ResolvedDriver,
+) -> DiffusionImageRequest {
+    let mut diffusion = DiffusionImageRequest {
+        prompt: request.prompt.clone(),
+        negative_prompt: request.negative_prompt.clone(),
+        count: request.count.max(1),
+        width: request.width.max(1),
+        height: request.height.max(1),
+        cfg_scale: request.cfg_scale,
+        guidance: request.guidance,
+        steps: request.steps.map(|steps| steps.max(1)),
+        seed: request.seed,
+        sample_method: request.sample_method.clone(),
+        scheduler: request.scheduler.clone(),
+        clip_skip: request.clip_skip,
+        strength: request.strength,
+        eta: request.eta,
+        init_image: request.init_image.clone(),
+        options: Default::default(),
+    };
+
+    match resolved.driver_id.as_str() {
+        "candle.diffusion" => {
+            if diffusion.cfg_scale.is_none() {
+                diffusion.cfg_scale = request.guidance;
+            }
+        }
+        _ => {
+            if diffusion.cfg_scale.is_none() {
+                diffusion.cfg_scale = request.guidance;
+            }
+            if diffusion.guidance.is_none() {
+                diffusion.guidance = request.guidance;
+            }
+        }
     }
 
-    Err(CoreError::ResultDecodeFailed {
-        task_kind: "image_generation".to_owned(),
-        message: "image generation response did not contain images".to_owned(),
-    })
+    diffusion
 }
 
 fn encode_image_tensor(image_bytes: &[u8], input_name: &str) -> Result<Value, CoreError> {
@@ -583,8 +530,11 @@ mod tests {
     use slab_types::chat::{ConversationMessage, ConversationMessageContent};
     use slab_types::runtime::Capability;
     use slab_types::{
-        CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
+        AudioTranscriptionOpOptions, CandleDiffusionLoadConfig, CandleLlamaLoadConfig,
+        CandleWhisperLoadConfig, DiffusionImageRequest, DiffusionImageResponse, GeneratedImage,
         GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
+        RawImageInput, TextGenerationOpOptions, WhisperDecodeOptions, WhisperVadOptions,
+        WhisperVadParams,
     };
     use std::path::PathBuf;
 
@@ -745,7 +695,7 @@ mod tests {
     }
 
     #[test]
-    fn encode_text_generation_request_includes_chat_messages_when_flag_set() {
+    fn encode_text_generation_request_uses_typed_options_payload() {
         let request = TextGenerationRequest {
             prompt: "fallback".to_owned(),
             chat_messages: vec![ConversationMessage {
@@ -762,25 +712,18 @@ mod tests {
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
 
-        let opts = match opts_payload {
-            Payload::Json(Value::Object(m)) => m,
-            other => panic!("expected JSON object options, got {other:?}"),
-        };
+        let opts = opts_payload
+            .to_typed::<TextGenerationOpOptions>()
+            .expect("text-generation options should decode as typed payload");
 
-        assert_eq!(
-            opts.get("apply_chat_template").and_then(|v| v.as_bool()),
-            Some(true),
-            "options should include apply_chat_template=true"
-        );
-        let messages = opts.get("chat_messages").expect("options should include chat_messages");
-        let arr = messages.as_array().expect("chat_messages should be an array");
-        assert_eq!(arr.len(), 1);
-        assert_eq!(arr[0]["role"], "user");
-        assert_eq!(arr[0]["content"], "hello");
+        assert!(opts.apply_chat_template, "typed options should preserve the template flag");
+        assert_eq!(opts.chat_messages.len(), 1);
+        assert_eq!(opts.chat_messages[0].role, "user");
+        assert_eq!(opts.chat_messages[0].rendered_text(), "hello");
     }
 
     #[test]
-    fn encode_text_generation_request_omits_chat_fields_when_flag_false() {
+    fn encode_text_generation_request_keeps_chat_messages_when_template_flag_is_false() {
         let request = TextGenerationRequest {
             prompt: "just a prompt".to_owned(),
             chat_messages: vec![ConversationMessage {
@@ -797,23 +740,16 @@ mod tests {
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
 
-        let opts = match opts_payload {
-            Payload::Json(Value::Object(m)) => m,
-            other => panic!("expected JSON object options, got {other:?}"),
-        };
+        let opts = opts_payload
+            .to_typed::<TextGenerationOpOptions>()
+            .expect("text-generation options should decode as typed payload");
 
-        assert!(
-            opts.get("apply_chat_template").is_none(),
-            "apply_chat_template should be absent when flag is false"
-        );
-        assert!(
-            opts.get("chat_messages").is_none(),
-            "chat_messages should be absent when flag is false"
-        );
+        assert!(!opts.apply_chat_template, "typed options should preserve false template flags");
+        assert_eq!(opts.chat_messages.len(), 1, "typed options should preserve chat messages");
     }
 
     #[test]
-    fn encode_text_generation_request_omits_chat_fields_when_messages_empty() {
+    fn encode_text_generation_request_preserves_empty_chat_message_lists() {
         let request = TextGenerationRequest {
             prompt: "just a prompt".to_owned(),
             chat_messages: vec![],
@@ -824,19 +760,12 @@ mod tests {
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
 
-        let opts = match opts_payload {
-            Payload::Json(Value::Object(m)) => m,
-            other => panic!("expected JSON object options, got {other:?}"),
-        };
+        let opts = opts_payload
+            .to_typed::<TextGenerationOpOptions>()
+            .expect("text-generation options should decode as typed payload");
 
-        assert!(
-            opts.get("apply_chat_template").is_none(),
-            "apply_chat_template should be absent when messages list is empty"
-        );
-        assert!(
-            opts.get("chat_messages").is_none(),
-            "chat_messages should be absent when messages list is empty"
-        );
+        assert!(opts.apply_chat_template);
+        assert!(opts.chat_messages.is_empty(), "typed options should keep empty chat lists");
     }
 
     // ── grammar encoding ──────────────────────────────────────────────────────
@@ -852,17 +781,12 @@ mod tests {
         let driver = make_llama_driver();
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
-        let opts = match opts_payload {
-            Payload::Json(Value::Object(m)) => m,
-            other => panic!("expected JSON object options, got {other:?}"),
-        };
-        assert_eq!(
-            opts.get("grammar").and_then(|v| v.as_str()),
-            Some(gbnf),
-            "raw grammar string should be present in options"
-        );
-        assert!(opts.get("grammar_json").is_none(), "grammar_json should be absent");
-        assert!(opts.get("grammar_tool_call").is_none(), "grammar_tool_call should be absent");
+        let opts = opts_payload
+            .to_typed::<TextGenerationOpOptions>()
+            .expect("text-generation options should decode as typed payload");
+        assert_eq!(opts.grammar.as_deref(), Some(gbnf));
+        assert!(!opts.grammar_json);
+        assert!(!opts.grammar_tool_call);
     }
 
     #[test]
@@ -875,15 +799,10 @@ mod tests {
         let driver = make_llama_driver();
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
-        let opts = match opts_payload {
-            Payload::Json(Value::Object(m)) => m,
-            other => panic!("expected JSON object options, got {other:?}"),
-        };
-        assert_eq!(
-            opts.get("grammar_json").and_then(|v| v.as_bool()),
-            Some(true),
-            "grammar_json flag should be present in options"
-        );
+        let opts = opts_payload
+            .to_typed::<TextGenerationOpOptions>()
+            .expect("text-generation options should decode as typed payload");
+        assert!(opts.grammar_json, "grammar_json flag should be present in typed options");
     }
 
     #[test]
@@ -896,58 +815,163 @@ mod tests {
         let driver = make_llama_driver();
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
-        let opts = match opts_payload {
-            Payload::Json(Value::Object(m)) => m,
-            other => panic!("expected JSON object options, got {other:?}"),
-        };
-        assert_eq!(
-            opts.get("grammar_tool_call").and_then(|v| v.as_bool()),
-            Some(true),
-            "grammar_tool_call flag should be present in options"
-        );
+        let opts = opts_payload
+            .to_typed::<TextGenerationOpOptions>()
+            .expect("text-generation options should decode as typed payload");
+        assert!(opts.grammar_tool_call, "grammar_tool_call flag should be present");
     }
 
     #[test]
-    fn encode_text_generation_request_grammar_flags_absent_when_not_set() {
+    fn encode_text_generation_request_grammar_flags_default_to_false() {
         let request = TextGenerationRequest { prompt: "hi".to_owned(), ..Default::default() };
         let driver = make_llama_driver();
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
-        let opts = match opts_payload {
-            Payload::Json(Value::Object(m)) => m,
-            other => panic!("expected JSON object options, got {other:?}"),
-        };
-        assert!(opts.get("grammar").is_none(), "grammar should be absent when not set");
-        assert!(opts.get("grammar_json").is_none(), "grammar_json should be absent when false");
-        assert!(
-            opts.get("grammar_tool_call").is_none(),
-            "grammar_tool_call should be absent when false"
-        );
+        let opts = opts_payload
+            .to_typed::<TextGenerationOpOptions>()
+            .expect("text-generation options should decode as typed payload");
+        assert!(opts.grammar.is_none());
+        assert!(!opts.grammar_json);
+        assert!(!opts.grammar_tool_call);
     }
 
     #[test]
-    fn decode_image_generation_response_accepts_unified_image_entries() {
-        let encoded = base64::engine::general_purpose::STANDARD.encode(b"mock-image");
+    fn encode_audio_transcription_options_uses_typed_payload() {
+        let payload = encode_audio_transcription_options(&AudioTranscriptionRequest {
+            audio_path: PathBuf::from("speech.wav"),
+            pcm_samples: None,
+            language: Some("en".to_owned()),
+            prompt: Some("hello".to_owned()),
+            vad: Some(WhisperVadOptions {
+                enabled: true,
+                model_path: Some(PathBuf::from("vad.bin")),
+                params: Some(WhisperVadParams { threshold: Some(0.5), ..Default::default() }),
+            }),
+            decode: Some(WhisperDecodeOptions {
+                max_tokens: Some(32),
+                no_timestamps: Some(true),
+                ..Default::default()
+            }),
+            options: Default::default(),
+        });
 
-        let response = decode_image_generation_response(Payload::Json(json!({
-            "images": [{ "image": encoded }]
-        })))
+        let opts = payload
+            .to_typed::<AudioTranscriptionOpOptions>()
+            .expect("audio options should decode as typed payload");
+
+        assert_eq!(opts.language.as_deref(), Some("en"));
+        assert_eq!(opts.prompt.as_deref(), Some("hello"));
+        assert_eq!(
+            opts.vad.as_ref().and_then(|vad| vad.model_path.as_ref()),
+            Some(&PathBuf::from("vad.bin"))
+        );
+        assert_eq!(opts.decode.as_ref().and_then(|decode| decode.max_tokens), Some(32));
+    }
+
+    #[test]
+    fn encode_image_generation_request_uses_typed_diffusion_payload_for_ggml() {
+        let request = ImageGenerationRequest {
+            prompt: "generate a cat".to_owned(),
+            negative_prompt: Some("dog".to_owned()),
+            count: 2,
+            width: 256,
+            height: 128,
+            cfg_scale: Some(6.0),
+            steps: Some(4),
+            guidance: Some(3.5),
+            seed: Some(123),
+            sample_method: Some("euler".to_owned()),
+            scheduler: Some("karras".to_owned()),
+            clip_skip: Some(1),
+            strength: Some(0.4),
+            eta: Some(0.1),
+            init_image: Some(RawImageInput {
+                data: vec![1, 2, 3],
+                width: 1,
+                height: 1,
+                channels: 3,
+            }),
+            options: Default::default(),
+        };
+        let driver = make_driver(
+            "ggml.diffusion",
+            "diffusion",
+            ModelFamily::Diffusion,
+            Capability::ImageGeneration,
+        );
+
+        let (input, op_options) =
+            encode_image_generation_request(&request, &driver).expect("encode should succeed");
+        assert!(matches!(op_options, Payload::None));
+
+        let typed = input
+            .to_typed::<DiffusionImageRequest>()
+            .expect("image request should encode as typed diffusion payload");
+
+        assert_eq!(typed.prompt, "generate a cat");
+        assert_eq!(typed.negative_prompt.as_deref(), Some("dog"));
+        assert_eq!(typed.count, 2);
+        assert_eq!(typed.width, 256);
+        assert_eq!(typed.height, 128);
+        assert_eq!(typed.cfg_scale, Some(6.0));
+        assert_eq!(typed.guidance, Some(3.5));
+        assert_eq!(typed.sample_method.as_deref(), Some("euler"));
+        assert_eq!(typed.scheduler.as_deref(), Some("karras"));
+        assert_eq!(typed.clip_skip, Some(1));
+        assert_eq!(typed.strength, Some(0.4));
+        assert_eq!(typed.eta, Some(0.1));
+        assert_eq!(typed.init_image.as_ref().map(|image| image.data.clone()), Some(vec![1, 2, 3]));
+    }
+
+    #[test]
+    fn encode_image_generation_request_defaults_candle_cfg_scale_from_guidance() {
+        let request = ImageGenerationRequest {
+            prompt: "generate a cat".to_owned(),
+            guidance: Some(6.5),
+            ..Default::default()
+        };
+        let driver = make_driver(
+            "candle.diffusion",
+            "candle.diffusion",
+            ModelFamily::Diffusion,
+            Capability::ImageGeneration,
+        );
+
+        let (input, _op_options) =
+            encode_image_generation_request(&request, &driver).expect("encode should succeed");
+        let typed = input
+            .to_typed::<DiffusionImageRequest>()
+            .expect("image request should encode as typed diffusion payload");
+
+        assert_eq!(typed.cfg_scale, Some(6.5));
+        assert_eq!(typed.guidance, Some(6.5));
+    }
+
+    #[test]
+    fn decode_image_generation_response_accepts_typed_diffusion_response() {
+        let response = decode_image_generation_response(Payload::typed(DiffusionImageResponse {
+            images: vec![GeneratedImage {
+                bytes: b"mock-image".to_vec(),
+                width: 256,
+                height: 256,
+                channels: 3,
+            }],
+            metadata: Default::default(),
+        }))
         .expect("image response should decode");
 
         assert_eq!(response.images, vec![b"mock-image".to_vec()]);
     }
 
     #[test]
-    fn decode_image_generation_response_rejects_legacy_image_entries() {
-        let error = decode_image_generation_response(Payload::Json(json!({
-            "images": ["legacy-image"]
-        })))
-        .expect_err("legacy image entry shape should be rejected");
+    fn decode_image_generation_response_rejects_non_typed_payloads() {
+        let error = decode_image_generation_response(Payload::Text("oops".into()))
+            .expect_err("non-diffusion payload should be rejected");
 
         match error {
             CoreError::ResultDecodeFailed { task_kind, message } => {
                 assert_eq!(task_kind, "image_generation");
-                assert_eq!(message, "unsupported image entry shape");
+                assert!(message.contains("invalid typed diffusion image response"));
             }
             other => panic!("unexpected error: {other:?}"),
         }

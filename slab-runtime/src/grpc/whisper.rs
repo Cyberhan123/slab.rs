@@ -5,8 +5,9 @@ use bytemuck::cast_slice;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, instrument, warn};
 
-use slab_core::api::{AudioTranscriptionRequest, JsonOptions};
+use slab_core::api::AudioTranscriptionRequest;
 use slab_proto::slab::ipc::v1 as pb;
+use slab_types::{WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams};
 
 use super::{extract_request_id, runtime_to_status, BackendKind, GrpcServiceImpl};
 
@@ -26,9 +27,10 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
             return Err(Status::invalid_argument("audio file path is empty"));
         }
 
-        let options = build_whisper_inference_options(&req).map_err(Status::invalid_argument)?;
-        let vad_enabled = req.vad.as_ref().is_some_and(|v| v.enabled);
-        let decode_configured = req.decode.is_some();
+        let (vad, decode) =
+            build_whisper_inference_options(&req).map_err(Status::invalid_argument)?;
+        let vad_enabled = vad.as_ref().is_some_and(|value| value.enabled);
+        let decode_configured = decode.is_some();
 
         debug!(
             audio_path = %req.path,
@@ -50,9 +52,9 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
                 pcm_samples: Some(pcm_samples),
                 language: None,
                 prompt: None,
-                vad: None,
-                decode: None,
-                options,
+                vad,
+                decode,
+                options: Default::default(),
             })
             .await
             .map_err(|error| {
@@ -107,26 +109,23 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
     }
 }
 
-fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<JsonOptions, String> {
-    let mut options = serde_json::Map::new();
-
-    if let Some(vad) = req.vad.as_ref() {
-        if vad.enabled {
+fn build_whisper_inference_options(
+    req: &pb::TranscribeRequest,
+) -> Result<(Option<WhisperVadOptions>, Option<WhisperDecodeOptions>), String> {
+    let vad = if let Some(vad) = req.vad.as_ref() {
+        if !vad.enabled {
+            None
+        } else {
             let model_path = vad.model_path.trim();
             if model_path.is_empty() {
                 return Err("vad.model_path is required when VAD is enabled".to_owned());
             }
 
-            let mut vad_json = serde_json::Map::new();
-            vad_json
-                .insert("model_path".to_owned(), serde_json::Value::String(model_path.to_owned()));
-
-            if let Some(params) = vad.params.as_ref() {
+            let params = if let Some(params) = vad.params.as_ref() {
                 if let Some(threshold) = params.threshold {
                     if !(0.0..=1.0).contains(&threshold) {
                         return Err("vad.threshold must be between 0.0 and 1.0".to_owned());
                     }
-                    vad_json.insert("threshold".to_owned(), serde_json::json!(threshold));
                 }
 
                 for (name, value) in [
@@ -138,10 +137,6 @@ fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<JsonOp
                         if value < 0 {
                             return Err(format!("{name} must be >= 0"));
                         }
-                        vad_json.insert(
-                            name.trim_start_matches("vad.").to_owned(),
-                            serde_json::json!(value),
-                        );
                     }
                 }
 
@@ -149,28 +144,37 @@ fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<JsonOp
                     if max_speech_duration_s <= 0.0 {
                         return Err("vad.max_speech_duration_s must be > 0.0".to_owned());
                     }
-                    vad_json.insert(
-                        "max_speech_duration_s".to_owned(),
-                        serde_json::json!(max_speech_duration_s),
-                    );
                 }
 
                 if let Some(samples_overlap) = params.samples_overlap {
                     if samples_overlap < 0.0 {
                         return Err("vad.samples_overlap must be >= 0.0".to_owned());
                     }
-                    vad_json
-                        .insert("samples_overlap".to_owned(), serde_json::json!(samples_overlap));
                 }
-            }
 
-            options.insert("vad".to_owned(), serde_json::Value::Object(vad_json));
+                Some(WhisperVadParams {
+                    threshold: params.threshold,
+                    min_speech_duration_ms: params.min_speech_duration_ms,
+                    min_silence_duration_ms: params.min_silence_duration_ms,
+                    max_speech_duration_s: params.max_speech_duration_s,
+                    speech_pad_ms: params.speech_pad_ms,
+                    samples_overlap: params.samples_overlap,
+                })
+            } else {
+                None
+            };
+
+            Some(WhisperVadOptions {
+                enabled: true,
+                model_path: Some(PathBuf::from(model_path)),
+                params,
+            })
         }
-    }
+    } else {
+        None
+    };
 
-    if let Some(decode) = req.decode.as_ref() {
-        let mut decode_json = serde_json::Map::new();
-
+    let decode = if let Some(decode) = req.decode.as_ref() {
         for (name, value) in [
             ("decode.offset_ms", decode.offset_ms),
             ("decode.duration_ms", decode.duration_ms),
@@ -181,10 +185,6 @@ fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<JsonOp
                 if value < 0 {
                     return Err(format!("{name} must be >= 0"));
                 }
-                decode_json.insert(
-                    name.trim_start_matches("decode.").to_owned(),
-                    serde_json::json!(value),
-                );
             }
         }
 
@@ -192,7 +192,6 @@ fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<JsonOp
             if !(0.0..=1.0).contains(&word_thold) {
                 return Err("decode.word_thold must be between 0.0 and 1.0".to_owned());
             }
-            decode_json.insert("word_thold".to_owned(), serde_json::json!(word_thold));
         }
 
         for (name, value) in [
@@ -203,48 +202,32 @@ fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> Result<JsonOp
                 if value < 0.0 {
                     return Err(format!("{name} must be >= 0.0"));
                 }
-                decode_json.insert(
-                    name.trim_start_matches("decode.").to_owned(),
-                    serde_json::json!(value),
-                );
             }
         }
 
-        for (name, value) in [
-            ("decode.no_context", decode.no_context),
-            ("decode.no_timestamps", decode.no_timestamps),
-            ("decode.token_timestamps", decode.token_timestamps),
-            ("decode.split_on_word", decode.split_on_word),
-            ("decode.suppress_nst", decode.suppress_nst),
-            ("decode.tdrz_enable", decode.tdrz_enable),
-        ] {
-            if let Some(value) = value {
-                decode_json.insert(
-                    name.trim_start_matches("decode.").to_owned(),
-                    serde_json::json!(value),
-                );
-            }
-        }
+        Some(WhisperDecodeOptions {
+            offset_ms: decode.offset_ms,
+            duration_ms: decode.duration_ms,
+            no_context: decode.no_context,
+            no_timestamps: decode.no_timestamps,
+            token_timestamps: decode.token_timestamps,
+            split_on_word: decode.split_on_word,
+            suppress_nst: decode.suppress_nst,
+            word_thold: decode.word_thold,
+            max_len: decode.max_len,
+            max_tokens: decode.max_tokens,
+            temperature: decode.temperature,
+            temperature_inc: decode.temperature_inc,
+            entropy_thold: decode.entropy_thold,
+            logprob_thold: decode.logprob_thold,
+            no_speech_thold: decode.no_speech_thold,
+            tdrz_enable: decode.tdrz_enable,
+        })
+    } else {
+        None
+    };
 
-        for (name, value) in [
-            ("decode.entropy_thold", decode.entropy_thold),
-            ("decode.logprob_thold", decode.logprob_thold),
-            ("decode.no_speech_thold", decode.no_speech_thold),
-        ] {
-            if let Some(value) = value {
-                decode_json.insert(
-                    name.trim_start_matches("decode.").to_owned(),
-                    serde_json::json!(value),
-                );
-            }
-        }
-
-        if !decode_json.is_empty() {
-            options.insert("decode".to_owned(), serde_json::Value::Object(decode_json));
-        }
-    }
-
-    Ok(options.into_iter().collect())
+    Ok((vad, decode))
 }
 
 fn convert_file_to_pcm_f32le(path: &str) -> Result<Arc<[f32]>, String> {

@@ -16,7 +16,6 @@
 
 use std::sync::Arc;
 
-use serde::Deserialize;
 use tokio::sync::broadcast;
 
 use crate::internal::engine::ggml::whisper::adapter::{
@@ -28,7 +27,9 @@ use crate::internal::scheduler::backend::protocol::{
 };
 use crate::internal::scheduler::types::Payload;
 use slab_core_macros::backend_handler;
-use slab_types::GgmlWhisperLoadConfig;
+use slab_types::{
+    AudioTranscriptionOpOptions, GgmlWhisperLoadConfig, WhisperDecodeOptions, WhisperVadOptions,
+};
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -56,127 +57,131 @@ pub(crate) struct WhisperWorker {
     last_model_config: Option<Payload>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(default)]
-struct WhisperInferenceOptions {
-    vad: Option<WhisperVadInferenceOptions>,
-    decode: Option<WhisperDecodeInferenceOptions>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-struct WhisperVadInferenceOptions {
-    model_path: String,
-    threshold: Option<f32>,
-    min_speech_duration_ms: Option<i32>,
-    min_silence_duration_ms: Option<i32>,
-    max_speech_duration_s: Option<f32>,
-    speech_pad_ms: Option<i32>,
-    samples_overlap: Option<f32>,
-}
-
-impl WhisperVadInferenceOptions {
-    fn into_engine_config(self) -> WhisperVadConfig {
-        WhisperVadConfig {
-            model_path: self.model_path,
-            threshold: self.threshold,
-            min_speech_duration_ms: self.min_speech_duration_ms,
-            min_silence_duration_ms: self.min_silence_duration_ms,
-            max_speech_duration_s: self.max_speech_duration_s,
-            speech_pad_ms: self.speech_pad_ms,
-            samples_overlap: self.samples_overlap,
-        }
+fn into_vad_config(vad: WhisperVadOptions) -> Result<Option<WhisperVadConfig>, String> {
+    if !vad.enabled {
+        return Ok(None);
     }
-}
 
-#[derive(Debug, Clone, Deserialize)]
-struct WhisperDecodeInferenceOptions {
-    offset_ms: Option<i32>,
-    duration_ms: Option<i32>,
-    no_context: Option<bool>,
-    no_timestamps: Option<bool>,
-    token_timestamps: Option<bool>,
-    split_on_word: Option<bool>,
-    suppress_nst: Option<bool>,
-    word_thold: Option<f32>,
-    max_len: Option<i32>,
-    max_tokens: Option<i32>,
-    temperature: Option<f32>,
-    temperature_inc: Option<f32>,
-    entropy_thold: Option<f32>,
-    logprob_thold: Option<f32>,
-    no_speech_thold: Option<f32>,
-    tdrz_enable: Option<bool>,
-}
-
-impl WhisperDecodeInferenceOptions {
-    fn into_engine_config(self) -> WhisperDecodeConfig {
-        WhisperDecodeConfig {
-            offset_ms: self.offset_ms,
-            duration_ms: self.duration_ms,
-            no_context: self.no_context,
-            no_timestamps: self.no_timestamps,
-            token_timestamps: self.token_timestamps,
-            split_on_word: self.split_on_word,
-            suppress_nst: self.suppress_nst,
-            word_thold: self.word_thold,
-            max_len: self.max_len,
-            max_tokens: self.max_tokens,
-            temperature: self.temperature,
-            temperature_inc: self.temperature_inc,
-            entropy_thold: self.entropy_thold,
-            logprob_thold: self.logprob_thold,
-            no_speech_thold: self.no_speech_thold,
-            tdrz_enable: self.tdrz_enable,
-        }
+    let model_path = vad
+        .model_path
+        .ok_or_else(|| "invalid whisper inference options: vad.model_path is missing".to_owned())?;
+    if model_path.as_os_str().is_empty() {
+        return Err("invalid whisper inference options: vad.model_path is empty".into());
     }
-}
 
-fn parse_inference_options(raw: &Payload) -> Result<WhisperInferenceOptions, String> {
-    let value = raw.to_serde_value();
-    if value.is_null() {
-        return Ok(WhisperInferenceOptions::default());
-    }
-    let opts: WhisperInferenceOptions = serde_json::from_value(value)
-        .map_err(|e| format!("invalid whisper inference options: {e}"))?;
-
-    if let Some(vad) = opts.vad.as_ref() {
-        if vad.model_path.trim().is_empty() {
-            return Err("invalid whisper inference options: vad.model_path is empty".into());
+    let params = vad.params.unwrap_or_default();
+    if let Some(threshold) = params.threshold {
+        if !(0.0..=1.0).contains(&threshold) {
+            return Err(
+                "invalid whisper inference options: vad.threshold must be between 0.0 and 1.0"
+                    .into(),
+            );
         }
     }
 
-    if let Some(decode) = opts.decode.as_ref() {
-        for (name, value) in [
-            ("decode.offset_ms", decode.offset_ms),
-            ("decode.duration_ms", decode.duration_ms),
-            ("decode.max_len", decode.max_len),
-            ("decode.max_tokens", decode.max_tokens),
-        ] {
-            if value.is_some_and(|v| v < 0) {
-                return Err(format!("invalid whisper inference options: {name} must be >= 0"));
-            }
-        }
-
-        if let Some(word_thold) = decode.word_thold {
-            if !(0.0..=1.0).contains(&word_thold) {
-                return Err(
-                    "invalid whisper inference options: decode.word_thold must be between 0.0 and 1.0"
-                        .into(),
-                );
-            }
-        }
-
-        for (name, value) in [
-            ("decode.temperature", decode.temperature),
-            ("decode.temperature_inc", decode.temperature_inc),
-        ] {
-            if value.is_some_and(|v| v < 0.0) {
-                return Err(format!("invalid whisper inference options: {name} must be >= 0.0"));
-            }
+    for (name, value) in [
+        ("vad.min_speech_duration_ms", params.min_speech_duration_ms),
+        ("vad.min_silence_duration_ms", params.min_silence_duration_ms),
+        ("vad.speech_pad_ms", params.speech_pad_ms),
+    ] {
+        if value.is_some_and(|value| value < 0) {
+            return Err(format!("invalid whisper inference options: {name} must be >= 0"));
         }
     }
 
-    Ok(opts)
+    if let Some(max_speech_duration_s) = params.max_speech_duration_s {
+        if max_speech_duration_s <= 0.0 {
+            return Err(
+                "invalid whisper inference options: vad.max_speech_duration_s must be > 0.0".into(),
+            );
+        }
+    }
+
+    if let Some(samples_overlap) = params.samples_overlap {
+        if samples_overlap < 0.0 {
+            return Err(
+                "invalid whisper inference options: vad.samples_overlap must be >= 0.0".into()
+            );
+        }
+    }
+
+    Ok(Some(WhisperVadConfig {
+        model_path: model_path.to_string_lossy().into_owned(),
+        threshold: params.threshold,
+        min_speech_duration_ms: params.min_speech_duration_ms,
+        min_silence_duration_ms: params.min_silence_duration_ms,
+        max_speech_duration_s: params.max_speech_duration_s,
+        speech_pad_ms: params.speech_pad_ms,
+        samples_overlap: params.samples_overlap,
+    }))
+}
+
+fn into_decode_config(decode: WhisperDecodeOptions) -> Result<Option<WhisperDecodeConfig>, String> {
+    for (name, value) in [
+        ("decode.offset_ms", decode.offset_ms),
+        ("decode.duration_ms", decode.duration_ms),
+        ("decode.max_len", decode.max_len),
+        ("decode.max_tokens", decode.max_tokens),
+    ] {
+        if value.is_some_and(|value| value < 0) {
+            return Err(format!("invalid whisper inference options: {name} must be >= 0"));
+        }
+    }
+
+    if let Some(word_thold) = decode.word_thold {
+        if !(0.0..=1.0).contains(&word_thold) {
+            return Err(
+                "invalid whisper inference options: decode.word_thold must be between 0.0 and 1.0"
+                    .into(),
+            );
+        }
+    }
+
+    for (name, value) in [
+        ("decode.temperature", decode.temperature),
+        ("decode.temperature_inc", decode.temperature_inc),
+    ] {
+        if value.is_some_and(|value| value < 0.0) {
+            return Err(format!("invalid whisper inference options: {name} must be >= 0.0"));
+        }
+    }
+
+    Ok(Some(WhisperDecodeConfig {
+        offset_ms: decode.offset_ms,
+        duration_ms: decode.duration_ms,
+        no_context: decode.no_context,
+        no_timestamps: decode.no_timestamps,
+        token_timestamps: decode.token_timestamps,
+        split_on_word: decode.split_on_word,
+        suppress_nst: decode.suppress_nst,
+        word_thold: decode.word_thold,
+        max_len: decode.max_len,
+        max_tokens: decode.max_tokens,
+        temperature: decode.temperature,
+        temperature_inc: decode.temperature_inc,
+        entropy_thold: decode.entropy_thold,
+        logprob_thold: decode.logprob_thold,
+        no_speech_thold: decode.no_speech_thold,
+        tdrz_enable: decode.tdrz_enable,
+    }))
+}
+
+fn parse_inference_options(
+    raw: &Payload,
+) -> Result<(Option<WhisperVadConfig>, Option<WhisperDecodeConfig>), String> {
+    let opts: AudioTranscriptionOpOptions =
+        raw.to_typed().map_err(|e| format!("invalid whisper inference options: {e}"))?;
+
+    let vad = match opts.vad {
+        Some(vad) => into_vad_config(vad)?,
+        None => None,
+    };
+    let decode = match opts.decode {
+        Some(decode) => into_decode_config(decode)?,
+        None => None,
+    };
+
+    Ok((vad, decode))
 }
 
 #[backend_handler]
@@ -213,20 +218,14 @@ impl WhisperWorker {
             }
         };
         let BackendRequest { input, reply_tx, .. } = req;
-        let options = match parse_inference_options(&invocation.options) {
+        let (vad, decode) = match parse_inference_options(&invocation.options) {
             Ok(options) => options,
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e));
                 return;
             }
         };
-        self.handle_inference(
-            input,
-            options.vad.map(|v| v.into_engine_config()),
-            options.decode.map(|d| d.into_engine_config()),
-            reply_tx,
-        )
-        .await;
+        self.handle_inference(input, vad, decode, reply_tx).await;
     }
 
     // ── model.load ────────────────────────────────────────────────────────────

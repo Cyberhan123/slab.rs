@@ -538,19 +538,22 @@ mod tests {
                                 },
                                 MockBackend::Image => match invocation.route {
                                     RequestRoute::InferenceImage => {
-                                        let body: serde_json::Value =
-                                            req.input.to_json().expect("image request should be JSON");
-                                        assert_eq!(body.get("prompt").and_then(|value| value.as_str()), Some("generate a cat"));
-                                        let image_bytes = b"mock-image".to_vec();
-                                        let encoded = base64::engine::general_purpose::STANDARD
-                                            .encode(image_bytes);
-                                        let _ = req.reply_tx.send(BackendReply::Value(Payload::json(
-                                            json!({
-                                                "images": [{
-                                                    "image": encoded,
-                                                }]
+                                        let body: slab_types::DiffusionImageRequest = req
+                                            .input
+                                            .to_typed()
+                                            .expect("image request should be typed diffusion input");
+                                        assert_eq!(body.prompt, "generate a cat");
+                                        let _ = req.reply_tx.send(BackendReply::Value(
+                                            Payload::typed(slab_types::DiffusionImageResponse {
+                                                images: vec![slab_types::GeneratedImage {
+                                                    bytes: b"mock-image".to_vec(),
+                                                    width: body.width,
+                                                    height: body.height,
+                                                    channels: 3,
+                                                }],
+                                                metadata: Default::default(),
                                             }),
-                                        )));
+                                        ));
                                     }
                                     other => {
                                         let _ = req.reply_tx.send(BackendReply::Error(format!(
