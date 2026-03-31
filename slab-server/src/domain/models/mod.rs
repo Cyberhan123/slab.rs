@@ -26,13 +26,14 @@ pub use chat::{
     ChatVerbosity, ConversationContentPart, ConversationMessage, ConversationMessageContent,
     ConversationToolCall, ConversationToolFunction, StructuredOutput, TextCompletionCommand,
     TextCompletionOutput, TextCompletionResult, TextResultChoice, assistant_message_from_parts,
-    assistant_message_from_text_response, serialize_session_message,
+    assistant_message_from_text_response, deserialize_session_message,
+    serialize_session_message,
 };
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{ImageGenerationCommand, ImageGenerationMode};
 pub use model::{
     AvailableModelsQuery, AvailableModelsView, CreateModelCommand, DeletedModelView,
-    DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus,
+    DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus, Pricing,
     RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
 };
 pub use pmid::PMID;

@@ -10,13 +10,19 @@ use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
 use crate::domain::models::{
+    ChatCompletionCommand as DomainChatCompletionCommand,
     ChatCompletionResult as DomainChatCompletionResult, ChatModelOption as DomainChatModelOption,
-    ChatModelSource as DomainChatModelSource, ChatResultChoice as DomainChatResultChoice,
+    ChatModelSource as DomainChatModelSource,
+    ChatReasoningEffort as DomainChatReasoningEffort, ChatResultChoice as DomainChatResultChoice,
+    ChatStreamOptions as DomainChatStreamOptions, ChatVerbosity as DomainChatVerbosity,
     ConversationContentPart as DomainConversationContentPart,
     ConversationMessage as DomainConversationMessage,
     ConversationMessageContent as DomainConversationMessageContent,
     ConversationToolCall as DomainConversationToolCall,
     ConversationToolFunction as DomainConversationToolFunction,
+    StructuredOutput as DomainStructuredOutput,
+    StructuredOutputJsonSchema as DomainStructuredOutputJsonSchema,
+    TextCompletionCommand as DomainTextCompletionCommand,
     TextCompletionResult as DomainTextCompletionResult, TextResultChoice as DomainTextResultChoice,
 };
 use slab_types::inference::TextGenerationUsage;
@@ -573,6 +579,122 @@ impl From<ChatToolCall> for DomainConversationToolCall {
     }
 }
 
+impl From<ChatReasoningEffort> for DomainChatReasoningEffort {
+    fn from(value: ChatReasoningEffort) -> Self {
+        match value {
+            ChatReasoningEffort::None => Self::None,
+            ChatReasoningEffort::Low => Self::Low,
+            ChatReasoningEffort::Medium => Self::Medium,
+            ChatReasoningEffort::High => Self::High,
+            ChatReasoningEffort::Minimal => Self::Minimal,
+        }
+    }
+}
+
+impl From<ChatVerbosity> for DomainChatVerbosity {
+    fn from(value: ChatVerbosity) -> Self {
+        match value {
+            ChatVerbosity::Low => Self::Low,
+            ChatVerbosity::Medium => Self::Medium,
+            ChatVerbosity::High => Self::High,
+        }
+    }
+}
+
+impl From<ChatStreamOptions> for DomainChatStreamOptions {
+    fn from(value: ChatStreamOptions) -> Self {
+        Self { include_usage: value.include_usage }
+    }
+}
+
+impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
+    fn from(request: ChatCompletionRequest) -> Self {
+        let ChatCompletionRequest {
+            id,
+            model,
+            messages,
+            continue_generation,
+            stream,
+            stream_options,
+            max_tokens,
+            temperature,
+            top_p,
+            n,
+            stop,
+            grammar,
+            response_format,
+            json_schema,
+            thinking,
+            reasoning_effort,
+            verbosity,
+        } = request;
+
+        let reasoning_effort = reasoning_effort
+            .map(Into::into)
+            .or_else(|| thinking.as_ref().and_then(reasoning_effort_from_thinking));
+        let verbosity = verbosity
+            .map(Into::into)
+            .or_else(|| thinking.as_ref().and_then(verbosity_from_thinking));
+        let structured_output = structured_output_from_api(response_format, json_schema);
+        let grammar_json = structured_output.is_some();
+        let stop = stop.as_ref().map(StopSequences::normalized).unwrap_or_default();
+
+        Self {
+            id,
+            model: model.trim().to_owned(),
+            messages: messages.into_iter().map(Into::into).collect(),
+            continue_generation,
+            max_tokens,
+            temperature,
+            top_p,
+            n: n.unwrap_or(1),
+            stop,
+            grammar,
+            grammar_json,
+            structured_output,
+            reasoning_effort,
+            verbosity,
+            stream,
+            stream_options: stream_options.map(Into::into).unwrap_or_default(),
+        }
+    }
+}
+
+impl From<CompletionRequest> for DomainTextCompletionCommand {
+    fn from(request: CompletionRequest) -> Self {
+        let CompletionRequest {
+            model,
+            prompt,
+            max_tokens,
+            temperature,
+            top_p,
+            n,
+            stop,
+            stream,
+            grammar,
+            response_format,
+            json_schema,
+        } = request;
+        let structured_output = structured_output_from_api(response_format, json_schema);
+        let grammar_json = structured_output.is_some();
+        let stop = stop.as_ref().map(StopSequences::normalized).unwrap_or_default();
+
+        Self {
+            model: model.trim().to_owned(),
+            prompt,
+            max_tokens,
+            temperature,
+            top_p,
+            n: n.unwrap_or(1),
+            stop,
+            grammar,
+            grammar_json,
+            structured_output,
+            stream,
+        }
+    }
+}
+
 impl From<DomainConversationMessage> for ChatMessage {
     fn from(message: DomainConversationMessage) -> Self {
         Self {
@@ -840,6 +962,290 @@ fn validation_error(code: &'static str, message: &str) -> ValidationError {
     error
 }
 
+fn reasoning_effort_from_thinking(
+    thinking: &ChatThinkingConfig,
+) -> Option<DomainChatReasoningEffort> {
+    match thinking.mode {
+        ChatThinkingType::Disabled => Some(DomainChatReasoningEffort::None),
+        ChatThinkingType::Enabled => thinking
+            .reasoning_effort
+            .map(Into::into)
+            .or(Some(DomainChatReasoningEffort::Medium)),
+    }
+}
+
+fn verbosity_from_thinking(thinking: &ChatThinkingConfig) -> Option<DomainChatVerbosity> {
+    match thinking.mode {
+        ChatThinkingType::Disabled => None,
+        ChatThinkingType::Enabled => thinking.verbosity.map(Into::into),
+    }
+}
+
+fn structured_output_from_api(
+    response_format: Option<ChatResponseFormat>,
+    json_schema: Option<Value>,
+) -> Option<DomainStructuredOutput> {
+    if let Some(schema) = json_schema {
+        return Some(DomainStructuredOutput::JsonSchema(DomainStructuredOutputJsonSchema::new(
+            None, None, None, schema,
+        )));
+    }
+
+    let response_format = response_format?;
+    match response_format.format_type {
+        ChatResponseFormatType::Text => None,
+        ChatResponseFormatType::JsonObject | ChatResponseFormatType::JsonSchema => response_format
+            .json_schema
+            .map(structured_output_json_schema_from_api)
+            .map(DomainStructuredOutput::JsonSchema)
+            .or_else(|| {
+                response_format.schema.map(|schema| {
+                    DomainStructuredOutput::JsonSchema(DomainStructuredOutputJsonSchema::new(
+                        None, None, None, schema,
+                    ))
+                })
+            })
+            .or(Some(DomainStructuredOutput::JsonObject)),
+    }
+}
+
+fn structured_output_json_schema_from_api(
+    value: ChatResponseJsonSchema,
+) -> DomainStructuredOutputJsonSchema {
+    DomainStructuredOutputJsonSchema::new(value.name, value.description, value.strict, value.schema)
+}
+
 fn normalize_stop_values<'a>(values: impl IntoIterator<Item = &'a str>) -> Vec<String> {
     values.into_iter().map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        ChatCompletionRequest, ChatMessage, ChatMessageContent, ChatReasoningEffort,
+        ChatResponseFormat, ChatResponseFormatType, ChatResponseJsonSchema, ChatStreamOptions,
+        ChatThinkingConfig, ChatThinkingType, ChatVerbosity, CompletionRequest, StopSequences,
+    };
+    use crate::domain::models::{
+        ChatCompletionCommand as DomainChatCompletionCommand,
+        ChatReasoningEffort as DomainChatReasoningEffort,
+        ChatVerbosity as DomainChatVerbosity, StructuredOutput as DomainStructuredOutput,
+        TextCompletionCommand as DomainTextCompletionCommand,
+    };
+    use serde_json::json;
+
+    fn make_request() -> ChatCompletionRequest {
+        ChatCompletionRequest {
+            id: None,
+            model: "cloud/provider/model".to_owned(),
+            messages: vec![ChatMessage {
+                role: "user".to_owned(),
+                content: Some(ChatMessageContent::Text("hello".to_owned())),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            }],
+            continue_generation: false,
+            stream: true,
+            stream_options: Some(ChatStreamOptions { include_usage: true }),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            n: None,
+            stop: None,
+            grammar: None,
+            response_format: None,
+            json_schema: None,
+            thinking: None,
+            reasoning_effort: None,
+            verbosity: None,
+        }
+    }
+
+    fn make_completion_request() -> CompletionRequest {
+        CompletionRequest {
+            model: "cloud/provider/model".to_owned(),
+            prompt: "hello".to_owned(),
+            max_tokens: None,
+            temperature: None,
+            top_p: None,
+            n: None,
+            stop: None,
+            stream: false,
+            grammar: None,
+            response_format: None,
+            json_schema: None,
+        }
+    }
+
+    #[test]
+    fn thinking_disabled_maps_to_reasoning_none() {
+        let mut request = make_request();
+        request.thinking = Some(ChatThinkingConfig {
+            mode: ChatThinkingType::Disabled,
+            reasoning_effort: None,
+            verbosity: None,
+        });
+
+        let command = DomainChatCompletionCommand::from(request);
+
+        assert!(matches!(
+            command.reasoning_effort,
+            Some(DomainChatReasoningEffort::None)
+        ));
+    }
+
+    #[test]
+    fn thinking_enabled_defaults_to_medium_reasoning() {
+        let mut request = make_request();
+        request.thinking = Some(ChatThinkingConfig {
+            mode: ChatThinkingType::Enabled,
+            reasoning_effort: None,
+            verbosity: None,
+        });
+
+        let command = DomainChatCompletionCommand::from(request);
+
+        assert!(matches!(
+            command.reasoning_effort,
+            Some(DomainChatReasoningEffort::Medium)
+        ));
+    }
+
+    #[test]
+    fn explicit_reasoning_and_verbosity_take_precedence() {
+        let mut request = make_request();
+        request.thinking = Some(ChatThinkingConfig {
+            mode: ChatThinkingType::Disabled,
+            reasoning_effort: None,
+            verbosity: None,
+        });
+        request.reasoning_effort = Some(ChatReasoningEffort::High);
+        request.verbosity = Some(ChatVerbosity::Low);
+
+        let command = DomainChatCompletionCommand::from(request);
+
+        assert!(matches!(
+            command.reasoning_effort,
+            Some(DomainChatReasoningEffort::High)
+        ));
+        assert!(matches!(command.verbosity, Some(DomainChatVerbosity::Low)));
+    }
+
+    #[test]
+    fn continue_generation_flag_is_preserved() {
+        let mut request = make_request();
+        request.continue_generation = true;
+
+        let command = DomainChatCompletionCommand::from(request);
+
+        assert!(command.continue_generation);
+    }
+
+    #[test]
+    fn response_format_json_object_maps_to_grammar_json() {
+        let mut request = make_request();
+        request.response_format = Some(ChatResponseFormat {
+            format_type: ChatResponseFormatType::JsonObject,
+            schema: None,
+            json_schema: None,
+        });
+
+        let command = DomainChatCompletionCommand::from(request);
+
+        assert!(command.grammar_json);
+        assert_eq!(command.structured_output, Some(DomainStructuredOutput::JsonObject));
+    }
+
+    #[test]
+    fn response_format_schema_maps_to_structured_json_schema() {
+        let mut request = make_request();
+        request.response_format = Some(ChatResponseFormat {
+            format_type: ChatResponseFormatType::JsonObject,
+            schema: Some(json!({ "const": "42" })),
+            json_schema: None,
+        });
+
+        let command = DomainChatCompletionCommand::from(request);
+
+        assert!(command.grammar_json);
+        assert!(matches!(
+            command.structured_output,
+            Some(DomainStructuredOutput::JsonSchema(ref schema))
+                if schema.schema == json!({ "const": "42" })
+        ));
+    }
+
+    #[test]
+    fn json_schema_field_maps_to_grammar_json() {
+        let mut request = make_request();
+        request.json_schema = Some(json!({ "const": "42" }));
+
+        let command = DomainChatCompletionCommand::from(request);
+
+        assert!(command.grammar_json);
+        assert!(matches!(
+            command.structured_output,
+            Some(DomainStructuredOutput::JsonSchema(ref schema))
+                if schema.name == "slab_structured_output"
+        ));
+    }
+
+    #[test]
+    fn response_format_json_schema_preserves_metadata() {
+        let mut request = make_request();
+        request.response_format = Some(ChatResponseFormat {
+            format_type: ChatResponseFormatType::JsonSchema,
+            schema: None,
+            json_schema: Some(ChatResponseJsonSchema {
+                name: Some("team schema/v1".to_owned()),
+                description: Some("  example schema  ".to_owned()),
+                strict: Some(false),
+                schema: json!({ "type": "object" }),
+            }),
+        });
+
+        let command = DomainChatCompletionCommand::from(request);
+
+        assert!(matches!(
+            command.structured_output,
+            Some(DomainStructuredOutput::JsonSchema(ref schema))
+                if schema.name == "team_schema_v1"
+                    && schema.description.as_deref() == Some("example schema")
+                    && schema.strict == Some(false)
+                    && schema.schema == json!({ "type": "object" })
+        ));
+    }
+
+    #[test]
+    fn stop_string_normalizes_to_vec() {
+        let mut request = make_request();
+        request.stop = Some(StopSequences::Single("END".to_owned()));
+
+        let command = DomainChatCompletionCommand::from(request);
+
+        assert_eq!(command.stop, vec!["END".to_owned()]);
+    }
+
+    #[test]
+    fn completion_request_defaults_n_to_one() {
+        let command = DomainTextCompletionCommand::from(make_completion_request());
+
+        assert_eq!(command.n, 1);
+    }
+
+    #[test]
+    fn completion_response_format_maps_to_grammar_json() {
+        let mut request = make_completion_request();
+        request.response_format = Some(ChatResponseFormat {
+            format_type: ChatResponseFormatType::JsonObject,
+            schema: None,
+            json_schema: None,
+        });
+
+        let command = DomainTextCompletionCommand::from(request);
+
+        assert!(command.grammar_json);
+        assert_eq!(command.structured_output, Some(DomainStructuredOutput::JsonObject));
+    }
 }
