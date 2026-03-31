@@ -25,6 +25,70 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/agents/spawn": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["spawn_agent"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{id}/input": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_input"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{id}/shutdown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post: operations["agent_shutdown"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/agents/{id}/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["agent_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/audio/transcriptions": {
         parameters: {
             query?: never;
@@ -563,6 +627,44 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** @description Agent configuration provided by the caller. */
+        AgentConfigInput: {
+            allowed_tools?: string[] | null;
+            /** Format: int32 */
+            max_tokens?: number | null;
+            /** Format: int32 */
+            max_turns?: number | null;
+            model?: string | null;
+            system_prompt?: string | null;
+            /** Format: float */
+            temperature?: number | null;
+        };
+        /** @description Request body for `POST /v1/agents/{id}/input`. */
+        AgentInputRequest: {
+            /** @description Plain-text message to append to the agent thread's conversation. */
+            content: string;
+        };
+        /** @description Response body for `POST /v1/agents/{id}/input`. */
+        AgentInputResponse: {
+            /** @description `true` if the input was accepted. */
+            accepted: boolean;
+            message: string;
+        };
+        /** @description Response body for `POST /v1/agents/{id}/shutdown`. */
+        AgentShutdownResponse: {
+            shutdown: boolean;
+            thread_id: string;
+        };
+        /** @description Response body for `GET /v1/agents/{id}/status`. */
+        AgentStatusResponse: {
+            status: components["schemas"]["AgentStatusValue"];
+            thread_id: string;
+        };
+        /**
+         * @description Serialisable mirror of [`AgentThreadStatus`].
+         * @enum {string}
+         */
+        AgentStatusValue: "pending" | "running" | "completed" | "errored" | "shutdown";
         /** @description Response body for list backends endpoint. */
         BackendListResponse: {
             backends: components["schemas"]["BackendStatusResponse"][];
@@ -720,6 +822,7 @@ export interface components {
         ChatModelOption: {
             /** @description Backend id when `source = local`, e.g. `"ggml.llama"`. */
             backend_id?: string | null;
+            /** @description Route-level feature flags for this model option. */
             capabilities: components["schemas"]["ChatModelCapabilities"];
             /** @description User-facing display label. */
             display_name: string;
@@ -1077,6 +1180,11 @@ export interface components {
              */
             num_workers?: number | null;
         };
+        /** @description A single message in the initial conversation. */
+        MessageInput: {
+            content: string;
+            role: string;
+        };
         MessageResponse: {
             content: string;
             created_at: string;
@@ -1171,18 +1279,25 @@ export interface components {
         };
         ReloadLibRequest: {
             backend_id: string;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Deprecated flattened compatibility field. Prefer `load.context_length`.
+             */
             context_length?: number | null;
             lib_path: string;
-            load?: components["schemas"]["ReloadModelLoadRequest"] | null;
+            load?: null | components["schemas"]["ReloadModelLoadRequest"];
+            /** @description Deprecated flattened compatibility field. Prefer `load.model_path`. */
             model_path?: string | null;
-            /** Format: int32 */
+            /**
+             * Format: int32
+             * @description Deprecated flattened compatibility field. Prefer `load.num_workers`.
+             */
             num_workers?: number | null;
         };
         ReloadModelLoadRequest: {
             /** Format: int32 */
             context_length?: number | null;
-            diffusion?: components["schemas"]["ReloadDiffusionLoadOptionsRequest"] | null;
+            diffusion?: null | components["schemas"]["ReloadDiffusionLoadOptionsRequest"];
             model_path: string;
             /** Format: int32 */
             num_workers?: number;
@@ -1275,6 +1390,20 @@ export interface components {
             ffmpeg: components["schemas"]["ComponentStatusResponse"];
             /** @description Whether the one-time setup wizard has been completed. */
             initialized: boolean;
+        };
+        /** @description Request body for `POST /v1/agents/spawn`. */
+        SpawnAgentRequest: {
+            /** @description Agent runtime configuration (model, temperature, etc.). */
+            config?: components["schemas"]["AgentConfigInput"];
+            /** @description Initial messages to seed the agent's conversation. */
+            messages?: components["schemas"]["MessageInput"][];
+            /** @description Chat session ID that backs this agent thread. */
+            session_id: string;
+        };
+        /** @description Response body for `POST /v1/agents/spawn`. */
+        SpawnAgentResponse: {
+            /** @description Unique ID of the newly created agent thread. */
+            thread_id: string;
         };
         StopSequences: string | string[];
         /** @description Request body for `POST /v1/models/switch`. */
@@ -1544,6 +1673,150 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+        };
+    };
+    spawn_agent: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SpawnAgentRequest"];
+            };
+        };
+        responses: {
+            /** @description Agent thread spawned */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SpawnAgentResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Thread limit exceeded */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_input: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent thread ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AgentInputRequest"];
+            };
+        };
+        responses: {
+            /** @description Not implemented */
+            501: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_shutdown: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent thread ID to shut down */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent thread shut down */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentShutdownResponse"];
+                };
+            };
+            /** @description Thread not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    agent_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Agent thread ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Agent thread status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AgentStatusResponse"];
+                };
+            };
+            /** @description Thread not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Internal error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };

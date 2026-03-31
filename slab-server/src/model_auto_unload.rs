@@ -39,7 +39,7 @@ impl Drop for ModelUsageGuard {
             return;
         }
         self.released = true;
-        self.manager.release_ref(self.backend_id.clone());
+        self.manager.release_ref(self.backend_id);
     }
 }
 

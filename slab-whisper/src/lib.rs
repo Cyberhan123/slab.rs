@@ -1,3 +1,4 @@
+use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -53,6 +54,14 @@ pub struct Whisper {
     _ggml_lib: Option<Arc<GGML>>,
 }
 
+fn load_ggml_sidecar(path: &Path) -> Option<Arc<GGML>> {
+    let ggml_path = path.parent()?.join(format!("{}ggml{}", DLL_PREFIX, DLL_SUFFIX));
+    let ggml = GGML::new_with(&ggml_path).ok()?;
+    let lib_dir = ggml_path.parent()?.to_string_lossy();
+    ggml.try_load_all_backend_from_path(lib_dir.as_ref()).ok()?;
+    Some(Arc::new(ggml))
+}
+
 impl Whisper {
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, WhisperError> {
         #[cfg(windows)]
@@ -71,10 +80,7 @@ impl Whisper {
             };
 
             let whisper_lib = unsafe { slab_whisper_sys::WhisperLib::from_library(lib)? };
-            let ggml_lib = GGML::new_with(path.as_ref()).ok().map(Arc::new);
-            if let Some(ggml_lib) = &ggml_lib {
-                ggml_lib.load_all_backend();
-            }
+            let ggml_lib = load_ggml_sidecar(path.as_ref());
             Ok(Self { lib: Arc::new(whisper_lib), _ggml_lib: ggml_lib })
         }
 
@@ -82,10 +88,7 @@ impl Whisper {
         {
             let raw_lib = unsafe { libloading::Library::new(path.as_ref())? };
             let lib = unsafe { slab_whisper_sys::WhisperLib::from_library(raw_lib)? };
-            let ggml_lib = GGML::new_with(path.as_ref()).ok().map(Arc::new);
-            if let Some(ggml_lib) = &ggml_lib {
-                ggml_lib.load_all_backend();
-            }
+            let ggml_lib = load_ggml_sidecar(path.as_ref());
             Ok(Self { lib: Arc::new(lib), _ggml_lib: ggml_lib })
         }
     }

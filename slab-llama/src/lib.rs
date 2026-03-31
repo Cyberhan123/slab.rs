@@ -33,6 +33,7 @@
 //! llama.backend_free();
 //! ```
 
+use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -75,6 +76,14 @@ pub struct Llama {
     _ggml_lib: Option<Arc<GGML>>,
 }
 
+fn load_ggml_sidecar(path: &Path) -> Option<Arc<GGML>> {
+    let ggml_path = path.parent()?.join(format!("{}ggml{}", DLL_PREFIX, DLL_SUFFIX));
+    let ggml = GGML::new_with(&ggml_path).ok()?;
+    let lib_dir = ggml_path.parent()?.to_string_lossy();
+    ggml.try_load_all_backend_from_path(lib_dir.as_ref()).ok()?;
+    Some(Arc::new(ggml))
+}
+
 impl Llama {
     /// Load the llama.cpp shared library from the given path.
     ///
@@ -95,20 +104,14 @@ impl Llama {
                 )?
             };
             let llama_lib = unsafe { slab_llama_sys::LlamaLib::from_library(lib)? };
-            let ggml_lib = GGML::new_with(path.as_ref()).ok().map(Arc::new);
-            if let Some(ggml_lib) = &ggml_lib {
-                ggml_lib.load_all_backend();
-            }
+            let ggml_lib = load_ggml_sidecar(path.as_ref());
             Ok(Self { lib: Arc::new(llama_lib), _ggml_lib: ggml_lib })
         }
 
         #[cfg(not(windows))]
         {
             let lib = unsafe { slab_llama_sys::LlamaLib::new(path.as_ref())? };
-            let ggml_lib = GGML::new_with(path.as_ref()).ok().map(Arc::new);
-            if let Some(ggml_lib) = &ggml_lib {
-                ggml_lib.load_all_backend();
-            }
+            let ggml_lib = load_ggml_sidecar(path.as_ref());
             Ok(Self { lib: Arc::new(lib), _ggml_lib: ggml_lib })
         }
     }
