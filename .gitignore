@@ -22,8 +22,4 @@ vendor/*
 
 # Binaries and resources
 slab-app/src-tauri/binaries/*
-
-#lib files
-slab-app/src-tauri/resources/lib/whisper/*.dll
-slab-app/src-tauri/resources/lib/diffusion/*.dll
-slab-app/src-tauri/resources/lib/llama/*.dll
+slab-app/src-tauri/resources/libs/*

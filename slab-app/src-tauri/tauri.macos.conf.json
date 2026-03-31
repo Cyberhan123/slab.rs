@@ -6,7 +6,7 @@
             "minimumSystemVersion": "12.0"
         },
         "resources": [
-            "resources/macos/**/*.dylib"
+            "resources/libs/**/*"
         ]
     }
 }
