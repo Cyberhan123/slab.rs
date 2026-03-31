@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use anyhow::Context;
 use slab_types::RuntimeBackendId;
 use tonic::service::Interceptor;
@@ -8,6 +10,8 @@ use uuid::Uuid;
 use super::pb;
 
 const MAX_MESSAGE_BYTES: usize = 64 * 1024 * 1024;
+const LOAD_MODEL_MAX_ATTEMPTS: usize = 3;
+const LOAD_MODEL_RETRY_DELAY: Duration = Duration::from_millis(250);
 
 // ---------------------------------------------------------------------------
 // Request-ID interceptor
@@ -137,13 +141,30 @@ impl BackendKind {
 /// the caller discards the error detail.
 #[inline]
 fn log_grpc_error(rpc: &str, request_id: &str, status: &tonic::Status) {
+    let status_message = status.message();
+    let is_transport_disconnect = status.code() == tonic::Code::Unknown
+        && (status_message.contains("transport error")
+            || status_message.contains("broken pipe")
+            || status_message.contains("connection error"));
+
     warn!(
         rpc,
         request_id,
         grpc.code = %status.code(),
-        grpc.message = %status.message(),
+        grpc.message = %status_message,
+        grpc.transport_disconnect = is_transport_disconnect,
         "downstream gRPC call failed"
     );
+}
+
+fn is_retryable_load_model_status(status: &tonic::Status) -> bool {
+    let message = status.message();
+    matches!(status.code(), tonic::Code::Unavailable)
+        || (matches!(status.code(), tonic::Code::Unknown)
+            && (message.contains("transport error")
+                || message.contains("broken pipe")
+                || message.contains("connection error")
+                || message.contains("os error 2")))
 }
 
 pub async fn chat(channel: Channel, req: pb::ChatRequest) -> anyhow::Result<pb::ChatResponse> {
@@ -231,20 +252,84 @@ pub async fn load_model(
     req: pb::ModelLoadRequest,
 ) -> anyhow::Result<pb::ModelStatusResponse> {
     let backend = BackendKind::from_backend_id(backend_id)?;
-    debug!(backend = %backend_id, model_path = %req.model_path, "sending gRPC load_model request");
+    let has_diffusion_overrides = !req.diffusion_model_path.is_empty()
+        || !req.vae_path.is_empty()
+        || !req.taesd_path.is_empty()
+        || !req.lora_model_dir.is_empty()
+        || !req.clip_l_path.is_empty()
+        || !req.clip_g_path.is_empty()
+        || !req.t5xxl_path.is_empty()
+        || !req.vae_device.is_empty()
+        || !req.clip_device.is_empty()
+        || req.flash_attn
+        || req.offload_params_to_cpu;
 
-    let (response, request_id) = match backend {
-        BackendKind::Llama => grpc_call!("load_model", llama_client, channel, load_model, req),
-        BackendKind::Whisper => grpc_call!("load_model", whisper_client, channel, load_model, req),
-        BackendKind::Diffusion => {
-            grpc_call!("load_model", diffusion_client, channel, load_model, req)
+    debug!(
+        backend = %backend_id,
+        model_path = %req.model_path,
+        num_workers = req.num_workers,
+        context_length = req.context_length,
+        has_diffusion_overrides,
+        "sending gRPC load_model request"
+    );
+
+    for attempt in 1..=LOAD_MODEL_MAX_ATTEMPTS {
+        let (response, request_id) = match backend {
+            BackendKind::Llama => {
+                grpc_call!("load_model", llama_client, channel.clone(), load_model, req.clone())
+            }
+            BackendKind::Whisper => grpc_call!(
+                "load_model",
+                whisper_client,
+                channel.clone(),
+                load_model,
+                req.clone()
+            ),
+            BackendKind::Diffusion => grpc_call!(
+                "load_model",
+                diffusion_client,
+                channel.clone(),
+                load_model,
+                req.clone()
+            ),
+        };
+
+        match response {
+            Ok(response) => {
+                debug!(
+                    backend = %backend_id,
+                    request_id = %request_id,
+                    attempt,
+                    status = %response.get_ref().status,
+                    "gRPC load_model request completed"
+                );
+                return Ok(response.into_inner());
+            }
+            Err(status) => {
+                let retryable = is_retryable_load_model_status(&status);
+                if retryable && attempt < LOAD_MODEL_MAX_ATTEMPTS {
+                    warn!(
+                        backend = %backend_id,
+                        request_id = %request_id,
+                        attempt,
+                        max_attempts = LOAD_MODEL_MAX_ATTEMPTS,
+                        grpc.code = %status.code(),
+                        grpc.message = %status.message(),
+                        retry_delay_ms = LOAD_MODEL_RETRY_DELAY.as_millis(),
+                        "gRPC load_model failed with transient transport error; retrying"
+                    );
+                    tokio::time::sleep(LOAD_MODEL_RETRY_DELAY).await;
+                    continue;
+                }
+
+                return Err(anyhow::Error::from(status).context(format!(
+                    "load_model RPC failed for backend: {backend_id} (request_id={request_id}, attempt={attempt})"
+                )));
+            }
         }
-    };
+    }
 
-    let response = response.with_context(|| {
-        format!("load_model RPC failed for backend: {backend_id} (request_id={request_id})")
-    })?;
-    Ok(response.into_inner())
+    unreachable!("load_model retry loop should always return")
 }
 
 pub async fn unload_model(

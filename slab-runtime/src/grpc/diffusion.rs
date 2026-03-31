@@ -103,7 +103,27 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        debug!("diffusion load_model request received");
+        let req = request.get_ref();
+        let has_diffusion_overrides = !req.diffusion_model_path.is_empty()
+            || !req.vae_path.is_empty()
+            || !req.taesd_path.is_empty()
+            || !req.lora_model_dir.is_empty()
+            || !req.clip_l_path.is_empty()
+            || !req.clip_g_path.is_empty()
+            || !req.t5xxl_path.is_empty()
+            || !req.vae_device.is_empty()
+            || !req.clip_device.is_empty()
+            || req.flash_attn
+            || req.offload_params_to_cpu;
+
+        debug!(
+            request_id = %request_id,
+            model_path = %req.model_path,
+            num_workers = req.num_workers,
+            context_length = req.context_length,
+            has_diffusion_overrides,
+            "diffusion load_model request received"
+        );
         let status =
             self.load_model_for_backend(BackendKind::Diffusion, request.into_inner()).await?;
         Ok(Response::new(status))
