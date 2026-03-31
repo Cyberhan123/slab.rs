@@ -1,0 +1,72 @@
+[package]
+name = "slab-app-core"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license = "AGPL-3.0-only"
+
+[features]
+default = []
+tauri = ["dep:tauri"]
+
+[dependencies]
+# Internal workspace deps
+slab-runtime-core = { workspace = true }
+slab-agent        = { workspace = true }
+slab-proto        = { workspace = true }
+slab-types        = { workspace = true }
+slab-libfetch     = { workspace = true }
+hf-hub            = { workspace = true }
+
+# Async runtime
+tokio   = { workspace = true }
+futures = { workspace = true }
+bytes   = { workspace = true }
+
+# gRPC / IPC
+tonic            = { workspace = true }
+parity-tokio-ipc = { workspace = true }
+tower            = { workspace = true }
+hyper-util       = { workspace = true }
+
+# OpenAPI schema derives (no HTTP/axum dependency)
+utoipa = { version = "5", features = ["uuid", "chrono"] }
+
+# Serialization
+serde      = { workspace = true }
+serde_json = { workspace = true }
+genai      = { workspace = true }
+reqwest    = { workspace = true }
+
+# Database (SQLite)
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "migrate", "chrono", "uuid", "_sqlite"] }
+
+# IDs & time
+uuid   = { workspace = true }
+chrono = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow    = { workspace = true }
+
+# Misc
+async-trait = { workspace = true }
+base64      = { workspace = true }
+bytemuck    = { workspace = true }
+strum       = { workspace = true }
+image       = { workspace = true }
+dirs-next   = "2.0.0"
+jsonschema  = { version = "0.45.0", default-features = false }
+ffmpeg-sidecar = { workspace = true, features = ["download_ffmpeg"] }
+all-smi = "0.17"
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
+validator = { version = "0.20", features = ["derive"] }
+
+# Optional: Tauri integration
+tauri = { version = "2", features = ["unstable"], optional = true }
