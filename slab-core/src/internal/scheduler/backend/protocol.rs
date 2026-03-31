@@ -62,13 +62,6 @@ impl DeploymentSnapshot {
         Self { generation, model: Some(payload) }
     }
 
-    pub fn model_config<T: serde::de::DeserializeOwned>(&self) -> Result<T, String> {
-        self.model
-            .as_ref()
-            .ok_or_else(|| "deployment snapshot missing model config".to_owned())?
-            .to_json()
-    }
-
     pub fn typed_model_config<T>(&self) -> Result<T, String>
     where
         T: serde::de::DeserializeOwned + Clone + Send + Sync + 'static,

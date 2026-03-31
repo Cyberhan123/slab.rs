@@ -43,7 +43,10 @@ pub use inference::{
     ImageGenerationResponse, JsonOptions, TextGenerationChunk, TextGenerationRequest,
     TextGenerationResponse,
 };
-pub use load_config::{GgmlLlamaLoadConfig, GgmlWhisperLoadConfig};
+pub use load_config::{
+    CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
+    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
+};
 pub use media::{GeneratedFrame, GeneratedImage, RawImageInput};
 pub use runtime::{
     Capability, DiffusionLoadOptions, DriverHints, ModelFamily, ModelSource, ModelSpec,

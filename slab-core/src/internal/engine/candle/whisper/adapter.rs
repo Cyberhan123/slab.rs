@@ -94,8 +94,8 @@ impl CandleWhisperEngine {
     /// without the `candle` feature.
     pub fn load_model(
         &self,
-        model_path: &str,
-        tokenizer_path: Option<&str>,
+        model_path: &Path,
+        tokenizer_path: Option<&Path>,
     ) -> Result<(), EngineError> {
         #[cfg(feature = "candle")]
         {
@@ -103,9 +103,9 @@ impl CandleWhisperEngine {
             use candle_nn::VarBuilder;
             use candle_transformers::models::whisper::{self, Config};
 
-            tracing::info!(model_path, "loading candle whisper model");
+            tracing::info!(model_path = %model_path.display(), "loading candle whisper model");
 
-            let path = Path::new(model_path);
+            let path = model_path;
             let device = Device::Cpu;
 
             // Load config from the same directory as the model.
@@ -113,12 +113,12 @@ impl CandleWhisperEngine {
             let config: Config = if config_path.exists() {
                 let data = std::fs::read_to_string(&config_path).map_err(|e| {
                     CandleWhisperEngineError::LoadModel {
-                        model_path: model_path.to_owned(),
+                        model_path: model_path.display().to_string(),
                         message: format!("failed to read config.json: {e}"),
                     }
                 })?;
                 serde_json::from_str(&data).map_err(|e| CandleWhisperEngineError::LoadModel {
-                    model_path: model_path.to_owned(),
+                    model_path: model_path.display().to_string(),
                     message: format!("failed to parse config.json: {e}"),
                 })?
             } else {
@@ -140,20 +140,20 @@ impl CandleWhisperEngine {
             let vb = unsafe {
                 VarBuilder::from_mmaped_safetensors(&[path], candle_core::DType::F32, &device)
                     .map_err(|e| CandleWhisperEngineError::LoadModel {
-                        model_path: model_path.to_owned(),
+                        model_path: model_path.display().to_string(),
                         message: e.to_string(),
                     })?
             };
 
             let model = whisper::model::Whisper::load(&vb, config.clone()).map_err(|e| {
                 CandleWhisperEngineError::LoadModel {
-                    model_path: model_path.to_owned(),
+                    model_path: model_path.display().to_string(),
                     message: e.to_string(),
                 }
             })?;
 
             let tok_dir: &Path = if let Some(tp) = tokenizer_path {
-                Path::new(tp).parent().unwrap_or(Path::new("."))
+                tp.parent().unwrap_or(Path::new("."))
             } else {
                 path.parent().unwrap_or(Path::new("."))
             };

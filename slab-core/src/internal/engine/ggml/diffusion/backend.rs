@@ -9,18 +9,8 @@
 //! | `"model.load"`      | `LoadModel`      | Load a model from the engine.                     |
 //! | `"model.unload"`    | `UnloadModel`    | Drop the model handle; call model.load to restore. |
 //! | `"inference.image"` | `InferenceImage` | Image generation; input is JSON generation params. |
-//! ### `model.load` input JSON (diffusion extended)
-//! ```json
-//! {
-//!   "model_path": "/path/to/model.gguf",
-//!   "vae_path": "",
-//!   "taesd_path": "",
-//!   "flash_attn": false,
-//!   "vae_device": "",
-//!   "clip_device": "",
-//!   "offload_params_to_cpu": false
-//! }
-//! ```
+//! ### `model.load` input payload
+//! Uses a typed [`slab_types::GgmlDiffusionLoadConfig`] payload inside `slab-core`.
 //!
 //! ### `inference.image` input JSON
 //! ```json
@@ -47,9 +37,10 @@ use std::sync::Arc;
 
 use base64::Engine as _;
 use serde::Deserialize;
+use slab_diffusion::{GuidanceParams, Image as DiffusionImage, SampleMethod, Scheduler, SlgParams};
+use slab_types::GgmlDiffusionLoadConfig;
 use tokio::sync::broadcast;
 
-use crate::internal::engine::ggml::config::DiffusionModelLoadConfig;
 use crate::internal::engine::ggml::diffusion::adapter::GGMLDiffusionEngine;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
@@ -61,43 +52,31 @@ use slab_core_macros::backend_handler;
 // ── Configurations ────────────────────────────────────────────────────────────
 
 /// Parse a sample method string into the native enum value.
-fn parse_sample_method(s: &str) -> slab_diffusion::SampleMethod {
-    use slab_diffusion::{
-        SAMPLE_DPM2 as SD_DPM2, SAMPLE_DPM_PP_2M as SD_DPM_PP_2M,
-        SAMPLE_DPM_PP_2M_V2 as SD_DPM_PP_2M_V2, SAMPLE_DPM_PP_2S_A as SD_DPM_PP_2S_A,
-        SAMPLE_EULER as SD_EULER, SAMPLE_EULER_A as SD_EULER_A, SAMPLE_HEUN as SD_HEUN,
-        SAMPLE_IPNDM as SD_IPNDM, SAMPLE_IPNDM_V as SD_IPNDM_V, SAMPLE_LCM as SD_LCM,
-        SAMPLE_METHOD_COUNT,
-    };
+fn parse_sample_method(s: &str) -> SampleMethod {
     match s {
-        "euler" => SD_EULER,
-        "euler_a" => SD_EULER_A,
-        "lcm" => SD_LCM,
-        "heun" => SD_HEUN,
-        "dpm2" => SD_DPM2,
-        "dpm++2s_a" => SD_DPM_PP_2S_A,
-        "dpm++2m" => SD_DPM_PP_2M,
-        "dpm++2mv2" => SD_DPM_PP_2M_V2,
-        "ipndm" => SD_IPNDM,
-        "ipndm_v" => SD_IPNDM_V,
-        _ => SAMPLE_METHOD_COUNT, // auto
+        "euler" => SampleMethod::Euler,
+        "euler_a" => SampleMethod::EULER_A,
+        "lcm" => SampleMethod::LCM,
+        "heun" => SampleMethod::HEUN,
+        "dpm2" => SampleMethod::DPM2,
+        "dpm++2s_a" => SampleMethod::DPMPP2S_A,
+        "dpm++2m" => SampleMethod::DPMPP2M,
+        "dpm++2mv2" => SampleMethod::DPMPP2Mv2,
+        "ipndm" => SampleMethod::IPNDM,
+        "ipndm_v" => SampleMethod::IPNDM_V,
+        _ => SampleMethod::Unknown,
     }
 }
 
 /// Parse a scheduler string into the native enum value.
-fn parse_scheduler(s: &str) -> slab_diffusion::Scheduler {
-    use slab_diffusion::{
-        SCHEDULER_AYS as SD_AYS, SCHEDULER_COUNT, SCHEDULER_DISCRETE as SD_DISCRETE,
-        SCHEDULER_EXPONENTIAL as SD_EXPONENTIAL, SCHEDULER_GITS as SD_GITS,
-        SCHEDULER_KARRAS as SD_KARRAS,
-    };
+fn parse_scheduler(s: &str) -> Scheduler {
     match s {
-        "discrete" => SD_DISCRETE,
-        "karras" => SD_KARRAS,
-        "exponential" => SD_EXPONENTIAL,
-        "ays" => SD_AYS,
-        "gits" => SD_GITS,
-        _ => SCHEDULER_COUNT, // auto
+        "discrete" => Scheduler::DISCRETE,
+        "karras" => Scheduler::KARRAS,
+        "exponential" => Scheduler::EXPONENTIAL,
+        "ays" => Scheduler::AYS,
+        "gits" => Scheduler::GITS,
+        _ => Scheduler::UNKNOWN,
     }
 }
 
@@ -122,8 +101,8 @@ struct GenImageParams {
     sample_method: String,
     #[serde(default = "default_scheduler")]
     scheduler: String,
-    #[serde(default)]
-    clip_skip: i32,
+    #[serde(default, rename = "clip_skip")]
+    _clip_skip: i32,
     #[serde(default = "default_strength")]
     strength: f32,
     #[serde(default)]
@@ -180,6 +159,104 @@ fn default_batch_count() -> i32 {
 }
 fn default_channels() -> u32 {
     3
+}
+
+fn build_context_params(
+    engine: &GGMLDiffusionEngine,
+    config: &GgmlDiffusionLoadConfig,
+) -> slab_diffusion::ContextParams {
+    let mut params = engine.new_context_params();
+    params.set_model_path(&config.model_path.to_string_lossy());
+
+    if let Some(path) = config.diffusion_model_path.as_ref() {
+        params.set_diffusion_model_path(&path.to_string_lossy());
+    }
+    if let Some(path) = config.vae_path.as_ref() {
+        params.set_vae_path(&path.to_string_lossy());
+    }
+    if let Some(path) = config.taesd_path.as_ref() {
+        params.set_taesd_path(&path.to_string_lossy());
+    }
+    if let Some(path) = config.clip_l_path.as_ref() {
+        params.set_clip_l_path(&path.to_string_lossy());
+    }
+    if let Some(path) = config.clip_g_path.as_ref() {
+        params.set_clip_g_path(&path.to_string_lossy());
+    }
+    if let Some(path) = config.t5xxl_path.as_ref() {
+        params.set_t5xxl_path(&path.to_string_lossy());
+    }
+    if let Some(path) = config.clip_vision_path.as_ref() {
+        params.set_clip_vision_path(&path.to_string_lossy());
+    }
+    if let Some(path) = config.control_net_path.as_ref() {
+        params.set_control_net_path(&path.to_string_lossy());
+    }
+    if let Some(device) = config.vae_device.as_deref() {
+        params.set_vae_device(device);
+    }
+    if let Some(device) = config.clip_device.as_deref() {
+        params.set_clip_device(device);
+    }
+    if let Some(n_threads) = config.n_threads {
+        params.set_n_threads(n_threads);
+    }
+
+    params.set_flash_attn(config.flash_attn);
+    params.set_offload_params_to_cpu(config.offload_params_to_cpu);
+    params.set_enable_mmap(config.enable_mmap);
+    params
+}
+
+fn build_image_params(
+    engine: &GGMLDiffusionEngine,
+    gen_params: GenImageParams,
+) -> Result<slab_diffusion::ImgParams, String> {
+    let init_image = if let Some(b64) = gen_params.init_image_b64 {
+        let data = base64::engine::general_purpose::STANDARD
+            .decode(b64)
+            .map_err(|e| format!("failed to decode init_image_b64: {e}"))?;
+        Some(DiffusionImage {
+            width: gen_params.init_image_width,
+            height: gen_params.init_image_height,
+            channel: gen_params.init_image_channels,
+            data,
+        })
+    } else {
+        None
+    };
+
+    let width = i32::try_from(gen_params.width)
+        .map_err(|_| format!("width {} exceeds i32 range", gen_params.width))?;
+    let height = i32::try_from(gen_params.height)
+        .map_err(|_| format!("height {} exceeds i32 range", gen_params.height))?;
+
+    let mut sample_params = engine.new_sample_params();
+    sample_params.set_sample_steps(gen_params.sample_steps);
+    sample_params.set_sample_method(parse_sample_method(&gen_params.sample_method));
+    sample_params.set_scheduler(parse_scheduler(&gen_params.scheduler));
+    sample_params.set_eta(gen_params.eta);
+    sample_params.set_flow_shift(gen_params.flow_shift);
+    sample_params.set_guidance(GuidanceParams {
+        txt_cfg: gen_params.cfg_scale,
+        img_cfg: gen_params.cfg_scale,
+        distilled_guidance: gen_params.guidance,
+        slg: SlgParams { layers: Vec::new(), layer_start: 0.0, layer_end: 0.0, scale: 0.0 },
+    });
+
+    let mut params = engine.new_image_params();
+    params.set_prompt(&gen_params.prompt);
+    params.set_negative_prompt(&gen_params.negative_prompt);
+    params.set_width(width);
+    params.set_height(height);
+    params.set_sample_params(sample_params);
+    params.set_strength(gen_params.strength);
+    params.set_seed(gen_params.seed);
+    params.set_batch_count(gen_params.batch_count);
+    if let Some(init_image) = init_image {
+        params.set_init_image(init_image);
+    }
+    Ok(params)
 }
 
 // ── Worker ────────────────────────────────────────────────────────────────────
@@ -254,7 +331,7 @@ impl DiffusionWorker {
             }
         };
 
-        let config: DiffusionModelLoadConfig = match input.to_json() {
+        let config: GgmlDiffusionLoadConfig = match input.to_typed() {
             Ok(c) => c,
             Err(e) => {
                 let _ =
@@ -265,25 +342,8 @@ impl DiffusionWorker {
 
         // Model loading is CPU/I-O bound; use block_in_place on this thread.
         let result = tokio::task::block_in_place(|| {
-            use slab_diffusion::SdContextParams;
-            let mut ctx_params = SdContextParams::with_model(&config.model_path);
-            ctx_params.diffusion_model_path = config.diffusion_model_path;
-            ctx_params.vae_path = config.vae_path;
-            ctx_params.taesd_path = config.taesd_path;
-            ctx_params.clip_l_path = config.clip_l_path;
-            ctx_params.clip_g_path = config.clip_g_path;
-            ctx_params.t5xxl_path = config.t5xxl_path;
-            ctx_params.clip_vision_path = config.clip_vision_path;
-            ctx_params.control_net_path = config.control_net_path;
-            ctx_params.flash_attn = config.flash_attn;
-            ctx_params.vae_device = config.vae_device.clone();
-            ctx_params.clip_device = config.clip_device.clone();
-            ctx_params.offload_params_to_cpu = config.offload_params_to_cpu;
-            ctx_params.enable_mmap = config.enable_mmap;
-            if config.n_threads != 0 {
-                ctx_params.n_threads = config.n_threads;
-            }
-            engine.new_context(&ctx_params)
+            let ctx_params = build_context_params(engine, &config);
+            engine.new_context(ctx_params)
         });
 
         match result {
@@ -354,49 +414,17 @@ impl DiffusionWorker {
             }
         };
 
-        // Decode optional init image (base64-encoded raw RGB pixels).
-        let init_image = if let Some(ref b64) = gen_params.init_image_b64 {
-            match base64::engine::general_purpose::STANDARD.decode(b64) {
-                Ok(data) => Some(slab_diffusion::SdImage {
-                    width: gen_params.init_image_width,
-                    height: gen_params.init_image_height,
-                    channel: gen_params.init_image_channels,
-                    data,
-                }),
-                Err(e) => {
-                    let _ = reply_tx
-                        .send(BackendReply::Error(format!("failed to decode init_image_b64: {e}")));
-                    return;
-                }
+        let image_params = match build_image_params(engine, gen_params) {
+            Ok(params) => params,
+            Err(error) => {
+                let _ = reply_tx.send(BackendReply::Error(error));
+                return;
             }
-        } else {
-            None
         };
 
         // Image generation is CPU/GPU-bound; use block_in_place so the engine
         // context stays on this thread without needing an additional spawn_blocking.
-        let result = tokio::task::block_in_place(|| {
-            use slab_diffusion::SdImgGenParams;
-            let params = SdImgGenParams {
-                prompt: gen_params.prompt,
-                negative_prompt: gen_params.negative_prompt,
-                width: gen_params.width,
-                height: gen_params.height,
-                sample_steps: gen_params.sample_steps,
-                cfg_scale: gen_params.cfg_scale,
-                guidance: gen_params.guidance,
-                seed: gen_params.seed,
-                sample_method: parse_sample_method(&gen_params.sample_method),
-                scheduler: parse_scheduler(&gen_params.scheduler),
-                clip_skip: gen_params.clip_skip,
-                strength: gen_params.strength,
-                eta: gen_params.eta,
-                flow_shift: gen_params.flow_shift,
-                batch_count: gen_params.batch_count.max(1),
-                init_image,
-            };
-            engine.generate_image(&params)
-        });
+        let result = tokio::task::block_in_place(|| engine.generate_image(image_params));
 
         match result {
             Err(e) => {
@@ -449,7 +477,7 @@ impl DiffusionWorker {
         let Some(snapshot) = cmd.deployment() else {
             return;
         };
-        let config: DiffusionModelLoadConfig = match snapshot.model_config() {
+        let config: GgmlDiffusionLoadConfig = match snapshot.typed_model_config() {
             Ok(config) => config,
             Err(error) => {
                 tracing::warn!(error = %error, "diffusion worker: invalid model deployment snapshot");
@@ -460,29 +488,12 @@ impl DiffusionWorker {
         if let Some(engine) = self.engine.as_mut() {
             if !engine.is_model_loaded() {
                 let result = tokio::task::block_in_place(|| {
-                    use slab_diffusion::SdContextParams;
-                    let mut ctx_params = SdContextParams::with_model(&model_path);
-                    ctx_params.diffusion_model_path = config.diffusion_model_path.clone();
-                    ctx_params.vae_path = config.vae_path.clone();
-                    ctx_params.taesd_path = config.taesd_path.clone();
-                    ctx_params.clip_l_path = config.clip_l_path.clone();
-                    ctx_params.clip_g_path = config.clip_g_path.clone();
-                    ctx_params.t5xxl_path = config.t5xxl_path.clone();
-                    ctx_params.clip_vision_path = config.clip_vision_path.clone();
-                    ctx_params.control_net_path = config.control_net_path.clone();
-                    ctx_params.flash_attn = config.flash_attn;
-                    ctx_params.vae_device = config.vae_device.clone();
-                    ctx_params.clip_device = config.clip_device.clone();
-                    ctx_params.offload_params_to_cpu = config.offload_params_to_cpu;
-                    ctx_params.enable_mmap = config.enable_mmap;
-                    if config.n_threads != 0 {
-                        ctx_params.n_threads = config.n_threads;
-                    }
-                    engine.new_context(&ctx_params)
+                    let ctx_params = build_context_params(engine, &config);
+                    engine.new_context(ctx_params)
                 });
                 if let Err(e) = result {
                     tracing::warn!(
-                        model_path,
+                        model_path = %model_path.display(),
                         error = %e,
                         "diffusion worker: broadcast LoadModel failed"
                     );
@@ -528,5 +539,46 @@ impl DiffusionWorker {
             e.unload();
         }
         self.last_model_config = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::PathBuf;
+
+    use super::*;
+
+    #[test]
+    fn deployment_snapshot_reads_typed_ggml_diffusion_model_config() {
+        let snapshot = DeploymentSnapshot::with_model(
+            11,
+            Payload::typed(GgmlDiffusionLoadConfig {
+                model_path: PathBuf::from("model.gguf"),
+                diffusion_model_path: Some(PathBuf::from("diffusion.gguf")),
+                vae_path: Some(PathBuf::from("vae.gguf")),
+                taesd_path: None,
+                clip_l_path: None,
+                clip_g_path: None,
+                t5xxl_path: None,
+                clip_vision_path: None,
+                control_net_path: None,
+                flash_attn: true,
+                vae_device: Some("cpu".to_owned()),
+                clip_device: None,
+                offload_params_to_cpu: false,
+                enable_mmap: true,
+                n_threads: Some(8),
+            }),
+        );
+
+        let config = snapshot
+            .typed_model_config::<GgmlDiffusionLoadConfig>()
+            .expect("typed deployment snapshot should decode");
+
+        assert_eq!(config.model_path, PathBuf::from("model.gguf"));
+        assert_eq!(config.diffusion_model_path, Some(PathBuf::from("diffusion.gguf")));
+        assert_eq!(config.vae_path, Some(PathBuf::from("vae.gguf")));
+        assert_eq!(config.vae_device.as_deref(), Some("cpu"));
+        assert_eq!(config.n_threads, Some(8));
     }
 }

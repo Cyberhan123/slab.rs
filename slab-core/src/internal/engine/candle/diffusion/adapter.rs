@@ -137,8 +137,8 @@ impl CandleDiffusionEngine {
     /// `sd_version` selects the architecture: `"v1-5"` or `"v2-1"` (default).
     pub fn load_model(
         &self,
-        model_path: &str,
-        vae_path: Option<&str>,
+        model_path: &Path,
+        vae_path: Option<&Path>,
         sd_version: &str,
     ) -> Result<(), EngineError> {
         #[cfg(feature = "candle")]
@@ -146,21 +146,20 @@ impl CandleDiffusionEngine {
             use candle_core::{DType, Device};
             use candle_transformers::models::stable_diffusion;
 
-            tracing::info!(model_path, sd_version, "loading candle diffusion model");
+            tracing::info!(model_path = %model_path.display(), sd_version, "loading candle diffusion model");
 
-            let model_file = Path::new(model_path);
             let vae_file_path: std::path::PathBuf;
             let vae_file = if let Some(vp) = vae_path {
-                vae_file_path = Path::new(vp).to_path_buf();
+                vae_file_path = vp.to_path_buf();
                 vae_file_path.as_path()
             } else {
-                model_file
+                model_path
             };
 
             // ── Validate that files exist before touching model state ──────────
-            if !model_file.exists() {
+            if !model_path.exists() {
                 return Err(CandleDiffusionEngineError::LoadModel {
-                    model_path: model_path.to_owned(),
+                    model_path: model_path.display().to_string(),
                     message: "UNet weight file not found".into(),
                 }
                 .into());
@@ -183,7 +182,7 @@ impl CandleDiffusionEngine {
             };
 
             // Derive tokenizer directory from the model path.
-            let tokenizer_dir = model_file.parent().unwrap_or(Path::new(".")).join("tokenizer");
+            let tokenizer_dir = model_path.parent().unwrap_or(Path::new(".")).join("tokenizer");
 
             // Load and cache CLIP tokenizer + text-encoder.
             let tokenizer_json = tokenizer_dir.join("tokenizer.json");
@@ -210,9 +209,9 @@ impl CandleDiffusionEngine {
             })?;
 
             // Build and cache UNet and VAE.
-            let unet = sd_config.build_unet(model_file, &device, 4, false, dtype).map_err(|e| {
+            let unet = sd_config.build_unet(model_path, &device, 4, false, dtype).map_err(|e| {
                 CandleDiffusionEngineError::LoadModel {
-                    model_path: model_path.to_owned(),
+                    model_path: model_path.display().to_string(),
                     message: format!("failed to build UNet: {e}"),
                 }
             })?;
@@ -228,7 +227,7 @@ impl CandleDiffusionEngine {
                 self.inner.write().map_err(|_| CandleDiffusionEngineError::LockPoisoned {
                     operation: "write diffusion model state",
                 })?;
-            state.model_path = Some(model_file.to_path_buf());
+            state.model_path = Some(model_path.to_path_buf());
             state.vae_path = vae_path.map(|p| Path::new(p).to_path_buf());
             state.sd_config = Some(sd_config);
             state.tokenizer_dir = Some(tokenizer_dir);

@@ -12,72 +12,26 @@ use crate::inference::{
     ImageEmbeddingResponse, ImageGenerationRequest, ImageGenerationResponse, JsonOptions,
     TextGenerationChunk, TextGenerationRequest, TextGenerationResponse,
 };
-use crate::internal::dispatch::{DriverLoadStyle, ResolvedDriver};
-use crate::model::{ModelFamily, ModelSource, ModelSpec};
-use slab_types::{GgmlLlamaLoadConfig, GgmlWhisperLoadConfig};
+use crate::internal::dispatch::ResolvedDriver;
+use crate::model::{ModelFamily, ModelSpec};
+use slab_types::{
+    CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
+    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
+};
 
 pub(crate) fn encode_load_payload(
     spec: &ModelSpec,
     resolved: &ResolvedDriver,
 ) -> Result<Payload, CoreError> {
     match resolved.driver_id.as_str() {
-        "ggml.llama" => return encode_ggml_llama_load_payload(spec),
-        "ggml.whisper" => return encode_ggml_whisper_load_payload(spec),
-        _ => {}
-    }
-
-    let model_path = primary_model_path(spec)?;
-
-    let payload = match resolved.driver_id.as_str() {
-        "ggml.diffusion" => serde_json::json!({
-            "model_path": model_path,
-            "diffusion_model_path": artifact_or_option(spec, "diffusion_model", "diffusion_model_path").unwrap_or_default(),
-            "vae_path": artifact_or_option(spec, "vae", "vae_path").unwrap_or_default(),
-            "taesd_path": artifact_or_option(spec, "taesd", "taesd_path").unwrap_or_default(),
-            "clip_l_path": artifact_or_option(spec, "clip_l", "clip_l_path").unwrap_or_default(),
-            "clip_g_path": artifact_or_option(spec, "clip_g", "clip_g_path").unwrap_or_default(),
-            "t5xxl_path": artifact_or_option(spec, "t5xxl", "t5xxl_path").unwrap_or_default(),
-            "clip_vision_path": artifact_or_option(spec, "clip_vision", "clip_vision_path").unwrap_or_default(),
-            "control_net_path": artifact_or_option(spec, "control_net", "control_net_path").unwrap_or_default(),
-            "flash_attn": bool_option(spec, "flash_attn").unwrap_or(false),
-            "vae_device": string_option(spec, "vae_device").unwrap_or_default(),
-            "clip_device": string_option(spec, "clip_device").unwrap_or_default(),
-            "offload_params_to_cpu": bool_option(spec, "offload_params_to_cpu").unwrap_or(false),
-            "enable_mmap": bool_option(spec, "enable_mmap").unwrap_or(false),
-            "n_threads": i32_option(spec, "n_threads").unwrap_or(0),
-        }),
-        "candle.llama" => serde_json::json!({
-            "model_path": model_path,
-            "tokenizer_path": artifact_or_option(spec, "tokenizer", "tokenizer_path"),
-            "seed": u64_option(spec, "seed").unwrap_or(0),
-        }),
-        "candle.whisper" => serde_json::json!({
-            "model_path": model_path,
-            "tokenizer_path": artifact_or_option(spec, "tokenizer", "tokenizer_path"),
-            "revision": source_revision(spec),
-        }),
-        "candle.diffusion" => serde_json::json!({
-            "model_path": model_path,
-            "vae_path": artifact_or_option(spec, "vae", "vae_path"),
-            "sd_version": string_option(spec, "sd_version")
-                .or_else(|| spec.metadata.get("sd_version").cloned())
-                .unwrap_or_else(|| "v2-1".to_owned()),
-        }),
-        "onnx.text" | "onnx.embedding" => serde_json::json!({
-            "model_path": model_path,
-            "execution_providers": execution_providers(spec),
-            "intra_op_num_threads": usize_option(spec, "intra_op_num_threads").unwrap_or(0),
-            "inter_op_num_threads": usize_option(spec, "inter_op_num_threads").unwrap_or(0),
-        }),
-        other => {
-            return Err(CoreError::DriverNotRegistered { driver_id: other.to_owned() });
-        }
-    };
-
-    match resolved.load_style {
-        DriverLoadStyle::DynamicLibraryThenModel | DriverLoadStyle::ModelOnly => {
-            Ok(Payload::json(payload))
-        }
+        "ggml.llama" => encode_ggml_llama_load_payload(spec),
+        "ggml.whisper" => encode_ggml_whisper_load_payload(spec),
+        "ggml.diffusion" => encode_ggml_diffusion_load_payload(spec),
+        "candle.llama" => encode_candle_llama_load_payload(spec),
+        "candle.whisper" => encode_candle_whisper_load_payload(spec),
+        "candle.diffusion" => encode_candle_diffusion_load_payload(spec),
+        "onnx.text" | "onnx.embedding" => encode_onnx_load_payload(spec),
+        other => Err(CoreError::DriverNotRegistered { driver_id: other.to_owned() }),
     }
 }
 
@@ -91,6 +45,64 @@ fn encode_ggml_llama_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError
 
 fn encode_ggml_whisper_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
     Ok(Payload::typed(GgmlWhisperLoadConfig { model_path: primary_model_path_buf(spec)? }))
+}
+
+fn encode_ggml_diffusion_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
+    Ok(Payload::typed(GgmlDiffusionLoadConfig {
+        model_path: primary_model_path_buf(spec)?,
+        diffusion_model_path: artifact_or_option_path(
+            spec,
+            "diffusion_model",
+            "diffusion_model_path",
+        ),
+        vae_path: artifact_or_option_path(spec, "vae", "vae_path"),
+        taesd_path: artifact_or_option_path(spec, "taesd", "taesd_path"),
+        clip_l_path: artifact_or_option_path(spec, "clip_l", "clip_l_path"),
+        clip_g_path: artifact_or_option_path(spec, "clip_g", "clip_g_path"),
+        t5xxl_path: artifact_or_option_path(spec, "t5xxl", "t5xxl_path"),
+        clip_vision_path: artifact_or_option_path(spec, "clip_vision", "clip_vision_path"),
+        control_net_path: artifact_or_option_path(spec, "control_net", "control_net_path"),
+        flash_attn: bool_option(spec, "flash_attn").unwrap_or(false),
+        vae_device: optional_nonempty_string_option(spec, "vae_device"),
+        clip_device: optional_nonempty_string_option(spec, "clip_device"),
+        offload_params_to_cpu: bool_option(spec, "offload_params_to_cpu").unwrap_or(false),
+        enable_mmap: bool_option(spec, "enable_mmap").unwrap_or(false),
+        n_threads: optional_nonzero_i32_option(spec, "n_threads"),
+    }))
+}
+
+fn encode_candle_llama_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
+    Ok(Payload::typed(CandleLlamaLoadConfig {
+        model_path: primary_model_path_buf(spec)?,
+        tokenizer_path: artifact_or_option_path(spec, "tokenizer", "tokenizer_path"),
+        seed: u64_option(spec, "seed").unwrap_or(0),
+    }))
+}
+
+fn encode_candle_whisper_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
+    Ok(Payload::typed(CandleWhisperLoadConfig {
+        model_path: primary_model_path_buf(spec)?,
+        tokenizer_path: artifact_or_option_path(spec, "tokenizer", "tokenizer_path"),
+    }))
+}
+
+fn encode_candle_diffusion_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
+    Ok(Payload::typed(CandleDiffusionLoadConfig {
+        model_path: primary_model_path_buf(spec)?,
+        vae_path: artifact_or_option_path(spec, "vae", "vae_path"),
+        sd_version: string_option(spec, "sd_version")
+            .or_else(|| spec.metadata.get("sd_version").cloned())
+            .unwrap_or_else(|| "v2-1".to_owned()),
+    }))
+}
+
+fn encode_onnx_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
+    Ok(Payload::typed(OnnxLoadConfig {
+        model_path: primary_model_path_buf(spec)?,
+        execution_providers: execution_providers(spec),
+        intra_op_num_threads: optional_nonzero_usize_option(spec, "intra_op_num_threads"),
+        inter_op_num_threads: optional_nonzero_usize_option(spec, "inter_op_num_threads"),
+    }))
 }
 
 pub(crate) fn encode_text_generation_request(
@@ -351,12 +363,6 @@ pub(crate) fn image_embedding_output_name(spec: &ModelSpec) -> String {
         .unwrap_or_else(|| "output".to_owned())
 }
 
-fn primary_model_path(spec: &ModelSpec) -> Result<String, CoreError> {
-    spec.source.primary_path().map(path_to_string).ok_or_else(|| CoreError::SourceResolveFailed {
-        message: "model source does not expose a primary artifact".to_owned(),
-    })
-}
-
 fn primary_model_path_buf(spec: &ModelSpec) -> Result<PathBuf, CoreError> {
     spec.source.primary_path().map(Path::to_path_buf).ok_or_else(|| {
         CoreError::SourceResolveFailed {
@@ -373,11 +379,10 @@ fn artifact_or_option(spec: &ModelSpec, artifact: &str, option: &str) -> Option<
     spec.source.artifact(artifact).map(path_to_string).or_else(|| string_option(spec, option))
 }
 
-fn source_revision(spec: &ModelSpec) -> Option<String> {
-    match &spec.source {
-        ModelSource::HuggingFace { revision, .. } => revision.clone(),
-        _ => None,
-    }
+fn artifact_or_option_path(spec: &ModelSpec, artifact: &str, option: &str) -> Option<PathBuf> {
+    artifact_or_option(spec, artifact, option)
+        .filter(|value| !value.trim().is_empty())
+        .map(PathBuf::from)
 }
 
 fn execution_providers(spec: &ModelSpec) -> Vec<String> {
@@ -419,6 +424,10 @@ fn string_option(spec: &ModelSpec, key: &str) -> Option<String> {
     })
 }
 
+fn optional_nonempty_string_option(spec: &ModelSpec, key: &str) -> Option<String> {
+    string_option(spec, key).filter(|value| !value.trim().is_empty())
+}
+
 fn bool_option(spec: &ModelSpec, key: &str) -> Option<bool> {
     spec.load_options.get(key).and_then(Value::as_bool).or_else(|| {
         spec.load_options.get(key).and_then(Value::as_str).and_then(|value| value.parse().ok())
@@ -435,6 +444,10 @@ fn usize_option(spec: &ModelSpec, key: &str) -> Option<usize> {
     u64_option(spec, key).and_then(|value| usize::try_from(value).ok())
 }
 
+fn optional_nonzero_usize_option(spec: &ModelSpec, key: &str) -> Option<usize> {
+    usize_option(spec, key).filter(|value| *value != 0)
+}
+
 fn i32_option(spec: &ModelSpec, key: &str) -> Option<i32> {
     spec.load_options
         .get(key)
@@ -443,6 +456,10 @@ fn i32_option(spec: &ModelSpec, key: &str) -> Option<i32> {
         .or_else(|| {
             spec.load_options.get(key).and_then(Value::as_str).and_then(|value| value.parse().ok())
         })
+}
+
+fn optional_nonzero_i32_option(spec: &ModelSpec, key: &str) -> Option<i32> {
+    i32_option(spec, key).filter(|value| *value != 0)
 }
 
 fn optional_nonzero_u32_option(spec: &ModelSpec, key: &str) -> Result<Option<u32>, CoreError> {
@@ -561,10 +578,14 @@ fn decode_embedding_tensor(value: &Value, output_name: &str) -> Result<Vec<f32>,
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::ModelSource;
     use serde_json::json;
     use slab_types::chat::{ConversationMessage, ConversationMessageContent};
     use slab_types::runtime::Capability;
-    use slab_types::{GgmlLlamaLoadConfig, GgmlWhisperLoadConfig};
+    use slab_types::{
+        CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
+        GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
+    };
     use std::path::PathBuf;
 
     fn make_driver(
@@ -632,9 +653,11 @@ mod tests {
     }
 
     #[test]
-    fn encode_load_payload_keeps_json_for_unmigrated_backends() {
-        let diffusion = encode_load_payload(
-            &make_spec(ModelFamily::Diffusion, Capability::ImageGeneration, "model.safetensors"),
+    fn encode_load_payload_uses_typed_payload_for_all_model_load_backends() {
+        let ggml_diffusion = encode_load_payload(
+            &make_spec(ModelFamily::Diffusion, Capability::ImageGeneration, "model.gguf")
+                .with_load_option("n_threads", 6)
+                .with_load_option("vae_device", "cpu"),
             &make_driver(
                 "ggml.diffusion",
                 "diffusion",
@@ -643,9 +666,17 @@ mod tests {
             ),
         )
         .expect("ggml.diffusion encode should succeed");
+        let ggml_diffusion = ggml_diffusion
+            .to_typed::<GgmlDiffusionLoadConfig>()
+            .expect("ggml.diffusion payload should decode as typed config");
+        assert_eq!(ggml_diffusion.model_path, PathBuf::from("model.gguf"));
+        assert_eq!(ggml_diffusion.n_threads, Some(6));
+        assert_eq!(ggml_diffusion.vae_device.as_deref(), Some("cpu"));
 
-        let candle = encode_load_payload(
-            &make_spec(ModelFamily::Llama, Capability::TextGeneration, "model.gguf"),
+        let candle_llama = encode_load_payload(
+            &make_spec(ModelFamily::Llama, Capability::TextGeneration, "model.gguf")
+                .with_load_option("seed", 42)
+                .with_load_option("tokenizer_path", "tokenizer.json"),
             &make_driver(
                 "candle.llama",
                 "candle.llama",
@@ -654,16 +685,63 @@ mod tests {
             ),
         )
         .expect("candle.llama encode should succeed");
+        let candle_llama = candle_llama
+            .to_typed::<CandleLlamaLoadConfig>()
+            .expect("candle.llama payload should decode as typed config");
+        assert_eq!(candle_llama.model_path, PathBuf::from("model.gguf"));
+        assert_eq!(candle_llama.tokenizer_path, Some(PathBuf::from("tokenizer.json")));
+        assert_eq!(candle_llama.seed, 42);
+
+        let candle_whisper = encode_load_payload(
+            &make_spec(ModelFamily::Whisper, Capability::AudioTranscription, "model.safetensors")
+                .with_load_option("tokenizer_path", "tokenizer.json"),
+            &make_driver(
+                "candle.whisper",
+                "candle.whisper",
+                ModelFamily::Whisper,
+                Capability::AudioTranscription,
+            ),
+        )
+        .expect("candle.whisper encode should succeed");
+        let candle_whisper = candle_whisper
+            .to_typed::<CandleWhisperLoadConfig>()
+            .expect("candle.whisper payload should decode as typed config");
+        assert_eq!(candle_whisper.model_path, PathBuf::from("model.safetensors"));
+        assert_eq!(candle_whisper.tokenizer_path, Some(PathBuf::from("tokenizer.json")));
+
+        let candle_diffusion = encode_load_payload(
+            &make_spec(ModelFamily::Diffusion, Capability::ImageGeneration, "model.safetensors")
+                .with_load_option("sd_version", "v1-5")
+                .with_load_option("vae_path", "vae.safetensors"),
+            &make_driver(
+                "candle.diffusion",
+                "candle.diffusion",
+                ModelFamily::Diffusion,
+                Capability::ImageGeneration,
+            ),
+        )
+        .expect("candle.diffusion encode should succeed");
+        let candle_diffusion = candle_diffusion
+            .to_typed::<CandleDiffusionLoadConfig>()
+            .expect("candle.diffusion payload should decode as typed config");
+        assert_eq!(candle_diffusion.model_path, PathBuf::from("model.safetensors"));
+        assert_eq!(candle_diffusion.vae_path, Some(PathBuf::from("vae.safetensors")));
+        assert_eq!(candle_diffusion.sd_version, "v1-5");
 
         let onnx = encode_load_payload(
-            &make_spec(ModelFamily::Onnx, Capability::TextGeneration, "model.onnx"),
+            &make_spec(ModelFamily::Onnx, Capability::TextGeneration, "model.onnx")
+                .with_load_option("execution_providers", json!(["CUDA", "CPU"]))
+                .with_load_option("intra_op_num_threads", 8),
             &make_driver("onnx.text", "onnx.text", ModelFamily::Onnx, Capability::TextGeneration),
         )
         .expect("onnx.text encode should succeed");
-
-        assert!(matches!(diffusion, Payload::Json(_)), "ggml.diffusion should remain JSON");
-        assert!(matches!(candle, Payload::Json(_)), "candle.llama should remain JSON");
-        assert!(matches!(onnx, Payload::Json(_)), "onnx.text should remain JSON");
+        let onnx = onnx
+            .to_typed::<OnnxLoadConfig>()
+            .expect("onnx.text payload should decode as typed config");
+        assert_eq!(onnx.model_path, PathBuf::from("model.onnx"));
+        assert_eq!(onnx.execution_providers, vec!["CUDA".to_owned(), "CPU".to_owned()]);
+        assert_eq!(onnx.intra_op_num_threads, Some(8));
+        assert_eq!(onnx.inter_op_num_threads, None);
     }
 
     #[test]
