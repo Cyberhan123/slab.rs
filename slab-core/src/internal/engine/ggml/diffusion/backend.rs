@@ -379,19 +379,19 @@ impl DiffusionWorker {
             }
         };
         let model_path = config.model_path.clone();
-        if let Some(engine) = self.engine.as_mut() {
-            if !engine.is_model_loaded() {
-                let result = tokio::task::block_in_place(|| {
-                    let ctx_params = build_context_params(engine, &config);
-                    engine.new_context(ctx_params)
-                });
-                if let Err(e) = result {
-                    tracing::warn!(
-                        model_path = %model_path.display(),
-                        error = %e,
-                        "diffusion worker: broadcast LoadModel failed"
-                    );
-                }
+        if let Some(engine) = self.engine.as_mut()
+            && !engine.is_model_loaded()
+        {
+            let result = tokio::task::block_in_place(|| {
+                let ctx_params = build_context_params(engine, &config);
+                engine.new_context(ctx_params)
+            });
+            if let Err(e) = result {
+                tracing::warn!(
+                    model_path = %model_path.display(),
+                    error = %e,
+                    "diffusion worker: broadcast LoadModel failed"
+                );
             }
         }
         self.last_model_config = snapshot.model.clone();

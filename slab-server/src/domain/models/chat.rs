@@ -187,10 +187,10 @@ pub fn serialize_session_message(message: &ConversationMessage) -> String {
 pub fn deserialize_session_message(role: &str, content: &str) -> ConversationMessage {
     let trimmed = content.trim();
 
-    if let Ok(stored) = serde_json::from_str::<StoredSessionMessage>(trimmed) {
-        if stored.version == SESSION_MESSAGE_STORAGE_VERSION {
-            return stored.message;
-        }
+    if let Ok(stored) = serde_json::from_str::<StoredSessionMessage>(trimmed)
+        && stored.version == SESSION_MESSAGE_STORAGE_VERSION
+    {
+        return stored.message;
     }
 
     if let Ok(message) = serde_json::from_str::<ConversationMessage>(trimmed) {

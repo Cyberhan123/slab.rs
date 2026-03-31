@@ -84,19 +84,19 @@ impl CandleWhisperWorker {
         let PeerWorkerCommand::LoadModel { .. } = cmd else {
             return;
         };
-        if let Some(engine) = self.engine.as_ref() {
-            if !engine.is_model_loaded() {
-                let engine = engine.clone();
-                let result = tokio::task::block_in_place(|| {
-                    engine.load_model(&model_path, tokenizer_path.as_deref())
-                });
-                if let Err(e) = result {
-                    tracing::warn!(
-                        model_path = %model_path.display(),
-                        error = %e,
-                        "candle.whisper worker: broadcast LoadModel failed"
-                    );
-                }
+        if let Some(engine) = self.engine.as_ref()
+            && !engine.is_model_loaded()
+        {
+            let engine = engine.clone();
+            let result = tokio::task::block_in_place(|| {
+                engine.load_model(&model_path, tokenizer_path.as_deref())
+            });
+            if let Err(e) = result {
+                tracing::warn!(
+                    model_path = %model_path.display(),
+                    error = %e,
+                    "candle.whisper worker: broadcast LoadModel failed"
+                );
             }
         }
     }

@@ -103,21 +103,20 @@ impl AgentThread {
         }
 
         // Inject system prompt as the first message, if not already present.
-        if let Some(ref system_prompt) = self.config.system_prompt {
-            if !system_prompt.is_empty()
-                && messages.first().map(|m| m.role.as_str()) != Some("system")
-            {
-                messages.insert(
-                    0,
-                    ConversationMessage {
-                        role: "system".to_owned(),
-                        content: ConversationMessageContent::Text(system_prompt.clone()),
-                        name: None,
-                        tool_call_id: None,
-                        tool_calls: vec![],
-                    },
-                );
-            }
+        if let Some(ref system_prompt) = self.config.system_prompt
+            && !system_prompt.is_empty()
+            && messages.first().map(|m| m.role.as_str()) != Some("system")
+        {
+            messages.insert(
+                0,
+                ConversationMessage {
+                    role: "system".to_owned(),
+                    content: ConversationMessageContent::Text(system_prompt.clone()),
+                    name: None,
+                    tool_call_id: None,
+                    tool_calls: vec![],
+                },
+            );
         }
 
         let mut completion_text: Option<String> = None;
@@ -143,12 +142,11 @@ impl AgentThread {
                     if !more_turns {
                         // Extract the final assistant text.
                         completion_text = messages.iter().rev().find_map(|m| {
-                            if m.role == "assistant" {
-                                if let ConversationMessageContent::Text(ref t) = m.content {
-                                    if !t.is_empty() {
-                                        return Some(t.clone());
-                                    }
-                                }
+                            if m.role == "assistant"
+                                && let ConversationMessageContent::Text(ref t) = m.content
+                                && !t.is_empty()
+                            {
+                                return Some(t.clone());
                             }
                             None
                         });

@@ -89,19 +89,19 @@ impl CandleDiffusionWorker {
         let PeerWorkerCommand::LoadModel { .. } = cmd else {
             return;
         };
-        if let Some(engine) = self.engine.as_ref() {
-            if !engine.is_model_loaded() {
-                let engine_clone = engine.clone();
-                let result = tokio::task::block_in_place(|| {
-                    engine_clone.load_model(&model_path, vae_path.as_deref(), &sd_version)
-                });
-                if let Err(e) = result {
-                    tracing::warn!(
-                        model_path = %model_path.display(),
-                        error = %e,
-                        "candle.diffusion worker: broadcast LoadModel failed"
-                    );
-                }
+        if let Some(engine) = self.engine.as_ref()
+            && !engine.is_model_loaded()
+        {
+            let engine_clone = engine.clone();
+            let result = tokio::task::block_in_place(|| {
+                engine_clone.load_model(&model_path, vae_path.as_deref(), &sd_version)
+            });
+            if let Err(e) = result {
+                tracing::warn!(
+                    model_path = %model_path.display(),
+                    error = %e,
+                    "candle.diffusion worker: broadcast LoadModel failed"
+                );
             }
         }
     }

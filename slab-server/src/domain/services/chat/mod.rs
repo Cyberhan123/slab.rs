@@ -667,10 +667,10 @@ async fn create_chat_completion_with_state(
         "chat completion done"
     );
 
-    if let Some(session_id) = command.id.as_deref() {
-        if let Some(first_choice) = choices.first() {
-            persist_session_message(&state, session_id, &first_choice.message).await;
-        }
+    if let Some(session_id) = command.id.as_deref()
+        && let Some(first_choice) = choices.first()
+    {
+        persist_session_message(&state, session_id, &first_choice.message).await;
     }
 
     let response = ChatCompletionResult {
@@ -834,15 +834,13 @@ async fn build_messages(
     let client_sent_history = current.len() > 1;
 
     let mut merged = Vec::new();
-    if !client_sent_history {
-        if let Some(session_id) = session_id {
-            let history = state.store().list_messages(session_id).await?;
-            for message in history {
-                if message.content.trim().is_empty() {
-                    continue;
-                }
-                merged.push(message.into());
+    if !client_sent_history && let Some(session_id) = session_id {
+        let history = state.store().list_messages(session_id).await?;
+        for message in history {
+            if message.content.trim().is_empty() {
+                continue;
             }
+            merged.push(message.into());
         }
     }
     merged.extend(current);

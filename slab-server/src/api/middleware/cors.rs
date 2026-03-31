@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tower_http::cors::{Any, CorsLayer};
 
 pub fn cors_layer(state: Arc<AppState>) -> CorsLayer {
-    let cors = if let Some(origins_str) = &state.context.config.cors_allowed_origins {
+    if let Some(origins_str) = &state.context.config.cors_allowed_origins {
         // Parse the comma-separated origin list and build a restrictive layer.
         let origins: Vec<axum::http::HeaderValue> = origins_str
             .split(',')
@@ -17,6 +17,5 @@ pub fn cors_layer(state: Arc<AppState>) -> CorsLayer {
     } else {
         // Wildcard – suitable for development; set SLAB_CORS_ORIGINS in production.
         CorsLayer::new().allow_origin(Any).allow_headers(Any).allow_methods(Any)
-    };
-    cors
+    }
 }

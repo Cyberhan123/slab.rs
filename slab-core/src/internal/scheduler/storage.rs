@@ -66,10 +66,10 @@ impl ResultStorage {
 
     /// Update the status of a specific stage.
     pub async fn set_stage_status(&self, task_id: TaskId, stage_index: usize, status: StageStatus) {
-        if let Some(record) = self.inner.write().await.get_mut(&task_id) {
-            if let Some(s) = record.stage_statuses.get_mut(stage_index) {
-                *s = status;
-            }
+        if let Some(record) = self.inner.write().await.get_mut(&task_id)
+            && let Some(s) = record.stage_statuses.get_mut(stage_index)
+        {
+            *s = status;
         }
     }
 

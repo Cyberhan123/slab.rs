@@ -343,16 +343,16 @@ impl VersionApi {
         // Skip if already at this version.
         let install = Install::new_with_path(&self.repo, target_path);
         if install.already_installed() {
-            if let Ok(info) = install.get_installed_version() {
-                if info.tag_name == version {
-                    if self.api.show_progress {
-                        println!(
-                            "✅ The header file for version {} already exists; skip the download.",
-                            version
-                        );
-                    }
-                    return Ok(());
+            if let Ok(info) = install.get_installed_version()
+                && info.tag_name == version
+            {
+                if self.api.show_progress {
+                    println!(
+                        "✅ The header file for version {} already exists; skip the download.",
+                        version
+                    );
                 }
+                return Ok(());
             }
             // Different version – clean up before re-downloading.
             std::fs::remove_dir_all(target_path)?;
