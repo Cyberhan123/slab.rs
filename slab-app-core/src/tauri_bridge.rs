@@ -59,7 +59,7 @@ pub async fn core_list_tasks(
     state
         .services
         .task_application
-        .list_tasks()
+        .list_tasks(None)
         .await
         .map(|tasks| serde_json::to_value(tasks).unwrap_or_default())
         .map_err(|e: AppCoreError| e.to_string())

@@ -56,6 +56,10 @@ pub fn run() {
 
     builder = plugins::register_protocol(builder);
 
+    // Register slab-app-core native IPC commands so the frontend can call the
+    // business logic directly without an HTTP round-trip when running embedded.
+    builder = slab_app_core::tauri_bridge::register(builder);
+
     #[cfg(debug_assertions)]
     {
         builder = builder.plugin(tauri_plugin_mcp_bridge::init());
