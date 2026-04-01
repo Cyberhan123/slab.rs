@@ -43,7 +43,6 @@
       "resources/libs/**/*"
     ],
     "externalBin": [
-      "binaries/slab-server",
       "binaries/slab-runtime"
     ],
     "copyright": "Copyright (c) 2026 CyberHan",

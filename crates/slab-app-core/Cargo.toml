@@ -10,7 +10,6 @@ license = "AGPL-3.0-only"
 
 [features]
 default = []
-tauri = ["dep:tauri"]
 axum = ["dep:axum"]
 
 [dependencies]
@@ -71,6 +70,3 @@ validator = { version = "0.20", features = ["derive"] }
 
 # Optional: Axum state extractor integration
 axum = { workspace = true, optional = true }
-
-# Optional: Tauri integration
-tauri = { version = "2", features = ["unstable"], optional = true }
