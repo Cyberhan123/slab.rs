@@ -38,11 +38,7 @@ impl PluginRuntimeManager {
             .build()
             .map_err(|e| format!("failed to build blocking HTTP client: {e}"))?;
 
-        Ok(Self {
-            instances: Mutex::new(HashMap::new()),
-            blocking_http_client,
-            api_endpoint,
-        })
+        Ok(Self { instances: Mutex::new(HashMap::new()), blocking_http_client, api_endpoint })
     }
 
     pub fn call_plugin(

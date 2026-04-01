@@ -42,6 +42,9 @@ mod tests {
         assert_eq!(config.api_origin, "http://127.0.0.1:3000");
         assert_eq!(config.api_base_url(), "http://127.0.0.1:3000/");
         assert_eq!(config.health_url(), "http://127.0.0.1:3000/health");
-        assert_eq!(config.connect_src, vec!["'self'".to_owned(), "http://127.0.0.1:3000".to_owned()]);
+        assert_eq!(
+            config.connect_src,
+            vec!["'self'".to_owned(), "http://127.0.0.1:3000".to_owned()]
+        );
     }
 }

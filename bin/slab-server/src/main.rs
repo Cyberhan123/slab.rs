@@ -4,9 +4,19 @@
 mod api;
 mod error;
 
-use std::{fs::OpenOptions, path::Path};
+use std::fs::OpenOptions;
+use std::io::ErrorKind;
+use std::net::SocketAddr;
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::Arc;
+use std::time::Duration;
 
+use anyhow::{Context, anyhow};
 use clap::Parser;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::{Child, ChildStdin, Command as TokioCommand};
+use tracing::{error, info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -110,6 +120,50 @@ impl Default for SupervisorArgs {
             backend_capacity: None,
             lib_dir: None,
             shutdown_on_stdin_close: false,
+        }
+    }
+}
+
+impl SupervisorArgs {
+    fn apply_config_defaults(&mut self, cfg: &mut Config) {
+        if let Some(log_level) = &self.log_level {
+            cfg.log_level = log_level.clone();
+        }
+        if self.log_json {
+            cfg.log_json = true;
+        }
+        if let Some(log_file) = &self.log_file {
+            cfg.log_file = Some(log_file.clone());
+        }
+        if !self.log_json && cfg.log_json {
+            self.log_json = true;
+        }
+        if self.database_url.is_none() {
+            self.database_url = Some(cfg.database_url.clone());
+        }
+        if self.log_level.is_none() {
+            self.log_level = Some(cfg.log_level.clone());
+        }
+        if self.log_file.is_none() {
+            self.log_file = cfg.log_file.clone();
+        }
+        if self.settings_path.is_none() {
+            self.settings_path = Some(cfg.settings_path.clone());
+        }
+        if self.model_config_dir.is_none() {
+            self.model_config_dir = Some(cfg.model_config_dir.clone());
+        }
+        if self.queue_capacity.is_none() {
+            self.queue_capacity = Some(cfg.queue_capacity);
+        }
+        if self.backend_capacity.is_none() {
+            self.backend_capacity = Some(cfg.backend_capacity);
+        }
+        if self.lib_dir.is_none() {
+            self.lib_dir = cfg.lib_dir.clone();
+        }
+        if self.runtime_transport.is_none() {
+            self.runtime_transport = Some(cfg.transport_mode.clone());
         }
     }
 }
