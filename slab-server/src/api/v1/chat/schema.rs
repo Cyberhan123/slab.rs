@@ -9,10 +9,10 @@ use serde_json::Value;
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
-use crate::domain::models::{
+use slab_app_core::domain::models::{
     ChatCompletionCommand as DomainChatCompletionCommand,
-    ChatCompletionResult as DomainChatCompletionResult, ChatModelOption as DomainChatModelOption,
-    ChatModelCapabilities as DomainChatModelCapabilities,
+    ChatCompletionResult as DomainChatCompletionResult,
+    ChatModelCapabilities as DomainChatModelCapabilities, ChatModelOption as DomainChatModelOption,
     ChatModelSource as DomainChatModelSource, ChatReasoningEffort as DomainChatReasoningEffort,
     ChatResultChoice as DomainChatResultChoice, ChatStreamOptions as DomainChatStreamOptions,
     ChatVerbosity as DomainChatVerbosity, CloudChatParams as DomainCloudChatParams,
@@ -22,8 +22,7 @@ use crate::domain::models::{
     ConversationMessageContent as DomainConversationMessageContent,
     ConversationToolCall as DomainConversationToolCall,
     ConversationToolFunction as DomainConversationToolFunction,
-    LocalChatParams as DomainLocalChatParams,
-    StructuredOutput as DomainStructuredOutput,
+    LocalChatParams as DomainLocalChatParams, StructuredOutput as DomainStructuredOutput,
     StructuredOutputJsonSchema as DomainStructuredOutputJsonSchema,
     TextCompletionCommand as DomainTextCompletionCommand,
     TextCompletionResult as DomainTextCompletionResult, TextResultChoice as DomainTextResultChoice,
@@ -664,15 +663,8 @@ impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
                 stop,
                 stream_options: stream_options.map(Into::into).unwrap_or_default(),
             },
-            local: DomainLocalChatParams {
-                grammar,
-                structured_output: structured_output.clone(),
-            },
-            cloud: DomainCloudChatParams {
-                reasoning_effort,
-                verbosity,
-                structured_output,
-            },
+            local: DomainLocalChatParams { grammar, structured_output: structured_output.clone() },
+            cloud: DomainCloudChatParams { reasoning_effort, verbosity, structured_output },
         }
     }
 }
@@ -707,10 +699,7 @@ impl From<CompletionRequest> for DomainTextCompletionCommand {
                 stop,
                 stream_options: DomainChatStreamOptions::default(),
             },
-            local: DomainLocalChatParams {
-                grammar,
-                structured_output: structured_output.clone(),
-            },
+            local: DomainLocalChatParams { grammar, structured_output: structured_output.clone() },
             cloud: DomainCloudChatParams {
                 reasoning_effort: None,
                 verbosity: None,
@@ -1061,7 +1050,7 @@ mod tests {
         ChatResponseFormat, ChatResponseFormatType, ChatResponseJsonSchema, ChatStreamOptions,
         ChatThinkingConfig, ChatThinkingType, ChatVerbosity, CompletionRequest, StopSequences,
     };
-    use crate::domain::models::{
+    use slab_app_core::domain::models::{
         ChatCompletionCommand as DomainChatCompletionCommand,
         ChatReasoningEffort as DomainChatReasoningEffort, ChatVerbosity as DomainChatVerbosity,
         StructuredOutput as DomainStructuredOutput,
@@ -1124,10 +1113,7 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(matches!(
-            command.cloud.reasoning_effort,
-            Some(DomainChatReasoningEffort::None)
-        ));
+        assert!(matches!(command.cloud.reasoning_effort, Some(DomainChatReasoningEffort::None)));
     }
 
     #[test]
@@ -1141,10 +1127,7 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(matches!(
-            command.cloud.reasoning_effort,
-            Some(DomainChatReasoningEffort::Medium)
-        ));
+        assert!(matches!(command.cloud.reasoning_effort, Some(DomainChatReasoningEffort::Medium)));
     }
 
     #[test]
@@ -1160,10 +1143,7 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert!(matches!(
-            command.cloud.reasoning_effort,
-            Some(DomainChatReasoningEffort::High)
-        ));
+        assert!(matches!(command.cloud.reasoning_effort, Some(DomainChatReasoningEffort::High)));
         assert!(matches!(command.cloud.verbosity, Some(DomainChatVerbosity::Low)));
     }
 

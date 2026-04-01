@@ -12,7 +12,7 @@ mod middleware;
 pub(crate) mod v1;
 pub mod validation;
 use crate::api::middleware::{cors, trace};
-use crate::context::AppState;
+use slab_app_core::context::AppState;
 use axum::{Router, middleware as axum_middleware};
 use std::sync::Arc;
 use tower::ServiceBuilder;

@@ -6,7 +6,7 @@ use serde_json::{Value, json};
 use std::sync::Arc;
 use utoipa::OpenApi;
 
-use crate::context::AppState;
+use slab_app_core::context::AppState;
 
 #[derive(OpenApi)]
 #[openapi(paths(get_health))]

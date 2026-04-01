@@ -147,8 +147,7 @@ pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error
     );
     info!(
         "Slab sidecar started (gateway_bind={}, api_origin={})",
-        endpoint_config.gateway_bind,
-        endpoint_config.api_origin
+        endpoint_config.gateway_bind, endpoint_config.api_origin
     );
     Ok(())
 }

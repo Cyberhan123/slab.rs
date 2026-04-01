@@ -13,14 +13,15 @@ Read [AGENTS.md](AGENTS.md) before making changes. This file only keeps the repo
   - `shadcn-ui`
   - `tauri-v2`
 - Current frontend stack: React 19, Vite, React Router 7, Tauri 2, TanStack Query, `openapi-fetch`, `openapi-react-query`, Zustand, Ant Design X, `i18next`, and Tailwind 4.
-- `bin/slab-app` is the Tauri desktop host. Its frontend is `packages/slab-desktop`, which uses `packages/slab-components` for UI and `packages/slab-i18n` for i18n.
+- `bin/slab-app` is the Tauri desktop host. Its frontend is `packages/slab-desktop`, which uses `packages/slab-components` for UI and `packages/slab-i18n` for i18n. It also embeds `crates/slab-app-core` (`tauri` feature) for native IPC commands.
 - `packages/slab-components` is the shadcn/ui-based shared component library (workspace package `@slab/components`).
 - `packages/slab-i18n` is the shared i18n package (workspace package `@slab/i18n`) with i18next and react-i18next.
 - `packages/slab-desktop` is the main React frontend app (workspace package `@slab/desktop`).
-- All Rust library crates live in `crates/` (e.g., `crates/slab-core`, `crates/slab-types`).
-- `slab-server` starts `slab-server` as a sidecar and hosts local plugins from `plugins/`.
-- `slab-server` keeps the existing `config`, `context`, `api`, `domain`, and `infra` layout, exposes `/v1` plus `/api-docs/openapi.json`, and adapts `slab-agent` through server-side port implementations.
-- `slab-runtime` serves gRPC over TCP or IPC and can enable llama, whisper, and diffusion backends independently.
-- `crates/slab-core` is runtime/orchestration only; shared contracts belong in `crates/slab-types` and `crates/slab-proto`.
+- All Rust library crates live in `crates/` (e.g., `crates/slab-core`, `crates/slab-types`, `crates/slab-app-core`).
+- Binary executables live in `bin/` (e.g., `bin/slab-server`, `bin/slab-runtime`, `bin/slab-app`).
+- `crates/slab-app-core` (package: `slab-app-core`) is the HTTP-free business logic library. Contains `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`. Enable feature `tauri` to get `slab_app_core::tauri_bridge::register()`. Migrations are in `crates/slab-app-core/migrations/`.
+- `bin/slab-server` is the thin HTTP gateway (axum). It depends on `crates/slab-app-core` for all domain logic; adds axum `FromRef` extractors in `state_extractors.rs` and `ServerError` → HTTP response conversion. Exposes `/v1` plus `/api-docs/openapi.json`.
+- `bin/slab-runtime` serves gRPC over TCP or IPC and can enable llama, whisper, and diffusion backends independently.
+- `crates/slab-core` (package: `slab-runtime-core`) is runtime/orchestration only; shared contracts belong in `crates/slab-types` and `crates/slab-proto`.
 - Preserve the current Tauri CSP, permissions, capabilities, and plugin host boundaries unless the task explicitly requires a change.
 - If repo docs and code disagree, follow the code and update the docs.

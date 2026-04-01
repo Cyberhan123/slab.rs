@@ -23,3 +23,15 @@ pub struct ConvertRequest {
     ))]
     pub output_path: Option<String>,
 }
+
+use slab_app_core::domain::models::FfmpegConvertCommand;
+
+impl From<ConvertRequest> for FfmpegConvertCommand {
+    fn from(request: ConvertRequest) -> Self {
+        Self {
+            source_path: request.source_path,
+            output_format: request.output_format,
+            output_path: request.output_path,
+        }
+    }
+}

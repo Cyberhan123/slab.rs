@@ -293,18 +293,10 @@ pub struct ChatModelCapabilities {
 
 impl ChatModelCapabilities {
     pub fn local() -> Self {
-        Self {
-            raw_grammar: true,
-            structured_output: true,
-            reasoning_controls: false,
-        }
+        Self { raw_grammar: true, structured_output: true, reasoning_controls: false }
     }
 
     pub fn cloud() -> Self {
-        Self {
-            raw_grammar: false,
-            structured_output: true,
-            reasoning_controls: true,
-        }
+        Self { raw_grammar: false, structured_output: true, reasoning_controls: true }
     }
 }

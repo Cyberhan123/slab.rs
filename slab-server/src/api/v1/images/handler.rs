@@ -9,8 +9,8 @@ use utoipa::OpenApi;
 use crate::api::v1::images::schema::{ImageGenerationRequest, ImageMode};
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::ValidatedJson;
-use crate::context::AppState;
-use crate::domain::services::ImageService;
+use slab_app_core::context::AppState;
+use slab_app_core::domain::services::ImageService;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
