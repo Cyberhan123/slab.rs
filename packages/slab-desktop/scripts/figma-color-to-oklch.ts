@@ -44,8 +44,8 @@ Usage:
   bun run color:oklch -- background=#f7f9fb primary=#0d9488
   bun run color:oklch -- "--background: #f7f9fb;" "--primary: rgb(13, 148, 136);"
   bun run color:oklch -- --stdin < colors.txt
-  bun run color:oklch -- --file src/styles/globals.css --out src/styles/globals.oklch.css
-  bun run color:oklch -- --file src/styles/globals.css --write --annotate
+  bun run color:oklch -- --file ../slab-components/src/styles/globals.css --out ../slab-components/src/styles/globals.oklch.css
+  bun run color:oklch -- --file ../slab-components/src/styles/globals.css --write --annotate
 
 Options:
   --file PATH      Convert a CSS file with PostCSS.

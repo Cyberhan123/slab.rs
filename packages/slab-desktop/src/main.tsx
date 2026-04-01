@@ -1,9 +1,10 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import "@slab/components/globals.css";
 import App from "./App";
-import "./styles/globals.css";
 import "@slab/i18n";
+import "./styles/vendor.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>
