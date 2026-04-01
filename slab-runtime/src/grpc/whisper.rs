@@ -5,7 +5,7 @@ use bytemuck::cast_slice;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, instrument, warn};
 
-use slab_core::api::AudioTranscriptionRequest;
+use slab_runtime_core::api::AudioTranscriptionRequest;
 use slab_proto::slab::ipc::v1 as pb;
 use slab_types::{WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams};
 
