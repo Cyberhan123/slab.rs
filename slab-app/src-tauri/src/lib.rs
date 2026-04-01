@@ -3,6 +3,8 @@ mod plugins;
 mod setup;
 
 use setup::ApiEndpointConfig;
+use slab_app_core::tauri_bridge::{core_health, core_list_models, core_list_sessions,
+                                   core_list_tasks};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -56,10 +58,6 @@ pub fn run() {
 
     builder = plugins::register_protocol(builder);
 
-    // Register slab-app-core native IPC commands so the frontend can call the
-    // business logic directly without an HTTP round-trip when running embedded.
-    builder = slab_app_core::tauri_bridge::register(builder);
-
     #[cfg(debug_assertions)]
     {
         builder = builder.plugin(tauri_plugin_mcp_bridge::init());
@@ -76,12 +74,24 @@ pub fn run() {
             plugins::plugin_update_view_bounds,
             plugins::plugin_unmount_view,
             plugins::plugin_call,
-            plugins::plugin_api_request
+            plugins::plugin_api_request,
+            // slab-app-core native IPC commands
+            core_health,
+            core_list_models,
+            core_list_sessions,
+            core_list_tasks,
         ])
         .setup(move |app| {
             setup::setup_windows(app)?;
             setup::run_server_sidecar(app)?;
             plugins::init(app, api_endpoint.clone()).map_err(std::io::Error::other)?;
+
+            // Initialise slab-app-core state so native IPC commands work.
+            tauri::async_runtime::block_on(
+                slab_app_core::tauri_bridge::init_state(app.handle()),
+            )
+            .map_err(|e| std::io::Error::other(format!("core state init failed: {e}")))?;
+
             Ok(())
         })
         .build(tauri::generate_context!())
