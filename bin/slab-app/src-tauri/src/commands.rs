@@ -1,72 +1,51 @@
-//! Tauri IPC command bridge for slab-app-core.
+//! Tauri IPC commands that delegate directly to the embedded slab-app-core library.
 //!
-//! When the `tauri` feature is enabled, this module exposes the core
-//! business-logic operations as Tauri commands so that the desktop frontend
-//! can call them directly without going through HTTP.
-//!
-//! # Usage
-//!
-//! 1. Call [`init_state`] once inside `setup` so the managed state is ready.
-//! 2. Include the `core_*` symbols in the single `tauri::generate_handler![]`
-//!    call in your `lib.rs`:
-//!
-//! ```no_run
-//! use slab_app_core::tauri_bridge::{core_health, core_list_models,
-//!                                    core_list_sessions, core_list_tasks};
-//!
-//! tauri::Builder::default()
-//!     .invoke_handler(tauri::generate_handler![
-//!         core_health,
-//!         core_list_models,
-//!         core_list_sessions,
-//!         core_list_tasks,
-//!         // … other app commands …
-//!     ])
-//!     .setup(|app| {
-//!         tauri::async_runtime::block_on(
-//!             slab_app_core::tauri_bridge::init_state(app.handle())
-//!         )?;
-//!         Ok(())
-//!     });
-//! ```
+//! These commands replace the former `slab_app_core::tauri_bridge` module.
+//! Because slab-app-core is now transport-agnostic, the Tauri-specific wiring
+//! lives here in the desktop host binary.
 
 use std::sync::Arc;
 
 use tauri::Manager as _;
 
-use crate::context::AppState;
-use crate::error::AppCoreError;
+use slab_app_core::context::AppState;
+use slab_app_core::error::AppCoreError;
 
 // ── State initialisation ──────────────────────────────────────────────────────
 
 /// Initialise the core [`AppState`] and register it with the Tauri app.
 ///
-/// Call this once inside the `setup` hook, for example via
-/// `tauri::async_runtime::block_on(init_state(app.handle()))`.
-/// After this returns every `core_*` Tauri command will have access to the
-/// fully initialised state.
-pub async fn init_state<R: tauri::Runtime>(
+/// `runtime_grpc_endpoint` is the gRPC address of the embedded `slab-runtime`
+/// sidecar, e.g. `"http://127.0.0.1:50051"`.  All three backends (llama,
+/// whisper, diffusion) are expected to be served on the same endpoint.
+///
+/// Call this once inside the Tauri `setup` hook via
+/// `tauri::async_runtime::block_on(init_core_state(app.handle(), endpoint))`.
+pub async fn init_core_state<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
+    runtime_grpc_endpoint: &str,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use crate::config::Config;
-    use crate::infra::db::AnyStore;
-    use crate::infra::rpc::gateway::GrpcGateway;
-    use crate::infra::settings::SettingsProvider;
-    use crate::model_auto_unload::ModelAutoUnloadManager;
+    use slab_app_core::config::Config;
+    use slab_app_core::infra::db::AnyStore;
+    use slab_app_core::infra::rpc::gateway::GrpcGateway;
+    use slab_app_core::infra::settings::SettingsProvider;
+    use slab_app_core::model_auto_unload::ModelAutoUnloadManager;
 
     let mut cfg = Config::from_env();
 
-    // If the database URL is still the default relative placeholder, resolve
-    // it to an absolute platform-specific path so data persists across
-    // working-directory changes.
+    // Point all three gRPC backends at the single embedded slab-runtime sidecar.
+    cfg.llama_grpc_endpoint = Some(runtime_grpc_endpoint.to_owned());
+    cfg.whisper_grpc_endpoint = Some(runtime_grpc_endpoint.to_owned());
+    cfg.diffusion_grpc_endpoint = Some(runtime_grpc_endpoint.to_owned());
+
+    // Resolve the database URL to an absolute platform-specific path so data
+    // persists across working-directory changes.
     if cfg.database_url == "sqlite://slab.db?mode=rwc" {
         let base = dirs_next::config_dir()
             .ok_or("could not determine the user config directory; set SLAB_DATABASE_URL")?
             .join("Slab");
         tokio::fs::create_dir_all(&base).await?;
         let normalized = base.join("slab.db").to_string_lossy().replace('\\', "/");
-        // SQLite URLs use "sqlite://" for absolute Unix paths ("/…") and
-        // "sqlite:///" for Windows paths that don't start with "/" (e.g. "C:/…").
         let prefix = if normalized.starts_with('/') { "sqlite://" } else { "sqlite:///" };
         cfg.database_url = format!("{prefix}{normalized}?mode=rwc");
     }
@@ -78,7 +57,8 @@ pub async fn init_state<R: tauri::Runtime>(
 
     let store = Arc::new(AnyStore::connect(&cfg.database_url).await?);
     let settings = Arc::new(SettingsProvider::load(cfg.settings_path.clone()).await?);
-    let pmid = Arc::new(crate::domain::services::PmidService::load(Arc::clone(&settings)).await?);
+    let pmid =
+        Arc::new(slab_app_core::domain::services::PmidService::load(Arc::clone(&settings)).await?);
     let grpc = Arc::new(GrpcGateway::connect_from_config(&cfg).await?);
     let model_auto_unload =
         Arc::new(ModelAutoUnloadManager::new(Arc::clone(&pmid), Arc::clone(&grpc)));
