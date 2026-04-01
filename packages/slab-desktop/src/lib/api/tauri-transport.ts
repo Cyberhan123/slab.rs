@@ -1,6 +1,92 @@
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 
 import { isTauri } from '@/hooks/use-tauri';
+
+/**
+ * An event emitted on the Tauri IPC channel for streaming chat completions.
+ * Matches the `ChatStreamEvent` enum defined in the Rust handler.
+ */
+type ChatStreamEvent =
+  | { type: 'data'; data: string }
+  | { type: 'done' }
+  | { type: 'error'; message: string };
+
+/**
+ * A fetch-compatible adapter that routes POST /v1/chat/completions and
+ * POST /v1/completions through the native Tauri IPC channel when running
+ * inside the Tauri desktop host.  The response is shaped to look like a
+ * `text/event-stream` (SSE) response so that @ant-design/x-sdk XRequest
+ * processes it transparently.
+ *
+ * Falls back to the native fetch API for all other URLs and when the app
+ * is running in a plain browser context.
+ */
+export const tauriStreamingFetch: typeof fetch = (input, init) => {
+  if (!isTauri()) {
+    return fetch(input, init);
+  }
+
+  const request = new Request(input, init);
+  const url = new URL(request.url);
+
+  let command: string;
+  if (request.method === 'POST' && url.pathname === '/v1/chat/completions') {
+    command = 'chat_completions_stream';
+  } else {
+    return fetch(request);
+  }
+
+  return request
+    .json()
+    .catch(() => ({}))
+    .then((body: unknown) => {
+      const encoder = new TextEncoder();
+      let streamController: ReadableStreamDefaultController<Uint8Array> | null = null;
+
+      const readable = new ReadableStream<Uint8Array>({
+        start(controller) {
+          streamController = controller;
+        },
+      });
+
+      const channel = new Channel<ChatStreamEvent>();
+      channel.onmessage = (event) => {
+        if (!streamController) return;
+        try {
+          if (event.type === 'data') {
+            streamController.enqueue(encoder.encode(`data: ${event.data}\n\n`));
+          } else if (event.type === 'done') {
+            streamController.enqueue(encoder.encode('data: [DONE]\n\n'));
+            streamController.close();
+          } else if (event.type === 'error') {
+            streamController.error(new Error(event.message));
+          }
+        } catch {
+          // Stream may have already been closed or errored.
+        }
+      };
+
+      invoke(command, { req: body, onEvent: channel }).catch((err: unknown) => {
+        if (!streamController) return;
+        try {
+          const message =
+            typeof err === 'string'
+              ? err
+              : err instanceof Error
+                ? err.message
+                : 'IPC error';
+          streamController.error(new Error(message));
+        } catch {
+          // Stream may have already been closed.
+        }
+      });
+
+      return new Response(readable, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    });
+};
 
 type TauriHttpMethod = 'DELETE' | 'GET' | 'POST' | 'PUT';
 

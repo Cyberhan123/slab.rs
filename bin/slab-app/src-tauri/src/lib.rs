@@ -79,6 +79,7 @@ pub fn run() {
             // chat
             api::v1::chat::handler::list_chat_models,
             api::v1::chat::handler::chat_completions,
+            api::v1::chat::handler::chat_completions_stream,
             api::v1::chat::handler::completions,
             // models
             api::v1::models::handler::list_models,
