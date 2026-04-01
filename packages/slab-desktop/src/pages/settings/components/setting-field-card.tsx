@@ -6,18 +6,18 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Button } from '@slab/components/button';
+import { Input } from '@slab/components/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
-import { Textarea } from '@/components/ui/textarea';
-import { StatusPill } from '@/components/ui/workspace';
+} from '@slab/components/select';
+import { Switch } from '@slab/components/switch';
+import { Textarea } from '@slab/components/textarea';
+import { StatusPill } from '@slab/components/workspace';
 import { cn } from '@/lib/utils';
 
 import { parseStructuredJsonSchema } from '../schema';

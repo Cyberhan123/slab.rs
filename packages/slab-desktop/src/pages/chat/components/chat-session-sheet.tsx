@@ -1,21 +1,21 @@
 import { MoreHorizontal, Trash2 } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
+import { Badge } from "@slab/components/badge"
+import { Button } from "@slab/components/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { ScrollArea } from "@/components/ui/scroll-area"
+} from "@slab/components/dropdown-menu"
+import { ScrollArea } from "@slab/components/scroll-area"
 import {
   Sheet,
   SheetContent,
   SheetDescription,
   SheetHeader,
   SheetTitle,
-} from "@/components/ui/sheet"
+} from "@slab/components/sheet"
 import { cn } from "@/lib/utils"
 
 type ConversationItem = {

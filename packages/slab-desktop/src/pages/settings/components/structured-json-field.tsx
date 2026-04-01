@@ -1,16 +1,16 @@
 import { Plus, Trash2 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Badge } from '@slab/components/badge';
+import { Button } from '@slab/components/button';
+import { Input } from '@slab/components/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
+} from '@slab/components/select';
+import { Switch } from '@slab/components/switch';
 import { cn } from '@/lib/utils';
 
 import {

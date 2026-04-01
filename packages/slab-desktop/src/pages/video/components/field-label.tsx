@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { Label } from '@/components/ui/label';
+import { Label } from '@slab/components/label';
 
 export function FieldLabel({
   className,

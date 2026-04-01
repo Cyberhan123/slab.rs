@@ -2,12 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { RefreshCw, PlugZap, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
+import { Button } from "@slab/components/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@slab/components/card";
+import { Input } from "@slab/components/input";
+import { Textarea } from "@slab/components/textarea";
+import { ScrollArea } from "@slab/components/scroll-area";
+import { Badge } from "@slab/components/badge";
 import { usePageHeader } from "@/hooks/use-global-header-meta";
 import { isTauri } from "@/hooks/use-tauri";
 import { PAGE_HEADER_META } from "@/layouts/header-meta";

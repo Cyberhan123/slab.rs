@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import "@ant-design/x-markdown/themes/dark.css"
 import "@ant-design/x-markdown/themes/light.css"
 
-import { ScrollArea } from "@/components/ui/scroll-area"
+import { ScrollArea } from "@slab/components/scroll-area"
 import type { components } from "@/lib/api/v1.d.ts"
 import { ChatComposer } from "@/pages/chat/components/chat-composer"
 import { ChatMessageBubble } from "@/pages/chat/components/chat-message-bubble"

@@ -12,27 +12,27 @@ import {
   ZoomIn,
 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Slider } from '@/components/ui/slider';
+import { Badge } from '@slab/components/badge';
+import { Button } from '@slab/components/button';
+import { Dialog, DialogContent } from '@slab/components/dialog';
+import { Input } from '@slab/components/input';
+import { Label } from '@slab/components/label';
+import { Slider } from '@slab/components/slider';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Textarea } from '@/components/ui/textarea';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+} from '@slab/components/select';
+import { Textarea } from '@slab/components/textarea';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@slab/components/tabs';
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import { SplitWorkbench } from '@/components/ui/workspace';
+} from '@slab/components/collapsible';
+import { SplitWorkbench } from '@slab/components/workspace';
 import { cn } from '@/lib/utils';
 import {
   DIMENSION_PRESETS,

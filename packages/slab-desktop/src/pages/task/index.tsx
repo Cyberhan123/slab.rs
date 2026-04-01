@@ -7,7 +7,7 @@ import {
   Timer,
 } from 'lucide-react';
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import {
   Table,
   TableBody,
@@ -15,10 +15,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from '@/components/ui/table';
+} from '@slab/components/table';
 import {
   StageEmptyState,
-} from '@/components/ui/workspace';
+} from '@slab/components/workspace';
 
 import { useTaskList } from './hooks/use-task-list';
 import { formatCompactDuration, formatDateTime, formatPercent, formatTaskId, getTaskTypeMeta } from './utils';

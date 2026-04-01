@@ -9,22 +9,22 @@ import {
   X,
 } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
+import { Button } from '@slab/components/button';
 import {
   Collapsible,
   CollapsibleContent,
   CollapsibleTrigger,
-} from '@/components/ui/collapsible';
-import { Input } from '@/components/ui/input';
+} from '@slab/components/collapsible';
+import { Input } from '@slab/components/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { Slider } from '@/components/ui/slider';
-import { Textarea } from '@/components/ui/textarea';
+} from '@slab/components/select';
+import { Slider } from '@slab/components/slider';
+import { Textarea } from '@slab/components/textarea';
 import { cn } from '@/lib/utils';
 import { FRAME_OPTIONS, FPS_OPTIONS, SAMPLE_METHODS, SCHEDULERS } from '../const';
 import { FieldLabel } from './field-label';

@@ -1,5 +1,5 @@
 import { cn } from '@/lib/utils';
-import { StatusPill } from '@/components/ui/workspace';
+import { StatusPill } from '@slab/components/workspace';
 
 import type { ModelStatus } from '../hooks/use-hub-model-catalog';
 

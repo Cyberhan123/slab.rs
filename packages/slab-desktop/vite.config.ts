@@ -34,9 +34,6 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // Redirect @/components/ui/* imports to @slab/components subpath exports
-      // This allows existing imports like "@/components/ui/button" to resolve
-      // through the re-export stubs in src/components/ui/
     },
   },
 }));

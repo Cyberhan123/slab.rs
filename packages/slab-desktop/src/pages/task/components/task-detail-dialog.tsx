@@ -1,8 +1,8 @@
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
-import { Spinner } from '@/components/ui/spinner';
-import { SoftPanel } from '@/components/ui/workspace';
+import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
+import { Button } from '@slab/components/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@slab/components/dialog';
+import { Spinner } from '@slab/components/spinner';
+import { SoftPanel } from '@slab/components/workspace';
 import { toast } from 'sonner';
 import type { Task, TaskResult } from '../const';
 import { renderStatusPill } from './task-status-pill';

@@ -2,7 +2,7 @@ import { Brain, ChevronDown } from "lucide-react"
 import { useState } from "react"
 import type { ReactNode } from "react"
 
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@slab/components/collapsible"
 import { cn } from "@/lib/utils"
 
 type ChatThinkingPanelProps = {

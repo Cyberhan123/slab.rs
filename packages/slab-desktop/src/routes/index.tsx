@@ -11,7 +11,7 @@ import Audio from "@/pages/audio";
 import Video from "@/pages/video";
 import Image from "@/pages/image";
 import Plugins from "@/pages/plugins";
-import { Spinner } from "@/components/ui/spinner";
+import { Spinner } from "@slab/components/spinner";
 import { GlobalHeaderProvider } from "@/layouts/global-header-provider";
 
 // Lazy-load the setup page so it doesn't bloat the main bundle.

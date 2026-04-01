@@ -8,14 +8,14 @@ import {
   WandSparkles,
 } from "lucide-react"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@slab/components/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Textarea } from "@/components/ui/textarea"
+} from "@slab/components/dropdown-menu"
+import { Textarea } from "@slab/components/textarea"
 import { cn } from "@/lib/utils"
 
 type ChatComposerProps = {

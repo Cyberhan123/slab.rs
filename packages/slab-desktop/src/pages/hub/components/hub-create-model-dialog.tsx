@@ -7,10 +7,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+} from '@slab/components/dialog';
+import { Button } from '@slab/components/button';
+import { Input } from '@slab/components/input';
+import { Label } from '@slab/components/label';
 
 type HubCreateModelDialogProps = {
   open: boolean;

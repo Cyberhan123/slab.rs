@@ -10,7 +10,7 @@ import {
   SelectLabel,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select"
+} from "@slab/components/select"
 
 type HeaderProps = {
   variant?: "default" | "chat" | "minimal"

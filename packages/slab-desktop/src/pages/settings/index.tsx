@@ -1,10 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { StageEmptyState, StatusPill } from '@/components/ui/workspace';
+import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
+import { Badge } from '@slab/components/badge';
+import { Button } from '@slab/components/button';
+import { StageEmptyState, StatusPill } from '@slab/components/workspace';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api, { getErrorMessage } from '@/lib/api';

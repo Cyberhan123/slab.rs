@@ -9,7 +9,7 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+} from '@slab/components/alert-dialog';
 
 import type { ModelItem } from '../hooks/use-hub-model-catalog';
 

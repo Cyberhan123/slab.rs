@@ -1,6 +1,6 @@
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Switch } from '@/components/ui/switch';
+import { Input } from '@slab/components/input';
+import { Label } from '@slab/components/label';
+import { Switch } from '@slab/components/switch';
 
 export type DecodeOptionsProps = {
   showDecodeOptions: boolean;

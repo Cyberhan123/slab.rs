@@ -1,7 +1,7 @@
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Switch } from '@/components/ui/switch';
+import { Input } from '@slab/components/input';
+import { Label } from '@slab/components/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slab/components/select';
+import { Switch } from '@slab/components/switch';
 import type { CatalogModel } from '@/lib/api/models';
 
 export type VadSettingsProps = {
