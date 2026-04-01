@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-model"
+description = "Enables the update_model command without any pre-configured scope."
+commands.allow = ["update_model"]
+
+[[permission]]
+identifier = "deny-update-model"
+description = "Denies the update_model command without any pre-configured scope."
+commands.deny = ["update_model"]

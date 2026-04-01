@@ -19,7 +19,7 @@ pub async fn backend_status(
 }
 
 #[tauri::command(async)]
-pub async fn core_list_backends(
+pub async fn list_backends(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<BackendListResponse, String> {
     let backends = state.services.backend.list_backends().await.map_err(map_err)?;

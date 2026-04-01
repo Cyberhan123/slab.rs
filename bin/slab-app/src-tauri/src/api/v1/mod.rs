@@ -1,4 +1,6 @@
+pub mod audio;
 pub mod backend;
+pub mod chat;
 pub mod models;
 pub mod session;
 pub mod settings;

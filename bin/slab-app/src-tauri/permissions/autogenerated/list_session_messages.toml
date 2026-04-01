@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-list-session-messages"
+description = "Enables the list_session_messages command without any pre-configured scope."
+commands.allow = ["list_session_messages"]
+
+[[permission]]
+identifier = "deny-list-session-messages"
+description = "Denies the list_session_messages command without any pre-configured scope."
+commands.deny = ["list_session_messages"]
