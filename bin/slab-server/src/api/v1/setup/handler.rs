@@ -8,9 +8,9 @@ use utoipa::OpenApi;
 
 use crate::api::v1::setup::schema::{CompleteSetupRequest, SetupStatusResponse};
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
+use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::SetupService;
-use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(

@@ -179,7 +179,9 @@ fn validate_image_generation_request(
 }
 
 use base64::Engine as _;
-use slab_app_core::domain::models::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
+use slab_app_core::domain::models::{
+    DecodedImageInput, ImageGenerationCommand, ImageGenerationMode,
+};
 
 use crate::error::ServerError;
 

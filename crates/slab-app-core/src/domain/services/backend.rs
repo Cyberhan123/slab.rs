@@ -149,9 +149,10 @@ impl BackendService {
             ))
         })?;
         let grpc_req = convert::encode_reload_library_request(&req.spec);
-        let response = rpc::client::reload_library(channel, req.backend_id, grpc_req)
-            .await
-            .map_err(|error| AppCoreError::Internal(format!("grpc reload_library failed: {error}")))?;
+        let response =
+            rpc::client::reload_library(channel, req.backend_id, grpc_req).await.map_err(
+                |error| AppCoreError::Internal(format!("grpc reload_library failed: {error}")),
+            )?;
 
         let status = convert::decode_model_status_response(&response).map_err(|error| {
             AppCoreError::Internal(format!("invalid model status response from runtime: {error}"))

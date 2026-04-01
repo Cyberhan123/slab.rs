@@ -104,14 +104,14 @@ fn build_agent_control(
 
 #[cfg(feature = "axum")]
 mod axum_extractors {
-    use std::sync::Arc;
-    use axum::extract::FromRef;
     use crate::context::{AppConfig, AppState, ModelState, WorkerState};
     use crate::domain::services::{
         AgentService, AudioService, BackendService, ChatService, FfmpegService, ImageService,
         ModelService, PmidService, SessionService, SettingsService, SetupService, SystemService,
         TaskApplicationService, VideoService,
     };
+    use axum::extract::FromRef;
+    use std::sync::Arc;
 
     impl FromRef<Arc<AppState>> for ModelState {
         fn from_ref(input: &Arc<AppState>) -> Self {

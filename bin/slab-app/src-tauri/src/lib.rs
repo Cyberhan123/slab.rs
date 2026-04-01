@@ -3,8 +3,9 @@ mod plugins;
 mod setup;
 
 use setup::ApiEndpointConfig;
-use slab_app_core::tauri_bridge::{core_health, core_list_models, core_list_sessions,
-                                   core_list_tasks};
+use slab_app_core::tauri_bridge::{
+    core_health, core_list_models, core_list_sessions, core_list_tasks,
+};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -87,10 +88,8 @@ pub fn run() {
             plugins::init(app, api_endpoint.clone()).map_err(std::io::Error::other)?;
 
             // Initialise slab-app-core state so native IPC commands work.
-            tauri::async_runtime::block_on(
-                slab_app_core::tauri_bridge::init_state(app.handle()),
-            )
-            .map_err(|e| std::io::Error::other(format!("core state init failed: {e}")))?;
+            tauri::async_runtime::block_on(slab_app_core::tauri_bridge::init_state(app.handle()))
+                .map_err(|e| std::io::Error::other(format!("core state init failed: {e}")))?;
 
             Ok(())
         })

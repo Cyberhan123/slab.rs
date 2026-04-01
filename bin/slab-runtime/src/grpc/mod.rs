@@ -2,11 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use slab_proto::{convert, slab::ipc::v1 as pb};
 use slab_runtime_core::api::{
     Capability, CoreError, DriversConfig, ModelFamily, ModelSource, ModelSpec, Pipeline, Runtime,
     RuntimeBuilder,
 };
-use slab_proto::{convert, slab::ipc::v1 as pb};
 use slab_types::backend::RuntimeBackendId;
 use slab_types::runtime::{RuntimeModelLoadSpec, RuntimeModelStatus};
 use tokio::sync::RwLock;
@@ -462,8 +462,9 @@ mod tests {
         assert_eq!(engine_io.code(), Code::Internal);
         assert!(engine_io.message().contains("engine I/O error"));
 
-        let ggml =
-            runtime_to_status(slab_runtime_core::api::CoreError::GGMLEngine("session not found".into()));
+        let ggml = runtime_to_status(slab_runtime_core::api::CoreError::GGMLEngine(
+            "session not found".into(),
+        ));
         assert_eq!(ggml.code(), Code::Internal);
         assert!(ggml.message().contains("GGML engine error"));
     }

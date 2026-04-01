@@ -9,9 +9,9 @@ use utoipa::OpenApi;
 use crate::api::v1::ffmpeg::schema::ConvertRequest;
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::ValidatedJson;
+use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::FfmpegService;
-use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(paths(convert), components(schemas(ConvertRequest, OperationAcceptedResponse)))]

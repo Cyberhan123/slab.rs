@@ -433,7 +433,10 @@ fn resolve_cloud_catalog_model(
     model: &UnifiedModel,
 ) -> Result<ResolvedCloudModel, AppCoreError> {
     let provider_id = referenced_provider_id(model).ok_or_else(|| {
-        AppCoreError::BadRequest(format!("cloud model '{}' is missing provider reference", model.id))
+        AppCoreError::BadRequest(format!(
+            "cloud model '{}' is missing provider reference",
+            model.id
+        ))
     })?;
     let provider = providers.get(&provider_id).ok_or_else(|| {
         AppCoreError::BadRequest(format!(

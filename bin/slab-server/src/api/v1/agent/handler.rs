@@ -12,9 +12,9 @@ use crate::api::v1::agent::schema::{
     SpawnAgentRequest, SpawnAgentResponse,
 };
 use crate::api::validation::ValidatedJson;
+use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::AgentService;
-use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(

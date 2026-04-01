@@ -172,16 +172,16 @@ impl From<BackendStatusView> for BackendStatusResponse {
 
 use std::path::PathBuf;
 
-use slab_app_core::domain::models::{BackendStatusQuery, DownloadBackendLibCommand, ReloadBackendLibCommand};
+use slab_app_core::domain::models::{
+    BackendStatusQuery, DownloadBackendLibCommand, ReloadBackendLibCommand,
+};
 use slab_types::runtime::{DiffusionLoadOptions, RuntimeModelLoadSpec, RuntimeModelReloadSpec};
 
 use crate::error::ServerError;
 
 impl From<BackendTypeQuery> for BackendStatusQuery {
     fn from(query: BackendTypeQuery) -> Self {
-        Self {
-            backend_id: query.backend_id.parse().expect("backend_id was validated"),
-        }
+        Self { backend_id: query.backend_id.parse().expect("backend_id was validated") }
     }
 }
 
@@ -250,10 +250,7 @@ fn runtime_model_load_spec_from_request(request: &ReloadModelLoadRequest) -> Run
         model_path: PathBuf::from(&request.model_path),
         num_workers: request.num_workers,
         context_length: request.context_length,
-        diffusion: request
-            .diffusion
-            .as_ref()
-            .and_then(diffusion_load_options_from_request),
+        diffusion: request.diffusion.as_ref().and_then(diffusion_load_options_from_request),
     }
 }
 
