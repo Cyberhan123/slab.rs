@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
 
-use crate::domain::models::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
+use crate::domain::models::{
+    AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 pub struct CompletionRequest {

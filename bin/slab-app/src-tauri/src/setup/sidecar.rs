@@ -132,10 +132,7 @@ pub fn run_runtime_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::erro
         app_log_dir.display(),
         runtime_log_path.display()
     );
-    info!(
-        "slab-runtime sidecar started (grpc_bind={})",
-        RUNTIME_GRPC_BIND
-    );
+    info!("slab-runtime sidecar started (grpc_bind={})", RUNTIME_GRPC_BIND);
     Ok(())
 }
 
