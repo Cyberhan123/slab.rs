@@ -411,7 +411,7 @@ async fn main() -> anyhow::Result<()> {
         "initializing slab-core runtime"
     );
 
-    let drivers = slab_core::api::DriversConfig {
+    let drivers = slab_runtime_core::api::DriversConfig {
         llama_lib_dir,
         whisper_lib_dir,
         diffusion_lib_dir,
@@ -420,7 +420,7 @@ async fn main() -> anyhow::Result<()> {
         enable_candle_diffusion: false,
         onnx_enabled: false,
     };
-    let runtime = slab_core::api::RuntimeBuilder::new()
+    let runtime = slab_runtime_core::api::RuntimeBuilder::new()
         .queue_capacity(cli.queue_capacity.unwrap_or(64))
         .backend_capacity(cli.backend_capacity.unwrap_or(4))
         .drivers(drivers.clone())

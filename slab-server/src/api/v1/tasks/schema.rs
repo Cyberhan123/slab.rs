@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
-use crate::domain::models::{
+use slab_app_core::domain::models::{
     AcceptedOperation, TaskResult, TaskStatus as DomainTaskStatus, TaskView,
 };
 
