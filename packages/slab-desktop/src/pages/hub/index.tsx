@@ -8,18 +8,18 @@ import {
   TriangleAlert,
 } from 'lucide-react';
 
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
+import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
+import { Badge } from '@slab/components/badge';
+import { Button } from '@slab/components/button';
+import { Card } from '@slab/components/card';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from '@/components/ui/select';
-import { StageEmptyState } from '@/components/ui/workspace';
+} from '@slab/components/select';
+import { StageEmptyState } from '@slab/components/workspace';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 

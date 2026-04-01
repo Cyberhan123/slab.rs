@@ -1,9 +1,9 @@
 import type { ChangeEvent, RefObject } from 'react';
 import type { NavigateFunction } from 'react-router-dom';
-import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { SoftPanel } from '@/components/ui/workspace';
+import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
+import { Button } from '@slab/components/button';
+import { Input } from '@slab/components/input';
+import { SoftPanel } from '@slab/components/workspace';
 import { FileAudio2, Loader2 } from 'lucide-react';
 import type { SelectedFile } from '@/hooks/use-file';
 import type { CatalogModel } from '@/lib/api/models';

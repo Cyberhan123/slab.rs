@@ -1,8 +1,8 @@
 import { Bot, Boxes, Code2, ImageIcon, Mic, Trash2 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
-import { Button } from '@/components/ui/button';
-import { StageEmptyState } from '@/components/ui/workspace';
+import { Badge } from '@slab/components/badge';
+import { Button } from '@slab/components/button';
+import { StageEmptyState } from '@slab/components/workspace';
 
 import type { ModelItem } from '../hooks/use-hub-model-catalog';
 import { StatusBadge } from './status-badge';

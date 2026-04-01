@@ -2,7 +2,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window"
 import { Minus, Square, X } from "lucide-react"
 import { toast } from "sonner"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@slab/components/button"
 import useIsTauri from "@/hooks/use-tauri"
 
 type WindowControlAction = "minimize" | "toggleMaximize" | "close"

@@ -1,7 +1,7 @@
 import { BotMessageSquare, Copy, Play, RefreshCcw, UserRound } from "lucide-react"
 import XMarkdown from "@ant-design/x-markdown"
 
-import { Button } from "@/components/ui/button"
+import { Button } from "@slab/components/button"
 import { ChatThinkingPanel } from "@/pages/chat/components/chat-thinking-panel"
 import {
   getChatMessageTextContent,

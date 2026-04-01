@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge } from '@/components/ui/badge';
+import { Badge } from '@slab/components/badge';
 import { checkBackendStatus } from '@/lib/tauri-api';
 
 export function BackendStatus() {

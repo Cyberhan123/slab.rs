@@ -1,6 +1,6 @@
 import { Outlet, useLocation } from "react-router-dom"
 
-import { WorkspaceStage } from "@/components/ui/workspace"
+import { WorkspaceStage } from "@slab/components/workspace"
 import FooterStatusBar from "@/layouts/footer-status-bar"
 import { GlobalHeaderProvider } from "@/layouts/global-header-provider"
 import Header from "@/layouts/header"

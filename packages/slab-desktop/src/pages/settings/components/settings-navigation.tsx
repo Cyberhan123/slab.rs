@@ -7,7 +7,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
-import { Badge } from '@/components/ui/badge';
+import { Badge } from '@slab/components/badge';
 import { cn } from '@/lib/utils';
 
 import type { SettingsSectionResponse } from '../types';

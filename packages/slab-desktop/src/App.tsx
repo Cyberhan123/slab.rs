@@ -3,8 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
 
 import { ErrorBoundary } from "@/components/error-boundary";
-import { Toaster } from "@/components/ui/sonner";
-import { TooltipProvider } from "@/components/ui/tooltip";
+import { Toaster } from "@slab/components/sonner";
+import { TooltipProvider } from "@slab/components/tooltip";
 import api, { queryClient } from "@/lib/api";
 import { TASK_POLL_INTERVAL_MS } from "@/pages/setup/const";
 import AppRoutes from "@/routes";

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { Label } from '@/components/ui/label';
+import { Label } from '@slab/components/label';
 import { SIDEBAR_LABEL_CLASSNAME } from '../const';
 
 type SliderFieldProps = {

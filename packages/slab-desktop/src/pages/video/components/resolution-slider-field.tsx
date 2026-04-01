@@ -1,4 +1,4 @@
-import { Slider } from '@/components/ui/slider';
+import { Slider } from '@slab/components/slider';
 import { FieldLabel } from './field-label';
 
 type ResolutionSliderFieldProps = {

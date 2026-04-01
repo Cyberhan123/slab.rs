@@ -1,8 +1,8 @@
 import { ImagePlus, MessageSquarePlus, Sparkles } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Badge } from "@slab/components/badge"
+import { Button } from "@slab/components/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@slab/components/card"
 
 const SUGGESTED_PROMPTS = [
   "Summarize a research paper into key claims and open questions.",
