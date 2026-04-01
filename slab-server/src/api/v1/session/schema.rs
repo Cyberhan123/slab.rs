@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::Validate;
 
-use crate::domain::models::{SessionMessageView, SessionView};
+use slab_app_core::domain::models::{CreateSessionCommand, SessionMessageView, SessionView};
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
 pub struct CreateSessionRequest {
@@ -52,5 +52,11 @@ impl From<SessionMessageView> for MessageResponse {
             content: message.content,
             created_at: message.created_at,
         }
+    }
+}
+
+impl From<CreateSessionRequest> for CreateSessionCommand {
+    fn from(request: CreateSessionRequest) -> Self {
+        Self { name: request.name }
     }
 }

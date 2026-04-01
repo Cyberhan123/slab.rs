@@ -2,34 +2,20 @@
 //! Runs in supervisor mode by default.
 
 mod api;
-mod config;
-mod context;
-mod domain;
 mod error;
-mod infra;
-mod model_auto_unload;
 
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
-use std::process::Stdio;
-use std::sync::Arc;
-use std::time::Duration;
-use std::{fs::OpenOptions, future::Future, io::ErrorKind};
+use std::{fs::OpenOptions, path::Path};
 
-use anyhow::{Context, anyhow};
 use clap::Parser;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command as TokioCommand};
-use tracing::{error, info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use crate::config::Config;
-use crate::context::AppState;
-use crate::infra::db::{AnyStore, TaskStore};
-use crate::infra::rpc::gateway::GrpcGateway;
-use crate::infra::settings::SettingsProvider;
+use slab_app_core::config::Config;
+use slab_app_core::context::AppState;
+use slab_app_core::infra::db::{AnyStore, TaskStore};
+use slab_app_core::infra::rpc::gateway::GrpcGateway;
+use slab_app_core::infra::settings::SettingsProvider;
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "slab-server", version, about = "Slab supervisor and HTTP gateway")]
@@ -132,46 +118,7 @@ impl Default for SupervisorArgs {
 async fn main() -> anyhow::Result<()> {
     let mut args = SupervisorArgs::parse();
     let mut cfg = Config::from_env();
-
-    if let Some(log_level) = &args.log_level {
-        cfg.log_level = log_level.clone();
-    }
-    if args.log_json {
-        cfg.log_json = true;
-    }
-    if let Some(log_file) = &args.log_file {
-        cfg.log_file = Some(log_file.clone());
-    }
-    if !args.log_json && cfg.log_json {
-        args.log_json = true;
-    }
-    if args.database_url.is_none() {
-        args.database_url = Some(cfg.database_url.clone());
-    }
-    if args.log_level.is_none() {
-        args.log_level = Some(cfg.log_level.clone());
-    }
-    if args.log_file.is_none() {
-        args.log_file = cfg.log_file.clone();
-    }
-    if args.settings_path.is_none() {
-        args.settings_path = Some(cfg.settings_path.clone());
-    }
-    if args.model_config_dir.is_none() {
-        args.model_config_dir = Some(cfg.model_config_dir.clone());
-    }
-    if args.queue_capacity.is_none() {
-        args.queue_capacity = Some(cfg.queue_capacity);
-    }
-    if args.backend_capacity.is_none() {
-        args.backend_capacity = Some(cfg.backend_capacity);
-    }
-    if args.lib_dir.is_none() {
-        args.lib_dir = cfg.lib_dir.clone();
-    }
-    if args.runtime_transport.is_none() {
-        args.runtime_transport = Some(cfg.transport_mode.clone());
-    }
+    args.apply_config_defaults(&mut cfg);
 
     let _log_guards = init_tracing(&cfg.log_level, cfg.log_json, cfg.log_file.as_deref())?;
     run_supervisor(args).await
@@ -197,15 +144,17 @@ fn init_tracing(
 
     if let Some(path) = log_file {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create slab-server log directory '{}'", parent.display())
+            std::fs::create_dir_all(parent).map_err(|error| {
+                anyhow::anyhow!(
+                    "failed to create slab-server log directory '{}': {error}",
+                    parent.display()
+                )
             })?;
         }
 
-        let file =
-            OpenOptions::new().create(true).append(true).open(path).with_context(|| {
-                format!("failed to open slab-server log file '{}'", path.display())
-            })?;
+        let file = OpenOptions::new().create(true).append(true).open(path).map_err(|error| {
+            anyhow::anyhow!("failed to open slab-server log file '{}': {error}", path.display())
+        })?;
         let (file_writer, guard) = tracing_appender::non_blocking(file);
         guards.push(guard);
 
@@ -274,7 +223,7 @@ where
         model_config_dir = %cfg.model_config_dir.display(),
         "model config directory ready"
     );
-    let pmid = Arc::new(crate::domain::services::PmidService::load(Arc::clone(&settings)).await?);
+    let pmid = Arc::new(slab_app_core::domain::services::PmidService::load(Arc::clone(&settings)).await?);
     info!("typed PMID config ready");
     let grpc = GrpcGateway::connect_from_config(&cfg)
         .await
@@ -282,7 +231,7 @@ where
 
     let grpc = Arc::new(grpc);
     let store = Arc::new(store.clone());
-    let model_auto_unload = Arc::new(model_auto_unload::ModelAutoUnloadManager::new(
+    let model_auto_unload = Arc::new(slab_app_core::model_auto_unload::ModelAutoUnloadManager::new(
         Arc::clone(&pmid),
         Arc::clone(&grpc),
     ));

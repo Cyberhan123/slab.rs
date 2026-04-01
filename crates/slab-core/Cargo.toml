@@ -1,5 +1,5 @@
 [package]
-name = "slab-core"
+name = "slab-runtime-core"
 version.workspace = true
 edition.workspace = true
 description.workspace = true

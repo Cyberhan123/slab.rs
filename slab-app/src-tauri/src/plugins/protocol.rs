@@ -244,10 +244,7 @@ mod tests {
     #[test]
     fn csp_blocks_external_by_default() {
         let csp = build_plugin_csp(
-            &PluginNetworkManifest {
-                mode: PluginNetworkMode::Blocked,
-                allow_hosts: Vec::new(),
-            },
+            &PluginNetworkManifest { mode: PluginNetworkMode::Blocked, allow_hosts: Vec::new() },
             &ApiEndpointConfig::desktop(),
         );
         assert!(csp.contains("default-src 'none'"));

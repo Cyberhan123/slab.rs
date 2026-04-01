@@ -14,16 +14,15 @@ use utoipa::OpenApi;
 use crate::api::v1::chat::schema::{
     ChatChoice, ChatCompletionRequest, ChatCompletionResponse, ChatCompletionUsage,
     ChatContentPart, ChatMessage as OpenAiMessage, ChatMessageContent, ChatModelCapabilities,
-    ChatModelOption,
-    ChatModelSource, ChatPromptTokensDetails, ChatReasoningEffort, ChatResponseFormat,
-    ChatResponseFormatType, ChatResponseJsonSchema, ChatStreamOptions, ChatThinkingConfig,
-    ChatThinkingType, ChatToolCall, ChatToolFunction, ChatVerbosity, CompletionChoice,
-    CompletionRequest, CompletionResponse, OpenAiErrorResponse, StopSequences,
+    ChatModelOption, ChatModelSource, ChatPromptTokensDetails, ChatReasoningEffort,
+    ChatResponseFormat, ChatResponseFormatType, ChatResponseJsonSchema, ChatStreamOptions,
+    ChatThinkingConfig, ChatThinkingType, ChatToolCall, ChatToolFunction, ChatVerbosity,
+    CompletionChoice, CompletionRequest, CompletionResponse, OpenAiErrorResponse, StopSequences,
 };
 use crate::api::validation::ValidatedJson;
-use crate::context::AppState;
-use crate::domain::models::{ChatCompletionOutput, ChatStreamChunk, TextCompletionOutput};
-use crate::domain::services::ChatService;
+use slab_app_core::context::AppState;
+use slab_app_core::domain::models::{ChatCompletionOutput, ChatStreamChunk, TextCompletionOutput};
+use slab_app_core::domain::services::ChatService;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
@@ -103,7 +102,7 @@ async fn chat_completions(
             Json(ChatCompletionResponse::from(response)).into_response()
         }
         Ok(ChatCompletionOutput::Stream(stream)) => sse_response(stream),
-        Err(error) => openai_error_response(error),
+        Err(error) => openai_error_response(error.into()),
     }
 }
 
@@ -127,7 +126,7 @@ async fn completions(
             Json(CompletionResponse::from(response)).into_response()
         }
         Ok(TextCompletionOutput::Stream(stream)) => sse_response(stream),
-        Err(error) => openai_error_response(error),
+        Err(error) => openai_error_response(error.into()),
     }
 }
 
@@ -142,29 +141,24 @@ fn sse_response(stream: futures::stream::BoxStream<'static, ChatStreamChunk>) ->
 
 fn openai_error_response(error: ServerError) -> Response {
     let (status, message, error_type, code, param) = match error {
-        ServerError::NotFound(message) => {
-            (
-                StatusCode::NOT_FOUND,
-                message,
-                "invalid_request_error".to_owned(),
-                Some("not_found".to_owned()),
-                None,
-            )
-        }
-        ServerError::BadRequest(message) => {
-            (
-                StatusCode::BAD_REQUEST,
-                message,
-                "invalid_request_error".to_owned(),
-                Some("bad_request".to_owned()),
-                None,
-            )
-        }
+        ServerError::NotFound(message) => (
+            StatusCode::NOT_FOUND,
+            message,
+            "invalid_request_error".to_owned(),
+            Some("not_found".to_owned()),
+            None,
+        ),
+        ServerError::BadRequest(message) => (
+            StatusCode::BAD_REQUEST,
+            message,
+            "invalid_request_error".to_owned(),
+            Some("bad_request".to_owned()),
+            None,
+        ),
         ServerError::BadRequestData { message, data } => (
             StatusCode::BAD_REQUEST,
             message,
-            string_field(&data, "error_type")
-                .unwrap_or_else(|| "invalid_request_error".to_owned()),
+            string_field(&data, "error_type").unwrap_or_else(|| "invalid_request_error".to_owned()),
             string_field(&data, "code").or(Some("bad_request".to_owned())),
             string_field(&data, "param"),
         ),
@@ -175,24 +169,20 @@ fn openai_error_response(error: ServerError) -> Response {
             Some("backend_not_ready".to_owned()),
             None,
         ),
-        ServerError::NotImplemented(message) => {
-            (
-                StatusCode::NOT_IMPLEMENTED,
-                message,
-                "invalid_request_error".to_owned(),
-                Some("not_implemented".to_owned()),
-                None,
-            )
-        }
-        ServerError::TooManyRequests(message) => {
-            (
-                StatusCode::TOO_MANY_REQUESTS,
-                message,
-                "rate_limit_error".to_owned(),
-                Some("too_many_requests".to_owned()),
-                None,
-            )
-        }
+        ServerError::NotImplemented(message) => (
+            StatusCode::NOT_IMPLEMENTED,
+            message,
+            "invalid_request_error".to_owned(),
+            Some("not_implemented".to_owned()),
+            None,
+        ),
+        ServerError::TooManyRequests(message) => (
+            StatusCode::TOO_MANY_REQUESTS,
+            message,
+            "rate_limit_error".to_owned(),
+            Some("too_many_requests".to_owned()),
+            None,
+        ),
         ServerError::Runtime(_) | ServerError::Database(_) | ServerError::Internal(_) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             "internal server error".to_owned(),

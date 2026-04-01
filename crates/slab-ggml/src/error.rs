@@ -7,6 +7,9 @@ pub enum GGMLError {
     #[error("GGML error loading library: {0}")]
     LibraryLoadError(#[from] ::libloading::Error),
 
+    #[error("GGML symbol '{symbol}' is unavailable: {message}")]
+    MissingSymbol { symbol: &'static str, message: String },
+
     /// Failed to initialize or load something (null pointer returned).
     #[error("GGML returned a null pointer")]
     NullPointer,
