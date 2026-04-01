@@ -1,4 +1,3 @@
-use base64::Engine as _;
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 use validator::{Validate, ValidationError};
@@ -226,20 +225,6 @@ impl TryFrom<ImageGenerationRequest> for ImageGenerationCommand {
 }
 
 fn decode_init_image(data_uri: &str) -> Result<DecodedImageInput, AppCoreError> {
-    let b64 = if let Some(pos) = data_uri.find("base64,") {
-        &data_uri[pos + "base64,".len()..]
-    } else {
-        data_uri
-    };
-
-    let bytes = base64::engine::general_purpose::STANDARD
-        .decode(b64)
-        .map_err(|error| AppCoreError::BadRequest(format!("init_image base64 decode failed: {error}")))?;
-
-    let image = image::load_from_memory(&bytes)
-        .map_err(|error| AppCoreError::BadRequest(format!("init_image decode failed: {error}")))?;
-
-    let rgb = image.to_rgb8();
-    let (width, height) = rgb.dimensions();
-    Ok(DecodedImageInput { data: rgb.into_raw(), width, height, channels: 3 })
+    let (data, width, height) = crate::schemas::decode_base64_init_image(data_uri)?;
+    Ok(DecodedImageInput { data, width, height, channels: 3 })
 }
