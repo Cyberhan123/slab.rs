@@ -76,7 +76,6 @@ jobs:
             copilot-${{ runner.os }}-bun-
 
       - name: Install frontend dependencies
-        working-directory: slab-app
         run: bun install
 
       - name: Warm up key Rust crates
