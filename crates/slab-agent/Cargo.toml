@@ -6,7 +6,7 @@ description = "Agent orchestration layer for slab.rs"
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-license = "AGPL-3.0-only"
+license.workspace = true
 
 [dependencies]
 slab-types    = { workspace = true }
