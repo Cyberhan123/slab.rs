@@ -4,7 +4,9 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
-use crate::domain::models::{BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand, ReloadBackendLibCommand};
+use crate::domain::models::{
+    BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand, ReloadBackendLibCommand,
+};
 use crate::error::AppCoreError;
 use slab_types::runtime::{DiffusionLoadOptions, RuntimeModelLoadSpec, RuntimeModelReloadSpec};
 

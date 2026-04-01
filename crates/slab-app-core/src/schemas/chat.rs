@@ -1050,13 +1050,13 @@ mod tests {
         ChatResponseFormat, ChatResponseFormatType, ChatResponseJsonSchema, ChatStreamOptions,
         ChatThinkingConfig, ChatThinkingType, ChatVerbosity, CompletionRequest, StopSequences,
     };
-    use serde_json::json;
     use crate::domain::models::{
         ChatCompletionCommand as DomainChatCompletionCommand,
         ChatReasoningEffort as DomainChatReasoningEffort, ChatVerbosity as DomainChatVerbosity,
         StructuredOutput as DomainStructuredOutput,
         TextCompletionCommand as DomainTextCompletionCommand,
     };
+    use serde_json::json;
 
     fn make_request() -> ChatCompletionRequest {
         ChatCompletionRequest {

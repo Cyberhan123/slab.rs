@@ -34,7 +34,9 @@ use crate::schemas::models::{
 use crate::schemas::session::{CreateSessionRequest, MessageResponse, SessionResponse};
 use crate::schemas::setup::{CompleteSetupRequest, SetupStatusResponse};
 use crate::schemas::system::GpuStatusResponse;
-use crate::schemas::tasks::{OperationAcceptedResponse, TaskResponse, TaskResultPayload, TaskTypeQuery};
+use crate::schemas::tasks::{
+    OperationAcceptedResponse, TaskResponse, TaskResultPayload, TaskTypeQuery,
+};
 
 // ── State initialisation ──────────────────────────────────────────────────────
 
@@ -87,8 +89,7 @@ pub async fn init_state<R: tauri::Runtime>(
 
     let store = Arc::new(AnyStore::connect(&cfg.database_url).await?);
     let settings = Arc::new(SettingsProvider::load(cfg.settings_path.clone()).await?);
-    let pmid =
-        Arc::new(crate::domain::services::PmidService::load(Arc::clone(&settings)).await?);
+    let pmid = Arc::new(crate::domain::services::PmidService::load(Arc::clone(&settings)).await?);
     let grpc = Arc::new(GrpcGateway::connect_from_config(&cfg).await?);
     let model_auto_unload =
         Arc::new(ModelAutoUnloadManager::new(Arc::clone(&pmid), Arc::clone(&grpc)));
@@ -132,8 +133,7 @@ pub async fn core_list_models(
     query: Option<ListModelsQuery>,
 ) -> Result<Vec<UnifiedModelResponse>, String> {
     let filter = query.unwrap_or_default().into();
-    let models =
-        state.services.model.list_models(filter).await.map_err(map_err)?;
+    let models = state.services.model.list_models(filter).await.map_err(map_err)?;
     Ok(models.into_iter().map(Into::into).collect())
 }
 
@@ -236,7 +236,8 @@ pub async fn core_list_available_models(
     query: ListAvailableQuery,
 ) -> Result<serde_json::Value, String> {
     let query = validate(query)?;
-    let response = state.services.model.list_available_models(query.into()).await.map_err(map_err)?;
+    let response =
+        state.services.model.list_available_models(query.into()).await.map_err(map_err)?;
     Ok(serde_json::json!({ "repo_id": response.repo_id, "files": response.files }))
 }
 
@@ -375,8 +376,7 @@ pub async fn core_backend_status(
 pub async fn core_list_backends(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<BackendListResponse, String> {
-    let backends =
-        state.services.backend.list_backends().await.map_err(map_err)?;
+    let backends = state.services.backend.list_backends().await.map_err(map_err)?;
     Ok(BackendListResponse { backends: backends.into_iter().map(Into::into).collect() })
 }
 
