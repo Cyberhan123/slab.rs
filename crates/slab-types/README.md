@@ -18,4 +18,4 @@ Rust library crate (shared types / contracts).
 
 ## License
 
-AGPL-3.0-only. See [LICENSE](./LICENSE).
+AGPL-3.0-only. See [LICENSE](../../LICENSE).
