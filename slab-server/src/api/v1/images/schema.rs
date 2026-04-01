@@ -177,3 +177,70 @@ fn validate_image_generation_request(
 
     Ok(())
 }
+
+use base64::Engine as _;
+use slab_app_core::domain::models::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
+
+use crate::error::ServerError;
+
+impl From<ImageMode> for ImageGenerationMode {
+    fn from(mode: ImageMode) -> Self {
+        match mode {
+            ImageMode::Txt2Img => Self::Txt2Img,
+            ImageMode::Img2Img => Self::Img2Img,
+        }
+    }
+}
+
+impl TryFrom<ImageGenerationRequest> for ImageGenerationCommand {
+    type Error = ServerError;
+
+    fn try_from(request: ImageGenerationRequest) -> Result<Self, Self::Error> {
+        let mode = ImageGenerationMode::from(request.mode);
+        let init_image = match mode {
+            ImageGenerationMode::Txt2Img => None,
+            ImageGenerationMode::Img2Img => {
+                request.init_image.as_deref().map(decode_init_image).transpose()?
+            }
+        };
+
+        Ok(Self {
+            model: request.model,
+            prompt: request.prompt,
+            negative_prompt: request.negative_prompt,
+            n: request.n,
+            width: request.width,
+            height: request.height,
+            cfg_scale: request.cfg_scale,
+            guidance: request.guidance,
+            steps: request.steps,
+            seed: request.seed,
+            sample_method: request.sample_method,
+            scheduler: request.scheduler,
+            clip_skip: request.clip_skip,
+            eta: request.eta,
+            strength: request.strength,
+            init_image,
+            mode,
+        })
+    }
+}
+
+fn decode_init_image(data_uri: &str) -> Result<DecodedImageInput, ServerError> {
+    let b64 = if let Some(pos) = data_uri.find("base64,") {
+        &data_uri[pos + "base64,".len()..]
+    } else {
+        data_uri
+    };
+
+    let bytes = base64::engine::general_purpose::STANDARD.decode(b64).map_err(|error| {
+        ServerError::BadRequest(format!("init_image base64 decode failed: {error}"))
+    })?;
+
+    let image = image::load_from_memory(&bytes)
+        .map_err(|error| ServerError::BadRequest(format!("init_image decode failed: {error}")))?;
+
+    let rgb = image.to_rgb8();
+    let (width, height) = rgb.dimensions();
+    Ok(DecodedImageInput { data: rgb.into_raw(), width, height, channels: 3 })
+}

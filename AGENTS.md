@@ -30,25 +30,30 @@ This workspace now has a desktop host, supervisor, runtime worker, and separate 
 
 ```text
 slab-app (Tauri desktop host + plugin shell)
+    |  \
+    |   \-- native IPC (slab-app-core tauri feature)
     |
     | sidecar HTTP
     v
-slab-server (supervisor + REST/OpenAPI + persistence/settings)
-    | \
-    |  \-- slab-agent port adapters and /v1/agent API
+slab-server (HTTP gateway, thin axum layer)
+    |
+    | (shares slab-app-core)
+    v
+slab-app-core (business logic: domain, infra, context, config — no HTTP/axum)
     |
     | gRPC / IPC
     v
 slab-runtime (worker process: ggml.llama / ggml.whisper / ggml.diffusion)
     |
     v
-slab-core (runtime builder, scheduler, engine adapters)
+slab-runtime-core (runtime builder, scheduler, engine adapters)
 ```
 
-- `slab-app` is the React 19 + Vite + React Router 7 + Tauri 2 desktop host. It launches the `slab-server` sidecar, mounts plugin child webviews, and exposes the desktop-only plugin bridge UI.
-- `slab-server` is the HTTP gateway, supervisor, persistence layer, settings entry point, and adapter layer that wires `slab-agent` into storage, notifications, and model calls.
+- `slab-app` is the React 19 + Vite + React Router 7 + Tauri 2 desktop host. It launches the `slab-server` sidecar, mounts plugin child webviews, and exposes the desktop-only plugin bridge UI. It also embeds `slab-app-core` via the `tauri` feature for native IPC commands.
+- `slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`. It is usable both from `slab-server` (HTTP path) and from `slab-app` (native Tauri IPC path). SQLx migrations live in `slab-app-core/migrations/`. Enable the `tauri` feature to expose `slab_app_core::tauri_bridge::register()`.
+- `slab-server` is the thin HTTP gateway and supervisor. It re-exports `slab-app-core` domain and infra types and adds the axum `FromRef` extractors (`state_extractors.rs`) and HTTP error conversion (`ServerError`).
 - `slab-runtime` is the standalone gRPC worker that can serve TCP or IPC transports and enable `ggml.llama`, `ggml.whisper`, and `ggml.diffusion` backends independently.
-- `slab-core` holds runtime orchestration, scheduler/dispatch logic, and engine adapters. Keep HTTP and SQL concerns out of this crate.
+- `slab-runtime-core` (directory: `slab-core/`) holds runtime orchestration, scheduler/dispatch logic, and engine adapters. Keep HTTP and SQL concerns out of this crate.
 - `slab-agent` is a pure control-plane library for agent threads, tool routing, and port-based orchestration.
 - `slab-proto` owns the protobuf contract between `slab-server` and `slab-runtime`.
 - `slab-types` is the shared semantic types, settings, runtime, and JSON-schema-friendly contract crate used across the workspace.
@@ -56,9 +61,10 @@ slab-core (runtime builder, scheduler, engine adapters)
 
 ## Repo Layout
 
-- `slab-server`: keep the existing `config`, `context`, `api`, `domain`, and `infra` layout.
+- `slab-server`: thin HTTP gateway; exposes `/v1` routes via axum. Business logic lives in `slab-app-core`.
+- `slab-app-core`: HTTP-free business logic (domain, infra, context, config). Use `tauri` feature for native IPC via `slab_app_core::tauri_bridge::register()`. Migrations are in `slab-app-core/migrations/`.
 - `slab-runtime`: gRPC server and runtime worker entry points.
-- `slab-core`: runtime library only; keep HTTP and SQL concerns out.
+- `slab-runtime-core` (directory `slab-core/`): runtime library only; keep HTTP and SQL concerns out.
 - `slab-agent`: agent orchestration library and tool router abstractions.
 - `slab-types`: shared semantic types, settings models, load specs, and other reusable Rust contracts.
 - `slab-proto`: protobuf definitions and generated conversion helpers for server/runtime IPC.
@@ -75,14 +81,14 @@ slab-core (runtime builder, scheduler, engine adapters)
 
 ## Working Rules
 
-- Keep inference behind `slab-server -> GrpcGateway -> slab-runtime -> slab-core`; the desktop app should talk to the sidecar gateway, not directly to runtime crates.
+- Keep inference behind `slab-server -> GrpcGateway -> slab-runtime -> slab-runtime-core`; the desktop app can talk to the sidecar gateway via HTTP **or** call `slab-app-core` directly via native Tauri IPC.
 - Extend the existing `/v1/*` API modules instead of adding a parallel API tree. The current surface includes `agent`, `audio`, `backend`, `chat`, `ffmpeg`, `images`, `models`, `session`, `settings`, `setup`, `system`, `tasks`, and `video`.
 - Keep long-running AI work in task-oriented flows when the feature already follows that model.
 - Prefer `slab-types` and `slab-proto` for contracts that need to cross crate boundaries instead of duplicating shapes.
 - Keep `slab-agent` pure: storage, HTTP, SSE/WebSocket, and model adapters belong in `slab-server`, behind the port traits.
 - Preserve Tauri CSP, capabilities, permissions, sidecar boundaries, and the `plugins/<plugin-id>/plugin.json` contract unless the task explicitly requires a change.
 - `plugins/` is runtime plugin content, not AI skill content; `.agents/skills` is only for agent guidance.
-- SQLx migrations in `slab-server/migrations/` are append-only.
+- SQLx migrations in `slab-app-core/migrations/` are append-only.
 - Cargo excludes `slab-app/src`, so Rust tooling does not validate the TypeScript frontend.
 - When backend API shapes change, regenerate `slab-app/src/lib/api/v1.d.ts` from `http://localhost:3000/api-docs/openapi.json`.
 

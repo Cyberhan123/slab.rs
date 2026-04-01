@@ -1,7 +1,7 @@
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, instrument};
 
-use slab_core::api::ImageGenerationRequest;
+use slab_runtime_core::api::ImageGenerationRequest;
 use slab_proto::{convert, slab::ipc::v1 as pb};
 use slab_types::diffusion::{DiffusionImageRequest, DiffusionVideoRequest};
 

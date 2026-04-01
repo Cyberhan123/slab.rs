@@ -20,9 +20,9 @@ use crate::api::v1::chat::schema::{
     CompletionChoice, CompletionRequest, CompletionResponse, OpenAiErrorResponse, StopSequences,
 };
 use crate::api::validation::ValidatedJson;
-use crate::context::AppState;
-use crate::domain::models::{ChatCompletionOutput, ChatStreamChunk, TextCompletionOutput};
-use crate::domain::services::ChatService;
+use slab_app_core::context::AppState;
+use slab_app_core::domain::models::{ChatCompletionOutput, ChatStreamChunk, TextCompletionOutput};
+use slab_app_core::domain::services::ChatService;
 use crate::error::ServerError;
 
 #[derive(OpenApi)]
@@ -102,7 +102,7 @@ async fn chat_completions(
             Json(ChatCompletionResponse::from(response)).into_response()
         }
         Ok(ChatCompletionOutput::Stream(stream)) => sse_response(stream),
-        Err(error) => openai_error_response(error),
+        Err(error) => openai_error_response(error.into()),
     }
 }
 
@@ -126,7 +126,7 @@ async fn completions(
             Json(CompletionResponse::from(response)).into_response()
         }
         Ok(TextCompletionOutput::Stream(stream)) => sse_response(stream),
-        Err(error) => openai_error_response(error),
+        Err(error) => openai_error_response(error.into()),
     }
 }
 

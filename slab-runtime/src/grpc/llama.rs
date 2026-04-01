@@ -5,7 +5,7 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{Instrument, debug, error, info, instrument, warn};
 
-use slab_core::api::TextGenerationChunk;
+use slab_runtime_core::api::TextGenerationChunk;
 use slab_proto::{convert, slab::ipc::v1 as pb};
 
 use super::{BackendKind, GrpcServiceImpl, extract_request_id, proto_to_status, runtime_to_status};

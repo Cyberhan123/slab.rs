@@ -7791,6 +7791,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
+ "slab-app-core",
  "slab-build-utils",
  "tauri",
  "tauri-build",
@@ -7805,6 +7806,49 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-app-core"
+version = "0.0.1"
+dependencies = [
+ "all-smi",
+ "anyhow",
+ "async-trait",
+ "axum",
+ "base64 0.22.1",
+ "bytemuck",
+ "bytes",
+ "chrono",
+ "dirs-next",
+ "ffmpeg-sidecar",
+ "futures",
+ "genai",
+ "hf-hub",
+ "hyper-util",
+ "image",
+ "jsonschema",
+ "parity-tokio-ipc",
+ "reqwest 0.13.2",
+ "serde",
+ "serde_json",
+ "slab-agent",
+ "slab-libfetch",
+ "slab-proto",
+ "slab-runtime-core",
+ "slab-types",
+ "sqlx",
+ "strum",
+ "tauri",
+ "thiserror 2.0.18",
+ "tokio",
+ "tonic",
+ "tower",
+ "tracing",
+ "utoipa",
+ "uuid",
+ "validator",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "slab-build-utils"
 version = "0.0.1"
 dependencies = [
@@ -7812,39 +7856,6 @@ dependencies = [
  "cargo_metadata 0.23.1",
  "slab-libfetch",
  "tokio",
-]
-
-[[package]]
-name = "slab-core"
-version = "0.0.1"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64 0.22.1",
- "bytes",
- "candle-core",
- "candle-nn",
- "candle-transformers",
- "futures",
- "hf-hub",
- "image",
- "libloading 0.8.9",
- "ort",
- "serde",
- "serde_json",
- "slab-core-macros",
- "slab-diffusion",
- "slab-libfetch",
- "slab-llama",
- "slab-subtitle",
- "slab-types",
- "slab-whisper",
- "thiserror 2.0.18",
- "tokenizers",
- "tokio",
- "tracing",
- "tracing-test",
- "trybuild",
 ]
 
 [[package]]
@@ -7970,8 +7981,8 @@ dependencies = [
  "image",
  "parity-tokio-ipc",
  "serde_json",
- "slab-core",
  "slab-proto",
+ "slab-runtime-core",
  "slab-types",
  "tokio",
  "tokio-stream",
@@ -7979,6 +7990,39 @@ dependencies = [
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+]
+
+[[package]]
+name = "slab-runtime-core"
+version = "0.0.1"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
+ "futures",
+ "hf-hub",
+ "image",
+ "libloading 0.8.9",
+ "ort",
+ "serde",
+ "serde_json",
+ "slab-core-macros",
+ "slab-diffusion",
+ "slab-libfetch",
+ "slab-llama",
+ "slab-subtitle",
+ "slab-types",
+ "slab-whisper",
+ "thiserror 2.0.18",
+ "tokenizers",
+ "tokio",
+ "tracing",
+ "tracing-test",
+ "trybuild",
 ]
 
 [[package]]
@@ -8009,9 +8053,10 @@ dependencies = [
  "serde",
  "serde_json",
  "slab-agent",
- "slab-core",
+ "slab-app-core",
  "slab-libfetch",
  "slab-proto",
+ "slab-runtime-core",
  "slab-types",
  "sqlx",
  "strum",

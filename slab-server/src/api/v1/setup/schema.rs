@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::ToSchema;
 
-use crate::domain::models::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
+use slab_app_core::domain::models::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 
 /// Response body for `GET /v1/setup/status`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
