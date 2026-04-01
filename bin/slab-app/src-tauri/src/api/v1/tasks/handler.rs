@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use slab_app_core::context::AppState;
+use slab_app_core::error::AppCoreError;
 use slab_app_core::schemas::tasks::{TaskResponse, TaskResultPayload, TaskTypeQuery};
 
 use crate::api::validation::{map_err, validate, validate_id};
@@ -45,4 +46,16 @@ pub async fn cancel_task(
 ) -> Result<TaskResponse, String> {
     validate_id(&id)?;
     Ok(state.services.task_application.cancel_task(&id).await.map_err(map_err)?.into())
+}
+
+#[tauri::command(async)]
+pub async fn restart_task(
+    state: tauri::State<'_, Arc<AppState>>,
+    id: String,
+) -> Result<TaskResponse, String> {
+    validate_id(&id)?;
+    state.services.task_application.validate_restartable(&id).await.map_err(map_err)?;
+    Err(map_err(AppCoreError::NotImplemented(
+        "task restart is not yet implemented".to_owned(),
+    )))
 }

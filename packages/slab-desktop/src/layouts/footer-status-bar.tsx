@@ -1,46 +1,18 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo } from "react"
 import { Bell } from "lucide-react"
 
-import { getApiUrl } from "@/lib/tauri-api"
+import { getErrorMessage } from "@/lib/api"
+import type { components } from "@/lib/api/v1.d.ts"
+import api from "@/lib/api"
 import { cn } from "@/lib/utils"
 
-type GpuDeviceStatus = {
-  id: number
-  name: string
-  device_type: string
-  utilization_percent: number
-  temperature_celsius: number
-  used_memory_bytes: number
-  total_memory_bytes: number
-  memory_usage_percent: number
-  power_draw_watts: number
-}
-
-type GpuStatusResponse = {
-  available: boolean
-  backend: string
-  updated_at: string
-  devices: GpuDeviceStatus[]
-  error?: string | null
-}
+type GpuStatusResponse = components["schemas"]["GpuStatusResponse"]
 
 const POLL_INTERVAL_MS = 5000
 
 function formatGiB(bytes: number): string {
   const gib = bytes / 1024 ** 3
   return `${gib.toFixed(gib >= 10 ? 1 : 2)} GB`
-}
-
-async function fetchGpuStatus(): Promise<GpuStatusResponse> {
-  const apiUrl = await getApiUrl()
-  const normalized = apiUrl.endsWith("/") ? apiUrl.slice(0, -1) : apiUrl
-  const response = await fetch(`${normalized}/v1/system/gpu`)
-
-  if (!response.ok) {
-    throw new Error(`GPU status request failed: ${response.status}`)
-  }
-
-  return (await response.json()) as GpuStatusResponse
 }
 
 type FooterStatusBarProps = {
@@ -68,52 +40,40 @@ function FooterMetric({ label, value, title, className }: FooterMetricProps) {
 }
 
 export default function FooterStatusBar({ variant = "default" }: FooterStatusBarProps) {
-  const [snapshot, setSnapshot] = useState<GpuStatusResponse | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const {
+    data,
+    error,
+    isLoading,
+    refetch,
+  } = api.useQuery("get", "/v1/system/gpu")
 
   useEffect(() => {
-    let mounted = true
-    let inflight = false
-
-    const refresh = async () => {
-      if (inflight) {
-        return
-      }
-
-      inflight = true
-
-      try {
-        const next = await fetchGpuStatus()
-        if (mounted) {
-          setSnapshot(next)
-          setIsLoading(false)
-        }
-      } catch (error) {
-        if (mounted) {
-          setSnapshot({
-            available: false,
-            backend: "all-smi",
-            updated_at: new Date().toISOString(),
-            devices: [],
-            error: error instanceof Error ? error.message : String(error),
-          })
-          setIsLoading(false)
-        }
-      } finally {
-        inflight = false
-      }
-    }
-
-    void refresh()
     const timer = window.setInterval(() => {
-      void refresh()
+      void refetch()
     }, POLL_INTERVAL_MS)
 
     return () => {
-      mounted = false
       clearInterval(timer)
     }
-  }, [])
+  }, [refetch])
+
+  const snapshot = useMemo<GpuStatusResponse | null>(() => {
+    if (data) {
+      return data
+    }
+
+    if (!error) {
+      return null
+    }
+
+    return {
+      available: false,
+      backend: "all-smi",
+      updated_at: new Date().toISOString(),
+      devices: [],
+      error: getErrorMessage(error),
+    }
+  }, [data, error])
 
   const summary = useMemo(() => {
     const devices = snapshot?.devices ?? []

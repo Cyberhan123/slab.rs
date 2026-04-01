@@ -78,6 +78,8 @@ pub fn run() {
             api::v1::audio::handler::transcribe,
             // chat
             api::v1::chat::handler::list_chat_models,
+            api::v1::chat::handler::chat_completions,
+            api::v1::chat::handler::completions,
             // models
             api::v1::models::handler::list_models,
             api::v1::models::handler::create_model,
@@ -100,6 +102,7 @@ pub fn run() {
             api::v1::tasks::handler::get_task,
             api::v1::tasks::handler::get_task_result,
             api::v1::tasks::handler::cancel_task,
+            api::v1::tasks::handler::restart_task,
             // setup
             api::v1::setup::handler::setup_status,
             api::v1::setup::handler::download_ffmpeg,
@@ -115,6 +118,17 @@ pub fn run() {
             api::v1::settings::handler::list_settings,
             api::v1::settings::handler::get_setting,
             api::v1::settings::handler::update_setting,
+            // images
+            api::v1::images::handler::generate_images,
+            // video
+            api::v1::video::handler::generate_video,
+            // ffmpeg
+            api::v1::ffmpeg::handler::convert,
+            // agents
+            api::v1::agent::handler::spawn_agent,
+            api::v1::agent::handler::agent_input,
+            api::v1::agent::handler::agent_status,
+            api::v1::agent::handler::agent_shutdown,
         ])
         .setup(move |app| {
             setup::setup_windows(app)?;

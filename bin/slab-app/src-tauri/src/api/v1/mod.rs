@@ -1,9 +1,13 @@
+pub mod agent;
 pub mod audio;
 pub mod backend;
 pub mod chat;
+pub mod ffmpeg;
+pub mod images;
 pub mod models;
 pub mod session;
 pub mod settings;
 pub mod setup;
 pub mod system;
 pub mod tasks;
+pub mod video;

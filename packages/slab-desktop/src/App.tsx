@@ -1,63 +1,49 @@
-import { useEffect, useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
-import AppRoutes from "@/routes";
-import { TooltipProvider } from "@/components/ui/tooltip"
-import { Toaster } from "@/components/ui/sonner"
-import { ErrorBoundary } from "@/components/error-boundary"
-import { QueryClientProvider } from '@tanstack/react-query'
-import { queryClient } from "@/lib/api"
-import { SERVER_BASE_URL } from '@/lib/config';
+import { useEffect } from "react";
+import { useLocation, useNavigate } from "react-router-dom";
+import { QueryClientProvider } from "@tanstack/react-query";
 
-const SETUP_STATUS_URL = `${SERVER_BASE_URL}/v1/setup/status`;
+import { ErrorBoundary } from "@/components/error-boundary";
+import { Toaster } from "@/components/ui/sonner";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import api, { queryClient } from "@/lib/api";
+import { TASK_POLL_INTERVAL_MS } from "@/pages/setup/const";
+import AppRoutes from "@/routes";
 
 /**
  * Checks whether the one-time setup wizard has been completed on every
- * navigation to a non-setup route.  Redirects to /setup when either:
+ * navigation to a non-setup route. Redirects to /setup when either:
  *   - the server reports `initialized: false`, or
- *   - the server is unreachable (so the user sees the setup page's error UI
- *     instead of a blank or broken main page).
+ *   - the server is unreachable.
  *
- * The result is cached in component state so repeated navigations within the
- * same session don't re-fetch.  Once the wizard calls `complete_setup` and
- * the flag is persisted, the next cold-start will skip the wizard entirely.
+ * The guard uses the shared API query client so Tauri route mapping and
+ * polling behaviour stay aligned with the rest of the app.
  */
 function SetupGuard() {
   const navigate = useNavigate();
   const location = useLocation();
-  // tri-state: null = not yet checked, true = initialized, false = needs setup
-  const [initialized, setInitialized] = useState<boolean | null>(null);
+  const isSetupRoute = location.pathname === "/setup";
+
+  const { data: setupStatus, error: setupStatusError } = api.useQuery(
+    "get",
+    "/v1/setup/status",
+    undefined,
+    {
+      enabled: !isSetupRoute,
+      refetchInterval: isSetupRoute ? false : TASK_POLL_INTERVAL_MS,
+      refetchIntervalInBackground: true,
+      retry: false,
+    }
+  );
 
   useEffect(() => {
-    // Never redirect while the user is already on the setup page.
-    if (location.pathname === '/setup') return;
-    // If we have already confirmed initialization this session, skip the fetch.
-    if (initialized === true) return;
+    if (isSetupRoute) {
+      return;
+    }
 
-    fetch(SETUP_STATUS_URL)
-      .then(async (r) => {
-        if (!r.ok) {
-          // Non-2xx from the server — treat as "not ready".
-          setInitialized(false);
-          navigate('/setup', { replace: true });
-          return;
-        }
-        const data = (await r.json()) as { initialized?: boolean };
-        if (!data.initialized) {
-          setInitialized(false);
-          navigate('/setup', { replace: true });
-        } else {
-          setInitialized(true);
-        }
-      })
-      .catch(() => {
-        // Server not reachable yet – go to setup so the user sees a proper
-        // error with guidance instead of a blank or broken main page.
-        setInitialized(false);
-        navigate('/setup', { replace: true });
-      });
-  // Re-evaluate on every pathname change so a manual navigation to "/" after
-  // an incomplete setup is still caught.
-  }, [navigate, location.pathname, initialized]);
+    if (setupStatusError || setupStatus?.initialized === false) {
+      navigate("/setup", { replace: true });
+    }
+  }, [isSetupRoute, navigate, setupStatus?.initialized, setupStatusError]);
 
   return null;
 }
