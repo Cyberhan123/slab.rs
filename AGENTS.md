@@ -123,7 +123,7 @@ bun run build
 
 # Run Tauri development mode
 cd bin/slab-app
-bun run dev
+bun run tauri dev
 
 # Regenerate OpenAPI types
 cd packages/slab-desktop

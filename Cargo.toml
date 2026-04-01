@@ -24,7 +24,7 @@ members = [
 ]
 
 exclude = [
-    "packages/slab-desktop/src",
+    "packages",
 ]
 
 [workspace.package]
