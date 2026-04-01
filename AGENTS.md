@@ -49,12 +49,12 @@ bin/slab-runtime (worker process: ggml.llama / ggml.whisper / ggml.diffusion)
 crates/slab-core (slab-runtime-core: runtime builder, scheduler, engine adapters)
 ```
 
-- `bin/slab-app` is the Tauri 2 desktop host that launches the `bin/slab-server` sidecar, mounts plugin child webviews, and exposes the desktop-only plugin bridge UI. Its frontend is served from `packages/slab-desktop`. It also embeds `crates/slab-app-core` via the `tauri` feature for native IPC commands.
+- `bin/slab-app` is the Tauri 2 desktop host that launches the `bin/slab-server` sidecar, mounts plugin child webviews, and exposes the desktop-only plugin bridge UI. Its frontend is served from `packages/slab-desktop`. Native IPC commands live in `bin/slab-app/src-tauri/src/api` and delegate directly to `crates/slab-app-core`.
 - `packages/slab-desktop` is the React 19 + Vite + React Router 7 frontend application for the Tauri desktop host. It imports UI components from `packages/slab-components` and i18n from `packages/slab-i18n`.
 - `packages/slab-components` is the shared shadcn/ui-based React component library (Radix UI + Tailwind CSS). It can be consumed by both `slab-desktop` and future mobile packages.
 - `packages/slab-i18n` is the shared internationalization package (i18next + react-i18next) with locale definitions.
 - `bin/slab-server` is the thin HTTP gateway and supervisor (axum). It depends on `crates/slab-app-core` for all domain/infra logic; adds axum `FromRef` extractors (`state_extractors.rs`) and `ServerError` → HTTP response conversion. Exposes `/v1` plus `/api-docs/openapi.json`.
-- `crates/slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`. It is usable both from `bin/slab-server` (HTTP path) and from `bin/slab-app` (native Tauri IPC path). SQLx migrations live in `crates/slab-app-core/migrations/`. Enable the `tauri` feature to expose `slab_app_core::tauri_bridge::register()`.
+- `crates/slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`. It is usable both from `bin/slab-server` (HTTP path) and from `bin/slab-app` (native Tauri IPC path). SQLx migrations live in `crates/slab-app-core/migrations/`.
 - `bin/slab-runtime` is the standalone gRPC worker that can serve TCP or IPC transports and enable `ggml.llama`, `ggml.whisper`, and `ggml.diffusion` backends independently.
 - `crates/slab-core` (package name: `slab-runtime-core`) holds runtime orchestration, scheduler/dispatch logic, and engine adapters. Keep HTTP and SQL concerns out of this crate.
 - `crates/slab-agent` is a pure control-plane library for agent threads, tool routing, and port-based orchestration.
@@ -66,7 +66,7 @@ crates/slab-core (slab-runtime-core: runtime builder, scheduler, engine adapters
 
 - `bin/slab-server`: thin HTTP gateway; exposes `/v1` routes via axum. Business logic lives in `crates/slab-app-core`.
 - `bin/slab-runtime`: gRPC server and runtime worker entry points.
-- `crates/slab-app-core`: HTTP-free business logic (domain, infra, context, config). Use `tauri` feature for native IPC via `slab_app_core::tauri_bridge::register()`. Migrations are in `crates/slab-app-core/migrations/`.
+- `crates/slab-app-core`: HTTP-free business logic (domain, infra, context, config). Native IPC wrappers now live in `bin/slab-app/src-tauri/src/api/`. Migrations are in `crates/slab-app-core/migrations/`.
 - `crates/slab-core`: runtime library only (package: `slab-runtime-core`); keep HTTP and SQL concerns out.
 - `crates/slab-agent`: agent orchestration library and tool router abstractions.
 - `crates/slab-types`: shared semantic types, settings models, load specs, and other reusable Rust contracts.

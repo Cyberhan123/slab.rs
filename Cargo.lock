@@ -7803,6 +7803,7 @@ dependencies = [
  "tauri-plugin-shell",
  "tauri-plugin-window-state",
  "tokio",
+ "validator",
 ]
 
 [[package]]
@@ -7836,7 +7837,6 @@ dependencies = [
  "slab-types",
  "sqlx",
  "strum",
- "tauri",
  "thiserror 2.0.18",
  "tokio",
  "tonic",
