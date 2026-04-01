@@ -77,7 +77,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: slab-app
-        run: bun install --frozen-lockfile
+        run: bun install
 
       - name: Warm up key Rust crates
         run: |
