@@ -34,7 +34,7 @@ use crate::schemas::models::{
 use crate::schemas::session::{CreateSessionRequest, MessageResponse, SessionResponse};
 use crate::schemas::setup::{CompleteSetupRequest, SetupStatusResponse};
 use crate::schemas::system::GpuStatusResponse;
-use crate::schemas::tasks::{OperationAcceptedResponse, TaskResponse, TaskResultPayload};
+use crate::schemas::tasks::{OperationAcceptedResponse, TaskResponse, TaskResultPayload, TaskTypeQuery};
 
 // ── State initialisation ──────────────────────────────────────────────────────
 
@@ -109,6 +109,11 @@ fn validate<T: validator::Validate>(v: T) -> Result<T, String> {
     Ok(v)
 }
 
+/// Validate that a plain string identifier (e.g. a row ID or PMID) is non-blank.
+fn validate_id(id: &str) -> Result<(), String> {
+    crate::schemas::validation::validate_non_blank(id).map_err(|e| e.to_string())
+}
+
 // ── Health ────────────────────────────────────────────────────────────────────
 
 /// Return `true` if the embedded core is initialised and responding.
@@ -138,6 +143,7 @@ pub async fn core_create_model(
     state: tauri::State<'_, Arc<AppState>>,
     req: CreateModelRequest,
 ) -> Result<UnifiedModelResponse, String> {
+    let req = validate(req)?;
     Ok(state.services.model.create_model(req.into()).await.map_err(map_err)?.into())
 }
 
@@ -147,6 +153,7 @@ pub async fn core_import_model_config(
     state: tauri::State<'_, Arc<AppState>>,
     req: ImportModelConfigRequest,
 ) -> Result<UnifiedModelResponse, String> {
+    let req = validate(req)?;
     Ok(state.services.model.import_model_config(req.into()).await.map_err(map_err)?.into())
 }
 
@@ -156,6 +163,7 @@ pub async fn core_get_model(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<UnifiedModelResponse, String> {
+    validate_id(&id)?;
     Ok(state.services.model.get_model(&id).await.map_err(map_err)?.into())
 }
 
@@ -166,6 +174,7 @@ pub async fn core_update_model(
     id: String,
     req: UpdateModelRequest,
 ) -> Result<UnifiedModelResponse, String> {
+    validate_id(&id)?;
     Ok(state.services.model.update_model(&id, req.into()).await.map_err(map_err)?.into())
 }
 
@@ -175,6 +184,7 @@ pub async fn core_delete_model(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<serde_json::Value, String> {
+    validate_id(&id)?;
     let view = state.services.model.delete_model(&id).await.map_err(map_err)?;
     Ok(serde_json::json!({ "id": view.id, "status": view.status }))
 }
@@ -185,6 +195,7 @@ pub async fn core_load_model(
     state: tauri::State<'_, Arc<AppState>>,
     req: LoadModelRequest,
 ) -> Result<ModelStatusResponse, String> {
+    let req = validate(req)?;
     Ok(state.services.model.load_model(req.into()).await.map_err(map_err)?.into())
 }
 
@@ -194,6 +205,7 @@ pub async fn core_unload_model(
     state: tauri::State<'_, Arc<AppState>>,
     req: UnloadModelRequest,
 ) -> Result<ModelStatusResponse, String> {
+    let req = validate(req)?;
     Ok(state.services.model.unload_model(req.into()).await.map_err(map_err)?.into())
 }
 
@@ -203,6 +215,7 @@ pub async fn core_switch_model(
     state: tauri::State<'_, Arc<AppState>>,
     req: SwitchModelRequest,
 ) -> Result<ModelStatusResponse, String> {
+    let req = validate(req)?;
     Ok(state.services.model.switch_model(req.into()).await.map_err(map_err)?.into())
 }
 
@@ -212,6 +225,7 @@ pub async fn core_download_model(
     state: tauri::State<'_, Arc<AppState>>,
     req: DownloadModelRequest,
 ) -> Result<OperationAcceptedResponse, String> {
+    let req = validate(req)?;
     Ok(state.services.model.download_model(req.into()).await.map_err(map_err)?.into())
 }
 
@@ -221,6 +235,7 @@ pub async fn core_list_available_models(
     state: tauri::State<'_, Arc<AppState>>,
     query: ListAvailableQuery,
 ) -> Result<serde_json::Value, String> {
+    let query = validate(query)?;
     let response = state.services.model.list_available_models(query.into()).await.map_err(map_err)?;
     Ok(serde_json::json!({ "repo_id": response.repo_id, "files": response.files }))
 }
@@ -242,6 +257,7 @@ pub async fn core_create_session(
     state: tauri::State<'_, Arc<AppState>>,
     req: CreateSessionRequest,
 ) -> Result<SessionResponse, String> {
+    let req = validate(req)?;
     Ok(state.services.session.create_session(req.into()).await.map_err(map_err)?.into())
 }
 
@@ -251,6 +267,7 @@ pub async fn core_delete_session(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<serde_json::Value, String> {
+    validate_id(&id)?;
     state.services.session.delete_session(&id).await.map_err(map_err)
 }
 
@@ -260,6 +277,7 @@ pub async fn core_list_session_messages(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<Vec<MessageResponse>, String> {
+    validate_id(&id)?;
     let messages = state.services.session.list_session_messages(&id).await.map_err(map_err)?;
     Ok(messages.into_iter().map(Into::into).collect())
 }
@@ -270,12 +288,13 @@ pub async fn core_list_session_messages(
 #[tauri::command]
 pub async fn core_list_tasks(
     state: tauri::State<'_, Arc<AppState>>,
-    task_type: Option<String>,
+    query: TaskTypeQuery,
 ) -> Result<Vec<TaskResponse>, String> {
+    let query = validate(query)?;
     let tasks = state
         .services
         .task_application
-        .list_tasks(task_type.as_deref())
+        .list_tasks(query.task_type.as_deref())
         .await
         .map_err(map_err)?;
     Ok(tasks.into_iter().map(Into::into).collect())
@@ -287,6 +306,7 @@ pub async fn core_get_task(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<TaskResponse, String> {
+    validate_id(&id)?;
     Ok(state.services.task_application.get_task(&id).await.map_err(map_err)?.into())
 }
 
@@ -296,6 +316,7 @@ pub async fn core_get_task_result(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<TaskResultPayload, String> {
+    validate_id(&id)?;
     Ok(state.services.task_application.get_task_result(&id).await.map_err(map_err)?.into())
 }
 
@@ -305,6 +326,7 @@ pub async fn core_cancel_task(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
 ) -> Result<TaskResponse, String> {
+    validate_id(&id)?;
     Ok(state.services.task_application.cancel_task(&id).await.map_err(map_err)?.into())
 }
 
@@ -405,6 +427,7 @@ pub async fn core_get_setting(
     state: tauri::State<'_, Arc<AppState>>,
     pmid: String,
 ) -> Result<crate::domain::models::SettingPropertyView, String> {
+    validate_id(&pmid)?;
     state.services.settings.get_setting(&pmid).await.map_err(map_err)
 }
 
@@ -415,5 +438,6 @@ pub async fn core_update_setting(
     pmid: String,
     body: crate::domain::models::UpdateSettingCommand,
 ) -> Result<crate::domain::models::SettingPropertyView, String> {
+    validate_id(&pmid)?;
     state.services.settings.update_setting(&pmid, body).await.map_err(map_err)
 }
