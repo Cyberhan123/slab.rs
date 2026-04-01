@@ -1,18 +1,9 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod api;
 mod plugins;
 mod setup;
 
 use setup::ApiEndpointConfig;
-use slab_app_core::tauri_bridge::{
-    core_backend_status, core_cancel_task, core_complete_setup, core_create_model,
-    core_create_session, core_delete_model, core_delete_session, core_download_backend_lib,
-    core_download_ffmpeg, core_download_model, core_get_model, core_get_setting, core_get_task,
-    core_get_task_result, core_gpu_status, core_health, core_import_model_config,
-    core_list_available_models, core_list_backends, core_list_models, core_list_session_messages,
-    core_list_sessions, core_list_settings, core_list_tasks, core_load_model,
-    core_reload_backend_lib, core_setup_status, core_switch_model, core_unload_model,
-    core_update_model, core_update_setting,
-};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -71,53 +62,52 @@ pub fn run() {
             plugins::plugin_unmount_view,
             plugins::plugin_call,
             plugins::plugin_api_request,
-            // slab-app-core native IPC commands — health
-            core_health,
+            // native IPC commands - health
+            api::health::health,
             // models
-            core_list_models,
-            core_create_model,
-            core_import_model_config,
-            core_get_model,
-            core_update_model,
-            core_delete_model,
-            core_load_model,
-            core_unload_model,
-            core_switch_model,
-            core_download_model,
-            core_list_available_models,
+            api::v1::models::handler::list_models,
+            api::v1::models::handler::create_model,
+            api::v1::models::handler::import_model_config,
+            api::v1::models::handler::get_model,
+            api::v1::models::handler::update_model,
+            api::v1::models::handler::delete_model,
+            api::v1::models::handler::load_model,
+            api::v1::models::handler::unload_model,
+            api::v1::models::handler::switch_model,
+            api::v1::models::handler::download_model,
+            api::v1::models::handler::list_available_models,
             // sessions
-            core_list_sessions,
-            core_create_session,
-            core_delete_session,
-            core_list_session_messages,
+            api::v1::session::handler::list_sessions,
+            api::v1::session::handler::create_session,
+            api::v1::session::handler::delete_session,
+            api::v1::session::handler::list_session_messages,
             // tasks
-            core_list_tasks,
-            core_get_task,
-            core_get_task_result,
-            core_cancel_task,
+            api::v1::tasks::handler::list_tasks,
+            api::v1::tasks::handler::get_task,
+            api::v1::tasks::handler::get_task_result,
+            api::v1::tasks::handler::cancel_task,
             // setup
-            core_setup_status,
-            core_download_ffmpeg,
-            core_complete_setup,
+            api::v1::setup::handler::setup_status,
+            api::v1::setup::handler::download_ffmpeg,
+            api::v1::setup::handler::complete_setup,
             // backends
-            core_backend_status,
-            core_list_backends,
-            core_download_backend_lib,
-            core_reload_backend_lib,
+            api::v1::backend::handler::backend_status,
+            api::v1::backend::handler::list_backends,
+            api::v1::backend::handler::download_backend_lib,
+            api::v1::backend::handler::reload_backend_lib,
             // system
-            core_gpu_status,
+            api::v1::system::handler::gpu_status,
             // settings
-            core_list_settings,
-            core_get_setting,
-            core_update_setting,
+            api::v1::settings::handler::list_settings,
+            api::v1::settings::handler::get_setting,
+            api::v1::settings::handler::update_setting,
         ])
         .setup(move |app| {
             setup::setup_windows(app)?;
             setup::run_runtime_sidecar(app)?;
             plugins::init(app, api_endpoint.clone()).map_err(std::io::Error::other)?;
 
-            // Initialise slab-app-core state so native IPC commands work.
-            tauri::async_runtime::block_on(slab_app_core::tauri_bridge::init_state(
+            tauri::async_runtime::block_on(api::init_state(
                 app.handle(),
                 &format!("http://{}", setup::RUNTIME_GRPC_BIND),
             ))
