@@ -23,3 +23,11 @@ vendor/*
 # Binaries and resources
 slab-app/src-tauri/binaries/*
 slab-app/src-tauri/resources/libs/*
+bin/slab-app/src-tauri/binaries/*
+bin/slab-app/src-tauri/resources/libs/*
+
+## Frontend node_modules and build outputs
+node_modules/
+packages/*/node_modules/
+packages/*/dist/
+bin/*/node_modules/
