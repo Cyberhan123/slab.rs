@@ -14,6 +14,8 @@ import { chatMessagesStoreHelper } from '@ant-design/x-sdk/es/x-chat/store';
 
 import type { components } from '@/lib/api/v1.d.ts';
 import { SERVER_BASE_URL } from '@/lib/config';
+import { isTauri } from '@/hooks/use-tauri';
+import { tauriStreamingFetch } from '@/lib/api/tauri-transport';
 
 export const ChatContext = createContext<{
     onReload?: ReturnType<typeof useXChat>['onReload'];
@@ -540,6 +542,7 @@ export const providerFactory = (conversationKey: string, model: string) => {
                     `${API_BASE_URL}/v1/chat/completions`,
                     {
                         manual: true,
+                        ...(isTauri() ? { fetch: tauriStreamingFetch } : {}),
                         middlewares: {
                             onResponse: adaptChatTransportResponse,
                         },
