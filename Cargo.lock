@@ -7836,6 +7836,7 @@ dependencies = [
  "slab-types",
  "sqlx",
  "strum",
+ "tauri",
  "thiserror 2.0.18",
  "tokio",
  "tonic",

@@ -5,3 +5,6 @@ pub mod error;
 pub mod infra;
 pub mod model_auto_unload;
 pub mod schemas;
+
+#[cfg(feature = "tauri")]
+pub mod tauri_bridge;
