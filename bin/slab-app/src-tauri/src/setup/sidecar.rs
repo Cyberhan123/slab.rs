@@ -5,22 +5,22 @@ use std::sync::{
 };
 use std::time::Duration;
 
-use dirs_next::config_dir;
 use log::{error, info, warn};
 use tauri::Manager;
 use tauri::path::BaseDirectory;
 use tauri_plugin_shell::ShellExt;
 use tauri_plugin_shell::process::{CommandChild, CommandEvent};
 
-use super::ApiEndpointConfig;
+/// The TCP address at which the embedded `slab-runtime` gRPC server listens.
+pub const RUNTIME_GRPC_BIND: &str = "127.0.0.1:50051";
 
-pub struct SidecarState {
+pub struct RuntimeSidecarState {
     child: Mutex<Option<CommandChild>>,
     terminated: Arc<AtomicBool>,
     shutdown_started: AtomicBool,
 }
 
-impl SidecarState {
+impl RuntimeSidecarState {
     fn new(child: CommandChild, terminated: Arc<AtomicBool>) -> Self {
         Self {
             child: Mutex::new(Some(child)),
@@ -39,7 +39,7 @@ impl SidecarState {
         };
 
         if let Err(e) = child.write(b"shutdown\n") {
-            error!("sidecar shutdown signal failed: {e}");
+            error!("runtime sidecar shutdown signal failed: {e}");
         }
 
         let terminated = Arc::clone(&self.terminated);
@@ -49,110 +49,98 @@ impl SidecarState {
                 return;
             }
             if let Err(e) = child.kill() {
-                error!("sidecar force kill failed after timeout: {e}");
+                error!("runtime sidecar force kill failed after timeout: {e}");
             }
         });
     }
 }
 
-pub fn shutdown_server_sidecar<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
-    if let Some(state) = app_handle.try_state::<SidecarState>() {
+pub fn shutdown_runtime_sidecar<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
+    if let Some(state) = app_handle.try_state::<RuntimeSidecarState>() {
         state.trigger_shutdown();
     }
 }
 
-pub fn run_server_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
+/// Launch the embedded `slab-runtime` sidecar with all backends enabled on a
+/// single gRPC endpoint ([`RUNTIME_GRPC_BIND`]).
+pub fn run_runtime_sidecar(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
     let app_handle = app.handle();
-    let endpoint_config = app_handle.state::<ApiEndpointConfig>().inner().clone();
     let lib_path = app.path().resolve("resources/libs", BaseDirectory::Resource)?;
     let lib_path_str = lib_path.to_str().ok_or("invalid lib path")?;
-    let config_base_dir = config_dir().unwrap_or_else(|| PathBuf::from(".")).join("Slab");
-    std::fs::create_dir_all(&config_base_dir)?;
     let app_log_dir = app.path().app_log_dir()?;
     std::fs::create_dir_all(&app_log_dir)?;
-    let settings_path = config_base_dir.join("settings.json");
-    let database_path = config_base_dir.join("slab.db");
-    let server_log_path = app_log_dir.join("slab-server.log");
-    let settings_path_str = settings_path.to_str().ok_or("invalid settings path")?;
-    let database_url = sqlite_database_url(&database_path);
-    let server_log_path_str = server_log_path.to_str().ok_or("invalid sidecar log path")?;
+    let runtime_log_path = app_log_dir.join("slab-runtime.log");
+    let runtime_log_path_str = runtime_log_path.to_str().ok_or("invalid runtime log path")?;
 
-    let sidecar_command = app_handle.shell().sidecar("slab-server")?.args([
-        "--gateway-bind",
-        endpoint_config.gateway_bind.as_str(),
-        "--whisper-bind",
-        "127.0.0.1:3001",
-        "--llama-bind",
-        "127.0.0.1:3002",
-        "--runtime-transport",
-        "ipc",
+    let sidecar_command = app_handle.shell().sidecar("slab-runtime")?.args([
+        "--grpc-bind",
+        RUNTIME_GRPC_BIND,
+        "--enabled-backends",
+        "llama,whisper,diffusion",
         "--lib-dir",
         lib_path_str,
-        "--database-url",
-        database_url.as_str(),
-        "--settings-path",
-        settings_path_str,
         "--log-file",
-        server_log_path_str,
+        runtime_log_path_str,
         "--shutdown-on-stdin-close",
     ]);
 
     let (mut rx, child) = sidecar_command.spawn()?;
     let terminated = Arc::new(AtomicBool::new(false));
     let terminated_for_events = Arc::clone(&terminated);
-    let _ = app.manage(SidecarState::new(child, terminated));
+    let _ = app.manage(RuntimeSidecarState::new(child, terminated));
 
     tauri::async_runtime::spawn(async move {
         while let Some(event) = rx.recv().await {
             match event {
                 CommandEvent::Stdout(line) => {
                     let msg = String::from_utf8_lossy(&line);
-                    info!("sidecar stdout: {}", msg.trim_end());
+                    info!("runtime stdout: {}", msg.trim_end());
                 }
                 CommandEvent::Stderr(line) => {
                     let msg = String::from_utf8_lossy(&line);
-                    warn!("sidecar stderr: {}", msg.trim_end());
+                    warn!("runtime stderr: {}", msg.trim_end());
                 }
                 CommandEvent::Error(err) => {
-                    error!("sidecar process error: {err}");
+                    error!("runtime process error: {err}");
                 }
                 CommandEvent::Terminated(payload) => {
                     terminated_for_events.store(true, Ordering::SeqCst);
                     match payload.code {
                         Some(0) => {
                             info!(
-                                "sidecar terminated: signal {:?} code {:?}",
+                                "runtime terminated: signal {:?} code {:?}",
                                 payload.signal, payload.code
                             );
                         }
                         _ => {
                             warn!(
-                                "sidecar terminated: signal {:?} code {:?}",
+                                "runtime terminated: signal {:?} code {:?}",
                                 payload.signal, payload.code
                             );
                         }
                     }
                 }
                 other => {
-                    info!("sidecar event: {:?}", other);
+                    info!("runtime event: {:?}", other);
                 }
             }
         }
     });
 
     info!(
-        "tauri log persistence enabled: log_dir={} server_log={}",
+        "tauri log persistence enabled: log_dir={} runtime_log={}",
         app_log_dir.display(),
-        server_log_path.display()
+        runtime_log_path.display()
     );
     info!(
-        "Slab sidecar started (gateway_bind={}, api_origin={})",
-        endpoint_config.gateway_bind, endpoint_config.api_origin
+        "slab-runtime sidecar started (grpc_bind={})",
+        RUNTIME_GRPC_BIND
     );
     Ok(())
 }
 
-fn sqlite_database_url(path: &std::path::Path) -> String {
+// Keep for backwards compatibility with any code that resolves database paths.
+pub fn sqlite_database_url(path: &std::path::Path) -> String {
     let absolute = if path.is_absolute() {
         path.to_path_buf()
     } else {

@@ -23,7 +23,6 @@
     "mcp-bridge:default",
     "allow-greet",
     "allow-get-api-url",
-    "allow-check-backend-status",
     "allow-get-system-info",
     "allow-plugin-list",
     "allow-plugin-mount-view",
@@ -39,7 +38,7 @@
         {
           "args": true,
           "cmd": "",
-          "name": "binaries/slab-server",
+          "name": "binaries/slab-runtime",
           "sidecar": true
         }
       ]

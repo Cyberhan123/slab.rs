@@ -1,11 +1,10 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+mod commands;
 mod plugins;
 mod setup;
 
 use setup::ApiEndpointConfig;
-use slab_app_core::tauri_bridge::{
-    core_health, core_list_models, core_list_sessions, core_list_tasks,
-};
+use commands::{core_health, core_list_models, core_list_sessions, core_list_tasks};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -16,17 +15,6 @@ fn greet(name: &str) -> String {
 #[tauri::command]
 fn get_api_url(api_endpoint: tauri::State<'_, ApiEndpointConfig>) -> String {
     api_endpoint.api_origin.clone()
-}
-
-/// Check if the backend server is running
-#[tauri::command]
-async fn check_backend_status(
-    api_endpoint: tauri::State<'_, ApiEndpointConfig>,
-) -> Result<bool, String> {
-    match reqwest::get(api_endpoint.health_url()).await {
-        Ok(response) => Ok(response.status().is_success()),
-        Err(e) => Err(format!("Failed to connect to backend: {}", e)),
-    }
 }
 
 /// Get system information
@@ -68,7 +56,6 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             get_api_url,
-            check_backend_status,
             get_system_info,
             plugins::plugin_list,
             plugins::plugin_mount_view,
@@ -84,12 +71,15 @@ pub fn run() {
         ])
         .setup(move |app| {
             setup::setup_windows(app)?;
-            setup::run_server_sidecar(app)?;
+            setup::run_runtime_sidecar(app)?;
             plugins::init(app, api_endpoint.clone()).map_err(std::io::Error::other)?;
 
             // Initialise slab-app-core state so native IPC commands work.
-            tauri::async_runtime::block_on(slab_app_core::tauri_bridge::init_state(app.handle()))
-                .map_err(|e| std::io::Error::other(format!("core state init failed: {e}")))?;
+            tauri::async_runtime::block_on(commands::init_core_state(
+                app.handle(),
+                &format!("http://{}", setup::RUNTIME_GRPC_BIND),
+            ))
+            .map_err(|e| std::io::Error::other(format!("core state init failed: {e}")))?;
 
             Ok(())
         })
@@ -98,7 +88,7 @@ pub fn run() {
 
     app.run(|app_handle, event| match event {
         tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit => {
-            setup::shutdown_server_sidecar(app_handle);
+            setup::shutdown_runtime_sidecar(app_handle);
         }
         _ => {}
     });
