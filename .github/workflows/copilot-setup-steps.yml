@@ -70,13 +70,12 @@ jobs:
             ~/.bun/install/cache
             ~/.cache/bun/install/cache
             ~/Library/Caches/Bun/install/cache
-            slab-app/node_modules
-          key: copilot-${{ runner.os }}-bun-${{ hashFiles('slab-app/bun.lock', 'slab-app/package.json') }}
+            node_modules
+          key: copilot-${{ runner.os }}-bun-${{ hashFiles('bun.lock', 'package.json') }}
           restore-keys: |
             copilot-${{ runner.os }}-bun-
 
       - name: Install frontend dependencies
-        working-directory: slab-app
         run: bun install --frozen-lockfile
 
       - name: Warm up key Rust crates

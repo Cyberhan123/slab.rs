@@ -10,8 +10,5 @@
   "dependencies": {
     "i18next": "^26.0.3",
     "react-i18next": "^17.0.2"
-  },
-  "devDependencies": {
-    "typescript": "~6.0.2"
   }
 }
