@@ -14,6 +14,7 @@ export interface ApiErrorResponse {
   code: number;
   data: unknown;
   message: string;
+  status?: number;
 }
 
 /**

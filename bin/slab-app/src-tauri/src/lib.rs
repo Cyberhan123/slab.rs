@@ -3,7 +3,10 @@ mod api;
 mod plugins;
 mod setup;
 
+use std::sync::Arc;
+
 use setup::ApiEndpointConfig;
+use slab_app_core::context::AppState;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -14,6 +17,12 @@ fn greet(name: &str) -> String {
 #[tauri::command]
 fn get_api_url(api_endpoint: tauri::State<'_, ApiEndpointConfig>) -> String {
     api_endpoint.api_origin.clone()
+}
+
+/// Check if the embedded backend/core state is available.
+#[tauri::command]
+async fn check_backend_status(state: tauri::State<'_, Arc<AppState>>) -> Result<bool, String> {
+    api::health::health(state).await
 }
 
 /// Get system information
@@ -55,6 +64,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             get_api_url,
+            check_backend_status,
             get_system_info,
             plugins::plugin_list,
             plugins::plugin_mount_view,
@@ -64,6 +74,10 @@ pub fn run() {
             plugins::plugin_api_request,
             // native IPC commands - health
             api::health::health,
+            // audio
+            api::v1::audio::handler::transcribe,
+            // chat
+            api::v1::chat::handler::list_chat_models,
             // models
             api::v1::models::handler::list_models,
             api::v1::models::handler::create_model,
