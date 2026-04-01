@@ -44,22 +44,22 @@ args = ["build", "--release", "-p", "slab-runtime"]
 workspace = false
 command = "bun"
 args = ["run", "tauri", "dev"]
-cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/slab-app"
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 
 [tasks.build-tauri-release]
 workspace = false
 command = "bun"
 args = ["run", "tauri", "build"]
-cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/slab-app"
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 
 [tasks.build-tauri-debug]
 workspace = false
 command = "bun"
 args = ["run", "tauri", "build", "--no-bundle", "--debug"]
-cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/slab-app"
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 
 [tasks.install-frontend]
 workspace = false
 command = "bun"
 args = ["install"]
-cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/slab-app"
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}"
