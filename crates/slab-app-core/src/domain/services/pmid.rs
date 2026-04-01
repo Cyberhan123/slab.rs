@@ -1,9 +1,12 @@
 use std::sync::{Arc, RwLock};
 
 use slab_types::settings::{
-    ChatConfig, DiffusionConfig, DiffusionPathsConfig, DiffusionPerformanceConfig, PmidConfig,
-    RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig, RuntimeWorkerConfig,
-    SetupBackendReleaseConfig, SetupBackendsConfig, SetupConfig, SetupFfmpegConfig,
+    ChatConfig, DesktopLaunchProfileConfig, DiffusionConfig, DiffusionPathsConfig,
+    DiffusionPerformanceConfig, LaunchBackendConfig, LaunchBackendsConfig, LaunchConfig,
+    LaunchProfilesConfig, PmidConfig, RuntimeConfig, RuntimeLlamaConfig,
+    RuntimeModelAutoUnloadConfig, RuntimeTransportMode, RuntimeWorkerConfig,
+    ServerLaunchProfileConfig, SetupBackendReleaseConfig, SetupBackendsConfig, SetupConfig,
+    SetupFfmpegConfig,
 };
 
 use crate::domain::models::{
@@ -149,6 +152,55 @@ async fn load_config(settings: &SettingsProvider) -> Result<PmidConfig, AppCoreE
                     .await?,
             },
         },
+        launch: LaunchConfig {
+            transport: required_runtime_transport(settings, PMID.launch.transport()).await?,
+            queue_capacity: required_u32(settings, PMID.launch.queue_capacity()).await?,
+            backend_capacity: required_u32(settings, PMID.launch.backend_capacity()).await?,
+            runtime_ipc_dir: settings.get_optional_string(PMID.launch.runtime_ipc_dir()).await?,
+            runtime_log_dir: settings.get_optional_string(PMID.launch.runtime_log_dir()).await?,
+            backends: LaunchBackendsConfig {
+                llama: LaunchBackendConfig {
+                    enabled: settings.get_bool(PMID.launch.backends.llama.enabled()).await?,
+                },
+                whisper: LaunchBackendConfig {
+                    enabled: settings.get_bool(PMID.launch.backends.whisper.enabled()).await?,
+                },
+                diffusion: LaunchBackendConfig {
+                    enabled: settings.get_bool(PMID.launch.backends.diffusion.enabled()).await?,
+                },
+            },
+            profiles: LaunchProfilesConfig {
+                server: ServerLaunchProfileConfig {
+                    gateway_bind: required_string(
+                        settings,
+                        PMID.launch.profiles.server.gateway_bind(),
+                    )
+                    .await?,
+                    runtime_bind_host: required_string(
+                        settings,
+                        PMID.launch.profiles.server.runtime_bind_host(),
+                    )
+                    .await?,
+                    runtime_bind_base_port: required_u32(
+                        settings,
+                        PMID.launch.profiles.server.runtime_bind_base_port(),
+                    )
+                    .await?,
+                },
+                desktop: DesktopLaunchProfileConfig {
+                    runtime_bind_host: required_string(
+                        settings,
+                        PMID.launch.profiles.desktop.runtime_bind_host(),
+                    )
+                    .await?,
+                    runtime_bind_base_port: required_u32(
+                        settings,
+                        PMID.launch.profiles.desktop.runtime_bind_base_port(),
+                    )
+                    .await?,
+                },
+            },
+        },
         chat: ChatConfig { providers: settings.get_chat_providers(PMID.chat.providers()).await? },
         diffusion: DiffusionConfig {
             paths: DiffusionPathsConfig {
@@ -189,6 +241,31 @@ async fn required_u32(
         .get_optional_u32(pmid)
         .await?
         .ok_or_else(|| AppCoreError::Internal(format!("setting '{}' resolved to null", pmid)))
+}
+
+async fn required_string(
+    settings: &SettingsProvider,
+    pmid: impl AsRef<str>,
+) -> Result<String, AppCoreError> {
+    let pmid = pmid.as_ref();
+    settings
+        .get_optional_string(pmid)
+        .await?
+        .ok_or_else(|| AppCoreError::Internal(format!("setting '{}' resolved to null", pmid)))
+}
+
+async fn required_runtime_transport(
+    settings: &SettingsProvider,
+    pmid: impl AsRef<str>,
+) -> Result<RuntimeTransportMode, AppCoreError> {
+    let pmid = pmid.as_ref();
+    let raw = required_string(settings, pmid).await?;
+    raw.parse().map_err(|error| {
+        AppCoreError::Internal(format!(
+            "setting '{}' contains invalid runtime transport: {error}",
+            pmid
+        ))
+    })
 }
 
 #[cfg(test)]

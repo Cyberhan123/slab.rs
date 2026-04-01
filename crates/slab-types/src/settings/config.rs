@@ -1,6 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::launch::LaunchConfig;
+
 /// A configured cloud/remote AI provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct CloudProviderConfig {
@@ -28,6 +30,7 @@ pub struct CloudProviderConfig {
 pub struct PmidConfig {
     pub setup: SetupConfig,
     pub runtime: RuntimeConfig,
+    pub launch: LaunchConfig,
     pub chat: ChatConfig,
     pub diffusion: DiffusionConfig,
 }

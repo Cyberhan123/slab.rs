@@ -19,6 +19,7 @@ impl ApiEndpointConfig {
         format!("{}/", self.api_origin.trim_end_matches('/'))
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub fn health_url(&self) -> String {
         format!("{}/health", self.api_origin.trim_end_matches('/'))
     }

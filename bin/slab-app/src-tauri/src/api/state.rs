@@ -8,18 +8,15 @@ use slab_app_core::domain::services::PmidService;
 use slab_app_core::infra::db::AnyStore;
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
 use slab_app_core::infra::settings::SettingsProvider;
+use slab_app_core::launch::ResolvedLaunchSpec;
 use slab_app_core::model_auto_unload::ModelAutoUnloadManager;
 
 /// Initialise the shared `slab-app-core` state for native IPC handlers.
 pub async fn init_state<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
-    runtime_grpc_endpoint: &str,
+    launch_spec: &ResolvedLaunchSpec,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg = Config::from_env();
-
-    cfg.llama_grpc_endpoint = Some(runtime_grpc_endpoint.to_owned());
-    cfg.whisper_grpc_endpoint = Some(runtime_grpc_endpoint.to_owned());
-    cfg.diffusion_grpc_endpoint = Some(runtime_grpc_endpoint.to_owned());
 
     if cfg.database_url == "sqlite://slab.db?mode=rwc" {
         let base = dirs_next::config_dir()
@@ -30,6 +27,8 @@ pub async fn init_state<R: tauri::Runtime>(
         let prefix = if normalized.starts_with('/') { "sqlite://" } else { "sqlite:///" };
         cfg.database_url = format!("{prefix}{normalized}?mode=rwc");
     }
+
+    launch_spec.apply_to_config(&mut cfg);
 
     if let Some(parent) = cfg.settings_path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -43,6 +42,7 @@ pub async fn init_state<R: tauri::Runtime>(
         Arc::new(ModelAutoUnloadManager::new(Arc::clone(&pmid), Arc::clone(&grpc)));
 
     let state = Arc::new(AppState::new(Arc::new(cfg), pmid, grpc, store, model_auto_unload));
+    state.services.model.sync_model_configs_from_disk().await?;
     app.manage(state);
 
     Ok(())
