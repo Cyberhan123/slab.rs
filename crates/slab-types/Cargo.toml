@@ -6,7 +6,7 @@ description = "Shared types, JSON schema definitions, and PMID catalog for slab.
 repository.workspace = true
 keywords.workspace = true
 categories.workspace = true
-license = "Apache-2.0"
+license.workspace = true
 
 [dependencies]
 serde       = { workspace = true }
