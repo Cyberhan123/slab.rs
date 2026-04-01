@@ -62,7 +62,8 @@ pub fn validate_chat_role(value: &str) -> Result<(), ValidationError> {
 pub fn validate_ffmpeg_output_format(value: &str) -> Result<(), ValidationError> {
     validate_non_blank(value)?;
 
-    if ALLOWED_FFMPEG_OUTPUT_FORMATS.contains(&value.trim().to_ascii_lowercase().as_str()) {
+    let trimmed = value.trim();
+    if ALLOWED_FFMPEG_OUTPUT_FORMATS.iter().any(|fmt| fmt.eq_ignore_ascii_case(trimmed)) {
         Ok(())
     } else {
         Err(ValidationError::new("ffmpeg_output_format"))
