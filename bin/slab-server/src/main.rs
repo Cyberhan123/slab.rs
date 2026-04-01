@@ -23,27 +23,17 @@ use tracing_subscriber::util::SubscriberInitExt;
 
 use slab_app_core::config::Config;
 use slab_app_core::context::AppState;
+use slab_app_core::domain::services::PmidService;
 use slab_app_core::infra::db::{AnyStore, TaskStore};
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
 use slab_app_core::infra::settings::SettingsProvider;
+use slab_app_core::launch::{
+    LaunchHostPaths, LaunchProfile, ResolvedRuntimeChildSpec, resolve_launch_spec,
+};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "slab-server", version, about = "Slab supervisor and HTTP gateway")]
 struct SupervisorArgs {
-    #[arg(long, default_value = "127.0.0.1:3000")]
-    gateway_bind: String,
-    #[arg(long, default_value = "127.0.0.1:3001")]
-    whisper_bind: String,
-    #[arg(long, default_value = "127.0.0.1:3002")]
-    llama_bind: String,
-    #[arg(long, default_value = "127.0.0.1:3003")]
-    diffusion_bind: String,
-    #[arg(long, default_value_t = true)]
-    include_diffusion: bool,
-    #[arg(long = "runtime-transport")]
-    runtime_transport: Option<String>,
-    #[arg(long = "runtime-ipc-dir")]
-    runtime_ipc_dir: Option<PathBuf>,
     #[arg(long = "database-url")]
     database_url: Option<String>,
     #[arg(long = "settings-path")]
@@ -56,76 +46,56 @@ struct SupervisorArgs {
     log_json: bool,
     #[arg(long = "log-file")]
     log_file: Option<PathBuf>,
-    #[arg(long = "queue-capacity")]
-    queue_capacity: Option<usize>,
-    #[arg(long = "backend-capacity")]
-    backend_capacity: Option<usize>,
-    #[arg(long = "lib-dir")]
-    lib_dir: Option<PathBuf>,
     #[arg(long, default_value_t = false)]
     shutdown_on_stdin_close: bool,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum RuntimeTransportMode {
-    Http,
-    Ipc,
-}
-
-impl RuntimeTransportMode {
-    fn parse(raw: &str) -> anyhow::Result<Self> {
-        match raw.trim().to_ascii_lowercase().as_str() {
-            "http" => Ok(Self::Http),
-            "both" => Ok(Self::Http),
-            "ipc" => Ok(Self::Ipc),
-            other => anyhow::bail!(
-                "invalid runtime transport '{}'; expected 'http' or 'ipc' ('both' is accepted as an alias of 'http')",
-                other
-            ),
-        }
-    }
-
-    fn as_str(self) -> &'static str {
-        match self {
-            Self::Http => "http",
-            Self::Ipc => "ipc",
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct RuntimeBackendEndpoints {
-    whisper: String,
-    llama: String,
-    diffusion: Option<String>,
+    #[arg(long, hide = true)]
+    gateway_bind: Option<String>,
+    #[arg(long, hide = true)]
+    whisper_bind: Option<String>,
+    #[arg(long, hide = true)]
+    llama_bind: Option<String>,
+    #[arg(long, hide = true)]
+    diffusion_bind: Option<String>,
+    #[arg(long, hide = true)]
+    include_diffusion: Option<bool>,
+    #[arg(long = "runtime-transport", hide = true)]
+    runtime_transport: Option<String>,
+    #[arg(long = "runtime-ipc-dir", hide = true)]
+    runtime_ipc_dir: Option<PathBuf>,
+    #[arg(long = "queue-capacity", hide = true)]
+    queue_capacity: Option<usize>,
+    #[arg(long = "backend-capacity", hide = true)]
+    backend_capacity: Option<usize>,
+    #[arg(long = "lib-dir", hide = true)]
+    lib_dir: Option<PathBuf>,
 }
 
 impl Default for SupervisorArgs {
     fn default() -> Self {
         Self {
-            gateway_bind: "127.0.0.1:3000".to_owned(),
-            whisper_bind: "127.0.0.1:3001".to_owned(),
-            llama_bind: "127.0.0.1:3002".to_owned(),
-            diffusion_bind: "127.0.0.1:3003".to_owned(),
-            include_diffusion: true,
-            runtime_transport: None,
-            runtime_ipc_dir: None,
             database_url: None,
             settings_path: None,
             model_config_dir: None,
             log_level: None,
             log_json: false,
             log_file: None,
+            shutdown_on_stdin_close: false,
+            gateway_bind: None,
+            whisper_bind: None,
+            llama_bind: None,
+            diffusion_bind: None,
+            include_diffusion: None,
+            runtime_transport: None,
+            runtime_ipc_dir: None,
             queue_capacity: None,
             backend_capacity: None,
             lib_dir: None,
-            shutdown_on_stdin_close: false,
         }
     }
 }
 
 impl SupervisorArgs {
-    fn apply_config_defaults(&mut self, cfg: &mut Config) {
+    fn apply_bootstrap_config(&mut self, cfg: &mut Config) {
         if let Some(log_level) = &self.log_level {
             cfg.log_level = log_level.clone();
         }
@@ -153,18 +123,50 @@ impl SupervisorArgs {
         if self.model_config_dir.is_none() {
             self.model_config_dir = Some(cfg.model_config_dir.clone());
         }
-        if self.queue_capacity.is_none() {
-            self.queue_capacity = Some(cfg.queue_capacity);
+    }
+
+    fn validate_no_legacy_launch_overrides(&self) -> anyhow::Result<()> {
+        let mut rejected = Vec::new();
+
+        if self.gateway_bind.is_some() {
+            rejected.push("--gateway-bind");
         }
-        if self.backend_capacity.is_none() {
-            self.backend_capacity = Some(cfg.backend_capacity);
+        if self.whisper_bind.is_some() {
+            rejected.push("--whisper-bind");
         }
-        if self.lib_dir.is_none() {
-            self.lib_dir = cfg.lib_dir.clone();
+        if self.llama_bind.is_some() {
+            rejected.push("--llama-bind");
         }
-        if self.runtime_transport.is_none() {
-            self.runtime_transport = Some(cfg.transport_mode.clone());
+        if self.diffusion_bind.is_some() {
+            rejected.push("--diffusion-bind");
         }
+        if self.include_diffusion.is_some() {
+            rejected.push("--include-diffusion");
+        }
+        if self.runtime_transport.is_some() {
+            rejected.push("--runtime-transport");
+        }
+        if self.runtime_ipc_dir.is_some() {
+            rejected.push("--runtime-ipc-dir");
+        }
+        if self.queue_capacity.is_some() {
+            rejected.push("--queue-capacity");
+        }
+        if self.backend_capacity.is_some() {
+            rejected.push("--backend-capacity");
+        }
+        if self.lib_dir.is_some() {
+            rejected.push("--lib-dir");
+        }
+
+        if rejected.is_empty() {
+            return Ok(());
+        }
+
+        anyhow::bail!(
+            "legacy startup override(s) {} are no longer supported. Update settings.json launch.* (and setup.backends.dir for runtime libraries) instead.",
+            rejected.join(", ")
+        );
     }
 }
 
@@ -172,10 +174,11 @@ impl SupervisorArgs {
 async fn main() -> anyhow::Result<()> {
     let mut args = SupervisorArgs::parse();
     let mut cfg = Config::from_env();
-    args.apply_config_defaults(&mut cfg);
+    args.validate_no_legacy_launch_overrides()?;
+    args.apply_bootstrap_config(&mut cfg);
 
     let _log_guards = init_tracing(&cfg.log_level, cfg.log_json, cfg.log_file.as_deref())?;
-    run_supervisor(args).await
+    run_supervisor(args, cfg).await
 }
 
 fn init_tracing(
@@ -327,89 +330,37 @@ struct ManagedChild {
 
 fn spawn_backend_child(
     runtime_exe: &Path,
-    backend: &str,
-    grpc_bind_address: &str,
-    args: &SupervisorArgs,
+    child_spec: &ResolvedRuntimeChildSpec,
+    log_level: Option<&str>,
+    log_json: bool,
 ) -> anyhow::Result<ManagedChild> {
-    let runtime_log_path = runtime_log_file_path(args, backend);
     let mut cmd = TokioCommand::new(runtime_exe);
-    cmd.arg("--enabled-backends")
-        .arg(backend)
-        .arg("--grpc-bind")
-        .arg(grpc_bind_address)
-        .arg("--shutdown-on-stdin-close")
-        .arg("--log-file")
-        .arg(&runtime_log_path)
+    cmd.args(child_spec.command_args(log_level, log_json))
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .stdin(Stdio::piped());
 
-    if let Some(v) = &args.lib_dir {
-        cmd.arg("--lib-dir").arg(v);
-    }
-    if let Some(v) = args.queue_capacity {
-        cmd.arg("--queue-capacity").arg(v.to_string());
-    }
-    if let Some(v) = args.backend_capacity {
-        cmd.arg("--backend-capacity").arg(v.to_string());
-    }
-    if let Some(v) = &args.log_level {
-        cmd.arg("--log").arg(v);
-    }
-    if args.log_json {
-        cmd.arg("--log-json");
-    }
-
     let mut child = cmd.spawn().with_context(|| {
-        format!("failed to spawn slab-runtime child '{}' from {}", backend, runtime_exe.display())
+        format!(
+            "failed to spawn slab-runtime child '{}' from {}",
+            child_spec.backend.canonical_id(),
+            runtime_exe.display()
+        )
     })?;
     let stdin = child.stdin.take();
     info!(
-        backend = backend,
-        bind_address = grpc_bind_address,
+        backend = child_spec.backend.canonical_id(),
+        bind_address = %child_spec.grpc_bind_address,
         pid = ?child.id(),
-        log_file = %runtime_log_path.display(),
+        log_file = %child_spec.log_file.display(),
         "spawned backend child process"
     );
     Ok(ManagedChild {
-        backend: backend.to_string(),
-        bind_address: grpc_bind_address.to_string(),
+        backend: child_spec.backend.canonical_id().to_owned(),
+        bind_address: child_spec.grpc_bind_address.clone(),
         child,
         stdin,
     })
-}
-
-fn runtime_log_file_path(args: &SupervisorArgs, backend: &str) -> PathBuf {
-    let base_dir = args
-        .settings_path
-        .as_deref()
-        .and_then(Path::parent)
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| std::env::temp_dir().join("Slab"));
-    let logs_dir = base_dir.join("logs");
-    if let Err(e) = std::fs::create_dir_all(&logs_dir) {
-        warn!(
-            path = %logs_dir.display(),
-            error = %e,
-            "failed to create runtime log directory; falling back to temp dir"
-        );
-        let fallback_dir = std::env::temp_dir().join("Slab").join("logs");
-        if let Err(fallback_error) = std::fs::create_dir_all(&fallback_dir) {
-            warn!(
-                path = %fallback_dir.display(),
-                error = %fallback_error,
-                "failed to create fallback runtime log directory"
-            );
-            return std::env::temp_dir().join(format!(
-                "slab-runtime-{}-{}.log",
-                std::process::id(),
-                backend
-            ));
-        }
-        return fallback_dir.join(format!("slab-runtime-{}-{}.log", std::process::id(), backend));
-    }
-
-    logs_dir.join(format!("slab-runtime-{}-{}.log", std::process::id(), backend))
 }
 
 async fn shutdown_children(children: &mut [ManagedChild]) {
@@ -561,119 +512,56 @@ fn resolve_runtime_exe(server_exe: &Path) -> anyhow::Result<PathBuf> {
     );
 }
 
-fn build_runtime_backend_endpoints(
-    args: &SupervisorArgs,
-    mode: RuntimeTransportMode,
-) -> anyhow::Result<RuntimeBackendEndpoints> {
-    match mode {
-        RuntimeTransportMode::Http => Ok(RuntimeBackendEndpoints {
-            whisper: args.whisper_bind.clone(),
-            llama: args.llama_bind.clone(),
-            diffusion: args.include_diffusion.then(|| args.diffusion_bind.clone()),
-        }),
-        RuntimeTransportMode::Ipc => build_ipc_runtime_backend_endpoints(args),
-    }
-}
-
-#[cfg(windows)]
-fn build_ipc_runtime_backend_endpoints(
-    args: &SupervisorArgs,
-) -> anyhow::Result<RuntimeBackendEndpoints> {
-    let pid = std::process::id();
-    let whisper = format!(r"ipc://\\.\pipe\slab-runtime-{}-whisper", pid);
-    let llama = format!(r"ipc://\\.\pipe\slab-runtime-{}-llama", pid);
-    let diffusion =
-        args.include_diffusion.then(|| format!(r"ipc://\\.\pipe\slab-runtime-{}-diffusion", pid));
-    Ok(RuntimeBackendEndpoints { whisper, llama, diffusion })
-}
-
-#[cfg(not(windows))]
-fn build_ipc_runtime_backend_endpoints(
-    args: &SupervisorArgs,
-) -> anyhow::Result<RuntimeBackendEndpoints> {
-    let base_dir = args.runtime_ipc_dir.clone().unwrap_or_else(std::env::temp_dir);
-    std::fs::create_dir_all(&base_dir).with_context(|| {
-        format!("failed to create runtime IPC socket directory '{}'", base_dir.display())
-    })?;
-
-    let pid = std::process::id();
-    let endpoint_for = |backend: &str| -> String {
-        let path = base_dir.join(format!("slab-runtime-{}-{}.sock", pid, backend));
-        format!("ipc://{}", path.to_string_lossy())
-    };
-
-    Ok(RuntimeBackendEndpoints {
-        whisper: endpoint_for("whisper"),
-        llama: endpoint_for("llama"),
-        diffusion: args.include_diffusion.then(|| endpoint_for("diffusion")),
-    })
-}
-
-async fn run_supervisor(args: SupervisorArgs) -> anyhow::Result<()> {
+async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow::Result<()> {
     info!("slab-server supervisor starting");
     let server_exe =
         std::env::current_exe().context("failed to resolve current executable path")?;
     let runtime_exe = resolve_runtime_exe(&server_exe)?;
-    let runtime_transport =
-        RuntimeTransportMode::parse(args.runtime_transport.as_deref().unwrap_or("http"))?;
-    let backend_endpoints = build_runtime_backend_endpoints(&args, runtime_transport)?;
+
+    let runtime_log_dir_fallback = gateway_cfg
+        .settings_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::temp_dir().join("Slab"))
+        .join("logs");
+    let runtime_ipc_dir_fallback = gateway_cfg
+        .settings_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| std::env::temp_dir().join("Slab"))
+        .join("ipc");
+
+    let settings = Arc::new(SettingsProvider::load(gateway_cfg.settings_path.clone()).await?);
+    let pmid = PmidService::load(Arc::clone(&settings)).await?;
+    let launch_spec = resolve_launch_spec(
+        &pmid.config(),
+        LaunchProfile::Server,
+        &LaunchHostPaths {
+            runtime_lib_dir_fallback: gateway_cfg.lib_dir.clone(),
+            runtime_log_dir_fallback,
+            runtime_ipc_dir_fallback,
+            shutdown_on_stdin_close: true,
+        },
+    )?;
+    launch_spec.prepare_filesystem().map_err(anyhow::Error::from)?;
     let mut children = Vec::new();
 
-    children.push(spawn_backend_child(
-        &runtime_exe,
-        "ggml.whisper",
-        &backend_endpoints.whisper,
-        &args,
-    )?);
-    children.push(spawn_backend_child(
-        &runtime_exe,
-        "ggml.llama",
-        &backend_endpoints.llama,
-        &args,
-    )?);
-    if args.include_diffusion {
-        let diffusion_endpoint = backend_endpoints.diffusion.as_deref().ok_or_else(|| {
-            anyhow!("diffusion endpoint is missing while diffusion backend is enabled")
-        })?;
+    for child_spec in &launch_spec.children {
         children.push(spawn_backend_child(
             &runtime_exe,
-            "ggml.diffusion",
-            diffusion_endpoint,
-            &args,
+            child_spec,
+            args.log_level.as_deref(),
+            args.log_json,
         )?);
     }
 
     info!(
         child_count = children.len(),
-        gateway_bind = %args.gateway_bind,
-        runtime_transport = %runtime_transport.as_str(),
+        gateway_bind = %launch_spec.gateway.as_ref().map(|gateway| gateway.bind_address.as_str()).unwrap_or(""),
+        runtime_transport = %launch_spec.transport.as_str(),
         "supervisor started backend children and is booting HTTP gateway"
     );
-
-    let mut gateway_cfg = Config::from_env();
-    if let Some(v) = &args.database_url {
-        gateway_cfg.database_url = v.clone();
-    }
-    if let Some(v) = &args.settings_path {
-        gateway_cfg.settings_path = v.clone();
-    }
-    if let Some(v) = &args.model_config_dir {
-        gateway_cfg.model_config_dir = v.clone();
-    }
-    if let Some(v) = &args.log_level {
-        gateway_cfg.log_level = v.clone();
-    }
-    if args.log_json {
-        gateway_cfg.log_json = true;
-    }
-    if let Some(v) = &args.log_file {
-        gateway_cfg.log_file = Some(v.clone());
-    }
-    gateway_cfg.bind_address = args.gateway_bind.clone();
-    gateway_cfg.transport_mode = runtime_transport.as_str().to_string();
-    gateway_cfg.whisper_grpc_endpoint = Some(backend_endpoints.whisper.clone());
-    gateway_cfg.llama_grpc_endpoint = Some(backend_endpoints.llama.clone());
-    gateway_cfg.diffusion_grpc_endpoint = backend_endpoints.diffusion.clone();
+    launch_spec.apply_to_config(&mut gateway_cfg);
 
     let (gateway_shutdown_tx, gateway_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let mut gateway_shutdown_tx = Some(gateway_shutdown_tx);
@@ -854,4 +742,35 @@ async fn shutdown_signal(listen_stdin: bool) {
         _ = stdin_signal => {}
     }
     info!("shutdown signal received; starting graceful shutdown");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SupervisorArgs;
+    use std::path::PathBuf;
+
+    #[test]
+    fn bootstrap_args_accept_settings_and_database_parameters() {
+        let args = SupervisorArgs {
+            database_url: Some("sqlite:///tmp/slab.db?mode=rwc".to_owned()),
+            settings_path: Some(PathBuf::from("C:/Slab/settings.json")),
+            ..SupervisorArgs::default()
+        };
+
+        assert!(args.validate_no_legacy_launch_overrides().is_ok());
+    }
+
+    #[test]
+    fn legacy_launch_overrides_are_rejected() {
+        let args = SupervisorArgs {
+            gateway_bind: Some("127.0.0.1:9000".to_owned()),
+            queue_capacity: Some(32),
+            ..SupervisorArgs::default()
+        };
+
+        let error = args.validate_no_legacy_launch_overrides().expect_err("legacy args must fail");
+        let message = error.to_string();
+        assert!(message.contains("--gateway-bind"));
+        assert!(message.contains("--queue-capacity"));
+    }
 }

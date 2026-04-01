@@ -557,6 +557,293 @@
       ]
     },
     {
+      "id": "launch",
+      "title": "Launch",
+      "description_md": "Shared supervisor launch settings used by both slab-server and the desktop host.",
+      "order": 15,
+      "subsections": [
+        {
+          "id": "general",
+          "title": "General",
+          "description_md": "Shared runtime transport and capacity settings. Backend library directories continue to come from `setup.backends.dir`.",
+          "order": 10,
+          "properties": [
+            {
+              "pmid": "launch.transport",
+              "label": "Runtime Transport",
+              "description_md": "Transport used between the supervisor host and each slab-runtime child.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "transport",
+                "runtime",
+                "grpc",
+                "ipc",
+                "http"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "enum": ["http", "ipc"],
+                "default_value": "http",
+                "order": 10
+              }
+            },
+            {
+              "pmid": "launch.queue_capacity",
+              "label": "Runtime Queue Capacity",
+              "description_md": "Submission queue capacity passed to each slab-runtime child.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "queue",
+                "capacity",
+                "runtime"
+              ],
+              "storage_kind": "integer",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "default_value": 64,
+                "order": 20
+              }
+            },
+            {
+              "pmid": "launch.backend_capacity",
+              "label": "Runtime Backend Capacity",
+              "description_md": "Maximum concurrent in-flight requests per runtime child.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "backend",
+                "capacity",
+                "runtime"
+              ],
+              "storage_kind": "integer",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "default_value": 4,
+                "order": 30
+              }
+            },
+            {
+              "pmid": "launch.runtime_ipc_dir",
+              "label": "Runtime IPC Directory",
+              "description_md": "Optional directory used for IPC socket files when the runtime transport is set to IPC. Leave empty to use the host default.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "ipc",
+                "socket",
+                "directory",
+                "runtime"
+              ],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 40
+              }
+            },
+            {
+              "pmid": "launch.runtime_log_dir",
+              "label": "Runtime Log Directory",
+              "description_md": "Optional directory used for slab-runtime child log files. Leave empty to use the host default log location.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "runtime",
+                "logs",
+                "directory"
+              ],
+              "storage_kind": "path",
+              "schema": {
+                "type": "string",
+                "default_value": "",
+                "order": 50
+              }
+            }
+          ]
+        },
+        {
+          "id": "backends",
+          "title": "Backends",
+          "description_md": "Enable or disable runtime child processes per backend.",
+          "order": 20,
+          "properties": [
+            {
+              "pmid": "launch.backends.llama.enabled",
+              "label": "Launch Llama Runtime",
+              "description_md": "Whether the ggml.llama runtime child should be started.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "llama",
+                "backend",
+                "runtime"
+              ],
+              "storage_kind": "boolean",
+              "schema": {
+                "type": "boolean",
+                "default_value": true,
+                "order": 10
+              }
+            },
+            {
+              "pmid": "launch.backends.whisper.enabled",
+              "label": "Launch Whisper Runtime",
+              "description_md": "Whether the ggml.whisper runtime child should be started.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "whisper",
+                "backend",
+                "runtime"
+              ],
+              "storage_kind": "boolean",
+              "schema": {
+                "type": "boolean",
+                "default_value": true,
+                "order": 20
+              }
+            },
+            {
+              "pmid": "launch.backends.diffusion.enabled",
+              "label": "Launch Diffusion Runtime",
+              "description_md": "Whether the ggml.diffusion runtime child should be started.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "diffusion",
+                "backend",
+                "runtime"
+              ],
+              "storage_kind": "boolean",
+              "schema": {
+                "type": "boolean",
+                "default_value": true,
+                "order": 30
+              }
+            }
+          ]
+        },
+        {
+          "id": "server_profile",
+          "title": "Server Profile",
+          "description_md": "Host-specific launch settings used by slab-server.",
+          "order": 30,
+          "properties": [
+            {
+              "pmid": "launch.profiles.server.gateway_bind",
+              "label": "Server Gateway Bind",
+              "description_md": "HTTP bind address used by slab-server for the local gateway.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "server",
+                "gateway",
+                "bind",
+                "http"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "127.0.0.1:3000",
+                "order": 10
+              }
+            },
+            {
+              "pmid": "launch.profiles.server.runtime_bind_host",
+              "label": "Server Runtime Bind Host",
+              "description_md": "Host/IP used when slab-server allocates HTTP runtime child endpoints.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "server",
+                "runtime",
+                "bind",
+                "host"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "127.0.0.1",
+                "order": 20
+              }
+            },
+            {
+              "pmid": "launch.profiles.server.runtime_bind_base_port",
+              "label": "Server Runtime Base Port",
+              "description_md": "Base port used to allocate per-backend runtime child endpoints for slab-server.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "server",
+                "runtime",
+                "port"
+              ],
+              "storage_kind": "integer",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535,
+                "default_value": 3001,
+                "order": 30
+              }
+            }
+          ]
+        },
+        {
+          "id": "desktop_profile",
+          "title": "Desktop Profile",
+          "description_md": "Host-specific launch settings used by the Tauri desktop app.",
+          "order": 40,
+          "properties": [
+            {
+              "pmid": "launch.profiles.desktop.runtime_bind_host",
+              "label": "Desktop Runtime Bind Host",
+              "description_md": "Host/IP used when the desktop host allocates HTTP runtime child endpoints.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "desktop",
+                "runtime",
+                "bind",
+                "host"
+              ],
+              "storage_kind": "string",
+              "schema": {
+                "type": "string",
+                "default_value": "127.0.0.1",
+                "order": 10
+              }
+            },
+            {
+              "pmid": "launch.profiles.desktop.runtime_bind_base_port",
+              "label": "Desktop Runtime Base Port",
+              "description_md": "Base port used to allocate per-backend runtime child endpoints for the desktop host.",
+              "editable": true,
+              "search_terms": [
+                "launch",
+                "desktop",
+                "runtime",
+                "port"
+              ],
+              "storage_kind": "integer",
+              "schema": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535,
+                "default_value": 50051,
+                "order": 20
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "id": "cloud",
       "title": "Cloud Providers",
       "description_md": "Global cloud provider configuration used by cloud model entries.",

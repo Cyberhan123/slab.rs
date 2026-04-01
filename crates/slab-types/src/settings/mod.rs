@@ -1,4 +1,5 @@
 mod config;
+mod launch;
 mod pmid;
 
 pub use config::{
@@ -7,8 +8,14 @@ pub use config::{
     RuntimeModelAutoUnloadConfig, RuntimeWorkerConfig, SetupBackendReleaseConfig,
     SetupBackendsConfig, SetupConfig, SetupFfmpegConfig,
 };
+pub use launch::{
+    DesktopLaunchProfileConfig, LaunchBackendConfig, LaunchBackendsConfig, LaunchConfig,
+    LaunchProfilesConfig, RuntimeTransportMode, ServerLaunchProfileConfig,
+};
 pub use pmid::{
-    ChatPmids, DiffusionPathPmids, DiffusionPerformancePmids, DiffusionPmids, PMID, PmidCatalog,
-    RuntimeLlamaPmids, RuntimeModelAutoUnloadPmids, RuntimePmids, RuntimeWorkerPmids, SettingPmid,
-    SetupBackendPmids, SetupBackendReleasePmids, SetupFfmpegPmids, SetupPmids,
+    ChatPmids, DesktopLaunchProfilePmids, DiffusionPathPmids, DiffusionPerformancePmids,
+    DiffusionPmids, LaunchBackendPmids, LaunchBackendTogglePmids, LaunchPmids, LaunchProfilePmids,
+    PMID, PmidCatalog, RuntimeLlamaPmids, RuntimeModelAutoUnloadPmids, RuntimePmids,
+    RuntimeWorkerPmids, ServerLaunchProfilePmids, SettingPmid, SetupBackendPmids,
+    SetupBackendReleasePmids, SetupFfmpegPmids, SetupPmids,
 };

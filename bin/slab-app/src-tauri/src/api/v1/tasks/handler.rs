@@ -55,7 +55,5 @@ pub async fn restart_task(
 ) -> Result<TaskResponse, String> {
     validate_id(&id)?;
     state.services.task_application.validate_restartable(&id).await.map_err(map_err)?;
-    Err(map_err(AppCoreError::NotImplemented(
-        "task restart is not yet implemented".to_owned(),
-    )))
+    Err(map_err(AppCoreError::NotImplemented("task restart is not yet implemented".to_owned())))
 }

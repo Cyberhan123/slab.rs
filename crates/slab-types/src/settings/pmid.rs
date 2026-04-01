@@ -50,6 +50,7 @@ impl fmt::Display for SettingPmid {
 pub struct PmidCatalog {
     pub setup: SetupPmids,
     pub runtime: RuntimePmids,
+    pub launch: LaunchPmids,
     pub chat: ChatPmids,
     pub diffusion: DiffusionPmids,
 }
@@ -59,6 +60,7 @@ impl PmidCatalog {
         Self {
             setup: SetupPmids::new(),
             runtime: RuntimePmids::new(),
+            launch: LaunchPmids::new(),
             chat: ChatPmids::new(),
             diffusion: DiffusionPmids::new(),
         }
@@ -92,6 +94,19 @@ impl PmidCatalog {
             self.runtime.diffusion.num_workers(),
             self.runtime.model_auto_unload.enabled(),
             self.runtime.model_auto_unload.idle_minutes(),
+            self.launch.transport(),
+            self.launch.queue_capacity(),
+            self.launch.backend_capacity(),
+            self.launch.runtime_ipc_dir(),
+            self.launch.runtime_log_dir(),
+            self.launch.backends.llama.enabled(),
+            self.launch.backends.whisper.enabled(),
+            self.launch.backends.diffusion.enabled(),
+            self.launch.profiles.server.gateway_bind(),
+            self.launch.profiles.server.runtime_bind_host(),
+            self.launch.profiles.server.runtime_bind_base_port(),
+            self.launch.profiles.desktop.runtime_bind_host(),
+            self.launch.profiles.desktop.runtime_bind_base_port(),
             self.chat.providers(),
             self.diffusion.paths.model(),
             self.diffusion.paths.vae(),
@@ -294,6 +309,138 @@ impl RuntimeModelAutoUnloadPmids {
 
 // ── Chat PMIDs ───────────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy)]
+pub struct LaunchPmids {
+    pub backends: LaunchBackendPmids,
+    pub profiles: LaunchProfilePmids,
+}
+
+impl LaunchPmids {
+    pub const fn new() -> Self {
+        Self { backends: LaunchBackendPmids::new(), profiles: LaunchProfilePmids::new() }
+    }
+
+    pub fn transport(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "transport"])
+    }
+
+    pub fn queue_capacity(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "queue_capacity"])
+    }
+
+    pub fn backend_capacity(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "backend_capacity"])
+    }
+
+    pub fn runtime_ipc_dir(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "runtime_ipc_dir"])
+    }
+
+    pub fn runtime_log_dir(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "runtime_log_dir"])
+    }
+}
+
+impl Default for LaunchPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LaunchBackendPmids {
+    pub llama: LaunchBackendTogglePmids,
+    pub whisper: LaunchBackendTogglePmids,
+    pub diffusion: LaunchBackendTogglePmids,
+}
+
+impl LaunchBackendPmids {
+    pub const fn new() -> Self {
+        Self {
+            llama: LaunchBackendTogglePmids::new("llama"),
+            whisper: LaunchBackendTogglePmids::new("whisper"),
+            diffusion: LaunchBackendTogglePmids::new("diffusion"),
+        }
+    }
+}
+
+impl Default for LaunchBackendPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LaunchBackendTogglePmids {
+    backend: &'static str,
+}
+
+impl LaunchBackendTogglePmids {
+    pub const fn new(backend: &'static str) -> Self {
+        Self { backend }
+    }
+
+    pub fn enabled(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "backends", self.backend, "enabled"])
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct LaunchProfilePmids {
+    pub server: ServerLaunchProfilePmids,
+    pub desktop: DesktopLaunchProfilePmids,
+}
+
+impl LaunchProfilePmids {
+    pub const fn new() -> Self {
+        Self { server: ServerLaunchProfilePmids::new(), desktop: DesktopLaunchProfilePmids::new() }
+    }
+}
+
+impl Default for LaunchProfilePmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ServerLaunchProfilePmids;
+
+impl ServerLaunchProfilePmids {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub fn gateway_bind(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "profiles", "server", "gateway_bind"])
+    }
+
+    pub fn runtime_bind_host(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "profiles", "server", "runtime_bind_host"])
+    }
+
+    pub fn runtime_bind_base_port(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "profiles", "server", "runtime_bind_base_port"])
+    }
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DesktopLaunchProfilePmids;
+
+impl DesktopLaunchProfilePmids {
+    pub const fn new() -> Self {
+        Self
+    }
+
+    pub fn runtime_bind_host(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "profiles", "desktop", "runtime_bind_host"])
+    }
+
+    pub fn runtime_bind_base_port(self) -> SettingPmid {
+        SettingPmid::from_segments(["launch", "profiles", "desktop", "runtime_bind_base_port"])
+    }
+}
+
 #[derive(Debug, Clone, Copy, Default)]
 pub struct ChatPmids;
 
@@ -399,6 +546,10 @@ mod tests {
         assert_eq!(
             PMID.runtime.model_auto_unload.idle_minutes().as_str(),
             "runtime.model_auto_unload.idle_minutes"
+        );
+        assert_eq!(
+            PMID.launch.profiles.desktop.runtime_bind_base_port().as_str(),
+            "launch.profiles.desktop.runtime_bind_base_port"
         );
     }
 
