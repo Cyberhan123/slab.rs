@@ -278,20 +278,12 @@ pub async fn load_model(
             BackendKind::Llama => {
                 grpc_call!("load_model", llama_client, channel.clone(), load_model, req.clone())
             }
-            BackendKind::Whisper => grpc_call!(
-                "load_model",
-                whisper_client,
-                channel.clone(),
-                load_model,
-                req.clone()
-            ),
-            BackendKind::Diffusion => grpc_call!(
-                "load_model",
-                diffusion_client,
-                channel.clone(),
-                load_model,
-                req.clone()
-            ),
+            BackendKind::Whisper => {
+                grpc_call!("load_model", whisper_client, channel.clone(), load_model, req.clone())
+            }
+            BackendKind::Diffusion => {
+                grpc_call!("load_model", diffusion_client, channel.clone(), load_model, req.clone())
+            }
         };
 
         match response {

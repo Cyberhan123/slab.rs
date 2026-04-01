@@ -41,7 +41,10 @@ impl ModelService {
         Self { model_state, worker_state }
     }
 
-    pub async fn create_model(&self, req: CreateModelCommand) -> Result<UnifiedModel, AppCoreError> {
+    pub async fn create_model(
+        &self,
+        req: CreateModelCommand,
+    ) -> Result<UnifiedModel, AppCoreError> {
         self.persist_model_definition(req).await
     }
 
@@ -134,7 +137,9 @@ impl ModelService {
         let (_, channel) = resolve_backend_channel(&self.model_state, backend_id)?;
         let response = rpc::client::unload_model(channel, backend_id, pb::ModelUnloadRequest {})
             .await
-            .map_err(|error| AppCoreError::Internal(format!("grpc unload_model failed: {error}")))?;
+            .map_err(|error| {
+                AppCoreError::Internal(format!("grpc unload_model failed: {error}"))
+            })?;
         self.model_state.auto_unload().notify_model_unloaded(backend_id).await;
 
         decode_model_status(response)
@@ -602,7 +607,9 @@ fn resolve_backend_channel(
 ) -> Result<(RuntimeBackendId, Channel), AppCoreError> {
     let canonical_backend = backend_id.to_string();
     let channel = state.grpc().backend_channel(backend_id).ok_or_else(|| {
-        AppCoreError::BackendNotReady(format!("{canonical_backend} gRPC endpoint is not configured"))
+        AppCoreError::BackendNotReady(format!(
+            "{canonical_backend} gRPC endpoint is not configured"
+        ))
     })?;
     Ok((backend_id, channel))
 }
@@ -834,7 +841,9 @@ async fn resolve_local_catalog_model(
     Ok(model)
 }
 
-fn resolve_local_backend_from_model(model: &UnifiedModel) -> Result<RuntimeBackendId, AppCoreError> {
+fn resolve_local_backend_from_model(
+    model: &UnifiedModel,
+) -> Result<RuntimeBackendId, AppCoreError> {
     backend_id_from_provider(&model.provider).ok_or_else(|| {
         AppCoreError::BadRequest(format!(
             "model '{}' uses provider '{}' and cannot be managed with local runtime lifecycle endpoints",

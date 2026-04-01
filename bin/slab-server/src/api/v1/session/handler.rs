@@ -9,9 +9,9 @@ use validator::Validate;
 
 use crate::api::v1::session::schema::{CreateSessionRequest, MessageResponse, SessionResponse};
 use crate::api::validation::{ValidatedJson, validate};
+use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::SessionService;
-use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(

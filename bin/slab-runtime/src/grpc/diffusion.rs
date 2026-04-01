@@ -1,8 +1,8 @@
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, instrument};
 
-use slab_runtime_core::api::ImageGenerationRequest;
 use slab_proto::{convert, slab::ipc::v1 as pb};
+use slab_runtime_core::api::ImageGenerationRequest;
 use slab_types::diffusion::{DiffusionImageRequest, DiffusionVideoRequest};
 
 use super::{BackendKind, GrpcServiceImpl, extract_request_id, proto_to_status, runtime_to_status};

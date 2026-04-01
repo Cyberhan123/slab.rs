@@ -51,9 +51,9 @@ impl TaskApplicationService {
                     })
                 })
                 .unwrap_or(TaskResult { image: None, images: None, video_path: None, text: None })),
-            status => Err(AppCoreError::BadRequest(format!(
-                "task is not succeeded (status: {status})"
-            ))),
+            status => {
+                Err(AppCoreError::BadRequest(format!("task is not succeeded (status: {status})")))
+            }
         }
     }
 

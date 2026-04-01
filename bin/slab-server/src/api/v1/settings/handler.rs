@@ -9,6 +9,7 @@ use validator::Validate;
 
 use crate::api::middleware::auth;
 use crate::api::validation::validate;
+use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::models::{
     SettingPropertySchema, SettingPropertyView, SettingValidationErrorData, SettingValueType,
@@ -16,7 +17,6 @@ use slab_app_core::domain::models::{
     UpdateSettingOperation,
 };
 use slab_app_core::domain::services::SettingsService;
-use crate::error::ServerError;
 
 #[derive(Debug, Deserialize, IntoParams, Validate)]
 struct SettingPmidPath {

@@ -15,9 +15,9 @@ use crate::api::v1::models::schema::{
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::{ValidatedJson, ValidatedQuery, validate};
+use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::ModelService;
-use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(

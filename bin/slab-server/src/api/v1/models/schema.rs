@@ -10,8 +10,7 @@ use slab_app_core::domain::models::{
     DownloadModelCommand as DomainDownloadModelCommand, ListModelsFilter as DomainListModelsFilter,
     ModelLoadCommand as DomainModelLoadCommand, ModelSpec as DomainModelSpec,
     ModelStatus as DomainModelStatus, RuntimePresets as DomainRuntimePresets,
-    UnifiedModel as DomainUnifiedModel,
-    UpdateModelCommand as DomainUpdateModelCommand,
+    UnifiedModel as DomainUnifiedModel, UpdateModelCommand as DomainUpdateModelCommand,
 };
 
 // ---------------------------------------------------------------------------
@@ -339,9 +338,10 @@ impl From<ModelSpecRequest> for DomainModelSpec {
         Self {
             provider_id: req.provider_id,
             remote_model_id: req.remote_model_id,
-            pricing: req
-                .pricing
-                .map(|p| slab_app_core::domain::models::Pricing { input: p.input, output: p.output }),
+            pricing: req.pricing.map(|p| slab_app_core::domain::models::Pricing {
+                input: p.input,
+                output: p.output,
+            }),
             repo_id: req.repo_id,
             filename: req.filename,
             local_path: req.local_path,

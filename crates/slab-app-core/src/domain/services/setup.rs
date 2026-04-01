@@ -5,7 +5,9 @@ use tracing::{info, warn};
 
 use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
-use crate::domain::models::{AcceptedOperation, CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
+use crate::domain::models::{
+    AcceptedOperation, CompleteSetupCommand, ComponentStatus, EnvironmentStatus,
+};
 use crate::error::AppCoreError;
 
 #[derive(Clone)]

@@ -20,10 +20,10 @@ use crate::api::v1::chat::schema::{
     CompletionChoice, CompletionRequest, CompletionResponse, OpenAiErrorResponse, StopSequences,
 };
 use crate::api::validation::ValidatedJson;
+use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::models::{ChatCompletionOutput, ChatStreamChunk, TextCompletionOutput};
 use slab_app_core::domain::services::ChatService;
-use crate::error::ServerError;
 
 #[derive(OpenApi)]
 #[openapi(

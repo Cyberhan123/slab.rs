@@ -36,5 +36,3 @@ pub struct TranscribeDecodeOptions {
     pub no_speech_thold: Option<f32>,
     pub tdrz_enable: Option<bool>,
 }
-
-

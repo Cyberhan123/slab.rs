@@ -277,7 +277,8 @@ where
         model_config_dir = %cfg.model_config_dir.display(),
         "model config directory ready"
     );
-    let pmid = Arc::new(slab_app_core::domain::services::PmidService::load(Arc::clone(&settings)).await?);
+    let pmid =
+        Arc::new(slab_app_core::domain::services::PmidService::load(Arc::clone(&settings)).await?);
     info!("typed PMID config ready");
     let grpc = GrpcGateway::connect_from_config(&cfg)
         .await
@@ -285,10 +286,11 @@ where
 
     let grpc = Arc::new(grpc);
     let store = Arc::new(store.clone());
-    let model_auto_unload = Arc::new(slab_app_core::model_auto_unload::ModelAutoUnloadManager::new(
-        Arc::clone(&pmid),
-        Arc::clone(&grpc),
-    ));
+    let model_auto_unload =
+        Arc::new(slab_app_core::model_auto_unload::ModelAutoUnloadManager::new(
+            Arc::clone(&pmid),
+            Arc::clone(&grpc),
+        ));
     let state = Arc::new(AppState::new(
         Arc::new(cfg.clone()),
         pmid,

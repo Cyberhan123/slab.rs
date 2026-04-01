@@ -43,7 +43,7 @@ args = ["build", "--release", "-p", "slab-runtime"]
 [tasks.run-tauri]
 workspace = false
 command = "bun"
-args = ["run", "tauri", "dev"]
+args = ["run", "dev"]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 
 [tasks.build-tauri-release]

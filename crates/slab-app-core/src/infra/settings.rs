@@ -234,7 +234,10 @@ fn load_runtime_state(
     }
 
     let raw = fs::read_to_string(path).map_err(|error| {
-        AppCoreError::Internal(format!("failed to read settings file '{}': {error}", path.display()))
+        AppCoreError::Internal(format!(
+            "failed to read settings file '{}': {error}",
+            path.display()
+        ))
     })?;
 
     let parsed: SettingsValuesFile = match serde_json::from_str(&raw) {
@@ -350,7 +353,10 @@ fn write_values_file(path: &Path, values: &SettingsValuesFile) -> Result<(), App
     ensure_settings_parent_dir(path)?;
 
     let parent = path.parent().ok_or_else(|| {
-        AppCoreError::Internal(format!("settings path '{}' has no parent directory", path.display()))
+        AppCoreError::Internal(format!(
+            "settings path '{}' has no parent directory",
+            path.display()
+        ))
     })?;
     let file_name = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
         AppCoreError::Internal(format!("settings path '{}' has invalid file name", path.display()))

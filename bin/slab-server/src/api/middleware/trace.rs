@@ -1,4 +1,3 @@
-use slab_app_core::context::AppState;
 use axum::{
     body::{Body, Bytes},
     extract::{Request, State},
@@ -7,6 +6,7 @@ use axum::{
     response::Response,
 };
 use http_body_util::BodyExt; // cargo add http_body_util
+use slab_app_core::context::AppState;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::{Instrument, info, info_span};

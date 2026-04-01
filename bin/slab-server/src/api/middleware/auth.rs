@@ -1,10 +1,10 @@
-use slab_app_core::context::AppState;
 use axum::{
     extract::{Request, State},
     http::{StatusCode, header::AUTHORIZATION},
     middleware::Next,
     response::{IntoResponse, Response},
 };
+use slab_app_core::context::AppState;
 use std::sync::Arc;
 
 pub async fn auth_middleware(
