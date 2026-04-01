@@ -6,8 +6,8 @@ use axum::{Json, Router};
 use utoipa::OpenApi;
 
 use crate::api::v1::system::schema::{GpuDeviceStatus, GpuStatusResponse};
-use crate::context::AppState;
-use crate::domain::services::SystemService;
+use slab_app_core::context::AppState;
+use slab_app_core::domain::services::SystemService;
 
 #[derive(OpenApi)]
 #[openapi(paths(gpu_status), components(schemas(GpuStatusResponse, GpuDeviceStatus)))]

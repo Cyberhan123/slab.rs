@@ -4,13 +4,13 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::{Validate, ValidationError};
 
-use crate::domain::models::{
+use slab_app_core::domain::models::{
     AvailableModelsQuery as DomainAvailableModelsQuery,
     CreateModelCommand as DomainCreateModelCommand,
     DownloadModelCommand as DomainDownloadModelCommand, ListModelsFilter as DomainListModelsFilter,
     ModelLoadCommand as DomainModelLoadCommand, ModelSpec as DomainModelSpec,
     ModelStatus as DomainModelStatus, RuntimePresets as DomainRuntimePresets,
-    UnifiedModel as DomainUnifiedModel, UnifiedModelStatus as DomainUnifiedModelStatus,
+    UnifiedModel as DomainUnifiedModel,
     UpdateModelCommand as DomainUpdateModelCommand,
 };
 
@@ -334,12 +334,6 @@ impl From<DomainUnifiedModel> for UnifiedModelResponse {
     }
 }
 
-impl From<DomainUnifiedModelStatus> for String {
-    fn from(status: DomainUnifiedModelStatus) -> Self {
-        status.as_str().to_owned()
-    }
-}
-
 impl From<ModelSpecRequest> for DomainModelSpec {
     fn from(req: ModelSpecRequest) -> Self {
         Self {
@@ -347,7 +341,7 @@ impl From<ModelSpecRequest> for DomainModelSpec {
             remote_model_id: req.remote_model_id,
             pricing: req
                 .pricing
-                .map(|p| crate::domain::models::Pricing { input: p.input, output: p.output }),
+                .map(|p| slab_app_core::domain::models::Pricing { input: p.input, output: p.output }),
             repo_id: req.repo_id,
             filename: req.filename,
             local_path: req.local_path,
