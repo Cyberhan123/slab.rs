@@ -221,9 +221,10 @@ fn default_storage_kind() -> SettingStorageKind {
 }
 
 pub fn embedded_settings_schema() -> Result<SettingsSchema, AppCoreError> {
-    SettingsSchema::from_json_str(include_str!(
-        "../../../../../manifests/settings/settings-schema.json"
-    ))
+    SettingsSchema::from_json_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../manifests/settings/settings-schema.json"
+    )))
 }
 
 impl SettingsSchema {
