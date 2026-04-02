@@ -58,7 +58,7 @@ fn load_ggml_sidecar(path: &Path) -> Option<Arc<GGML>> {
     let ggml_path = path.parent()?.join(format!("{}ggml{}", DLL_PREFIX, DLL_SUFFIX));
     let ggml = GGML::new_with(&ggml_path).ok()?;
     let lib_dir = ggml_path.parent()?.to_string_lossy();
-    ggml.try_load_all_backend_from_path(lib_dir.as_ref()).ok()?;
+    ggml.load_all_backend_from_path(lib_dir.as_ref()).ok()?;
     Some(Arc::new(ggml))
 }
 

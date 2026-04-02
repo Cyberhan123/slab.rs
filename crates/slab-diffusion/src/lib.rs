@@ -150,3 +150,113 @@ impl fmt::Debug for Diffusion {
         f.debug_struct("Diffusion").finish()
     }
 }
+
+#[cfg(all(test, windows))]
+mod tests {
+    use super::*;
+    use std::os::windows::ffi::OsStrExt;
+    use std::path::{Path, PathBuf};
+    use std::sync::OnceLock;
+
+    type DllDirectoryCookie = *mut std::ffi::c_void;
+
+    unsafe extern "system" {
+        fn AddDllDirectory(new_directory: *const u16) -> DllDirectoryCookie;
+    }
+
+    static DLL_DIRS_INIT: OnceLock<Result<(), String>> = OnceLock::new();
+
+    fn workspace_root() -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../..")
+            .canonicalize()
+            .expect("workspace root should resolve")
+    }
+
+    fn vendored_runtime_dir(artifact: &str) -> PathBuf {
+        workspace_root().join("vendor").join(artifact).join("bin")
+    }
+
+    fn vendored_diffusion_library_path() -> PathBuf {
+        vendored_runtime_dir("diffusion").join("stable-diffusion.dll")
+    }
+
+    fn add_dll_directory(path: &Path) -> Result<(), String> {
+        if !path.is_dir() {
+            return Err(format!("runtime directory does not exist: {}", path.display()));
+        }
+
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        wide.push(0);
+
+        let cookie = unsafe { AddDllDirectory(wide.as_ptr()) };
+        if cookie.is_null() {
+            return Err(format!("AddDllDirectory failed for {}", path.display()));
+        }
+
+        Ok(())
+    }
+
+    fn ensure_vendored_runtime_dirs_registered() {
+        let init = DLL_DIRS_INIT.get_or_init(|| {
+            add_dll_directory(&vendored_runtime_dir("diffusion"))?;
+            add_dll_directory(&vendored_runtime_dir("ggml"))?;
+            Ok(())
+        });
+
+        if let Err(error) = init {
+            panic!("failed to register vendored runtime directories: {error}");
+        }
+    }
+
+    fn load_vendored_diffusion() -> Diffusion {
+        ensure_vendored_runtime_dirs_registered();
+
+        Diffusion::new(vendored_diffusion_library_path())
+            .unwrap_or_else(|error| panic!("failed to load vendored diffusion runtime: {error}"))
+    }
+
+    #[test]
+    fn vendored_ffi_loads_and_reports_metadata() {
+        let diffusion = load_vendored_diffusion();
+
+        assert!(diffusion.get_num_physical_cores() >= 1);
+        let _ = diffusion.get_system_info();
+        assert!(!diffusion.get_version().trim().is_empty() || !diffusion.get_commit().trim().is_empty());
+    }
+
+    #[test]
+    fn vendored_ffi_serializes_param_structs() {
+        let diffusion = load_vendored_diffusion();
+
+        let mut context_params = diffusion.new_context_params();
+        context_params.set_model_path("missing-model.gguf");
+        assert!(context_params.to_str().is_some_and(|text| !text.trim().is_empty()));
+
+        let mut sample_params = diffusion.new_sample_params();
+        sample_params.set_sample_steps(8);
+        assert!(diffusion.sample_params_to_str(&sample_params).is_some_and(|text| !text.trim().is_empty()));
+
+        let mut image_params = diffusion.new_image_params();
+        image_params.set_prompt("test prompt");
+        assert!(diffusion.image_params_to_str(&image_params).is_some_and(|text| !text.trim().is_empty()));
+    }
+
+    #[test]
+    fn vendored_ffi_reports_upscaler_creation_failure_for_missing_model() {
+        let diffusion = load_vendored_diffusion();
+        let result = diffusion.new_upscaler_context(
+            "definitely-missing-upscaler-model.pth",
+            false,
+            false,
+            1,
+            64,
+            None,
+        );
+
+        match result {
+            Ok(_) => panic!("expected missing upscaler model to fail"),
+            Err(error) => assert!(matches!(error, DiffusionError::ContextCreationFailed)),
+        }
+    }
+}

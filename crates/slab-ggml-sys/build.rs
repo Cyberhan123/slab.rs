@@ -16,7 +16,7 @@ fn main() {
         .header("wrapper.h")
         .clang_arg(format!("-I{}", layout.primary.include_dir.display()))
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
-        .dynamic_library_name("GGmlLib")
+        .dynamic_library_name("GGmlBaseLib")
         .generate();
 
     let out = PathBuf::from(env::var("OUT_DIR").unwrap());

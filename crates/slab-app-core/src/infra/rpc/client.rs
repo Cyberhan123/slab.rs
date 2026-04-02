@@ -157,7 +157,7 @@ fn log_grpc_error(rpc: &str, request_id: &str, status: &tonic::Status) {
     );
 }
 
-fn is_retryable_load_model_status(status: &tonic::Status) -> bool {
+pub fn is_transient_runtime_status(status: &tonic::Status) -> bool {
     let message = status.message();
     matches!(status.code(), tonic::Code::Unavailable)
         || (matches!(status.code(), tonic::Code::Unknown)
@@ -165,6 +165,14 @@ fn is_retryable_load_model_status(status: &tonic::Status) -> bool {
                 || message.contains("broken pipe")
                 || message.contains("connection error")
                 || message.contains("os error 2")))
+}
+
+pub fn transient_runtime_detail(err: &anyhow::Error) -> Option<String> {
+    let status = err.chain().find_map(|cause| cause.downcast_ref::<tonic::Status>())?;
+    is_transient_runtime_status(status).then(|| {
+        let message = status.message().trim();
+        if message.is_empty() { status.to_string() } else { message.to_owned() }
+    })
 }
 
 pub async fn chat(channel: Channel, req: pb::ChatRequest) -> anyhow::Result<pb::ChatResponse> {
@@ -298,7 +306,7 @@ pub async fn load_model(
                 return Ok(response.into_inner());
             }
             Err(status) => {
-                let retryable = is_retryable_load_model_status(&status);
+                let retryable = is_transient_runtime_status(&status);
                 if retryable && attempt < LOAD_MODEL_MAX_ATTEMPTS {
                     warn!(
                         backend = %backend_id,

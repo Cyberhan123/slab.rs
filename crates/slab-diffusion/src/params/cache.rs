@@ -160,3 +160,41 @@ impl CacheParams {
         self.fp.spectrum_stop_percent = spectrum_stop_percent;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    fn new_cache_params() -> CacheParams {
+        CacheParams {
+            fp: Box::new(unsafe { std::mem::zeroed::<sd_cache_params_t>() }),
+            scm_mask: None,
+        }
+    }
+
+    #[test]
+    fn set_scm_mask_and_numeric_fields_sync_backing() {
+        let mut params = new_cache_params();
+        params.set_mode(CacheMode::Spectrum);
+        params.set_scm_mask("101010".to_owned());
+        params.set_spectrum_window_size(64);
+        params.set_use_relative_threshold(true);
+
+        assert_eq!(params.fp.mode, CacheMode::Spectrum.into());
+        assert_eq!(unsafe { CStr::from_ptr(params.fp.scm_mask) }.to_str().unwrap(), "101010");
+        assert_eq!(params.fp.spectrum_window_size, 64);
+        assert!(params.fp.use_relative_threshold);
+    }
+
+    #[test]
+    fn clone_rebinds_scm_mask_storage() {
+        let mut params = new_cache_params();
+        params.set_scm_mask("dynamic-mask".to_owned());
+
+        let cloned = params.clone();
+
+        assert_ne!(cloned.fp.scm_mask, params.fp.scm_mask);
+        assert_eq!(unsafe { CStr::from_ptr(cloned.fp.scm_mask) }.to_str().unwrap(), "dynamic-mask");
+    }
+}

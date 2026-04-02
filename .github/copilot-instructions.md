@@ -10,16 +10,16 @@ Key repo facts:
   - `x-chat-provider`
   - `shadcn-ui`
   - `tauri-v2`
-- `bin/slab-app` is the Tauri 2 desktop host that launches `bin/slab-server` as a sidecar and mounts local plugin webviews. Its frontend is `packages/slab-desktop`. Native IPC commands live in `bin/slab-app/src-tauri/src/api` and delegate to `crates/slab-app-core`.
+- `bin/slab-app` is the Tauri 2 desktop host that mounts local plugin webviews and calls `crates/slab-app-core` directly from native IPC commands in `bin/slab-app/src-tauri/src/api`. Desktop mode launches `bin/slab-runtime` through the shared `crates/slab-app-core::runtime_supervisor` using a Tauri sidecar adapter, not through `bin/slab-server`.
 - `packages/slab-desktop` is the React 19 + Vite + React Router 7 frontend app, managed as a bun workspace package (`@slab/desktop`).
 - `packages/slab-components` is the shared shadcn/ui-based React component library (`@slab/components`), with Radix UI + Tailwind 4 primitives.
 - `packages/slab-i18n` is the shared i18n package (`@slab/i18n`) using i18next and react-i18next.
 - Frontend server state uses TanStack Query with `openapi-fetch` and `openapi-react-query`.
 - Frontend client state uses Zustand.
 - AI-focused frontend components use Ant Design X, with shared Tailwind 4 primitives from `packages/slab-components/src`.
-- `crates/slab-app-core` (directory: `crates/slab-app-core/`) holds the HTTP-free business logic: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`. Native IPC wrappers live in `bin/slab-app/src-tauri/src/api/`. Migrations live in `crates/slab-app-core/migrations/`.
-- `bin/slab-server` is the thin HTTP (axum) gateway. It depends on `crates/slab-app-core` for domain/infra logic; `state_extractors.rs` provides axum `FromRef` impls, and `error.rs` provides `ServerError` → HTTP response conversion. The server exposes `/v1` plus `/api-docs/openapi.json`.
-- AI inference must stay behind the supervisor plus runtime boundary: `bin/slab-server -> GrpcGateway -> bin/slab-runtime -> crates/slab-core`.
+- `crates/slab-app-core` (directory: `crates/slab-app-core/`) holds the HTTP-free business logic: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and `runtime_supervisor`. Native IPC wrappers live in `bin/slab-app/src-tauri/src/api/`. Migrations live in `crates/slab-app-core/migrations/`.
+- `bin/slab-server` is the thin HTTP (axum) gateway and headless host. It depends on `crates/slab-app-core` for domain/infra logic; `state_extractors.rs` provides axum `FromRef` impls, `error.rs` provides `ServerError` → HTTP response conversion, and runtime process supervision is delegated to the shared core supervisor through a `tokio::process` adapter. The server exposes `/v1` plus `/api-docs/openapi.json`.
+- AI inference must stay behind `host -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime -> crates/slab-core`. Do not reintroduce separate app/server runtime management paths.
 - `bin/slab-runtime` supports TCP or IPC transport for llama, whisper, and diffusion workers.
 - `crates/slab-core` (package: `slab-runtime-core`) holds runtime orchestration, scheduler, and engine adapters. Keep HTTP and SQL concerns out.
 - `crates/slab-types` and `crates/slab-proto` are the shared Rust contract crates for semantic types, settings/runtime models, and server/runtime IPC.

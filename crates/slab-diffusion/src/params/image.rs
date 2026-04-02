@@ -266,3 +266,84 @@ impl ImgParams {
         self.fp.batch_count.max(1)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    fn new_img_params() -> ImgParams {
+        ImgParams {
+            fp: Box::new(unsafe { std::mem::zeroed::<sd_img_gen_params_t>() }),
+            prompt: None,
+            negative_prompt: None,
+            loras: Vec::new(),
+            lora_paths: Vec::new(),
+            c_loras: Vec::new(),
+            init_image: None,
+            ref_images: Vec::new(),
+            c_ref_images: Vec::new(),
+            mask_image: None,
+            sample_params: None,
+            control_image: None,
+            pm_params: None,
+            cache: None,
+        }
+    }
+
+    fn alloc_image_buffer(bytes: &[u8]) -> *mut u8 {
+        let ptr = unsafe { libc::malloc(bytes.len()).cast::<u8>() };
+        assert!(!ptr.is_null());
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, bytes.len()) };
+        ptr
+    }
+
+    fn sample_image(value: u8) -> Image {
+        Image { width: 2, height: 1, channel: 3, data: vec![value; 6] }
+    }
+
+    #[test]
+    fn image_from_raw_copies_pixels_and_handles_empty_images() {
+        let raw = sd_image_t { width: 2, height: 1, channel: 3, data: alloc_image_buffer(&[1, 2, 3, 4, 5, 6]) };
+        let image = Image::from(raw);
+
+        assert_eq!(image.width, 2);
+        assert_eq!(image.height, 1);
+        assert_eq!(image.channel, 3);
+        assert_eq!(image.data, vec![1, 2, 3, 4, 5, 6]);
+
+        let empty = Image::from(sd_image_t { width: 0, height: 0, channel: 4, data: std::ptr::null_mut() });
+        assert_eq!(empty.channel, 4);
+        assert!(empty.data.is_empty());
+    }
+
+    #[test]
+    fn batch_count_is_clamped_to_at_least_one() {
+        let mut params = new_img_params();
+
+        params.set_batch_count(0);
+        assert_eq!(params.fp.batch_count, 1);
+        assert_eq!(params.get_batch_count(), 1);
+
+        params.fp.batch_count = -10;
+        assert_eq!(params.get_batch_count(), 1);
+    }
+
+    #[test]
+    fn clone_resyncs_owned_prompt_and_ref_images() {
+        let mut params = new_img_params();
+        params.set_prompt("A lovely cat");
+        params.set_negative_prompt("blurry");
+        params.set_ref_images(vec![sample_image(7)]);
+        params.set_init_image(sample_image(3));
+
+        let cloned = params.clone();
+
+        assert_eq!(unsafe { CStr::from_ptr(params.fp.prompt) }.to_str().unwrap(), "A lovely cat");
+        assert_eq!(unsafe { CStr::from_ptr(cloned.fp.prompt) }.to_str().unwrap(), "A lovely cat");
+        assert_ne!(cloned.fp.prompt, params.fp.prompt);
+        assert_eq!(cloned.fp.ref_images_count, 1);
+        assert_eq!(cloned.fp.init_image.width, 2);
+        assert_ne!(unsafe { (*cloned.fp.ref_images).data }, unsafe { (*params.fp.ref_images).data });
+    }
+}

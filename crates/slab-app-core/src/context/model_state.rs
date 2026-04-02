@@ -8,6 +8,7 @@ pub struct ModelState {
     pmid: Arc<crate::domain::services::PmidService>,
     store: Arc<crate::infra::db::AnyStore>,
     grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+    runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
     model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
 }
 
@@ -17,9 +18,10 @@ impl ModelState {
         pmid: Arc<crate::domain::services::PmidService>,
         store: Arc<crate::infra::db::AnyStore>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+        runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
-        Self { config, pmid, store, grpc, model_auto_unload }
+        Self { config, pmid, store, grpc, runtime_status, model_auto_unload }
     }
 
     pub fn config(&self) -> &Arc<crate::context::AppConfig> {
@@ -36,6 +38,10 @@ impl ModelState {
 
     pub fn grpc(&self) -> &Arc<crate::infra::rpc::gateway::GrpcGateway> {
         &self.grpc
+    }
+
+    pub fn runtime_status(&self) -> &Arc<crate::runtime_supervisor::RuntimeSupervisorStatus> {
+        &self.runtime_status
     }
 
     pub fn auto_unload(&self) -> &Arc<crate::model_auto_unload::ModelAutoUnloadManager> {

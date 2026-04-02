@@ -137,9 +137,7 @@ impl ModelService {
         let (_, channel) = resolve_backend_channel(&self.model_state, backend_id)?;
         let response = rpc::client::unload_model(channel, backend_id, pb::ModelUnloadRequest {})
             .await
-            .map_err(|error| {
-                AppCoreError::Internal(format!("grpc unload_model failed: {error}"))
-            })?;
+            .map_err(|error| map_grpc_model_error("unload_model", error))?;
         self.model_state.auto_unload().notify_model_unloaded(backend_id).await;
 
         decode_model_status(response)
@@ -700,6 +698,10 @@ fn decode_model_status(response: pb::ModelStatusResponse) -> Result<ModelStatus,
 }
 
 fn map_grpc_model_error(action: &str, err: anyhow::Error) -> AppCoreError {
+    if let Some(detail) = rpc::client::transient_runtime_detail(&err) {
+        return AppCoreError::BackendNotReady(detail);
+    }
+
     let grpc_status = err.chain().find_map(|cause| cause.downcast_ref::<tonic::Status>());
 
     if let Some(status) = grpc_status {
@@ -870,8 +872,12 @@ fn resolve_local_model_path(model: &UnifiedModel) -> Result<String, AppCoreError
 
 #[cfg(test)]
 mod tests {
-    use super::{canonicalize_model_spec, canonicalize_runtime_presets, normalize_required_text};
+    use super::{
+        canonicalize_model_spec, canonicalize_runtime_presets, map_grpc_model_error,
+        normalize_required_text,
+    };
     use crate::domain::models::{ModelSpec, RuntimePresets};
+    use crate::error::AppCoreError;
 
     #[test]
     fn cloud_models_require_remote_model_and_provider_reference() {
@@ -913,5 +919,20 @@ mod tests {
         let value = normalize_required_text("  model-id  ".into(), "id").expect("trimmed value");
 
         assert_eq!(value, "model-id");
+    }
+
+    #[test]
+    fn transient_transport_errors_map_to_backend_not_ready() {
+        let error = anyhow::Error::new(tonic::Status::unknown(
+            "transport error: broken pipe while reconnecting runtime",
+        ));
+
+        let mapped = map_grpc_model_error("load_model", error);
+        match mapped {
+            AppCoreError::BackendNotReady(detail) => {
+                assert!(detail.contains("transport error"));
+            }
+            other => panic!("expected BackendNotReady, got {other:?}"),
+        }
     }
 }

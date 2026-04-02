@@ -133,11 +133,15 @@ pub fn run() {
         ])
         .setup(move |app| {
             setup::setup_windows(app)?;
-            let launch_spec = setup::run_runtime_sidecar(app)?;
+            let runtime_supervisor = setup::run_runtime_sidecar(app)?;
             plugins::init(app, api_endpoint.clone()).map_err(std::io::Error::other)?;
 
-            tauri::async_runtime::block_on(api::init_state(app.handle(), &launch_spec))
-                .map_err(|e| std::io::Error::other(format!("core state init failed: {e}")))?;
+            tauri::async_runtime::block_on(api::init_state(
+                app.handle(),
+                runtime_supervisor.launch_spec(),
+                runtime_supervisor.status_registry(),
+            ))
+            .map_err(|e| std::io::Error::other(format!("core state init failed: {e}")))?;
 
             Ok(())
         })

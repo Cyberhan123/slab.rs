@@ -7780,6 +7780,7 @@ dependencies = [
 name = "slab-app"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "base64 0.22.1",
  "dirs-next",
  "extism",
@@ -7875,6 +7876,7 @@ name = "slab-diffusion"
 version = "0.0.1"
 dependencies = [
  "bindgen",
+ "hf-hub",
  "libc",
  "libloading 0.8.9",
  "slab-diffusion-sys",

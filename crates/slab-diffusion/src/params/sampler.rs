@@ -170,3 +170,69 @@ impl SampleParams {
         self.fp.flow_shift = flow_shift;
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::params::slg::SlgParams;
+
+    fn new_sample_params() -> SampleParams {
+        SampleParams {
+            fp: Box::new(unsafe { std::mem::zeroed::<sd_sample_params_t>() }),
+            guidance: None,
+            custom_sigmas: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn sample_method_and_scheduler_round_trip_known_and_unknown_values() {
+        let scheduler: slab_diffusion_sys::scheduler_t = Scheduler::KARRAS.into();
+
+        assert_eq!(SampleMethod::from(sample_method_t_EULER_SAMPLE_METHOD), SampleMethod::Euler);
+        assert_eq!(SampleMethod::from(sample_method_t_SAMPLE_METHOD_COUNT), SampleMethod::Unknown);
+        assert_eq!(Scheduler::from(scheduler), Scheduler::KARRAS);
+        assert_eq!(Scheduler::from(slab_diffusion_sys::scheduler_t_SCHEDULER_COUNT), Scheduler::UNKNOWN);
+    }
+
+    #[test]
+    fn set_guidance_and_custom_sigmas_syncs_nested_backing_fields() {
+        let mut params = new_sample_params();
+        let guidance = GuidanceParams {
+            txt_cfg: 7.5,
+            img_cfg: 1.25,
+            distilled_guidance: 2.0,
+            slg: SlgParams {
+                layers: vec![1, 4, 7],
+                layer_start: 0.1,
+                layer_end: 0.9,
+                scale: 0.8,
+            },
+        };
+
+        params.set_guidance(guidance.clone());
+        params.set_custom_sigmas(vec![0.1, 0.2, 0.3]);
+        params.set_scheduler(Scheduler::LCM);
+        params.set_sample_method(SampleMethod::DPM2);
+
+        assert_eq!(params.fp.guidance.txt_cfg, guidance.txt_cfg);
+        assert_eq!(params.fp.guidance.img_cfg, guidance.img_cfg);
+        assert_eq!(params.fp.guidance.slg.layer_count, 3);
+        assert_eq!(unsafe { std::slice::from_raw_parts(params.fp.guidance.slg.layers, 3) }, &[1, 4, 7]);
+        assert_eq!(params.fp.custom_sigmas_count, 3);
+        assert_eq!(unsafe { std::slice::from_raw_parts(params.fp.custom_sigmas, 3) }, &[0.1, 0.2, 0.3]);
+        assert_eq!(Scheduler::from(params.fp.scheduler), Scheduler::LCM);
+        assert_eq!(SampleMethod::from(params.fp.sample_method), SampleMethod::DPM2);
+    }
+
+    #[test]
+    fn clone_rebinds_custom_sigma_storage() {
+        let mut params = new_sample_params();
+        params.set_custom_sigmas(vec![0.5, 0.75]);
+
+        let cloned = params.clone();
+
+        assert_eq!(cloned.fp.custom_sigmas_count, 2);
+        assert_ne!(cloned.fp.custom_sigmas, params.fp.custom_sigmas);
+        assert_eq!(unsafe { std::slice::from_raw_parts(cloned.fp.custom_sigmas, 2) }, &[0.5, 0.75]);
+    }
+}
