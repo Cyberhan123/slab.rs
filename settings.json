@@ -1,0 +1,235 @@
+{
+  "$schema": "./settings-schema.json",
+  "schema_version": 2,
+  // 移入 slab.db
+  // "setup": {
+  //   "initialized": true,
+  // },
+  "database": {
+    "url": "sqlite:///%AppData%/Slab/slab.db?mode=rwc"
+  },
+  // 这里是全局的logging配置，所有模块都会继承，除非被各自的logging覆盖
+  "logging": {
+    "level": "info",
+    "json": false,
+    "file": null,
+    "path": "%AppData%/Slab/logs",
+  },
+  "runtime": {
+    "mode": "managed_children",
+    "transport": "ipc", // 可选 "ipc" 或 "http"
+    // 这里是runtime全局的logging配置，所有runtime都会继承，除非被各自的logging覆盖
+    "logging": {
+      "level": "info",
+      "json": false,
+      "file": null,
+      "path": "%AppData%/Slab/logs",
+    },
+    "ffmpeg": {
+      "enabled": true,
+      "tag": null,
+      "auto_download": true,
+      "asset": "%AppData%/Slab/tools/ffmpeg"
+    },
+    // 这里是全局的ipc_path,server,app 都从这里寻找runtime的配置, 
+    "ipc": {
+      "path": null
+    },
+    // 这里是全局的capacity配置，所有runtime都会继承，除非被各自的capacity覆盖
+    "capacity": {
+      "queue": 64,
+      "backend": 4, // 代表每个独立的runtime最多可以有4个模型同时加载，超过的模型会排队等待，默认为4，可以根据实际情况调整
+    },
+    // 这里因为ggml是native库，所以需要按照动态库开runtime
+    "ggml": {
+      "tag": null,
+      "asset": "%AppData%/Slab/resources/libs", // 这是ggml的动态库放在这里，独有字段
+      "llama": {
+        "enabled": true,
+        "bind": "127.0.0.1:3001",
+        "capacity": {
+          "queue": 64,
+          "backend": 1, // 默认为1，因为现在ctx会独享模型大于1会把显存存打爆
+        },
+        "tag": null,
+        "asset": null,
+        // "num_workers": 1, 这个字段废弃，和queue_capacity重复了，如果为了兼容llama,则使用capacity.backend填充
+        "session": {
+          "state_path": "%AppData%/Slab/tmp/slab-sessions",
+        },
+        // 和全局logging 结构相同
+        "logging": {
+          "level": "info",
+          "json": false,
+          "file": null,
+          "path": "%AppData%/Slab/logs",
+        },
+      },
+      "whisper": {
+        "enabled": true,
+        "bind": "127.0.0.1:3002",
+        "ipc": {
+          "path": null
+        },
+        "tag": null,
+        "asset": null,
+        "capacity": {
+          "queue": 64,
+          "backend": 1, // 默认为1，因为现在ctx会独享模型大于1会把显存存打爆
+        },
+        // "num_workers": 1, 这个字段废弃
+        "logging": {
+          "level": "info",
+          "json": false,
+          "file": null,
+          "path": "%AppData%/Slab/logs",
+        },
+      },
+      "diffusion": {
+        "enabled": true,
+        "bind": "127.0.0.1:3003",
+        "ipc": {
+          "path": null
+        },
+        "tag": null,
+        "asset": null,
+        "capacity": {
+          "queue": 64,
+          "backend": 1, // 默认为1，因为现在ctx会独享模型大于1会把显存存打爆
+        },
+        // "num_workers": 1, 这个字段废弃
+        // 和全局logging 结构相同
+        "logging": {
+          "level": "info",
+          "json": false,
+          "file": null,
+          "path": "%AppData%/Slab/logs",
+        },
+      },
+    },
+    // 这里因为candle是rust库，所以所有的模型都放在一起开一个runtime
+    "candle": {
+      "enabled": false,
+      "bind": "127.0.0.1:3004",
+      "ipc": {
+        "path": null
+      },
+      "tag": null,
+      "asset": null,
+      // "num_workers": 1, 这个字段废弃
+      "capacity": {
+        "queue": 64,
+        "backend": 1, // 默认为1，因为现在ctx会独享模型大于1会把显存存打爆
+      },
+      // 和全局logging 结构相同
+      "logging": {
+        "level": "info",
+        "json": false,
+        "file": null,
+        "path": "%AppData%/Slab/logs",
+      },
+    },
+    // 这里因为onnx是rust库，所以所有的模型都放在一起开一个runtime
+    "onnx": {
+      "enabled": false,
+      "bind": "127.0.0.1:3005",
+      "ipc": {
+        "path": null
+      },
+      "tag": null,
+      "asset": null,
+      "capacity": {
+        "queue": 64,
+        "backend": 1, // 默认为1，因为现在ctx会独享模型大于1会把显存存打爆
+      },
+      // "num_workers": 1, 这个字段废弃，
+      "logging": {
+        "level": "info",
+        "json": false,
+        "file": null,
+        "path": "%AppData%/Slab/logs",
+      },
+    }
+  },
+  "providers": {
+    "registry": [
+      {
+        "id": "openai-main",
+        "family": "openai_compatible",
+        "display_name": "OpenAI",
+        "api_base": "https://api.openai.com/v1",
+        "auth": {
+          "api_key": "sk-live-REPLACE_ME",
+          "api_key_env": null
+        },
+        "defaults": {
+          "headers": {},
+          "query": {}
+        }
+      },
+      {
+        "id": "company-gateway",
+        "family": "openai_compatible",
+        "display_name": "Company Gateway",
+        "api_base": "https://llm.example.com/v1",
+        "auth": {
+          "api_key": null,
+          "api_key_env": "COMPANY_LLM_API_KEY"
+        },
+        "defaults": {
+          "headers": {
+            "x-team": "research"
+          },
+          "query": {}
+        }
+      }
+    ]
+  },
+  "models": {
+    "cache_path": "C:/Users/cyberhan/AppData/Roaming/Slab/cache/models",
+    "auto_unload": {
+      "enabled": true,
+      "idle_minutes": 15
+    },
+    "config_path": "C:/Users/cyberhan/AppData/Roaming/Slab/models"
+  },
+  // 这里只保留server独有的配置
+  "server": {
+    "bind": "127.0.0.1:3000",
+    "logging": {
+      "level": "info",
+      "json": false,
+      "path": null
+    },
+    "cors": {
+      "allowed_origins": [
+        "http://127.0.0.1:1420"
+      ]
+    },
+    "admin": {
+      "token": null
+    },
+    "swagger": {
+      "enabled": true
+    },
+    "cloud_http_trace": false,
+  },
+  // 我们不需要这个字段，这是应该在 model json 配置的
+  // "diffusion": {
+  //   "paths": {
+  //     "model": null,
+  //     "vae": null,
+  //     "taesd": null,
+  //     "lora_model_dir": null,
+  //     "clip_l": null,
+  //     "clip_g": null,
+  //     "t5xxl": null
+  //   },
+  //   "performance": {
+  //     "flash_attn": false,
+  //     "vae_device": "",
+  //     "clip_device": "",
+  //     "offload_params_to_cpu": false
+  //   }
+  // }
+}

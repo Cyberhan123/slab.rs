@@ -8,7 +8,7 @@ use chrono::Utc;
 use tokio::sync::RwLock;
 use uuid::Uuid;
 
-use slab_types::settings::CloudProviderConfig;
+use slab_types::settings::{CloudProviderConfig, SettingsDocumentV2};
 
 use crate::domain::models::{
     SettingDefinition, SettingsDocumentView, SettingsSchema, SettingsSectionView,
@@ -35,6 +35,18 @@ struct SettingsRuntimeState {
     warnings: Vec<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SettingsDocumentProviderV2 {
+    path: PathBuf,
+    state: Arc<RwLock<SettingsDocumentRuntimeStateV2>>,
+}
+
+#[derive(Debug, Clone, Default)]
+struct SettingsDocumentRuntimeStateV2 {
+    document: SettingsDocumentV2,
+    warnings: Vec<String>,
+}
+
 impl SettingsProvider {
     pub async fn load(path: PathBuf) -> Result<Self, AppCoreError> {
         let schema = embedded_settings_schema()?;
@@ -54,6 +66,10 @@ impl SettingsProvider {
     #[cfg(test)]
     pub fn schema_version(&self) -> u32 {
         self.schema.schema_version()
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     pub async fn document(&self) -> SettingsDocumentView {
@@ -222,6 +238,76 @@ impl SettingsProvider {
     }
 }
 
+impl SettingsDocumentProviderV2 {
+    pub async fn load(path: PathBuf) -> Result<Self, AppCoreError> {
+        let path_for_load = path.clone();
+        let state = tokio::task::spawn_blocking(move || load_runtime_state_v2(&path_for_load))
+            .await
+            .map_err(|error| {
+                AppCoreError::Internal(format!("settings V2 loader task failed: {error}"))
+            })??;
+
+        Ok(Self { path, state: Arc::new(RwLock::new(state)) })
+    }
+
+    pub async fn document(&self) -> SettingsDocumentV2 {
+        self.state.read().await.document.clone()
+    }
+
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+
+    pub async fn warnings(&self) -> Vec<String> {
+        self.state.read().await.warnings.clone()
+    }
+
+    pub async fn value(&self, path: &str) -> Result<serde_json::Value, AppCoreError> {
+        let state = self.state.read().await;
+        let document = settings_document_v2_to_json_value(&state.document);
+
+        value_at_path(&document, path)
+            .cloned()
+            .ok_or_else(|| AppCoreError::NotFound(format!("setting pmid '{}' not found", path)))
+    }
+
+    pub async fn update(
+        &self,
+        path: &str,
+        command: UpdateSettingCommand,
+    ) -> Result<serde_json::Value, AppCoreError> {
+        let mut state = self.state.write().await;
+        let mut next_document = settings_document_v2_to_json_value(&state.document);
+        let default_document = settings_document_v2_to_json_value(&SettingsDocumentV2::default());
+
+        let next_value = match command.op {
+            crate::domain::models::UpdateSettingOperation::Set => command.value.ok_or_else(|| {
+                AppCoreError::BadRequest(format!(
+                    "setting '{}' update requires a value when op=set",
+                    path
+                ))
+            })?,
+            crate::domain::models::UpdateSettingOperation::Unset => value_at_path(&default_document, path)
+                .cloned()
+                .ok_or_else(|| AppCoreError::NotFound(format!("setting pmid '{}' not found", path)))?,
+        };
+
+        set_value_at_path(&mut next_document, path, next_value.clone())?;
+
+        let next_settings: SettingsDocumentV2 = serde_json::from_value(next_document).map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "setting '{}' update produced an invalid settings document: {error}",
+                path
+            ))
+        })?;
+
+        write_settings_document_v2_file(&self.path, &next_settings)?;
+        state.document = next_settings;
+
+        Ok(next_value)
+    }
+}
+
 fn load_runtime_state(
     schema: &SettingsSchema,
     path: &Path,
@@ -240,7 +326,7 @@ fn load_runtime_state(
         ))
     })?;
 
-    let parsed: SettingsValuesFile = match serde_json::from_str(&raw) {
+    let raw_json: serde_json::Value = match serde_json::from_str(&raw) {
         Ok(parsed) => parsed,
         Err(error) => {
             let warning =
@@ -249,6 +335,23 @@ fn load_runtime_state(
                 warnings: vec![warning],
                 ..SettingsRuntimeState::default()
             });
+        }
+    };
+
+    let parsed: SettingsValuesFile = match serde_json::from_value(raw_json.clone()) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            if serde_json::from_value::<SettingsDocumentV2>(raw_json).is_ok() {
+                return Err(AppCoreError::NotImplemented(
+                    "settings file uses the V2 nested document format; load it with SettingsDocumentProviderV2"
+                        .to_owned(),
+                ));
+            }
+
+            return Err(AppCoreError::BadRequest(format!(
+                "settings file '{}' is valid JSON but does not match the legacy PMID override format: {error}",
+                path.display()
+            )));
         }
     };
 
@@ -310,6 +413,77 @@ fn recover_corrupt_settings_file(
 
     Ok(format!(
         "Recovered from corrupt settings file. Original file was backed up to '{}' ({reason}).",
+        backup_path.display()
+    ))
+}
+
+fn load_runtime_state_v2(path: &Path) -> Result<SettingsDocumentRuntimeStateV2, AppCoreError> {
+    ensure_settings_parent_dir(path)?;
+
+    if !path.exists() {
+        let document = SettingsDocumentV2::default();
+        write_settings_document_v2_file(path, &document)?;
+        return Ok(SettingsDocumentRuntimeStateV2 { document, warnings: Vec::new() });
+    }
+
+    let raw = fs::read_to_string(path).map_err(|error| {
+        AppCoreError::Internal(format!(
+            "failed to read settings V2 file '{}': {error}",
+            path.display()
+        ))
+    })?;
+
+    let raw_json: serde_json::Value = match serde_json::from_str(&raw) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            let warning = recover_corrupt_settings_document_v2_file(path, &error.to_string())?;
+            return Ok(SettingsDocumentRuntimeStateV2 {
+                document: SettingsDocumentV2::default(),
+                warnings: vec![warning],
+            });
+        }
+    };
+
+    match serde_json::from_value::<SettingsDocumentV2>(raw_json.clone()) {
+        Ok(document) => Ok(SettingsDocumentRuntimeStateV2 { document, warnings: Vec::new() }),
+        Err(error) => {
+            if serde_json::from_value::<SettingsValuesFile>(raw_json).is_ok() {
+                return Err(AppCoreError::NotImplemented(
+                    "settings file uses the legacy PMID override format; load it with SettingsProvider"
+                        .to_owned(),
+                ));
+            }
+
+            Err(AppCoreError::BadRequest(format!(
+                "settings file '{}' is valid JSON but does not match the V2 settings document format: {error}",
+                path.display()
+            )))
+        }
+    }
+}
+
+fn recover_corrupt_settings_document_v2_file(
+    path: &Path,
+    reason: &str,
+) -> Result<String, AppCoreError> {
+    let backup_name = format!(
+        "{}.corrupt-{}",
+        path.file_name().and_then(|name| name.to_str()).unwrap_or("settings.json"),
+        Utc::now().format("%Y%m%d%H%M%S")
+    );
+    let backup_path = path.with_file_name(backup_name);
+
+    fs::rename(path, &backup_path).map_err(|error| {
+        AppCoreError::Internal(format!(
+            "failed to back up corrupt settings V2 file '{}': {error}",
+            path.display()
+        ))
+    })?;
+
+    write_settings_document_v2_file(path, &SettingsDocumentV2::default())?;
+
+    Ok(format!(
+        "Recovered from corrupt settings V2 file. Original file was backed up to '{}' ({reason}).",
         backup_path.display()
     ))
 }
@@ -388,6 +562,62 @@ fn write_values_file(path: &Path, values: &SettingsValuesFile) -> Result<(), App
         })?;
         temp_file.sync_all().map_err(|error| {
             AppCoreError::Internal(format!("failed to flush settings file: {error}"))
+        })?;
+
+        replace_file(&temp_path, path)?;
+        sync_parent_dir(parent)?;
+        Ok(())
+    })();
+
+    if write_result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+
+    write_result
+}
+
+fn write_settings_document_v2_file(
+    path: &Path,
+    document: &SettingsDocumentV2,
+) -> Result<(), AppCoreError> {
+    ensure_settings_parent_dir(path)?;
+
+    let parent = path.parent().ok_or_else(|| {
+        AppCoreError::Internal(format!(
+            "settings path '{}' has no parent directory",
+            path.display()
+        ))
+    })?;
+    let file_name = path.file_name().and_then(|name| name.to_str()).ok_or_else(|| {
+        AppCoreError::Internal(format!("settings path '{}' has invalid file name", path.display()))
+    })?;
+
+    let temp_path = parent.join(format!(".{}.tmp-{}", file_name, Uuid::new_v4()));
+    let mut payload = serde_json::to_vec_pretty(document).map_err(|error| {
+        AppCoreError::Internal(format!("failed to serialize settings V2 file: {error}"))
+    })?;
+    payload.push(b'\n');
+
+    let write_result = (|| -> Result<(), AppCoreError> {
+        let mut temp_file =
+            OpenOptions::new().create_new(true).write(true).open(&temp_path).map_err(|error| {
+                AppCoreError::Internal(format!(
+                    "failed to create temp settings V2 file '{}': {error}",
+                    temp_path.display()
+                ))
+            })?;
+
+        #[cfg(unix)]
+        {
+            let permissions = fs::Permissions::from_mode(0o600);
+            let _ = temp_file.set_permissions(permissions);
+        }
+
+        temp_file.write_all(&payload).map_err(|error| {
+            AppCoreError::Internal(format!("failed to write settings V2 file: {error}"))
+        })?;
+        temp_file.sync_all().map_err(|error| {
+            AppCoreError::Internal(format!("failed to flush settings V2 file: {error}"))
         })?;
 
         replace_file(&temp_path, path)?;
@@ -481,6 +711,303 @@ fn describe_value_type(value: &serde_json::Value) -> &'static str {
         serde_json::Value::Array(_) => "array",
         serde_json::Value::Object(_) => "object",
     }
+}
+
+pub(crate) fn settings_document_v2_to_json_value(
+    document: &SettingsDocumentV2,
+) -> serde_json::Value {
+    serde_json::json!({
+        "$schema": document.schema,
+        "schema_version": document.schema_version,
+        "database": {
+            "url": document.database.url,
+        },
+        "logging": {
+            "level": document.logging.level,
+            "json": document.logging.json,
+            "path": document.logging.path,
+        },
+        "tools": {
+            "ffmpeg": {
+                "enabled": document.tools.ffmpeg.enabled,
+                "auto_download": document.tools.ffmpeg.auto_download,
+                "install_dir": document.tools.ffmpeg.install_dir,
+                "source": {
+                    "version": document.tools.ffmpeg.source.version,
+                    "artifact": document.tools.ffmpeg.source.artifact,
+                }
+            }
+        },
+        "runtime": {
+            "mode": document.runtime.mode,
+            "transport": document.runtime.transport,
+            "sessions": {
+                "state_dir": document.runtime.sessions.state_dir,
+            },
+            "logging": {
+                "level": document.runtime.logging.level,
+                "json": document.runtime.logging.json,
+                "path": document.runtime.logging.path,
+            },
+            "capacity": {
+                "queue": document.runtime.capacity.queue,
+                "concurrent_requests": document.runtime.capacity.concurrent_requests,
+            },
+            "endpoint": {
+                "http": {
+                    "address": document.runtime.endpoint.http.address,
+                },
+                "ipc": {
+                    "path": document.runtime.endpoint.ipc.path,
+                }
+            },
+            "ggml": {
+                "install_dir": document.runtime.ggml.install_dir,
+                "source": {
+                    "version": document.runtime.ggml.source.version,
+                    "artifact": document.runtime.ggml.source.artifact,
+                },
+                "logging": {
+                    "level": document.runtime.ggml.logging.level,
+                    "json": document.runtime.ggml.logging.json,
+                    "path": document.runtime.ggml.logging.path,
+                },
+                "capacity": {
+                    "queue": document.runtime.ggml.capacity.queue,
+                    "concurrent_requests": document.runtime.ggml.capacity.concurrent_requests,
+                },
+                "endpoint": {
+                    "http": {
+                        "address": document.runtime.ggml.endpoint.http.address,
+                    },
+                    "ipc": {
+                        "path": document.runtime.ggml.endpoint.ipc.path,
+                    }
+                },
+                "backends": {
+                    "llama": {
+                        "enabled": document.runtime.ggml.backends.llama.enabled,
+                        "context_length": document.runtime.ggml.backends.llama.context_length,
+                        "source": {
+                            "version": document.runtime.ggml.backends.llama.source.version,
+                            "artifact": document.runtime.ggml.backends.llama.source.artifact,
+                        },
+                        "logging": {
+                            "level": document.runtime.ggml.backends.llama.logging.level,
+                            "json": document.runtime.ggml.backends.llama.logging.json,
+                            "path": document.runtime.ggml.backends.llama.logging.path,
+                        },
+                        "capacity": {
+                            "queue": document.runtime.ggml.backends.llama.capacity.queue,
+                            "concurrent_requests": document.runtime.ggml.backends.llama.capacity.concurrent_requests,
+                        },
+                        "endpoint": {
+                            "http": {
+                                "address": document.runtime.ggml.backends.llama.endpoint.http.address,
+                            },
+                            "ipc": {
+                                "path": document.runtime.ggml.backends.llama.endpoint.ipc.path,
+                            }
+                        }
+                    },
+                    "whisper": {
+                        "enabled": document.runtime.ggml.backends.whisper.enabled,
+                        "source": {
+                            "version": document.runtime.ggml.backends.whisper.source.version,
+                            "artifact": document.runtime.ggml.backends.whisper.source.artifact,
+                        },
+                        "logging": {
+                            "level": document.runtime.ggml.backends.whisper.logging.level,
+                            "json": document.runtime.ggml.backends.whisper.logging.json,
+                            "path": document.runtime.ggml.backends.whisper.logging.path,
+                        },
+                        "capacity": {
+                            "queue": document.runtime.ggml.backends.whisper.capacity.queue,
+                            "concurrent_requests": document.runtime.ggml.backends.whisper.capacity.concurrent_requests,
+                        },
+                        "endpoint": {
+                            "http": {
+                                "address": document.runtime.ggml.backends.whisper.endpoint.http.address,
+                            },
+                            "ipc": {
+                                "path": document.runtime.ggml.backends.whisper.endpoint.ipc.path,
+                            }
+                        }
+                    },
+                    "diffusion": {
+                        "enabled": document.runtime.ggml.backends.diffusion.enabled,
+                        "source": {
+                            "version": document.runtime.ggml.backends.diffusion.source.version,
+                            "artifact": document.runtime.ggml.backends.diffusion.source.artifact,
+                        },
+                        "logging": {
+                            "level": document.runtime.ggml.backends.diffusion.logging.level,
+                            "json": document.runtime.ggml.backends.diffusion.logging.json,
+                            "path": document.runtime.ggml.backends.diffusion.logging.path,
+                        },
+                        "capacity": {
+                            "queue": document.runtime.ggml.backends.diffusion.capacity.queue,
+                            "concurrent_requests": document.runtime.ggml.backends.diffusion.capacity.concurrent_requests,
+                        },
+                        "endpoint": {
+                            "http": {
+                                "address": document.runtime.ggml.backends.diffusion.endpoint.http.address,
+                            },
+                            "ipc": {
+                                "path": document.runtime.ggml.backends.diffusion.endpoint.ipc.path,
+                            }
+                        }
+                    }
+                }
+            },
+            "candle": {
+                "enabled": document.runtime.candle.enabled,
+                "install_dir": document.runtime.candle.install_dir,
+                "source": {
+                    "version": document.runtime.candle.source.version,
+                    "artifact": document.runtime.candle.source.artifact,
+                },
+                "logging": {
+                    "level": document.runtime.candle.logging.level,
+                    "json": document.runtime.candle.logging.json,
+                    "path": document.runtime.candle.logging.path,
+                },
+                "capacity": {
+                    "queue": document.runtime.candle.capacity.queue,
+                    "concurrent_requests": document.runtime.candle.capacity.concurrent_requests,
+                },
+                "endpoint": {
+                    "http": {
+                        "address": document.runtime.candle.endpoint.http.address,
+                    },
+                    "ipc": {
+                        "path": document.runtime.candle.endpoint.ipc.path,
+                    }
+                }
+            },
+            "onnx": {
+                "enabled": document.runtime.onnx.enabled,
+                "install_dir": document.runtime.onnx.install_dir,
+                "source": {
+                    "version": document.runtime.onnx.source.version,
+                    "artifact": document.runtime.onnx.source.artifact,
+                },
+                "logging": {
+                    "level": document.runtime.onnx.logging.level,
+                    "json": document.runtime.onnx.logging.json,
+                    "path": document.runtime.onnx.logging.path,
+                },
+                "capacity": {
+                    "queue": document.runtime.onnx.capacity.queue,
+                    "concurrent_requests": document.runtime.onnx.capacity.concurrent_requests,
+                },
+                "endpoint": {
+                    "http": {
+                        "address": document.runtime.onnx.endpoint.http.address,
+                    },
+                    "ipc": {
+                        "path": document.runtime.onnx.endpoint.ipc.path,
+                    }
+                }
+            }
+        },
+        "providers": {
+            "registry": document.providers.registry.iter().map(|entry| serde_json::json!({
+                "id": entry.id,
+                "family": entry.family,
+                "display_name": entry.display_name,
+                "api_base": entry.api_base,
+                "auth": {
+                    "api_key": entry.auth.api_key,
+                    "api_key_env": entry.auth.api_key_env,
+                },
+                "defaults": {
+                    "headers": entry.defaults.headers,
+                    "query": entry.defaults.query,
+                }
+            })).collect::<Vec<_>>(),
+        },
+        "models": {
+            "cache_dir": document.models.cache_dir,
+            "config_dir": document.models.config_dir,
+            "auto_unload": {
+                "enabled": document.models.auto_unload.enabled,
+                "idle_minutes": document.models.auto_unload.idle_minutes,
+            }
+        },
+        "server": {
+            "address": document.server.address,
+            "logging": {
+                "level": document.server.logging.level,
+                "json": document.server.logging.json,
+                "path": document.server.logging.path,
+            },
+            "cors": {
+                "allowed_origins": document.server.cors.allowed_origins,
+            },
+            "admin": {
+                "token": document.server.admin.token,
+            },
+            "swagger": {
+                "enabled": document.server.swagger.enabled,
+            },
+            "cloud_http_trace": document.server.cloud_http_trace,
+        }
+    })
+}
+
+fn value_at_path<'a>(root: &'a serde_json::Value, path: &str) -> Option<&'a serde_json::Value> {
+    let mut current = root;
+    for segment in settings_path_segments(path).ok()? {
+        current = current.as_object()?.get(segment)?;
+    }
+    Some(current)
+}
+
+fn set_value_at_path(
+    root: &mut serde_json::Value,
+    path: &str,
+    next_value: serde_json::Value,
+) -> Result<(), AppCoreError> {
+    let segments = settings_path_segments(path)?;
+    let (leaf, parents) = segments.split_last().ok_or_else(|| {
+        AppCoreError::BadRequest("settings pmid must not be empty".to_owned())
+    })?;
+    let mut current = root;
+
+    for segment in parents {
+        current = current
+            .as_object_mut()
+            .and_then(|object| object.get_mut(*segment))
+            .ok_or_else(|| AppCoreError::NotFound(format!("setting pmid '{}' not found", path)))?;
+    }
+
+    let object = current
+        .as_object_mut()
+        .ok_or_else(|| AppCoreError::NotFound(format!("setting pmid '{}' not found", path)))?;
+    if !object.contains_key(*leaf) {
+        return Err(AppCoreError::NotFound(format!("setting pmid '{}' not found", path)));
+    }
+
+    object.insert((*leaf).to_owned(), next_value);
+    Ok(())
+}
+
+fn settings_path_segments(path: &str) -> Result<Vec<&str>, AppCoreError> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(AppCoreError::BadRequest("settings pmid must not be empty".to_owned()));
+    }
+
+    let segments: Vec<&str> = trimmed.split('.').map(str::trim).collect();
+    if segments.iter().any(|segment| segment.is_empty()) {
+        return Err(AppCoreError::BadRequest(format!(
+            "settings pmid '{}' contains an empty path segment",
+            path
+        )));
+    }
+
+    Ok(segments)
 }
 
 #[cfg(test)]
@@ -647,6 +1174,132 @@ mod tests {
         assert!(file.values.is_empty());
         assert!(!document.warnings.is_empty());
         assert!(backup_exists);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn legacy_provider_rejects_v2_document_without_rewriting_file() {
+        let path = temp_settings_path();
+        ensure_settings_parent_dir(&path).expect("dir");
+        let mut document = SettingsDocumentV2::default();
+        document.logging.level = "debug".to_owned();
+        fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))
+            .expect("write");
+
+        let error = SettingsProvider::load(path.clone()).await.expect_err("legacy must reject V2");
+        let persisted: SettingsDocumentV2 =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+
+        assert!(matches!(error, AppCoreError::NotImplemented(_)));
+        assert_eq!(persisted.logging.level, "debug");
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn v2_provider_creates_missing_document_file() {
+        let path = temp_settings_path();
+
+        let provider = SettingsDocumentProviderV2::load(path.clone()).await.expect("provider");
+        let file: SettingsDocumentV2 =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+
+        assert_eq!(provider.document().await, SettingsDocumentV2::default());
+        assert_eq!(file.schema_version, 2);
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn v2_provider_set_and_unset_restore_defaults() {
+        let path = temp_settings_path();
+        let provider = SettingsDocumentProviderV2::load(path.clone()).await.expect("provider");
+
+        provider
+            .update(
+                "logging.level",
+                UpdateSettingCommand {
+                    op: crate::domain::models::UpdateSettingOperation::Set,
+                    value: Some(serde_json::json!("debug")),
+                },
+            )
+            .await
+            .expect("set");
+        assert_eq!(provider.value("logging.level").await.expect("value"), serde_json::json!("debug"));
+
+        provider
+            .update(
+                "logging.level",
+                UpdateSettingCommand {
+                    op: crate::domain::models::UpdateSettingOperation::Unset,
+                    value: None,
+                },
+            )
+            .await
+            .expect("unset");
+
+        let persisted: SettingsDocumentV2 =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+        assert_eq!(persisted.logging.level, "info");
+        assert_eq!(provider.value("logging.level").await.expect("value"), serde_json::json!("info"));
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn v2_provider_rejects_type_invalid_updates() {
+        let path = temp_settings_path();
+        let provider = SettingsDocumentProviderV2::load(path.clone()).await.expect("provider");
+
+        let error = provider
+            .update(
+                "logging.json",
+                UpdateSettingCommand {
+                    op: crate::domain::models::UpdateSettingOperation::Set,
+                    value: Some(serde_json::json!("yes")),
+                },
+            )
+            .await
+            .expect_err("invalid type must fail");
+
+        assert!(matches!(error, AppCoreError::BadRequest(_)));
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn v2_provider_handles_optional_paths_that_default_to_null() {
+        let path = temp_settings_path();
+        let provider = SettingsDocumentProviderV2::load(path.clone()).await.expect("provider");
+
+        assert_eq!(provider.value("runtime.ggml.install_dir").await.expect("value"), serde_json::Value::Null);
+
+        provider
+            .update(
+                "runtime.ggml.install_dir",
+                UpdateSettingCommand {
+                    op: crate::domain::models::UpdateSettingOperation::Set,
+                    value: Some(serde_json::json!("D:/runtime/libs")),
+                },
+            )
+            .await
+            .expect("set");
+
+        assert_eq!(provider.value("runtime.ggml.install_dir").await.expect("value"), serde_json::json!("D:/runtime/libs"));
+
+        provider
+            .update(
+                "runtime.ggml.install_dir",
+                UpdateSettingCommand {
+                    op: crate::domain::models::UpdateSettingOperation::Unset,
+                    value: None,
+                },
+            )
+            .await
+            .expect("unset");
+
+        assert_eq!(provider.value("runtime.ggml.install_dir").await.expect("value"), serde_json::Value::Null);
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

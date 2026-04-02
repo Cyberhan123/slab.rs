@@ -110,7 +110,7 @@ pub struct SettingValidationErrorData {
     pub message: String,
 }
 
-use slab_types::settings::CloudProviderConfig;
+use slab_types::settings::{CloudProviderConfig, PMID};
 
 #[derive(Debug, Clone)]
 pub struct SettingsSchema {
@@ -220,11 +220,683 @@ fn default_storage_kind() -> SettingStorageKind {
     SettingStorageKind::String
 }
 
+fn legacy_settings_schema() -> RawSettingsSchema {
+    RawSettingsSchema {
+        schema_version: 1,
+        sections: vec![
+            legacy_section(
+                "setup",
+                "Setup & Downloads",
+                "First-time setup settings: whether initialization is complete, and configurable download locations and versions for FFmpeg and AI backends.",
+                5,
+                vec![
+                    legacy_subsection(
+                        "general",
+                        "General",
+                        "Global setup state.",
+                        10,
+                        vec![legacy_bool_property(
+                            PMID.setup.initialized().into_string(),
+                            "Setup Initialized",
+                            false,
+                            10,
+                        )],
+                    ),
+                    legacy_subsection(
+                        "ffmpeg",
+                        "FFmpeg",
+                        "Settings for automatic FFmpeg download.",
+                        20,
+                        vec![
+                            legacy_bool_property(
+                                PMID.setup.ffmpeg.auto_download().into_string(),
+                                "FFmpeg Auto-Download",
+                                true,
+                                10,
+                            ),
+                            legacy_path_property(
+                                PMID.setup.ffmpeg.dir().into_string(),
+                                "FFmpeg Install Directory",
+                                20,
+                            ),
+                        ],
+                    ),
+                    legacy_subsection(
+                        "backends",
+                        "AI Backend Libraries",
+                        "Settings for automatic download of GGML backend libraries and bundled Candle/ONNX backend packages.",
+                        30,
+                        vec![
+                            legacy_path_property(
+                                PMID.setup.backends.dir().into_string(),
+                                "Backend Library Directory",
+                                10,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.ggml_llama.tag().into_string(),
+                                "GGML Llama Release Tag",
+                                "",
+                                20,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.ggml_llama.asset().into_string(),
+                                "GGML Llama Asset Name",
+                                "",
+                                30,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.ggml_whisper.tag().into_string(),
+                                "GGML Whisper Release Tag",
+                                "",
+                                40,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.ggml_whisper.asset().into_string(),
+                                "GGML Whisper Asset Name",
+                                "",
+                                50,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.ggml_diffusion.tag().into_string(),
+                                "GGML Diffusion Release Tag",
+                                "",
+                                60,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.ggml_diffusion.asset().into_string(),
+                                "GGML Diffusion Asset Name",
+                                "",
+                                70,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.candle_llama.tag().into_string(),
+                                "Candle Llama Release Tag",
+                                "",
+                                80,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.candle_llama.asset().into_string(),
+                                "Candle Llama Asset Name",
+                                "",
+                                90,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.candle_whisper.tag().into_string(),
+                                "Candle Whisper Release Tag",
+                                "",
+                                100,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.candle_whisper.asset().into_string(),
+                                "Candle Whisper Asset Name",
+                                "",
+                                110,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.candle_diffusion.tag().into_string(),
+                                "Candle Diffusion Release Tag",
+                                "",
+                                120,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.candle_diffusion.asset().into_string(),
+                                "Candle Diffusion Asset Name",
+                                "",
+                                130,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.onnx.tag().into_string(),
+                                "ONNX Release Tag",
+                                "",
+                                140,
+                            ),
+                            legacy_string_property(
+                                PMID.setup.backends.onnx.asset().into_string(),
+                                "ONNX Asset Name",
+                                "",
+                                150,
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            legacy_section(
+                "runtime",
+                "Runtime",
+                "Core runtime behavior, worker sizing, and automatic unload settings.",
+                10,
+                vec![
+                    legacy_subsection(
+                        "general",
+                        "General",
+                        "Global runtime paths and cache directories.",
+                        10,
+                        vec![legacy_path_property(
+                            PMID.runtime.model_cache_dir().into_string(),
+                            "Model Cache Directory",
+                            10,
+                        )],
+                    ),
+                    legacy_subsection(
+                        "llama",
+                        "Llama",
+                        "Settings for the ggml.llama runtime.",
+                        20,
+                        vec![
+                            legacy_integer_property(
+                                PMID.runtime.llama.num_workers().into_string(),
+                                "Llama Workers",
+                                json!(1),
+                                Some(1),
+                                None,
+                                10,
+                            ),
+                            legacy_integer_property(
+                                PMID.runtime.llama.context_length().into_string(),
+                                "Llama Context Length",
+                                Value::Null,
+                                Some(1),
+                                None,
+                                20,
+                            ),
+                        ],
+                    ),
+                    legacy_subsection(
+                        "whisper",
+                        "Whisper",
+                        "Settings for the ggml.whisper runtime.",
+                        30,
+                        vec![legacy_integer_property(
+                            PMID.runtime.whisper.num_workers().into_string(),
+                            "Whisper Workers",
+                            json!(1),
+                            Some(1),
+                            None,
+                            10,
+                        )],
+                    ),
+                    legacy_subsection(
+                        "diffusion_runtime",
+                        "Diffusion Runtime",
+                        "Worker sizing for the ggml.diffusion runtime.",
+                        40,
+                        vec![legacy_integer_property(
+                            PMID.runtime.diffusion.num_workers().into_string(),
+                            "Diffusion Workers",
+                            json!(1),
+                            Some(1),
+                            None,
+                            10,
+                        )],
+                    ),
+                    legacy_subsection(
+                        "model_auto_unload",
+                        "Model Auto Unload",
+                        "Unload idle models automatically to reclaim memory.",
+                        50,
+                        vec![
+                            legacy_bool_property(
+                                PMID.runtime.model_auto_unload.enabled().into_string(),
+                                "Model Auto Unload Enabled",
+                                false,
+                                10,
+                            ),
+                            legacy_integer_property(
+                                PMID.runtime.model_auto_unload.idle_minutes().into_string(),
+                                "Model Auto Unload Idle Minutes",
+                                json!(10),
+                                Some(1),
+                                None,
+                                20,
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            legacy_section(
+                "launch",
+                "Launch",
+                "Shared supervisor launch settings used by both slab-server and the desktop host.",
+                15,
+                vec![
+                    legacy_subsection(
+                        "general",
+                        "General",
+                        "Shared runtime transport and capacity settings. Backend library directories continue to come from setup.backends.dir.",
+                        10,
+                        vec![
+                            legacy_enum_string_property(
+                                PMID.launch.transport().into_string(),
+                                "Runtime Transport",
+                                "http",
+                                vec!["http".to_owned(), "ipc".to_owned()],
+                                10,
+                            ),
+                            legacy_integer_property(
+                                PMID.launch.queue_capacity().into_string(),
+                                "Runtime Queue Capacity",
+                                json!(64),
+                                Some(1),
+                                None,
+                                20,
+                            ),
+                            legacy_integer_property(
+                                PMID.launch.backend_capacity().into_string(),
+                                "Runtime Backend Capacity",
+                                json!(4),
+                                Some(1),
+                                None,
+                                30,
+                            ),
+                            legacy_path_property(
+                                PMID.launch.runtime_ipc_dir().into_string(),
+                                "Runtime IPC Directory",
+                                40,
+                            ),
+                            legacy_path_property(
+                                PMID.launch.runtime_log_dir().into_string(),
+                                "Runtime Log Directory",
+                                50,
+                            ),
+                        ],
+                    ),
+                    legacy_subsection(
+                        "backends",
+                        "Backends",
+                        "Enable or disable runtime child processes per backend.",
+                        20,
+                        vec![
+                            legacy_bool_property(
+                                PMID.launch.backends.llama.enabled().into_string(),
+                                "Launch Llama Runtime",
+                                true,
+                                10,
+                            ),
+                            legacy_bool_property(
+                                PMID.launch.backends.whisper.enabled().into_string(),
+                                "Launch Whisper Runtime",
+                                true,
+                                20,
+                            ),
+                            legacy_bool_property(
+                                PMID.launch.backends.diffusion.enabled().into_string(),
+                                "Launch Diffusion Runtime",
+                                true,
+                                30,
+                            ),
+                        ],
+                    ),
+                    legacy_subsection(
+                        "server_profile",
+                        "Server Profile",
+                        "Host-specific launch settings used by slab-server.",
+                        30,
+                        vec![
+                            legacy_string_property(
+                                PMID.launch.profiles.server.gateway_bind().into_string(),
+                                "Server Gateway Bind",
+                                "127.0.0.1:3000",
+                                10,
+                            ),
+                            legacy_string_property(
+                                PMID.launch.profiles.server.runtime_bind_host().into_string(),
+                                "Server Runtime Bind Host",
+                                "127.0.0.1",
+                                20,
+                            ),
+                            legacy_integer_property(
+                                PMID.launch.profiles.server.runtime_bind_base_port().into_string(),
+                                "Server Runtime Base Port",
+                                json!(3001),
+                                Some(1),
+                                Some(65535),
+                                30,
+                            ),
+                        ],
+                    ),
+                    legacy_subsection(
+                        "desktop_profile",
+                        "Desktop Profile",
+                        "Host-specific launch settings used by the Tauri desktop app.",
+                        40,
+                        vec![
+                            legacy_string_property(
+                                PMID.launch.profiles.desktop.runtime_bind_host().into_string(),
+                                "Desktop Runtime Bind Host",
+                                "127.0.0.1",
+                                10,
+                            ),
+                            legacy_integer_property(
+                                PMID.launch.profiles.desktop.runtime_bind_base_port().into_string(),
+                                "Desktop Runtime Base Port",
+                                json!(50051),
+                                Some(1),
+                                Some(65535),
+                                20,
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+            legacy_section(
+                "cloud",
+                "Cloud Providers",
+                "Global cloud provider configuration used by cloud model entries.",
+                20,
+                vec![legacy_subsection(
+                    "providers",
+                    "Cloud Providers",
+                    "OpenAI-compatible cloud provider configuration stored as JSON.",
+                    10,
+                    vec![legacy_chat_providers_property(
+                        PMID.chat.providers().into_string(),
+                        10,
+                    )],
+                )],
+            ),
+            legacy_section(
+                "diffusion",
+                "Diffusion",
+                "Diffusion model paths and runtime performance toggles.",
+                30,
+                vec![
+                    legacy_subsection(
+                        "paths",
+                        "Paths",
+                        "Optional model paths passed to the diffusion backend.",
+                        10,
+                        vec![
+                            legacy_path_property(
+                                PMID.diffusion.paths.model().into_string(),
+                                "Diffusion Model Path",
+                                10,
+                            ),
+                            legacy_path_property(
+                                PMID.diffusion.paths.vae().into_string(),
+                                "Diffusion VAE Path",
+                                20,
+                            ),
+                            legacy_path_property(
+                                PMID.diffusion.paths.taesd().into_string(),
+                                "Diffusion TAESD Path",
+                                30,
+                            ),
+                            legacy_path_property(
+                                PMID.diffusion.paths.lora_model_dir().into_string(),
+                                "Diffusion LoRA Model Directory",
+                                40,
+                            ),
+                            legacy_path_property(
+                                PMID.diffusion.paths.clip_l().into_string(),
+                                "Diffusion CLIP-L Path",
+                                50,
+                            ),
+                            legacy_path_property(
+                                PMID.diffusion.paths.clip_g().into_string(),
+                                "Diffusion CLIP-G Path",
+                                60,
+                            ),
+                            legacy_path_property(
+                                PMID.diffusion.paths.t5xxl().into_string(),
+                                "Diffusion T5XXL Path",
+                                70,
+                            ),
+                        ],
+                    ),
+                    legacy_subsection(
+                        "performance",
+                        "Performance",
+                        "Flags that trade memory usage for performance.",
+                        20,
+                        vec![
+                            legacy_bool_property(
+                                PMID.diffusion.performance.flash_attn().into_string(),
+                                "Diffusion Flash Attention",
+                                false,
+                                10,
+                            ),
+                            legacy_string_property(
+                                PMID.diffusion.performance.vae_device().into_string(),
+                                "Diffusion VAE Device",
+                                "",
+                                20,
+                            ),
+                            legacy_string_property(
+                                PMID.diffusion.performance.clip_device().into_string(),
+                                "Diffusion CLIP Device",
+                                "",
+                                30,
+                            ),
+                            legacy_bool_property(
+                                PMID.diffusion.performance.offload_params_to_cpu().into_string(),
+                                "Diffusion Offload Params To CPU",
+                                false,
+                                40,
+                            ),
+                        ],
+                    ),
+                ],
+            ),
+        ],
+    }
+}
+
+fn legacy_section(
+    id: &str,
+    title: &str,
+    description_md: &str,
+    order: u32,
+    subsections: Vec<RawSettingsSubsectionDefinition>,
+) -> RawSettingsSectionDefinition {
+    RawSettingsSectionDefinition {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        description_md: description_md.to_owned(),
+        order,
+        subsections,
+    }
+}
+
+fn legacy_subsection(
+    id: &str,
+    title: &str,
+    description_md: &str,
+    order: u32,
+    properties: Vec<RawSettingDefinition>,
+) -> RawSettingsSubsectionDefinition {
+    RawSettingsSubsectionDefinition {
+        id: id.to_owned(),
+        title: title.to_owned(),
+        description_md: description_md.to_owned(),
+        order,
+        properties,
+    }
+}
+
+fn legacy_bool_property(
+    pmid: String,
+    label: &str,
+    default_value: bool,
+    order: u32,
+) -> RawSettingDefinition {
+    legacy_property(
+        pmid,
+        label,
+        SettingStorageKind::Boolean,
+        SettingPropertySchema {
+            value_type: SettingValueType::Boolean,
+            default_value: Value::Bool(default_value),
+            order,
+            ..Default::default()
+        },
+    )
+}
+
+fn legacy_string_property(
+    pmid: String,
+    label: &str,
+    default_value: &str,
+    order: u32,
+) -> RawSettingDefinition {
+    legacy_property(
+        pmid,
+        label,
+        SettingStorageKind::String,
+        SettingPropertySchema {
+            value_type: SettingValueType::String,
+            default_value: json!(default_value),
+            order,
+            ..Default::default()
+        },
+    )
+}
+
+fn legacy_path_property(pmid: String, label: &str, order: u32) -> RawSettingDefinition {
+    legacy_property(
+        pmid,
+        label,
+        SettingStorageKind::Path,
+        SettingPropertySchema {
+            value_type: SettingValueType::String,
+            default_value: json!(""),
+            order,
+            ..Default::default()
+        },
+    )
+}
+
+fn legacy_integer_property(
+    pmid: String,
+    label: &str,
+    default_value: Value,
+    minimum: Option<i64>,
+    maximum: Option<i64>,
+    order: u32,
+) -> RawSettingDefinition {
+    legacy_property(
+        pmid,
+        label,
+        SettingStorageKind::Integer,
+        SettingPropertySchema {
+            value_type: SettingValueType::Integer,
+            minimum,
+            maximum,
+            default_value,
+            order,
+            ..Default::default()
+        },
+    )
+}
+
+fn legacy_enum_string_property(
+    pmid: String,
+    label: &str,
+    default_value: &str,
+    enum_values: Vec<String>,
+    order: u32,
+) -> RawSettingDefinition {
+    legacy_property(
+        pmid,
+        label,
+        SettingStorageKind::String,
+        SettingPropertySchema {
+            value_type: SettingValueType::String,
+            enum_values: Some(enum_values),
+            default_value: json!(default_value),
+            order,
+            ..Default::default()
+        },
+    )
+}
+
+fn legacy_chat_providers_property(pmid: String, order: u32) -> RawSettingDefinition {
+    legacy_property(
+        pmid,
+        "Cloud Providers",
+        SettingStorageKind::ChatProviders,
+        SettingPropertySchema {
+            value_type: SettingValueType::Array,
+            json_schema: Some(legacy_chat_providers_json_schema()),
+            default_value: json!([]),
+            multiline: true,
+            order,
+            ..Default::default()
+        },
+    )
+}
+
+fn legacy_property(
+    pmid: String,
+    label: &str,
+    storage_kind: SettingStorageKind,
+    schema: SettingPropertySchema,
+) -> RawSettingDefinition {
+    let search_terms = pmid
+        .split('.')
+        .flat_map(|segment| segment.split('_'))
+        .filter(|segment| !segment.is_empty())
+        .map(|segment| segment.to_owned())
+        .collect();
+
+    RawSettingDefinition {
+        pmid,
+        label: label.to_owned(),
+        description_md: String::new(),
+        editable: true,
+        search_terms,
+        storage_kind,
+        schema,
+    }
+}
+
+fn legacy_chat_providers_json_schema() -> Value {
+    json!({
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "array",
+        "title": "Cloud Providers",
+        "description": "Configure OpenAI-compatible providers referenced by cloud model entries.",
+        "items": {
+            "type": "object",
+            "title": "Provider",
+            "additionalProperties": false,
+            "required": ["id", "name", "api_base"],
+            "properties": {
+                "id": {
+                    "type": "string",
+                    "title": "Provider ID",
+                    "minLength": 1,
+                    "examples": ["openai-main"]
+                },
+                "name": {
+                    "type": "string",
+                    "title": "Display Name",
+                    "minLength": 1,
+                    "examples": ["OpenAI"]
+                },
+                "api_base": {
+                    "type": "string",
+                    "title": "API Base URL",
+                    "minLength": 1,
+                    "examples": ["https://api.openai.com/v1"]
+                },
+                "api_key": {
+                    "type": ["string", "null"],
+                    "title": "Literal API Key",
+                    "writeOnly": true,
+                    "examples": ["sk-live-..."]
+                },
+                "api_key_env": {
+                    "type": ["string", "null"],
+                    "title": "API Key Env Var",
+                    "examples": ["OPENAI_API_KEY"]
+                }
+            }
+        }
+    })
+}
+
 pub fn embedded_settings_schema() -> Result<SettingsSchema, AppCoreError> {
-    SettingsSchema::from_json_str(include_str!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../../manifests/settings/settings-schema.json"
-    )))
+    SettingsSchema::from_raw(legacy_settings_schema())
 }
 
 impl SettingsSchema {
@@ -236,6 +908,11 @@ impl SettingsSchema {
         let parsed: RawSettingsSchema = serde_json::from_value(raw_document).map_err(|error| {
             AppCoreError::Internal(format!("invalid embedded settings schema: {error}"))
         })?;
+
+        Self::from_raw(parsed)
+    }
+
+    fn from_raw(parsed: RawSettingsSchema) -> Result<Self, AppCoreError> {
 
         if parsed.sections.is_empty() {
             return Err(AppCoreError::Internal(

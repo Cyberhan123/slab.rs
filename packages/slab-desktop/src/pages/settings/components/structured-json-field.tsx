@@ -324,7 +324,15 @@ function StringEditor({
     <Input
       type={schema.writeOnly ? 'password' : 'text'}
       value={currentValue}
-      onChange={(event) => onChange(event.target.value)}
+      onChange={(event) => {
+        const nextValue = event.target.value;
+        if (nextValue.trim().length === 0 && schemaAllowsNull(schema)) {
+          onChange(null);
+          return;
+        }
+
+        onChange(nextValue);
+      }}
       placeholder={placeholder}
       className="h-11 rounded-2xl"
     />

@@ -20,6 +20,11 @@ impl SettingPmid {
         Self(segments.join("."))
     }
 
+    /// Build a [`SettingPmid`] from an already-joined dot path.
+    pub fn from_path(path: impl Into<String>) -> Self {
+        Self(path.into())
+    }
+
     /// Return the PMID as a string slice.
     pub fn as_str(&self) -> &str {
         &self.0

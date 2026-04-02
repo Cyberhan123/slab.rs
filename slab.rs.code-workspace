@@ -13,6 +13,11 @@
 		],
 		"json.schemaDownload.trustedDomains": {
 			"https://schema.tauri.app/config/2": true
+		},
+		"chat.tools.terminal.autoApprove": {
+			"cargo check": true,
+			"cargo test": true,
+			"bun": true
 		}
 	}
 }

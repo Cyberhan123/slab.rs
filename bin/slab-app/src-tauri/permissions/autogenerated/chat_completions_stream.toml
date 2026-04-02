@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-chat-completions-stream"
+description = "Enables the chat_completions_stream command without any pre-configured scope."
+commands.allow = ["chat_completions_stream"]
+
+[[permission]]
+identifier = "deny-chat-completions-stream"
+description = "Denies the chat_completions_stream command without any pre-configured scope."
+commands.deny = ["chat_completions_stream"]

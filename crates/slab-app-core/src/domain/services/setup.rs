@@ -9,6 +9,10 @@ use crate::domain::models::{
     AcceptedOperation, CompleteSetupCommand, ComponentStatus, EnvironmentStatus,
 };
 use crate::error::AppCoreError;
+use crate::infra::db::repository::config::ConfigStore;
+
+const SETUP_INITIALIZED_CONFIG_KEY: &str = "setup_initialized";
+const SETUP_INITIALIZED_CONFIG_NAME: &str = "Setup Initialized";
 
 #[derive(Clone)]
 pub struct SetupService {
@@ -24,7 +28,7 @@ impl SetupService {
     /// Return the current environment status: FFmpeg presence, backend
     /// availability, and whether the setup wizard has been completed.
     pub async fn environment_status(&self) -> Result<EnvironmentStatus, AppCoreError> {
-        let initialized = self.model_state.pmid().config().setup.initialized;
+        let initialized = self.load_setup_initialized().await?;
 
         // `ffmpeg_is_installed` is a blocking check — run it off the async executor.
         let ffmpeg_installed =
@@ -79,15 +83,46 @@ impl SetupService {
         Ok(AcceptedOperation { operation_id })
     }
 
-    /// Persist the `setup.initialized` flag (or reset it) in `settings.json`.
+    /// Persist the setup-complete flag in `config_store`.
     pub async fn complete_setup(
         &self,
         cmd: CompleteSetupCommand,
     ) -> Result<EnvironmentStatus, AppCoreError> {
-        self.model_state.pmid().set_setup_initialized(cmd.initialized).await?;
+        self.persist_setup_initialized(cmd.initialized).await?;
 
         info!(initialized = cmd.initialized, "setup state persisted");
         self.environment_status().await
+    }
+
+    async fn load_setup_initialized(&self) -> Result<bool, AppCoreError> {
+        let raw = self
+            .model_state
+            .store()
+            .get_config_value(SETUP_INITIALIZED_CONFIG_KEY)
+            .await?;
+
+        match raw.as_deref().map(str::trim) {
+            None | Some("") => Ok(false),
+            Some("true") => Ok(true),
+            Some("false") => Ok(false),
+            Some(other) => Err(AppCoreError::Internal(format!(
+                "config_store key '{}' contains invalid boolean value '{}'",
+                SETUP_INITIALIZED_CONFIG_KEY, other
+            ))),
+        }
+    }
+
+    async fn persist_setup_initialized(&self, initialized: bool) -> Result<(), AppCoreError> {
+        let value = if initialized { "true" } else { "false" };
+        self.model_state
+            .store()
+            .set_config_entry(
+                SETUP_INITIALIZED_CONFIG_KEY,
+                Some(SETUP_INITIALIZED_CONFIG_NAME),
+                value,
+            )
+            .await?;
+        Ok(())
     }
 }
 
