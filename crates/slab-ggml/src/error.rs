@@ -4,6 +4,9 @@ use std::str::Utf8Error;
 /// Errors that can occur when using the GGML API.
 #[derive(Debug, thiserror::Error)]
 pub enum GGMLError {
+    #[error("GGML error: can't find parent directory of library path")]
+    NotParentDir,
+
     #[error("GGML error loading library: {0}")]
     LibraryLoadError(#[from] ::libloading::Error),
 

@@ -9,11 +9,13 @@ use slab_app_core::infra::db::AnyStore;
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
 use slab_app_core::launch::ResolvedLaunchSpec;
 use slab_app_core::model_auto_unload::ModelAutoUnloadManager;
+use slab_app_core::runtime_supervisor::RuntimeSupervisorStatus;
 
 /// Initialise the shared `slab-app-core` state for native IPC handlers.
 pub async fn init_state<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     launch_spec: &ResolvedLaunchSpec,
+    runtime_status: Arc<RuntimeSupervisorStatus>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut cfg = Config::from_env();
 
@@ -39,7 +41,14 @@ pub async fn init_state<R: tauri::Runtime>(
     let model_auto_unload =
         Arc::new(ModelAutoUnloadManager::new(Arc::clone(&pmid), Arc::clone(&grpc)));
 
-    let state = Arc::new(AppState::new(Arc::new(cfg), pmid, grpc, store, model_auto_unload));
+    let state = Arc::new(AppState::new(
+        Arc::new(cfg),
+        pmid,
+        grpc,
+        runtime_status,
+        store,
+        model_auto_unload,
+    ));
     state.services.model.sync_model_configs_from_disk().await?;
     app.manage(state);
 

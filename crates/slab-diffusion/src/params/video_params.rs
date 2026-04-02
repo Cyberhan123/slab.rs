@@ -212,3 +212,60 @@ impl VideoParams {
         self.sync_cache();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    fn new_video_params() -> VideoParams {
+        VideoParams {
+            fp: Box::new(unsafe { std::mem::zeroed::<sd_vid_gen_params_t>() }),
+            prompt: None,
+            negative_prompt: None,
+            loras: Vec::new(),
+            lora_paths: Vec::new(),
+            c_loras: Vec::new(),
+            init_image: None,
+            end_image: None,
+            control_frames: Vec::new(),
+            c_control_frames: Vec::new(),
+            sample_params: None,
+            high_noise_sample_params: None,
+            cache: None,
+        }
+    }
+
+    fn sample_image(value: u8) -> Image {
+        Image { width: 2, height: 1, channel: 3, data: vec![value; 6] }
+    }
+
+    #[test]
+    fn set_video_frames_clamps_to_at_least_one() {
+        let mut params = new_video_params();
+
+        params.set_video_frames(0);
+        assert_eq!(params.fp.video_frames, 1);
+
+        params.set_video_frames(12);
+        assert_eq!(params.fp.video_frames, 12);
+    }
+
+    #[test]
+    fn clone_resyncs_prompt_and_control_frame_views() {
+        let mut params = new_video_params();
+        params.set_prompt("animated skyline");
+        params.set_negative_prompt("noisy");
+        params.set_control_frames(vec![sample_image(4), sample_image(8)]);
+        params.set_init_image(sample_image(1));
+        params.set_end_image(sample_image(2));
+
+        let cloned = params.clone();
+
+        assert_eq!(unsafe { CStr::from_ptr(cloned.fp.prompt) }.to_str().unwrap(), "animated skyline");
+        assert_ne!(cloned.fp.prompt, params.fp.prompt);
+        assert_eq!(cloned.fp.control_frames_size, 2);
+        assert_eq!(cloned.fp.init_image.width, 2);
+        assert_ne!(unsafe { (*cloned.fp.control_frames).data }, unsafe { (*params.fp.control_frames).data });
+    }
+}

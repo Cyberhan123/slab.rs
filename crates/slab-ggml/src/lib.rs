@@ -1,16 +1,19 @@
 mod backend;
 mod error;
+
+pub use backend::GGMLBackendDevice;
 pub use backend::GGMLBackendReg;
 pub use error::GGMLError;
+use slab_ggml_sys::GGmlLib;
+use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::ffi::CStr;
 use std::fmt;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct GGML {
-    pub(crate) lib: Arc<slab_ggml_sys::GGmlLib>,
+    pub(crate) lib: Arc<GGmlLib>,
 }
 
 /// Safety: `GGML` is thread-safe because it only contains an `Arc` to the underlying library,
@@ -36,7 +39,18 @@ impl GGML {
                     LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
                 )?
             };
-            let ggml_lib = unsafe { slab_ggml_sys::GGmlLib::from_library(lib)? };
+            let lib_dir = path.as_ref().parent().ok_or(GGMLError::NotParentDir)?;
+
+            let ggml_base_path = lib_dir.join(format!("{}ggml-base{}", DLL_PREFIX, DLL_SUFFIX));
+
+            let ggml_base_lib = unsafe {
+                Library::load_with_flags(
+                    ggml_base_path.as_path(),
+                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
+                )?
+            };
+
+            let ggml_lib = unsafe { slab_ggml_sys::GGmlLib::from_library(ggml_base_lib, lib)? };
             Ok(Self { lib: Arc::new(ggml_lib) })
         }
 
@@ -67,7 +81,7 @@ impl GGML {
     }
 
     pub fn version(&self) -> Result<&'static str, GGMLError> {
-        let ptr = unsafe { self.lib.ggml_version() };
+        let ptr = unsafe { self.lib.base.ggml_version() };
         if ptr.is_null() {
             return Err(GGMLError::NullPointer);
         }
@@ -75,50 +89,80 @@ impl GGML {
     }
 
     pub fn load_all_backend(&self) {
-        unsafe { self.lib.ggml_backend_load_all() };
-    }
-
-    pub fn try_load_all_backend(&self) -> Result<(), GGMLError> {
-        let load_all = self.lib.ggml_backend_load_all.as_ref().map_err(|error| {
-            GGMLError::MissingSymbol { symbol: "ggml_backend_load_all", message: error.to_string() }
-        })?;
-        unsafe { load_all() };
-        Ok(())
+        unsafe { self.lib.loader.ggml_backend_load_all() };
     }
 
     pub fn load_all_backend_from_path(&self, path: &str) -> Result<(), GGMLError> {
         let c_path = std::ffi::CString::new(path)?;
-        unsafe { self.lib.ggml_backend_load_all_from_path(c_path.as_ptr()) };
-        Ok(())
-    }
-
-    pub fn try_load_all_backend_from_path(&self, path: &str) -> Result<(), GGMLError> {
-        let c_path = std::ffi::CString::new(path)?;
-        let load_all_from_path =
-            self.lib.ggml_backend_load_all_from_path.as_ref().map_err(|error| {
-                GGMLError::MissingSymbol {
-                    symbol: "ggml_backend_load_all_from_path",
-                    message: error.to_string(),
-                }
-            })?;
-        unsafe { load_all_from_path(c_path.as_ptr()) };
+        unsafe { self.lib.loader.ggml_backend_load_all_from_path(c_path.as_ptr()) };
         Ok(())
     }
 
     pub fn ggml_backend_load(&self, path: &str) -> Result<GGMLBackendReg, GGMLError> {
         let c_backend = std::ffi::CString::new(path)?;
-        let reg = unsafe { self.lib.ggml_backend_load(c_backend.as_ptr()) };
+        let reg = unsafe { self.lib.loader.ggml_backend_load(c_backend.as_ptr()) };
 
         if reg.is_null() {
             return Err(GGMLError::NullPointer);
         }
 
-        Ok(GGMLBackendReg { _reg: Rc::new(reg) })
+        Ok(GGMLBackendReg { reg })
+    }
+
+    pub fn ggml_backend_unload(&self, reg: GGMLBackendReg) {
+        unsafe { self.lib.loader.ggml_backend_unload(reg.reg) };
+    }
+
+    pub fn ggml_backend_dev_count(&self) -> usize {
+        unsafe { self.lib.loader.ggml_backend_dev_count() }
+    }
+
+    pub fn ggml_backend_dev_get(&self, index: usize) -> Result<GGMLBackendDevice, GGMLError> {
+        let device = unsafe { self.lib.loader.ggml_backend_dev_get(index) };
+        if device.is_null() {
+            return Err(GGMLError::NullPointer);
+        }
+        Ok(GGMLBackendDevice { device: device })
+    }
+
+    pub fn ggml_backend_dev_name(&self, device: GGMLBackendDevice) -> Result<&str, GGMLError> {
+        let name_ptr = unsafe { self.lib.base.ggml_backend_dev_name(device.device) };
+        if name_ptr.is_null() {
+            return Err(GGMLError::NullPointer);
+        }
+        Ok(unsafe { CStr::from_ptr(name_ptr) }.to_str()?)
     }
 }
 
 impl fmt::Debug for GGML {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GGML").finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_with_rejects_missing_parent_directory() {
+        let missing = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("missing-runtime-dir")
+            .join("ggml.dll");
+
+        let error = GGML::new_with(&missing).unwrap_err();
+        assert!(matches!(error, GGMLError::NullPointer));
+    }
+
+    #[test]
+    fn new_wih_matches_new_with_for_missing_parent_directory() {
+        let missing = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests")
+            .join("missing-runtime-dir")
+            .join("ggml.dll");
+
+        let error = GGML::new_wih(&missing).unwrap_err();
+        assert!(matches!(error, GGMLError::NullPointer));
     }
 }

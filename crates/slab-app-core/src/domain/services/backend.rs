@@ -10,6 +10,7 @@ use crate::domain::models::{
 };
 use crate::error::AppCoreError;
 use crate::infra::rpc;
+use crate::runtime_supervisor::RuntimeBackendRuntimeStatus;
 
 pub(crate) type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
 type WindowsDownloadSpec = (&'static str, &'static str, &'static str, fn(&str) -> String);
@@ -30,22 +31,22 @@ impl BackendService {
         query: BackendStatusQuery,
     ) -> Result<BackendStatusView, AppCoreError> {
         let canonical_backend = query.backend_id.to_string();
-        let status = if self.model_state.grpc().has_backend(query.backend_id) {
-            "ready"
-        } else {
-            "disabled"
-        };
-        Ok(BackendStatusView { backend: canonical_backend, status: status.into() })
+        Ok(BackendStatusView {
+            backend: canonical_backend,
+            status: runtime_status_label(self.model_state.runtime_status().status(query.backend_id))
+                .to_owned(),
+        })
     }
 
     pub async fn list_backends(&self) -> Result<Vec<BackendStatusView>, AppCoreError> {
         let backends = RuntimeBackendId::ALL
             .into_iter()
             .map(|name| {
-                let backend_str = name.to_string();
-                let status =
-                    if self.model_state.grpc().has_backend(name) { "ready" } else { "disabled" };
-                BackendStatusView { backend: backend_str, status: status.into() }
+                BackendStatusView {
+                    backend: name.to_string(),
+                    status: runtime_status_label(self.model_state.runtime_status().status(name))
+                        .to_owned(),
+                }
             })
             .collect();
         Ok(backends)
@@ -149,16 +150,39 @@ impl BackendService {
             ))
         })?;
         let grpc_req = convert::encode_reload_library_request(&req.spec);
-        let response =
-            rpc::client::reload_library(channel, req.backend_id, grpc_req).await.map_err(
-                |error| AppCoreError::Internal(format!("grpc reload_library failed: {error}")),
-            )?;
+        let response = rpc::client::reload_library(channel, req.backend_id, grpc_req)
+            .await
+            .map_err(|error| {
+                if let Some(detail) = rpc::client::transient_runtime_detail(&error) {
+                    AppCoreError::BackendNotReady(detail)
+                } else {
+                    AppCoreError::Internal(format!("grpc reload_library failed: {error}"))
+                }
+            })?;
 
         let status = convert::decode_model_status_response(&response).map_err(|error| {
             AppCoreError::Internal(format!("invalid model status response from runtime: {error}"))
         })?;
 
         Ok(BackendStatusView { backend: status.backend.to_string(), status: status.status })
+    }
+}
+
+fn runtime_status_label(status: RuntimeBackendRuntimeStatus) -> &'static str {
+    status.as_str()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::runtime_status_label;
+    use crate::runtime_supervisor::RuntimeBackendRuntimeStatus;
+
+    #[test]
+    fn runtime_status_labels_match_backend_api_surface() {
+        assert_eq!(runtime_status_label(RuntimeBackendRuntimeStatus::Ready), "ready");
+        assert_eq!(runtime_status_label(RuntimeBackendRuntimeStatus::Restarting), "restarting");
+        assert_eq!(runtime_status_label(RuntimeBackendRuntimeStatus::Unavailable), "unavailable");
+        assert_eq!(runtime_status_label(RuntimeBackendRuntimeStatus::Disabled), "disabled");
     }
 }
 

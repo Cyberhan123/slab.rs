@@ -26,20 +26,22 @@ See [docs/ai-skill-map.md](docs/ai-skill-map.md) for the short routing map.
 
 ## Architecture Snapshot
 
-This workspace now has a desktop host, supervisor, runtime worker, and separate plugin/agent layers:
+This workspace now has desktop and headless hosts that share a core runtime supervisor, plus separate runtime worker and plugin/agent layers:
 
 ```text
 bin/slab-app (Tauri desktop host + plugin shell)
-    |  \
-    |   \-- native IPC (crates/slab-app-core tauri feature)
+    | native IPC + Tauri sidecar adapter
     |
-    | sidecar HTTP
     v
-bin/slab-server (HTTP gateway, thin axum layer)
+crates/slab-app-core (business logic + shared runtime supervisor -- no HTTP/axum/Tauri)
+    ^
     |
-    | (shares crates/slab-app-core)
+    | HTTP + tokio::process adapter
+bin/slab-server (axum HTTP gateway, headless host)
+    |
+    | gRPC / IPC
     v
-crates/slab-app-core (business logic: domain, infra, context, config — no HTTP/axum)
+GrpcGateway / runtime endpoints
     |
     | gRPC / IPC
     v
@@ -49,12 +51,12 @@ bin/slab-runtime (worker process: ggml.llama / ggml.whisper / ggml.diffusion)
 crates/slab-core (slab-runtime-core: runtime builder, scheduler, engine adapters)
 ```
 
-- `bin/slab-app` is the Tauri 2 desktop host that launches the `bin/slab-server` sidecar, mounts plugin child webviews, and exposes the desktop-only plugin bridge UI. Its frontend is served from `packages/slab-desktop`. Native IPC commands live in `bin/slab-app/src-tauri/src/api` and delegate directly to `crates/slab-app-core`.
+- `bin/slab-app` is the Tauri 2 desktop host. It mounts plugin child webviews, exposes the desktop-only plugin bridge UI, and calls `crates/slab-app-core` directly via native IPC. Desktop mode launches `bin/slab-runtime` through the shared `crates/slab-app-core::runtime_supervisor` using a Tauri sidecar adapter, not through `bin/slab-server`.
 - `packages/slab-desktop` is the React 19 + Vite + React Router 7 frontend application for the Tauri desktop host. It imports UI components from `packages/slab-components` and i18n from `packages/slab-i18n`.
 - `packages/slab-components` is the shared shadcn/ui-based React component library (Radix UI + Tailwind CSS). It can be consumed by both `slab-desktop` and future mobile packages.
 - `packages/slab-i18n` is the shared internationalization package (i18next + react-i18next) with locale definitions.
-- `bin/slab-server` is the thin HTTP gateway and supervisor (axum). It depends on `crates/slab-app-core` for all domain/infra logic; adds axum `FromRef` extractors (`state_extractors.rs`) and `ServerError` → HTTP response conversion. Exposes `/v1` plus `/api-docs/openapi.json`.
-- `crates/slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`. It is usable both from `bin/slab-server` (HTTP path) and from `bin/slab-app` (native Tauri IPC path). SQLx migrations live in `crates/slab-app-core/migrations/`.
+- `bin/slab-server` is the thin HTTP gateway and headless host (axum). It depends on `crates/slab-app-core` for all domain/infra logic, adds axum `FromRef` extractors (`state_extractors.rs`) and `ServerError` → HTTP response conversion, and launches `bin/slab-runtime` through the same shared supervisor using a `tokio::process` adapter. Runtime crashes restart per backend; the HTTP host stays up unless the gateway itself fails. It exposes `/v1` plus `/api-docs/openapi.json`.
+- `crates/slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and `runtime_supervisor`. It is usable both from `bin/slab-server` (HTTP path) and from `bin/slab-app` (native Tauri IPC path). SQLx migrations live in `crates/slab-app-core/migrations/`.
 - `bin/slab-runtime` is the standalone gRPC worker that can serve TCP or IPC transports and enable `ggml.llama`, `ggml.whisper`, and `ggml.diffusion` backends independently.
 - `crates/slab-core` (package name: `slab-runtime-core`) holds runtime orchestration, scheduler/dispatch logic, and engine adapters. Keep HTTP and SQL concerns out of this crate.
 - `crates/slab-agent` is a pure control-plane library for agent threads, tool routing, and port-based orchestration.
@@ -66,7 +68,7 @@ crates/slab-core (slab-runtime-core: runtime builder, scheduler, engine adapters
 
 - `bin/slab-server`: thin HTTP gateway; exposes `/v1` routes via axum. Business logic lives in `crates/slab-app-core`.
 - `bin/slab-runtime`: gRPC server and runtime worker entry points.
-- `crates/slab-app-core`: HTTP-free business logic (domain, infra, context, config). Native IPC wrappers now live in `bin/slab-app/src-tauri/src/api/`. Migrations are in `crates/slab-app-core/migrations/`.
+- `crates/slab-app-core`: HTTP-free business logic (domain, infra, context, config) plus the shared runtime supervisor used by both `slab-app` and `slab-server`. Native IPC wrappers now live in `bin/slab-app/src-tauri/src/api/`. Migrations are in `crates/slab-app-core/migrations/`.
 - `crates/slab-core`: runtime library only (package: `slab-runtime-core`); keep HTTP and SQL concerns out.
 - `crates/slab-agent`: agent orchestration library and tool router abstractions.
 - `crates/slab-types`: shared semantic types, settings models, load specs, and other reusable Rust contracts.
@@ -85,7 +87,7 @@ crates/slab-core (slab-runtime-core: runtime builder, scheduler, engine adapters
 
 ## Working Rules
 
-- Keep inference behind `bin/slab-server -> GrpcGateway -> bin/slab-runtime -> crates/slab-core`; the desktop app can also call `crates/slab-app-core` directly via native Tauri IPC.
+- Keep inference behind `host -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime -> crates/slab-core`; the desktop app calls `crates/slab-app-core` directly via native Tauri IPC and must not reintroduce a `slab-app -> slab-server -> slab-runtime` control path.
 - Extend the existing `/v1/*` API modules instead of adding a parallel API tree. The current surface includes `agent`, `audio`, `backend`, `chat`, `ffmpeg`, `images`, `models`, `session`, `settings`, `setup`, `system`, `tasks`, and `video`.
 - Keep long-running AI work in task-oriented flows when the feature already follows that model.
 - Prefer `crates/slab-types` and `crates/slab-proto` for contracts that need to cross crate boundaries instead of duplicating shapes.

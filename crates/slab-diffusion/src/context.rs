@@ -108,3 +108,36 @@ impl std::fmt::Debug for Context {
         f.debug_struct("Context").finish()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn alloc_image(width: u32, height: u32, channel: u32, data: &[u8]) -> slab_diffusion_sys::sd_image_t {
+        let ptr = unsafe { libc::malloc(data.len()).cast::<u8>() };
+        assert!(!ptr.is_null());
+        unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len()) };
+
+        slab_diffusion_sys::sd_image_t { width, height, channel, data: ptr }
+    }
+
+    #[test]
+    fn collect_images_copies_and_returns_native_images() {
+        let raw_images = [
+            alloc_image(2, 1, 3, &[1, 2, 3, 4, 5, 6]),
+            alloc_image(1, 1, 4, &[9, 8, 7, 6]),
+        ];
+        let bytes = std::mem::size_of_val(&raw_images);
+        let ptr = unsafe { libc::malloc(bytes).cast::<slab_diffusion_sys::sd_image_t>() };
+        assert!(!ptr.is_null());
+        unsafe { std::ptr::copy_nonoverlapping(raw_images.as_ptr(), ptr, raw_images.len()) };
+
+        let images = Context::collect_images(ptr, raw_images.len());
+
+        assert_eq!(images.len(), 2);
+        assert_eq!(images[0].width, 2);
+        assert_eq!(images[0].data, vec![1, 2, 3, 4, 5, 6]);
+        assert_eq!(images[1].channel, 4);
+        assert_eq!(images[1].data, vec![9, 8, 7, 6]);
+    }
+}

@@ -21,6 +21,7 @@ impl AppContext {
         config: Arc<AppConfig>,
         pmid: Arc<crate::domain::services::PmidService>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+        runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
         store: Arc<crate::infra::db::AnyStore>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
@@ -30,6 +31,7 @@ impl AppContext {
             Arc::clone(&pmid),
             Arc::clone(&store),
             Arc::clone(&grpc),
+            Arc::clone(&runtime_status),
             Arc::clone(&model_auto_unload),
         ));
         let worker_state = Arc::new(WorkerState::new(
@@ -54,6 +56,7 @@ impl AppState {
         config: Arc<AppConfig>,
         pmid: Arc<crate::domain::services::PmidService>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+        runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
         store: Arc<crate::infra::db::AnyStore>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
@@ -61,6 +64,7 @@ impl AppState {
             Arc::clone(&config),
             Arc::clone(&pmid),
             Arc::clone(&grpc),
+            Arc::clone(&runtime_status),
             Arc::clone(&store),
             Arc::clone(&model_auto_unload),
         ));

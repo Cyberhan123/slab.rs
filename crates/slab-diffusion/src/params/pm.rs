@@ -37,3 +37,41 @@ impl PmParams {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    fn sample_image(value: u8) -> Image {
+        Image { width: 1, height: 1, channel: 3, data: vec![value; 3] }
+    }
+
+    #[test]
+    fn build_c_params_handles_absent_fields() {
+        let mut params = PmParams::default();
+        let built = params.build_c_params();
+
+        assert!(built.id_images.is_null());
+        assert_eq!(built.id_images_count, 0);
+        assert!(built.id_embed_path.is_null());
+        assert_eq!(built.style_strength, 0.0);
+    }
+
+    #[test]
+    fn build_c_params_exposes_images_and_embed_path() {
+        let mut params = PmParams {
+            id_images: Some(vec![sample_image(2), sample_image(9)]),
+            id_embed_path: Some("photo-maker/embed.bin".to_owned()),
+            style_strength: 0.75,
+            ..PmParams::default()
+        };
+
+        let built = params.build_c_params();
+
+        assert_eq!(built.id_images_count, 2);
+        assert_eq!(unsafe { (*built.id_images).data }, params.id_images.as_ref().unwrap()[0].data.as_ptr().cast_mut());
+        assert_eq!(unsafe { CStr::from_ptr(built.id_embed_path) }.to_str().unwrap(), "photo-maker/embed.bin");
+        assert_eq!(built.style_strength, 0.75);
+    }
+}

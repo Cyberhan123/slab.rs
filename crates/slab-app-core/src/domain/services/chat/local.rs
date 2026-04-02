@@ -80,7 +80,7 @@ pub(super) async fn create_chat_completion(
 
         let backend_stream = rpc::client::chat_stream(llama_channel.clone(), grpc_request.clone())
             .await
-            .map_err(|error| AppCoreError::Internal(format!("grpc chat stream failed: {error}")))?;
+            .map_err(map_runtime_chat_error("chat stream"))?;
 
         let completion_id = format!("chatcmpl-{}", Uuid::new_v4());
         let created_ts = Utc::now().timestamp();
@@ -232,7 +232,7 @@ pub(super) async fn create_chat_completion(
 
     let generated = rpc::client::chat(llama_channel, grpc_request)
         .await
-        .map_err(|error| AppCoreError::Internal(format!("grpc chat failed: {error}")))?;
+        .map_err(map_runtime_chat_error("chat"))?;
     let mut response = convert::decode_chat_response(&generated);
 
     let usage = response.usage.clone().unwrap_or_else(|| {
@@ -279,7 +279,7 @@ pub(super) async fn create_text_completion(
 
     let generated = rpc::client::chat(llama_channel, grpc_request)
         .await
-        .map_err(|error| AppCoreError::Internal(format!("grpc chat failed: {error}")))?;
+        .map_err(map_runtime_chat_error("chat"))?;
     let mut response = convert::decode_chat_response(&generated);
 
     let usage = response.usage.clone().unwrap_or_else(|| {
@@ -304,4 +304,16 @@ async fn resolve_prompt_template_context(
     let model: UnifiedModel =
         record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
     Ok(Some(super::template::PromptTemplateContext::from_model(&model)))
+}
+
+fn map_runtime_chat_error(
+    action: &'static str,
+) -> impl Fn(anyhow::Error) -> AppCoreError + Send + Sync + 'static {
+    move |error| {
+        if let Some(detail) = rpc::client::transient_runtime_detail(&error) {
+            AppCoreError::BackendNotReady(detail)
+        } else {
+            AppCoreError::Internal(format!("grpc {action} failed: {error}"))
+        }
+    }
 }

@@ -5,4 +5,5 @@ pub mod error;
 pub mod infra;
 pub mod launch;
 pub mod model_auto_unload;
+pub mod runtime_supervisor;
 pub mod schemas;
