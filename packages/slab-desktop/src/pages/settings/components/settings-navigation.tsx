@@ -1,9 +1,14 @@
 import {
+  CloudCog,
   Cloud,
   Cpu,
+  Database,
   Download,
+  Logs,
+  Server,
   SlidersHorizontal,
   Sparkles,
+  Wrench,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -21,9 +26,15 @@ type SettingsNavigationProps = {
 
 const sectionIcons: Record<string, LucideIcon> = {
   cloud: Cloud,
+  database: Database,
   diffusion: Sparkles,
+  logging: Logs,
+  models: CloudCog,
+  providers: Cloud,
   runtime: Cpu,
+  server: Server,
   setup: Download,
+  tools: Wrench,
 };
 
 export function SettingsNavigation({

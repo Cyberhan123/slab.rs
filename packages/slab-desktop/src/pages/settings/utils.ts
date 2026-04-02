@@ -182,6 +182,18 @@ export function buildRequestBody(
     }
   }
 
+  if (propertyType === 'string') {
+    const trimmed = rawValue.trim();
+    if (trimmed.length === 0 && property.schema.default_value === null) {
+      return { op: 'unset' };
+    }
+
+    return {
+      op: 'set',
+      value: rawValue,
+    };
+  }
+
   return {
     op: 'set',
     value: rawValue,

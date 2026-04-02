@@ -1,6 +1,8 @@
 mod config;
 mod launch;
 mod pmid;
+mod pmid_v2;
+mod v2;
 
 pub use config::{
     ChatConfig, CloudProviderConfig, DiffusionConfig, DiffusionPathsConfig,
@@ -18,4 +20,21 @@ pub use pmid::{
     PMID, PmidCatalog, RuntimeLlamaPmids, RuntimeModelAutoUnloadPmids, RuntimePmids,
     RuntimeWorkerPmids, ServerLaunchProfilePmids, SettingPmid, SetupBackendPmids,
     SetupBackendReleasePmids, SetupFfmpegPmids, SetupPmids,
+};
+pub use pmid_v2::{
+    AdminPmids, AutoUnloadPmids, CapacityPmids, CorsPmids, DatabasePmids, EndpointPmids,
+    FfmpegToolPmids, GgmlBackendPmids, GgmlRuntimePmids, LlamaRuntimePmids, ModelsPmids,
+    ProvidersPmids, RuntimeBackendLeafPmids, RuntimeSessionsPmids, RuntimeV2Pmids, ServerPmids,
+    SettingsV2PmidCatalog, SingleRuntimeFamilyPmids, SourcePmids, SwaggerPmids, ToolsPmids,
+    V2_PMID,
+};
+pub use v2::{
+    AdminConfig, AutoUnloadConfig, CapacityConfig, CapacityOverrideConfig, CorsConfig,
+    DatabaseConfig, EndpointConfig, FfmpegToolConfig, GgmlRuntimeBackendsConfig,
+    GgmlRuntimeFamilyConfig, HttpEndpointConfig, IpcEndpointConfig, LoggingConfig,
+    LoggingOverrideConfig, LlamaRuntimeLeafConfig, ModelsConfigV2, ProviderAuthConfig,
+    ProviderDefaultsConfig, ProviderFamily, ProviderRegistryEntry, ProvidersConfig,
+    RuntimeConfigV2, RuntimeLeafConfig, RuntimeMode, RuntimeSessionsConfig, ServerConfigV2,
+    SettingsDocumentV2, SingleRuntimeFamilyConfig, SourceConfig, SwaggerConfig, ToolsConfig,
+    provider_registry_json_schema, settings_document_v2_json_schema, string_list_json_schema,
 };

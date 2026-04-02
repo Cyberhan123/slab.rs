@@ -8,10 +8,8 @@ use std::time::Duration;
 use log::{error, info, warn};
 use slab_app_core::config::Config;
 use slab_app_core::domain::services::PmidService;
-use slab_app_core::infra::settings::SettingsProvider;
 use slab_app_core::launch::{
     LaunchHostPaths, LaunchProfile, ResolvedLaunchSpec, ResolvedRuntimeChildSpec,
-    resolve_launch_spec,
 };
 use tauri::Manager;
 use tauri::path::BaseDirectory;
@@ -72,10 +70,8 @@ pub fn run_runtime_sidecar(
     let runtime_log_dir_fallback = app_log_dir.join("runtime");
     let runtime_ipc_dir_fallback = app_log_dir.join("ipc");
     let launch_spec = tauri::async_runtime::block_on(async {
-        let settings = Arc::new(SettingsProvider::load(cfg.settings_path.clone()).await?);
-        let pmid = PmidService::load(Arc::clone(&settings)).await?;
-        let launch_spec = resolve_launch_spec(
-            &pmid.config(),
+        let pmid = PmidService::load_from_path(cfg.settings_path.clone()).await?;
+        let launch_spec = pmid.resolve_launch_spec(
             LaunchProfile::Desktop,
             &LaunchHostPaths {
                 runtime_lib_dir_fallback: Some(lib_path),
@@ -83,7 +79,7 @@ pub fn run_runtime_sidecar(
                 runtime_ipc_dir_fallback,
                 shutdown_on_stdin_close: true,
             },
-        )?;
+        ).await?;
         launch_spec.prepare_filesystem()?;
         Ok::<_, Box<dyn std::error::Error>>(launch_spec)
     })?;

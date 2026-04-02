@@ -7783,6 +7783,7 @@ dependencies = [
  "base64 0.22.1",
  "dirs-next",
  "extism",
+ "futures",
  "hex",
  "log",
  "mime_guess",

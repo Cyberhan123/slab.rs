@@ -28,6 +28,7 @@ import type {
   SettingResponse,
 } from '../types';
 import { valueToEditorString } from '../utils';
+import { ProviderRegistryField } from './provider-registry-field';
 import { StructuredJsonField } from './structured-json-field';
 
 type SettingFieldCardProps = {
@@ -151,6 +152,13 @@ export function SettingFieldCard({
               placeholder="Enter a whole number"
               className="h-[42px] rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               aria-invalid={Boolean(errorState)}
+            />
+          ) : property.pmid === 'providers.registry' && structuredSchema ? (
+            <ProviderRegistryField
+              schema={structuredSchema}
+              value={structuredValue}
+              errorState={errorState}
+              onChange={(value) => onChange(property, value)}
             />
           ) : structuredSchema ? (
             <StructuredJsonField

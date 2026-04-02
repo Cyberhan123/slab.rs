@@ -43,6 +43,7 @@ percent-encoding = "2.3"
 base64 = { workspace = true }
 dirs-next = "2.0.0"
 validator = "0.20"
+futures = { workspace = true }
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-window-state = "2"

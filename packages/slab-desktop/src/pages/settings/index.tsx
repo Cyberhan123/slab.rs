@@ -171,12 +171,21 @@ export default function SettingsPage() {
                       >
                         {countSectionProperties(activeSection)} settings
                       </Badge>
+                      <Badge
+                        variant="chip"
+                        className="rounded-full border-border/60 bg-border/20 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground"
+                      >
+                        schema v{data.schema_version}
+                      </Badge>
                     </div>
                     {activeSection.description_md ? (
                       <p className="max-w-3xl text-base leading-8 text-muted-foreground">
                         {activeSection.description_md}
                       </p>
                     ) : null}
+                    <p className="max-w-3xl truncate font-mono text-[11px] text-muted-foreground/80">
+                      {data.settings_path}
+                    </p>
                   </div>
 
                   {statusSummary.error > 0 ||

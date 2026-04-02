@@ -26,10 +26,7 @@ use slab_app_core::context::AppState;
 use slab_app_core::domain::services::PmidService;
 use slab_app_core::infra::db::{AnyStore, TaskStore};
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
-use slab_app_core::infra::settings::SettingsProvider;
-use slab_app_core::launch::{
-    LaunchHostPaths, LaunchProfile, ResolvedRuntimeChildSpec, resolve_launch_spec,
-};
+use slab_app_core::launch::{LaunchHostPaths, LaunchProfile, ResolvedRuntimeChildSpec};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "slab-server", version, about = "Slab supervisor and HTTP gateway")]
@@ -274,14 +271,12 @@ where
 
     let store = AnyStore::connect(&cfg.database_url).await?;
     info!(database_url = %cfg.database_url, "database ready");
-    let settings = Arc::new(SettingsProvider::load(cfg.settings_path.clone()).await?);
-    info!(settings_path = %cfg.settings_path.display(), "settings provider ready");
+    let pmid = Arc::new(PmidService::load_from_path(cfg.settings_path.clone()).await?);
+    info!(settings_path = %cfg.settings_path.display(), "settings service ready");
     info!(
         model_config_dir = %cfg.model_config_dir.display(),
         "model config directory ready"
     );
-    let pmid =
-        Arc::new(slab_app_core::domain::services::PmidService::load(Arc::clone(&settings)).await?);
     info!("typed PMID config ready");
     let grpc = GrpcGateway::connect_from_config(&cfg)
         .await
@@ -531,10 +526,8 @@ async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow
         .unwrap_or_else(|| std::env::temp_dir().join("Slab"))
         .join("ipc");
 
-    let settings = Arc::new(SettingsProvider::load(gateway_cfg.settings_path.clone()).await?);
-    let pmid = PmidService::load(Arc::clone(&settings)).await?;
-    let launch_spec = resolve_launch_spec(
-        &pmid.config(),
+    let pmid = PmidService::load_from_path(gateway_cfg.settings_path.clone()).await?;
+    let launch_spec = pmid.resolve_launch_spec(
         LaunchProfile::Server,
         &LaunchHostPaths {
             runtime_lib_dir_fallback: gateway_cfg.lib_dir.clone(),
@@ -542,7 +535,7 @@ async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow
             runtime_ipc_dir_fallback,
             shutdown_on_stdin_close: true,
         },
-    )?;
+    ).await?;
     launch_spec.prepare_filesystem().map_err(anyhow::Error::from)?;
     let mut children = Vec::new();
 
