@@ -1,15 +1,12 @@
-use slab_proto::convert;
 use slab_types::RuntimeBackendId;
-use tracing::{info, warn};
+use tracing::warn;
 
 use crate::context::worker_state::OperationContext;
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
-    ReloadBackendLibCommand,
 };
 use crate::error::AppCoreError;
-use crate::infra::rpc;
 use crate::runtime_supervisor::RuntimeBackendRuntimeStatus;
 
 pub(crate) type AssetNameResolver = Box<dyn Fn(&str) -> String + Send + 'static>;
@@ -123,48 +120,6 @@ impl BackendService {
             .await?;
 
         Ok(AcceptedOperation { operation_id })
-    }
-
-    pub async fn reload_lib(
-        &self,
-        req: ReloadBackendLibCommand,
-    ) -> Result<BackendStatusView, AppCoreError> {
-        info!(
-            backend = %req.backend_id,
-            lib_path = %req.spec.lib_path.display(),
-            model_path = %req.spec.load.model_path.display(),
-            "reloading lib"
-        );
-
-        if req.uses_legacy_flattened_load {
-            warn!(
-                backend = %req.backend_id,
-                "legacy flattened reload payload used; prefer {{ lib_path, load }}"
-            );
-        }
-
-        let canonical_backend = req.backend_id.to_string();
-        let channel = self.model_state.grpc().backend_channel(req.backend_id).ok_or_else(|| {
-            AppCoreError::BackendNotReady(format!(
-                "{canonical_backend} gRPC endpoint is not configured"
-            ))
-        })?;
-        let grpc_req = convert::encode_reload_library_request(&req.spec);
-        let response = rpc::client::reload_library(channel, req.backend_id, grpc_req)
-            .await
-            .map_err(|error| {
-                if let Some(detail) = rpc::client::transient_runtime_detail(&error) {
-                    AppCoreError::BackendNotReady(detail)
-                } else {
-                    AppCoreError::Internal(format!("grpc reload_library failed: {error}"))
-                }
-            })?;
-
-        let status = convert::decode_model_status_response(&response).map_err(|error| {
-            AppCoreError::Internal(format!("invalid model status response from runtime: {error}"))
-        })?;
-
-        Ok(BackendStatusView { backend: status.backend.to_string(), status: status.status })
     }
 }
 

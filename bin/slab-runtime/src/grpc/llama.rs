@@ -149,20 +149,6 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         let status = self.unload_model_for_backend(BackendKind::Llama).await?;
         Ok(Response::new(status))
     }
-
-    #[instrument(skip_all, fields(request_id, backend = "ggml.llama"))]
-    async fn reload_library(
-        &self,
-        request: Request<pb::ReloadLibraryRequest>,
-    ) -> Result<Response<pb::ModelStatusResponse>, Status> {
-        let request_id = extract_request_id(request.metadata());
-        tracing::Span::current().record("request_id", &request_id);
-
-        debug!("llama reload_library request received");
-        let status =
-            self.reload_library_for_backend(BackendKind::Llama, request.into_inner()).await?;
-        Ok(Response::new(status))
-    }
 }
 
 fn estimate_token_count(text: &str) -> u32 {

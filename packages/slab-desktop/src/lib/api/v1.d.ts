@@ -1156,37 +1156,6 @@ export interface components {
             /** Format: double */
             output: number;
         };
-        ReloadDiffusionLoadOptionsRequest: {
-            clip_device?: string | null;
-            clip_g_path?: string | null;
-            clip_l_path?: string | null;
-            diffusion_model_path?: string | null;
-            flash_attn?: boolean;
-            lora_model_dir?: string | null;
-            offload_params_to_cpu?: boolean;
-            t5xxl_path?: string | null;
-            taesd_path?: string | null;
-            vae_device?: string | null;
-            vae_path?: string | null;
-        };
-        ReloadLibRequest: {
-            backend_id: string;
-            /** Format: int32 */
-            context_length?: number | null;
-            lib_path: string;
-            load?: components["schemas"]["ReloadModelLoadRequest"] | null;
-            model_path?: string | null;
-            /** Format: int32 */
-            num_workers?: number | null;
-        };
-        ReloadModelLoadRequest: {
-            /** Format: int32 */
-            context_length?: number | null;
-            diffusion?: components["schemas"]["ReloadDiffusionLoadOptionsRequest"] | null;
-            model_path: string;
-            /** Format: int32 */
-            num_workers?: number;
-        };
         /** @description Default runtime parameters (request). */
         RuntimePresetsRequest: {
             /**
@@ -1636,44 +1605,6 @@ export interface operations {
                 };
             };
             /** @description Bad request (invalid path) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unauthorised (management token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    reload_lib: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["ReloadLibRequest"];
-            };
-        };
-        responses: {
-            /** @description Backend reloaded with new library */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["BackendStatusResponse"];
-                };
-            };
-            /** @description Bad request (invalid path or unknown backend) */
             400: {
                 headers: {
                     [name: string]: unknown;

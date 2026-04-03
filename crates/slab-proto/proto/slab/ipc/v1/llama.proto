@@ -9,7 +9,6 @@ service LlamaService {
   rpc ChatStream(ChatRequest) returns (stream ChatStreamChunk);
   rpc LoadModel(ModelLoadRequest) returns (ModelStatusResponse);
   rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
-  rpc ReloadLibrary(ReloadLibraryRequest) returns (ModelStatusResponse);
 }
 
 message Usage {

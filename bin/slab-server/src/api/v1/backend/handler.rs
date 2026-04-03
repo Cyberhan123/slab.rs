@@ -9,7 +9,6 @@ use utoipa::OpenApi;
 use crate::api::middleware::auth;
 use crate::api::v1::backend::schema::{
     BackendListResponse, BackendStatusResponse, BackendTypeQuery, DownloadLibRequest,
-    ReloadLibRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::{ValidatedJson, ValidatedQuery};
@@ -19,10 +18,9 @@ use slab_app_core::domain::services::BackendService;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(backend_status, list_backends, download_lib, reload_lib),
+    paths(backend_status, list_backends, download_lib),
     components(schemas(
         DownloadLibRequest,
-        ReloadLibRequest,
         BackendTypeQuery,
         BackendStatusResponse,
         BackendListResponse,
@@ -36,7 +34,6 @@ pub fn router(state: Arc<AppState>) -> Router<Arc<AppState>> {
         .route("/backends", get(list_backends))
         .route("/backends/status", get(backend_status))
         .route("/backends/download", post(download_lib))
-        .route("/backends/reload", post(reload_lib))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth::auth_middleware))
         .with_state(state)
 }
@@ -92,22 +89,4 @@ async fn download_lib(
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
     let response = service.download_lib(req.into()).await?;
     Ok((StatusCode::ACCEPTED, Json(response.into())))
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/backends/reload",
-    tag = "backends",
-    request_body = ReloadLibRequest,
-    responses(
-        (status = 200, description = "Backend reloaded with new library", body = BackendStatusResponse),
-        (status = 400, description = "Bad request (invalid path or unknown backend)"),
-        (status = 401, description = "Unauthorised (management token required)"),
-    )
-)]
-async fn reload_lib(
-    State(service): State<BackendService>,
-    ValidatedJson(req): ValidatedJson<ReloadLibRequest>,
-) -> Result<Json<BackendStatusResponse>, ServerError> {
-    Ok(Json(service.reload_lib(req.try_into()?).await?.into()))
 }

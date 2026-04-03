@@ -14,9 +14,7 @@ mod task;
 mod video;
 
 pub use audio::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
-pub use backend::{
-    BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand, ReloadBackendLibCommand,
-};
+pub use backend::{BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand};
 #[allow(unused_imports)]
 pub use chat::StructuredOutputJsonSchema;
 pub use chat::{

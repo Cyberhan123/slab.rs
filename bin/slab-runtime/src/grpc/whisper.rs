@@ -92,20 +92,6 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         let status = self.unload_model_for_backend(BackendKind::Whisper).await?;
         Ok(Response::new(status))
     }
-
-    #[instrument(skip_all, fields(request_id, backend = "ggml.whisper"))]
-    async fn reload_library(
-        &self,
-        request: Request<pb::ReloadLibraryRequest>,
-    ) -> Result<Response<pb::ModelStatusResponse>, Status> {
-        let request_id = extract_request_id(request.metadata());
-        tracing::Span::current().record("request_id", &request_id);
-
-        debug!("whisper reload_library request received");
-        let status =
-            self.reload_library_for_backend(BackendKind::Whisper, request.into_inner()).await?;
-        Ok(Response::new(status))
-    }
 }
 
 fn build_whisper_inference_options(

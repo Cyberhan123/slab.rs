@@ -355,37 +355,3 @@ pub async fn unload_model(
     })?;
     Ok(response.into_inner())
 }
-
-pub async fn reload_library(
-    channel: Channel,
-    backend_id: RuntimeBackendId,
-    req: pb::ReloadLibraryRequest,
-) -> anyhow::Result<pb::ModelStatusResponse> {
-    let backend = BackendKind::from_backend_id(backend_id)?;
-    #[allow(deprecated)]
-    let model_path =
-        req.load.as_ref().map(|load| load.model_path.as_str()).unwrap_or(req.model_path.as_str());
-    debug!(
-        backend = %backend_id,
-        lib_path = %req.lib_path,
-        model_path,
-        "sending gRPC reload_library request"
-    );
-
-    let (response, request_id) = match backend {
-        BackendKind::Llama => {
-            grpc_call!("reload_library", llama_client, channel, reload_library, req)
-        }
-        BackendKind::Whisper => {
-            grpc_call!("reload_library", whisper_client, channel, reload_library, req)
-        }
-        BackendKind::Diffusion => {
-            grpc_call!("reload_library", diffusion_client, channel, reload_library, req)
-        }
-    };
-
-    let response = response.with_context(|| {
-        format!("reload_library RPC failed for backend: {backend_id} (request_id={request_id})")
-    })?;
-    Ok(response.into_inner())
-}
