@@ -260,7 +260,7 @@ fn make_local_llama() -> slab_llama::Llama {
     let _guard = LLAMA_INIT_LOCK
         .lock()
         .expect("LLAMA_INIT_LOCK was poisoned by a panicked thread during library initialization");
-    let llama = slab_llama::Llama::new(llama_lib_dir().join("libllama.so"))
+    let llama = slab_llama::Llama::new(llama_lib_dir())
         .expect("failed to load llama library from testdata");
     // `backend_init` must only be called once per process; guard it with OnceLock
     // while still holding the init lock so the call is fully serialized.

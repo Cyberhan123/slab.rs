@@ -1,4 +1,3 @@
-use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -45,6 +44,7 @@ pub type WhisperLogCallback = slab_whisper_sys::ggml_log_callback;
 pub type DtwAhead = slab_whisper_sys::whisper_ahead;
 
 use slab_ggml::GGML;
+use slab_ggml::load_runtime_with_ggml_sidecar;
 use whisper_ctx::WhisperInnerContext;
 
 #[derive(Clone)]
@@ -54,43 +54,12 @@ pub struct Whisper {
     _ggml_lib: Option<Arc<GGML>>,
 }
 
-fn load_ggml_sidecar(path: &Path) -> Option<Arc<GGML>> {
-    let ggml_path = path.parent()?.join(format!("{}ggml{}", DLL_PREFIX, DLL_SUFFIX));
-    let ggml = GGML::new_with(&ggml_path).ok()?;
-    let lib_dir = ggml_path.parent()?.to_string_lossy();
-    ggml.load_all_backend_from_path(lib_dir.as_ref()).ok()?;
-    Some(Arc::new(ggml))
-}
-
 impl Whisper {
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, WhisperError> {
-        #[cfg(windows)]
-        {
-            use libloading::os::windows::{
-                LOAD_LIBRARY_SEARCH_APPLICATION_DIR, LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-                LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, Library,
-            };
-            let lib = unsafe {
-                Library::load_with_flags(
-                    path.as_ref(),
-                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR
-                        | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS
-                        | LOAD_LIBRARY_SEARCH_APPLICATION_DIR,
-                )?
-            };
+    pub fn new<P: AsRef<Path>>(lib_dir: P) -> Result<Self, WhisperError> {
+        let (whisper_lib, ggml_lib) =
+            load_runtime_with_ggml_sidecar::<_, slab_whisper_sys::WhisperLib>(lib_dir, "whisper")?;
 
-            let whisper_lib = unsafe { slab_whisper_sys::WhisperLib::from_library(lib)? };
-            let ggml_lib = load_ggml_sidecar(path.as_ref());
-            Ok(Self { lib: Arc::new(whisper_lib), _ggml_lib: ggml_lib })
-        }
-
-        #[cfg(not(windows))]
-        {
-            let raw_lib = unsafe { libloading::Library::new(path.as_ref())? };
-            let lib = unsafe { slab_whisper_sys::WhisperLib::from_library(raw_lib)? };
-            let ggml_lib = load_ggml_sidecar(path.as_ref());
-            Ok(Self { lib: Arc::new(lib), _ggml_lib: ggml_lib })
-        }
+        Ok(Self { lib: Arc::new(whisper_lib), _ggml_lib: ggml_lib })
     }
 
     /// Redirect all whisper.cpp and GGML logs to logging hooks installed by whisper-rs.
@@ -126,17 +95,18 @@ impl fmt::Debug for Whisper {
 mod test {
     use super::*;
     use std::env;
-    use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
+
     #[test]
     fn test_load_library() {
         match env::current_exe() {
             Ok(exe_path) => {
-                let whisper_lib_name = format!("{}whisper{}", DLL_PREFIX, DLL_SUFFIX);
                 let dir = exe_path.parent().unwrap().parent().unwrap().join("resources\\libs");
-                let whisper_dll_path = dir.join(&whisper_lib_name);
                 println!("The executable file directory is: {:?}", dir);
-                println!("Whisper DLL path: {:?}", whisper_dll_path);
-                match Whisper::new(whisper_dll_path) {
+                println!(
+                    "Whisper DLL path: {:?}",
+                    slab_utils::loader::library_path(&dir, "whisper")
+                );
+                match Whisper::new(dir) {
                     Ok(_) => println!("Successfully loaded Whisper library!"),
                     Err(e) => println!("Failed to load Whisper library: {}", e),
                 }

@@ -27,6 +27,7 @@ ggml = ["dep:slab-whisper", "dep:slab-llama", "dep:slab-diffusion"]
 [dependencies]
 slab-core-macros = { workspace = true }
 slab-types = { workspace = true }
+slab-utils = { workspace = true }
 libloading = { workspace = true }
 slab-whisper = { workspace = true, optional = true }
 slab-llama = { workspace = true, optional = true }

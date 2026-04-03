@@ -304,7 +304,12 @@ mod tests {
 
     #[test]
     fn image_from_raw_copies_pixels_and_handles_empty_images() {
-        let raw = sd_image_t { width: 2, height: 1, channel: 3, data: alloc_image_buffer(&[1, 2, 3, 4, 5, 6]) };
+        let raw = sd_image_t {
+            width: 2,
+            height: 1,
+            channel: 3,
+            data: alloc_image_buffer(&[1, 2, 3, 4, 5, 6]),
+        };
         let image = Image::from(raw);
 
         assert_eq!(image.width, 2);
@@ -312,7 +317,8 @@ mod tests {
         assert_eq!(image.channel, 3);
         assert_eq!(image.data, vec![1, 2, 3, 4, 5, 6]);
 
-        let empty = Image::from(sd_image_t { width: 0, height: 0, channel: 4, data: std::ptr::null_mut() });
+        let empty =
+            Image::from(sd_image_t { width: 0, height: 0, channel: 4, data: std::ptr::null_mut() });
         assert_eq!(empty.channel, 4);
         assert!(empty.data.is_empty());
     }
@@ -344,6 +350,8 @@ mod tests {
         assert_ne!(cloned.fp.prompt, params.fp.prompt);
         assert_eq!(cloned.fp.ref_images_count, 1);
         assert_eq!(cloned.fp.init_image.width, 2);
-        assert_ne!(unsafe { (*cloned.fp.ref_images).data }, unsafe { (*params.fp.ref_images).data });
+        assert_ne!(unsafe { (*cloned.fp.ref_images).data }, unsafe {
+            (*params.fp.ref_images).data
+        });
     }
 }

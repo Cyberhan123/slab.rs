@@ -13,5 +13,5 @@ pub enum DiffusionError {
     UpscalerFailed,
 
     #[error("Backend list is unavailable")]
-    BackendListUnavailable
+    BackendListUnavailable,
 }

@@ -21,13 +21,6 @@ pub enum GGMLLlamaEngineError {
     #[error("Invalid llama worker count: {num_workers} (must be > 0)")]
     InvalidWorkerCount { num_workers: usize },
 
-    #[error("Failed to canonicalize llama library path: {path}")]
-    CanonicalizeLibraryPath {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
-
     #[error("Failed to initialize llama dynamic library at: {path}")]
     InitializeDynamicLibrary {
         path: PathBuf,

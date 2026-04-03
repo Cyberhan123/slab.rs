@@ -281,25 +281,30 @@ impl SettingsDocumentProviderV2 {
         let default_document = settings_document_v2_to_json_value(&SettingsDocumentV2::default());
 
         let next_value = match command.op {
-            crate::domain::models::UpdateSettingOperation::Set => command.value.ok_or_else(|| {
-                AppCoreError::BadRequest(format!(
-                    "setting '{}' update requires a value when op=set",
-                    path
-                ))
-            })?,
-            crate::domain::models::UpdateSettingOperation::Unset => value_at_path(&default_document, path)
-                .cloned()
-                .ok_or_else(|| AppCoreError::NotFound(format!("setting pmid '{}' not found", path)))?,
+            crate::domain::models::UpdateSettingOperation::Set => {
+                command.value.ok_or_else(|| {
+                    AppCoreError::BadRequest(format!(
+                        "setting '{}' update requires a value when op=set",
+                        path
+                    ))
+                })?
+            }
+            crate::domain::models::UpdateSettingOperation::Unset => {
+                value_at_path(&default_document, path).cloned().ok_or_else(|| {
+                    AppCoreError::NotFound(format!("setting pmid '{}' not found", path))
+                })?
+            }
         };
 
         set_value_at_path(&mut next_document, path, next_value.clone())?;
 
-        let next_settings: SettingsDocumentV2 = serde_json::from_value(next_document).map_err(|error| {
-            AppCoreError::BadRequest(format!(
-                "setting '{}' update produced an invalid settings document: {error}",
-                path
-            ))
-        })?;
+        let next_settings: SettingsDocumentV2 =
+            serde_json::from_value(next_document).map_err(|error| {
+                AppCoreError::BadRequest(format!(
+                    "setting '{}' update produced an invalid settings document: {error}",
+                    path
+                ))
+            })?;
 
         write_settings_document_v2_file(&self.path, &next_settings)?;
         state.document = next_settings;
@@ -970,9 +975,9 @@ fn set_value_at_path(
     next_value: serde_json::Value,
 ) -> Result<(), AppCoreError> {
     let segments = settings_path_segments(path)?;
-    let (leaf, parents) = segments.split_last().ok_or_else(|| {
-        AppCoreError::BadRequest("settings pmid must not be empty".to_owned())
-    })?;
+    let (leaf, parents) = segments
+        .split_last()
+        .ok_or_else(|| AppCoreError::BadRequest("settings pmid must not be empty".to_owned()))?;
     let mut current = root;
 
     for segment in parents {
@@ -1226,7 +1231,10 @@ mod tests {
             )
             .await
             .expect("set");
-        assert_eq!(provider.value("logging.level").await.expect("value"), serde_json::json!("debug"));
+        assert_eq!(
+            provider.value("logging.level").await.expect("value"),
+            serde_json::json!("debug")
+        );
 
         provider
             .update(
@@ -1242,7 +1250,10 @@ mod tests {
         let persisted: SettingsDocumentV2 =
             serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
         assert_eq!(persisted.logging.level, "info");
-        assert_eq!(provider.value("logging.level").await.expect("value"), serde_json::json!("info"));
+        assert_eq!(
+            provider.value("logging.level").await.expect("value"),
+            serde_json::json!("info")
+        );
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }
@@ -1273,7 +1284,10 @@ mod tests {
         let path = temp_settings_path();
         let provider = SettingsDocumentProviderV2::load(path.clone()).await.expect("provider");
 
-        assert_eq!(provider.value("runtime.ggml.install_dir").await.expect("value"), serde_json::Value::Null);
+        assert_eq!(
+            provider.value("runtime.ggml.install_dir").await.expect("value"),
+            serde_json::Value::Null
+        );
 
         provider
             .update(
@@ -1286,7 +1300,10 @@ mod tests {
             .await
             .expect("set");
 
-        assert_eq!(provider.value("runtime.ggml.install_dir").await.expect("value"), serde_json::json!("D:/runtime/libs"));
+        assert_eq!(
+            provider.value("runtime.ggml.install_dir").await.expect("value"),
+            serde_json::json!("D:/runtime/libs")
+        );
 
         provider
             .update(
@@ -1299,7 +1316,10 @@ mod tests {
             .await
             .expect("unset");
 
-        assert_eq!(provider.value("runtime.ggml.install_dir").await.expect("value"), serde_json::Value::Null);
+        assert_eq!(
+            provider.value("runtime.ggml.install_dir").await.expect("value"),
+            serde_json::Value::Null
+        );
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

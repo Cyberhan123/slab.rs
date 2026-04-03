@@ -728,10 +728,7 @@ mod tests {
     fn generated_provider_registry_schema_is_editor_friendly() {
         let schema = provider_registry_json_schema();
         let items = schema.get("items").and_then(Value::as_object).expect("items");
-        let properties = items
-            .get("properties")
-            .and_then(Value::as_object)
-            .expect("properties");
+        let properties = items.get("properties").and_then(Value::as_object).expect("properties");
         let auth_properties = properties
             .get("auth")
             .and_then(Value::as_object)
@@ -740,6 +737,12 @@ mod tests {
             .expect("auth properties");
 
         assert!(properties.contains_key("api_base"));
-        assert_eq!(auth_properties.get("api_key").and_then(Value::as_object).and_then(|value| value.get("writeOnly")), Some(&Value::Bool(true)));
+        assert_eq!(
+            auth_properties
+                .get("api_key")
+                .and_then(Value::as_object)
+                .and_then(|value| value.get("writeOnly")),
+            Some(&Value::Bool(true))
+        );
     }
 }

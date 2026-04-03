@@ -70,8 +70,14 @@ mod tests {
         let built = params.build_c_params();
 
         assert_eq!(built.id_images_count, 2);
-        assert_eq!(unsafe { (*built.id_images).data }, params.id_images.as_ref().unwrap()[0].data.as_ptr().cast_mut());
-        assert_eq!(unsafe { CStr::from_ptr(built.id_embed_path) }.to_str().unwrap(), "photo-maker/embed.bin");
+        assert_eq!(
+            unsafe { (*built.id_images).data },
+            params.id_images.as_ref().unwrap()[0].data.as_ptr().cast_mut()
+        );
+        assert_eq!(
+            unsafe { CStr::from_ptr(built.id_embed_path) }.to_str().unwrap(),
+            "photo-maker/embed.bin"
+        );
         assert_eq!(built.style_strength, 0.75);
     }
 }

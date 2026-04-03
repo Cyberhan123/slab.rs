@@ -12,8 +12,8 @@ use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use async_trait::async_trait;
 use anyhow::{Context, anyhow};
+use async_trait::async_trait;
 use clap::Parser;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, ChildStdin, Command as TokioCommand};
@@ -508,11 +508,7 @@ async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow
     let runtime_supervisor = Arc::new(
         ManagedRuntimeSupervisor::start(
             launch_spec,
-            Arc::new(TokioRuntimeSpawner::new(
-                runtime_exe,
-                args.log_level.clone(),
-                args.log_json,
-            )),
+            Arc::new(TokioRuntimeSpawner::new(runtime_exe, args.log_level.clone(), args.log_json)),
             RuntimeSupervisorOptions::default(),
         )
         .await

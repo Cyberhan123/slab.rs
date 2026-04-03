@@ -89,9 +89,7 @@ mod tests {
         let bytes = CString::new(value).unwrap().into_bytes_with_nul();
         let ptr = unsafe { libc::malloc(bytes.len()).cast::<c_char>() };
         assert!(!ptr.is_null());
-        unsafe {
-            std::ptr::copy_nonoverlapping(bytes.as_ptr().cast::<c_char>(), ptr, bytes.len())
-        };
+        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr().cast::<c_char>(), ptr, bytes.len()) };
         ptr
     }
 
@@ -139,7 +137,10 @@ mod tests {
         assert_eq!(lora_views.len(), 2);
         assert!(lora_views[0].is_high_noise);
         assert_eq!(lora_views[1].multiplier, 1.25);
-        assert_eq!(unsafe { CStr::from_ptr(lora_views[0].path) }.to_str().unwrap(), "hi.safetensors");
+        assert_eq!(
+            unsafe { CStr::from_ptr(lora_views[0].path) }.to_str().unwrap(),
+            "hi.safetensors"
+        );
 
         let embeddings = vec![
             Embedding { name: "style", path: "style.pt" },

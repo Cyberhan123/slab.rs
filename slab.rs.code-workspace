@@ -17,7 +17,8 @@
 		"chat.tools.terminal.autoApprove": {
 			"cargo check": true,
 			"cargo test": true,
-			"bun": true
+			"bun": true,
+			"cargo fmt": true
 		}
 	}
 }

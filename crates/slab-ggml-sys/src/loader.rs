@@ -104,7 +104,10 @@ impl GGmlLoaderLib {
         (self.ggml_backend_dev_by_name.as_ref().expect("Expected function, got error."))(name)
     }
 
-    pub unsafe fn ggml_backend_dev_by_type(&self, dev_type: ggml_backend_dev_type) -> ggml_backend_dev_t {
+    pub unsafe fn ggml_backend_dev_by_type(
+        &self,
+        dev_type: ggml_backend_dev_type,
+    ) -> ggml_backend_dev_t {
         (self.ggml_backend_dev_by_type.as_ref().expect("Expected function, got error."))(dev_type)
     }
 
@@ -124,12 +127,25 @@ impl GGmlLoaderLib {
         (self.ggml_backend_init_best.as_ref().expect("Expected function, got error."))()
     }
 
-    pub unsafe fn ggml_backend_init_by_name(&self, name: *const c_char, dev_name: *const c_char) -> ggml_backend_t {
-        (self.ggml_backend_init_by_name.as_ref().expect("Expected function, got error."))(name, dev_name)
+    pub unsafe fn ggml_backend_init_by_name(
+        &self,
+        name: *const c_char,
+        dev_name: *const c_char,
+    ) -> ggml_backend_t {
+        (self.ggml_backend_init_by_name.as_ref().expect("Expected function, got error."))(
+            name, dev_name,
+        )
     }
 
-    pub unsafe fn ggml_backend_init_by_type(&self, backend_type: ggml_backend_dev_type, dev_name: *const c_char) -> ggml_backend_t {
-        (self.ggml_backend_init_by_type.as_ref().expect("Expected function, got error."))(backend_type, dev_name)
+    pub unsafe fn ggml_backend_init_by_type(
+        &self,
+        backend_type: ggml_backend_dev_type,
+        dev_name: *const c_char,
+    ) -> ggml_backend_t {
+        (self.ggml_backend_init_by_type.as_ref().expect("Expected function, got error."))(
+            backend_type,
+            dev_name,
+        )
     }
 
     pub unsafe fn ggml_backend_load(&self, path: *const c_char) -> ggml_backend_reg_t {
@@ -141,7 +157,9 @@ impl GGmlLoaderLib {
     }
 
     pub unsafe fn ggml_backend_load_all_from_path(&self, path: *const c_char) {
-        (self.ggml_backend_load_all_from_path.as_ref().expect("Expected function, got error."))(path)
+        (self.ggml_backend_load_all_from_path.as_ref().expect("Expected function, got error."))(
+            path,
+        )
     }
 
     pub unsafe fn ggml_backend_reg_by_name(&self, name: *const c_char) -> ggml_backend_reg_t {

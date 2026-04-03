@@ -5,7 +5,7 @@ pub use backend::GGMLBackendDevice;
 pub use backend::GGMLBackendReg;
 pub use error::GGMLError;
 use slab_ggml_sys::GGmlLib;
-use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
+use slab_utils::loader::{RuntimeLibrary, load_runtime_library_from_dir};
 use std::ffi::CStr;
 use std::fmt;
 use std::path::Path;
@@ -28,37 +28,25 @@ impl GGML {
     /// Returns a [`GGMLError`] when the library cannot be opened or a
     /// required symbol is missing.
     pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, GGMLError> {
-        #[cfg(windows)]
-        {
-            use libloading::os::windows::{
-                LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, Library,
-            };
-            let lib = unsafe {
-                Library::load_with_flags(
-                    path.as_ref(),
-                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-                )?
-            };
-            let lib_dir = path.as_ref().parent().ok_or(GGMLError::NotParentDir)?;
+        let path = path.as_ref();
+        let lib_dir = path.parent().ok_or(GGMLError::NotParentDir)?;
+        let lib = unsafe { <GGmlLib as RuntimeLibrary>::load_from_dir(lib_dir, path)? };
+        Ok(Self { lib: Arc::new(lib) })
+    }
 
-            let ggml_base_path = lib_dir.join(format!("{}ggml-base{}", DLL_PREFIX, DLL_SUFFIX));
+    /// Load the `ggml` shared library from a unified runtime library directory.
+    pub fn from_dir<P: AsRef<Path>>(lib_dir: P) -> Result<Self, GGMLError> {
+        load_runtime_library_from_dir::<_, Self>(lib_dir, "ggml").map_err(Into::into)
+    }
 
-            let ggml_base_lib = unsafe {
-                Library::load_with_flags(
-                    ggml_base_path.as_path(),
-                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-                )?
-            };
-
-            let ggml_lib = unsafe { slab_ggml_sys::GGmlLib::from_library(ggml_base_lib, lib)? };
-            Ok(Self { lib: Arc::new(ggml_lib) })
-        }
-
-        #[cfg(not(windows))]
-        {
-            let lib = unsafe { slab_ggml_sys::GGmlLib::new(path.as_ref())? };
-            Ok(Self { lib: Arc::new(lib) })
-        }
+    /// Load the `ggml` shared library and eagerly register backend plugins from
+    /// the same runtime directory.
+    pub fn from_dir_and_load_backends<P: AsRef<Path>>(lib_dir: P) -> Result<Self, GGMLError> {
+        let lib_dir = lib_dir.as_ref();
+        let ggml = Self::from_dir(lib_dir)?;
+        let lib_dir = lib_dir.to_string_lossy();
+        ggml.load_all_backend_from_path(lib_dir.as_ref())?;
+        Ok(ggml)
     }
 
     /// Load ggml after verifying the library directory exists.
@@ -138,6 +126,27 @@ impl fmt::Debug for GGML {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("GGML").finish()
     }
+}
+
+impl RuntimeLibrary for GGML {
+    unsafe fn load_from_dir(lib_dir: &Path, path: &Path) -> Result<Self, libloading::Error> {
+        let lib = unsafe { <GGmlLib as RuntimeLibrary>::load_from_dir(lib_dir, path)? };
+        Ok(Self { lib: Arc::new(lib) })
+    }
+}
+
+pub fn load_runtime_with_ggml_sidecar<P, Main>(
+    lib_dir: P,
+    main_name: &str,
+) -> Result<(Main, Option<Arc<GGML>>), libloading::Error>
+where
+    P: AsRef<Path>,
+    Main: RuntimeLibrary,
+{
+    let lib_dir = lib_dir.as_ref();
+    let main = load_runtime_library_from_dir::<_, Main>(lib_dir, main_name)?;
+    let ggml = GGML::from_dir_and_load_backends(lib_dir).ok().map(Arc::new);
+    Ok((main, ggml))
 }
 
 #[cfg(test)]

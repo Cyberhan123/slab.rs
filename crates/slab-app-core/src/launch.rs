@@ -290,7 +290,9 @@ pub fn resolve_launch_spec_v2(
     host_paths: &LaunchHostPaths,
 ) -> Result<ResolvedLaunchSpec, AppCoreError> {
     match settings.runtime.mode {
-        RuntimeMode::ManagedChildren => resolve_managed_launch_spec_v2(settings, profile, host_paths),
+        RuntimeMode::ManagedChildren => {
+            resolve_managed_launch_spec_v2(settings, profile, host_paths)
+        }
         RuntimeMode::ExternalEndpoints => {
             resolve_external_launch_spec_v2(settings, profile, host_paths)
         }
@@ -341,7 +343,8 @@ fn resolve_managed_launch_spec_v2(
             single_backend,
         )?;
         let (queue_capacity, backend_capacity) = resolve_backend_capacity_v2(settings, backend)?;
-        let (log_level, log_json, log_dir) = resolve_backend_logging_v2(settings, backend, &runtime_log_dir);
+        let (log_level, log_json, log_dir) =
+            resolve_backend_logging_v2(settings, backend, &runtime_log_dir);
 
         if log_dir != runtime_log_dir {
             extra_dirs.insert(log_dir.clone());
@@ -381,9 +384,9 @@ fn resolve_managed_launch_spec_v2(
     }
 
     let gateway = match profile {
-        LaunchProfile::Server => Some(ResolvedGatewaySpec {
-            bind_address: settings.server.address.trim().to_owned(),
-        }),
+        LaunchProfile::Server => {
+            Some(ResolvedGatewaySpec { bind_address: settings.server.address.trim().to_owned() })
+        }
         LaunchProfile::Desktop => None,
     };
 
@@ -439,9 +442,9 @@ fn resolve_external_launch_spec_v2(
     }
 
     let gateway = match profile {
-        LaunchProfile::Server => Some(ResolvedGatewaySpec {
-            bind_address: settings.server.address.trim().to_owned(),
-        }),
+        LaunchProfile::Server => {
+            Some(ResolvedGatewaySpec { bind_address: settings.server.address.trim().to_owned() })
+        }
         LaunchProfile::Desktop => None,
     };
 
@@ -593,7 +596,9 @@ fn resolve_external_backend_endpoint_v2(
 ) -> Result<String, AppCoreError> {
     let explicit = explicit_leaf_endpoint_v2(settings, backend, transport)
         .or_else(|| single_backend.then(|| shared_ggml_endpoint_v2(settings, transport)).flatten())
-        .or_else(|| single_backend.then(|| shared_runtime_endpoint_v2(settings, transport)).flatten())
+        .or_else(|| {
+            single_backend.then(|| shared_runtime_endpoint_v2(settings, transport)).flatten()
+        })
         .ok_or_else(|| {
             AppCoreError::BadRequest(format!(
                 "runtime.mode=external_endpoints requires an explicit endpoint for backend '{}'",
@@ -623,10 +628,8 @@ fn resolve_backend_capacity_v2(
     };
 
     let queue = leaf.queue.or(family.queue).unwrap_or(root.queue);
-    let concurrent = leaf
-        .concurrent_requests
-        .or(family.concurrent_requests)
-        .unwrap_or(root.concurrent_requests);
+    let concurrent =
+        leaf.concurrent_requests.or(family.concurrent_requests).unwrap_or(root.concurrent_requests);
 
     let queue_capacity = usize::try_from(queue).map_err(|_| {
         AppCoreError::Internal(format!(
@@ -834,11 +837,7 @@ fn normalize_optional_text(raw: Option<&str>) -> Option<String> {
 
 fn normalize_text(raw: &str) -> Option<String> {
     let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_owned())
-    }
+    if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
 }
 
 #[cfg(test)]
@@ -974,7 +973,8 @@ mod tests {
         settings.runtime.ggml.backends.diffusion.enabled = false;
         settings.runtime.transport = RuntimeTransportMode::Http;
         settings.runtime.ggml.install_dir = Some("D:/settings/backend-libs".to_owned());
-        settings.runtime.ggml.backends.llama.endpoint.http.address = Some("127.0.0.1:4100".to_owned());
+        settings.runtime.ggml.backends.llama.endpoint.http.address =
+            Some("127.0.0.1:4100".to_owned());
 
         let spec = resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap();
 
@@ -984,7 +984,10 @@ mod tests {
         assert_eq!(spec.children[0].backend_capacity, 1);
         assert_eq!(spec.children[0].log_level.as_deref(), Some("error"));
         assert_eq!(spec.children[0].lib_dir, Some(PathBuf::from("D:/settings/backend-libs")));
-        assert_eq!(spec.gateway.as_ref().map(|gateway| gateway.bind_address.as_str()), Some("127.0.0.1:3000"));
+        assert_eq!(
+            spec.gateway.as_ref().map(|gateway| gateway.bind_address.as_str()),
+            Some("127.0.0.1:3000")
+        );
     }
 
     #[test]
@@ -993,7 +996,8 @@ mod tests {
         settings.runtime.mode = RuntimeMode::ExternalEndpoints;
         settings.runtime.transport = RuntimeTransportMode::Http;
 
-        let error = resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap_err();
+        let error =
+            resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap_err();
         assert!(error.to_string().contains("requires an explicit endpoint"));
     }
 
@@ -1002,9 +1006,12 @@ mod tests {
         let mut settings = SettingsDocumentV2::default();
         settings.runtime.mode = RuntimeMode::ExternalEndpoints;
         settings.runtime.transport = RuntimeTransportMode::Http;
-        settings.runtime.ggml.backends.llama.endpoint.http.address = Some("127.0.0.1:9101".to_owned());
-        settings.runtime.ggml.backends.whisper.endpoint.http.address = Some("127.0.0.1:9102".to_owned());
-        settings.runtime.ggml.backends.diffusion.endpoint.http.address = Some("127.0.0.1:9103".to_owned());
+        settings.runtime.ggml.backends.llama.endpoint.http.address =
+            Some("127.0.0.1:9101".to_owned());
+        settings.runtime.ggml.backends.whisper.endpoint.http.address =
+            Some("127.0.0.1:9102".to_owned());
+        settings.runtime.ggml.backends.diffusion.endpoint.http.address =
+            Some("127.0.0.1:9103".to_owned());
 
         let spec = resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap();
 

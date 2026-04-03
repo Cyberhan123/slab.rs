@@ -3,12 +3,12 @@ mod error;
 mod params;
 mod upscaler;
 
+use slab_ggml::GGML;
+use slab_ggml::load_runtime_with_ggml_sidecar;
 use std::ffi::CStr;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
-use slab_ggml::GGML;
-use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 
 pub use context::Context;
 pub use error::DiffusionError;
@@ -23,7 +23,7 @@ pub use upscaler::UpscalerContext;
 /// ```no_run
 /// use slab_diffusion::{Diffusion, ImgParams, SampleMethod};
 ///
-/// let sd = Diffusion::new("/usr/lib/libstable-diffusion.so").unwrap();
+/// let sd = Diffusion::new("/usr/lib").unwrap();
 /// let params = sd.new_context_params();
 /// let ctx = sd.new_context(params).unwrap();
 /// let mut image_params = sd.new_image_params();
@@ -42,47 +42,22 @@ pub use upscaler::UpscalerContext;
 #[derive(Clone)]
 pub struct Diffusion {
     pub(crate) lib: Arc<slab_diffusion_sys::DiffusionLib>,
-    pub(crate) ggml: Option<Arc<GGML>>,
+    pub(crate) _ggml_lib: Option<Arc<GGML>>,
 }
-
-fn load_ggml_sidecar(path: &Path) -> Option<Arc<GGML>> {
-    let ggml_path = path.parent()?.join(format!("{}ggml{}", DLL_PREFIX, DLL_SUFFIX));
-    let ggml = GGML::new_with(&ggml_path).ok()?;
-    let lib_dir = ggml_path.parent()?.to_string_lossy();
-    ggml.load_all_backend_from_path(lib_dir.as_ref()).ok()?;
-    Some(Arc::new(ggml))
-}
-
 
 impl Diffusion {
-    /// Load the `stable-diffusion` shared library from `path`.
+    /// Load the `stable-diffusion` shared library from the given runtime library directory.
     ///
     /// # Errors
     /// Returns a [`libloading::Error`] when the library cannot be opened or a
     /// required symbol is missing.
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, ::libloading::Error> {
-        #[cfg(windows)]
-        {
-            use libloading::os::windows::{
-                LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, Library,
-            };
-            let lib = unsafe {
-                Library::load_with_flags(
-                    path.as_ref(),
-                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-                )?
-            };
-            let diffusion_lib = unsafe { slab_diffusion_sys::DiffusionLib::from_library(lib)? };
-            let ggml = load_ggml_sidecar(path.as_ref());
-            Ok(Self { lib: Arc::new(diffusion_lib), ggml })
-        }
+    pub fn new<P: AsRef<Path>>(lib_dir: P) -> Result<Self, ::libloading::Error> {
+        let (diffusion_lib, ggml) = load_runtime_with_ggml_sidecar::<
+            _,
+            slab_diffusion_sys::DiffusionLib,
+        >(lib_dir, "stable-diffusion")?;
 
-        #[cfg(not(windows))]
-        {
-            let lib = unsafe { slab_diffusion_sys::DiffusionLib::new(path.as_ref())? };
-            let ggml = load_ggml_sidecar(path.as_ref());
-            Ok(Self { lib: Arc::new(lib), ggml })
-        }
+        Ok(Self { lib: Arc::new(diffusion_lib), _ggml_lib: ggml })
     }
 
     /// Return a string describing the capabilities of the loaded build
@@ -199,10 +174,6 @@ mod tests {
         workspace_root().join("vendor").join(artifact).join("bin")
     }
 
-    fn vendored_diffusion_library_path() -> PathBuf {
-        vendored_runtime_dir("diffusion").join("stable-diffusion.dll")
-    }
-
     fn add_dll_directory(path: &Path) -> Result<(), String> {
         if !path.is_dir() {
             return Err(format!("runtime directory does not exist: {}", path.display()));
@@ -234,7 +205,7 @@ mod tests {
     fn load_vendored_diffusion() -> Diffusion {
         ensure_vendored_runtime_dirs_registered();
 
-        Diffusion::new(vendored_diffusion_library_path())
+        Diffusion::new(vendored_runtime_dir("diffusion"))
             .unwrap_or_else(|error| panic!("failed to load vendored diffusion runtime: {error}"))
     }
 
@@ -244,7 +215,9 @@ mod tests {
 
         assert!(diffusion.get_num_physical_cores() >= 1);
         let _ = diffusion.get_system_info();
-        assert!(!diffusion.get_version().trim().is_empty() || !diffusion.get_commit().trim().is_empty());
+        assert!(
+            !diffusion.get_version().trim().is_empty() || !diffusion.get_commit().trim().is_empty()
+        );
     }
 
     #[test]
@@ -257,11 +230,19 @@ mod tests {
 
         let mut sample_params = diffusion.new_sample_params();
         sample_params.set_sample_steps(8);
-        assert!(diffusion.sample_params_to_str(&sample_params).is_some_and(|text| !text.trim().is_empty()));
+        assert!(
+            diffusion
+                .sample_params_to_str(&sample_params)
+                .is_some_and(|text| !text.trim().is_empty())
+        );
 
         let mut image_params = diffusion.new_image_params();
         image_params.set_prompt("test prompt");
-        assert!(diffusion.image_params_to_str(&image_params).is_some_and(|text| !text.trim().is_empty()));
+        assert!(
+            diffusion
+                .image_params_to_str(&image_params)
+                .is_some_and(|text| !text.trim().is_empty())
+        );
     }
 
     #[test]

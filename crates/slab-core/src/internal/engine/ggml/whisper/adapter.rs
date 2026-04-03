@@ -3,12 +3,11 @@ use slab_subtitle::{
     SubtitleEntry,
     timetypes::{TimePoint, TimeSpan},
 };
+use slab_utils::loader::load_library_from_dir;
 use slab_whisper::{
     SamplingStrategy, Whisper, WhisperContext, WhisperContextParameters, WhisperError,
     WhisperVadParams,
 };
-use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
-use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -26,13 +25,6 @@ pub enum GGMLWhisperEngineError {
     InferenceFailed {
         #[source]
         source: WhisperError,
-    },
-
-    #[error("Failed to canonicalize GGMLWhisperEngine library path: {path}")]
-    CanonicalizeLibraryPath {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
     },
 
     #[error("Failed to initialize GGMLWhisperEngine dynamic library at: {path}")]
@@ -117,38 +109,22 @@ unsafe impl Send for GGMLWhisperEngine {}
 unsafe impl Sync for GGMLWhisperEngine {}
 
 impl GGMLWhisperEngine {
-    fn resolve_lib_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, engine::EngineError> {
-        let whisper_lib_name = format!("{}whisper{}", DLL_PREFIX, DLL_SUFFIX);
-
-        let mut lib_path = path.as_ref().to_path_buf();
-        if lib_path.file_name() != Some(OsStr::new(&whisper_lib_name)) {
-            lib_path.push(&whisper_lib_name);
-        }
-
-        std::fs::canonicalize(&lib_path).map_err(|source| {
-            GGMLWhisperEngineError::CanonicalizeLibraryPath { path: lib_path, source }.into()
-        })
-    }
-
-    fn build_engine(normalized_path: &Path) -> Result<Self, engine::EngineError> {
-        info!("current whisper path is: {}", normalized_path.display());
-        let whisper = Whisper::new(normalized_path).map_err(|source| {
-            GGMLWhisperEngineError::InitializeDynamicLibrary {
-                path: normalized_path.to_path_buf(),
-                source,
-            }
-        })?;
-
-        Ok(Self { instance: Arc::new(whisper), ctx: None })
-    }
-
-    /// Create a new engine from the library at `path` **without** registering
-    /// any process-wide singleton.
+    /// Create a new engine from the shared runtime library directory at `path`
+    /// **without** registering any process-wide singleton.
     ///
     /// Call [`new_context`] afterwards to load a model.
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, engine::EngineError> {
-        let normalized = Self::resolve_lib_path(path)?;
-        Self::build_engine(&normalized)
+        load_library_from_dir(path, "whisper", |lib_dir, whisper_path| {
+            info!("current whisper path is: {}", whisper_path.display());
+            let whisper = Whisper::new(lib_dir).map_err(|source| {
+                GGMLWhisperEngineError::InitializeDynamicLibrary {
+                    path: whisper_path.to_path_buf(),
+                    source,
+                }
+            })?;
+
+            Ok(Self { instance: Arc::new(whisper), ctx: None })
+        })
     }
 
     pub fn new_context<P: AsRef<Path>>(

@@ -1,6 +1,6 @@
 #![cfg(windows)]
 
-use slab_ggml::{GGMLError, GGML};
+use slab_ggml::{GGML, GGMLError};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
@@ -22,10 +22,6 @@ fn workspace_root() -> PathBuf {
 
 fn vendored_runtime_dir() -> PathBuf {
     workspace_root().join("vendor").join("ggml").join("bin")
-}
-
-fn vendored_ggml_library_path() -> PathBuf {
-    vendored_runtime_dir().join("ggml.dll")
 }
 
 fn vendored_cpu_backend_library_path() -> PathBuf {
@@ -61,7 +57,7 @@ fn ensure_vendored_runtime_dir_registered() {
 fn load_vendored_ggml() -> GGML {
     ensure_vendored_runtime_dir_registered();
 
-    GGML::new_with(vendored_ggml_library_path())
+    GGML::from_dir(vendored_runtime_dir())
         .unwrap_or_else(|error| panic!("failed to load vendored ggml runtime: {error}"))
 }
 
@@ -102,11 +98,11 @@ fn vendored_ggml_can_load_cpu_backend_directly() {
 fn ggml_list_backends() {
     // let _guard = GGML_TEST_LOCK.lock().unwrap();
     let ggml = load_vendored_ggml();
-  
+
     ggml.load_all_backend_from_path(&vendored_runtime_dir().to_string_lossy())
         .expect("loading ggml backends from vendored directory should succeed");
 
-   let backend_count = ggml.ggml_backend_dev_count();
+    let backend_count = ggml.ggml_backend_dev_count();
     assert!(backend_count >= 1, "should have at least one backend device");
 
     for index in 0..backend_count {

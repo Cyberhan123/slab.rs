@@ -4,13 +4,12 @@ use std::sync::{Arc, RwLock};
 use serde_json::Value;
 use slab_types::settings::{
     ChatConfig, CloudProviderConfig, DesktopLaunchProfileConfig, DiffusionConfig,
-    DiffusionPathsConfig, DiffusionPerformanceConfig, LaunchBackendConfig,
-    LaunchBackendsConfig, LaunchConfig, LaunchProfilesConfig, PmidConfig,
-    ProviderRegistryEntry, RuntimeConfig, RuntimeLlamaConfig,
-    RuntimeModelAutoUnloadConfig, RuntimeTransportMode, RuntimeWorkerConfig,
-    ServerLaunchProfileConfig, SettingsDocumentV2, SetupBackendReleaseConfig,
-    SetupBackendsConfig, SetupConfig, SetupFfmpegConfig, V2_PMID,
-    provider_registry_json_schema, string_list_json_schema,
+    DiffusionPathsConfig, DiffusionPerformanceConfig, LaunchBackendConfig, LaunchBackendsConfig,
+    LaunchConfig, LaunchProfilesConfig, PmidConfig, ProviderRegistryEntry, RuntimeConfig,
+    RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig, RuntimeTransportMode, RuntimeWorkerConfig,
+    ServerLaunchProfileConfig, SettingsDocumentV2, SetupBackendReleaseConfig, SetupBackendsConfig,
+    SetupConfig, SetupFfmpegConfig, V2_PMID, provider_registry_json_schema,
+    string_list_json_schema,
 };
 
 use crate::domain::models::{
@@ -19,7 +18,7 @@ use crate::domain::models::{
 };
 use crate::error::AppCoreError;
 use crate::infra::settings::{
-    settings_document_v2_to_json_value, SettingsDocumentProviderV2, SettingsProvider,
+    SettingsDocumentProviderV2, SettingsProvider, settings_document_v2_to_json_value,
 };
 use crate::launch::{self, LaunchHostPaths, LaunchProfile, ResolvedLaunchSpec};
 
@@ -43,7 +42,10 @@ pub struct PmidService {
 impl PmidService {
     pub async fn load(settings: Arc<SettingsProvider>) -> Result<Self, AppCoreError> {
         let config = load_legacy_config(&settings).await?;
-        Ok(Self { backend: SettingsBackend::Legacy(settings), config: Arc::new(RwLock::new(config)) })
+        Ok(Self {
+            backend: SettingsBackend::Legacy(settings),
+            config: Arc::new(RwLock::new(config)),
+        })
     }
 
     pub async fn load_from_path(path: PathBuf) -> Result<Self, AppCoreError> {
@@ -74,7 +76,9 @@ impl PmidService {
         host_paths: &LaunchHostPaths,
     ) -> Result<ResolvedLaunchSpec, AppCoreError> {
         match &self.backend {
-            SettingsBackend::Legacy(_) => launch::resolve_launch_spec(&self.config(), profile, host_paths),
+            SettingsBackend::Legacy(_) => {
+                launch::resolve_launch_spec(&self.config(), profile, host_paths)
+            }
             SettingsBackend::V2(settings) => {
                 launch::resolve_launch_spec_v2(&settings.document().await, profile, host_paths)
             }
@@ -84,14 +88,16 @@ impl PmidService {
     pub async fn document(&self) -> SettingsDocumentView {
         match &self.backend {
             SettingsBackend::Legacy(settings) => settings.document().await,
-            SettingsBackend::V2(settings) => build_v2_document_view(settings).await.unwrap_or_else(|error| {
-                SettingsDocumentView {
-                    schema_version: 2,
-                    settings_path: settings.path().display().to_string(),
-                    warnings: vec![format!("Failed to build V2 settings view: {error}")],
-                    sections: Vec::new(),
-                }
-            }),
+            SettingsBackend::V2(settings) => {
+                build_v2_document_view(settings).await.unwrap_or_else(|error| {
+                    SettingsDocumentView {
+                        schema_version: 2,
+                        settings_path: settings.path().display().to_string(),
+                        warnings: vec![format!("Failed to build V2 settings view: {error}")],
+                        sections: Vec::new(),
+                    }
+                })
+            }
         }
     }
 
@@ -393,12 +399,7 @@ fn load_v2_config(settings: &SettingsDocumentV2) -> PmidConfig {
             backend_capacity: settings.runtime.capacity.concurrent_requests,
             runtime_ipc_dir: None,
             runtime_log_dir: normalize_string(
-                settings
-                    .runtime
-                    .logging
-                    .path
-                    .clone()
-                    .or_else(|| settings.logging.path.clone()),
+                settings.runtime.logging.path.clone().or_else(|| settings.logging.path.clone()),
             ),
             backends: LaunchBackendsConfig {
                 llama: LaunchBackendConfig {
@@ -444,7 +445,8 @@ async fn build_v2_document_view(
     let mut sections = empty_v2_sections();
 
     for pmid in V2_PMID.all() {
-        let property = build_v2_property_view_from_values(pmid.as_str(), &current_json, &default_json)?;
+        let property =
+            build_v2_property_view_from_values(pmid.as_str(), &current_json, &default_json)?;
         push_v2_property(&mut sections, property)?;
     }
 
@@ -508,22 +510,29 @@ fn empty_v2_sections() -> Vec<SettingsSectionView> {
         SettingsSectionView {
             id: "database".to_owned(),
             title: "Database".to_owned(),
-            description_md: "Persistent application data storage and connection settings.".to_owned(),
+            description_md: "Persistent application data storage and connection settings."
+                .to_owned(),
             subsections: vec![SettingsSubsectionView {
                 id: "general".to_owned(),
                 title: "General".to_owned(),
-                description_md: "Configure the primary database connection used by the desktop app and server.".to_owned(),
+                description_md:
+                    "Configure the primary database connection used by the desktop app and server."
+                        .to_owned(),
                 properties: Vec::new(),
             }],
         },
         SettingsSectionView {
             id: "logging".to_owned(),
             title: "Logging".to_owned(),
-            description_md: "Global logging defaults inherited by runtime workers and server processes.".to_owned(),
+            description_md:
+                "Global logging defaults inherited by runtime workers and server processes."
+                    .to_owned(),
             subsections: vec![SettingsSubsectionView {
                 id: "general".to_owned(),
                 title: "General".to_owned(),
-                description_md: "Choose the default log level, output format, and optional log directory.".to_owned(),
+                description_md:
+                    "Choose the default log level, output format, and optional log directory."
+                        .to_owned(),
                 properties: Vec::new(),
             }],
         },
@@ -541,18 +550,23 @@ fn empty_v2_sections() -> Vec<SettingsSectionView> {
         SettingsSectionView {
             id: "runtime".to_owned(),
             title: "Runtime".to_owned(),
-            description_md: "Shared inference runtime topology, transport, and backend-specific overrides.".to_owned(),
+            description_md:
+                "Shared inference runtime topology, transport, and backend-specific overrides."
+                    .to_owned(),
             subsections: vec![
                 SettingsSubsectionView {
                     id: "general".to_owned(),
                     title: "General".to_owned(),
-                    description_md: "Configure shared transport, session state, and fallback capacity limits.".to_owned(),
+                    description_md:
+                        "Configure shared transport, session state, and fallback capacity limits."
+                            .to_owned(),
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
                     id: "ggml".to_owned(),
                     title: "GGML".to_owned(),
-                    description_md: "Family-level defaults shared by GGML worker processes.".to_owned(),
+                    description_md: "Family-level defaults shared by GGML worker processes."
+                        .to_owned(),
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -576,7 +590,8 @@ fn empty_v2_sections() -> Vec<SettingsSectionView> {
                 SettingsSubsectionView {
                     id: "candle".to_owned(),
                     title: "Candle".to_owned(),
-                    description_md: "Shared configuration for the Candle runtime family.".to_owned(),
+                    description_md: "Shared configuration for the Candle runtime family."
+                        .to_owned(),
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -594,7 +609,8 @@ fn empty_v2_sections() -> Vec<SettingsSectionView> {
             subsections: vec![SettingsSubsectionView {
                 id: "registry".to_owned(),
                 title: "Registry".to_owned(),
-                description_md: "Manage provider endpoints, credentials, and request defaults.".to_owned(),
+                description_md: "Manage provider endpoints, credentials, and request defaults."
+                    .to_owned(),
                 properties: Vec::new(),
             }],
         },
@@ -606,13 +622,15 @@ fn empty_v2_sections() -> Vec<SettingsSectionView> {
                 SettingsSubsectionView {
                     id: "general".to_owned(),
                     title: "General".to_owned(),
-                    description_md: "Configure model cache and config directory locations.".to_owned(),
+                    description_md: "Configure model cache and config directory locations."
+                        .to_owned(),
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
                     id: "auto_unload".to_owned(),
                     title: "Auto Unload".to_owned(),
-                    description_md: "Unload idle models automatically to reclaim memory.".to_owned(),
+                    description_md: "Unload idle models automatically to reclaim memory."
+                        .to_owned(),
                     properties: Vec::new(),
                 },
             ],
@@ -620,12 +638,15 @@ fn empty_v2_sections() -> Vec<SettingsSectionView> {
         SettingsSectionView {
             id: "server".to_owned(),
             title: "Server".to_owned(),
-            description_md: "HTTP gateway configuration, access control, and API tooling.".to_owned(),
+            description_md: "HTTP gateway configuration, access control, and API tooling."
+                .to_owned(),
             subsections: vec![
                 SettingsSubsectionView {
                     id: "general".to_owned(),
                     title: "General".to_owned(),
-                    description_md: "Configure the gateway bind address and server-side logging behavior.".to_owned(),
+                    description_md:
+                        "Configure the gateway bind address and server-side logging behavior."
+                            .to_owned(),
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
@@ -637,13 +658,15 @@ fn empty_v2_sections() -> Vec<SettingsSectionView> {
                 SettingsSubsectionView {
                     id: "admin".to_owned(),
                     title: "Admin".to_owned(),
-                    description_md: "Protect management routes with an optional bearer token.".to_owned(),
+                    description_md: "Protect management routes with an optional bearer token."
+                        .to_owned(),
                     properties: Vec::new(),
                 },
                 SettingsSubsectionView {
                     id: "swagger".to_owned(),
                     title: "Swagger".to_owned(),
-                    description_md: "Enable or disable the OpenAPI and Swagger UI endpoints.".to_owned(),
+                    description_md: "Enable or disable the OpenAPI and Swagger UI endpoints."
+                        .to_owned(),
                     properties: Vec::new(),
                 },
             ],
@@ -656,18 +679,20 @@ fn push_v2_property(
     property: SettingPropertyView,
 ) -> Result<(), AppCoreError> {
     let (section_id, subsection_id) = v2_section_location(&property.pmid);
-    let section = sections
-        .iter_mut()
-        .find(|section| section.id == section_id)
-        .ok_or_else(|| AppCoreError::Internal(format!("unknown V2 settings section '{}'", section_id)))?;
+    let section =
+        sections.iter_mut().find(|section| section.id == section_id).ok_or_else(|| {
+            AppCoreError::Internal(format!("unknown V2 settings section '{}'", section_id))
+        })?;
     let subsection = section
         .subsections
         .iter_mut()
         .find(|subsection| subsection.id == subsection_id)
-        .ok_or_else(|| AppCoreError::Internal(format!(
-            "unknown V2 settings subsection '{}.{}'",
-            section_id, subsection_id
-        )))?;
+        .ok_or_else(|| {
+            AppCoreError::Internal(format!(
+                "unknown V2 settings subsection '{}.{}'",
+                section_id, subsection_id
+            ))
+        })?;
     subsection.properties.push(property);
     Ok(())
 }
@@ -732,7 +757,9 @@ fn v2_value_type(path: &str, effective: &Value, default: &Value) -> SettingValue
 
 fn v2_enum_values(path: &str) -> Option<Vec<String>> {
     match path {
-        "runtime.mode" => Some(vec!["managed_children".to_owned(), "external_endpoints".to_owned()]),
+        "runtime.mode" => {
+            Some(vec!["managed_children".to_owned(), "external_endpoints".to_owned()])
+        }
         "runtime.transport" => Some(vec!["http".to_owned(), "ipc".to_owned()]),
         _ => None,
     }
@@ -826,11 +853,8 @@ fn v2_property_description(path: &str) -> String {
 
 fn v2_search_terms(path: &str) -> Vec<String> {
     let mut search_terms: Vec<String> = path.split('.').map(|segment| segment.to_owned()).collect();
-    search_terms.extend(
-        v2_property_label(path)
-            .split_whitespace()
-            .map(|segment| segment.to_lowercase()),
-    );
+    search_terms
+        .extend(v2_property_label(path).split_whitespace().map(|segment| segment.to_lowercase()));
     search_terms.sort();
     search_terms.dedup();
     search_terms
@@ -882,11 +906,7 @@ fn merged_release(
 fn normalize_string(raw: Option<String>) -> Option<String> {
     raw.and_then(|value| {
         let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_owned())
-        }
+        if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
     })
 }
 
@@ -912,11 +932,12 @@ fn resolve_v2_backend_concurrency(settings: &SettingsDocumentV2, backend: V2Back
     let leaf = match backend {
         V2Backend::Llama => settings.runtime.ggml.backends.llama.capacity.concurrent_requests,
         V2Backend::Whisper => settings.runtime.ggml.backends.whisper.capacity.concurrent_requests,
-        V2Backend::Diffusion => settings.runtime.ggml.backends.diffusion.capacity.concurrent_requests,
+        V2Backend::Diffusion => {
+            settings.runtime.ggml.backends.diffusion.capacity.concurrent_requests
+        }
     };
 
-    leaf.or(family.concurrent_requests)
-        .unwrap_or(settings.runtime.capacity.concurrent_requests)
+    leaf.or(family.concurrent_requests).unwrap_or(settings.runtime.capacity.concurrent_requests)
 }
 
 async fn required_u32(
@@ -1104,10 +1125,7 @@ mod tests {
             family: ProviderFamily::OpenaiCompatible,
             display_name: "OpenAI".to_owned(),
             api_base: "https://api.openai.com/v1".to_owned(),
-            auth: ProviderAuthConfig {
-                api_key: Some("sk-test".to_owned()),
-                api_key_env: None,
-            },
+            auth: ProviderAuthConfig { api_key: Some("sk-test".to_owned()), api_key_env: None },
             defaults: ProviderDefaultsConfig::default(),
         });
         fs::write(&path, serde_json::to_string_pretty(&document).expect("serialize"))

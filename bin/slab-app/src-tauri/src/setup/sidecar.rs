@@ -167,18 +167,23 @@ struct TauriRuntimeChildHandle {
 
 #[async_trait]
 impl RuntimeChildHandle for TauriRuntimeChildHandle {
-    async fn wait_for_exit(&mut self) -> Result<RuntimeChildExit, slab_app_core::error::AppCoreError> {
-        let exit = self.exit_rx.as_mut().ok_or_else(|| {
-            slab_app_core::error::AppCoreError::Internal(
-                "runtime exit receiver missing for Tauri sidecar".to_owned(),
-            )
-        })?
-        .await
-        .map_err(|_| {
-            slab_app_core::error::AppCoreError::Internal(
-                "runtime exit receiver dropped for Tauri sidecar".to_owned(),
-            )
-        })?;
+    async fn wait_for_exit(
+        &mut self,
+    ) -> Result<RuntimeChildExit, slab_app_core::error::AppCoreError> {
+        let exit = self
+            .exit_rx
+            .as_mut()
+            .ok_or_else(|| {
+                slab_app_core::error::AppCoreError::Internal(
+                    "runtime exit receiver missing for Tauri sidecar".to_owned(),
+                )
+            })?
+            .await
+            .map_err(|_| {
+                slab_app_core::error::AppCoreError::Internal(
+                    "runtime exit receiver dropped for Tauri sidecar".to_owned(),
+                )
+            })?;
         self.exit_rx = None;
         Ok(exit)
     }
@@ -195,10 +200,10 @@ impl RuntimeChildHandle for TauriRuntimeChildHandle {
             })?
             .write(b"shutdown\n")
             .map_err(|error| {
-            slab_app_core::error::AppCoreError::Internal(format!(
-                "runtime sidecar shutdown signal failed: {error}"
-            ))
-        })
+                slab_app_core::error::AppCoreError::Internal(format!(
+                    "runtime sidecar shutdown signal failed: {error}"
+                ))
+            })
     }
 
     async fn force_kill(&mut self) -> Result<(), slab_app_core::error::AppCoreError> {
@@ -211,10 +216,10 @@ impl RuntimeChildHandle for TauriRuntimeChildHandle {
             })?
             .kill()
             .map_err(|error| {
-            slab_app_core::error::AppCoreError::Internal(format!(
-                "runtime sidecar force kill failed: {error}"
-            ))
-        })
+                slab_app_core::error::AppCoreError::Internal(format!(
+                    "runtime sidecar force kill failed: {error}"
+                ))
+            })
     }
 }
 
@@ -283,13 +288,19 @@ impl RuntimeChildSpawner for TauriRuntimeSpawner {
                             Some(0) => {
                                 info!(
                                     "runtime terminated [{} {}]: signal {:?} code {:?}",
-                                    backend_for_events, bind_for_events, payload.signal, payload.code
+                                    backend_for_events,
+                                    bind_for_events,
+                                    payload.signal,
+                                    payload.code
                                 );
                             }
                             _ => {
                                 warn!(
                                     "runtime terminated [{} {}]: signal {:?} code {:?}",
-                                    backend_for_events, bind_for_events, payload.signal, payload.code
+                                    backend_for_events,
+                                    bind_for_events,
+                                    payload.signal,
+                                    payload.code
                                 );
                             }
                         }
