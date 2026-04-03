@@ -2,6 +2,8 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
+
 use crate::Llama;
 use crate::LlamaSampler;
 use crate::context_params::LlamaContextParams;
@@ -36,7 +38,7 @@ pub struct LlamaModel {
 }
 
 /// A single chat message used by `llama_chat_apply_template`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ChatMessage {
     pub role: String,
     pub content: String,
