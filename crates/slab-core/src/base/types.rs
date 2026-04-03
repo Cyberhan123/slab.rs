@@ -311,6 +311,8 @@ pub enum StreamChunk {
     Done,
     /// Generation terminated due to a backend error.
     Error(String),
+    /// Structured stream metadata emitted before terminal completion.
+    Json(serde_json::Value),
     /// A generated image (placeholder for now).
     #[allow(dead_code)]
     Image(bytes::Bytes), //TODO: A generated image.

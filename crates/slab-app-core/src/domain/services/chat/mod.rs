@@ -463,19 +463,6 @@ fn validate_chat_route_params(
         return Ok(());
     }
 
-    if command.cloud.reasoning_effort.is_some() {
-        return Err(unsupported_chat_parameter(
-            "reasoning_effort",
-            "local chat completions do not support reasoning controls",
-        ));
-    }
-    if command.cloud.verbosity.is_some() {
-        return Err(unsupported_chat_parameter(
-            "verbosity",
-            "local chat completions do not support verbosity controls",
-        ));
-    }
-
     Ok(())
 }
 
@@ -614,6 +601,8 @@ async fn create_chat_completion_with_state(
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
+                    reasoning_effort: command.cloud.reasoning_effort,
+                    verbosity: command.cloud.verbosity,
                     grammar: command.local.grammar.clone(),
                     grammar_json: command.local.structured_output.is_some(),
                     stream: true,
@@ -687,6 +676,8 @@ async fn create_chat_completion_with_state(
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
+                    reasoning_effort: command.cloud.reasoning_effort,
+                    verbosity: command.cloud.verbosity,
                     grammar: command.local.grammar.clone(),
                     grammar_json: command.local.structured_output.is_some(),
                     stream: false,
@@ -790,6 +781,8 @@ async fn create_text_completion_with_state(
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
+                    reasoning_effort: command.cloud.reasoning_effort,
+                    verbosity: command.cloud.verbosity,
                     grammar: command.local.grammar.clone(),
                     grammar_json: command.local.structured_output.is_some(),
                 },
@@ -897,6 +890,7 @@ async fn build_messages(
 #[cfg(test)]
 mod test {
     use super::*;
+    use crate::domain::models::{ChatReasoningEffort, ChatVerbosity, TextCompletionCommand};
 
     fn make_command(role: &str, content: &str) -> ChatCompletionCommand {
         ChatCompletionCommand {
@@ -931,6 +925,31 @@ mod test {
         }
     }
 
+    fn make_text_command(prompt: &str) -> TextCompletionCommand {
+        TextCompletionCommand {
+            model: "test".into(),
+            prompt: prompt.into(),
+            common: crate::domain::models::CommonChatParams {
+                max_tokens: None,
+                temperature: None,
+                top_p: None,
+                n: 1,
+                stream: false,
+                stop: Vec::new(),
+                stream_options: Default::default(),
+            },
+            local: crate::domain::models::LocalChatParams {
+                grammar: None,
+                structured_output: None,
+            },
+            cloud: crate::domain::models::CloudChatParams {
+                reasoning_effort: None,
+                verbosity: None,
+                structured_output: None,
+            },
+        }
+    }
+
     #[test]
     fn validate_max_tokens_zero() {
         let mut req = make_command("user", "hello");
@@ -959,6 +978,24 @@ mod test {
         let req = make_command("system", "you are a bot");
         let found = req.messages.iter().rev().find(|message| message.role == "user");
         assert!(found.is_none());
+    }
+
+    #[test]
+    fn validate_chat_route_params_allows_local_reasoning_controls() {
+        let mut req = make_command("user", "hello");
+        req.cloud.reasoning_effort = Some(ChatReasoningEffort::High);
+        req.cloud.verbosity = Some(ChatVerbosity::Low);
+
+        assert!(validate_chat_route_params(false, &req).is_ok());
+    }
+
+    #[test]
+    fn validate_text_route_params_allows_local_reasoning_controls() {
+        let mut req = make_text_command("hello");
+        req.cloud.reasoning_effort = Some(ChatReasoningEffort::Minimal);
+        req.cloud.verbosity = Some(ChatVerbosity::High);
+
+        assert!(validate_text_route_params(false, &req).is_ok());
     }
 
     #[test]
@@ -999,13 +1036,14 @@ mod test {
     }
 
     #[test]
-    fn local_route_rejects_reasoning_controls() {
+    fn local_route_allows_reasoning_controls() {
         let mut command = make_command("user", "hello");
         command.cloud.reasoning_effort = Some(crate::domain::models::ChatReasoningEffort::Low);
+        command.cloud.verbosity = Some(crate::domain::models::ChatVerbosity::Medium);
 
         let result = validate_chat_route_params(false, &command);
 
-        assert!(matches!(result, Err(AppCoreError::BadRequestData { .. })));
+        assert!(result.is_ok());
     }
 
     #[test]

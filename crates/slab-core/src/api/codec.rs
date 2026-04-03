@@ -230,7 +230,11 @@ pub(crate) fn decode_text_generation_response(
                 .and_then(Value::as_u64)
                 .and_then(|value| u32::try_from(value).ok()),
             usage: value.get("usage").cloned().and_then(|usage| serde_json::from_value(usage).ok()),
-            metadata: BTreeMap::new(),
+            metadata: value
+                .get("metadata")
+                .cloned()
+                .and_then(|metadata| serde_json::from_value(metadata).ok())
+                .unwrap_or_default(),
         }),
         other => Err(CoreError::ResultDecodeFailed {
             task_kind: "text_generation".to_owned(),
@@ -251,6 +255,24 @@ pub(crate) fn decode_text_generation_chunk(
             metadata: BTreeMap::new(),
         })),
         StreamChunk::Done => Ok(None),
+        StreamChunk::Json(value) => Ok(Some(TextGenerationChunk {
+            delta: value
+                .get("delta")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned)
+                .unwrap_or_default(),
+            done: value.get("done").and_then(Value::as_bool).unwrap_or(false),
+            finish_reason: value
+                .get("finish_reason")
+                .and_then(Value::as_str)
+                .map(ToOwned::to_owned),
+            usage: value.get("usage").cloned().and_then(|usage| serde_json::from_value(usage).ok()),
+            metadata: value
+                .get("metadata")
+                .cloned()
+                .and_then(|metadata| serde_json::from_value(metadata).ok())
+                .unwrap_or_default(),
+        })),
         StreamChunk::Error(message) => {
             Err(CoreError::ResultDecodeFailed { task_kind: "text_generation".to_owned(), message })
         }
@@ -921,6 +943,58 @@ mod tests {
         assert_eq!(config.model_path, PathBuf::from("model.gguf"));
         assert_eq!(config.num_workers, 3);
         assert_eq!(config.context_length, Some(2048));
+    }
+
+    #[test]
+    fn decode_text_generation_response_preserves_json_usage_and_metadata() {
+        let response = decode_text_generation_response(Payload::Json(json!({
+            "text": "hello",
+            "tokens_used": 3,
+            "usage": {
+                "prompt_tokens": 8,
+                "completion_tokens": 3,
+                "total_tokens": 11,
+                "prompt_tokens_details": {
+                    "cached_tokens": 5
+                },
+                "estimated": false
+            },
+            "metadata": {
+                "reasoning_content": "step by step"
+            }
+        })))
+        .expect("json payload should decode");
+
+        assert_eq!(response.text, "hello");
+        assert_eq!(response.tokens_used, Some(3));
+        assert_eq!(
+            response.usage.as_ref().map(|usage| usage.prompt_tokens_details.cached_tokens),
+            Some(5)
+        );
+        assert_eq!(response.metadata.get("reasoning_content"), Some(&json!("step by step")));
+    }
+
+    #[test]
+    fn decode_text_generation_chunk_preserves_json_usage() {
+        let chunk = decode_text_generation_chunk(StreamChunk::Json(json!({
+            "usage": {
+                "prompt_tokens": 8,
+                "completion_tokens": 3,
+                "total_tokens": 11,
+                "prompt_tokens_details": {
+                    "cached_tokens": 5
+                },
+                "estimated": false
+            }
+        })))
+        .expect("json chunk should decode")
+        .expect("json chunk should yield a text chunk");
+
+        assert!(chunk.delta.is_empty());
+        assert_eq!(
+            chunk.usage.as_ref().map(|usage| usage.prompt_tokens_details.cached_tokens),
+            Some(5)
+        );
     }
 
     #[test]

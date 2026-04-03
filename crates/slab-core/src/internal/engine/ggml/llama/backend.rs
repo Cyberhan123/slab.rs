@@ -21,10 +21,13 @@
 
 use std::sync::Arc;
 
+use serde_json::json;
 use slab_llama::{ChatMessage as LlamaChatMessage, LlamaInferenceParams, LlamaLoadConfig};
 use tokio::sync::{broadcast, watch};
 
-use crate::internal::engine::ggml::llama::adapter::{GGMLLlamaEngine, LlamaDispatchRequest};
+use crate::internal::engine::ggml::llama::adapter::{
+    GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest,
+};
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, RuntimeControlSignal, WorkerCommand,
 };
@@ -280,9 +283,13 @@ impl LlamaWorker {
         };
 
         match engine.dispatch_inference(request).await {
-            Ok(text) => {
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(text.as_bytes()))));
+            Ok(LlamaDispatchOutput { text, usage }) => {
+                let tokens_used = usage.as_ref().map(|usage| usage.completion_tokens);
+                let _ = reply_tx.send(BackendReply::Value(Payload::Json(json!({
+                    "text": text,
+                    "tokens_used": tokens_used,
+                    "usage": usage,
+                }))));
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
