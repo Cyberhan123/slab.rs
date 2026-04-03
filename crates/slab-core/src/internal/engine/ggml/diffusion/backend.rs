@@ -10,15 +10,12 @@
 //! | `"model.unload"`    | `UnloadModel`    | Drop the model handle; call model.load to restore. |
 //! | `"inference.image"` | `InferenceImage` | Image generation from typed diffusion params.     |
 //! ### `model.load` input payload
-//! Uses a typed [`slab_types::GgmlDiffusionLoadConfig`] payload inside `slab-core`.
+//! Uses a typed [`slab_diffusion::ContextParams`] payload inside `slab-core`.
 
 use std::sync::Arc;
 use std::time::Instant;
 
-use slab_diffusion::{GuidanceParams, Image as DiffusionImage, SampleMethod, Scheduler, SlgParams};
-use slab_types::{
-    DiffusionImageRequest, DiffusionImageResponse, GeneratedImage, GgmlDiffusionLoadConfig,
-};
+use slab_diffusion::{ContextParams as DiffusionContextParams, ImgParams as DiffusionImgParams};
 use tokio::sync::broadcast;
 
 use crate::internal::engine::ggml::diffusion::adapter::GGMLDiffusionEngine;
@@ -30,140 +27,6 @@ use crate::internal::scheduler::types::Payload;
 use slab_core_macros::backend_handler;
 
 // ── Configurations ────────────────────────────────────────────────────────────
-
-/// Parse a sample method string into the native enum value.
-fn parse_sample_method(s: &str) -> SampleMethod {
-    match s {
-        "euler" => SampleMethod::Euler,
-        "euler_a" => SampleMethod::EULER_A,
-        "lcm" => SampleMethod::LCM,
-        "heun" => SampleMethod::HEUN,
-        "dpm2" => SampleMethod::DPM2,
-        "dpm++2s_a" => SampleMethod::DPMPP2S_A,
-        "dpm++2m" => SampleMethod::DPMPP2M,
-        "dpm++2mv2" => SampleMethod::DPMPP2Mv2,
-        "ipndm" => SampleMethod::IPNDM,
-        "ipndm_v" => SampleMethod::IPNDM_V,
-        _ => SampleMethod::Unknown,
-    }
-}
-
-/// Parse a scheduler string into the native enum value.
-fn parse_scheduler(s: &str) -> Scheduler {
-    match s {
-        "discrete" => Scheduler::DISCRETE,
-        "karras" => Scheduler::KARRAS,
-        "exponential" => Scheduler::EXPONENTIAL,
-        "ays" => Scheduler::AYS,
-        "gits" => Scheduler::GITS,
-        _ => Scheduler::UNKNOWN,
-    }
-}
-
-fn default_flow_shift() -> f32 {
-    f32::INFINITY
-}
-
-fn build_context_params(
-    engine: &GGMLDiffusionEngine,
-    config: &GgmlDiffusionLoadConfig,
-) -> slab_diffusion::ContextParams {
-    let mut params = engine.new_context_params();
-    params.set_model_path(&config.model_path.to_string_lossy());
-
-    if let Some(path) = config.diffusion_model_path.as_ref() {
-        params.set_diffusion_model_path(&path.to_string_lossy());
-    }
-    if let Some(path) = config.vae_path.as_ref() {
-        params.set_vae_path(&path.to_string_lossy());
-    }
-    if let Some(path) = config.taesd_path.as_ref() {
-        params.set_taesd_path(&path.to_string_lossy());
-    }
-    if let Some(path) = config.clip_l_path.as_ref() {
-        params.set_clip_l_path(&path.to_string_lossy());
-    }
-    if let Some(path) = config.clip_g_path.as_ref() {
-        params.set_clip_g_path(&path.to_string_lossy());
-    }
-    if let Some(path) = config.t5xxl_path.as_ref() {
-        params.set_t5xxl_path(&path.to_string_lossy());
-    }
-    if let Some(path) = config.clip_vision_path.as_ref() {
-        params.set_clip_vision_path(&path.to_string_lossy());
-    }
-    if let Some(path) = config.control_net_path.as_ref() {
-        params.set_control_net_path(&path.to_string_lossy());
-    }
-    if let Some(device) = config.vae_device.as_deref() {
-        params.set_vae_device(device);
-    }
-    if let Some(device) = config.clip_device.as_deref() {
-        params.set_clip_device(device);
-    }
-    if let Some(n_threads) = config.n_threads {
-        params.set_n_threads(n_threads);
-    }
-
-    params.set_flash_attn(config.flash_attn);
-    params.set_offload_params_to_cpu(config.offload_params_to_cpu);
-    params.set_enable_mmap(config.enable_mmap);
-    params
-}
-
-fn build_image_params(
-    engine: &GGMLDiffusionEngine,
-    gen_params: DiffusionImageRequest,
-) -> Result<slab_diffusion::ImgParams, String> {
-    let init_image = gen_params.init_image.as_ref().map(|image| DiffusionImage {
-        width: image.width,
-        height: image.height,
-        channel: u32::from(image.channels.max(1)),
-        data: image.data.clone(),
-    });
-
-    let width = i32::try_from(gen_params.width)
-        .map_err(|_| format!("width {} exceeds i32 range", gen_params.width))?;
-    let height = i32::try_from(gen_params.height)
-        .map_err(|_| format!("height {} exceeds i32 range", gen_params.height))?;
-    let sample_steps = gen_params.steps.unwrap_or(20).max(1);
-    let cfg_scale = gen_params.cfg_scale.unwrap_or(7.0);
-    let guidance = gen_params.guidance.unwrap_or(3.5);
-    let seed = gen_params.seed.unwrap_or(42);
-    let sample_method = gen_params.sample_method.as_deref().unwrap_or("auto");
-    let scheduler = gen_params.scheduler.as_deref().unwrap_or("auto");
-    let eta = gen_params.eta.unwrap_or(0.0);
-    let strength = gen_params.strength.unwrap_or(0.75);
-    let batch_count = i32::try_from(gen_params.count.max(1))
-        .map_err(|_| format!("count {} exceeds i32 range", gen_params.count))?;
-
-    let mut sample_params = engine.new_sample_params();
-    sample_params.set_sample_steps(sample_steps);
-    sample_params.set_sample_method(parse_sample_method(sample_method));
-    sample_params.set_scheduler(parse_scheduler(scheduler));
-    sample_params.set_eta(eta);
-    sample_params.set_flow_shift(default_flow_shift());
-    sample_params.set_guidance(GuidanceParams {
-        txt_cfg: cfg_scale,
-        img_cfg: cfg_scale,
-        distilled_guidance: guidance,
-        slg: SlgParams { layers: Vec::new(), layer_start: 0.0, layer_end: 0.0, scale: 0.0 },
-    });
-
-    let mut params = engine.new_image_params();
-    params.set_prompt(&gen_params.prompt);
-    params.set_negative_prompt(gen_params.negative_prompt.as_deref().unwrap_or_default());
-    params.set_width(width);
-    params.set_height(height);
-    params.set_sample_params(sample_params);
-    params.set_strength(strength);
-    params.set_seed(seed);
-    params.set_batch_count(batch_count);
-    if let Some(init_image) = init_image {
-        params.set_init_image(init_image);
-    }
-    Ok(params)
-}
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -237,7 +100,7 @@ impl DiffusionWorker {
             }
         };
 
-        let config: GgmlDiffusionLoadConfig = match input.to_typed() {
+        let config: DiffusionContextParams = match input.to_typed() {
             Ok(c) => c,
             Err(e) => {
                 tracing::warn!(
@@ -255,11 +118,11 @@ impl DiffusionWorker {
         tracing::info!(
             worker_id = self.worker_id,
             seq_id,
-            model_path = %config.model_path.display(),
+            model_path = ?config.model_path.as_ref().map(|path| path.display().to_string()),
             diffusion_model_path = ?config.diffusion_model_path.as_ref().map(|p| p.display().to_string()),
             vae_path = ?config.vae_path.as_ref().map(|p| p.display().to_string()),
-            flash_attn = config.flash_attn,
-            offload_params_to_cpu = config.offload_params_to_cpu,
+            flash_attn = ?config.flash_attn,
+            offload_params_to_cpu = ?config.offload_params_to_cpu,
             n_threads = ?config.n_threads,
             "diffusion model.load started"
         );
@@ -267,10 +130,7 @@ impl DiffusionWorker {
         let started_at = Instant::now();
 
         // Model loading is CPU/I-O bound; use block_in_place on this thread.
-        let result = tokio::task::block_in_place(|| {
-            let ctx_params = build_context_params(engine, &config);
-            engine.new_context(ctx_params)
-        });
+        let result = tokio::task::block_in_place(|| engine.new_context(config.clone()));
 
         match result {
             Ok(()) => {
@@ -344,19 +204,11 @@ impl DiffusionWorker {
             }
         };
 
-        let gen_params: DiffusionImageRequest = match input.to_typed() {
+        let image_params: DiffusionImgParams = match input.to_typed() {
             Ok(p) => p,
             Err(e) => {
                 let _ = reply_tx
                     .send(BackendReply::Error(format!("invalid inference.image params: {e}")));
-                return;
-            }
-        };
-
-        let image_params = match build_image_params(engine, gen_params) {
-            Ok(params) => params,
-            Err(error) => {
-                let _ = reply_tx.send(BackendReply::Error(error));
                 return;
             }
         };
@@ -370,32 +222,7 @@ impl DiffusionWorker {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
             }
             Ok(images) => {
-                let encoded: Vec<GeneratedImage> = images
-                    .into_iter()
-                    .filter(|img| !img.data.is_empty())
-                    .filter_map(|img| {
-                        let (w, h, channels) = (img.width, img.height, img.channel as u8);
-                        let dyn_img: Option<image::DynamicImage> = if channels == 3 {
-                            image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(w, h, img.data)
-                                .map(image::DynamicImage::ImageRgb8)
-                        } else {
-                            image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(w, h, img.data)
-                                .map(image::DynamicImage::ImageRgba8)
-                        };
-                        let dyn_img = dyn_img?;
-                        let mut png_bytes: Vec<u8> = Vec::new();
-                        dyn_img
-                            .write_to(
-                                &mut std::io::Cursor::new(&mut png_bytes),
-                                image::ImageFormat::Png,
-                            )
-                            .ok()?;
-                        Some(GeneratedImage { bytes: png_bytes, width: w, height: h, channels })
-                    })
-                    .collect();
-                let payload =
-                    DiffusionImageResponse { images: encoded, metadata: Default::default() };
-                let _ = reply_tx.send(BackendReply::Value(Payload::typed(payload)));
+                let _ = reply_tx.send(BackendReply::Value(Payload::typed(images)));
             }
         }
     }
@@ -405,7 +232,7 @@ impl DiffusionWorker {
         let Some(snapshot) = cmd.deployment() else {
             return;
         };
-        let config: GgmlDiffusionLoadConfig = match snapshot.typed_model_config() {
+        let config: DiffusionContextParams = match snapshot.typed_model_config() {
             Ok(config) => config,
             Err(error) => {
                 tracing::warn!(error = %error, "diffusion worker: invalid model deployment snapshot");
@@ -416,13 +243,10 @@ impl DiffusionWorker {
         if let Some(engine) = self.engine.as_mut()
             && !engine.is_model_loaded()
         {
-            let result = tokio::task::block_in_place(|| {
-                let ctx_params = build_context_params(engine, &config);
-                engine.new_context(ctx_params)
-            });
+            let result = tokio::task::block_in_place(|| engine.new_context(config.clone()));
             if let Err(e) = result {
                 tracing::warn!(
-                    model_path = %model_path.display(),
+                    model_path = ?model_path.as_ref().map(|path| path.display().to_string()),
                     error = %e,
                     "diffusion worker: broadcast LoadModel failed"
                 );
@@ -480,30 +304,23 @@ mod tests {
     fn deployment_snapshot_reads_typed_ggml_diffusion_model_config() {
         let snapshot = DeploymentSnapshot::with_model(
             11,
-            Payload::typed(GgmlDiffusionLoadConfig {
-                model_path: PathBuf::from("model.gguf"),
+            Payload::typed(DiffusionContextParams {
+                model_path: Some(PathBuf::from("model.gguf")),
                 diffusion_model_path: Some(PathBuf::from("diffusion.gguf")),
                 vae_path: Some(PathBuf::from("vae.gguf")),
-                taesd_path: None,
-                clip_l_path: None,
-                clip_g_path: None,
-                t5xxl_path: None,
-                clip_vision_path: None,
-                control_net_path: None,
-                flash_attn: true,
+                flash_attn: Some(true),
                 vae_device: Some("cpu".to_owned()),
-                clip_device: None,
-                offload_params_to_cpu: false,
-                enable_mmap: true,
+                enable_mmap: Some(true),
                 n_threads: Some(8),
+                ..Default::default()
             }),
         );
 
         let config = snapshot
-            .typed_model_config::<GgmlDiffusionLoadConfig>()
+            .typed_model_config::<DiffusionContextParams>()
             .expect("typed deployment snapshot should decode");
 
-        assert_eq!(config.model_path, PathBuf::from("model.gguf"));
+        assert_eq!(config.model_path, Some(PathBuf::from("model.gguf")));
         assert_eq!(config.diffusion_model_path, Some(PathBuf::from("diffusion.gguf")));
         assert_eq!(config.vae_path, Some(PathBuf::from("vae.gguf")));
         assert_eq!(config.vae_device.as_deref(), Some("cpu"));

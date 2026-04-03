@@ -2,6 +2,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use futures::stream::BoxStream;
+use slab_diffusion::{Image as DiffusionImage, ImgParams as DiffusionImgParams};
 use tokio::sync::Mutex;
 
 use crate::base::error::CoreError;
@@ -156,6 +157,13 @@ impl Pipeline {
         self.submit_image_generation(request).await?.result().await
     }
 
+    pub async fn run_inference_image(
+        &self,
+        params: DiffusionImgParams,
+    ) -> Result<Vec<DiffusionImage>, CoreError> {
+        self.submit_inference_image(params).await?.result().await
+    }
+
     pub async fn submit_image_generation(
         &self,
         request: ImageGenerationRequest,
@@ -173,6 +181,24 @@ impl Pipeline {
             op_options,
         )?;
         submit_plan(&self.runtime, plan, ImageGenerationTaskCodec).await
+    }
+
+    pub async fn submit_inference_image(
+        &self,
+        params: DiffusionImgParams,
+    ) -> Result<TaskHandle<Vec<DiffusionImage>, Infallible>, CoreError> {
+        self.require_capability(Capability::ImageGeneration)?;
+        let deployment = self.ensure_loaded_for(Capability::ImageGeneration, false).await?;
+        let resolved = deployment.resolved.clone();
+        let plan = InvocationPlan::new(
+            resolved,
+            Capability::ImageGeneration,
+            false,
+            Payload::typed(params),
+            Vec::new(),
+            Payload::None,
+        )?;
+        submit_plan(&self.runtime, plan, InferenceImageTaskCodec).await
     }
 
     pub async fn run_image_embedding(
@@ -301,6 +327,25 @@ impl TaskCodec<ImageGenerationResponse, Infallible> for ImageGenerationTaskCodec
     }
 }
 
+struct InferenceImageTaskCodec;
+
+impl TaskCodec<Vec<DiffusionImage>, Infallible> for InferenceImageTaskCodec {
+    fn capability(&self) -> Capability {
+        Capability::ImageGeneration
+    }
+
+    fn decode_result(&self, payload: Payload) -> Result<Vec<DiffusionImage>, CoreError> {
+        payload.to_typed().map_err(|error| CoreError::ResultDecodeFailed {
+            task_kind: "inference_image".to_owned(),
+            message: format!("invalid typed inference image result: {error}"),
+        })
+    }
+
+    fn decode_chunk(&self, chunk: StreamChunk) -> Result<Option<Infallible>, CoreError> {
+        Err(unexpected_chunk("inference_image", chunk))
+    }
+}
+
 struct ImageEmbeddingTaskCodec {
     output_name: String,
 }
@@ -372,7 +417,7 @@ mod tests {
 
     use base64::Engine as _;
     use futures::StreamExt;
-    use image::{ColorType, ImageEncoder, Rgb, RgbImage};
+    use image::{ColorType, GenericImageView, ImageEncoder, Rgb, RgbImage};
     use serde_json::json;
     use tokio::sync::mpsc;
 
@@ -538,21 +583,25 @@ mod tests {
                                 },
                                 MockBackend::Image => match invocation.route {
                                     RequestRoute::InferenceImage => {
-                                        let body: slab_types::DiffusionImageRequest = req
+                                        let body: DiffusionImgParams = req
                                             .input
                                             .to_typed()
                                             .expect("image request should be typed diffusion input");
-                                        assert_eq!(body.prompt, "generate a cat");
+                                        assert_eq!(body.prompt.as_deref(), Some("generate a cat"));
+                                        let width =
+                                            body.width.expect("mock image width should be set");
+                                        let height =
+                                            body.height.expect("mock image height should be set");
+                                        let pixel_count = (width as usize)
+                                            .saturating_mul(height as usize)
+                                            .saturating_mul(3);
                                         let _ = req.reply_tx.send(BackendReply::Value(
-                                            Payload::typed(slab_types::DiffusionImageResponse {
-                                                images: vec![slab_types::GeneratedImage {
-                                                    bytes: b"mock-image".to_vec(),
-                                                    width: body.width,
-                                                    height: body.height,
-                                                    channels: 3,
-                                                }],
-                                                metadata: Default::default(),
-                                            }),
+                                            Payload::typed(vec![DiffusionImage {
+                                                width,
+                                                height,
+                                                channel: 3,
+                                                data: vec![255; pixel_count],
+                                            }]),
                                         ));
                                     }
                                     other => {
@@ -928,7 +977,31 @@ mod tests {
             .await
             .expect("image generation should succeed");
 
-        assert_eq!(response.images, vec![b"mock-image".to_vec()]);
+        assert_eq!(response.images.len(), 1);
+        let decoded =
+            image::load_from_memory(&response.images[0]).expect("generated image should be a PNG");
+        assert_eq!(decoded.dimensions(), (256, 256));
+    }
+
+    #[tokio::test]
+    async fn pipeline_runs_canonical_inference_image() {
+        let runtime = test_runtime();
+        let pipeline = runtime.pipeline(image_spec()).expect("pipeline should build");
+
+        let response = pipeline
+            .run_inference_image(DiffusionImgParams {
+                prompt: Some("generate a cat".to_owned()),
+                width: Some(128),
+                height: Some(64),
+                ..Default::default()
+            })
+            .await
+            .expect("canonical inference image should succeed");
+
+        assert_eq!(response.len(), 1);
+        assert_eq!(response[0].width, 128);
+        assert_eq!(response[0].height, 64);
+        assert_eq!(response[0].channel, 3);
     }
 
     #[tokio::test]

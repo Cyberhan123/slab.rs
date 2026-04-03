@@ -1,8 +1,9 @@
 /// Self-guidance layer configuration.
+use serde::{Deserialize, Serialize};
 use slab_diffusion_sys::sd_slg_params_t;
 use std::ptr;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct SlgParams {
     pub layers: Vec<i32>,
     pub layer_start: f32,

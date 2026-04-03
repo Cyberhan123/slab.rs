@@ -19,6 +19,7 @@ slab-diffusion-sys = { workspace = true }
 thiserror = { workspace = true }
 libc = { workspace = true }
 slab-ggml = { workspace = true }
+serde = { workspace = true }
 
 [dev-dependencies]
 hf-hub = { workspace = true }

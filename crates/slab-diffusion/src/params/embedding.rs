@@ -1,5 +1,9 @@
-#[derive(Debug, Clone, Default)]
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Embedding {
-    pub name: &'static str,
-    pub path: &'static str,
+    pub name: String,
+    pub path: PathBuf,
 }

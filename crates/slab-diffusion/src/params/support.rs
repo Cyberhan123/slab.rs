@@ -51,7 +51,7 @@ pub(crate) fn sync_lora_views(
     views.clear();
 
     for lora in loras {
-        let path = new_c_string(lora.path);
+        let path = new_c_string(&lora.path.to_string_lossy());
         views.push(sd_lora_t {
             is_high_noise: lora.is_high_noise,
             multiplier: lora.multiplier,
@@ -72,8 +72,8 @@ pub(crate) fn sync_embedding_views(
     views.clear();
 
     for embedding in embeddings {
-        let name = new_c_string(embedding.name);
-        let path = new_c_string(embedding.path);
+        let name = new_c_string(&embedding.name);
+        let path = new_c_string(&embedding.path.to_string_lossy());
 
         views.push(sd_embedding_t { name: c_string_ptr(&name), path: c_string_ptr(&path) });
         names.push(name);
@@ -126,8 +126,16 @@ mod tests {
     #[test]
     fn sync_lora_and_embedding_views_keep_strings_alive() {
         let loras = vec![
-            Lora { is_high_noise: true, multiplier: 0.5, path: "hi.safetensors" },
-            Lora { is_high_noise: false, multiplier: 1.25, path: "lo.safetensors" },
+            Lora {
+                is_high_noise: true,
+                multiplier: 0.5,
+                path: std::path::PathBuf::from("hi.safetensors"),
+            },
+            Lora {
+                is_high_noise: false,
+                multiplier: 1.25,
+                path: std::path::PathBuf::from("lo.safetensors"),
+            },
         ];
         let mut lora_paths = Vec::new();
         let mut lora_views = Vec::new();
@@ -143,8 +151,8 @@ mod tests {
         );
 
         let embeddings = vec![
-            Embedding { name: "style", path: "style.pt" },
-            Embedding { name: "face", path: "face.pt" },
+            Embedding { name: "style".to_owned(), path: std::path::PathBuf::from("style.pt") },
+            Embedding { name: "face".to_owned(), path: std::path::PathBuf::from("face.pt") },
         ];
         let mut embedding_names = Vec::new();
         let mut embedding_paths = Vec::new();

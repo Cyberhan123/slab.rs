@@ -1,4 +1,7 @@
 /// Sigma schedule (scheduler).
+use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
 pub use slab_diffusion_sys::scheduler_t;
 /// scheduler parameters must keep code order
 #[rustfmt::skip]
@@ -20,7 +23,7 @@ pub use slab_diffusion_sys::{
 #[allow(non_camel_case_types)]
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Scheduler {
     DISCRETE = scheduler_t_DISCRETE_SCHEDULER,
     KARRAS = scheduler_t_KARRAS_SCHEDULER,
@@ -58,6 +61,33 @@ impl From<scheduler_t> for Scheduler {
             scheduler_t_LCM_SCHEDULER => Scheduler::LCM,
             scheduler_t_BONG_TANGENT_SCHEDULER => Scheduler::BONG_TANGENT,
             _ => Scheduler::UNKNOWN, // Handle unknown values gracefully
+        }
+    }
+}
+
+impl Default for Scheduler {
+    fn default() -> Self {
+        Self::UNKNOWN
+    }
+}
+
+impl FromStr for Scheduler {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "discrete" => Ok(Self::DISCRETE),
+            "karras" => Ok(Self::KARRAS),
+            "exponential" => Ok(Self::EXPONENTIAL),
+            "ays" => Ok(Self::AYS),
+            "gits" => Ok(Self::GITS),
+            "sgm_uniform" => Ok(Self::SGM_UNIFORM),
+            "simple" => Ok(Self::SIMPLE),
+            "smoothstep" => Ok(Self::SMOOTHSTEP),
+            "kl_optimal" => Ok(Self::KL_OPTIMAL),
+            "lcm" => Ok(Self::LCM),
+            "bong_tangent" => Ok(Self::BONG_TANGENT),
+            other => Err(format!("unsupported scheduler: {other}")),
         }
     }
 }

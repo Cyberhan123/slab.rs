@@ -1,6 +1,6 @@
 use hf_hub::api::sync::Api;
 use hf_hub::{Repo, RepoType};
-use slab_diffusion::{Diffusion, SampleMethod};
+use slab_diffusion::{ContextParams, Diffusion, ImgParams, SampleMethod, SampleParams};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -91,24 +91,30 @@ fn minisd_generates_small_image_from_hf_hub_model() {
     diffusion
         .backend_list_size()
         .unwrap_or_else(|error| panic!("failed to get diffusion backend list size: {error}"));
-    let mut context_params = diffusion.new_context_params();
-    context_params.set_model_path(&model_path.to_string_lossy());
+    let context_params = ContextParams {
+        model_path: Some(model_path),
+        ..Default::default()
+    };
 
     let ctx = diffusion
         .new_context(context_params)
         .unwrap_or_else(|error| panic!("failed to create miniSD context: {error}"));
 
-    let mut sample_params = diffusion.new_sample_params();
-    sample_params.set_sample_steps(2);
-    sample_params.set_sample_method(SampleMethod::Euler);
+    let sample_params = SampleParams {
+        sample_steps: Some(2),
+        sample_method: Some(SampleMethod::Euler),
+        ..Default::default()
+    };
 
-    let mut image_params = diffusion.new_image_params();
-    image_params.set_prompt("a tiny orange cat");
-    image_params.set_width(256);
-    image_params.set_height(256);
-    image_params.set_seed(42);
-    image_params.set_batch_count(1);
-    image_params.set_sample_params(sample_params);
+    let image_params = ImgParams {
+        prompt: Some("a tiny orange cat".to_owned()),
+        width: Some(256),
+        height: Some(256),
+        seed: Some(42),
+        batch_count: Some(1),
+        sample_params: Some(sample_params),
+        ..Default::default()
+    };
 
     let images = ctx
         .generate_image(image_params)

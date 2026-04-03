@@ -1,3 +1,7 @@
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
+
 use slab_diffusion_sys::lora_apply_mode_t;
 /// lora parameters must keep code order
 #[rustfmt::skip]
@@ -10,7 +14,7 @@ pub use slab_diffusion_sys::{
 
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))]
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum LoraApplyMode {
     Auto = lora_apply_mode_t_LORA_APPLY_AUTO,
     Immediately = lora_apply_mode_t_LORA_APPLY_IMMEDIATELY,
@@ -24,10 +28,16 @@ impl From<LoraApplyMode> for lora_apply_mode_t {
     }
 }
 
+impl Default for LoraApplyMode {
+    fn default() -> Self {
+        Self::Auto
+    }
+}
+
 /// A LoRA entry consumed by `sd_img_gen_params_t.loras`.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct Lora {
     pub is_high_noise: bool,
     pub multiplier: f32,
-    pub path: &'static str,
+    pub path: PathBuf,
 }

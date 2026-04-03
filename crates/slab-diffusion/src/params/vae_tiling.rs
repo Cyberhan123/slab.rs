@@ -1,8 +1,9 @@
 /// VAE tiling parameters.
+use serde::{Deserialize, Serialize};
 use slab_diffusion_sys::sd_tiling_params_t;
 
 /// Rust mirror of `sd_tiling_params_t`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct TilingParams {
     pub enabled: bool,
     pub tile_size_x: i32,

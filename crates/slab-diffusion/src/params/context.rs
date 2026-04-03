@@ -1,20 +1,114 @@
 use std::ffi::CString;
+use std::path::{Path, PathBuf};
 use std::ptr;
 
-use slab_diffusion_sys::sd_ctx_params_t;
-use slab_diffusion_sys::sd_embedding_t;
+use serde::{Deserialize, Serialize};
+use slab_diffusion_sys::{sd_ctx_params_t, sd_embedding_t};
 
-use crate::Diffusion;
-use crate::RngType;
-use crate::WeightType;
 use crate::params::support::{
     c_string_ptr, copy_and_free_c_string, new_c_string, sync_embedding_views,
 };
-use crate::params::{Embedding, LoraApplyMode, Prediction};
+use crate::params::{Embedding, LoraApplyMode, Prediction, RngType, WeightType};
+use crate::Diffusion;
 
+/// Stable Rust-native context parameters shared across the runtime chain.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_l_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_g_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_vision_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub t5xxl_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub llm_vision_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diffusion_model_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub high_noise_diffusion_model_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vae_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub taesd_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_net_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub embeddings: Option<Vec<Embedding>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photo_maker_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tensor_type_rules: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vae_decode_only: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub free_params_immediately: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_threads: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub wtype: Option<WeightType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rng_type: Option<RngType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sampler_rng_type: Option<RngType>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub prediction: Option<Prediction>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lora_apply_mode: Option<LoraApplyMode>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offload_params_to_cpu: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enable_mmap: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flash_attn: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diffusion_flash_attn: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tae_preview_only: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diffusion_conv_direct: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vae_conv_direct: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub circular_x: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub circular_y: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub force_sdxl_vae_conv_scale: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chroma_use_dit_mask: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chroma_use_t5_mask: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chroma_t5_mask_pad: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub qwen_image_zero_cond_t: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub main_device: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub diffusion_device: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub clip_device: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vae_device: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tae_device: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_net_device: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub photomaker_device: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vision_device: Option<String>,
+}
+
+/// FFI-only context parameter backing struct.
+pub(crate) struct InnerContextParams {
     pub(crate) fp: Box<sd_ctx_params_t>,
-    instance: Diffusion,
     model_path: Option<CString>,
     clip_l_path: Option<CString>,
     clip_g_path: Option<CString>,
@@ -43,11 +137,10 @@ pub struct ContextParams {
     vision_device: Option<CString>,
 }
 
-impl Clone for ContextParams {
+impl Clone for InnerContextParams {
     fn clone(&self) -> Self {
         let mut cloned = Self {
             fp: self.fp.clone(),
-            instance: self.instance.clone(),
             model_path: self.model_path.clone(),
             clip_l_path: self.clip_l_path.clone(),
             clip_g_path: self.clip_g_path.clone(),
@@ -80,19 +173,10 @@ impl Clone for ContextParams {
     }
 }
 
-impl std::fmt::Debug for ContextParams {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("ContextParams").finish_non_exhaustive()
-    }
-}
-
-impl Diffusion {
-    pub fn new_context_params(&self) -> ContextParams {
-        let mut fp = Box::new(unsafe { std::mem::zeroed::<sd_ctx_params_t>() });
-        unsafe { self.lib.sd_ctx_params_init(fp.as_mut()) };
-        ContextParams {
-            fp,
-            instance: self.clone(),
+impl Default for InnerContextParams {
+    fn default() -> Self {
+        Self {
+            fp: Box::new(unsafe { std::mem::zeroed::<sd_ctx_params_t>() }),
             model_path: None,
             clip_l_path: None,
             clip_g_path: None,
@@ -123,13 +207,240 @@ impl Diffusion {
     }
 }
 
-impl ContextParams {
-    fn set_string(
-        slot: &mut Option<CString>,
-        field: &mut *const std::os::raw::c_char,
-        value: &str,
-    ) {
-        *slot = Some(new_c_string(value));
+impl std::fmt::Debug for InnerContextParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InnerContextParams").finish_non_exhaustive()
+    }
+}
+
+impl Diffusion {
+    pub fn context_params_to_str(&self, params: &ContextParams) -> Option<String> {
+        let inner = InnerContextParams::from_canonical(self.lib.as_ref(), params);
+        let c_buf = unsafe { self.lib.sd_ctx_params_to_str(&*inner.fp) };
+        copy_and_free_c_string(c_buf)
+    }
+}
+
+impl InnerContextParams {
+    pub(crate) fn with_native_init(lib: &slab_diffusion_sys::DiffusionLib) -> Self {
+        let mut inner = Self::default();
+        unsafe { lib.sd_ctx_params_init(inner.fp.as_mut()) };
+        inner
+    }
+
+    pub(crate) fn from_canonical(
+        lib: &slab_diffusion_sys::DiffusionLib,
+        value: &ContextParams,
+    ) -> Self {
+        let mut inner = InnerContextParams::with_native_init(lib);
+
+        if value.model_path.is_some() {
+            Self::set_path(&mut inner.model_path, &mut inner.fp.model_path, value.model_path.as_deref());
+        }
+        if value.clip_l_path.is_some() {
+            Self::set_path(&mut inner.clip_l_path, &mut inner.fp.clip_l_path, value.clip_l_path.as_deref());
+        }
+        if value.clip_g_path.is_some() {
+            Self::set_path(&mut inner.clip_g_path, &mut inner.fp.clip_g_path, value.clip_g_path.as_deref());
+        }
+        if value.clip_vision_path.is_some() {
+            Self::set_path(
+                &mut inner.clip_vision_path,
+                &mut inner.fp.clip_vision_path,
+                value.clip_vision_path.as_deref(),
+            );
+        }
+        if value.t5xxl_path.is_some() {
+            Self::set_path(&mut inner.t5xxl_path, &mut inner.fp.t5xxl_path, value.t5xxl_path.as_deref());
+        }
+        if value.llm_path.is_some() {
+            Self::set_path(&mut inner.llm_path, &mut inner.fp.llm_path, value.llm_path.as_deref());
+        }
+        if value.llm_vision_path.is_some() {
+            Self::set_path(
+                &mut inner.llm_vision_path,
+                &mut inner.fp.llm_vision_path,
+                value.llm_vision_path.as_deref(),
+            );
+        }
+        if value.diffusion_model_path.is_some() {
+            Self::set_path(
+                &mut inner.diffusion_model_path,
+                &mut inner.fp.diffusion_model_path,
+                value.diffusion_model_path.as_deref(),
+            );
+        }
+        if value.high_noise_diffusion_model_path.is_some() {
+            Self::set_path(
+                &mut inner.high_noise_diffusion_model_path,
+                &mut inner.fp.high_noise_diffusion_model_path,
+                value.high_noise_diffusion_model_path.as_deref(),
+            );
+        }
+        if value.vae_path.is_some() {
+            Self::set_path(&mut inner.vae_path, &mut inner.fp.vae_path, value.vae_path.as_deref());
+        }
+        if value.taesd_path.is_some() {
+            Self::set_path(&mut inner.taesd_path, &mut inner.fp.taesd_path, value.taesd_path.as_deref());
+        }
+        if value.control_net_path.is_some() {
+            Self::set_path(
+                &mut inner.control_net_path,
+                &mut inner.fp.control_net_path,
+                value.control_net_path.as_deref(),
+            );
+        }
+        if let Some(embeddings) = value.embeddings.clone() {
+            inner.embeddings = embeddings;
+            inner.sync_embeddings();
+        }
+        if value.photo_maker_path.is_some() {
+            Self::set_path(
+                &mut inner.photo_maker_path,
+                &mut inner.fp.photo_maker_path,
+                value.photo_maker_path.as_deref(),
+            );
+        }
+        if value.tensor_type_rules.is_some() {
+            Self::set_c_string(
+                &mut inner.tensor_type_rules,
+                &mut inner.fp.tensor_type_rules,
+                value.tensor_type_rules.as_deref(),
+            );
+        }
+        if let Some(vae_decode_only) = value.vae_decode_only {
+            inner.fp.vae_decode_only = vae_decode_only;
+        }
+        if let Some(free_params_immediately) = value.free_params_immediately {
+            inner.fp.free_params_immediately = free_params_immediately;
+        }
+        if let Some(n_threads) = value.n_threads {
+            inner.fp.n_threads = n_threads;
+        }
+        if let Some(wtype) = value.wtype {
+            inner.fp.wtype = wtype.into();
+        }
+        if let Some(rng_type) = value.rng_type {
+            inner.fp.rng_type = rng_type.into();
+        }
+        if let Some(sampler_rng_type) = value.sampler_rng_type {
+            inner.fp.sampler_rng_type = sampler_rng_type.into();
+        }
+        if let Some(prediction) = value.prediction {
+            inner.fp.prediction = prediction.into();
+        }
+        if let Some(lora_apply_mode) = value.lora_apply_mode {
+            inner.fp.lora_apply_mode = lora_apply_mode.into();
+        }
+        if let Some(offload_params_to_cpu) = value.offload_params_to_cpu {
+            inner.fp.offload_params_to_cpu = offload_params_to_cpu;
+        }
+        if let Some(enable_mmap) = value.enable_mmap {
+            inner.fp.enable_mmap = enable_mmap;
+        }
+        if let Some(flash_attn) = value.flash_attn {
+            inner.fp.flash_attn = flash_attn;
+        }
+        if let Some(diffusion_flash_attn) = value.diffusion_flash_attn {
+            inner.fp.diffusion_flash_attn = diffusion_flash_attn;
+        }
+        if let Some(tae_preview_only) = value.tae_preview_only {
+            inner.fp.tae_preview_only = tae_preview_only;
+        }
+        if let Some(diffusion_conv_direct) = value.diffusion_conv_direct {
+            inner.fp.diffusion_conv_direct = diffusion_conv_direct;
+        }
+        if let Some(vae_conv_direct) = value.vae_conv_direct {
+            inner.fp.vae_conv_direct = vae_conv_direct;
+        }
+        if let Some(circular_x) = value.circular_x {
+            inner.fp.circular_x = circular_x;
+        }
+        if let Some(circular_y) = value.circular_y {
+            inner.fp.circular_y = circular_y;
+        }
+        if let Some(force_sdxl_vae_conv_scale) = value.force_sdxl_vae_conv_scale {
+            inner.fp.force_sdxl_vae_conv_scale = force_sdxl_vae_conv_scale;
+        }
+        if let Some(chroma_use_dit_mask) = value.chroma_use_dit_mask {
+            inner.fp.chroma_use_dit_mask = chroma_use_dit_mask;
+        }
+        if let Some(chroma_use_t5_mask) = value.chroma_use_t5_mask {
+            inner.fp.chroma_use_t5_mask = chroma_use_t5_mask;
+        }
+        if let Some(chroma_t5_mask_pad) = value.chroma_t5_mask_pad {
+            inner.fp.chroma_t5_mask_pad = chroma_t5_mask_pad;
+        }
+        if let Some(qwen_image_zero_cond_t) = value.qwen_image_zero_cond_t {
+            inner.fp.qwen_image_zero_cond_t = qwen_image_zero_cond_t;
+        }
+        if value.main_device.is_some() {
+            Self::set_c_string(
+                &mut inner.main_device,
+                &mut inner.fp.main_device,
+                value.main_device.as_deref(),
+            );
+        }
+        if value.diffusion_device.is_some() {
+            Self::set_c_string(
+                &mut inner.diffusion_device,
+                &mut inner.fp.diffusion_device,
+                value.diffusion_device.as_deref(),
+            );
+        }
+        if value.clip_device.is_some() {
+            Self::set_c_string(
+                &mut inner.clip_device,
+                &mut inner.fp.clip_device,
+                value.clip_device.as_deref(),
+            );
+        }
+        if value.vae_device.is_some() {
+            Self::set_c_string(
+                &mut inner.vae_device,
+                &mut inner.fp.vae_device,
+                value.vae_device.as_deref(),
+            );
+        }
+        if value.tae_device.is_some() {
+            Self::set_c_string(
+                &mut inner.tae_device,
+                &mut inner.fp.tae_device,
+                value.tae_device.as_deref(),
+            );
+        }
+        if value.control_net_device.is_some() {
+            Self::set_c_string(
+                &mut inner.control_net_device,
+                &mut inner.fp.control_net_device,
+                value.control_net_device.as_deref(),
+            );
+        }
+        if value.photomaker_device.is_some() {
+            Self::set_c_string(
+                &mut inner.photomaker_device,
+                &mut inner.fp.photomaker_device,
+                value.photomaker_device.as_deref(),
+            );
+        }
+        if value.vision_device.is_some() {
+            Self::set_c_string(
+                &mut inner.vision_device,
+                &mut inner.fp.vision_device,
+                value.vision_device.as_deref(),
+            );
+        }
+
+        inner
+    }
+
+    fn set_c_string(slot: &mut Option<CString>, field: &mut *const std::os::raw::c_char, value: Option<&str>) {
+        *slot = value.map(new_c_string);
+        *field = slot.as_ref().map_or(ptr::null(), c_string_ptr);
+    }
+
+    fn set_path(slot: &mut Option<CString>, field: &mut *const std::os::raw::c_char, value: Option<&Path>) {
+        *slot = value.map(|path| new_c_string(&path.to_string_lossy()));
         *field = slot.as_ref().map_or(ptr::null(), c_string_ptr);
     }
 
@@ -177,195 +488,5 @@ impl ContextParams {
         self.fp.photomaker_device =
             self.photomaker_device.as_ref().map_or(ptr::null(), c_string_ptr);
         self.fp.vision_device = self.vision_device.as_ref().map_or(ptr::null(), c_string_ptr);
-    }
-
-    pub fn to_str(&self) -> Option<String> {
-        let c_buf = unsafe { self.instance.lib.sd_ctx_params_to_str(&*self.fp) };
-        copy_and_free_c_string(c_buf)
-    }
-
-    pub fn set_model_path(&mut self, path: &str) {
-        Self::set_string(&mut self.model_path, &mut self.fp.model_path, path);
-    }
-
-    pub fn set_clip_l_path(&mut self, path: &str) {
-        Self::set_string(&mut self.clip_l_path, &mut self.fp.clip_l_path, path);
-    }
-
-    pub fn set_clip_g_path(&mut self, path: &str) {
-        Self::set_string(&mut self.clip_g_path, &mut self.fp.clip_g_path, path);
-    }
-
-    pub fn set_clip_vision_path(&mut self, path: &str) {
-        Self::set_string(&mut self.clip_vision_path, &mut self.fp.clip_vision_path, path);
-    }
-
-    pub fn set_t5xxl_path(&mut self, path: &str) {
-        Self::set_string(&mut self.t5xxl_path, &mut self.fp.t5xxl_path, path);
-    }
-
-    pub fn set_llm_path(&mut self, path: &str) {
-        Self::set_string(&mut self.llm_path, &mut self.fp.llm_path, path);
-    }
-
-    pub fn set_llm_vision_path(&mut self, path: &str) {
-        Self::set_string(&mut self.llm_vision_path, &mut self.fp.llm_vision_path, path);
-    }
-
-    pub fn set_diffusion_model_path(&mut self, path: &str) {
-        Self::set_string(&mut self.diffusion_model_path, &mut self.fp.diffusion_model_path, path);
-    }
-
-    pub fn set_high_noise_diffusion_model_path(&mut self, path: &str) {
-        Self::set_string(
-            &mut self.high_noise_diffusion_model_path,
-            &mut self.fp.high_noise_diffusion_model_path,
-            path,
-        );
-    }
-
-    pub fn set_vae_path(&mut self, path: &str) {
-        Self::set_string(&mut self.vae_path, &mut self.fp.vae_path, path);
-    }
-
-    pub fn set_taesd_path(&mut self, path: &str) {
-        Self::set_string(&mut self.taesd_path, &mut self.fp.taesd_path, path);
-    }
-
-    pub fn set_control_net_path(&mut self, path: &str) {
-        Self::set_string(&mut self.control_net_path, &mut self.fp.control_net_path, path);
-    }
-
-    pub fn set_embeddings(&mut self, embeddings: Vec<Embedding>) {
-        self.embeddings = embeddings;
-        self.sync_embeddings();
-    }
-
-    pub fn set_photo_maker_path(&mut self, path: &str) {
-        Self::set_string(&mut self.photo_maker_path, &mut self.fp.photo_maker_path, path);
-    }
-
-    pub fn set_tensor_type_rules(&mut self, rules: &str) {
-        Self::set_string(&mut self.tensor_type_rules, &mut self.fp.tensor_type_rules, rules);
-    }
-
-    pub fn set_vae_decode_only(&mut self, decode_only: bool) {
-        self.fp.vae_decode_only = decode_only;
-    }
-
-    pub fn set_free_params_immediately(&mut self, free_params_immediately: bool) {
-        self.fp.free_params_immediately = free_params_immediately;
-    }
-
-    pub fn set_n_threads(&mut self, n_threads: i32) {
-        self.fp.n_threads = n_threads;
-    }
-
-    pub fn set_wtype(&mut self, wtype: WeightType) {
-        self.fp.wtype = wtype.into();
-    }
-
-    pub fn set_rng_type(&mut self, rng_type: RngType) {
-        self.fp.rng_type = rng_type.into();
-    }
-
-    pub fn set_sampler_rng_type(&mut self, sampler_rng_type: RngType) {
-        self.fp.sampler_rng_type = sampler_rng_type.into();
-    }
-
-    pub fn set_prediction(&mut self, prediction: Prediction) {
-        self.fp.prediction = prediction.into();
-    }
-
-    pub fn set_lora_apply_mode(&mut self, lora_apply_mode: LoraApplyMode) {
-        self.fp.lora_apply_mode = lora_apply_mode.into();
-    }
-
-    pub fn set_offload_params_to_cpu(&mut self, offload_params_to_cpu: bool) {
-        self.fp.offload_params_to_cpu = offload_params_to_cpu;
-    }
-
-    pub fn set_enable_mmap(&mut self, enable_mmap: bool) {
-        self.fp.enable_mmap = enable_mmap;
-    }
-
-    pub fn set_flash_attn(&mut self, enable_flash_attn: bool) {
-        self.fp.flash_attn = enable_flash_attn;
-    }
-
-    pub fn set_diffusion_flash_attn(&mut self, diffusion_flash_attn: bool) {
-        self.fp.diffusion_flash_attn = diffusion_flash_attn;
-    }
-
-    pub fn set_tae_preview_only(&mut self, tae_preview_only: bool) {
-        self.fp.tae_preview_only = tae_preview_only;
-    }
-
-    pub fn set_diffusion_conv_direct(&mut self, diffusion_conv_direct: bool) {
-        self.fp.diffusion_conv_direct = diffusion_conv_direct;
-    }
-
-    pub fn set_vae_conv_direct(&mut self, vae_conv_direct: bool) {
-        self.fp.vae_conv_direct = vae_conv_direct;
-    }
-
-    pub fn set_circular_x(&mut self, circular_x: bool) {
-        self.fp.circular_x = circular_x;
-    }
-
-    pub fn set_circular_y(&mut self, circular_y: bool) {
-        self.fp.circular_y = circular_y;
-    }
-
-    pub fn set_force_sdxl_vae_conv_scale(&mut self, force_sdxl_vae_conv_scale: bool) {
-        self.fp.force_sdxl_vae_conv_scale = force_sdxl_vae_conv_scale;
-    }
-
-    pub fn set_chroma_use_dit_mask(&mut self, chroma_use_dit_mask: bool) {
-        self.fp.chroma_use_dit_mask = chroma_use_dit_mask;
-    }
-
-    pub fn set_chroma_use_t5_mask(&mut self, chroma_use_t5_mask: bool) {
-        self.fp.chroma_use_t5_mask = chroma_use_t5_mask;
-    }
-
-    pub fn set_chroma_t5_mask_pad(&mut self, chroma_t5_mask_pad: i32) {
-        self.fp.chroma_t5_mask_pad = chroma_t5_mask_pad;
-    }
-
-    pub fn set_qwen_image_zero_cond_t(&mut self, qwen_image_zero_cond_t: bool) {
-        self.fp.qwen_image_zero_cond_t = qwen_image_zero_cond_t;
-    }
-
-    pub fn set_main_device(&mut self, path: &str) {
-        Self::set_string(&mut self.main_device, &mut self.fp.main_device, path);
-    }
-
-    pub fn set_diffusion_device(&mut self, path: &str) {
-        Self::set_string(&mut self.diffusion_device, &mut self.fp.diffusion_device, path);
-    }
-
-    pub fn set_clip_device(&mut self, path: &str) {
-        Self::set_string(&mut self.clip_device, &mut self.fp.clip_device, path);
-    }
-
-    pub fn set_vae_device(&mut self, path: &str) {
-        Self::set_string(&mut self.vae_device, &mut self.fp.vae_device, path);
-    }
-
-    pub fn set_tae_device(&mut self, path: &str) {
-        Self::set_string(&mut self.tae_device, &mut self.fp.tae_device, path);
-    }
-
-    pub fn set_control_net_device(&mut self, path: &str) {
-        Self::set_string(&mut self.control_net_device, &mut self.fp.control_net_device, path);
-    }
-
-    pub fn set_photomaker_device(&mut self, path: &str) {
-        Self::set_string(&mut self.photomaker_device, &mut self.fp.photomaker_device, path);
-    }
-
-    pub fn set_vision_device(&mut self, path: &str) {
-        Self::set_string(&mut self.vision_device, &mut self.fp.vision_device, path);
     }
 }

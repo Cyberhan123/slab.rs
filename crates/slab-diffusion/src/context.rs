@@ -5,8 +5,8 @@ use libc::free;
 
 use crate::error::DiffusionError;
 use crate::params::{
-    ContextParams, Image, ImgParams, SampleMethod, Scheduler, Video, VideoParams,
-    owned_image_from_raw,
+    ContextParams, Image, ImgParams, InnerImgParams, InnerVideoParams, SampleMethod, Scheduler,
+    Video, VideoParams, owned_image_from_raw,
 };
 
 /// A Stable Diffusion inference context.
@@ -51,27 +51,32 @@ impl Context {
     /// Generate one or more images from the supplied parameters.
     ///
     /// The returned `Vec` contains exactly the effective batch count sent to
-    /// the native layer. Values below `1` are clamped to `1`.
+    /// the native layer.
     ///
     /// # Errors
     /// Returns [`DiffusionError::GenerationFailed`] when the native library
     /// returns a null pointer (e.g. out of memory or bad parameters).
     pub fn generate_image(&self, params: ImgParams) -> Result<Vec<Image>, DiffusionError> {
-        let images_ptr = unsafe { self.lib.generate_image(self.ctx, &*params.fp) };
+        let inner = InnerImgParams::from_canonical(self.lib.as_ref(), &params)
+            .map_err(DiffusionError::InvalidParameters)?;
+        let images_ptr = unsafe { self.lib.generate_image(self.ctx, &*inner.fp) };
 
         if images_ptr.is_null() {
             return Err(DiffusionError::GenerationFailed);
         }
 
-        let batch = params.get_batch_count() as usize;
+        let batch =
+            usize::try_from(inner.get_batch_count()).map_err(|_| DiffusionError::GenerationFailed)?;
         Ok(Self::collect_images(images_ptr, batch))
     }
 
     pub fn generate_video(&self, params: VideoParams) -> Result<Video, DiffusionError> {
+        let inner = InnerVideoParams::from_canonical(self.lib.as_ref(), &params)
+            .map_err(DiffusionError::InvalidParameters)?;
         let mut num_frames_out: i32 = 0;
 
         let frames_ptr = unsafe {
-            self.lib.generate_video(self.ctx, &*params.fp, &mut num_frames_out as *mut i32)
+            self.lib.generate_video(self.ctx, &*inner.fp, &mut num_frames_out as *mut i32)
         };
 
         if frames_ptr.is_null() {

@@ -8,6 +8,9 @@ pub enum DiffusionError {
     #[error("Image generation failed (NULL returned from generate_image)")]
     GenerationFailed,
 
+    #[error("Invalid diffusion parameters: {0}")]
+    InvalidParameters(String),
+
     /// Reserved for future upscaling support (ESRGAN / RealESRGAN).
     #[error("Upscaling failed (NULL data in upscaled image)")]
     UpscalerFailed,
