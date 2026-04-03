@@ -10,7 +10,8 @@ use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatStreamChunk, ConversationMessage as DomainConversationMessage, UnifiedModel,
+    ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
+    ConversationMessage as DomainConversationMessage, ConversationMessageContent, UnifiedModel,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::ModelStore;
@@ -92,6 +93,10 @@ fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
     }
 }
 
+fn reasoning_content_from_metadata(metadata: &slab_types::inference::JsonOptions) -> Option<&str> {
+    metadata.get(REASONING_CONTENT_METADATA_KEY).and_then(Value::as_str)
+}
+
 impl ThinkingStreamState {
     fn ingest(&mut self, delta: &str) -> Vec<ThinkingDelta> {
         self.raw_output.push_str(delta);
@@ -125,6 +130,10 @@ impl ThinkingStreamState {
 }
 
 fn attach_reasoning_metadata(response: &mut TextGenerationResponse) {
+    if reasoning_content_from_metadata(&response.metadata).is_some() {
+        return;
+    }
+
     let parsed = parse_thinking_output(&response.text, true);
     let reasoning = parsed.reasoning.trim();
     if reasoning.is_empty() {
@@ -150,6 +159,8 @@ pub(super) struct LocalChatRequestConfig {
     pub(super) max_tokens: u32,
     pub(super) temperature: f32,
     pub(super) top_p: Option<f32>,
+    pub(super) reasoning_effort: Option<ChatReasoningEffort>,
+    pub(super) verbosity: Option<ChatVerbosity>,
     pub(super) grammar: Option<String>,
     pub(super) grammar_json: bool,
     pub(super) stream: bool,
@@ -161,8 +172,108 @@ pub(super) struct LocalTextRequestConfig {
     pub(super) max_tokens: u32,
     pub(super) temperature: f32,
     pub(super) top_p: Option<f32>,
+    pub(super) reasoning_effort: Option<ChatReasoningEffort>,
+    pub(super) verbosity: Option<ChatVerbosity>,
     pub(super) grammar: Option<String>,
     pub(super) grammar_json: bool,
+}
+
+fn local_reasoning_guidance(
+    reasoning_effort: Option<ChatReasoningEffort>,
+    verbosity: Option<ChatVerbosity>,
+) -> Option<String> {
+    let mut lines = Vec::new();
+
+    match reasoning_effort {
+        Some(ChatReasoningEffort::None) => {
+            lines.push(
+                "Answer directly and do not emit <think>...</think> blocks or hidden reasoning."
+                    .to_owned(),
+            );
+        }
+        Some(ChatReasoningEffort::Minimal) => {
+            lines.push(
+                "If reasoning is necessary, keep it minimal and place it in a very short <think>...</think> block before the final answer."
+                    .to_owned(),
+            );
+        }
+        Some(ChatReasoningEffort::Low) => {
+            lines.push(
+                "If reasoning is useful, keep the <think>...</think> block brief and keep the final answer outside the block."
+                    .to_owned(),
+            );
+        }
+        Some(ChatReasoningEffort::Medium) => {
+            lines.push(
+                "If reasoning is useful, use a moderate <think>...</think> block and keep the final answer outside the block."
+                    .to_owned(),
+            );
+        }
+        Some(ChatReasoningEffort::High) => {
+            lines.push(
+                "You may use a detailed <think>...</think> block before the final answer, but keep the final answer outside the block."
+                    .to_owned(),
+            );
+        }
+        None => {}
+    }
+
+    match verbosity {
+        Some(ChatVerbosity::Low) => {
+            lines.push("Keep the final answer concise and compact.".to_owned());
+        }
+        Some(ChatVerbosity::Medium) => {
+            lines.push("Keep the final answer moderately detailed.".to_owned());
+        }
+        Some(ChatVerbosity::High) => {
+            lines.push("Keep the final answer detailed and thorough.".to_owned());
+        }
+        None => {}
+    }
+
+    if lines.is_empty() {
+        None
+    } else {
+        Some(format!("Local response policy:\n{}", lines.join("\n")))
+    }
+}
+
+fn apply_local_reasoning_controls(
+    messages: &[DomainConversationMessage],
+    reasoning_effort: Option<ChatReasoningEffort>,
+    verbosity: Option<ChatVerbosity>,
+) -> Vec<DomainConversationMessage> {
+    let Some(guidance) = local_reasoning_guidance(reasoning_effort, verbosity) else {
+        return messages.to_vec();
+    };
+
+    let insert_at = messages
+        .iter()
+        .take_while(|message| matches!(message.role.as_str(), "system" | "developer"))
+        .count();
+    let mut guided_messages = messages.to_vec();
+    guided_messages.insert(
+        insert_at,
+        DomainConversationMessage {
+            role: "system".to_owned(),
+            content: ConversationMessageContent::Text(guidance),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        },
+    );
+    guided_messages
+}
+
+fn apply_local_reasoning_controls_to_prompt(
+    prompt: &str,
+    reasoning_effort: Option<ChatReasoningEffort>,
+    verbosity: Option<ChatVerbosity>,
+) -> String {
+    match local_reasoning_guidance(reasoning_effort, verbosity) {
+        Some(guidance) => format!("{guidance}\n\nPrompt:\n{prompt}"),
+        None => prompt.to_owned(),
+    }
 }
 
 pub(super) async fn create_chat_completion(
@@ -171,12 +282,14 @@ pub(super) async fn create_chat_completion(
     messages: &[DomainConversationMessage],
     config: LocalChatRequestConfig,
 ) -> Result<GeneratedChatOutput, AppCoreError> {
+    let request_messages =
+        apply_local_reasoning_controls(messages, config.reasoning_effort, config.verbosity);
     let prompt_template_context = resolve_prompt_template_context(state, model).await?;
-    let prompt = super::template::build_prompt(messages, prompt_template_context.as_ref());
+    let prompt = super::template::build_prompt(&request_messages, prompt_template_context.as_ref());
     let request = TextGenerationRequest {
         prompt: prompt.clone(),
         system_prompt: None,
-        chat_messages: messages.to_vec(),
+        chat_messages: request_messages,
         apply_chat_template: true,
         max_tokens: Some(config.max_tokens),
         temperature: Some(config.temperature),
@@ -283,6 +396,25 @@ pub(super) async fn create_chat_completion(
                                     _ => None,
                                 })
                                 .collect()
+                        } else if let Some(reasoning) = reasoning_content_from_metadata(&decoded.metadata) {
+                            let mut chunks = Vec::new();
+                            if !reasoning.is_empty() {
+                                chunks.push(ChatStreamChunk::Data(super::build_reasoning_chunk(
+                                    &completion_id,
+                                    created_ts,
+                                    &model_name,
+                                    reasoning,
+                                )));
+                            }
+                            if !decoded.delta.is_empty() {
+                                chunks.push(ChatStreamChunk::Data(super::build_chunk(
+                                    &completion_id,
+                                    created_ts,
+                                    &model_name,
+                                    &decoded.delta,
+                                )));
+                            }
+                            chunks
                         } else if decoded.delta.is_empty() {
                             Vec::new()
                         } else {
@@ -421,8 +553,13 @@ pub(super) async fn create_text_completion(
     prompt: &str,
     config: LocalTextRequestConfig,
 ) -> Result<slab_types::inference::TextGenerationResponse, AppCoreError> {
+    let prompt = apply_local_reasoning_controls_to_prompt(
+        prompt,
+        config.reasoning_effort,
+        config.verbosity,
+    );
     let request = TextGenerationRequest {
-        prompt: prompt.to_owned(),
+        prompt: prompt.clone(),
         system_prompt: None,
         chat_messages: Vec::new(),
         apply_chat_template: false,
@@ -451,7 +588,7 @@ pub(super) async fn create_text_completion(
     let mut response = convert::decode_chat_response(&generated);
 
     let usage = response.usage.clone().unwrap_or_else(|| {
-        super::build_estimated_usage(prompt, &response.text, response.tokens_used)
+        super::build_estimated_usage(&prompt, &response.text, response.tokens_used)
     });
     response.tokens_used.get_or_insert(usage.completion_tokens);
     response.usage = Some(usage.clone());
@@ -489,8 +626,14 @@ fn map_runtime_chat_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        ParsedThinkingOutput, ThinkingDelta, ThinkingStreamState, attach_reasoning_metadata,
-        parse_thinking_output,
+        ParsedThinkingOutput, ThinkingDelta, ThinkingStreamState,
+        apply_local_reasoning_controls, apply_local_reasoning_controls_to_prompt,
+        attach_reasoning_metadata, local_reasoning_guidance, parse_thinking_output,
+        reasoning_content_from_metadata,
+    };
+    use crate::domain::models::{
+        ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
+        ConversationMessageContent,
     };
     use serde_json::json;
     use slab_types::inference::TextGenerationResponse;
@@ -549,5 +692,73 @@ mod tests {
             response.metadata.get("reasoning_content"),
             Some(&json!("step by step"))
         );
+    }
+
+    #[test]
+    fn attach_reasoning_metadata_keeps_runtime_reasoning_metadata() {
+        let mut response = TextGenerationResponse {
+            text: "answer".to_owned(),
+            metadata: [("reasoning_content".to_owned(), json!("from runtime"))]
+                .into_iter()
+                .collect(),
+            ..Default::default()
+        };
+
+        attach_reasoning_metadata(&mut response);
+
+        assert_eq!(response.text, "answer");
+        assert_eq!(reasoning_content_from_metadata(&response.metadata), Some("from runtime"));
+    }
+
+    #[test]
+    fn local_reasoning_guidance_disables_think_blocks() {
+        let guidance = local_reasoning_guidance(Some(ChatReasoningEffort::None), None)
+            .expect("guidance should be produced");
+
+        assert!(guidance.contains("do not emit <think>...</think>"));
+    }
+
+    #[test]
+    fn apply_local_reasoning_controls_inserts_system_policy_after_existing_system_messages() {
+        let messages = vec![
+            DomainConversationMessage {
+                role: "system".to_owned(),
+                content: ConversationMessageContent::Text("existing".to_owned()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            },
+            DomainConversationMessage {
+                role: "user".to_owned(),
+                content: ConversationMessageContent::Text("hello".to_owned()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            },
+        ];
+
+        let guided = apply_local_reasoning_controls(
+            &messages,
+            Some(ChatReasoningEffort::Low),
+            Some(ChatVerbosity::High),
+        );
+
+        assert_eq!(guided.len(), 3);
+        assert_eq!(guided[0].role, "system");
+        assert_eq!(guided[1].role, "system");
+        assert!(guided[1].rendered_text().contains("<think>...</think> block"));
+        assert_eq!(guided[2].role, "user");
+    }
+
+    #[test]
+    fn apply_local_reasoning_controls_to_prompt_prefixes_guidance() {
+        let prompt = apply_local_reasoning_controls_to_prompt(
+            "Solve 2+2",
+            Some(ChatReasoningEffort::Minimal),
+            Some(ChatVerbosity::Low),
+        );
+
+        assert!(prompt.starts_with("Local response policy:"));
+        assert!(prompt.contains("Prompt:\nSolve 2+2"));
     }
 }

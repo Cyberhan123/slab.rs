@@ -5,6 +5,7 @@ use slab_llama::{
     ChatMessage, LlamaContextParams, LlamaModel, LlamaModelParams, LlamaRuntime,
     LlamaSessionSnapshot,
 };
+use slab_types::inference::{TextGenerationUsage, TextPromptTokensDetails};
 use std::collections::HashMap;
 use slab_utils::loader::load_library_from_dir;
 use std::path::Path;
@@ -25,6 +26,12 @@ pub(crate) struct LlamaDispatchRequest {
 }
 
 #[derive(Debug, Clone)]
+pub(crate) struct LlamaDispatchOutput {
+    pub text: String,
+    pub usage: Option<TextGenerationUsage>,
+}
+
+#[derive(Debug, Clone)]
 enum SessionBinding {
     Ready {
         snapshot: LlamaSessionSnapshot,
@@ -38,10 +45,12 @@ enum SessionBinding {
 enum SessionReusePlan {
     CreateFresh {
         delta_prompt: String,
+        cached_tokens: u32,
     },
     RestoreSnapshot {
         snapshot: LlamaSessionSnapshot,
         delta_prompt: String,
+        cached_tokens: u32,
     },
 }
 
@@ -51,6 +60,7 @@ struct PreparedSession {
     sid: Option<SessionId>,
     delta_prompt: String,
     full_prompt: String,
+    cached_tokens: u32,
 }
 
 struct ParsedChatPrompt {
@@ -111,6 +121,7 @@ fn plan_session_reuse(
     match existing {
         None => Ok(SessionReusePlan::CreateFresh {
             delta_prompt: full_prompt.to_owned(),
+            cached_tokens: 0,
         }),
         Some(SessionBinding::Busy) => {
             Err(GGMLLlamaEngineError::SessionKeyBusy { key: key.to_owned() })
@@ -123,16 +134,19 @@ fn plan_session_reuse(
             if cached_grammar.as_deref() != grammar {
                 return Ok(SessionReusePlan::CreateFresh {
                     delta_prompt: full_prompt.to_owned(),
+                    cached_tokens: 0,
                 });
             }
 
             match full_prompt.strip_prefix(cached_prompt) {
                 Some("") | None => Ok(SessionReusePlan::CreateFresh {
                     delta_prompt: full_prompt.to_owned(),
+                    cached_tokens: 0,
                 }),
                 Some(delta_prompt) => Ok(SessionReusePlan::RestoreSnapshot {
                     snapshot: snapshot.clone(),
                     delta_prompt: delta_prompt.to_owned(),
+                    cached_tokens: snapshot.n_past.max(0) as u32,
                 }),
             }
         }
@@ -300,6 +314,7 @@ impl GGMLLlamaEngine {
                 sid: None,
                 delta_prompt: full_prompt.clone(),
                 full_prompt,
+                cached_tokens: 0,
             });
         };
 
@@ -312,19 +327,19 @@ impl GGMLLlamaEngine {
             bindings.insert(key.clone(), SessionBinding::Busy);
         }
 
-        let (sid, delta_prompt) = match plan {
-            SessionReusePlan::CreateFresh { delta_prompt } => {
+        let (sid, delta_prompt, cached_tokens) = match plan {
+            SessionReusePlan::CreateFresh { delta_prompt, cached_tokens } => {
                 match self.create_session_with_grammar(grammar.clone()).await {
-                    Ok(sid) => (Some(sid), delta_prompt),
+                    Ok(sid) => (Some(sid), delta_prompt, cached_tokens),
                     Err(error) => {
                         self.session_bindings.lock().await.remove(&key);
                         return Err(error);
                     }
                 }
             }
-            SessionReusePlan::RestoreSnapshot { snapshot, delta_prompt } => {
+            SessionReusePlan::RestoreSnapshot { snapshot, delta_prompt, cached_tokens } => {
                 match self.create_session_from_snapshot(snapshot, grammar.clone()).await {
-                    Ok(sid) => (Some(sid), delta_prompt),
+                    Ok(sid) => (Some(sid), delta_prompt, cached_tokens),
                     Err(error) => {
                         self.session_bindings.lock().await.remove(&key);
                         return Err(error);
@@ -333,7 +348,28 @@ impl GGMLLlamaEngine {
             }
         };
 
-        Ok(PreparedSession { key: Some(key), sid, delta_prompt, full_prompt })
+        Ok(PreparedSession { key: Some(key), sid, delta_prompt, full_prompt, cached_tokens })
+    }
+
+    fn build_usage(
+        &self,
+        prompt: &str,
+        generated: &str,
+        cached_tokens: u32,
+    ) -> Option<TextGenerationUsage> {
+        let model = self.require_model().ok()?;
+        let prompt_tokens = u32::try_from(model.tokenize(prompt, false, true).ok()?.len()).ok()?;
+        let completion_tokens =
+            u32::try_from(model.tokenize(generated, false, true).ok()?.len()).ok()?;
+        let cached_tokens = cached_tokens.min(prompt_tokens);
+
+        Some(TextGenerationUsage {
+            prompt_tokens,
+            completion_tokens,
+            total_tokens: prompt_tokens.saturating_add(completion_tokens),
+            prompt_tokens_details: TextPromptTokensDetails { cached_tokens },
+            estimated: false,
+        })
     }
 
     async fn commit_managed_session(
@@ -390,7 +426,7 @@ impl GGMLLlamaEngine {
     pub(crate) async fn dispatch_inference(
         &self,
         request: LlamaDispatchRequest,
-    ) -> Result<String, engine::EngineError> {
+    ) -> Result<LlamaDispatchOutput, engine::EngineError> {
         let prompt = self.render_prompt(&request);
         let max_tokens = request.max_tokens;
         let grammar = request.grammar.clone();
@@ -402,6 +438,8 @@ impl GGMLLlamaEngine {
 
         match self.inference(&prepared.delta_prompt, max_tokens, prepared.sid, grammar).await {
             Ok(text) => {
+                let usage =
+                    self.build_usage(&prepared.full_prompt, &text, prepared.cached_tokens);
                 if let Err(error) = self
                     .commit_managed_session(
                         prepared.key,
@@ -414,7 +452,7 @@ impl GGMLLlamaEngine {
                 {
                     warn!(error = %error, "failed to persist llama session snapshot after inference");
                 }
-                Ok(text)
+                Ok(LlamaDispatchOutput { text, usage })
             }
             Err(error) => {
                 self.drop_managed_session(prepared.key, prepared.sid).await;
@@ -451,7 +489,7 @@ impl GGMLLlamaEngine {
         let (stream_tx, stream_rx) = mpsc::channel::<BaseStreamChunk>(64);
         let engine = Arc::clone(self);
         tokio::spawn(async move {
-            let PreparedSession { key, full_prompt, .. } = prepared;
+            let PreparedSession { key, full_prompt, cached_tokens, .. } = prepared;
             let grammar = commit_grammar;
             let mut generated = String::new();
             let mut completed = false;
@@ -483,40 +521,54 @@ impl GGMLLlamaEngine {
                             break;
                         };
 
-                        let mapped = match chunk {
+                        match chunk {
                             StreamChunk::Token(text) => {
                                 generated.push_str(&text);
-                                BaseStreamChunk::Token(text)
+                                if stream_tx.send(BaseStreamChunk::Token(text)).await.is_err() {
+                                    forward_failed = true;
+                                    if !completed && !stream_error {
+                                        if let Err(error) = engine.cancel_generate(sid).await {
+                                            warn!(
+                                                session_id = sid,
+                                                error = %error,
+                                                "failed to cancel llama generation after downstream disconnect"
+                                            );
+                                        }
+                                    }
+                                    break;
+                                }
                             }
                             StreamChunk::Done => {
                                 completed = true;
-                                BaseStreamChunk::Done
+                                break;
                             }
                             StreamChunk::Error(error) => {
                                 stream_error = true;
-                                BaseStreamChunk::Error(error)
-                            }
-                        };
-
-                        if stream_tx.send(mapped).await.is_err() {
-                            forward_failed = true;
-                            if !completed && !stream_error {
-                                if let Err(error) = engine.cancel_generate(sid).await {
-                                    warn!(
-                                        session_id = sid,
-                                        error = %error,
-                                        "failed to cancel llama generation after downstream disconnect"
-                                    );
+                                if stream_tx.send(BaseStreamChunk::Error(error)).await.is_err() {
+                                    forward_failed = true;
                                 }
+                                break;
                             }
-                            break;
-                        }
-
-                        if completed || stream_error {
-                            break;
                         }
                     }
                 }
+            }
+
+            if completed && !forward_failed && !stream_error && !cancelled {
+                if let Some(usage) = engine.build_usage(&full_prompt, &generated, cached_tokens)
+                    && stream_tx
+                        .send(BaseStreamChunk::Json(serde_json::json!({ "usage": usage })))
+                        .await
+                        .is_err()
+                {
+                    forward_failed = true;
+                }
+            }
+
+            if completed && !forward_failed && !stream_error
+                && stream_tx.send(BaseStreamChunk::Done).await.is_err()
+            {
+                forward_failed = true;
             }
 
             if key.is_some() && completed && !forward_failed && !stream_error && !cancelled {
@@ -778,7 +830,10 @@ mod tests {
     fn plan_session_reuse_creates_fresh_when_no_binding_exists() {
         let plan = plan_session_reuse("chat-1", None, "hello", None).expect("plan should succeed");
         match plan {
-            SessionReusePlan::CreateFresh { delta_prompt } => assert_eq!(delta_prompt, "hello"),
+            SessionReusePlan::CreateFresh { delta_prompt, cached_tokens } => {
+                assert_eq!(delta_prompt, "hello");
+                assert_eq!(cached_tokens, 0);
+            }
             SessionReusePlan::RestoreSnapshot { .. } => panic!("expected fresh session plan"),
         }
     }
@@ -803,11 +858,12 @@ mod tests {
                 .expect("plan should succeed");
 
         match plan {
-            SessionReusePlan::RestoreSnapshot { snapshot, delta_prompt } => {
+            SessionReusePlan::RestoreSnapshot { snapshot, delta_prompt, cached_tokens } => {
                 assert_eq!(snapshot.worker_id, 1);
                 assert_eq!(snapshot.n_past, 12);
                 assert_eq!(snapshot.state.as_ref(), &[1, 2, 3, 4]);
                 assert_eq!(delta_prompt, "!!!");
+                assert_eq!(cached_tokens, 12);
             }
             SessionReusePlan::CreateFresh { .. } => panic!("expected snapshot restore plan"),
         }
@@ -824,7 +880,10 @@ mod tests {
         let plan = plan_session_reuse("chat-1", Some(&binding), "hello world", Some("tool"))
             .expect("plan should succeed");
         match plan {
-            SessionReusePlan::CreateFresh { delta_prompt } => assert_eq!(delta_prompt, "hello world"),
+            SessionReusePlan::CreateFresh { delta_prompt, cached_tokens } => {
+                assert_eq!(delta_prompt, "hello world");
+                assert_eq!(cached_tokens, 0);
+            }
             SessionReusePlan::RestoreSnapshot { .. } => {
                 panic!("expected fresh session when grammar changes")
             }

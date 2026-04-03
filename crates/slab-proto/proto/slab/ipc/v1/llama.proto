@@ -106,6 +106,7 @@ message ChatResponse {
   string finish_reason = 2;
   uint32 tokens_used = 3;
   Usage usage = 4;
+  string reasoning_content = 5;
 }
 
 message ChatStreamChunk {
@@ -114,4 +115,5 @@ message ChatStreamChunk {
   bool done = 3;
   string finish_reason = 4;
   Usage usage = 5;
+  string reasoning_content = 6;
 }

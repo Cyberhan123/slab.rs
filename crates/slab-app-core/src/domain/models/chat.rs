@@ -397,6 +397,9 @@ mod test {
                     && text.contains("step by step")
                     && text.ends_with("final answer")
         ));
-        assert!(super::serialize_session_message(&message).contains("<think status=\"done\">"));
+
+        let stored = super::serialize_session_message(&message);
+        assert!(stored.contains("step by step"));
+        assert_eq!(super::deserialize_session_message("assistant", &stored), message);
     }
 }

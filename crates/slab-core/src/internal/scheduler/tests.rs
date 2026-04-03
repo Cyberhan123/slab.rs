@@ -270,6 +270,7 @@ async fn streaming_pipeline_returns_stream_handle() {
             crate::internal::scheduler::backend::protocol::StreamChunk::Token(t) => {
                 tokens.push_str(&t)
             }
+            crate::internal::scheduler::backend::protocol::StreamChunk::Json(_) => continue,
             crate::internal::scheduler::backend::protocol::StreamChunk::Done => break,
             crate::internal::scheduler::backend::protocol::StreamChunk::Error(e) => {
                 panic!("stream error: {e}")

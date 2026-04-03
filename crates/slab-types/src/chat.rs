@@ -293,10 +293,24 @@ pub struct ChatModelCapabilities {
 
 impl ChatModelCapabilities {
     pub fn local() -> Self {
-        Self { raw_grammar: true, structured_output: true, reasoning_controls: false }
+        Self { raw_grammar: true, structured_output: true, reasoning_controls: true }
     }
 
     pub fn cloud() -> Self {
         Self { raw_grammar: false, structured_output: true, reasoning_controls: true }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::ChatModelCapabilities;
+
+    #[test]
+    fn local_capabilities_include_reasoning_controls() {
+        let capabilities = ChatModelCapabilities::local();
+
+        assert!(capabilities.reasoning_controls);
+        assert!(capabilities.raw_grammar);
+        assert!(capabilities.structured_output);
     }
 }

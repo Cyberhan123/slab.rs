@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use base64::Engine as _;
 use image::GenericImageView;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use slab_types::backend::RuntimeBackendId;
 use slab_types::chat::{
     ConversationContentPart, ConversationMessage, ConversationMessageContent, ConversationToolCall,
@@ -20,6 +21,29 @@ use slab_types::runtime::{DiffusionLoadOptions, RuntimeModelLoadSpec, RuntimeMod
 use thiserror::Error;
 
 use crate::slab::ipc::v1 as pb;
+
+const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
+
+fn reasoning_content_from_metadata(metadata: &slab_types::inference::JsonOptions) -> String {
+    metadata
+        .get(REASONING_CONTENT_METADATA_KEY)
+        .and_then(Value::as_str)
+        .unwrap_or_default()
+        .to_owned()
+}
+
+fn insert_reasoning_content_metadata(
+    metadata: &mut slab_types::inference::JsonOptions,
+    reasoning_content: &str,
+) {
+    if reasoning_content.is_empty() {
+        return;
+    }
+    metadata.insert(
+        REASONING_CONTENT_METADATA_KEY.to_owned(),
+        Value::String(reasoning_content.to_owned()),
+    );
+}
 
 #[derive(Debug, Error)]
 pub enum ProtoConversionError {
@@ -169,17 +193,21 @@ pub fn encode_chat_response(response: &TextGenerationResponse) -> pb::ChatRespon
         finish_reason: response.finish_reason.clone().unwrap_or_default(),
         tokens_used: response.tokens_used.unwrap_or_default(),
         usage: response.usage.as_ref().map(encode_usage),
+        reasoning_content: reasoning_content_from_metadata(&response.metadata),
     }
 }
 
 pub fn decode_chat_response(response: &pb::ChatResponse) -> TextGenerationResponse {
+    let mut metadata = slab_types::inference::JsonOptions::default();
+    insert_reasoning_content_metadata(&mut metadata, &response.reasoning_content);
+
     TextGenerationResponse {
         text: response.text.clone(),
         finish_reason: (!response.finish_reason.is_empty())
             .then_some(response.finish_reason.clone()),
         tokens_used: (response.tokens_used > 0).then_some(response.tokens_used),
         usage: response.usage.as_ref().map(decode_usage),
-        metadata: Default::default(),
+        metadata,
     }
 }
 
@@ -190,16 +218,20 @@ pub fn encode_chat_stream_chunk(chunk: &TextGenerationChunk) -> pb::ChatStreamCh
         done: chunk.done,
         finish_reason: chunk.finish_reason.clone().unwrap_or_default(),
         usage: chunk.usage.as_ref().map(encode_usage),
+        reasoning_content: reasoning_content_from_metadata(&chunk.metadata),
     }
 }
 
 pub fn decode_chat_stream_chunk(chunk: &pb::ChatStreamChunk) -> TextGenerationChunk {
+    let mut metadata = slab_types::inference::JsonOptions::default();
+    insert_reasoning_content_metadata(&mut metadata, &chunk.reasoning_content);
+
     TextGenerationChunk {
         delta: chunk.token.clone(),
         done: chunk.done,
         finish_reason: (!chunk.finish_reason.is_empty()).then_some(chunk.finish_reason.clone()),
         usage: chunk.usage.as_ref().map(decode_usage),
-        metadata: Default::default(),
+        metadata,
     }
 }
 
