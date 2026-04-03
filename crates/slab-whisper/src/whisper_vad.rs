@@ -1,126 +1,110 @@
 use crate::WhisperError;
+use serde::{Deserialize, Serialize};
 use slab_whisper_sys::{
     whisper_vad_context, whisper_vad_context_params, whisper_vad_params, whisper_vad_segments,
 };
-use std::ffi::{CString, c_char};
+use std::ffi::CString;
 use std::os::raw::c_int;
+use std::path::Path;
 
-/// Configuration for Voice Activity Detection in `whisper.cpp`.
-///
-/// See [the `whisper.cpp` README](https://github.com/ggml-org/whisper.cpp/#voice-activity-detection-vad) for more details.
-#[derive(Copy, Clone)]
+/// Stable Rust-native VAD parameters shared across the runtime chain.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct WhisperVadParams {
-    params: whisper_vad_params,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub threshold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_speech_duration_ms: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_silence_duration_ms: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_speech_duration_s: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speech_pad_ms: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub samples_overlap: Option<f32>,
 }
 
-impl Default for WhisperVadParams {
-    fn default() -> Self {
+impl WhisperVadParams {
+    pub(crate) fn from_native(params: whisper_vad_params) -> Self {
         Self {
-            params: whisper_vad_params {
-                threshold: 0.5,
-                min_speech_duration_ms: 250,
-                min_silence_duration_ms: 100,
-                max_speech_duration_s: f32::MAX,
-                speech_pad_ms: 30,
-                samples_overlap: 0.1,
-            },
+            threshold: Some(params.threshold),
+            min_speech_duration_ms: Some(params.min_speech_duration_ms),
+            min_silence_duration_ms: Some(params.min_silence_duration_ms),
+            max_speech_duration_s: Some(params.max_speech_duration_s),
+            speech_pad_ms: Some(params.speech_pad_ms),
+            samples_overlap: Some(params.samples_overlap),
+        }
+    }
+
+    pub(crate) fn apply_to(&self, params: &mut whisper_vad_params) {
+        if let Some(threshold) = self.threshold {
+            params.threshold = threshold;
+        }
+        if let Some(min_speech_duration_ms) = self.min_speech_duration_ms {
+            params.min_speech_duration_ms = min_speech_duration_ms;
+        }
+        if let Some(min_silence_duration_ms) = self.min_silence_duration_ms {
+            params.min_silence_duration_ms = min_silence_duration_ms;
+        }
+        if let Some(max_speech_duration_s) = self.max_speech_duration_s {
+            params.max_speech_duration_s = max_speech_duration_s;
+        }
+        if let Some(speech_pad_ms) = self.speech_pad_ms {
+            params.speech_pad_ms = speech_pad_ms;
+        }
+        if let Some(samples_overlap) = self.samples_overlap {
+            params.samples_overlap = samples_overlap;
         }
     }
 }
 
-impl WhisperVadParams {
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Set the probability threshold to consider as speech.
-    /// A probability for a speech segment/frame above this threshold will be considered as speech.
-    ///
-    /// Defaults to 0.5.
-    pub fn set_threshold(&mut self, threshold: f32) {
-        self.params.threshold = threshold;
-    }
-
-    /// Set the minimum duration for a valid speech segment, in milliseconds.
-    /// Speech segments shorter than this value will be discarded to filter out brief noise or false positives.
-    ///
-    /// Defaults to 250 milliseconds.
-    pub fn set_min_speech_duration(&mut self, min_speech_duration: c_int) {
-        self.params.min_speech_duration_ms = min_speech_duration;
-    }
-
-    /// Set the minimum silence duration to consider speech as ended.
-    /// Silence periods must be at least this long to end a speech segment.
-    /// Shorter silence periods will be ignored and included as part of the speech.
-    ///
-    /// Defaults to 100 milliseconds.
-    pub fn set_min_silence_duration(&mut self, min_silence_duration: c_int) {
-        self.params.min_silence_duration_ms = min_silence_duration;
-    }
-
-    /// Set the maximum duration of a speech segment before forcing a new segment.
-    /// Speech segments longer than this will be automatically split into multiple segments at
-    /// silence points exceeding 98ms to prevent excessively long segments.
-    ///
-    /// Defaults to [`f32::MAX`].
-    pub fn set_max_speech_duration(&mut self, max_speech_duration: f32) {
-        self.params.max_speech_duration_s = max_speech_duration;
-    }
-
-    /// Set the amount of padding added before and after speech segments, in milliseconds.
-    /// Adds this amount of padding before and after each detected speech segment to avoid cutting off speech edges.
-    ///
-    /// Defaults to 30 milliseconds.
-    pub fn set_speech_pad(&mut self, speech_pad: c_int) {
-        self.params.speech_pad_ms = speech_pad;
-    }
-
-    /// Sets the amount of audio to extend from each speech segment into the next one, in seconds (e.g., 0.10 = 100ms overlap).
-    /// This ensures speech isn't cut off abruptly between segments when they're concatenated together.
-    ///
-    /// Defaults to 0.1 seconds.
-    pub fn set_samples_overlap(&mut self, samples_overlap: f32) {
-        self.params.samples_overlap = samples_overlap;
-    }
-
-    pub(crate) fn into_inner(self) -> whisper_vad_params {
-        self.params
-    }
-}
-
-/// Whisper VAD context parameters
-#[derive(Copy, Clone)]
+/// Stable Rust-native standalone VAD context parameters.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct WhisperVadContextParams {
-    params: whisper_vad_context_params,
-}
-
-impl Default for WhisperVadContextParams {
-    fn default() -> Self {
-        Self { params: whisper_vad_context_params { n_threads: 4, use_gpu: false, gpu_device: 0 } }
-    }
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_threads: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_gpu: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_device: Option<c_int>,
 }
 
 impl WhisperVadContextParams {
-    pub fn new() -> Self {
-        Self::default()
+    pub(crate) fn from_native(params: whisper_vad_context_params) -> Self {
+        Self {
+            n_threads: Some(params.n_threads),
+            use_gpu: Some(params.use_gpu),
+            gpu_device: Some(params.gpu_device),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct InnerWhisperVadContextParams {
+    params: whisper_vad_context_params,
+}
+
+impl InnerWhisperVadContextParams {
+    pub(crate) fn from_canonical(
+        lib: &slab_whisper_sys::WhisperLib,
+        value: &WhisperVadContextParams,
+    ) -> Self {
+        let mut params = unsafe { lib.whisper_vad_default_context_params() };
+
+        if let Some(n_threads) = value.n_threads {
+            params.n_threads = n_threads;
+        }
+        if let Some(use_gpu) = value.use_gpu {
+            params.use_gpu = use_gpu;
+        }
+        if let Some(gpu_device) = value.gpu_device {
+            params.gpu_device = gpu_device;
+        }
+
+        Self { params }
     }
 
-    /// Set the number of threads to use for processing
-    pub fn set_n_threads(&mut self, n_threads: c_int) {
-        self.params.n_threads = n_threads;
-    }
-
-    /// Enable the GPU for VAD?
-    pub fn set_use_gpu(&mut self, use_gpu: bool) {
-        self.params.use_gpu = use_gpu;
-    }
-
-    /// The CUDA device to use if `use_gpu` is true
-    pub fn set_gpu_device(&mut self, gpu_device: c_int) {
-        self.params.gpu_device = gpu_device;
-    }
-
-    fn into_inner(self) -> whisper_vad_context_params {
+    pub(crate) fn into_inner(self) -> whisper_vad_context_params {
         self.params
     }
 }
@@ -138,16 +122,16 @@ unsafe impl Sync for WhisperVadContext {}
 use crate::Whisper;
 
 impl Whisper {
-    pub fn new_vad_context(
+    pub fn new_vad_context<P: AsRef<Path>>(
         &self,
-        model_path: &str,
+        model_path: P,
         params: WhisperVadContextParams,
     ) -> Result<WhisperVadContext, WhisperError> {
-        let model_path = CString::new(model_path)
-            .expect("VAD model path contains null byte")
-            .into_raw() as *const c_char;
+        let model_path = CString::new(model_path.as_ref().to_string_lossy().as_ref())?;
+        let params = InnerWhisperVadContextParams::from_canonical(self.lib.as_ref(), &params);
         let ptr = unsafe {
-            self.lib.whisper_vad_init_from_file_with_params(model_path, params.into_inner())
+            self.lib
+                .whisper_vad_init_from_file_with_params(model_path.as_ptr(), params.into_inner())
         };
 
         if ptr.is_null() {
@@ -155,6 +139,16 @@ impl Whisper {
         } else {
             Ok(WhisperVadContext { instance: self.clone(), ptr })
         }
+    }
+
+    pub fn default_vad_params(&self) -> WhisperVadParams {
+        WhisperVadParams::from_native(unsafe { self.lib.whisper_vad_default_params() })
+    }
+
+    pub fn default_vad_context_params(&self) -> WhisperVadContextParams {
+        WhisperVadContextParams::from_native(unsafe {
+            self.lib.whisper_vad_default_context_params()
+        })
     }
 }
 
@@ -190,9 +184,9 @@ impl WhisperVadContext {
         &mut self,
         params: WhisperVadParams,
     ) -> Result<WhisperVadSegments, WhisperError> {
-        let ptr = unsafe {
-            self.instance.lib.whisper_vad_segments_from_probs(self.ptr, params.into_inner())
-        };
+        let mut native = unsafe { self.instance.lib.whisper_vad_default_params() };
+        params.apply_to(&mut native);
+        let ptr = unsafe { self.instance.lib.whisper_vad_segments_from_probs(self.ptr, native) };
 
         if ptr.is_null() {
             Err(WhisperError::NullPointer)
@@ -212,13 +206,12 @@ impl WhisperVadContext {
         samples: &[f32],
     ) -> Result<WhisperVadSegments, WhisperError> {
         let (sample_ptr, sample_len) = (samples.as_ptr(), samples.len() as c_int);
+        let mut native = unsafe { self.instance.lib.whisper_vad_default_params() };
+        params.apply_to(&mut native);
         let ptr = unsafe {
-            self.instance.lib.whisper_vad_segments_from_samples(
-                self.ptr,
-                params.into_inner(),
-                sample_ptr,
-                sample_len,
-            )
+            self.instance
+                .lib
+                .whisper_vad_segments_from_samples(self.ptr, native, sample_ptr, sample_len)
         };
 
         if ptr.is_null() {
@@ -295,7 +288,7 @@ impl Iterator for WhisperVadSegments {
     }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WhisperVadSegment {
     /// Start timestamp of this segment in centiseconds.
     pub start: f32,

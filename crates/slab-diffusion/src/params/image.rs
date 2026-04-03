@@ -5,6 +5,7 @@ use libc::free;
 use serde::{Deserialize, Serialize};
 use slab_diffusion_sys::{sd_image_t, sd_img_gen_params_t, sd_lora_t};
 
+use crate::Diffusion;
 use crate::params::support::{
     copy_and_free_c_string, empty_image, image_view, new_c_string, sync_image_views,
     sync_lora_views,
@@ -13,7 +14,6 @@ use crate::params::{
     CacheParams, InnerCacheParams, InnerPmParams, InnerSampleParams, Lora, PmParams, SampleParams,
     TilingParams,
 };
-use crate::Diffusion;
 
 /// Rust image container.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -475,8 +475,6 @@ mod tests {
         assert_ne!(cloned.fp.prompt, inner.fp.prompt);
         assert_eq!(cloned.fp.ref_images_count, 1);
         assert_eq!(cloned.fp.init_image.width, 2);
-        assert_ne!(unsafe { (*cloned.fp.ref_images).data }, unsafe {
-            (*inner.fp.ref_images).data
-        });
+        assert_ne!(unsafe { (*cloned.fp.ref_images).data }, unsafe { (*inner.fp.ref_images).data });
     }
 }

@@ -5,11 +5,11 @@ use std::ptr;
 use serde::{Deserialize, Serialize};
 use slab_diffusion_sys::{sd_ctx_params_t, sd_embedding_t};
 
+use crate::Diffusion;
 use crate::params::support::{
     c_string_ptr, copy_and_free_c_string, new_c_string, sync_embedding_views,
 };
 use crate::params::{Embedding, LoraApplyMode, Prediction, RngType, WeightType};
-use crate::Diffusion;
 
 /// Stable Rust-native context parameters shared across the runtime chain.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -235,13 +235,25 @@ impl InnerContextParams {
         let mut inner = InnerContextParams::with_native_init(lib);
 
         if value.model_path.is_some() {
-            Self::set_path(&mut inner.model_path, &mut inner.fp.model_path, value.model_path.as_deref());
+            Self::set_path(
+                &mut inner.model_path,
+                &mut inner.fp.model_path,
+                value.model_path.as_deref(),
+            );
         }
         if value.clip_l_path.is_some() {
-            Self::set_path(&mut inner.clip_l_path, &mut inner.fp.clip_l_path, value.clip_l_path.as_deref());
+            Self::set_path(
+                &mut inner.clip_l_path,
+                &mut inner.fp.clip_l_path,
+                value.clip_l_path.as_deref(),
+            );
         }
         if value.clip_g_path.is_some() {
-            Self::set_path(&mut inner.clip_g_path, &mut inner.fp.clip_g_path, value.clip_g_path.as_deref());
+            Self::set_path(
+                &mut inner.clip_g_path,
+                &mut inner.fp.clip_g_path,
+                value.clip_g_path.as_deref(),
+            );
         }
         if value.clip_vision_path.is_some() {
             Self::set_path(
@@ -251,7 +263,11 @@ impl InnerContextParams {
             );
         }
         if value.t5xxl_path.is_some() {
-            Self::set_path(&mut inner.t5xxl_path, &mut inner.fp.t5xxl_path, value.t5xxl_path.as_deref());
+            Self::set_path(
+                &mut inner.t5xxl_path,
+                &mut inner.fp.t5xxl_path,
+                value.t5xxl_path.as_deref(),
+            );
         }
         if value.llm_path.is_some() {
             Self::set_path(&mut inner.llm_path, &mut inner.fp.llm_path, value.llm_path.as_deref());
@@ -281,7 +297,11 @@ impl InnerContextParams {
             Self::set_path(&mut inner.vae_path, &mut inner.fp.vae_path, value.vae_path.as_deref());
         }
         if value.taesd_path.is_some() {
-            Self::set_path(&mut inner.taesd_path, &mut inner.fp.taesd_path, value.taesd_path.as_deref());
+            Self::set_path(
+                &mut inner.taesd_path,
+                &mut inner.fp.taesd_path,
+                value.taesd_path.as_deref(),
+            );
         }
         if value.control_net_path.is_some() {
             Self::set_path(
@@ -434,12 +454,20 @@ impl InnerContextParams {
         inner
     }
 
-    fn set_c_string(slot: &mut Option<CString>, field: &mut *const std::os::raw::c_char, value: Option<&str>) {
+    fn set_c_string(
+        slot: &mut Option<CString>,
+        field: &mut *const std::os::raw::c_char,
+        value: Option<&str>,
+    ) {
         *slot = value.map(new_c_string);
         *field = slot.as_ref().map_or(ptr::null(), c_string_ptr);
     }
 
-    fn set_path(slot: &mut Option<CString>, field: &mut *const std::os::raw::c_char, value: Option<&Path>) {
+    fn set_path(
+        slot: &mut Option<CString>,
+        field: &mut *const std::os::raw::c_char,
+        value: Option<&Path>,
+    ) {
         *slot = value.map(|path| new_c_string(&path.to_string_lossy()));
         *field = slot.as_ref().map_or(ptr::null(), c_string_ptr);
     }

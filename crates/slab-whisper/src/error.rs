@@ -74,6 +74,9 @@ pub enum WhisperError {
     /// Failed to load the whisper dynamic library.
     #[error("Failed to load the whisper dynamic library: {0}")]
     LoadLibraryError(String),
+    /// `ContextParams.model_path` was not set for a file-backed context load.
+    #[error("ContextParams.model_path must be set before creating a file-backed whisper context")]
+    ModelPathNotSet,
     /// `enable_vad(true)` was called before a VAD model path was set.
     #[error("VAD model path must be set via set_vad_model_path before enabling VAD")]
     VadModelPathNotSet,

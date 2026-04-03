@@ -30,8 +30,6 @@ fn main() {
         Err(e) => {
             println!("cargo:warning=Unable to generate bindings: {}", e);
             println!("cargo:warning=Using bundled bindings.rs, which may be out of date");
-            std::fs::copy("src/bindings.rs", out.join("bindings.rs"))
-                .expect("Unable to copy bindings.rs");
         }
     }
 }

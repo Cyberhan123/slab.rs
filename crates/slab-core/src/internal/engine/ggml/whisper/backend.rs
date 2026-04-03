@@ -11,25 +11,23 @@
 //! | `"inference"`      | `Inference`      | Transcribe audio; input is packed `f32` PCM.       |
 //!
 //! ### `model.load` input payload
-//! Uses a typed [`slab_types::GgmlWhisperLoadConfig`] payload inside `slab-core`,
-//! with JSON deserialization kept as a compatibility fallback.
+//! Prefers typed [`slab_whisper::ContextParams`] payloads inside `slab-core`,
+//! with legacy `GgmlWhisperLoadConfig` JSON/typed deserialization kept as a compatibility fallback.
 
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::internal::engine::ggml::whisper::adapter::{
-    GGMLWhisperEngine, WhisperDecodeConfig, WhisperVadConfig,
-};
+use crate::api::build_ggml_whisper_full_params_from_legacy;
+use crate::internal::engine::ggml::whisper::adapter::GGMLWhisperEngine;
 use crate::internal::scheduler::backend::protocol::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
 use crate::internal::scheduler::types::Payload;
 use slab_core_macros::backend_handler;
-use slab_types::{
-    AudioTranscriptionOpOptions, GgmlWhisperLoadConfig, WhisperDecodeOptions, WhisperVadOptions,
-};
+use slab_types::{AudioTranscriptionOpOptions, GgmlWhisperLoadConfig};
+use slab_whisper::{ContextParams as WhisperContextParams, FullParams as WhisperFullParams};
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
@@ -57,128 +55,25 @@ pub(crate) struct WhisperWorker {
     last_model_config: Option<Payload>,
 }
 
-fn into_vad_config(vad: WhisperVadOptions) -> Result<Option<WhisperVadConfig>, String> {
-    if !vad.enabled {
-        return Ok(None);
+fn parse_context_payload(raw: &Payload) -> Result<WhisperContextParams, String> {
+    if let Ok(params) = raw.to_typed::<WhisperContextParams>() {
+        return Ok(params);
     }
 
-    let model_path = vad
-        .model_path
-        .ok_or_else(|| "invalid whisper inference options: vad.model_path is missing".to_owned())?;
-    if model_path.as_os_str().is_empty() {
-        return Err("invalid whisper inference options: vad.model_path is empty".into());
-    }
-
-    let params = vad.params.unwrap_or_default();
-    if let Some(threshold) = params.threshold
-        && !(0.0..=1.0).contains(&threshold)
-    {
-        return Err(
-            "invalid whisper inference options: vad.threshold must be between 0.0 and 1.0".into()
-        );
-    }
-
-    for (name, value) in [
-        ("vad.min_speech_duration_ms", params.min_speech_duration_ms),
-        ("vad.min_silence_duration_ms", params.min_silence_duration_ms),
-        ("vad.speech_pad_ms", params.speech_pad_ms),
-    ] {
-        if value.is_some_and(|value| value < 0) {
-            return Err(format!("invalid whisper inference options: {name} must be >= 0"));
-        }
-    }
-
-    if let Some(max_speech_duration_s) = params.max_speech_duration_s
-        && max_speech_duration_s <= 0.0
-    {
-        return Err(
-            "invalid whisper inference options: vad.max_speech_duration_s must be > 0.0".into()
-        );
-    }
-
-    if let Some(samples_overlap) = params.samples_overlap
-        && samples_overlap < 0.0
-    {
-        return Err("invalid whisper inference options: vad.samples_overlap must be >= 0.0".into());
-    }
-
-    Ok(Some(WhisperVadConfig {
-        model_path: model_path.to_string_lossy().into_owned(),
-        threshold: params.threshold,
-        min_speech_duration_ms: params.min_speech_duration_ms,
-        min_silence_duration_ms: params.min_silence_duration_ms,
-        max_speech_duration_s: params.max_speech_duration_s,
-        speech_pad_ms: params.speech_pad_ms,
-        samples_overlap: params.samples_overlap,
-    }))
+    let legacy: GgmlWhisperLoadConfig =
+        raw.to_typed().map_err(|e| format!("invalid model.load config: {e}"))?;
+    Ok(WhisperContextParams { model_path: Some(legacy.model_path), ..Default::default() })
 }
 
-fn into_decode_config(decode: WhisperDecodeOptions) -> Result<Option<WhisperDecodeConfig>, String> {
-    for (name, value) in [
-        ("decode.offset_ms", decode.offset_ms),
-        ("decode.duration_ms", decode.duration_ms),
-        ("decode.max_len", decode.max_len),
-        ("decode.max_tokens", decode.max_tokens),
-    ] {
-        if value.is_some_and(|value| value < 0) {
-            return Err(format!("invalid whisper inference options: {name} must be >= 0"));
-        }
+fn parse_inference_options(raw: &Payload) -> Result<WhisperFullParams, String> {
+    if let Ok(params) = raw.to_typed::<WhisperFullParams>() {
+        return Ok(params);
     }
 
-    if let Some(word_thold) = decode.word_thold
-        && !(0.0..=1.0).contains(&word_thold)
-    {
-        return Err(
-            "invalid whisper inference options: decode.word_thold must be between 0.0 and 1.0"
-                .into(),
-        );
-    }
-
-    for (name, value) in [
-        ("decode.temperature", decode.temperature),
-        ("decode.temperature_inc", decode.temperature_inc),
-    ] {
-        if value.is_some_and(|value| value < 0.0) {
-            return Err(format!("invalid whisper inference options: {name} must be >= 0.0"));
-        }
-    }
-
-    Ok(Some(WhisperDecodeConfig {
-        offset_ms: decode.offset_ms,
-        duration_ms: decode.duration_ms,
-        no_context: decode.no_context,
-        no_timestamps: decode.no_timestamps,
-        token_timestamps: decode.token_timestamps,
-        split_on_word: decode.split_on_word,
-        suppress_nst: decode.suppress_nst,
-        word_thold: decode.word_thold,
-        max_len: decode.max_len,
-        max_tokens: decode.max_tokens,
-        temperature: decode.temperature,
-        temperature_inc: decode.temperature_inc,
-        entropy_thold: decode.entropy_thold,
-        logprob_thold: decode.logprob_thold,
-        no_speech_thold: decode.no_speech_thold,
-        tdrz_enable: decode.tdrz_enable,
-    }))
-}
-
-fn parse_inference_options(
-    raw: &Payload,
-) -> Result<(Option<WhisperVadConfig>, Option<WhisperDecodeConfig>), String> {
     let opts: AudioTranscriptionOpOptions =
         raw.to_typed().map_err(|e| format!("invalid whisper inference options: {e}"))?;
-
-    let vad = match opts.vad {
-        Some(vad) => into_vad_config(vad)?,
-        None => None,
-    };
-    let decode = match opts.decode {
-        Some(decode) => into_decode_config(decode)?,
-        None => None,
-    };
-
-    Ok((vad, decode))
+    build_ggml_whisper_full_params_from_legacy(opts.language, opts.prompt, opts.vad, opts.decode)
+        .map_err(|error| error.to_string())
 }
 
 #[backend_handler]
@@ -215,14 +110,14 @@ impl WhisperWorker {
             }
         };
         let BackendRequest { input, reply_tx, .. } = req;
-        let (vad, decode) = match parse_inference_options(&invocation.options) {
+        let params = match parse_inference_options(&invocation.options) {
             Ok(options) => options,
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e));
                 return;
             }
         };
-        self.handle_inference(input, vad, decode, reply_tx).await;
+        self.handle_inference(input, params, reply_tx).await;
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
@@ -241,7 +136,7 @@ impl WhisperWorker {
             }
         };
 
-        let config: GgmlWhisperLoadConfig = match input.to_typed() {
+        let params = match parse_context_payload(&input) {
             Ok(c) => c,
             Err(e) => {
                 let _ =
@@ -251,11 +146,7 @@ impl WhisperWorker {
         };
 
         // Model loading is CPU/I-O bound; use block_in_place on this thread.
-        let result = tokio::task::block_in_place(|| {
-            use slab_whisper::WhisperContextParameters;
-            let params = WhisperContextParameters::default();
-            engine.new_context(&config.model_path, params)
-        });
+        let result = tokio::task::block_in_place(|| engine.new_context(params.clone()));
 
         match result {
             Ok(()) => {
@@ -306,8 +197,7 @@ impl WhisperWorker {
     async fn handle_inference(
         &mut self,
         input: Payload,
-        vad: Option<WhisperVadConfig>,
-        decode: Option<WhisperDecodeConfig>,
+        params: WhisperFullParams,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
         let engine = match self.engine.as_ref() {
@@ -339,8 +229,25 @@ impl WhisperWorker {
 
         // Whisper inference is CPU/GPU-bound; use block_in_place so the engine
         // context stays on this thread without needing an additional spawn_blocking.
-        let vad_enabled = vad.is_some();
-        let decode_configured = decode.is_some();
+        let vad_enabled = params.vad.unwrap_or(false);
+        let decode_configured = params.offset_ms.is_some()
+            || params.duration_ms.is_some()
+            || params.no_context.is_some()
+            || params.no_timestamps.is_some()
+            || params.token_timestamps.is_some()
+            || params.split_on_word.is_some()
+            || params.suppress_nst.is_some()
+            || params.thold_pt.is_some()
+            || params.max_len.is_some()
+            || params.max_tokens.is_some()
+            || params.temperature.is_some()
+            || params.temperature_inc.is_some()
+            || params.entropy_thold.is_some()
+            || params.logprob_thold.is_some()
+            || params.no_speech_thold.is_some()
+            || params.tdrz_enable.is_some()
+            || params.language.is_some()
+            || params.initial_prompt.is_some();
         let result = tokio::task::block_in_place(|| {
             tracing::debug!(
                 sample_count = samples.len(),
@@ -349,7 +256,7 @@ impl WhisperWorker {
                 decode_configured,
                 "starting whisper inference"
             );
-            engine.inference(&samples, vad.as_ref(), decode.as_ref())
+            engine.inference(&samples, &params)
         });
 
         match result {
@@ -383,25 +290,26 @@ impl WhisperWorker {
         let Some(snapshot) = cmd.deployment() else {
             return;
         };
-        let config: GgmlWhisperLoadConfig = match snapshot.typed_model_config() {
+        let Some(model_payload) = snapshot.model.as_ref() else {
+            tracing::warn!("whisper worker: deployment snapshot missing model payload");
+            return;
+        };
+        let params = match parse_context_payload(model_payload) {
             Ok(config) => config,
             Err(error) => {
                 tracing::warn!(error = %error, "whisper worker: invalid model deployment snapshot");
                 return;
             }
         };
-        let model_path = config.model_path;
+        let model_path =
+            params.model_path.clone().map(|path| path.display().to_string()).unwrap_or_default();
         if let Some(engine) = self.engine.as_mut()
             && !engine.is_model_loaded()
         {
-            let result = tokio::task::block_in_place(|| {
-                use slab_whisper::WhisperContextParameters;
-                let params = WhisperContextParameters::default();
-                engine.new_context(&model_path, params)
-            });
+            let result = tokio::task::block_in_place(|| engine.new_context(params.clone()));
             if let Err(e) = result {
                 tracing::warn!(
-                    model_path = %model_path.display(),
+                    model_path = %model_path,
                     error = %e,
                     "whisper worker: broadcast LoadModel failed"
                 );
@@ -459,14 +367,17 @@ mod tests {
     fn deployment_snapshot_reads_typed_whisper_model_config() {
         let snapshot = DeploymentSnapshot::with_model(
             7,
-            Payload::typed(GgmlWhisperLoadConfig { model_path: PathBuf::from("model.bin") }),
+            Payload::typed(WhisperContextParams {
+                model_path: Some(PathBuf::from("model.bin")),
+                ..Default::default()
+            }),
         );
 
         let config = snapshot
-            .typed_model_config::<GgmlWhisperLoadConfig>()
+            .typed_model_config::<WhisperContextParams>()
             .expect("typed deployment snapshot should decode");
 
-        assert_eq!(config.model_path, PathBuf::from("model.bin"));
+        assert_eq!(config.model_path, Some(PathBuf::from("model.bin")));
     }
 
     #[test]

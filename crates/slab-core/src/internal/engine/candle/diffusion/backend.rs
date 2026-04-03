@@ -62,7 +62,8 @@ fn build_gen_image_params(raw: &DiffusionImgParams) -> Result<(GenImageParams, u
             if steps < 1 {
                 return Err("sample_steps must be >= 1".to_owned());
             }
-            params.steps = usize::try_from(steps).map_err(|_| "sample_steps exceeds usize range".to_owned())?;
+            params.steps = usize::try_from(steps)
+                .map_err(|_| "sample_steps exceeds usize range".to_owned())?;
         }
         if let Some(guidance) = sample.guidance.as_ref() {
             params.cfg_scale = f64::from(guidance.txt_cfg.max(guidance.distilled_guidance));
@@ -74,10 +75,7 @@ fn build_gen_image_params(raw: &DiffusionImgParams) -> Result<(GenImageParams, u
         return Err("batch_count must be >= 1".to_owned());
     }
 
-    Ok((
-        params,
-        usize::try_from(count).map_err(|_| "batch_count exceeds usize range".to_owned())?,
-    ))
+    Ok((params, usize::try_from(count).map_err(|_| "batch_count exceeds usize range".to_owned())?))
 }
 
 fn decode_png_to_diffusion_image(png_bytes: Vec<u8>) -> Result<DiffusionImage, String> {

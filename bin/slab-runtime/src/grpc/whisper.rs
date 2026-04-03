@@ -27,8 +27,7 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
             return Err(Status::invalid_argument("audio file path is empty"));
         }
 
-        let (vad, decode) =
-            build_whisper_inference_options(&req).map_err(Status::invalid_argument)?;
+        let (vad, decode) = build_whisper_inference_options(&req);
         let vad_enabled = vad.as_ref().is_some_and(|value| value.enabled);
         let decode_configured = decode.is_some();
 
@@ -111,47 +110,12 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
 
 fn build_whisper_inference_options(
     req: &pb::TranscribeRequest,
-) -> Result<(Option<WhisperVadOptions>, Option<WhisperDecodeOptions>), String> {
+) -> (Option<WhisperVadOptions>, Option<WhisperDecodeOptions>) {
     let vad = if let Some(vad) = req.vad.as_ref() {
         if !vad.enabled {
             None
         } else {
-            let model_path = vad.model_path.trim();
-            if model_path.is_empty() {
-                return Err("vad.model_path is required when VAD is enabled".to_owned());
-            }
-
             let params = if let Some(params) = vad.params.as_ref() {
-                if let Some(threshold) = params.threshold
-                    && !(0.0..=1.0).contains(&threshold)
-                {
-                    return Err("vad.threshold must be between 0.0 and 1.0".to_owned());
-                }
-
-                for (name, value) in [
-                    ("vad.min_speech_duration_ms", params.min_speech_duration_ms),
-                    ("vad.min_silence_duration_ms", params.min_silence_duration_ms),
-                    ("vad.speech_pad_ms", params.speech_pad_ms),
-                ] {
-                    if let Some(value) = value
-                        && value < 0
-                    {
-                        return Err(format!("{name} must be >= 0"));
-                    }
-                }
-
-                if let Some(max_speech_duration_s) = params.max_speech_duration_s
-                    && max_speech_duration_s <= 0.0
-                {
-                    return Err("vad.max_speech_duration_s must be > 0.0".to_owned());
-                }
-
-                if let Some(samples_overlap) = params.samples_overlap
-                    && samples_overlap < 0.0
-                {
-                    return Err("vad.samples_overlap must be >= 0.0".to_owned());
-                }
-
                 Some(WhisperVadParams {
                     threshold: params.threshold,
                     min_speech_duration_ms: params.min_speech_duration_ms,
@@ -166,7 +130,7 @@ fn build_whisper_inference_options(
 
             Some(WhisperVadOptions {
                 enabled: true,
-                model_path: Some(PathBuf::from(model_path)),
+                model_path: Some(PathBuf::from(vad.model_path.clone())),
                 params,
             })
         }
@@ -175,36 +139,6 @@ fn build_whisper_inference_options(
     };
 
     let decode = if let Some(decode) = req.decode.as_ref() {
-        for (name, value) in [
-            ("decode.offset_ms", decode.offset_ms),
-            ("decode.duration_ms", decode.duration_ms),
-            ("decode.max_len", decode.max_len),
-            ("decode.max_tokens", decode.max_tokens),
-        ] {
-            if let Some(value) = value
-                && value < 0
-            {
-                return Err(format!("{name} must be >= 0"));
-            }
-        }
-
-        if let Some(word_thold) = decode.word_thold
-            && !(0.0..=1.0).contains(&word_thold)
-        {
-            return Err("decode.word_thold must be between 0.0 and 1.0".to_owned());
-        }
-
-        for (name, value) in [
-            ("decode.temperature", decode.temperature),
-            ("decode.temperature_inc", decode.temperature_inc),
-        ] {
-            if let Some(value) = value
-                && value < 0.0
-            {
-                return Err(format!("{name} must be >= 0.0"));
-            }
-        }
-
         Some(WhisperDecodeOptions {
             offset_ms: decode.offset_ms,
             duration_ms: decode.duration_ms,
@@ -227,7 +161,7 @@ fn build_whisper_inference_options(
         None
     };
 
-    Ok((vad, decode))
+    (vad, decode)
 }
 
 fn convert_file_to_pcm_f32le(path: &str) -> Result<Arc<[f32]>, String> {

@@ -1,6 +1,7 @@
 use std::ffi::c_int;
 use std::sync::Arc;
 
+use crate::whisper_params::InnerFullParams;
 use crate::{FullParams, WhisperError, WhisperInnerContext, WhisperTokenId};
 
 mod iterator;
@@ -291,6 +292,7 @@ impl WhisperState {
             return Err(WhisperError::NoSamples);
         }
 
+        let params = InnerFullParams::from_canonical(self.ctx.instance.lib.as_ref(), &params)?;
         let ret = unsafe {
             self.ctx.instance.lib.whisper_full_with_state(
                 self.ctx.ctx,
@@ -300,6 +302,44 @@ impl WhisperState {
                 data.len() as c_int,
             )
         };
+        if ret == -1 {
+            Err(WhisperError::UnableToCalculateSpectrogram)
+        } else if ret == 7 {
+            Err(WhisperError::FailedToEncode)
+        } else if ret == 8 {
+            Err(WhisperError::FailedToDecode)
+        } else if ret == 0 {
+            Ok(())
+        } else {
+            Err(WhisperError::GenericError(ret))
+        }
+    }
+
+    /// Run the entire model in parallel using the context default state.
+    pub fn full_parallel(
+        &mut self,
+        params: FullParams,
+        data: &[f32],
+        n_processors: usize,
+    ) -> Result<(), WhisperError> {
+        if data.is_empty() {
+            return Err(WhisperError::NoSamples);
+        }
+        if n_processors < 1 {
+            return Err(WhisperError::InvalidThreadCount);
+        }
+
+        let params = InnerFullParams::from_canonical(self.ctx.instance.lib.as_ref(), &params)?;
+        let ret = unsafe {
+            self.ctx.instance.lib.whisper_full_parallel(
+                self.ctx.ctx,
+                params.fp,
+                data.as_ptr(),
+                data.len() as c_int,
+                n_processors as c_int,
+            )
+        };
+
         if ret == -1 {
             Err(WhisperError::UnableToCalculateSpectrogram)
         } else if ret == 7 {

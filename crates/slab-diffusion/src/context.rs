@@ -65,8 +65,8 @@ impl Context {
             return Err(DiffusionError::GenerationFailed);
         }
 
-        let batch =
-            usize::try_from(inner.get_batch_count()).map_err(|_| DiffusionError::GenerationFailed)?;
+        let batch = usize::try_from(inner.get_batch_count())
+            .map_err(|_| DiffusionError::GenerationFailed)?;
         Ok(Self::collect_images(images_ptr, batch))
     }
 

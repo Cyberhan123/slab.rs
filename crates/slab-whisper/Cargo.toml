@@ -14,6 +14,7 @@ slab-ggml = { workspace = true }
 slab-utils = { workspace = true }
 libloading = { workspace = true }
 thiserror = { workspace = true }
+serde = { workspace = true }
 log = { workspace = true, optional = true }
 tracing = { workspace = true, optional = true }
 
