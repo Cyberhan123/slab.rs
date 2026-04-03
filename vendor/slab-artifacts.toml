@@ -77,7 +77,7 @@ extension = "tar.gz"
 
 [artifacts.diffusion]
 repo = "seasonjs/stable-diffusion.cpp-build"
-version = "v0527541"
+version = "vb55f8f3f"
 lib_name = "stable-diffusion"
 asset_pattern = "stable-diffusion-sdk-{os}-{arch}.{extension}"
 

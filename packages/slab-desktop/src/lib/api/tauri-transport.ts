@@ -133,6 +133,13 @@ const TAURI_ROUTE_DEFINITIONS: readonly TauriRouteDefinition[] = [
   },
   {
     method: 'POST',
+    pattern: '/v1/images/generations',
+    command: 'generate_images',
+    status: 202,
+    buildArgs: ({ body }) => ({ req: body }),
+  },
+  {
+    method: 'POST',
     pattern: '/v1/backends/download',
     command: 'download_backend_lib',
     status: 202,

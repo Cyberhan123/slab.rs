@@ -53,11 +53,12 @@ fn add_dll_directory(path: &Path) -> Result<(), String> {
     let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
     wide.push(0);
 
+    print!("Adding DLL directory: {}... ", path.display());
     let cookie = unsafe { AddDllDirectory(wide.as_ptr()) };
     if cookie.is_null() {
         return Err(format!("AddDllDirectory failed for {}", path.display()));
     }
-
+    println!("done.");
     Ok(())
 }
 
@@ -103,9 +104,9 @@ fn minisd_generates_small_image_from_hf_hub_model() {
     let diffusion = load_vendored_diffusion();
     let model_path = resolve_minisd_model_path();
 
+    diffusion.backend_list_size().unwrap_or_else(|error| panic!("failed to get diffusion backend list size: {error}"));
     let mut context_params = diffusion.new_context_params();
     context_params.set_model_path(&model_path.to_string_lossy());
-    context_params.set_main_device("cuda");
 
 
     let ctx = diffusion

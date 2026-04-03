@@ -62,6 +62,7 @@ fn main() {
             "backend_status",
             "list_backends",
             "download_backend_lib",
+            "generate_images",
             "reload_backend_lib",
             "gpu_status",
             "list_settings",

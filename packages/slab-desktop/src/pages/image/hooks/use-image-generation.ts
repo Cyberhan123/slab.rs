@@ -4,16 +4,22 @@ import { toast } from 'sonner';
 
 import { usePageHeader, usePageHeaderModelPicker } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
+import api from '@/lib/api';
+import type { components } from '@/lib/api/v1.d.ts';
 import {
-  API_BASE_URL,
   DIMENSION_PRESETS,
   MAX_POLL_ATTEMPTS,
   POLL_INTERVAL_MS,
   type GeneratedImage,
   type ImageRouteState,
-  type TaskResult,
 } from '../const';
 import { useImageModelPreparation } from './use-image-model-preparation';
+
+type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
+type ImageGenerationRequest = components['schemas']['ImageGenerationRequest'];
+type OperationAcceptedResponse = components['schemas']['OperationAcceptedResponse'];
+type TaskResponse = components['schemas']['TaskResponse'];
+type TaskResultPayload = components['schemas']['TaskResultPayload'];
 
 async function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -44,15 +50,13 @@ export function useImageGeneration() {
   const [strength, setStrength] = useState(0.75);
   const [initImageDataUri, setInitImageDataUri] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [generationPhase, setGenerationPhase] = useState<GenerationPhase>('idle');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isPolling, setIsPolling] = useState(false);
   const [images, setImages] = useState<GeneratedImage[]>([]);
   const [zoomedImage, setZoomedImage] = useState<string | null>(null);
 
   const initImageInputRef = useRef<HTMLInputElement>(null);
   const pollAttempts = useRef(0);
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef(false);
 
   const {
     catalogLoading,
@@ -62,6 +66,64 @@ export function useImageGeneration() {
     selectedModelId,
     setSelectedModelId,
   } = useImageModelPreparation();
+
+  const generateImagesMutation = api.useMutation('post', '/v1/images/generations') as unknown as {
+    mutateAsync: (options: { body: ImageGenerationRequest }) => Promise<OperationAcceptedResponse>;
+  };
+  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
+
+  const isPolling = generationPhase === 'polling';
+  const isFetchingResult = generationPhase === 'fetchingResult';
+
+  const {
+    data: taskStatus,
+    error: taskStatusError,
+    dataUpdatedAt: taskStatusUpdatedAt,
+  } = api.useQuery(
+    'get',
+    '/v1/tasks/{id}',
+    {
+      params: {
+        path: {
+          id: taskId ?? '',
+        },
+      },
+    },
+    {
+      enabled: isPolling && Boolean(taskId),
+      refetchInterval: isPolling && taskId ? POLL_INTERVAL_MS : false,
+      refetchIntervalInBackground: true,
+      retry: false,
+    },
+  ) as {
+    data: TaskResponse | undefined;
+    error: unknown;
+    dataUpdatedAt: number;
+  };
+
+  const {
+    data: taskResult,
+    error: taskResultError,
+    dataUpdatedAt: taskResultUpdatedAt,
+  } = api.useQuery(
+    'get',
+    '/v1/tasks/{id}/result',
+    {
+      params: {
+        path: {
+          id: taskId ?? '',
+        },
+      },
+    },
+    {
+      enabled: isFetchingResult && Boolean(taskId),
+      retry: false,
+    },
+  ) as {
+    data: TaskResultPayload | undefined;
+    error: unknown;
+    dataUpdatedAt: number;
+  };
 
   const getPrefilledPrompt = useCallback(() => {
     const statePrompt =
@@ -90,7 +152,7 @@ export function useImageGeneration() {
         : 'Generate images from text prompts',
   });
 
-  const isGenerating = isSubmitting || isPolling;
+  const isGenerating = isSubmitting || generationPhase !== 'idle';
   const isBusy = isGenerating || isPreparingModel;
   const headerModelPicker = useMemo(
     () => ({
@@ -116,6 +178,12 @@ export function useImageGeneration() {
     )?.label ?? null;
 
   usePageHeaderModelPicker(headerModelPicker);
+
+  const clearGenerationTask = useCallback(() => {
+    pollAttempts.current = 0;
+    setGenerationPhase('idle');
+    setTaskId(null);
+  }, []);
 
   const handleDimensionPreset = useCallback((width: number, height: number) => {
     setWidthStr(String(width));
@@ -149,19 +217,16 @@ export function useImageGeneration() {
       return;
     }
 
-    abortRef.current = false;
-
     try {
-      const modelPath = await prepareSelectedModel();
       setIsSubmitting(true);
+      clearGenerationTask();
 
+      const modelPath = await prepareSelectedModel();
       const width = Number.parseInt(widthStr, 10) || 512;
       const height = Number.parseInt(heightStr, 10) || 512;
 
-      const response = await fetch(`${API_BASE_URL}/v1/images/generations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { operation_id } = await generateImagesMutation.mutateAsync({
+        body: {
           model: modelPath,
           prompt,
           negative_prompt: negativePrompt || undefined,
@@ -179,17 +244,11 @@ export function useImageGeneration() {
           strength: mode === 'img2img' ? strength : undefined,
           init_image: mode === 'img2img' ? initImageDataUri : undefined,
           mode,
-        }),
+        },
       });
 
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`HTTP ${response.status}: ${detail || 'generation failed'}`);
-      }
-
-      const { operation_id } = (await response.json()) as { operation_id: string };
       setTaskId(operation_id);
-      setIsPolling(true);
+      setGenerationPhase('polling');
       pollAttempts.current = 0;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -199,6 +258,7 @@ export function useImageGeneration() {
     }
   }, [
     cfgScale,
+    clearGenerationTask,
     clipSkip,
     eta,
     guidance,
@@ -215,101 +275,109 @@ export function useImageGeneration() {
     steps,
     strength,
     widthStr,
+    generateImagesMutation,
   ]);
 
   useEffect(() => {
-    if (!isPolling || !taskId) {
+    if (!isPolling || !taskId || taskStatusUpdatedAt === 0) {
       return;
     }
 
-    const poll = async () => {
-      if (abortRef.current) {
-        setIsPolling(false);
-        return;
-      }
+    pollAttempts.current += 1;
+    if (pollAttempts.current > MAX_POLL_ATTEMPTS) {
+      toast.error('Generation timed out');
+      clearGenerationTask();
+      return;
+    }
 
-      pollAttempts.current += 1;
-      if (pollAttempts.current > MAX_POLL_ATTEMPTS) {
-        toast.error('Generation timed out');
-        setIsPolling(false);
-        setTaskId(null);
-        return;
-      }
+    if (!taskStatus) {
+      return;
+    }
 
-      try {
-        const statusRes = await fetch(`${API_BASE_URL}/v1/tasks/${taskId}`);
-        if (!statusRes.ok) {
-          throw new Error(`status ${statusRes.status}`);
-        }
-        const status = (await statusRes.json()) as { status: string };
+    if (
+      taskStatus.status === 'failed' ||
+      taskStatus.status === 'cancelled' ||
+      taskStatus.status === 'interrupted'
+    ) {
+      toast.error(taskStatus.error_msg ?? 'Image generation failed');
+      clearGenerationTask();
+      return;
+    }
 
-        if (status.status === 'failed') {
-          toast.error('Image generation failed');
-          setIsPolling(false);
-          setTaskId(null);
-          return;
-        }
+    if (taskStatus.status === 'succeeded') {
+      setGenerationPhase('fetchingResult');
+    }
+  }, [clearGenerationTask, isPolling, taskId, taskStatus, taskStatusUpdatedAt]);
 
-        if (status.status === 'succeeded') {
-          const resultRes = await fetch(`${API_BASE_URL}/v1/tasks/${taskId}/result`);
-          if (!resultRes.ok) {
-            throw new Error(`result ${resultRes.status}`);
-          }
-          const result = (await resultRes.json()) as TaskResult;
+  useEffect(() => {
+    if (!isPolling || !taskId || !taskStatusError) {
+      return;
+    }
 
-          const srcs = result.images ?? (result.image ? [result.image] : []);
-          const width = Number.parseInt(widthStr, 10) || 512;
-          const height = Number.parseInt(heightStr, 10) || 512;
+    const message = taskStatusError instanceof Error ? taskStatusError.message : String(taskStatusError);
+    toast.error(`Polling error: ${message}`);
+    clearGenerationTask();
+  }, [clearGenerationTask, isPolling, taskId, taskStatusError]);
 
-          const generated: GeneratedImage[] = srcs.map((src) => ({
-            src,
-            prompt,
-            width,
-            height,
-            mode,
-          }));
+  useEffect(() => {
+    if (!isFetchingResult || !taskId || taskResultUpdatedAt === 0 || !taskResult) {
+      return;
+    }
 
-          setImages((previous) => [...generated, ...previous]);
-          toast.success(
-            `Generated ${generated.length} image${generated.length !== 1 ? 's' : ''}!`,
-          );
-          setIsPolling(false);
-          setTaskId(null);
-          return;
-        }
+    const srcs = taskResult.images ?? (taskResult.image ? [taskResult.image] : []);
+    const width = Number.parseInt(widthStr, 10) || 512;
+    const height = Number.parseInt(heightStr, 10) || 512;
 
-        pollTimer.current = setTimeout(poll, POLL_INTERVAL_MS);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        toast.error(`Polling error: ${message}`);
-        setIsPolling(false);
-        setTaskId(null);
-      }
-    };
+    const generated: GeneratedImage[] = srcs
+      .filter((src): src is string => typeof src === 'string' && src.length > 0)
+      .map((src) => ({
+        src,
+        prompt,
+        width,
+        height,
+        mode,
+      }));
 
-    pollTimer.current = setTimeout(poll, POLL_INTERVAL_MS);
-    return () => {
-      if (pollTimer.current) {
-        clearTimeout(pollTimer.current);
-      }
-    };
-  }, [heightStr, isPolling, mode, prompt, taskId, widthStr]);
+    setImages((previous) => [...generated, ...previous]);
+    toast.success(`Generated ${generated.length} image${generated.length !== 1 ? 's' : ''}!`);
+    clearGenerationTask();
+  }, [
+    clearGenerationTask,
+    heightStr,
+    isFetchingResult,
+    mode,
+    prompt,
+    taskId,
+    taskResult,
+    taskResultUpdatedAt,
+    widthStr,
+  ]);
+
+  useEffect(() => {
+    if (!isFetchingResult || !taskId || !taskResultError) {
+      return;
+    }
+
+    const message = taskResultError instanceof Error ? taskResultError.message : String(taskResultError);
+    toast.error(`Failed to fetch generation result: ${message}`);
+    clearGenerationTask();
+  }, [clearGenerationTask, isFetchingResult, taskId, taskResultError]);
 
   const handleCancel = useCallback(async () => {
-    abortRef.current = true;
-    if (pollTimer.current) {
-      clearTimeout(pollTimer.current);
-    }
     if (taskId) {
       try {
-        await fetch(`${API_BASE_URL}/v1/tasks/${taskId}/cancel`, { method: 'POST' });
+        await cancelTaskMutation.mutateAsync({
+          params: {
+            path: { id: taskId },
+          },
+        });
       } catch (error) {
         console.error('Failed to cancel task', error);
       }
     }
-    setIsPolling(false);
-    setTaskId(null);
-  }, [taskId]);
+
+    clearGenerationTask();
+  }, [cancelTaskMutation, clearGenerationTask, taskId]);
 
   const handleDownload = useCallback((src: string, index: number) => {
     const anchor = document.createElement('a');

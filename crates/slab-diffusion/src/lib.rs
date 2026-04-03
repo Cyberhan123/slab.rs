@@ -7,6 +7,8 @@ use std::ffi::CStr;
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
+use slab_ggml::GGML;
+use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 
 pub use context::Context;
 pub use error::DiffusionError;
@@ -40,7 +42,17 @@ pub use upscaler::UpscalerContext;
 #[derive(Clone)]
 pub struct Diffusion {
     pub(crate) lib: Arc<slab_diffusion_sys::DiffusionLib>,
+    pub(crate) ggml: Option<Arc<GGML>>,
 }
+
+fn load_ggml_sidecar(path: &Path) -> Option<Arc<GGML>> {
+    let ggml_path = path.parent()?.join(format!("{}ggml{}", DLL_PREFIX, DLL_SUFFIX));
+    let ggml = GGML::new_with(&ggml_path).ok()?;
+    let lib_dir = ggml_path.parent()?.to_string_lossy();
+    ggml.load_all_backend_from_path(lib_dir.as_ref()).ok()?;
+    Some(Arc::new(ggml))
+}
+
 
 impl Diffusion {
     /// Load the `stable-diffusion` shared library from `path`.
@@ -61,13 +73,15 @@ impl Diffusion {
                 )?
             };
             let diffusion_lib = unsafe { slab_diffusion_sys::DiffusionLib::from_library(lib)? };
-            Ok(Self { lib: Arc::new(diffusion_lib) })
+            let ggml = load_ggml_sidecar(path.as_ref());
+            Ok(Self { lib: Arc::new(diffusion_lib), ggml })
         }
 
         #[cfg(not(windows))]
         {
             let lib = unsafe { slab_diffusion_sys::DiffusionLib::new(path.as_ref())? };
-            Ok(Self { lib: Arc::new(lib) })
+            let ggml = load_ggml_sidecar(path.as_ref());
+            Ok(Self { lib: Arc::new(lib), ggml })
         }
     }
 
@@ -142,6 +156,14 @@ impl Diffusion {
             return Err(DiffusionError::ContextCreationFailed);
         }
         Ok(Context { ctx, lib: self.lib.clone(), _params: params })
+    }
+
+    pub fn backend_list_size(&self) -> Result<usize, DiffusionError> {
+        let size = unsafe { self.lib.backend_list_size() };
+        if size == 0 {
+            return Err(DiffusionError::BackendListUnavailable);
+        }
+        Ok(size)
     }
 }
 

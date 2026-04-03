@@ -7880,6 +7880,7 @@ dependencies = [
  "libc",
  "libloading 0.8.9",
  "slab-diffusion-sys",
+ "slab-ggml",
  "slab-libfetch",
  "thiserror 2.0.18",
  "tokio",
