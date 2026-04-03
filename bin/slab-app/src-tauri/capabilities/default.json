@@ -64,6 +64,7 @@
     "allow-download-backend-lib",
     "allow-reload-backend-lib",
     "allow-gpu-status",
+    "allow-generate-images",
     "allow-list-settings",
     "allow-get-setting",
     "allow-update-setting",

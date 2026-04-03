@@ -11,4 +11,7 @@ pub enum DiffusionError {
     /// Reserved for future upscaling support (ESRGAN / RealESRGAN).
     #[error("Upscaling failed (NULL data in upscaled image)")]
     UpscalerFailed,
+
+    #[error("Backend list is unavailable")]
+    BackendListUnavailable
 }
