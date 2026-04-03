@@ -148,13 +148,12 @@ mod test {
             return;
         }
 
-        let ctx_params = ContextParams {
-            model_path: Some(model_path.clone()),
-            ..Default::default()
-        };
+        let ctx_params =
+            ContextParams { model_path: Some(model_path.clone()), ..Default::default() };
         ds.new_context(ctx_params).expect("failed to create diffusion context");
 
-        let sample_params = slab_diffusion::SampleParams { sample_steps: Some(4), ..Default::default() };
+        let sample_params =
+            slab_diffusion::SampleParams { sample_steps: Some(4), ..Default::default() };
 
         let image_params = ImgParams {
             prompt: Some("a lovely cat sitting on a roof".to_owned()),

@@ -9,6 +9,7 @@ use std::path::PathBuf;
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.h");
     println!("cargo:rerun-if-changed=src/bindings.rs");
+    println!("cargo:rerun-if-changed=../../vendor/whisper/include/whisper.h");
 
     let layout = ensure_vendor_layout("whisper", &["ggml"])
         .expect("Failed to prepare whisper vendor layout");
@@ -35,8 +36,13 @@ fn main() {
         Err(e) => {
             println!("cargo:warning=Unable to generate bindings: {}", e);
             println!("cargo:warning=Using bundled bindings.rs, which may be out of date");
-            std::fs::copy("src/bindings.rs", out.join("bindings.rs"))
-                .expect("Unable to copy bindings.rs");
+            let bundled = PathBuf::from("src").join("bindings.rs");
+            if !bundled.exists() {
+                panic!(
+                    "Unable to generate bindings and bundled fallback is missing at {}",
+                    bundled.display()
+                );
+            }
         }
     }
 }

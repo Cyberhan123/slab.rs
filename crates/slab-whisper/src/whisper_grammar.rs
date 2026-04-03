@@ -1,3 +1,4 @@
+use serde::{Deserialize, Serialize};
 use slab_whisper_sys::{
     whisper_gretype_WHISPER_GRETYPE_ALT, whisper_gretype_WHISPER_GRETYPE_CHAR,
     whisper_gretype_WHISPER_GRETYPE_CHAR_ALT, whisper_gretype_WHISPER_GRETYPE_CHAR_NOT,
@@ -7,7 +8,7 @@ use slab_whisper_sys::{
 
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum WhisperGrammarElementType {
     /// End of rule definition
     End = whisper_gretype_WHISPER_GRETYPE_END,
@@ -53,7 +54,7 @@ impl From<WhisperGrammarElementType> for slab_whisper_sys::whisper_gretype {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct WhisperGrammarElement {
     pub element_type: WhisperGrammarElementType,
     pub value: u32,

@@ -2,9 +2,7 @@ use std::borrow::Cow;
 use std::ffi::c_int;
 use std::sync::Arc;
 
-use crate::{
-    WhisperContextParameters, WhisperError, WhisperInnerContext, WhisperState, WhisperTokenId,
-};
+use crate::{ContextParams, WhisperError, WhisperInnerContext, WhisperState, WhisperTokenId};
 
 #[derive(Clone, Debug)]
 pub struct WhisperContext {
@@ -25,12 +23,8 @@ impl Whisper {
     ///
     /// # C++ equivalent
     /// `struct whisper_context * whisper_init_from_file_with_params_no_state(const char * path_model, struct whisper_context_params params);`
-    pub fn new_context_with_params(
-        &self,
-        path: &str,
-        parameters: WhisperContextParameters,
-    ) -> Result<WhisperContext, WhisperError> {
-        let ctx = self.new_inner_context_with_params(path, parameters)?;
+    pub fn new_context(&self, parameters: ContextParams) -> Result<WhisperContext, WhisperError> {
+        let ctx = self.new_inner_context(parameters)?;
         Ok(WhisperContext::wrap(ctx))
     }
 
@@ -44,12 +38,12 @@ impl Whisper {
     ///
     /// # C++ equivalent
     /// `struct whisper_context * whisper_init_from_buffer_with_params_no_state(void * buffer, size_t buffer_size, struct whisper_context_params params);`
-    pub fn new_context_from_buffer_with_params(
+    pub fn new_context_from_buffer(
         &self,
         buffer: &[u8],
-        parameters: WhisperContextParameters,
+        parameters: ContextParams,
     ) -> Result<WhisperContext, WhisperError> {
-        let ctx = self.new_inner_context_from_buffer_with_params(buffer, parameters)?;
+        let ctx = self.new_inner_context_from_buffer(buffer, parameters)?;
         Ok(WhisperContext::wrap(ctx))
     }
 }
@@ -437,6 +431,11 @@ impl WhisperContext {
     /// `void whisper_reset_timings(struct whisper_context * ctx)`
     pub fn reset_timings(&self) {
         self.ctx.reset_timings()
+    }
+
+    /// Get performance timings from the default state.
+    pub fn timings(&self) -> Option<crate::WhisperTimings> {
+        self.ctx.timings()
     }
 
     // task tokens

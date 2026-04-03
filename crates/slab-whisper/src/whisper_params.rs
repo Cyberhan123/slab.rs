@@ -1,31 +1,75 @@
-use crate::whisper_grammar::WhisperGrammarElement;
+use crate::whisper_grammar::{WhisperGrammarElement, WhisperGrammarElementType};
 use crate::whisper_vad::WhisperVadParams;
+use crate::{Whisper, WhisperError};
+use serde::{Deserialize, Serialize};
 use slab_whisper_sys::whisper_token;
-use std::ffi::{CString, c_char, c_float, c_int};
-use std::marker::PhantomData;
-use std::sync::Arc;
+use std::ffi::{CStr, CString, c_char, c_float, c_int};
+use std::path::PathBuf;
+use std::ptr;
 
 /// The sampling strategy to use to pick tokens from a list of likely possibilities.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub enum SamplingStrategy {
-    /// Greedy sampling: picks the token with the highest probability after having seen `best_of` tokens.
+    /// Greedy sampling.
     Greedy {
-        /// Defaults to 5 in `whisper.cpp`. Will be clamped to at least 1.
+        /// Defaults to 5 in `whisper.cpp`.
         best_of: c_int,
     },
-    /// Beam search. Much harder to explain in a blurb.
-    /// Tends to be more accurate in exchange for more CPU time.
+    /// Beam search.
     BeamSearch {
-        /// The maximum width of the beam.
-        /// Higher values are better (to a point) at the cost of exponential CPU time.
-        ///
-        /// Defaults to 5 in `whisper.cpp`. Will be clamped to at least 1.
+        /// Defaults to 5 in `whisper.cpp`.
         beam_size: c_int,
-        /// Not implemented in `whisper.cpp` as of this writing (02-08-2025, `whisper.cpp` v1.7.6).
-        ///
-        /// Defaults to -1.0.
+        /// Defaults to -1.0 in `whisper.cpp`.
         patience: c_float,
     },
+}
+
+impl Default for SamplingStrategy {
+    fn default() -> Self {
+        Self::Greedy { best_of: 5 }
+    }
+}
+
+impl SamplingStrategy {
+    fn to_native_strategy(&self) -> slab_whisper_sys::whisper_sampling_strategy {
+        match self {
+            SamplingStrategy::Greedy { .. } => {
+                slab_whisper_sys::whisper_sampling_strategy_WHISPER_SAMPLING_GREEDY
+            }
+            SamplingStrategy::BeamSearch { .. } => {
+                slab_whisper_sys::whisper_sampling_strategy_WHISPER_SAMPLING_BEAM_SEARCH
+            }
+        }
+    }
+
+    fn apply_to_native(&self, fp: &mut slab_whisper_sys::whisper_full_params) {
+        fp.strategy = self.to_native_strategy();
+
+        match self {
+            SamplingStrategy::Greedy { best_of } => {
+                fp.greedy.best_of = (*best_of).max(1);
+            }
+            SamplingStrategy::BeamSearch { beam_size, patience } => {
+                fp.beam_search.beam_size = (*beam_size).max(1);
+                fp.beam_search.patience = *patience;
+            }
+        }
+    }
+
+    fn from_native(fp: &slab_whisper_sys::whisper_full_params) -> Self {
+        match fp.strategy {
+            slab_whisper_sys::whisper_sampling_strategy_WHISPER_SAMPLING_GREEDY => {
+                Self::Greedy { best_of: fp.greedy.best_of }
+            }
+            slab_whisper_sys::whisper_sampling_strategy_WHISPER_SAMPLING_BEAM_SEARCH => {
+                Self::BeamSearch {
+                    beam_size: fp.beam_search.beam_size,
+                    patience: fp.beam_search.patience,
+                }
+            }
+            _ => Self::default(),
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -36,932 +80,481 @@ pub struct SegmentCallbackData {
     pub text: String,
 }
 
-type SegmentCallbackFn = Box<dyn FnMut(SegmentCallbackData)>;
-type ProgressCallbackFn = Box<dyn FnMut(i32)>;
-type AbortCallbackFn = Box<dyn FnMut() -> bool>;
-
-#[derive(Clone)]
-pub struct FullParams<'a, 'b> {
-    pub(crate) fp: slab_whisper_sys::whisper_full_params,
-    phantom_lang: PhantomData<&'a str>,
-    phantom_tokens: PhantomData<&'b [c_int]>,
-    grammar: Option<Vec<slab_whisper_sys::whisper_grammar_element>>,
-    progress_callback_safe: Option<Arc<ProgressCallbackFn>>,
-    abort_callback_safe: Option<Arc<AbortCallbackFn>>,
-    segment_calllback_safe: Option<Arc<SegmentCallbackFn>>,
-    instance: Whisper,
+/// Stable Rust-native full inference parameters shared across the runtime chain.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FullParams {
+    #[serde(default)]
+    pub strategy: SamplingStrategy,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_threads: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub n_max_text_ctx: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub offset_ms: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub translate: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_context: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_timestamps: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub single_segment: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub print_special: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub print_progress: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub print_realtime: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub print_timestamps: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_timestamps: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thold_pt: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thold_ptsum: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_len: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split_on_word: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub debug_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_ctx: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tdrz_enable: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppress_regex: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_prompt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub carry_initial_prompt: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub prompt_tokens: Vec<whisper_token>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub language: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detect_language: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppress_blank: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suppress_nst: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_initial_ts: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub length_penalty: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature_inc: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub entropy_thold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logprob_thold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub no_speech_thold: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grammar: Option<Vec<Vec<WhisperGrammarElement>>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub i_start_rule: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grammar_penalty: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vad: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vad_model_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vad_params: Option<WhisperVadParams>,
 }
 
-use crate::Whisper;
-
-impl Whisper {
-    pub fn new_full_params<'a, 'b>(
-        &self,
-        sampling_strategy: SamplingStrategy,
-    ) -> FullParams<'a, 'b> {
-        let mut fp = unsafe {
-            self.lib.whisper_full_default_params(match sampling_strategy {
-                SamplingStrategy::Greedy { .. } => {
-                    slab_whisper_sys::whisper_sampling_strategy_WHISPER_SAMPLING_GREEDY
-                }
-                SamplingStrategy::BeamSearch { .. } => {
-                    slab_whisper_sys::whisper_sampling_strategy_WHISPER_SAMPLING_BEAM_SEARCH
-                }
-            } as _)
-        };
-
-        match sampling_strategy {
-            SamplingStrategy::Greedy { best_of } => {
-                fp.greedy.best_of = best_of;
-            }
-            SamplingStrategy::BeamSearch { mut beam_size, patience } => {
-                if beam_size < 1 {
-                    beam_size = 1;
-                }
-
-                fp.beam_search.beam_size = beam_size;
-                fp.beam_search.patience = patience;
-            }
-        }
-
-        FullParams {
-            fp,
-            phantom_lang: PhantomData,
-            phantom_tokens: PhantomData,
+impl Default for FullParams {
+    fn default() -> Self {
+        Self {
+            strategy: SamplingStrategy::default(),
+            n_threads: None,
+            n_max_text_ctx: None,
+            offset_ms: None,
+            duration_ms: None,
+            translate: None,
+            no_context: None,
+            no_timestamps: None,
+            single_segment: None,
+            print_special: None,
+            print_progress: None,
+            print_realtime: None,
+            print_timestamps: None,
+            token_timestamps: None,
+            thold_pt: None,
+            thold_ptsum: None,
+            max_len: None,
+            split_on_word: None,
+            max_tokens: None,
+            debug_mode: None,
+            audio_ctx: None,
+            tdrz_enable: None,
+            suppress_regex: None,
+            initial_prompt: None,
+            carry_initial_prompt: None,
+            prompt_tokens: Vec::new(),
+            language: None,
+            detect_language: None,
+            suppress_blank: None,
+            suppress_nst: None,
+            temperature: None,
+            max_initial_ts: None,
+            length_penalty: None,
+            temperature_inc: None,
+            entropy_thold: None,
+            logprob_thold: None,
+            no_speech_thold: None,
             grammar: None,
-            progress_callback_safe: None,
-            abort_callback_safe: None,
-            segment_calllback_safe: None,
-            instance: self.clone(),
+            i_start_rule: None,
+            grammar_penalty: None,
+            vad: None,
+            vad_model_path: None,
+            vad_params: None,
         }
     }
 }
 
-impl<'a, 'b> FullParams<'a, 'b> {
-    /// Set the number of threads to use for decoding.
-    ///
-    /// Defaults to min(4, std::thread::hardware_concurrency()).
-    pub fn set_n_threads(&mut self, n_threads: c_int) {
-        self.fp.n_threads = n_threads;
+impl FullParams {
+    pub fn new(strategy: SamplingStrategy) -> Self {
+        Self { strategy, ..Self::default() }
     }
 
-    /// Max tokens to use from past text as prompt for the decoder
-    ///
-    /// Defaults to 16384.
-    pub fn set_n_max_text_ctx(&mut self, n_max_text_ctx: c_int) {
-        self.fp.n_max_text_ctx = n_max_text_ctx;
-    }
-
-    /// Set the start offset in milliseconds to use for decoding.
-    ///
-    /// Defaults to 0.
-    pub fn set_offset_ms(&mut self, offset_ms: c_int) {
-        self.fp.offset_ms = offset_ms;
-    }
-
-    /// Set the audio duration to process in milliseconds.
-    ///
-    /// Defaults to 0.
-    pub fn set_duration_ms(&mut self, duration_ms: c_int) {
-        self.fp.duration_ms = duration_ms;
-    }
-
-    /// Set whether to translate the output to the language specified by `language`.
-    ///
-    /// Defaults to false.
-    pub fn set_translate(&mut self, translate: bool) {
-        self.fp.translate = translate;
-    }
-
-    /// Do not use past transcription (if any) as initial prompt for the decoder.
-    ///
-    /// Defaults to false.
-    pub fn set_no_context(&mut self, no_context: bool) {
-        self.fp.no_context = no_context;
-    }
-
-    /// Do not generate timestamps.
-    ///
-    /// Defaults to false.
-    pub fn set_no_timestamps(&mut self, no_timestamps: bool) {
-        self.fp.no_timestamps = no_timestamps;
-    }
-
-    /// Force single segment output. This may be useful for streaming.
-    ///
-    /// Defaults to false.
-    pub fn set_single_segment(&mut self, single_segment: bool) {
-        self.fp.single_segment = single_segment;
-    }
-
-    /// Print special tokens (e.g. `<SOT>`, `<EOT>`, `<BEG>`, etc.)
-    ///
-    /// Defaults to false.
-    pub fn set_print_special(&mut self, print_special: bool) {
-        self.fp.print_special = print_special;
-    }
-
-    /// Set whether to print progress.
-    ///
-    /// Defaults to true.
-    pub fn set_print_progress(&mut self, print_progress: bool) {
-        self.fp.print_progress = print_progress;
-    }
-
-    /// Print results from within whisper.cpp.
-    /// Try to use the callback methods instead: [set_new_segment_callback](FullParams::set_new_segment_callback),
-    /// [set_new_segment_callback_user_data](FullParams::set_new_segment_callback_user_data).
-    ///
-    /// Defaults to false.
-    pub fn set_print_realtime(&mut self, print_realtime: bool) {
-        self.fp.print_realtime = print_realtime;
-    }
-
-    /// Print timestamps for each text segment when printing realtime. Only has an effect if
-    /// [set_print_realtime](FullParams::set_print_realtime) is set to true.
-    ///
-    /// Defaults to true.
-    pub fn set_print_timestamps(&mut self, print_timestamps: bool) {
-        self.fp.print_timestamps = print_timestamps;
-    }
-
-    /// # EXPERIMENTAL
-    ///
-    /// Enable token-level timestamps.
-    ///
-    /// Defaults to false.
-    pub fn set_token_timestamps(&mut self, token_timestamps: bool) {
-        self.fp.token_timestamps = token_timestamps;
-    }
-
-    /// # EXPERIMENTAL
-    ///
-    /// Set timestamp token probability threshold.
-    ///
-    /// Defaults to 0.01.
-    pub fn set_thold_pt(&mut self, thold_pt: f32) {
-        self.fp.thold_pt = thold_pt;
-    }
-
-    /// # EXPERIMENTAL
-    ///
-    /// Set timestamp token sum probability threshold.
-    ///
-    /// Defaults to 0.01.
-    pub fn set_thold_ptsum(&mut self, thold_ptsum: f32) {
-        self.fp.thold_ptsum = thold_ptsum;
-    }
-
-    /// # EXPERIMENTAL
-    ///
-    /// Set maximum segment length in characters.
-    ///
-    /// Defaults to 0.
-    pub fn set_max_len(&mut self, max_len: c_int) {
-        self.fp.max_len = max_len;
-    }
-
-    /// # EXPERIMENTAL
-    ///
-    /// Should the timestamps be split on words instead of characters?
-    ///
-    /// Defaults to false.
-    pub fn set_split_on_word(&mut self, split_on_word: bool) {
-        self.fp.split_on_word = split_on_word;
-    }
-
-    /// # EXPERIMENTAL
-    ///
-    /// Set maximum tokens per segment. 0 means no limit.
-    ///
-    /// Defaults to 0.
-    pub fn set_max_tokens(&mut self, max_tokens: c_int) {
-        self.fp.max_tokens = max_tokens;
-    }
-
-    /// # EXPERIMENTAL
-    ///
-    /// Enables debug mode, such as dumping the log mel spectrogram.
-    ///
-    /// Defaults to false.
-    pub fn set_debug_mode(&mut self, debug: bool) {
-        self.fp.debug_mode = debug;
-    }
-
-    /// # EXPERIMENTAL
-    ///
-    /// Overwrite the audio context size. 0 = default.
-    ///
-    /// Defaults to 0.
-    pub fn set_audio_ctx(&mut self, audio_ctx: c_int) {
-        self.fp.audio_ctx = audio_ctx;
-    }
-
-    /// # EXPERIMENTAL
-    ///
-    /// Enable tinydiarize support.
-    /// Experimental speaker turn detection.
-    ///
-    /// Defaults to false.
-    pub fn set_tdrz_enable(&mut self, tdrz_enable: bool) {
-        self.fp.tdrz_enable = tdrz_enable;
-    }
-
-    /// Set tokens to provide the model as initial input.
-    ///
-    /// These tokens are prepended to any existing text content from a previous call.
-    ///
-    /// Calling this more than once will overwrite the previous tokens.
-    ///
-    /// Defaults to an empty vector.
-    pub fn set_tokens(&mut self, tokens: &'b [c_int]) {
-        // turn into ptr and len
-        let tokens_ptr: *const whisper_token = tokens.as_ptr();
-        let tokens_len: c_int = tokens.len() as c_int;
-
-        // set the tokens
-        self.fp.prompt_tokens = tokens_ptr;
-        self.fp.prompt_n_tokens = tokens_len;
-    }
-
-    /// Set the target language.
-    ///
-    /// For auto-detection, set this to either "auto" or None.
-    ///
-    /// Defaults to "en".
-    pub fn set_language(&mut self, language: Option<&'a str>) {
-        self.fp.language = match language {
-            Some(language) => {
-                CString::new(language).expect("Language contains null byte").into_raw() as *const _
-            }
-            None => std::ptr::null(),
-        };
-    }
-
-    /// Set `detect_language`.
-    ///
-    /// Has the same effect as setting the language to "auto" or None.
-    ///
-    /// Defaults to false.
-    pub fn set_detect_language(&mut self, detect_language: bool) {
-        self.fp.detect_language = detect_language;
-    }
-
-    /// Set suppress_blank.
-    /// See <https://github.com/openai/whisper/blob/f82bc59f5ea234d4b97fb2860842ed38519f7e65/whisper/decoding.py#L89>
-    /// for more information.
-    ///
-    /// Defaults to true.
-    pub fn set_suppress_blank(&mut self, suppress_blank: bool) {
-        self.fp.suppress_blank = suppress_blank;
-    }
-
-    /// Set suppress_non_speech_tokens.
-    /// See <https://github.com/openai/whisper/blob/7858aa9c08d98f75575035ecd6481f462d66ca27/whisper/tokenizer.py#L224-L253>
-    /// for more information.
-    ///
-    /// Defaults to false.
-    pub fn set_suppress_nst(&mut self, suppress_nst: bool) {
-        self.fp.suppress_nst = suppress_nst;
-    }
-
-    /// Set initial decoding temperature.
-    /// See <https://ai.stackexchange.com/a/32478> for more information.
-    ///
-    /// Defaults to 0.0.
-    pub fn set_temperature(&mut self, temperature: f32) {
-        self.fp.temperature = temperature;
-    }
-
-    /// Set max_initial_ts.
-    /// See <https://github.com/openai/whisper/blob/f82bc59f5ea234d4b97fb2860842ed38519f7e65/whisper/decoding.py#L97>
-    /// for more information.
-    ///
-    /// Defaults to 1.0.
-    pub fn set_max_initial_ts(&mut self, max_initial_ts: f32) {
-        self.fp.max_initial_ts = max_initial_ts;
-    }
-
-    /// Set length_penalty.
-    /// See <https://github.com/openai/whisper/blob/f82bc59f5ea234d4b97fb2860842ed38519f7e65/whisper/transcribe.py#L267>
-    /// for more information.
-    ///
-    /// Defaults to -1.0.
-    pub fn set_length_penalty(&mut self, length_penalty: f32) {
-        self.fp.length_penalty = length_penalty;
-    }
-
-    /// Set temperature_inc.
-    /// See <https://github.com/openai/whisper/blob/f82bc59f5ea234d4b97fb2860842ed38519f7e65/whisper/transcribe.py#L274-L278>
-    /// for more information.
-    ///
-    /// Defaults to 0.2.
-    pub fn set_temperature_inc(&mut self, temperature_inc: f32) {
-        self.fp.temperature_inc = temperature_inc;
-    }
-
-    /// Set entropy_thold. Similar to OpenAI's compression_ratio_threshold.
-    /// See <https://github.com/openai/whisper/blob/f82bc59f5ea234d4b97fb2860842ed38519f7e65/whisper/transcribe.py#L274-L278> for more information.
-    ///
-    /// Defaults to 2.4.
-    pub fn set_entropy_thold(&mut self, entropy_thold: f32) {
-        self.fp.entropy_thold = entropy_thold;
-    }
-
-    /// Set logprob_thold.
-    /// See <https://github.com/openai/whisper/blob/f82bc59f5ea234d4b97fb2860842ed38519f7e65/whisper/transcribe.py#L274-L278>
-    /// for more information.
-    ///
-    /// Defaults to -1.0.
-    pub fn set_logprob_thold(&mut self, logprob_thold: f32) {
-        self.fp.logprob_thold = logprob_thold;
-    }
-
-    /// Set no_speech_thold. Currently (as of v1.3.0) not implemented.
-    ///
-    /// Defaults to 0.6.
-    pub fn set_no_speech_thold(&mut self, no_speech_thold: f32) {
-        self.fp.no_speech_thold = no_speech_thold;
-    }
-
-    /// Set the callback for new segments.
-    ///
-    /// Note that this callback has not been Rustified yet (and likely never will be, unless someone else feels the need to do so).
-    /// It is still a C callback.
-    ///
-    /// # Safety
-    /// Do not use this function unless you know what you are doing.
-    /// * Be careful not to mutate the state of the whisper_context pointer returned in the callback.
-    ///   This could cause undefined behavior, as this violates the thread-safety guarantees of the underlying C library.
-    ///
-    /// **Warning** Can't be used with DTW. DTW will produce inconsistent callback invocation
-    ///
-    /// Defaults to None.
-    pub unsafe fn set_new_segment_callback(
-        &mut self,
-        new_segment_callback: crate::WhisperNewSegmentCallback,
-    ) {
-        self.fp.new_segment_callback = new_segment_callback;
-    }
-
-    /// Set the user data to be passed to the new segment callback.
-    ///
-    /// # Safety
-    /// See the safety notes for `set_new_segment_callback`.
-    /// **Warning** Can't be used with DTW. DTW will produce inconsistent callback invocation
-    ///
-    /// Defaults to None.
-    pub unsafe fn set_new_segment_callback_user_data(&mut self, user_data: *mut std::ffi::c_void) {
-        self.fp.new_segment_callback_user_data = user_data;
-    }
-
-    /// Set the callback for segment updates.
-    ///
-    /// Provides a limited segment_callback to ensure safety.
-    /// See `set_new_segment_callback` if you need to use `whisper_context` and `whisper_state`
-    /// **Warning** Can't be used with DTW. DTW will produce inconsistent callback invocation
-    ///
-    /// Defaults to None.
-    pub fn set_segment_callback_safe<O, F>(&mut self, closure: O)
-    where
-        F: FnMut(SegmentCallbackData) + 'static,
-        O: Into<Option<F>>,
-    {
-        use slab_whisper_sys::{whisper_context, whisper_state};
-        use std::ffi::{CStr, c_void};
-
-        struct CallbackWrapper {
-            handler: Box<dyn FnMut(SegmentCallbackData)>,
-            lib: Arc<slab_whisper_sys::WhisperLib>, // 把 lib 传进来
+    pub fn try_enable_vad(&mut self, vad: bool) -> Result<(), WhisperError> {
+        if vad && self.vad_model_path.is_none() {
+            return Err(WhisperError::VadModelPathNotSet);
         }
 
-        extern "C" fn trampoline(
-            _: *mut whisper_context,
-            state: *mut whisper_state,
-            n_new: i32,
-            user_data: *mut c_void,
-        ) {
-            unsafe {
-                let user_data = &mut *(user_data as *mut CallbackWrapper);
-
-                let n_segments = user_data.lib.whisper_full_n_segments_from_state(state);
-                let s0 = n_segments - n_new;
-                //let user_data = user_data as *mut Box<dyn FnMut(SegmentCallbackData)>;
-
-                for i in s0..n_segments {
-                    let text = user_data.lib.whisper_full_get_segment_text_from_state(state, i);
-                    let text = CStr::from_ptr(text);
-
-                    let t0 = user_data.lib.whisper_full_get_segment_t0_from_state(state, i);
-                    let t1 = user_data.lib.whisper_full_get_segment_t1_from_state(state, i);
-
-                    if let Ok(n) = text.to_str() {
-                        (user_data.handler)(SegmentCallbackData {
-                            segment: i,
-                            start_timestamp: t0,
-                            end_timestamp: t1,
-                            text: n.to_string(),
-                        })
-                    }
-                }
-            }
-        }
-
-        match closure.into() {
-            Some(closure) => {
-                // Stable address
-                let wrapper = Box::new(CallbackWrapper {
-                    handler: Box::new(closure),
-                    lib: Arc::clone(&self.instance.lib),
-                });
-                // Raw pointer
-                let wrapper = Box::into_raw(wrapper);
-
-                self.fp.new_segment_callback_user_data = wrapper as *mut c_void;
-                self.fp.new_segment_callback = Some(trampoline);
-                self.segment_calllback_safe = None;
-            }
-            None => {
-                self.segment_calllback_safe = None;
-                self.fp.new_segment_callback = None;
-                self.fp.new_segment_callback_user_data = std::ptr::null_mut::<c_void>();
-            }
-        }
-    }
-
-    /// Set the callback for segment updates.
-    ///
-    /// Provides a limited segment_callback to ensure safety with lossy handling of bad UTF-8 characters.
-    /// See `set_new_segment_callback` if you need to use `whisper_context` and `whisper_state`.
-    /// **Warning** Can't be used with DTW. DTW will produce inconsistent callback invocation
-    ///
-    /// Defaults to None.
-    pub fn set_segment_callback_safe_lossy<O, F>(&mut self, closure: O)
-    where
-        F: FnMut(SegmentCallbackData) + 'static,
-        O: Into<Option<F>>,
-    {
-        use slab_whisper_sys::{whisper_context, whisper_state};
-        use std::ffi::{CStr, c_void};
-
-        struct CallbackWrapper {
-            handler: Box<dyn FnMut(SegmentCallbackData)>,
-            lib: Arc<slab_whisper_sys::WhisperLib>, // 把 lib 传进来
-        }
-
-        extern "C" fn trampoline(
-            _: *mut whisper_context,
-            state: *mut whisper_state,
-            n_new: i32,
-            user_data: *mut c_void,
-        ) {
-            unsafe {
-                let user_data = &mut *(user_data as *mut CallbackWrapper);
-                let n_segments = user_data.lib.whisper_full_n_segments_from_state(state);
-                let s0 = n_segments - n_new;
-                //let user_data = user_data as *mut Box<dyn FnMut(SegmentCallbackData)>;
-
-                for i in s0..n_segments {
-                    let text = user_data.lib.whisper_full_get_segment_text_from_state(state, i);
-                    let text = CStr::from_ptr(text);
-
-                    let t0 = user_data.lib.whisper_full_get_segment_t0_from_state(state, i);
-                    let t1 = user_data.lib.whisper_full_get_segment_t1_from_state(state, i);
-                    (user_data.handler)(SegmentCallbackData {
-                        segment: i,
-                        start_timestamp: t0,
-                        end_timestamp: t1,
-                        text: text.to_string_lossy().to_string(),
-                    });
-                }
-            }
-        }
-
-        match closure.into() {
-            Some(closure) => {
-                // Stable address
-                let wrapper = Box::new(CallbackWrapper {
-                    handler: Box::new(closure),
-                    lib: Arc::clone(&self.instance.lib),
-                });
-                // Raw pointer
-                let wrapper = Box::into_raw(wrapper);
-                self.fp.new_segment_callback_user_data = wrapper as *mut c_void;
-                self.fp.new_segment_callback = Some(trampoline);
-                self.segment_calllback_safe = None;
-            }
-            None => {
-                self.segment_calllback_safe = None;
-                self.fp.new_segment_callback = None;
-                self.fp.new_segment_callback_user_data = std::ptr::null_mut::<c_void>();
-            }
-        }
-    }
-
-    /// Set the callback for progress updates.
-    ///
-    /// Note that is still a C callback.
-    /// See `set_progress_callback_safe` for a limited yet safe version.
-    ///
-    /// # Safety
-    /// Do not use this function unless you know what you are doing.
-    /// * Be careful not to mutate the state of the whisper_context pointer returned in the callback.
-    ///   This could cause undefined behavior, as this violates the thread-safety guarantees of the underlying C library.
-    ///
-    /// Defaults to None.
-    pub unsafe fn set_progress_callback(
-        &mut self,
-        progress_callback: crate::WhisperProgressCallback,
-    ) {
-        self.fp.progress_callback = progress_callback;
-    }
-
-    /// Set the callback for progress updates, potentially using a closure.
-    ///
-    /// Note that, in order to ensure safety, the callback only accepts the progress in percent.
-    /// See `set_progress_callback` if you need to use `whisper_context` and `whisper_state`
-    /// (or extend this one to support their use).
-    ///
-    /// Defaults to None.
-    pub fn set_progress_callback_safe<O, F>(&mut self, closure: O)
-    where
-        F: FnMut(i32) + 'static,
-        O: Into<Option<F>>,
-    {
-        use slab_whisper_sys::{whisper_context, whisper_state};
-        use std::ffi::c_void;
-
-        unsafe extern "C" fn trampoline<F>(
-            _: *mut whisper_context,
-            _: *mut whisper_state,
-            progress: c_int,
-            user_data: *mut c_void,
-        ) where
-            F: FnMut(i32),
-        {
-            unsafe {
-                let user_data = &mut *(user_data as *mut F);
-                user_data(progress);
-            }
-        }
-
-        match closure.into() {
-            Some(closure) => {
-                self.fp.progress_callback = Some(trampoline::<Box<dyn FnMut(i32)>>);
-                let boxed_closure = Box::new(closure) as Box<dyn FnMut(i32)>;
-                let boxed_closure = Box::new(boxed_closure);
-                let raw_ptr = Box::into_raw(boxed_closure);
-                self.fp.progress_callback_user_data = raw_ptr as *mut c_void;
-                self.progress_callback_safe = None;
-            }
-            None => {
-                self.fp.progress_callback = None;
-                self.fp.progress_callback_user_data = std::ptr::null_mut::<c_void>();
-                self.progress_callback_safe = None;
-            }
-        }
-    }
-
-    /// Set the callback for abort conditions, potentially using a closure.
-    ///
-    /// Note that, for safety, the callback only accepts a function that returns a boolean
-    /// indicating whether to abort or not.
-    ///
-    /// See `set_progress_callback` if you need to use `whisper_context` and `whisper_state`,
-    /// or extend this one to support their use.
-    ///
-    /// Defaults to None.
-    pub fn set_abort_callback_safe<O, F>(&mut self, closure: O)
-    where
-        F: FnMut() -> bool + 'static,
-        O: Into<Option<F>>,
-    {
-        use std::ffi::c_void;
-
-        unsafe extern "C" fn trampoline<F>(user_data: *mut c_void) -> bool
-        where
-            F: FnMut() -> bool,
-        {
-            unsafe {
-                let user_data = &mut *(user_data as *mut F);
-                user_data()
-            }
-        }
-
-        match closure.into() {
-            Some(closure) => {
-                // Stable address
-                let closure = Box::new(closure) as Box<dyn FnMut() -> bool>;
-                // Thin pointer
-                let closure = Box::new(closure);
-                // Raw pointer
-                let closure = Box::into_raw(closure);
-
-                self.fp.abort_callback = Some(trampoline::<F>);
-                self.fp.abort_callback_user_data = closure as *mut c_void;
-                self.abort_callback_safe = None;
-            }
-            None => {
-                self.fp.abort_callback = None;
-                self.fp.abort_callback_user_data = std::ptr::null_mut::<c_void>();
-                self.abort_callback_safe = None;
-            }
-        }
-    }
-
-    /// Set the user data to be passed to the progress callback.
-    ///
-    /// # Safety
-    /// See the safety notes for `set_progress_callback`.
-    ///
-    /// Defaults to None.
-    pub unsafe fn set_progress_callback_user_data(&mut self, user_data: *mut std::ffi::c_void) {
-        self.fp.progress_callback_user_data = user_data;
-    }
-
-    /// Set the callback that is called each time before the encoder begins.
-    ///
-    /// Note that this callback has not been Rustified yet (and likely never will be, unless someone else feels the need to do so).
-    /// It is still a C callback.
-    ///
-    /// # Safety
-    /// Do not use this function unless you know what you are doing.
-    /// * Be careful not to mutate the state of the whisper_context pointer returned in the callback.
-    ///   This could cause undefined behavior, as this violates the thread-safety guarantees of the underlying C library.
-    ///
-    /// Defaults to None.
-    pub unsafe fn set_start_encoder_callback(
-        &mut self,
-        start_encoder_callback: crate::WhisperStartEncoderCallback,
-    ) {
-        self.fp.encoder_begin_callback = start_encoder_callback;
-    }
-
-    /// Set the user data to be passed to the start encoder callback.
-    ///
-    /// # Safety
-    /// See the safety notes for `set_start_encoder_callback`.
-    ///
-    /// Defaults to None.
-    pub unsafe fn set_start_encoder_callback_user_data(
-        &mut self,
-        user_data: *mut std::ffi::c_void,
-    ) {
-        self.fp.encoder_begin_callback_user_data = user_data;
-    }
-
-    /// Set the callback that is called by each decoder to filter obtained logits.
-    ///
-    /// Note that this callback has not been Rustified yet (and likely never will be, unless someone else feels the need to do so).
-    /// It is still a C callback.
-    ///
-    /// # Safety
-    /// Do not use this function unless you know what you are doing.
-    /// * Be careful not to mutate the state of the whisper_context pointer returned in the callback.
-    ///   This could cause undefined behavior, as this violates the thread-safety guarantees of the underlying C library.
-    ///
-    /// Defaults to None.
-    pub unsafe fn set_filter_logits_callback(
-        &mut self,
-        logits_filter_callback: crate::WhisperLogitsFilterCallback,
-    ) {
-        self.fp.logits_filter_callback = logits_filter_callback;
-    }
-
-    /// Set the user data to be passed to the logits filter callback.
-    ///
-    /// # Safety
-    /// See the safety notes for `set_filter_logits_callback`.
-    ///
-    /// Defaults to None.
-    pub unsafe fn set_filter_logits_callback_user_data(
-        &mut self,
-        user_data: *mut std::ffi::c_void,
-    ) {
-        self.fp.logits_filter_callback_user_data = user_data;
-    }
-
-    /// Set the callback that is called each time before ggml computation starts.
-    ///
-    /// Note that this callback has not been Rustified yet (and likely never will be, unless someone else feels the need to do so).
-    /// It is still a C callback.
-    ///
-    /// # Safety
-    /// Do not use this function unless you know what you are doing.
-    /// * Be careful not to mutate the state of the whisper_context pointer returned in the callback.
-    ///   This could cause undefined behavior, as this violates the thread-safety guarantees of the underlying C library.
-    ///
-    /// Defaults to None.
-    pub unsafe fn set_abort_callback(&mut self, abort_callback: crate::WhisperAbortCallback) {
-        self.fp.abort_callback = abort_callback;
-    }
-
-    /// Set the user data to be passed to the abort callback.
-    ///
-    /// # Safety
-    /// See the safety notes for `set_abort_callback`.
-    ///
-    /// Defaults to None.
-    pub unsafe fn set_abort_callback_user_data(&mut self, user_data: *mut std::ffi::c_void) {
-        self.fp.abort_callback_user_data = user_data;
-    }
-
-    /// Enable an array of grammar elements to be passed to the whisper model.
-    ///
-    /// Defaults to an empty vector.
-    pub fn set_grammar(&mut self, grammar: Option<&[WhisperGrammarElement]>) {
-        if let Some(grammar) = grammar {
-            // convert to c types
-            let inner = grammar.iter().map(|e| e.to_c_type()).collect::<Vec<_>>();
-            // turn into ptr and len
-            let grammar_ptr = inner.as_ptr() as *mut _;
-            let grammar_len = inner.len();
-
-            self.grammar = Some(inner);
-
-            // set the grammar
-            self.fp.grammar_rules = grammar_ptr;
-            self.fp.n_grammar_rules = grammar_len;
-        } else {
-            self.grammar = None;
-            self.fp.grammar_rules = std::ptr::null_mut();
-            self.fp.n_grammar_rules = 0;
-            self.fp.i_start_rule = 0;
-        }
-    }
-
-    /// Set the start grammar rule. Does nothing if no grammar is set.
-    ///
-    /// Defaults to 0.
-    pub fn set_start_rule(&mut self, start_rule: usize) {
-        if self.grammar.is_some() {
-            self.fp.i_start_rule = start_rule;
-        }
-    }
-
-    /// Set grammar penalty.
-    ///
-    /// Defaults to 100.0.
-    pub fn set_grammar_penalty(&mut self, grammar_penalty: f32) {
-        self.fp.grammar_penalty = grammar_penalty;
-    }
-
-    /// Set the initial prompt for the model.
-    ///
-    /// This is the text that will be used as the starting point for the model's decoding.
-    /// Calling this more than once will overwrite the previous initial prompt.
-    ///
-    /// # Arguments
-    /// * `initial_prompt` - A string slice representing the initial prompt text.
-    ///
-    /// # Panics
-    /// This method will panic if `initial_prompt` contains a null byte, as it cannot be converted into a `CString`.
-    ///
-    /// # Examples
-    /// ```
-    /// # use whisper_rs::{FullParams, SamplingStrategy};
-    /// let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-    /// params.set_initial_prompt("Hello, world!");
-    /// // ... further usage of params ...
-    /// ```
-    pub fn set_initial_prompt(&mut self, initial_prompt: &str) {
-        self.fp.initial_prompt = CString::new(initial_prompt)
-            .expect("Initial prompt contains null byte")
-            .into_raw() as *const c_char;
-    }
-
-    /// Enable or disable VAD.
-    ///
-    /// # Panics
-    /// Panics if `vad` is `true` and no VAD model path has been set via
-    /// [`set_vad_model_path`].  Prefer [`try_enable_vad`] to get a `Result`
-    /// instead of a panic.
-    ///
-    /// [`set_vad_model_path`]: FullParams::set_vad_model_path
-    /// [`try_enable_vad`]: FullParams::try_enable_vad
-    #[deprecated(
-        since = "0.0.1",
-        note = "Use `try_enable_vad` to handle the missing-path case as an error instead of a panic."
-    )]
-    pub fn enable_vad(&mut self, vad: bool) {
-        self.try_enable_vad(vad).unwrap_or_else(|e| panic!("{e}"));
-    }
-
-    /// Enable or disable VAD.
-    ///
-    /// # Errors
-    /// Returns [`WhisperError::VadModelPathNotSet`] if `vad` is `true` and
-    /// `set_vad_model_path` has not been called with a non-`None` path.
-    pub fn try_enable_vad(&mut self, vad: bool) -> Result<(), crate::WhisperError> {
-        if vad && self.fp.vad_model_path.is_null() {
-            return Err(crate::WhisperError::VadModelPathNotSet);
-        }
-
-        self.fp.vad = vad;
+        self.vad = Some(vad);
         Ok(())
     }
 
-    /// Set the path where a VAD model can be found. Passing `None` will clear it and disable VAD.
-    ///
-    /// # Panics
-    /// This method will panic if `vad_model_path` contains a null byte.
-    pub fn set_vad_model_path(&mut self, vad_model_path: Option<&str>) {
-        self.fp.vad_model_path = if let Some(vad_model_path) = vad_model_path {
-            CString::new(vad_model_path).expect("VAD model path contains null byte").into_raw()
-                as *const c_char
-        } else {
-            self.fp.vad = false;
-
-            std::ptr::null()
-        };
-    }
-
-    /// Replace the VAD model parameters.
-    pub fn set_vad_params(&mut self, params: WhisperVadParams) {
-        self.fp.vad_params = params.into_inner();
+    pub(crate) fn from_native(fp: slab_whisper_sys::whisper_full_params) -> Self {
+        Self {
+            strategy: SamplingStrategy::from_native(&fp),
+            n_threads: Some(fp.n_threads),
+            n_max_text_ctx: Some(fp.n_max_text_ctx),
+            offset_ms: Some(fp.offset_ms),
+            duration_ms: Some(fp.duration_ms),
+            translate: Some(fp.translate),
+            no_context: Some(fp.no_context),
+            no_timestamps: Some(fp.no_timestamps),
+            single_segment: Some(fp.single_segment),
+            print_special: Some(fp.print_special),
+            print_progress: Some(fp.print_progress),
+            print_realtime: Some(fp.print_realtime),
+            print_timestamps: Some(fp.print_timestamps),
+            token_timestamps: Some(fp.token_timestamps),
+            thold_pt: Some(fp.thold_pt),
+            thold_ptsum: Some(fp.thold_ptsum),
+            max_len: Some(fp.max_len),
+            split_on_word: Some(fp.split_on_word),
+            max_tokens: Some(fp.max_tokens),
+            debug_mode: Some(fp.debug_mode),
+            audio_ctx: Some(fp.audio_ctx),
+            tdrz_enable: Some(fp.tdrz_enable),
+            suppress_regex: copy_c_string(fp.suppress_regex),
+            initial_prompt: copy_c_string(fp.initial_prompt),
+            carry_initial_prompt: Some(fp.carry_initial_prompt),
+            prompt_tokens: copy_prompt_tokens(fp.prompt_tokens, fp.prompt_n_tokens),
+            language: copy_c_string(fp.language),
+            detect_language: Some(fp.detect_language),
+            suppress_blank: Some(fp.suppress_blank),
+            suppress_nst: Some(fp.suppress_nst),
+            temperature: Some(fp.temperature),
+            max_initial_ts: Some(fp.max_initial_ts),
+            length_penalty: Some(fp.length_penalty),
+            temperature_inc: Some(fp.temperature_inc),
+            entropy_thold: Some(fp.entropy_thold),
+            logprob_thold: Some(fp.logprob_thold),
+            no_speech_thold: Some(fp.no_speech_thold),
+            grammar: copy_grammar_rules(fp.grammar_rules, fp.n_grammar_rules),
+            i_start_rule: Some(fp.i_start_rule),
+            grammar_penalty: Some(fp.grammar_penalty),
+            vad: Some(fp.vad),
+            vad_model_path: copy_c_string(fp.vad_model_path).map(PathBuf::from),
+            vad_params: Some(WhisperVadParams::from_native(fp.vad_params)),
+        }
     }
 }
 
-// following implementations are safe
-// see https://github.com/ggerganov/whisper.cpp/issues/32#issuecomment-1272790388
+pub(crate) struct InnerFullParams {
+    pub(crate) fp: slab_whisper_sys::whisper_full_params,
+    suppress_regex: Option<CString>,
+    initial_prompt: Option<CString>,
+    language: Option<CString>,
+    vad_model_path: Option<CString>,
+    prompt_tokens: Vec<whisper_token>,
+    grammar_rules: Vec<Vec<slab_whisper_sys::whisper_grammar_element>>,
+    grammar_rule_ptrs: Vec<*const slab_whisper_sys::whisper_grammar_element>,
+}
+
+impl Clone for InnerFullParams {
+    fn clone(&self) -> Self {
+        let mut cloned = Self {
+            fp: self.fp,
+            suppress_regex: self.suppress_regex.clone(),
+            initial_prompt: self.initial_prompt.clone(),
+            language: self.language.clone(),
+            vad_model_path: self.vad_model_path.clone(),
+            prompt_tokens: self.prompt_tokens.clone(),
+            grammar_rules: self.grammar_rules.clone(),
+            grammar_rule_ptrs: Vec::new(),
+        };
+        cloned.sync_backing();
+        cloned
+    }
+}
+
+impl std::fmt::Debug for InnerFullParams {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InnerFullParams").finish_non_exhaustive()
+    }
+}
+
+impl Whisper {
+    pub fn new_full_params(&self, sampling_strategy: SamplingStrategy) -> FullParams {
+        let fp =
+            unsafe { self.lib.whisper_full_default_params(sampling_strategy.to_native_strategy()) };
+        FullParams::from_native(fp)
+    }
+}
+
+impl InnerFullParams {
+    pub(crate) fn from_canonical(
+        lib: &slab_whisper_sys::WhisperLib,
+        value: &FullParams,
+    ) -> Result<Self, WhisperError> {
+        let mut inner = Self {
+            fp: unsafe { lib.whisper_full_default_params(value.strategy.to_native_strategy()) },
+            suppress_regex: None,
+            initial_prompt: None,
+            language: None,
+            vad_model_path: None,
+            prompt_tokens: value.prompt_tokens.clone(),
+            grammar_rules: Vec::new(),
+            grammar_rule_ptrs: Vec::new(),
+        };
+
+        value.strategy.apply_to_native(&mut inner.fp);
+
+        if let Some(n_threads) = value.n_threads {
+            inner.fp.n_threads = n_threads;
+        }
+        if let Some(n_max_text_ctx) = value.n_max_text_ctx {
+            inner.fp.n_max_text_ctx = n_max_text_ctx;
+        }
+        if let Some(offset_ms) = value.offset_ms {
+            inner.fp.offset_ms = offset_ms;
+        }
+        if let Some(duration_ms) = value.duration_ms {
+            inner.fp.duration_ms = duration_ms;
+        }
+        if let Some(translate) = value.translate {
+            inner.fp.translate = translate;
+        }
+        if let Some(no_context) = value.no_context {
+            inner.fp.no_context = no_context;
+        }
+        if let Some(no_timestamps) = value.no_timestamps {
+            inner.fp.no_timestamps = no_timestamps;
+        }
+        if let Some(single_segment) = value.single_segment {
+            inner.fp.single_segment = single_segment;
+        }
+        if let Some(print_special) = value.print_special {
+            inner.fp.print_special = print_special;
+        }
+        if let Some(print_progress) = value.print_progress {
+            inner.fp.print_progress = print_progress;
+        }
+        if let Some(print_realtime) = value.print_realtime {
+            inner.fp.print_realtime = print_realtime;
+        }
+        if let Some(print_timestamps) = value.print_timestamps {
+            inner.fp.print_timestamps = print_timestamps;
+        }
+        if let Some(token_timestamps) = value.token_timestamps {
+            inner.fp.token_timestamps = token_timestamps;
+        }
+        if let Some(thold_pt) = value.thold_pt {
+            inner.fp.thold_pt = thold_pt;
+        }
+        if let Some(thold_ptsum) = value.thold_ptsum {
+            inner.fp.thold_ptsum = thold_ptsum;
+        }
+        if let Some(max_len) = value.max_len {
+            inner.fp.max_len = max_len;
+        }
+        if let Some(split_on_word) = value.split_on_word {
+            inner.fp.split_on_word = split_on_word;
+        }
+        if let Some(max_tokens) = value.max_tokens {
+            inner.fp.max_tokens = max_tokens;
+        }
+        if let Some(debug_mode) = value.debug_mode {
+            inner.fp.debug_mode = debug_mode;
+        }
+        if let Some(audio_ctx) = value.audio_ctx {
+            inner.fp.audio_ctx = audio_ctx;
+        }
+        if let Some(tdrz_enable) = value.tdrz_enable {
+            inner.fp.tdrz_enable = tdrz_enable;
+        }
+        if let Some(carry_initial_prompt) = value.carry_initial_prompt {
+            inner.fp.carry_initial_prompt = carry_initial_prompt;
+        }
+        if let Some(detect_language) = value.detect_language {
+            inner.fp.detect_language = detect_language;
+        }
+        if let Some(suppress_blank) = value.suppress_blank {
+            inner.fp.suppress_blank = suppress_blank;
+        }
+        if let Some(suppress_nst) = value.suppress_nst {
+            inner.fp.suppress_nst = suppress_nst;
+        }
+        if let Some(temperature) = value.temperature {
+            inner.fp.temperature = temperature;
+        }
+        if let Some(max_initial_ts) = value.max_initial_ts {
+            inner.fp.max_initial_ts = max_initial_ts;
+        }
+        if let Some(length_penalty) = value.length_penalty {
+            inner.fp.length_penalty = length_penalty;
+        }
+        if let Some(temperature_inc) = value.temperature_inc {
+            inner.fp.temperature_inc = temperature_inc;
+        }
+        if let Some(entropy_thold) = value.entropy_thold {
+            inner.fp.entropy_thold = entropy_thold;
+        }
+        if let Some(logprob_thold) = value.logprob_thold {
+            inner.fp.logprob_thold = logprob_thold;
+        }
+        if let Some(no_speech_thold) = value.no_speech_thold {
+            inner.fp.no_speech_thold = no_speech_thold;
+        }
+        if let Some(grammar_penalty) = value.grammar_penalty {
+            inner.fp.grammar_penalty = grammar_penalty;
+        }
+        if let Some(vad) = value.vad {
+            inner.fp.vad = vad;
+        }
+
+        if let Some(suppress_regex) = value.suppress_regex.as_deref() {
+            inner.suppress_regex = Some(CString::new(suppress_regex)?);
+        }
+        if let Some(initial_prompt) = value.initial_prompt.as_deref() {
+            inner.initial_prompt = Some(CString::new(initial_prompt)?);
+        }
+        if let Some(language) = value.language.as_deref() {
+            inner.language = Some(CString::new(language)?);
+        }
+        if let Some(vad_model_path) = value.vad_model_path.as_ref() {
+            inner.vad_model_path = Some(CString::new(vad_model_path.to_string_lossy().as_ref())?);
+        }
+        if let Some(vad_params) = value.vad_params.as_ref() {
+            let mut native = unsafe { lib.whisper_vad_default_params() };
+            vad_params.apply_to(&mut native);
+            inner.fp.vad_params = native;
+        }
+        if let Some(grammar) = value.grammar.as_ref() {
+            inner.grammar_rules = grammar
+                .iter()
+                .map(|rule| rule.iter().copied().map(WhisperGrammarElement::to_c_type).collect())
+                .collect();
+        }
+        if let Some(i_start_rule) = value.i_start_rule {
+            inner.fp.i_start_rule = i_start_rule;
+        }
+
+        inner.sync_backing();
+
+        if inner.fp.vad && inner.vad_model_path.is_none() {
+            return Err(WhisperError::VadModelPathNotSet);
+        }
+
+        Ok(inner)
+    }
+
+    fn sync_backing(&mut self) {
+        self.fp.suppress_regex =
+            self.suppress_regex.as_ref().map_or(ptr::null(), |value| value.as_ptr());
+        self.fp.initial_prompt =
+            self.initial_prompt.as_ref().map_or(ptr::null(), |value| value.as_ptr());
+        self.fp.language = self.language.as_ref().map_or(ptr::null(), |value| value.as_ptr());
+        self.fp.vad_model_path =
+            self.vad_model_path.as_ref().map_or(ptr::null(), |value| value.as_ptr());
+
+        self.fp.prompt_tokens =
+            if self.prompt_tokens.is_empty() { ptr::null() } else { self.prompt_tokens.as_ptr() };
+        self.fp.prompt_n_tokens = self.prompt_tokens.len().min(i32::MAX as usize) as c_int;
+
+        self.grammar_rule_ptrs.clear();
+        self.grammar_rule_ptrs.extend(self.grammar_rules.iter().map(|rule| rule.as_ptr()));
+        self.fp.grammar_rules = if self.grammar_rule_ptrs.is_empty() {
+            ptr::null_mut()
+        } else {
+            self.grammar_rule_ptrs.as_mut_ptr()
+        };
+        self.fp.n_grammar_rules = self.grammar_rule_ptrs.len();
+    }
+}
+
+fn copy_c_string(ptr: *const c_char) -> Option<String> {
+    (!ptr.is_null()).then(|| unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned())
+}
+
+fn copy_prompt_tokens(ptr: *const whisper_token, count: c_int) -> Vec<whisper_token> {
+    if ptr.is_null() || count <= 0 {
+        Vec::new()
+    } else {
+        unsafe { std::slice::from_raw_parts(ptr, count as usize) }.to_vec()
+    }
+}
+
+fn copy_grammar_rules(
+    ptr: *mut *const slab_whisper_sys::whisper_grammar_element,
+    count: usize,
+) -> Option<Vec<Vec<WhisperGrammarElement>>> {
+    if ptr.is_null() || count == 0 {
+        return None;
+    }
+
+    let rules = unsafe { std::slice::from_raw_parts(ptr, count) }
+        .iter()
+        .copied()
+        .filter(|rule_ptr| !rule_ptr.is_null())
+        .map(|rule_ptr| {
+            let mut items = Vec::new();
+            let mut offset = 0usize;
+
+            loop {
+                let element = unsafe { *rule_ptr.add(offset) };
+                items.push(WhisperGrammarElement {
+                    element_type: WhisperGrammarElementType::from(element.type_),
+                    value: element.value,
+                });
+                offset += 1;
+
+                if element.type_ == slab_whisper_sys::whisper_gretype_WHISPER_GRETYPE_END {
+                    break;
+                }
+            }
+
+            items
+        })
+        .collect::<Vec<_>>();
+
+    Some(rules)
+}
+
 // concurrent usage is prevented by &mut self on methods that modify the struct
-unsafe impl Send for FullParams<'_, '_> {}
-unsafe impl Sync for FullParams<'_, '_> {}
-
-// #[cfg(test)]
-// mod test_whisper_params_initial_prompt {
-//     use super::*;
-
-//     impl<'a, 'b> FullParams<'a, 'b> {
-//         pub fn get_initial_prompt(&self) -> &str {
-//             // SAFETY: Ensure this is safe and respects the lifetime of the string in self.fp
-//             unsafe {
-//                 std::ffi::CStr::from_ptr(self.fp.initial_prompt)
-//                     .to_str()
-//                     .unwrap()
-//             }
-//         }
-//     }
-
-//     #[test]
-//     fn test_initial_prompt_normal_usage() {
-//         Whisper::new_full_params(SamplingStrategy::Greedy { best_of: 5 });
-//         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-//         let prompt = "Hello, world!";
-//         params.set_initial_prompt(prompt);
-//         assert_eq!(params.get_initial_prompt(), prompt);
-//     }
-
-//     #[test]
-//     #[should_panic(expected = "Initial prompt contains null byte")]
-//     fn test_initial_prompt_null_byte() {
-//         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-//         let prompt = "Hello\0, world!";
-//         params.set_initial_prompt(prompt);
-//         // Should panic
-//     }
-
-//     #[test]
-//     fn test_initial_prompt_empty_string() {
-//         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-//         let prompt = "";
-//         params.set_initial_prompt(prompt);
-
-//         assert_eq!(
-//             params.get_initial_prompt(),
-//             prompt,
-//             "The initial prompt should be an empty string."
-//         );
-//     }
-
-//     #[test]
-//     fn test_initial_prompt_repeated_calls() {
-//         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-//         params.set_initial_prompt("First prompt");
-//         assert_eq!(
-//             params.get_initial_prompt(),
-//             "First prompt",
-//             "The initial prompt should be 'First prompt'."
-//         );
-
-//         params.set_initial_prompt("Second prompt");
-//         assert_eq!(
-//             params.get_initial_prompt(),
-//             "Second prompt",
-//             "The initial prompt should be 'Second prompt' after second set."
-//         );
-//     }
-
-//     #[test]
-//     fn test_initial_prompt_long_string() {
-//         let mut params = FullParams::new(SamplingStrategy::Greedy { best_of: 5 });
-//         let long_prompt = "a".repeat(10000); // a long string of 10,000 'a' characters
-//         params.set_initial_prompt(&long_prompt);
-
-//         assert_eq!(
-//             params.get_initial_prompt(),
-//             long_prompt.as_str(),
-//             "The initial prompt should match the long string provided."
-//         );
-//     }
-// }
+unsafe impl Send for InnerFullParams {}
+unsafe impl Sync for InnerFullParams {}

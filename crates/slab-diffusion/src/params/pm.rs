@@ -47,11 +47,8 @@ impl InnerPmParams {
             sync_image_views(images, &mut self.c_id_images);
         }
 
-        self.c_id_embed_path = self
-            .canonical
-            .id_embed_path
-            .as_ref()
-            .map(|path| new_c_string(&path.to_string_lossy()));
+        self.c_id_embed_path =
+            self.canonical.id_embed_path.as_ref().map(|path| new_c_string(&path.to_string_lossy()));
 
         self.fp = sd_pm_params_t {
             id_images: if self.c_id_images.is_empty() {

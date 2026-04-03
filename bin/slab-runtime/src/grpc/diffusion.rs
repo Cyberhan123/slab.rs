@@ -34,10 +34,8 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
         );
 
         let pipeline = self.pipeline_for_backend(BackendKind::Diffusion).await?;
-        let generated = pipeline
-            .run_inference_image(build_image_params(&request)?)
-            .await
-            .map_err(|error| {
+        let generated =
+            pipeline.run_inference_image(build_image_params(&request)?).await.map_err(|error| {
                 error!(error = %error, "diffusion image generation failed");
                 runtime_to_status(error)
             })?;
@@ -313,8 +311,9 @@ fn encode_generated_image_response(images: &[DiffusionImage]) -> Result<pb::Imag
             .collect::<Result<Vec<_>, Status>>()?,
         metadata: Default::default(),
     };
-    convert::encode_diffusion_image_response(&response)
-        .map_err(|error| Status::internal(format!("failed to encode generated image response: {error}")))
+    convert::encode_diffusion_image_response(&response).map_err(|error| {
+        Status::internal(format!("failed to encode generated image response: {error}"))
+    })
 }
 
 fn encode_generated_video_response(images: &[DiffusionImage]) -> Result<pb::VideoResponse, Status> {
@@ -332,11 +331,14 @@ fn encode_generated_video_response(images: &[DiffusionImage]) -> Result<pb::Vide
             .collect::<Result<Vec<_>, Status>>()?,
         metadata: Default::default(),
     };
-    convert::encode_diffusion_video_response(&response)
-        .map_err(|error| Status::internal(format!("failed to encode generated video response: {error}")))
+    convert::encode_diffusion_video_response(&response).map_err(|error| {
+        Status::internal(format!("failed to encode generated video response: {error}"))
+    })
 }
 
-fn diffusion_image_to_generated_image(image: &DiffusionImage) -> Result<slab_types::media::GeneratedImage, Status> {
+fn diffusion_image_to_generated_image(
+    image: &DiffusionImage,
+) -> Result<slab_types::media::GeneratedImage, Status> {
     let dynamic = match image.channel {
         3 => image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(
             image.width,
@@ -377,8 +379,9 @@ fn diffusion_image_to_generated_image(image: &DiffusionImage) -> Result<slab_typ
 }
 
 fn diffusion_image_channel_to_u8(channel: u32) -> Result<u8, Status> {
-    let channel = u8::try_from(channel)
-        .map_err(|_| Status::internal(format!("diffusion image channel count exceeds u8 range: {channel}")))?;
+    let channel = u8::try_from(channel).map_err(|_| {
+        Status::internal(format!("diffusion image channel count exceeds u8 range: {channel}"))
+    })?;
     if channel == 0 {
         return Err(Status::internal("diffusion image channel count must be >= 1"));
     }

@@ -14,3 +14,5 @@ pub use crate::model::{Capability, DriverHints, ModelFamily, ModelSource, ModelS
 pub use pipeline::Pipeline;
 pub use runtime::{DriversConfig, Runtime, RuntimeBuilder};
 pub use task::{TaskHandle, TaskSnapshot, TaskState};
+
+pub(crate) use codec::build_ggml_whisper_full_params_from_legacy;

@@ -134,13 +134,14 @@ impl Pipeline {
                     .map(Payload::from)
             })]
         };
+        let op_options = encode_audio_transcription_options(&request, &resolved)?;
         let plan = InvocationPlan::new(
             resolved,
             Capability::AudioTranscription,
             false,
             input,
             stages,
-            encode_audio_transcription_options(&request),
+            op_options,
         )?;
         submit_plan(
             &self.runtime,

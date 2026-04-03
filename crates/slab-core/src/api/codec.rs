@@ -7,8 +7,13 @@ use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use serde_json::Value;
 use slab_diffusion::{
     ContextParams as DiffusionContextParams, GuidanceParams as DiffusionGuidanceParams,
-    Image as DiffusionImage, ImgParams as DiffusionImgParams, SampleMethod as DiffusionSampleMethod,
-    SampleParams as DiffusionSampleParams, Scheduler as DiffusionScheduler, SlgParams,
+    Image as DiffusionImage, ImgParams as DiffusionImgParams,
+    SampleMethod as DiffusionSampleMethod, SampleParams as DiffusionSampleParams,
+    Scheduler as DiffusionScheduler, SlgParams,
+};
+use slab_whisper::{
+    ContextParams as WhisperContextParams, FullParams as WhisperFullParams,
+    SamplingStrategy as WhisperSamplingStrategy, WhisperVadParams as CanonicalWhisperVadParams,
 };
 
 use crate::base::error::CoreError;
@@ -22,8 +27,8 @@ use crate::internal::dispatch::ResolvedDriver;
 use crate::model::{ModelFamily, ModelSpec};
 use slab_types::{
     AudioTranscriptionOpOptions, CandleDiffusionLoadConfig, CandleLlamaLoadConfig,
-    CandleWhisperLoadConfig, DiffusionImageRequest, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
-    OnnxLoadConfig, TextGenerationOpOptions,
+    CandleWhisperLoadConfig, DiffusionImageRequest, GgmlLlamaLoadConfig, OnnxLoadConfig,
+    TextGenerationOpOptions,
 };
 
 pub(crate) fn encode_load_payload(
@@ -51,13 +56,17 @@ fn encode_ggml_llama_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError
 }
 
 fn encode_ggml_whisper_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
-    Ok(Payload::typed(GgmlWhisperLoadConfig { model_path: primary_model_path_buf(spec)? }))
+    Ok(Payload::typed(build_ggml_whisper_context_params(spec)?))
 }
 
 fn encode_ggml_diffusion_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
     Ok(Payload::typed(DiffusionContextParams {
         model_path: Some(primary_model_path_buf(spec)?),
-        diffusion_model_path: artifact_or_option_path(spec, "diffusion_model", "diffusion_model_path"),
+        diffusion_model_path: artifact_or_option_path(
+            spec,
+            "diffusion_model",
+            "diffusion_model_path",
+        ),
         vae_path: artifact_or_option_path(spec, "vae", "vae_path"),
         taesd_path: artifact_or_option_path(spec, "taesd", "taesd_path"),
         clip_l_path: artifact_or_option_path(spec, "clip_l", "clip_l_path"),
@@ -210,13 +219,183 @@ pub(crate) fn decode_text_generation_chunk(
     }
 }
 
-pub(crate) fn encode_audio_transcription_options(request: &AudioTranscriptionRequest) -> Payload {
-    Payload::typed(AudioTranscriptionOpOptions {
-        language: request.language.clone(),
-        prompt: request.prompt.clone(),
-        vad: request.vad.clone(),
-        decode: request.decode.clone(),
+pub(crate) fn encode_audio_transcription_options(
+    request: &AudioTranscriptionRequest,
+    resolved: &ResolvedDriver,
+) -> Result<Payload, CoreError> {
+    match resolved.driver_id.as_str() {
+        "ggml.whisper" => Ok(Payload::typed(build_ggml_whisper_full_params(request)?)),
+        _ => Ok(Payload::typed(AudioTranscriptionOpOptions {
+            language: request.language.clone(),
+            prompt: request.prompt.clone(),
+            vad: request.vad.clone(),
+            decode: request.decode.clone(),
+        })),
+    }
+}
+
+pub(crate) fn build_ggml_whisper_context_params(
+    spec: &ModelSpec,
+) -> Result<WhisperContextParams, CoreError> {
+    Ok(WhisperContextParams {
+        model_path: Some(primary_model_path_buf(spec)?),
+        use_gpu: bool_option(spec, "use_gpu"),
+        flash_attn: bool_option(spec, "flash_attn"),
+        gpu_device: i32_option(spec, "gpu_device"),
+        ..Default::default()
     })
+}
+
+pub(crate) fn build_ggml_whisper_full_params(
+    request: &AudioTranscriptionRequest,
+) -> Result<WhisperFullParams, CoreError> {
+    build_ggml_whisper_full_params_from_legacy(
+        request.language.clone(),
+        request.prompt.clone(),
+        request.vad.clone(),
+        request.decode.clone(),
+    )
+}
+
+pub(crate) fn build_ggml_whisper_full_params_from_legacy(
+    language: Option<String>,
+    prompt: Option<String>,
+    vad: Option<slab_types::WhisperVadOptions>,
+    decode: Option<slab_types::WhisperDecodeOptions>,
+) -> Result<WhisperFullParams, CoreError> {
+    let mut params = WhisperFullParams {
+        strategy: WhisperSamplingStrategy::BeamSearch { beam_size: 5, patience: -1.0 },
+        language: language.filter(|value| !value.trim().is_empty()),
+        initial_prompt: prompt.filter(|value| !value.trim().is_empty()),
+        ..Default::default()
+    };
+
+    if let Some(vad) = vad
+        && vad.enabled
+    {
+        let model_path = vad.model_path.ok_or_else(|| {
+            diffusion_param_error(
+                "audio_transcription",
+                "invalid whisper inference options: vad.model_path is missing",
+            )
+        })?;
+        if model_path.as_os_str().is_empty() {
+            return Err(diffusion_param_error(
+                "audio_transcription",
+                "invalid whisper inference options: vad.model_path is empty",
+            ));
+        }
+
+        params.vad = Some(true);
+        params.vad_model_path = Some(model_path);
+
+        if let Some(vad_params) = vad.params {
+            if let Some(threshold) = vad_params.threshold
+                && !(0.0..=1.0).contains(&threshold)
+            {
+                return Err(diffusion_param_error(
+                    "audio_transcription",
+                    "invalid whisper inference options: vad.threshold must be between 0.0 and 1.0",
+                ));
+            }
+
+            for (name, value) in [
+                ("vad.min_speech_duration_ms", vad_params.min_speech_duration_ms),
+                ("vad.min_silence_duration_ms", vad_params.min_silence_duration_ms),
+                ("vad.speech_pad_ms", vad_params.speech_pad_ms),
+            ] {
+                if value.is_some_and(|value| value < 0) {
+                    return Err(diffusion_param_error(
+                        "audio_transcription",
+                        format!("invalid whisper inference options: {name} must be >= 0"),
+                    ));
+                }
+            }
+
+            if let Some(max_speech_duration_s) = vad_params.max_speech_duration_s
+                && max_speech_duration_s <= 0.0
+            {
+                return Err(diffusion_param_error(
+                    "audio_transcription",
+                    "invalid whisper inference options: vad.max_speech_duration_s must be > 0.0",
+                ));
+            }
+
+            if let Some(samples_overlap) = vad_params.samples_overlap
+                && samples_overlap < 0.0
+            {
+                return Err(diffusion_param_error(
+                    "audio_transcription",
+                    "invalid whisper inference options: vad.samples_overlap must be >= 0.0",
+                ));
+            }
+
+            params.vad_params = Some(CanonicalWhisperVadParams {
+                threshold: vad_params.threshold,
+                min_speech_duration_ms: vad_params.min_speech_duration_ms,
+                min_silence_duration_ms: vad_params.min_silence_duration_ms,
+                max_speech_duration_s: vad_params.max_speech_duration_s,
+                speech_pad_ms: vad_params.speech_pad_ms,
+                samples_overlap: vad_params.samples_overlap,
+            });
+        }
+    }
+
+    if let Some(decode) = decode {
+        for (name, value) in [
+            ("decode.offset_ms", decode.offset_ms),
+            ("decode.duration_ms", decode.duration_ms),
+            ("decode.max_len", decode.max_len),
+            ("decode.max_tokens", decode.max_tokens),
+        ] {
+            if value.is_some_and(|value| value < 0) {
+                return Err(diffusion_param_error(
+                    "audio_transcription",
+                    format!("invalid whisper inference options: {name} must be >= 0"),
+                ));
+            }
+        }
+
+        if let Some(word_thold) = decode.word_thold
+            && !(0.0..=1.0).contains(&word_thold)
+        {
+            return Err(diffusion_param_error(
+                "audio_transcription",
+                "invalid whisper inference options: decode.word_thold must be between 0.0 and 1.0",
+            ));
+        }
+
+        for (name, value) in [
+            ("decode.temperature", decode.temperature),
+            ("decode.temperature_inc", decode.temperature_inc),
+        ] {
+            if value.is_some_and(|value| value < 0.0) {
+                return Err(diffusion_param_error(
+                    "audio_transcription",
+                    format!("invalid whisper inference options: {name} must be >= 0.0"),
+                ));
+            }
+        }
+
+        params.offset_ms = decode.offset_ms;
+        params.duration_ms = decode.duration_ms;
+        params.no_context = decode.no_context;
+        params.no_timestamps = decode.no_timestamps;
+        params.token_timestamps = decode.token_timestamps;
+        params.split_on_word = decode.split_on_word;
+        params.suppress_nst = decode.suppress_nst;
+        params.thold_pt = decode.word_thold;
+        params.max_len = decode.max_len;
+        params.max_tokens = decode.max_tokens;
+        params.temperature = decode.temperature;
+        params.temperature_inc = decode.temperature_inc;
+        params.entropy_thold = decode.entropy_thold;
+        params.logprob_thold = decode.logprob_thold;
+        params.no_speech_thold = decode.no_speech_thold;
+        params.tdrz_enable = decode.tdrz_enable;
+    }
+
+    Ok(params)
 }
 
 pub(crate) fn decode_audio_transcription_response(
@@ -382,12 +561,12 @@ fn diffusion_image_to_png_bytes(image: &DiffusionImage) -> Result<Vec<u8>, CoreE
     })?;
 
     let mut png_bytes = Vec::new();
-    dynamic
-        .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
-        .map_err(|error| CoreError::ResultDecodeFailed {
+    dynamic.write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png).map_err(
+        |error| CoreError::ResultDecodeFailed {
             task_kind: "image_generation".to_owned(),
             message: format!("failed to encode diffusion image as PNG: {error}"),
-        })?;
+        },
+    )?;
     Ok(png_bytes)
 }
 
@@ -527,7 +706,11 @@ pub(crate) fn diffusion_image_request_to_params(
         prompt: Some(request.prompt.clone()),
         negative_prompt: request.negative_prompt.clone(),
         clip_skip: request.clip_skip,
-        init_image: request.init_image.as_ref().map(raw_image_input_to_diffusion_image).transpose()?,
+        init_image: request
+            .init_image
+            .as_ref()
+            .map(raw_image_input_to_diffusion_image)
+            .transpose()?,
         width: Some(request.width),
         height: Some(request.height),
         sample_params: (sample_params != DiffusionSampleParams::default()).then_some(sample_params),
@@ -538,7 +721,9 @@ pub(crate) fn diffusion_image_request_to_params(
     })
 }
 
-fn build_diffusion_img_params(request: &ImageGenerationRequest) -> Result<DiffusionImgParams, CoreError> {
+fn build_diffusion_img_params(
+    request: &ImageGenerationRequest,
+) -> Result<DiffusionImgParams, CoreError> {
     diffusion_image_request_to_params(&DiffusionImageRequest {
         prompt: request.prompt.clone(),
         negative_prompt: request.negative_prompt.clone(),
@@ -636,16 +821,17 @@ mod tests {
     use image::GenericImageView;
     use serde_json::json;
     use slab_diffusion::{
-        ContextParams as DiffusionContextParams, Image as DiffusionImage, ImgParams as DiffusionImgParams,
+        ContextParams as DiffusionContextParams, Image as DiffusionImage,
+        ImgParams as DiffusionImgParams,
     };
     use slab_types::chat::{ConversationMessage, ConversationMessageContent};
     use slab_types::runtime::Capability;
     use slab_types::{
         AudioTranscriptionOpOptions, CandleDiffusionLoadConfig, CandleLlamaLoadConfig,
-        CandleWhisperLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
-        OnnxLoadConfig, RawImageInput, TextGenerationOpOptions, WhisperDecodeOptions,
-        WhisperVadOptions, WhisperVadParams,
+        CandleWhisperLoadConfig, GgmlLlamaLoadConfig, OnnxLoadConfig, RawImageInput,
+        TextGenerationOpOptions, WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams,
     };
+    use slab_whisper::{ContextParams as WhisperContextParams, FullParams as WhisperFullParams};
     use std::path::PathBuf;
 
     fn make_driver(
@@ -706,10 +892,10 @@ mod tests {
 
         let payload = encode_load_payload(&spec, &driver).expect("encode should succeed");
         let config = payload
-            .to_typed::<GgmlWhisperLoadConfig>()
+            .to_typed::<WhisperContextParams>()
             .expect("ggml.whisper payload should decode as typed config");
 
-        assert_eq!(config.model_path, PathBuf::from("model.bin"));
+        assert_eq!(config.model_path, Some(PathBuf::from("model.bin")));
     }
 
     #[test]
@@ -946,24 +1132,77 @@ mod tests {
     }
 
     #[test]
-    fn encode_audio_transcription_options_uses_typed_payload() {
-        let payload = encode_audio_transcription_options(&AudioTranscriptionRequest {
-            audio_path: PathBuf::from("speech.wav"),
-            pcm_samples: None,
-            language: Some("en".to_owned()),
-            prompt: Some("hello".to_owned()),
-            vad: Some(WhisperVadOptions {
-                enabled: true,
-                model_path: Some(PathBuf::from("vad.bin")),
-                params: Some(WhisperVadParams { threshold: Some(0.5), ..Default::default() }),
-            }),
-            decode: Some(WhisperDecodeOptions {
-                max_tokens: Some(32),
-                no_timestamps: Some(true),
-                ..Default::default()
-            }),
-            options: Default::default(),
-        });
+    fn encode_audio_transcription_options_uses_typed_payload_for_ggml_whisper() {
+        let payload = encode_audio_transcription_options(
+            &AudioTranscriptionRequest {
+                audio_path: PathBuf::from("speech.wav"),
+                pcm_samples: None,
+                language: Some("en".to_owned()),
+                prompt: Some("hello".to_owned()),
+                vad: Some(WhisperVadOptions {
+                    enabled: true,
+                    model_path: Some(PathBuf::from("vad.bin")),
+                    params: Some(WhisperVadParams { threshold: Some(0.5), ..Default::default() }),
+                }),
+                decode: Some(WhisperDecodeOptions {
+                    max_tokens: Some(32),
+                    no_timestamps: Some(true),
+                    word_thold: Some(0.42),
+                    ..Default::default()
+                }),
+                options: Default::default(),
+            },
+            &make_driver(
+                "ggml.whisper",
+                "whisper",
+                ModelFamily::Whisper,
+                Capability::AudioTranscription,
+            ),
+        )
+        .expect("audio options should encode");
+
+        let opts = payload
+            .to_typed::<WhisperFullParams>()
+            .expect("ggml.whisper audio options should decode as canonical full params");
+
+        assert_eq!(opts.language.as_deref(), Some("en"));
+        assert_eq!(opts.initial_prompt.as_deref(), Some("hello"));
+        assert_eq!(opts.vad, Some(true));
+        assert_eq!(opts.vad_model_path, Some(PathBuf::from("vad.bin")));
+        assert_eq!(opts.vad_params.as_ref().and_then(|vad| vad.threshold), Some(0.5));
+        assert_eq!(opts.max_tokens, Some(32));
+        assert_eq!(opts.no_timestamps, Some(true));
+        assert_eq!(opts.thold_pt, Some(0.42));
+    }
+
+    #[test]
+    fn encode_audio_transcription_options_keeps_legacy_shape_for_non_ggml_whisper() {
+        let payload = encode_audio_transcription_options(
+            &AudioTranscriptionRequest {
+                audio_path: PathBuf::from("speech.wav"),
+                pcm_samples: None,
+                language: Some("en".to_owned()),
+                prompt: Some("hello".to_owned()),
+                vad: Some(WhisperVadOptions {
+                    enabled: true,
+                    model_path: Some(PathBuf::from("vad.bin")),
+                    params: Some(WhisperVadParams { threshold: Some(0.5), ..Default::default() }),
+                }),
+                decode: Some(WhisperDecodeOptions {
+                    max_tokens: Some(32),
+                    no_timestamps: Some(true),
+                    ..Default::default()
+                }),
+                options: Default::default(),
+            },
+            &make_driver(
+                "candle.whisper",
+                "whisper",
+                ModelFamily::Whisper,
+                Capability::AudioTranscription,
+            ),
+        )
+        .expect("audio options should encode");
 
         let opts = payload
             .to_typed::<AudioTranscriptionOpOptions>()

@@ -237,9 +237,11 @@ mod tests {
             model_path: Some(PathBuf::from("missing-model.gguf")),
             ..Default::default()
         };
-        assert!(diffusion
-            .context_params_to_str(&context_params)
-            .is_some_and(|text| !text.trim().is_empty()));
+        assert!(
+            diffusion
+                .context_params_to_str(&context_params)
+                .is_some_and(|text| !text.trim().is_empty())
+        );
 
         let sample_params = SampleParams { sample_steps: Some(8), ..Default::default() };
         assert!(
@@ -248,10 +250,8 @@ mod tests {
                 .is_some_and(|text| !text.trim().is_empty())
         );
 
-        let image_params = ImgParams {
-            prompt: Some("test prompt".to_owned()),
-            ..Default::default()
-        };
+        let image_params =
+            ImgParams { prompt: Some("test prompt".to_owned()), ..Default::default() };
         assert!(
             diffusion
                 .image_params_to_str(&image_params)

@@ -111,10 +111,7 @@ impl Clone for InnerCacheParams {
 
 impl Default for InnerCacheParams {
     fn default() -> Self {
-        Self {
-            fp: Box::new(unsafe { std::mem::zeroed::<sd_cache_params_t>() }),
-            scm_mask: None,
-        }
+        Self { fp: Box::new(unsafe { std::mem::zeroed::<sd_cache_params_t>() }), scm_mask: None }
     }
 }
 
@@ -344,7 +341,8 @@ mod tests {
 
     #[test]
     fn clone_rebinds_scm_mask_storage() {
-        let params = CacheParams { scm_mask: Some("dynamic-mask".to_owned()), ..Default::default() };
+        let params =
+            CacheParams { scm_mask: Some("dynamic-mask".to_owned()), ..Default::default() };
         let mut inner = InnerCacheParams::default();
         inner.set_scm_mask(params.scm_mask.as_deref());
         let cloned = inner.clone();

@@ -18,10 +18,12 @@ mod whisper_vad;
 pub use common_logging::GGMLLogLevel;
 pub use error::WhisperError;
 pub use utilities::*;
+pub use whisper_ctx::ContextParams;
+pub use whisper_ctx::DtwAhead;
 pub use whisper_ctx::DtwMode;
 pub use whisper_ctx::DtwModelPreset;
 pub use whisper_ctx::DtwParameters;
-pub use whisper_ctx::WhisperContextParameters;
+pub use whisper_ctx::WhisperTimings;
 
 pub use whisper_ctx_wrapper::WhisperContext;
 pub use whisper_grammar::{WhisperGrammarElement, WhisperGrammarElementType};
@@ -41,7 +43,6 @@ pub type WhisperProgressCallback = slab_whisper_sys::whisper_progress_callback;
 pub type WhisperLogitsFilterCallback = slab_whisper_sys::whisper_logits_filter_callback;
 pub type WhisperAbortCallback = slab_whisper_sys::ggml_abort_callback;
 pub type WhisperLogCallback = slab_whisper_sys::ggml_log_callback;
-pub type DtwAhead = slab_whisper_sys::whisper_ahead;
 
 use slab_ggml::GGML;
 use slab_ggml::load_runtime_with_ggml_sidecar;

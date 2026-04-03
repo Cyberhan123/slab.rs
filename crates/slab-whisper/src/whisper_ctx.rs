@@ -2,6 +2,9 @@ use crate::WhisperTokenId;
 use crate::error::WhisperError;
 use std::borrow::Cow;
 use std::ffi::{CStr, CString, c_int};
+use std::path::PathBuf;
+
+use serde::{Deserialize, Serialize};
 
 use crate::Whisper;
 
@@ -17,6 +20,12 @@ pub struct WhisperInnerContext {
 }
 
 impl Whisper {
+    pub fn default_context_params(&self, model_path: impl Into<PathBuf>) -> ContextParams {
+        ContextParams::from_native(Some(model_path.into()), unsafe {
+            self.lib.whisper_context_default_params()
+        })
+    }
+
     /// Create a new WhisperContext from a file, with parameters.
     ///
     /// # Arguments
@@ -28,16 +37,17 @@ impl Whisper {
     ///
     /// # C++ equivalent
     /// `struct whisper_context * whisper_init_from_file_with_params_no_state(const char * path_model, struct whisper_context_params params);`
-    pub fn new_inner_context_with_params(
+    pub fn new_inner_context(
         &self,
-        path: &str,
-        parameters: WhisperContextParameters,
+        parameters: ContextParams,
     ) -> Result<WhisperInnerContext, WhisperError> {
-        let path_cstr = CString::new(path)?;
+        let model_path = parameters.model_path.as_ref().ok_or(WhisperError::ModelPathNotSet)?;
+        let path_cstr = CString::new(model_path.to_string_lossy().as_ref())?;
+        let parameters = InnerContextParams::from_canonical(self.lib.as_ref(), &parameters)?;
         let ctx = unsafe {
             self.lib.whisper_init_from_file_with_params_no_state(
                 path_cstr.as_ptr(),
-                parameters.to_c_struct(),
+                parameters.into_inner(),
             )
         };
         if ctx.is_null() {
@@ -57,16 +67,17 @@ impl Whisper {
     ///
     /// # C++ equivalent
     /// `struct whisper_context * whisper_init_from_buffer_with_params_no_state(void * buffer, size_t buffer_size, struct whisper_context_params params);`
-    pub fn new_inner_context_from_buffer_with_params(
+    pub fn new_inner_context_from_buffer(
         &self,
         buffer: &[u8],
-        parameters: WhisperContextParameters,
+        parameters: ContextParams,
     ) -> Result<WhisperInnerContext, WhisperError> {
+        let parameters = InnerContextParams::from_canonical(self.lib.as_ref(), &parameters)?;
         let ctx = unsafe {
             self.lib.whisper_init_from_buffer_with_params_no_state(
                 buffer.as_ptr() as _,
                 buffer.len(),
-                parameters.to_c_struct(),
+                parameters.into_inner(),
             )
         };
         if ctx.is_null() {
@@ -412,6 +423,12 @@ impl WhisperInnerContext {
         unsafe { self.instance.lib.whisper_reset_timings(self.ctx) }
     }
 
+    /// Get performance timings from the default state.
+    pub fn timings(&self) -> Option<WhisperTimings> {
+        let timings = unsafe { self.instance.lib.whisper_get_timings(self.ctx) };
+        (!timings.is_null()).then(|| WhisperTimings::from(unsafe { *timings }))
+    }
+
     // task tokens
     /// Get the ID of the translate task token.
     ///
@@ -440,172 +457,252 @@ impl Drop for WhisperInnerContext {
 // see https://github.com/ggerganov/whisper.cpp/issues/32#issuecomment-1272790388
 unsafe impl Send for WhisperInnerContext {}
 unsafe impl Sync for WhisperInnerContext {}
-#[derive(Debug, Clone)]
-pub struct WhisperContextParameters<'a> {
-    /// Use GPU if available.
-    pub use_gpu: bool,
-    /// Enable flash attention, default false
-    ///
-    /// **Warning** Can't be used with DTW. DTW will be disabled if flash_attn is true
-    pub flash_attn: bool,
-    /// GPU device id, default 0
-    pub gpu_device: c_int,
-    /// DTW token level timestamp parameters
-    pub dtw_parameters: DtwParameters<'a>,
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WhisperTimings {
+    pub sample_ms: f32,
+    pub encode_ms: f32,
+    pub decode_ms: f32,
+    pub batchd_ms: f32,
+    pub prompt_ms: f32,
 }
 
-#[allow(clippy::derivable_impls)] // this impl cannot be derived
-impl<'a> Default for WhisperContextParameters<'a> {
-    fn default() -> Self {
+impl From<slab_whisper_sys::whisper_timings> for WhisperTimings {
+    fn from(value: slab_whisper_sys::whisper_timings) -> Self {
         Self {
-            use_gpu: true,
-            flash_attn: false,
-            gpu_device: 0,
-            dtw_parameters: DtwParameters::default(),
+            sample_ms: value.sample_ms,
+            encode_ms: value.encode_ms,
+            decode_ms: value.decode_ms,
+            batchd_ms: value.batchd_ms,
+            prompt_ms: value.prompt_ms,
         }
     }
 }
-impl<'a> WhisperContextParameters<'a> {
-    pub fn new() -> Self {
-        Self::default()
-    }
-    pub fn use_gpu(&mut self, use_gpu: bool) -> &mut Self {
-        self.use_gpu = use_gpu;
-        self
-    }
-    pub fn flash_attn(&mut self, flash_attn: bool) -> &mut Self {
-        self.flash_attn = flash_attn;
-        self
-    }
-    pub fn gpu_device(&mut self, gpu_device: c_int) -> &mut Self {
-        self.gpu_device = gpu_device;
-        self
-    }
-    pub fn dtw_parameters(&mut self, dtw_parameters: DtwParameters<'a>) -> &mut Self {
-        self.dtw_parameters = dtw_parameters;
-        self
+
+/// Stable Rust-native context parameters shared across the runtime chain.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct ContextParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_path: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub use_gpu: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub flash_attn: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gpu_device: Option<c_int>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dtw_parameters: Option<DtwParameters>,
+}
+
+impl ContextParams {
+    pub fn new(model_path: impl Into<PathBuf>) -> Self {
+        Self { model_path: Some(model_path.into()), ..Self::default() }
     }
 
-    fn to_c_struct(&self) -> slab_whisper_sys::whisper_context_params {
-        let dtw_token_timestamps = !matches!(self.dtw_parameters.mode, DtwMode::None);
-        let mut dtw_aheads_preset =
+    pub(crate) fn from_native(
+        model_path: Option<PathBuf>,
+        params: slab_whisper_sys::whisper_context_params,
+    ) -> Self {
+        Self {
+            model_path,
+            use_gpu: Some(params.use_gpu),
+            flash_attn: Some(params.flash_attn),
+            gpu_device: Some(params.gpu_device),
+            dtw_parameters: Some(DtwParameters::from_native(params)),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct InnerContextParams {
+    cp: slab_whisper_sys::whisper_context_params,
+    dtw_aheads: Vec<slab_whisper_sys::whisper_ahead>,
+}
+
+impl InnerContextParams {
+    pub(crate) fn from_canonical(
+        lib: &slab_whisper_sys::WhisperLib,
+        value: &ContextParams,
+    ) -> Result<Self, WhisperError> {
+        let mut inner =
+            Self { cp: unsafe { lib.whisper_context_default_params() }, dtw_aheads: Vec::new() };
+
+        if let Some(use_gpu) = value.use_gpu {
+            inner.cp.use_gpu = use_gpu;
+        }
+        if let Some(flash_attn) = value.flash_attn {
+            inner.cp.flash_attn = flash_attn;
+        }
+        if let Some(gpu_device) = value.gpu_device {
+            inner.cp.gpu_device = gpu_device;
+        }
+        if let Some(dtw_parameters) = value.dtw_parameters.as_ref() {
+            dtw_parameters.apply_to(&mut inner.cp, &mut inner.dtw_aheads);
+        }
+
+        inner.sync_backing();
+        Ok(inner)
+    }
+
+    fn sync_backing(&mut self) {
+        self.cp.dtw_aheads = if self.dtw_aheads.is_empty() {
+            slab_whisper_sys::whisper_aheads { n_heads: 0, heads: std::ptr::null() }
+        } else {
+            slab_whisper_sys::whisper_aheads {
+                n_heads: self.dtw_aheads.len(),
+                heads: self.dtw_aheads.as_ptr(),
+            }
+        };
+    }
+
+    pub(crate) fn into_inner(mut self) -> slab_whisper_sys::whisper_context_params {
+        self.sync_backing();
+        self.cp
+    }
+}
+
+/// [EXPERIMENTAL] Enable token-level timestamps with DTW.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DtwParameters {
+    #[serde(default)]
+    pub mode: DtwMode,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dtw_mem_size: Option<usize>,
+}
+
+impl DtwParameters {
+    fn from_native(params: slab_whisper_sys::whisper_context_params) -> Self {
+        let mode = match params.dtw_aheads_preset {
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_NONE => DtwMode::None,
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_N_TOP_MOST => {
+                DtwMode::TopMost { n_top: params.dtw_n_top }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_CUSTOM => {
+                let aheads = if params.dtw_aheads.heads.is_null() || params.dtw_aheads.n_heads == 0
+                {
+                    Vec::new()
+                } else {
+                    unsafe {
+                        std::slice::from_raw_parts(
+                            params.dtw_aheads.heads,
+                            params.dtw_aheads.n_heads,
+                        )
+                    }
+                    .iter()
+                    .copied()
+                    .map(DtwAhead::from)
+                    .collect()
+                };
+                DtwMode::Custom { aheads }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_TINY_EN => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::TinyEn }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_TINY => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::Tiny }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_BASE_EN => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::BaseEn }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_BASE => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::Base }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_SMALL_EN => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::SmallEn }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_SMALL => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::Small }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_MEDIUM_EN => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::MediumEn }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_MEDIUM => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::Medium }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V1 => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::LargeV1 }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V2 => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::LargeV2 }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V3 => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::LargeV3 }
+            }
+            slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V3_TURBO => {
+                DtwMode::ModelPreset { model_preset: DtwModelPreset::LargeV3Turbo }
+            }
+            _ => DtwMode::None,
+        };
+
+        Self { mode, dtw_mem_size: Some(params.dtw_mem_size) }
+    }
+
+    fn apply_to(
+        &self,
+        params: &mut slab_whisper_sys::whisper_context_params,
+        dtw_aheads: &mut Vec<slab_whisper_sys::whisper_ahead>,
+    ) {
+        params.dtw_token_timestamps = !matches!(self.mode, DtwMode::None);
+        params.dtw_n_top = -1;
+        params.dtw_aheads_preset =
             slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_NONE;
-        let mut dtw_n_top: c_int = -1;
-        let mut dtw_aheads =
-            slab_whisper_sys::whisper_aheads { n_heads: 0, heads: std::ptr::null() };
+        dtw_aheads.clear();
 
-        match &self.dtw_parameters.mode {
+        match &self.mode {
             DtwMode::None => {}
             DtwMode::TopMost { n_top } => {
-                dtw_aheads_preset =
+                params.dtw_aheads_preset =
                     slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_N_TOP_MOST;
-                dtw_n_top = *n_top;
+                params.dtw_n_top = *n_top;
             }
             DtwMode::Custom { aheads } => {
-                dtw_aheads_preset =
+                params.dtw_aheads_preset =
                     slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_CUSTOM;
-
-                dtw_aheads = slab_whisper_sys::whisper_aheads {
-                    n_heads: aheads.len(),
-                    heads: aheads.as_ptr(),
-                };
+                dtw_aheads
+                    .extend(aheads.iter().copied().map(slab_whisper_sys::whisper_ahead::from));
             }
-            DtwMode::ModelPreset { model_preset } => match model_preset {
-                DtwModelPreset::TinyEn => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_TINY_EN;
-                }
-                DtwModelPreset::Tiny => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_TINY;
-                }
-                DtwModelPreset::BaseEn => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_BASE_EN;
-                }
-                DtwModelPreset::Base => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_BASE;
-                }
-                DtwModelPreset::SmallEn => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_SMALL_EN;
-                }
-                DtwModelPreset::Small => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_SMALL;
-                }
-                DtwModelPreset::MediumEn => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_MEDIUM_EN;
-                }
-                DtwModelPreset::Medium => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_MEDIUM;
-                }
-                DtwModelPreset::LargeV1 => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V1;
-                }
-                DtwModelPreset::LargeV2 => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V2;
-                }
-                DtwModelPreset::LargeV3 => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V3;
-                }
-                DtwModelPreset::LargeV3Turbo => {
-                    dtw_aheads_preset =
-                        slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V3_TURBO;
-                }
-            },
+            DtwMode::ModelPreset { model_preset } => {
+                params.dtw_aheads_preset = model_preset.to_native();
+            }
         }
 
-        slab_whisper_sys::whisper_context_params {
-            use_gpu: self.use_gpu,
-            flash_attn: self.flash_attn,
-            gpu_device: self.gpu_device,
-            dtw_token_timestamps,
-            dtw_aheads_preset,
-            dtw_n_top,
-            dtw_aheads,
-            dtw_mem_size: self.dtw_parameters.dtw_mem_size,
+        if let Some(dtw_mem_size) = self.dtw_mem_size {
+            params.dtw_mem_size = dtw_mem_size;
         }
     }
 }
 
-/// [EXPERIMENTAL] Enable Token-level timestamps with DTW, default Disabled
-#[derive(Debug, Clone)]
-pub struct DtwParameters<'a> {
-    pub mode: DtwMode<'a>,
-    pub dtw_mem_size: usize,
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DtwAhead {
+    pub n_text_layer: c_int,
+    pub n_head: c_int,
 }
 
-impl Default for DtwParameters<'_> {
-    fn default() -> Self {
-        Self { mode: DtwMode::None, dtw_mem_size: 1024 * 1024 * 128 }
+impl From<slab_whisper_sys::whisper_ahead> for DtwAhead {
+    fn from(value: slab_whisper_sys::whisper_ahead) -> Self {
+        Self { n_text_layer: value.n_text_layer, n_head: value.n_head }
     }
 }
 
-#[derive(Debug, Clone)]
-pub enum DtwMode<'a> {
-    /// DTW token level timestamps disabled
+impl From<DtwAhead> for slab_whisper_sys::whisper_ahead {
+    fn from(value: DtwAhead) -> Self {
+        Self { n_text_layer: value.n_text_layer, n_head: value.n_head }
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DtwMode {
+    /// DTW token level timestamps disabled.
+    #[default]
     None,
-    /// Use N Top Most layers from loaded model
-    TopMost {
-        /// Number of top text layers used from model, should be 0 < n_top <= model n_text_layer
-        n_top: c_int,
-    },
-    /// Use custom aheads, non-empty list of whisper_ahead.
-    /// 0 < n_text_layer < model n_text_layer, 0 < n_head < model n_text_head for each element
-    /// See details https://github.com/ggerganov/whisper.cpp/pull/1485#discussion_r1519681143
-    Custom { aheads: &'a [slab_whisper_sys::whisper_ahead] },
-    /// Use predefined preset for standard models
+    /// Use N top-most layers from the loaded model.
+    TopMost { n_top: c_int },
+    /// Use custom aheads.
+    Custom { aheads: Vec<DtwAhead> },
+    /// Use predefined preset for standard models.
     ModelPreset { model_preset: DtwModelPreset },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum DtwModelPreset {
     TinyEn,
     Tiny,
@@ -619,6 +716,49 @@ pub enum DtwModelPreset {
     LargeV2,
     LargeV3,
     LargeV3Turbo,
+}
+
+impl DtwModelPreset {
+    fn to_native(self) -> slab_whisper_sys::whisper_alignment_heads_preset {
+        match self {
+            DtwModelPreset::TinyEn => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_TINY_EN
+            }
+            DtwModelPreset::Tiny => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_TINY
+            }
+            DtwModelPreset::BaseEn => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_BASE_EN
+            }
+            DtwModelPreset::Base => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_BASE
+            }
+            DtwModelPreset::SmallEn => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_SMALL_EN
+            }
+            DtwModelPreset::Small => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_SMALL
+            }
+            DtwModelPreset::MediumEn => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_MEDIUM_EN
+            }
+            DtwModelPreset::Medium => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_MEDIUM
+            }
+            DtwModelPreset::LargeV1 => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V1
+            }
+            DtwModelPreset::LargeV2 => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V2
+            }
+            DtwModelPreset::LargeV3 => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V3
+            }
+            DtwModelPreset::LargeV3Turbo => {
+                slab_whisper_sys::whisper_alignment_heads_preset_WHISPER_AHEADS_LARGE_V3_TURBO
+            }
+        }
+    }
 }
 
 #[cfg(test)]

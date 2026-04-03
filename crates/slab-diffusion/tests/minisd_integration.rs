@@ -91,10 +91,7 @@ fn minisd_generates_small_image_from_hf_hub_model() {
     diffusion
         .backend_list_size()
         .unwrap_or_else(|error| panic!("failed to get diffusion backend list size: {error}"));
-    let context_params = ContextParams {
-        model_path: Some(model_path),
-        ..Default::default()
-    };
+    let context_params = ContextParams { model_path: Some(model_path), ..Default::default() };
 
     let ctx = diffusion
         .new_context(context_params)
