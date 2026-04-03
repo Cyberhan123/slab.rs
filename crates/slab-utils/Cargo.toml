@@ -1,5 +1,5 @@
 [package]
-name = "slab-ggml"
+name = "slab-utils"
 version.workspace = true
 edition.workspace = true
 description.workspace = true
@@ -8,14 +8,9 @@ keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
-[build-dependencies]
-slab-libfetch = { workspace = true }
-bindgen = { workspace = true }
-tokio = { workspace = true }
-
 [dependencies]
 libloading = { workspace = true }
 slab-ggml-sys = { workspace = true }
-slab-utils = { workspace = true }
-thiserror = { workspace = true }
-libc = { workspace = true }
+slab-diffusion-sys = { workspace = true }
+slab-llama-sys = { workspace = true }
+slab-whisper-sys = { workspace = true }

@@ -7904,6 +7904,7 @@ dependencies = [
  "libloading 0.8.9",
  "slab-ggml-sys",
  "slab-libfetch",
+ "slab-utils",
  "thiserror 2.0.18",
  "tokio",
 ]
@@ -8020,6 +8021,7 @@ dependencies = [
  "slab-llama",
  "slab-subtitle",
  "slab-types",
+ "slab-utils",
  "slab-whisper",
  "thiserror 2.0.18",
  "tokenizers",
@@ -8104,6 +8106,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-utils"
+version = "0.0.1"
+dependencies = [
+ "libloading 0.8.9",
+ "slab-diffusion-sys",
+ "slab-ggml-sys",
+ "slab-llama-sys",
+ "slab-whisper-sys",
+]
+
+[[package]]
 name = "slab-whisper"
 version = "0.0.1"
 dependencies = [
@@ -8111,6 +8124,7 @@ dependencies = [
  "log",
  "rand 0.10.0",
  "slab-ggml",
+ "slab-utils",
  "slab-whisper-sys",
  "thiserror 2.0.18",
  "tracing",

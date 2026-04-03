@@ -27,7 +27,8 @@ impl RuntimeChildExit {
     }
 
     pub fn description(&self) -> String {
-        if let Some(message) = self.message.as_deref().map(str::trim).filter(|value| !value.is_empty())
+        if let Some(message) =
+            self.message.as_deref().map(str::trim).filter(|value| !value.is_empty())
         {
             return message.to_owned();
         }
@@ -120,7 +121,9 @@ impl RuntimeSupervisorStatus {
             .unwrap_or_else(|error| error.into_inner())
             .get(&backend)
             .cloned()
-            .unwrap_or_else(|| RuntimeBackendStatusSnapshot::new(RuntimeBackendRuntimeStatus::Disabled))
+            .unwrap_or_else(|| {
+                RuntimeBackendStatusSnapshot::new(RuntimeBackendRuntimeStatus::Disabled)
+            })
     }
 
     pub fn status(&self, backend: RuntimeBackendId) -> RuntimeBackendRuntimeStatus {
@@ -129,9 +132,9 @@ impl RuntimeSupervisorStatus {
 
     fn mark_ready(&self, backend: RuntimeBackendId, restart_attempts: usize) {
         let mut guard = self.inner.lock().unwrap_or_else(|error| error.into_inner());
-        let entry = guard
-            .entry(backend)
-            .or_insert_with(|| RuntimeBackendStatusSnapshot::new(RuntimeBackendRuntimeStatus::Disabled));
+        let entry = guard.entry(backend).or_insert_with(|| {
+            RuntimeBackendStatusSnapshot::new(RuntimeBackendRuntimeStatus::Disabled)
+        });
         entry.status = RuntimeBackendRuntimeStatus::Ready;
         entry.restart_attempts = restart_attempts;
         entry.last_error = None;
@@ -139,9 +142,9 @@ impl RuntimeSupervisorStatus {
 
     fn mark_disabled(&self, backend: RuntimeBackendId) {
         let mut guard = self.inner.lock().unwrap_or_else(|error| error.into_inner());
-        let entry = guard
-            .entry(backend)
-            .or_insert_with(|| RuntimeBackendStatusSnapshot::new(RuntimeBackendRuntimeStatus::Disabled));
+        let entry = guard.entry(backend).or_insert_with(|| {
+            RuntimeBackendStatusSnapshot::new(RuntimeBackendRuntimeStatus::Disabled)
+        });
         entry.status = RuntimeBackendRuntimeStatus::Disabled;
         entry.last_error = None;
     }
@@ -156,9 +159,9 @@ impl RuntimeSupervisorStatus {
         unexpected_exit: UnexpectedRuntimeExit,
     ) {
         let mut guard = self.inner.lock().unwrap_or_else(|error| error.into_inner());
-        let entry = guard
-            .entry(backend)
-            .or_insert_with(|| RuntimeBackendStatusSnapshot::new(RuntimeBackendRuntimeStatus::Disabled));
+        let entry = guard.entry(backend).or_insert_with(|| {
+            RuntimeBackendStatusSnapshot::new(RuntimeBackendRuntimeStatus::Disabled)
+        });
         entry.status = status;
         entry.consecutive_failures = consecutive_failures;
         entry.restart_attempts = restart_attempts;
@@ -571,11 +574,7 @@ mod tests {
         }
 
         fn exit(&self, exit: RuntimeChildExit) {
-            let sender = self
-                .exit_tx
-                .lock()
-                .unwrap_or_else(|error| error.into_inner())
-                .take();
+            let sender = self.exit_tx.lock().unwrap_or_else(|error| error.into_inner()).take();
             if let Some(sender) = sender {
                 let _ = sender.send(exit);
             }
@@ -697,8 +696,12 @@ mod tests {
         let mut endpoints = ResolvedRuntimeEndpoints::default();
         for child in &children {
             match child.backend {
-                RuntimeBackendId::GgmlWhisper => endpoints.whisper = Some(child.grpc_bind_address.clone()),
-                RuntimeBackendId::GgmlLlama => endpoints.llama = Some(child.grpc_bind_address.clone()),
+                RuntimeBackendId::GgmlWhisper => {
+                    endpoints.whisper = Some(child.grpc_bind_address.clone())
+                }
+                RuntimeBackendId::GgmlLlama => {
+                    endpoints.llama = Some(child.grpc_bind_address.clone())
+                }
                 RuntimeBackendId::GgmlDiffusion => {
                     endpoints.diffusion = Some(child.grpc_bind_address.clone())
                 }

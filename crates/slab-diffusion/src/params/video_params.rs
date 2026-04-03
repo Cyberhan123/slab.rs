@@ -262,10 +262,15 @@ mod tests {
 
         let cloned = params.clone();
 
-        assert_eq!(unsafe { CStr::from_ptr(cloned.fp.prompt) }.to_str().unwrap(), "animated skyline");
+        assert_eq!(
+            unsafe { CStr::from_ptr(cloned.fp.prompt) }.to_str().unwrap(),
+            "animated skyline"
+        );
         assert_ne!(cloned.fp.prompt, params.fp.prompt);
         assert_eq!(cloned.fp.control_frames_size, 2);
         assert_eq!(cloned.fp.init_image.width, 2);
-        assert_ne!(unsafe { (*cloned.fp.control_frames).data }, unsafe { (*params.fp.control_frames).data });
+        assert_ne!(unsafe { (*cloned.fp.control_frames).data }, unsafe {
+            (*params.fp.control_frames).data
+        });
     }
 }

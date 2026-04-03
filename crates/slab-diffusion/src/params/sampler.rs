@@ -191,7 +191,10 @@ mod tests {
         assert_eq!(SampleMethod::from(sample_method_t_EULER_SAMPLE_METHOD), SampleMethod::Euler);
         assert_eq!(SampleMethod::from(sample_method_t_SAMPLE_METHOD_COUNT), SampleMethod::Unknown);
         assert_eq!(Scheduler::from(scheduler), Scheduler::KARRAS);
-        assert_eq!(Scheduler::from(slab_diffusion_sys::scheduler_t_SCHEDULER_COUNT), Scheduler::UNKNOWN);
+        assert_eq!(
+            Scheduler::from(slab_diffusion_sys::scheduler_t_SCHEDULER_COUNT),
+            Scheduler::UNKNOWN
+        );
     }
 
     #[test]
@@ -201,12 +204,7 @@ mod tests {
             txt_cfg: 7.5,
             img_cfg: 1.25,
             distilled_guidance: 2.0,
-            slg: SlgParams {
-                layers: vec![1, 4, 7],
-                layer_start: 0.1,
-                layer_end: 0.9,
-                scale: 0.8,
-            },
+            slg: SlgParams { layers: vec![1, 4, 7], layer_start: 0.1, layer_end: 0.9, scale: 0.8 },
         };
 
         params.set_guidance(guidance.clone());
@@ -217,9 +215,15 @@ mod tests {
         assert_eq!(params.fp.guidance.txt_cfg, guidance.txt_cfg);
         assert_eq!(params.fp.guidance.img_cfg, guidance.img_cfg);
         assert_eq!(params.fp.guidance.slg.layer_count, 3);
-        assert_eq!(unsafe { std::slice::from_raw_parts(params.fp.guidance.slg.layers, 3) }, &[1, 4, 7]);
+        assert_eq!(
+            unsafe { std::slice::from_raw_parts(params.fp.guidance.slg.layers, 3) },
+            &[1, 4, 7]
+        );
         assert_eq!(params.fp.custom_sigmas_count, 3);
-        assert_eq!(unsafe { std::slice::from_raw_parts(params.fp.custom_sigmas, 3) }, &[0.1, 0.2, 0.3]);
+        assert_eq!(
+            unsafe { std::slice::from_raw_parts(params.fp.custom_sigmas, 3) },
+            &[0.1, 0.2, 0.3]
+        );
         assert_eq!(Scheduler::from(params.fp.scheduler), Scheduler::LCM);
         assert_eq!(SampleMethod::from(params.fp.sample_method), SampleMethod::DPM2);
     }

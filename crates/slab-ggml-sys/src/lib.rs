@@ -33,7 +33,6 @@ impl GGmlLib {
         L1: Into<::libloading::Library>,
         L2: Into<::libloading::Library>,
     {
-
         let base = GGmlBaseLib::from_library(base.into())?;
         let loader = GGmlLoaderLib::from_library(loader.into())?;
         Ok(Self { base, loader })

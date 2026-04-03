@@ -5,7 +5,7 @@
 //! ```rust,no_run
 //! use slab_llama::{Llama, LlamaModelParams, LlamaContextParams, LlamaBatch, SamplerChainBuilder};
 //!
-//! let llama = Llama::new("/path/to/libllama.so").unwrap();
+//! let llama = Llama::new("/path/to/runtime/libs").unwrap();
 //! llama.backend_init();
 //!
 //! let model = llama
@@ -33,7 +33,6 @@
 //! llama.backend_free();
 //! ```
 
-use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
 use std::fmt;
 use std::path::Path;
 use std::sync::Arc;
@@ -65,9 +64,10 @@ pub type LlamaStateSeqFlags = slab_llama_sys::llama_state_seq_flags;
 pub const LLAMA_DEFAULT_SEED: u32 = slab_llama_sys::LLAMA_DEFAULT_SEED;
 
 use slab_ggml::GGML;
+use slab_ggml::load_runtime_with_ggml_sidecar;
 /// Entry point for the llama.cpp dynamic library.
 ///
-/// Load the shared library (`.so` / `.dylib` / `.dll`) with [`Llama::new`],
+/// Load the shared library directory with [`Llama::new`],
 /// then use it to initialise the backend, load models and create contexts.
 #[derive(Clone)]
 pub struct Llama {
@@ -76,44 +76,18 @@ pub struct Llama {
     _ggml_lib: Option<Arc<GGML>>,
 }
 
-fn load_ggml_sidecar(path: &Path) -> Option<Arc<GGML>> {
-    let ggml_path = path.parent()?.join(format!("{}ggml{}", DLL_PREFIX, DLL_SUFFIX));
-    let ggml = GGML::new_with(&ggml_path).ok()?;
-    let lib_dir = ggml_path.parent()?.to_string_lossy();
-    ggml.load_all_backend_from_path(lib_dir.as_ref()).ok()?;
-    Some(Arc::new(ggml))
-}
-
 impl Llama {
-    /// Load the llama.cpp shared library from the given path.
+    /// Load the llama.cpp shared library from the given runtime library directory.
     ///
     /// # Errors
     /// Returns a [`libloading::Error`] if the library cannot be opened or if
     /// a required symbol is missing.
     #[allow(clippy::arc_with_non_send_sync)]
-    pub fn new<P: AsRef<Path>>(path: P) -> Result<Self, ::libloading::Error> {
-        #[cfg(windows)]
-        {
-            use libloading::os::windows::{
-                LOAD_LIBRARY_SEARCH_DEFAULT_DIRS, LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR, Library,
-            };
-            let lib = unsafe {
-                Library::load_with_flags(
-                    path.as_ref(),
-                    LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS,
-                )?
-            };
-            let llama_lib = unsafe { slab_llama_sys::LlamaLib::from_library(lib)? };
-            let ggml_lib = load_ggml_sidecar(path.as_ref());
-            Ok(Self { lib: Arc::new(llama_lib), _ggml_lib: ggml_lib })
-        }
+    pub fn new<P: AsRef<Path>>(lib_dir: P) -> Result<Self, ::libloading::Error> {
+        let (llama_lib, ggml_lib) =
+            load_runtime_with_ggml_sidecar::<_, slab_llama_sys::LlamaLib>(lib_dir, "llama")?;
 
-        #[cfg(not(windows))]
-        {
-            let lib = unsafe { slab_llama_sys::LlamaLib::new(path.as_ref())? };
-            let ggml_lib = load_ggml_sidecar(path.as_ref());
-            Ok(Self { lib: Arc::new(lib), _ggml_lib: ggml_lib })
-        }
+        Ok(Self { lib: Arc::new(llama_lib), _ggml_lib: ggml_lib })
     }
 
     /// Initialise the llama.cpp backend.

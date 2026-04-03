@@ -95,11 +95,7 @@ impl SetupService {
     }
 
     async fn load_setup_initialized(&self) -> Result<bool, AppCoreError> {
-        let raw = self
-            .model_state
-            .store()
-            .get_config_value(SETUP_INITIALIZED_CONFIG_KEY)
-            .await?;
+        let raw = self.model_state.store().get_config_value(SETUP_INITIALIZED_CONFIG_KEY).await?;
 
         match raw.as_deref().map(str::trim) {
             None | Some("") => Ok(false),

@@ -33,20 +33,20 @@ impl BackendService {
         let canonical_backend = query.backend_id.to_string();
         Ok(BackendStatusView {
             backend: canonical_backend,
-            status: runtime_status_label(self.model_state.runtime_status().status(query.backend_id))
-                .to_owned(),
+            status: runtime_status_label(
+                self.model_state.runtime_status().status(query.backend_id),
+            )
+            .to_owned(),
         })
     }
 
     pub async fn list_backends(&self) -> Result<Vec<BackendStatusView>, AppCoreError> {
         let backends = RuntimeBackendId::ALL
             .into_iter()
-            .map(|name| {
-                BackendStatusView {
-                    backend: name.to_string(),
-                    status: runtime_status_label(self.model_state.runtime_status().status(name))
-                        .to_owned(),
-                }
+            .map(|name| BackendStatusView {
+                backend: name.to_string(),
+                status: runtime_status_label(self.model_state.runtime_status().status(name))
+                    .to_owned(),
             })
             .collect();
         Ok(backends)

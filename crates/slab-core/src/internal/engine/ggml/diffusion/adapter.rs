@@ -2,8 +2,7 @@ use crate::internal::engine;
 use slab_diffusion::{
     Context, ContextParams, Diffusion, DiffusionError, Image, ImgParams, SampleParams,
 };
-use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
-use std::ffi::OsStr;
+use slab_utils::loader::load_library_from_dir;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -13,13 +12,6 @@ use tracing::info;
 pub enum GGMLDiffusionEngineError {
     #[error("GGMLDiffusionEngine context not initialized")]
     ContextNotInitialized,
-
-    #[error("Failed to canonicalize GGMLDiffusionEngine library path: {path}")]
-    CanonicalizeLibraryPath {
-        path: PathBuf,
-        #[source]
-        source: std::io::Error,
-    },
 
     #[error("Failed to initialize GGMLDiffusionEngine dynamic library at: {path}")]
     InitializeDynamicLibrary {
@@ -62,38 +54,22 @@ unsafe impl Send for GGMLDiffusionEngine {}
 unsafe impl Sync for GGMLDiffusionEngine {}
 
 impl GGMLDiffusionEngine {
-    fn resolve_lib_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, engine::EngineError> {
-        let sd_lib_name = format!("{}stable-diffusion{}", DLL_PREFIX, DLL_SUFFIX);
-
-        let mut lib_path = path.as_ref().to_path_buf();
-        if lib_path.file_name() != Some(OsStr::new(&sd_lib_name)) {
-            lib_path.push(&sd_lib_name);
-        }
-
-        std::fs::canonicalize(&lib_path).map_err(|source| {
-            GGMLDiffusionEngineError::CanonicalizeLibraryPath { path: lib_path, source }.into()
-        })
-    }
-
-    fn build_engine(normalized_path: &Path) -> Result<Self, engine::EngineError> {
-        info!("current diffusion path is: {}", normalized_path.display());
-        let diffusion = Diffusion::new(normalized_path).map_err(|source| {
-            GGMLDiffusionEngineError::InitializeDynamicLibrary {
-                path: normalized_path.to_path_buf(),
-                source,
-            }
-        })?;
-
-        Ok(Self { instance: Arc::new(diffusion), ctx: None })
-    }
-
-    /// Create a new engine from the library at `path` **without** registering
-    /// any process-wide singleton.
+    /// Create a new engine from the shared runtime library directory at `path`
+    /// **without** registering any process-wide singleton.
     ///
     /// Call [`new_context`] afterwards to load a model.
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Self, engine::EngineError> {
-        let normalized = Self::resolve_lib_path(path)?;
-        Self::build_engine(&normalized)
+        load_library_from_dir(path, "stable-diffusion", |lib_dir, diffusion_path| {
+            info!("current diffusion path is: {}", diffusion_path.display());
+            let diffusion = Diffusion::new(lib_dir).map_err(|source| {
+                GGMLDiffusionEngineError::InitializeDynamicLibrary {
+                    path: diffusion_path.to_path_buf(),
+                    source,
+                }
+            })?;
+
+            Ok(Self { instance: Arc::new(diffusion), ctx: None })
+        })
     }
 
     pub fn new_context_params(&self) -> ContextParams {

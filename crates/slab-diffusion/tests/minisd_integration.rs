@@ -30,18 +30,6 @@ fn vendored_runtime_dir(artifact: &str) -> PathBuf {
     workspace_root().join("vendor").join(artifact).join(subdir)
 }
 
-fn vendored_diffusion_library_path() -> PathBuf {
-    let file_name = if cfg!(windows) {
-        "stable-diffusion.dll"
-    } else if cfg!(target_os = "macos") {
-        "libstable-diffusion.dylib"
-    } else {
-        "libstable-diffusion.so"
-    };
-
-    vendored_runtime_dir("diffusion").join(file_name)
-}
-
 #[cfg(windows)]
 fn add_dll_directory(path: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
@@ -81,17 +69,13 @@ fn ensure_vendored_runtime_dirs_registered() {}
 fn load_vendored_diffusion() -> Diffusion {
     ensure_vendored_runtime_dirs_registered();
 
-    Diffusion::new(vendored_diffusion_library_path())
+    Diffusion::new(vendored_runtime_dir("diffusion"))
         .unwrap_or_else(|error| panic!("failed to load vendored diffusion runtime: {error}"))
 }
 
 fn resolve_minisd_model_path() -> PathBuf {
     let api = Api::new().expect("failed to init hf-hub api");
-    let repo = Repo::with_revision(
-        MINI_SD_REPO_ID.to_owned(),
-        RepoType::Model,
-        "main".to_owned(),
-    );
+    let repo = Repo::with_revision(MINI_SD_REPO_ID.to_owned(), RepoType::Model, "main".to_owned());
 
     api.repo(repo)
         .get(MINI_SD_FILENAME)
@@ -104,10 +88,11 @@ fn minisd_generates_small_image_from_hf_hub_model() {
     let diffusion = load_vendored_diffusion();
     let model_path = resolve_minisd_model_path();
 
-    diffusion.backend_list_size().unwrap_or_else(|error| panic!("failed to get diffusion backend list size: {error}"));
+    diffusion
+        .backend_list_size()
+        .unwrap_or_else(|error| panic!("failed to get diffusion backend list size: {error}"));
     let mut context_params = diffusion.new_context_params();
     context_params.set_model_path(&model_path.to_string_lossy());
-
 
     let ctx = diffusion
         .new_context(context_params)

@@ -1,9 +1,8 @@
 use crate::internal::engine;
 use slab_llama::Llama;
 use slab_llama::{ChatMessage, LlamaContextParams, LlamaModel, LlamaModelParams};
-use std::env::consts::{DLL_PREFIX, DLL_SUFFIX};
-use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use slab_utils::loader::load_library_from_dir;
+use std::path::Path;
 use std::sync::{Arc, RwLock};
 use tracing::info;
 
@@ -25,58 +24,37 @@ unsafe impl Send for GGMLLlamaEngine {}
 unsafe impl Sync for GGMLLlamaEngine {}
 
 impl GGMLLlamaEngine {
-    /// Resolve the final shared-library path and canonicalize it.
-    ///
-    /// Accepts either a directory containing the llama library or a direct path
-    /// to the library file itself.
-    fn resolve_lib_path<P: AsRef<Path>>(path: P) -> Result<PathBuf, engine::EngineError> {
-        let llama_lib_name = format!("{}llama{}", DLL_PREFIX, DLL_SUFFIX);
-
-        let mut lib_path = path.as_ref().to_path_buf();
-        if lib_path.file_name() != Some(OsStr::new(&llama_lib_name)) {
-            lib_path.push(&llama_lib_name);
-        }
-
-        std::fs::canonicalize(&lib_path).map_err(|source| {
-            GGMLLlamaEngineError::CanonicalizeLibraryPath { path: lib_path, source }.into()
-        })
-    }
-
-    fn build_engine(normalized_path: &Path) -> Result<Self, engine::EngineError> {
-        info!("current llama path is: {}", normalized_path.display());
-        let llama = Llama::new(normalized_path).map_err(|source| {
-            GGMLLlamaEngineError::InitializeDynamicLibrary {
-                path: normalized_path.to_path_buf(),
-                source,
-            }
-        })?;
-
-        llama.backend_init();
-
-        // SAFETY: `Llama` wraps `Arc<slab_llama_sys::LlamaLib>` — a dlopen2-generated
-        // handle that holds a read-only table of function pointers loaded once at startup.
-        // After `Llama::new` returns the function pointer table is never mutated, making
-        // concurrent reads from multiple threads safe. No other mutable state is stored
-        // directly on `Llama`; all mutable engine state (`inference_engine`, `loaded_model`)
-        // is guarded by `RwLock` on the enclosing `GGMLLlamaEngine`. The `GGMLLlamaEngine`
-        // struct therefore satisfies the `Send + Sync` contract, which is asserted explicitly
-        // via the `unsafe impl` declarations above this block.
-        #[allow(clippy::arc_with_non_send_sync)]
-        Ok(Self {
-            instance: Arc::new(llama),
-            inference_engine: RwLock::new(None),
-            loaded_model: RwLock::new(None),
-        })
-    }
-
-    /// Create a new engine from the library at `path` **without** registering
-    /// any process-wide singleton.
+    /// Create a new engine from the shared runtime library directory at `path`
+    /// **without** registering any process-wide singleton.
     ///
     /// Call [`load_model_with_workers`] afterwards to load a model.
     pub fn from_path<P: AsRef<Path>>(path: P) -> Result<Arc<Self>, engine::EngineError> {
-        let normalized = Self::resolve_lib_path(path)?;
-        let engine = Self::build_engine(&normalized)?;
-        Ok(Arc::new(engine))
+        load_library_from_dir(path, "llama", |lib_dir, llama_path| {
+            info!("current llama path is: {}", llama_path.display());
+            let llama = Llama::new(lib_dir).map_err(|source| {
+                GGMLLlamaEngineError::InitializeDynamicLibrary {
+                    path: llama_path.to_path_buf(),
+                    source,
+                }
+            })?;
+
+            llama.backend_init();
+
+            // SAFETY: `Llama` wraps `Arc<slab_llama_sys::LlamaLib>` — a dlopen2-generated
+            // handle that holds a read-only table of function pointers loaded once at startup.
+            // After `Llama::new` returns the function pointer table is never mutated, making
+            // concurrent reads from multiple threads safe. No other mutable state is stored
+            // directly on `Llama`; all mutable engine state (`inference_engine`, `loaded_model`)
+            // is guarded by `RwLock` on the enclosing `GGMLLlamaEngine`. The `GGMLLlamaEngine`
+            // struct therefore satisfies the `Send + Sync` contract, which is asserted explicitly
+            // via the `unsafe impl` declarations above this block.
+            #[allow(clippy::arc_with_non_send_sync)]
+            Ok(Arc::new(Self {
+                instance: Arc::new(llama),
+                inference_engine: RwLock::new(None),
+                loaded_model: RwLock::new(None),
+            }))
+        })
     }
 
     /// Load a model and start a multi-worker inference engine.

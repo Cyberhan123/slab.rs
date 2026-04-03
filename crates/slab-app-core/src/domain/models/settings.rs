@@ -588,10 +588,7 @@ fn legacy_settings_schema() -> RawSettingsSchema {
                     "Cloud Providers",
                     "OpenAI-compatible cloud provider configuration stored as JSON.",
                     10,
-                    vec![legacy_chat_providers_property(
-                        PMID.chat.providers().into_string(),
-                        10,
-                    )],
+                    vec![legacy_chat_providers_property(PMID.chat.providers().into_string(), 10)],
                 )],
             ),
             legacy_section(
@@ -913,7 +910,6 @@ impl SettingsSchema {
     }
 
     fn from_raw(parsed: RawSettingsSchema) -> Result<Self, AppCoreError> {
-
         if parsed.sections.is_empty() {
             return Err(AppCoreError::Internal(
                 "embedded settings schema must contain at least one section".into(),

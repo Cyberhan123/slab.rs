@@ -113,7 +113,12 @@ impl std::fmt::Debug for Context {
 mod tests {
     use super::*;
 
-    fn alloc_image(width: u32, height: u32, channel: u32, data: &[u8]) -> slab_diffusion_sys::sd_image_t {
+    fn alloc_image(
+        width: u32,
+        height: u32,
+        channel: u32,
+        data: &[u8],
+    ) -> slab_diffusion_sys::sd_image_t {
         let ptr = unsafe { libc::malloc(data.len()).cast::<u8>() };
         assert!(!ptr.is_null());
         unsafe { std::ptr::copy_nonoverlapping(data.as_ptr(), ptr, data.len()) };
@@ -123,10 +128,8 @@ mod tests {
 
     #[test]
     fn collect_images_copies_and_returns_native_images() {
-        let raw_images = [
-            alloc_image(2, 1, 3, &[1, 2, 3, 4, 5, 6]),
-            alloc_image(1, 1, 4, &[9, 8, 7, 6]),
-        ];
+        let raw_images =
+            [alloc_image(2, 1, 3, &[1, 2, 3, 4, 5, 6]), alloc_image(1, 1, 4, &[9, 8, 7, 6])];
         let bytes = std::mem::size_of_val(&raw_images);
         let ptr = unsafe { libc::malloc(bytes).cast::<slab_diffusion_sys::sd_image_t>() };
         assert!(!ptr.is_null());
