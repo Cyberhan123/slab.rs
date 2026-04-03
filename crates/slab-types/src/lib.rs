@@ -50,6 +50,6 @@ pub use load_config::{
 pub use media::{GeneratedFrame, GeneratedImage, RawImageInput};
 pub use runtime::{
     Capability, DiffusionLoadOptions, DriverHints, ModelFamily, ModelSource, ModelSpec,
-    RuntimeModelLoadCommand, RuntimeModelLoadSpec, RuntimeModelReloadSpec, RuntimeModelStatus,
+    RuntimeModelLoadCommand, RuntimeModelLoadSpec, RuntimeModelStatus,
 };
 pub use whisper::{WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams};

@@ -9,7 +9,6 @@ service DiffusionService {
   rpc GenerateVideo(VideoRequest) returns (VideoResponse);
   rpc LoadModel(ModelLoadRequest) returns (ModelStatusResponse);
   rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
-  rpc ReloadLibrary(ReloadLibraryRequest) returns (ModelStatusResponse);
 }
 
 // ── Image generation ─────────────────────────────────────────────────────────

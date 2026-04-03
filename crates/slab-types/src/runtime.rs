@@ -206,13 +206,6 @@ pub struct RuntimeModelLoadCommand {
     pub spec: RuntimeModelLoadSpec,
 }
 
-/// Runtime library reload specification.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
-pub struct RuntimeModelReloadSpec {
-    pub lib_path: PathBuf,
-    pub load: RuntimeModelLoadSpec,
-}
-
 /// Runtime-reported model status on the server/runtime boundary.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct RuntimeModelStatus {

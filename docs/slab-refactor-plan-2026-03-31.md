@@ -11,7 +11,7 @@
 - WP3 `P0` Chat 契约收口：域层请求拆成 `CommonChatParams`、`LocalChatParams`、`CloudChatParams`；API 层继续接受现有字段，但在模型路由确定后做显式校验，本地拒绝 `reasoning_effort/verbosity`，云端拒绝原始 `grammar`，`response_format/json_schema` 统一映射为 structured output；所有“不生效参数”统一返回 `400 unsupported_chat_parameter`，不再静默忽略。
 - WP4 `P0` Chat 能力显式化：`GET /v1/chat/models` 增加 `capabilities` 字段，至少包含 `raw_grammar`、`structured_output`、`reasoning_controls`；前端聊天页按能力开关禁用不支持的控制项，不再靠失败后回退判断。
 - WP5 `P1` 任务系统类型化：引入 `TaskStatus` 枚举和 `TaskPayloadEnvelope { kind, version, data }`；数据库继续保留 `TEXT` 列，但只有 repository 负责字符串与 JSON 编解码；应用服务不再直接比较 `"pending"`、`"running"`、`"succeeded"`。`/v1/tasks/{id}` 和 `/v1/tasks/{id}/result` 对外 JSON 形状保持兼容，`status` 改为枚举驱动的 schema。
-- WP6 `P1` 兼容链退役：`/v1/backends/reload` 和 gRPC `ReloadLibraryRequest` 升级为完整承载 `RuntimeModelReloadSpec`，采用 `lib_path + load` 的对称结构，不再伪造 `ModelLoadRequest`；会话消息写入统一切到 `StoredSessionMessage v2` JSON envelope，纯文本和旧 JSON 只保留读兼容；云模型选择统一使用 catalog `model.id`，`cloud/{provider}/{legacy_model_id}` 仅保留一个发布窗口的翻译 shim，并打 warning/metric，窗口结束后删除。
+- WP6 `P1` 兼容链退役：`/v1/backends/reload` 和 gRPC `ReloadLibraryRequest` 直接退役删除，不再保留升级路径；会话消息写入统一切到 `StoredSessionMessage v2` JSON envelope，纯文本和旧 JSON 只保留读兼容；云模型选择统一使用 catalog `model.id`，`cloud/{provider}/{legacy_model_id}` 仅保留一个发布窗口的翻译 shim，并打 warning/metric，窗口结束后删除。
 - WP7 `P1` 前端错误语义修复：删除 `normalizeChatErrorResponse()` 的 `200 OK` 改写；新增 `ChatTransportError { transport_status, code, message, request_id }` 适配层，把失败 JSON 转成 provider 可消费对象，但保留原始 HTTP status 给日志、重试和监控；UI 可以继续展示友好错误文案，但不能再篡改传输层语义。
 - WP8 `P2` 流式完成语义下推到 runtime：runtime 终止 chunk 直接透传 `finish_reason` 和 `usage`；server 只在缺失时兜底估算，并在域层标记 `finish_reason_source` 与 `usage_source`；对外响应继续沿用现有字段，其中 `usage.estimated` 必须准确反映是否为估算值。
 
@@ -28,7 +28,7 @@
 - API 基址：补 Tauri Rust 单测验证 `ApiEndpointConfig`、plugin CSP 生成和 host health check；前端 smoke test 覆盖 chat、image、video、hub 都走同一 base URL。
 - Chat 契约：为本地/云模型分别覆盖“支持参数通过、不支持参数 400、structured output 正常映射”的矩阵测试，并更新 OpenAPI 快照。
 - 任务系统：补 repository round-trip、legacy JSON/text fallback、取消/重启语义测试，确保 API 输出不变。
-- 兼容链：补 `reload_library` proto round-trip、旧会话格式读兼容、legacy cloud ID deprecation tests，并在日志/指标里确认命中次数可观测。
+- 兼容链：验证 `reload_library` 已从 proto/runtime/app-core/API 面彻底删除；补旧会话格式读兼容、legacy cloud ID deprecation tests，并在日志/指标里确认命中次数可观测。
 - 前端错误：补 provider/XRequest 适配测试，验证网络面板仍显示 4xx/5xx，同时 UI 能展示友好错误。
 - 流式语义：补 runtime 到 server 的流式集成测试，校验 terminal chunk、`finish_reason`、`usage` 和 `usage.estimated` 的透传与兜底行为。
 

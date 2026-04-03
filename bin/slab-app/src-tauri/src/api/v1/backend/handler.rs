@@ -3,7 +3,6 @@ use std::sync::Arc;
 use slab_app_core::context::AppState;
 use slab_app_core::schemas::backend::{
     BackendListResponse, BackendStatusResponse, BackendTypeQuery, DownloadLibRequest,
-    ReloadLibRequest,
 };
 use slab_app_core::schemas::tasks::OperationAcceptedResponse;
 
@@ -33,14 +32,4 @@ pub async fn download_backend_lib(
 ) -> Result<OperationAcceptedResponse, String> {
     let req = validate(req)?;
     Ok(state.services.backend.download_lib(req.into()).await.map_err(map_err)?.into())
-}
-
-#[tauri::command(async)]
-pub async fn reload_backend_lib(
-    state: tauri::State<'_, Arc<AppState>>,
-    req: ReloadLibRequest,
-) -> Result<BackendStatusResponse, String> {
-    let req = validate(req)?;
-    let cmd = req.try_into().map_err(map_err)?;
-    Ok(state.services.backend.reload_lib(cmd).await.map_err(map_err)?.into())
 }

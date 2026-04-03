@@ -112,7 +112,6 @@ pub fn run() {
             api::v1::backend::handler::backend_status,
             api::v1::backend::handler::list_backends,
             api::v1::backend::handler::download_backend_lib,
-            api::v1::backend::handler::reload_backend_lib,
             // system
             api::v1::system::handler::gpu_status,
             // settings

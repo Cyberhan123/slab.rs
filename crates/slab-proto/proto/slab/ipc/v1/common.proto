@@ -23,16 +23,6 @@ message ModelLoadRequest {
 
 message ModelUnloadRequest {}
 
-message ReloadLibraryRequest {
-  string lib_path = 1;
-  ModelLoadRequest load = 2;
-
-  // Deprecated flattened compatibility fields retained for one release window.
-  string model_path = 10 [deprecated = true];
-  uint32 num_workers = 11 [deprecated = true];
-  uint32 context_length = 12 [deprecated = true];
-}
-
 message ModelStatusResponse {
   string backend = 1;
   string status = 2;

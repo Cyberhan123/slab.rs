@@ -8,7 +8,6 @@ service WhisperService {
   rpc Transcribe(TranscribeRequest) returns (TranscribeResponse);
   rpc LoadModel(ModelLoadRequest) returns (ModelStatusResponse);
   rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
-  rpc ReloadLibrary(ReloadLibraryRequest) returns (ModelStatusResponse);
 }
 
 message TranscribeRequest {

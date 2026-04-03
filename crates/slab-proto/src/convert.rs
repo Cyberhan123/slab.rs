@@ -16,9 +16,7 @@ use slab_types::inference::{
     TextGenerationUsage, TextPromptTokensDetails,
 };
 use slab_types::media::{GeneratedFrame, GeneratedImage, RawImageInput};
-use slab_types::runtime::{
-    DiffusionLoadOptions, RuntimeModelLoadSpec, RuntimeModelReloadSpec, RuntimeModelStatus,
-};
+use slab_types::runtime::{DiffusionLoadOptions, RuntimeModelLoadSpec, RuntimeModelStatus};
 use thiserror::Error;
 
 use crate::slab::ipc::v1 as pb;
@@ -84,29 +82,6 @@ pub fn decode_model_load_request(
         context_length: (request.context_length > 0).then_some(request.context_length),
         diffusion: diffusion_load_options_from_model_load_request(request),
     })
-}
-
-#[allow(deprecated)]
-pub fn encode_reload_library_request(spec: &RuntimeModelReloadSpec) -> pb::ReloadLibraryRequest {
-    pb::ReloadLibraryRequest {
-        lib_path: path_to_string(&spec.lib_path),
-        load: Some(encode_model_load_request(&spec.load)),
-        model_path: String::new(),
-        num_workers: 0,
-        context_length: 0,
-    }
-}
-
-pub fn decode_reload_library_request(
-    request: &pb::ReloadLibraryRequest,
-) -> Result<RuntimeModelReloadSpec, ProtoConversionError> {
-    ensure_non_empty(&request.lib_path, "lib_path")?;
-    let load = match request.load.as_ref() {
-        Some(load) => decode_model_load_request(load)?,
-        None => decode_legacy_reload_library_load(request)?,
-    };
-
-    Ok(RuntimeModelReloadSpec { lib_path: PathBuf::from(&request.lib_path), load })
 }
 
 pub fn encode_model_status_response(status: &RuntimeModelStatus) -> pb::ModelStatusResponse {
@@ -709,20 +684,6 @@ fn diffusion_load_options_from_model_load_request(
     has_any_value.then_some(options)
 }
 
-#[allow(deprecated)]
-fn decode_legacy_reload_library_load(
-    request: &pb::ReloadLibraryRequest,
-) -> Result<RuntimeModelLoadSpec, ProtoConversionError> {
-    ensure_non_empty(&request.model_path, "model_path")?;
-
-    Ok(RuntimeModelLoadSpec {
-        model_path: PathBuf::from(&request.model_path),
-        num_workers: request.num_workers.max(1),
-        context_length: (request.context_length > 0).then_some(request.context_length),
-        diffusion: None,
-    })
-}
-
 fn raw_image_input_from_proto_parts(
     data: &[u8],
     width: u32,
@@ -870,56 +831,6 @@ mod tests {
         let roundtrip = decode_model_load_request(&request).unwrap();
 
         assert_eq!(roundtrip, spec);
-    }
-
-    #[test]
-    fn reload_spec_round_trips_nested_load_fields() {
-        let spec = RuntimeModelReloadSpec {
-            lib_path: PathBuf::from("C:/runtime/llama.dll"),
-            load: RuntimeModelLoadSpec {
-                model_path: PathBuf::from("C:/models/model.gguf"),
-                num_workers: 2,
-                context_length: Some(4096),
-                diffusion: Some(DiffusionLoadOptions {
-                    diffusion_model_path: Some(PathBuf::from("C:/models/diffusion.safetensors")),
-                    vae_path: Some(PathBuf::from("C:/models/vae.safetensors")),
-                    taesd_path: None,
-                    lora_model_dir: Some(PathBuf::from("C:/models/lora")),
-                    clip_l_path: None,
-                    clip_g_path: Some(PathBuf::from("C:/models/clip-g.safetensors")),
-                    t5xxl_path: None,
-                    flash_attn: true,
-                    vae_device: "cpu".to_owned(),
-                    clip_device: "cuda".to_owned(),
-                    offload_params_to_cpu: true,
-                }),
-            },
-        };
-
-        let request = encode_reload_library_request(&spec);
-        let roundtrip = decode_reload_library_request(&request).unwrap();
-
-        assert_eq!(roundtrip, spec);
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn reload_spec_decodes_legacy_flattened_fields() {
-        let request = pb::ReloadLibraryRequest {
-            lib_path: "C:/runtime/llama.dll".to_owned(),
-            load: None,
-            model_path: "C:/models/model.gguf".to_owned(),
-            num_workers: 0,
-            context_length: 2048,
-        };
-
-        let roundtrip = decode_reload_library_request(&request).unwrap();
-
-        assert_eq!(roundtrip.lib_path, PathBuf::from("C:/runtime/llama.dll"));
-        assert_eq!(roundtrip.load.model_path, PathBuf::from("C:/models/model.gguf"));
-        assert_eq!(roundtrip.load.num_workers, 1);
-        assert_eq!(roundtrip.load.context_length, Some(2048));
-        assert_eq!(roundtrip.load.diffusion, None);
     }
 
     #[test]

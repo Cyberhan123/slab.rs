@@ -132,20 +132,6 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
         let status = self.unload_model_for_backend(BackendKind::Diffusion).await?;
         Ok(Response::new(status))
     }
-
-    #[instrument(skip_all, fields(request_id, backend = "ggml.diffusion"))]
-    async fn reload_library(
-        &self,
-        request: Request<pb::ReloadLibraryRequest>,
-    ) -> Result<Response<pb::ModelStatusResponse>, Status> {
-        let request_id = extract_request_id(request.metadata());
-        tracing::Span::current().record("request_id", &request_id);
-
-        debug!("diffusion reload_library request received");
-        let status =
-            self.reload_library_for_backend(BackendKind::Diffusion, request.into_inner()).await?;
-        Ok(Response::new(status))
-    }
 }
 
 fn build_image_params(req: &DiffusionImageRequest) -> Result<DiffusionImgParams, Status> {

@@ -5,7 +5,6 @@ use std::sync::Arc;
 use slab_proto::{convert, slab::ipc::v1 as pb};
 use slab_runtime_core::api::{
     Capability, CoreError, DriversConfig, ModelFamily, ModelSource, ModelSpec, Pipeline, Runtime,
-    RuntimeBuilder,
 };
 use slab_types::backend::RuntimeBackendId;
 use slab_types::runtime::{RuntimeModelLoadSpec, RuntimeModelStatus};
@@ -27,7 +26,6 @@ pub struct GrpcServiceImpl {
 #[derive(Debug)]
 struct RuntimeState {
     runtime: Runtime,
-    drivers: DriversConfig,
     enabled_backends: EnabledBackends,
     pipelines: HashMap<BackendKind, Pipeline>,
 }
@@ -42,19 +40,15 @@ pub(super) enum BackendKind {
     Diffusion,
 }
 
-const BACKEND_ORDER: [BackendKind; 3] =
-    [BackendKind::Llama, BackendKind::Whisper, BackendKind::Diffusion];
-
 impl GrpcServiceImpl {
     pub fn new(
         runtime: Runtime,
-        drivers: DriversConfig,
+        _drivers: DriversConfig,
         enabled_backends: EnabledBackends,
     ) -> Self {
         Self {
             state: Arc::new(RwLock::new(RuntimeState {
                 runtime,
-                drivers,
                 enabled_backends,
                 pipelines: HashMap::new(),
             })),
@@ -109,61 +103,6 @@ impl GrpcServiceImpl {
 
         Ok(model_status_response(backend, "unloaded"))
     }
-
-    #[instrument(skip_all, fields(
-        backend = backend.canonical_id(),
-        lib_path = %request.lib_path,
-        model_path = %reload_request_model_path(&request)
-    ))]
-    pub(super) async fn reload_library_for_backend(
-        &self,
-        backend: BackendKind,
-        request: pb::ReloadLibraryRequest,
-    ) -> Result<pb::ModelStatusResponse, Status> {
-        let reload_spec =
-            convert::decode_reload_library_request(&request).map_err(proto_to_status)?;
-
-        let mut state = self.state.write().await;
-        state.ensure_enabled(backend).map_err(Status::from)?;
-
-        let mut drivers = state.drivers.clone();
-        backend.set_library_path(&mut drivers, reload_spec.lib_path.clone());
-
-        let new_runtime =
-            RuntimeBuilder::new().drivers(drivers.clone()).build().map_err(runtime_to_status)?;
-
-        let mut specs: HashMap<BackendKind, ModelSpec> = state
-            .pipelines
-            .iter()
-            .map(|(kind, pipeline)| (*kind, pipeline.model().clone()))
-            .collect();
-
-        let target_spec = match specs.remove(&backend) {
-            Some(mut spec) => {
-                update_model_spec_from_load_spec(backend, &mut spec, &reload_spec.load);
-                spec
-            }
-            None => build_model_spec(backend, &reload_spec.load),
-        };
-        specs.insert(backend, target_spec);
-
-        let pipelines = load_pipelines(&new_runtime, &specs).await?;
-
-        state.runtime = new_runtime;
-        state.drivers = drivers;
-        state.pipelines = pipelines;
-
-        Ok(model_status_response(backend, "loaded"))
-    }
-}
-
-#[allow(deprecated)]
-fn reload_request_model_path(request: &pb::ReloadLibraryRequest) -> &str {
-    request
-        .load
-        .as_ref()
-        .map(|load| load.model_path.as_str())
-        .unwrap_or(request.model_path.as_str())
 }
 
 impl RuntimeState {
@@ -222,33 +161,6 @@ impl BackendKind {
             Self::Diffusion => enabled.diffusion,
         }
     }
-
-    fn set_library_path(self, drivers: &mut DriversConfig, path: PathBuf) {
-        match self {
-            Self::Llama => drivers.llama_lib_dir = Some(path),
-            Self::Whisper => drivers.whisper_lib_dir = Some(path),
-            Self::Diffusion => drivers.diffusion_lib_dir = Some(path),
-        }
-    }
-}
-
-async fn load_pipelines(
-    runtime: &Runtime,
-    specs: &HashMap<BackendKind, ModelSpec>,
-) -> Result<HashMap<BackendKind, Pipeline>, Status> {
-    let mut pipelines = HashMap::new();
-
-    for backend in BACKEND_ORDER {
-        let Some(spec) = specs.get(&backend).cloned() else {
-            continue;
-        };
-
-        let pipeline = runtime.pipeline(spec).map_err(runtime_to_status)?;
-        pipeline.load().await.map_err(runtime_to_status)?;
-        pipelines.insert(backend, pipeline);
-    }
-
-    Ok(pipelines)
 }
 
 fn build_model_spec(backend: BackendKind, load_spec: &RuntimeModelLoadSpec) -> ModelSpec {
@@ -304,80 +216,7 @@ fn build_model_spec(backend: BackendKind, load_spec: &RuntimeModelLoadSpec) -> M
     spec
 }
 
-fn update_model_spec_from_load_spec(
-    backend: BackendKind,
-    spec: &mut ModelSpec,
-    load_spec: &RuntimeModelLoadSpec,
-) {
-    update_model_source_primary_path(&mut spec.source, load_spec.model_path.clone());
-    spec.driver_hints.prefer_drivers = vec![backend.driver_id().to_owned()];
-    spec.driver_hints.avoid_drivers.clear();
-    spec.driver_hints.require_streaming = false;
-
-    match backend {
-        BackendKind::Llama => {
-            spec.load_options
-                .insert("num_workers".to_owned(), serde_json::json!(load_spec.num_workers));
-            spec.load_options.insert(
-                "context_length".to_owned(),
-                serde_json::json!(load_spec.context_length.unwrap_or(0)),
-            );
-        }
-        BackendKind::Diffusion => {
-            if let Some(diffusion) = load_spec.diffusion.as_ref() {
-                replace_opt_path_option(
-                    spec,
-                    "diffusion_model_path",
-                    diffusion.diffusion_model_path.as_ref(),
-                );
-                replace_opt_path_option(spec, "vae_path", diffusion.vae_path.as_ref());
-                replace_opt_path_option(spec, "taesd_path", diffusion.taesd_path.as_ref());
-                replace_opt_path_option(spec, "lora_model_dir", diffusion.lora_model_dir.as_ref());
-                replace_opt_path_option(spec, "clip_l_path", diffusion.clip_l_path.as_ref());
-                replace_opt_path_option(spec, "clip_g_path", diffusion.clip_g_path.as_ref());
-                replace_opt_path_option(spec, "t5xxl_path", diffusion.t5xxl_path.as_ref());
-                spec.load_options
-                    .insert("flash_attn".to_owned(), serde_json::json!(diffusion.flash_attn));
-                spec.load_options
-                    .insert("vae_device".to_owned(), serde_json::json!(diffusion.vae_device));
-                spec.load_options
-                    .insert("clip_device".to_owned(), serde_json::json!(diffusion.clip_device));
-                spec.load_options.insert(
-                    "offload_params_to_cpu".to_owned(),
-                    serde_json::json!(diffusion.offload_params_to_cpu),
-                );
-            }
-        }
-        BackendKind::Whisper => {}
-    }
-}
-
-fn update_model_source_primary_path(source: &mut ModelSource, path: PathBuf) {
-    match source {
-        ModelSource::LocalPath { path: current } => *current = path,
-        ModelSource::LocalArtifacts { files } | ModelSource::HuggingFace { files, .. } => {
-            files.insert("model".to_owned(), path);
-        }
-        // `ModelSource` is `#[non_exhaustive]`; future variants that carry no
-        // embedded file map cannot have their primary path updated here. Log a
-        // warning so unexpected sources don't fail silently.
-        _ => {
-            tracing::warn!(
-                "update_model_source_primary_path: unrecognised ModelSource variant; \
-                 primary path was not updated"
-            );
-        }
-    }
-}
-
 fn insert_opt_path_option(spec: &mut ModelSpec, key: &str, value: Option<&PathBuf>) {
-    if let Some(value) = value {
-        spec.load_options
-            .insert(key.to_owned(), serde_json::json!(value.to_string_lossy().into_owned()));
-    }
-}
-
-fn replace_opt_path_option(spec: &mut ModelSpec, key: &str, value: Option<&PathBuf>) {
     if let Some(value) = value {
         spec.load_options
             .insert(key.to_owned(), serde_json::json!(value.to_string_lossy().into_owned()));
