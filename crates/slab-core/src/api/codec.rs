@@ -5,6 +5,10 @@ use std::str::FromStr;
 use base64::Engine as _;
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use serde_json::Value;
+use slab_llama::{
+    ChatMessage as LlamaChatMessage,
+    runtime::{LlamaInferenceParams, LlamaLoadConfig, resolve_grammar as resolve_llama_grammar},
+};
 use slab_diffusion::{
     ContextParams as DiffusionContextParams, GuidanceParams as DiffusionGuidanceParams,
     Image as DiffusionImage, ImgParams as DiffusionImgParams,
@@ -27,8 +31,7 @@ use crate::internal::dispatch::ResolvedDriver;
 use crate::model::{ModelFamily, ModelSpec};
 use slab_types::{
     AudioTranscriptionOpOptions, CandleDiffusionLoadConfig, CandleLlamaLoadConfig,
-    CandleWhisperLoadConfig, DiffusionImageRequest, GgmlLlamaLoadConfig, OnnxLoadConfig,
-    TextGenerationOpOptions,
+    CandleWhisperLoadConfig, DiffusionImageRequest, OnnxLoadConfig, TextGenerationOpOptions,
 };
 
 pub(crate) fn encode_load_payload(
@@ -48,11 +51,46 @@ pub(crate) fn encode_load_payload(
 }
 
 fn encode_ggml_llama_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
-    Ok(Payload::typed(GgmlLlamaLoadConfig {
+    Ok(Payload::typed(LlamaLoadConfig {
         model_path: primary_model_path_buf(spec)?,
         num_workers: usize_option(spec, "num_workers").unwrap_or(1),
         context_length: optional_nonzero_u32_option(spec, "context_length")?,
     }))
+}
+
+fn encode_ggml_llama_text_generation_options(request: &TextGenerationRequest) -> Payload {
+    Payload::typed(LlamaInferenceParams {
+        max_tokens: request.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256),
+        session_key: request.session_key.clone(),
+        apply_chat_template: request.apply_chat_template,
+        chat_messages: extract_llama_chat_messages(&request.chat_messages),
+        grammar: resolve_llama_grammar(
+            request.grammar.as_deref(),
+            request.grammar_json,
+            request.grammar_tool_call,
+        ),
+    })
+}
+
+fn extract_llama_chat_messages(
+    messages: &[slab_types::chat::ConversationMessage],
+) -> Vec<LlamaChatMessage> {
+    messages
+        .iter()
+        .filter(|message| !message.role.trim().is_empty() && message.has_meaningful_content())
+        .map(|message| LlamaChatMessage {
+            role: normalize_llama_chat_role(&message.role).to_owned(),
+            content: message.rendered_text(),
+        })
+        .collect()
+}
+
+fn normalize_llama_chat_role(role: &str) -> &'static str {
+    match role {
+        "system" | "developer" => "system",
+        "assistant" => "assistant",
+        _ => "user",
+    }
 }
 
 fn encode_ggml_whisper_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
@@ -139,20 +177,24 @@ pub(crate) fn encode_text_generation_request(
         })
     };
 
-    let options = TextGenerationOpOptions {
-        max_tokens: request.max_tokens,
-        temperature: request.temperature,
-        top_p: request.top_p,
-        session_key: request.session_key.clone(),
-        stream: request.stream,
-        apply_chat_template: request.apply_chat_template,
-        chat_messages: request.chat_messages.clone(),
-        grammar: request.grammar.clone(),
-        grammar_json: request.grammar_json,
-        grammar_tool_call: request.grammar_tool_call,
+    let options = if resolved.driver_id == "ggml.llama" {
+        encode_ggml_llama_text_generation_options(request)
+    } else {
+        Payload::typed(TextGenerationOpOptions {
+            max_tokens: request.max_tokens,
+            temperature: request.temperature,
+            top_p: request.top_p,
+            session_key: request.session_key.clone(),
+            stream: request.stream,
+            apply_chat_template: request.apply_chat_template,
+            chat_messages: request.chat_messages.clone(),
+            grammar: request.grammar.clone(),
+            grammar_json: request.grammar_json,
+            grammar_tool_call: request.grammar_tool_call,
+        })
     };
 
-    Ok((input, Payload::typed(options)))
+    Ok((input, options))
 }
 
 pub(crate) fn decode_text_generation_response(
@@ -824,12 +866,13 @@ mod tests {
         ContextParams as DiffusionContextParams, Image as DiffusionImage,
         ImgParams as DiffusionImgParams,
     };
+    use slab_llama::{ChatMessage as LlamaChatMessage, LlamaInferenceParams, LlamaLoadConfig};
     use slab_types::chat::{ConversationMessage, ConversationMessageContent};
     use slab_types::runtime::Capability;
     use slab_types::{
         AudioTranscriptionOpOptions, CandleDiffusionLoadConfig, CandleLlamaLoadConfig,
-        CandleWhisperLoadConfig, GgmlLlamaLoadConfig, OnnxLoadConfig, RawImageInput,
-        TextGenerationOpOptions, WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams,
+        CandleWhisperLoadConfig, OnnxLoadConfig, RawImageInput, WhisperDecodeOptions,
+        WhisperVadOptions, WhisperVadParams,
     };
     use slab_whisper::{ContextParams as WhisperContextParams, FullParams as WhisperFullParams};
     use std::path::PathBuf;
@@ -872,7 +915,7 @@ mod tests {
         let payload =
             encode_load_payload(&spec, &make_llama_driver()).expect("encode should succeed");
         let config = payload
-            .to_typed::<GgmlLlamaLoadConfig>()
+            .to_typed::<LlamaLoadConfig>()
             .expect("ggml.llama payload should decode as typed config");
 
         assert_eq!(config.model_path, PathBuf::from("model.gguf"));
@@ -1009,13 +1052,13 @@ mod tests {
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
 
         let opts = opts_payload
-            .to_typed::<TextGenerationOpOptions>()
+            .to_typed::<LlamaInferenceParams>()
             .expect("text-generation options should decode as typed payload");
 
         assert!(opts.apply_chat_template, "typed options should preserve the template flag");
         assert_eq!(opts.chat_messages.len(), 1);
         assert_eq!(opts.chat_messages[0].role, "user");
-        assert_eq!(opts.chat_messages[0].rendered_text(), "hello");
+        assert_eq!(opts.chat_messages[0].content, "hello");
     }
 
     #[test]
@@ -1037,7 +1080,7 @@ mod tests {
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
 
         let opts = opts_payload
-            .to_typed::<TextGenerationOpOptions>()
+            .to_typed::<LlamaInferenceParams>()
             .expect("text-generation options should decode as typed payload");
 
         assert!(!opts.apply_chat_template, "typed options should preserve false template flags");
@@ -1057,7 +1100,7 @@ mod tests {
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
 
         let opts = opts_payload
-            .to_typed::<TextGenerationOpOptions>()
+            .to_typed::<LlamaInferenceParams>()
             .expect("text-generation options should decode as typed payload");
 
         assert!(opts.apply_chat_template);
@@ -1078,11 +1121,9 @@ mod tests {
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
         let opts = opts_payload
-            .to_typed::<TextGenerationOpOptions>()
+            .to_typed::<LlamaInferenceParams>()
             .expect("text-generation options should decode as typed payload");
         assert_eq!(opts.grammar.as_deref(), Some(gbnf));
-        assert!(!opts.grammar_json);
-        assert!(!opts.grammar_tool_call);
     }
 
     #[test]
@@ -1096,9 +1137,9 @@ mod tests {
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
         let opts = opts_payload
-            .to_typed::<TextGenerationOpOptions>()
+            .to_typed::<LlamaInferenceParams>()
             .expect("text-generation options should decode as typed payload");
-        assert!(opts.grammar_json, "grammar_json flag should be present in typed options");
+        assert!(opts.grammar.as_deref().is_some_and(|grammar| grammar.contains("root")));
     }
 
     #[test]
@@ -1112,9 +1153,9 @@ mod tests {
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
         let opts = opts_payload
-            .to_typed::<TextGenerationOpOptions>()
+            .to_typed::<LlamaInferenceParams>()
             .expect("text-generation options should decode as typed payload");
-        assert!(opts.grammar_tool_call, "grammar_tool_call flag should be present");
+        assert!(opts.grammar.as_deref().is_some_and(|grammar| grammar.contains("tool")));
     }
 
     #[test]
@@ -1124,11 +1165,36 @@ mod tests {
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &driver).expect("encode should succeed");
         let opts = opts_payload
-            .to_typed::<TextGenerationOpOptions>()
+            .to_typed::<LlamaInferenceParams>()
             .expect("text-generation options should decode as typed payload");
         assert!(opts.grammar.is_none());
-        assert!(!opts.grammar_json);
-        assert!(!opts.grammar_tool_call);
+    }
+
+    #[test]
+    fn encode_text_generation_request_normalizes_llama_chat_roles() {
+        let request = TextGenerationRequest {
+            prompt: "fallback".to_owned(),
+            chat_messages: vec![ConversationMessage {
+                role: "developer".to_owned(),
+                content: ConversationMessageContent::Text("policy".to_owned()),
+                name: None,
+                tool_call_id: None,
+                tool_calls: Vec::new(),
+            }],
+            apply_chat_template: true,
+            ..Default::default()
+        };
+
+        let (_input, opts_payload) =
+            encode_text_generation_request(&request, &make_llama_driver()).expect("encode ok");
+        let opts = opts_payload
+            .to_typed::<LlamaInferenceParams>()
+            .expect("llama params should decode");
+
+        assert_eq!(opts.chat_messages, vec![LlamaChatMessage {
+            role: "system".to_owned(),
+            content: "policy".to_owned(),
+        }]);
     }
 
     #[test]

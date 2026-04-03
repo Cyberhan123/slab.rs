@@ -45,6 +45,7 @@ mod llama_context;
 mod llama_model;
 mod llama_sampler;
 mod model_params;
+pub mod runtime;
 mod token;
 
 pub use context_params::LlamaContextParams;
@@ -55,6 +56,11 @@ pub use llama_context::LlamaContext;
 pub use llama_model::{ChatMessage, LlamaModel};
 pub use llama_sampler::{LlamaSampler, SamplerChainBuilder};
 pub use model_params::LlamaModelParams;
+pub use runtime::{
+    LlamaInferenceParams, LlamaLoadConfig, LlamaRuntime, LlamaRuntimeError, SessionId,
+    StreamChunk, StreamHandle,
+    LlamaSessionSnapshot,
+};
 pub use token::{LlamaPos, LlamaSeqId, LlamaToken};
 
 /// The type alias for per-sequence state flags (used in `state_seq_*_ext` methods).

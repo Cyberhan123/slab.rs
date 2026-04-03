@@ -13,119 +13,26 @@
 //! | `"inference.stream"` | `InferenceStream`| Streaming text generation.                     |
 //!
 //! ### `model.load` input payload
-//! Uses a typed [`slab_types::GgmlLlamaLoadConfig`] payload inside `slab-core`,
-//! with JSON deserialization kept as a compatibility fallback.
+//! Uses a typed [`slab_llama::LlamaLoadConfig`] payload.
 //!
-//! ## Grammar constraints (optional)
-//!
-//! Callers may request GBNF grammar-constrained sampling via options keys:
-//!
-//! | Key               | Type    | Description                                              |
-//! |-------------------|---------|----------------------------------------------------------|
-//! | `grammar`         | string  | Raw GBNF grammar string (highest priority).             |
-//! | `grammar_json`    | bool    | Use built-in JSON grammar when `true`.                  |
-//! | `grammar_tool_call` | bool  | Use built-in tool-call grammar when `true`.             |
-//!
-//! Priority: `grammar` > `grammar_json` > `grammar_tool_call`.
-//!
-//! If grammar initialization fails for any reason (invalid GBNF, null vocab,
-//! unsupported runtime) a warning is logged and generation falls back to
-//! unconstrained sampling — existing behavior is never broken.
+//! ### `inference` / `inference.stream` options payload
+//! Uses a typed [`slab_llama::LlamaInferenceParams`] payload. Grammar and chat
+//! message normalization are resolved before the backend receives the request.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use slab_llama::ChatMessage as LlamaChatMessage;
-use slab_types::{GgmlLlamaLoadConfig, TextGenerationOpOptions};
-use tokio::sync::{broadcast, mpsc, watch};
+use slab_llama::{ChatMessage as LlamaChatMessage, LlamaInferenceParams, LlamaLoadConfig};
+use tokio::sync::{broadcast, watch};
 
-use crate::internal::engine::ggml::llama::adapter::GGMLLlamaEngine;
-use crate::internal::engine::ggml::llama::errors::SessionId;
+use crate::internal::engine::ggml::llama::adapter::{GGMLLlamaEngine, LlamaDispatchRequest};
 use crate::internal::scheduler::backend::protocol::{
-    BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
+    BackendReply, BackendRequest, RuntimeControlSignal, WorkerCommand,
 };
 use crate::internal::scheduler::backend::runner::{SharedIngressRx, spawn_runtime_worker};
 use crate::internal::scheduler::types::Payload;
 use slab_core_macros::backend_handler;
 
-// ── Built-in grammar strings ──────────────────────────────────────────────────
-
-/// Minimal GBNF grammar that constrains output to a valid JSON value.
-///
-/// Supports objects, arrays, strings, numbers, booleans and null.
-/// Based on the grammar shipped with llama.cpp examples.
-pub(crate) const GRAMMAR_JSON: &str = r#"root   ::= value
-value  ::= object | array | string | number | "true" | "false" | "null"
-object ::=
-  "{" ws (
-            string ":" ws value
-    ("," ws string ":" ws value)*
-  )? "}" ws
-array  ::=
-  "[" ws (
-            value
-    ("," ws value)*
-  )? "]" ws
-string ::=
-  "\"" (
-    [^\\"\x7F\x00-\x1F] |
-    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
-  )* "\"" ws
-number ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? (([eE] [-+]? [0-9]+))? ws
-ws     ::= ([ \t\n] ws)?
-"#;
-
-/// GBNF grammar for tool-call envelope: `{"tool":"<name>","arguments":{...}}`.
-///
-/// Constrains output to a JSON object that contains exactly the keys `"tool"`
-/// (string) and `"arguments"` (JSON object), in that order.
-pub(crate) const GRAMMAR_TOOL_CALL: &str = r#"root      ::= "{" ws "\"tool\"" ws ":" ws string ws "," ws "\"arguments\"" ws ":" ws object ws "}"
-object    ::=
-  "{" ws (
-            string ":" ws value
-    ("," ws string ":" ws value)*
-  )? "}" ws
-value     ::= object | array | string | number | "true" | "false" | "null"
-array     ::=
-  "[" ws (
-            value
-    ("," ws value)*
-  )? "]" ws
-string    ::=
-  "\"" (
-    [^\\"\x7F\x00-\x1F] |
-    "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
-  )* "\"" ws
-number    ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? (([eE] [-+]? [0-9]+))? ws
-ws        ::= ([ \t\n] ws)?
-"#;
-
-/// Resolve the active grammar string from typed inference options.
-///
-/// Priority: `grammar` (raw GBNF) > `grammar_json` > `grammar_tool_call`.
-/// Returns `None` when no grammar option is set or when the raw grammar string
-/// is empty.
-fn resolve_grammar(opts: &TextGenerationOpOptions) -> Option<String> {
-    if let Some(g) = opts.grammar.as_deref()
-        && !g.is_empty()
-    {
-        return Some(g.to_owned());
-    }
-    if opts.grammar_json {
-        return Some(GRAMMAR_JSON.to_owned());
-    }
-    if opts.grammar_tool_call {
-        return Some(GRAMMAR_TOOL_CALL.to_owned());
-    }
-    None
-}
-
 // ── Configurations ────────────────────────────────────────────────────────────
-
-struct ParsedChatPrompt {
-    messages: Vec<LlamaChatMessage>,
-    add_assistant_prompt: bool,
-}
 
 struct InferenceOptions {
     max_tokens: usize,
@@ -136,91 +43,18 @@ struct InferenceOptions {
 }
 
 impl InferenceOptions {
-    fn from_options(opts: &TextGenerationOpOptions) -> Self {
+    fn from_params(params: LlamaInferenceParams) -> Self {
         Self {
-            max_tokens: opts
-                .max_tokens
-                .and_then(|value| usize::try_from(value).ok())
-                .unwrap_or(256),
-            session_key: opts.session_key.clone(),
-            apply_chat_template: opts.apply_chat_template,
-            chat_messages: extract_chat_messages(opts),
-            grammar: resolve_grammar(opts),
+            max_tokens: if params.max_tokens == 0 { 256 } else { params.max_tokens },
+            session_key: params.session_key,
+            apply_chat_template: params.apply_chat_template,
+            chat_messages: params.chat_messages,
+            grammar: params.grammar,
         }
     }
-}
-
-fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
-    // Only attempt template application for the legacy "Role: content" prompt shape.
-    if !(prompt.contains("User:") || prompt.contains("Assistant:") || prompt.contains("System:")) {
-        return None;
-    }
-
-    let mut messages: Vec<LlamaChatMessage> = Vec::new();
-    for raw_line in prompt.lines() {
-        let line = raw_line.trim_end();
-        if line.is_empty() {
-            continue;
-        }
-        let (raw_role, raw_content) = line.split_once(':')?;
-        let role = raw_role.trim().to_ascii_lowercase();
-        if !matches!(role.as_str(), "system" | "user" | "assistant") {
-            return None;
-        }
-        messages.push(LlamaChatMessage { role, content: raw_content.trim_start().to_owned() });
-    }
-
-    if messages.is_empty() {
-        return None;
-    }
-
-    let mut add_assistant_prompt = false;
-    if let Some(last) = messages.last() {
-        if last.role == "assistant" && last.content.is_empty() {
-            let _ = messages.pop();
-            add_assistant_prompt = true;
-        } else if last.role != "assistant" {
-            add_assistant_prompt = true;
-        }
-    }
-
-    if messages.is_empty() && !add_assistant_prompt {
-        return None;
-    }
-
-    Some(ParsedChatPrompt { messages, add_assistant_prompt })
 }
 
 // ── Worker ────────────────────────────────────────────────────────────────────
-
-/// Normalize typed chat messages into the backend chat-template representation.
-fn extract_chat_messages(opts: &TextGenerationOpOptions) -> Vec<LlamaChatMessage> {
-    opts.chat_messages
-        .iter()
-        .filter(|message| !message.role.trim().is_empty() && message.has_meaningful_content())
-        .map(|message| LlamaChatMessage {
-            role: normalize_chat_role_for_template(&message.role).to_owned(),
-            content: message.rendered_text(),
-        })
-        .collect()
-}
-
-fn normalize_chat_role_for_template(role: &str) -> &'static str {
-    match role {
-        "system" | "developer" => "system",
-        "assistant" => "assistant",
-        _ => "user",
-    }
-}
-
-/// Infer the `add_assistant_prompt` flag from the message list.
-///
-/// Returns `false` when the last message already has role `"assistant"` (i.e.
-/// an assistant-prefill / regeneration scenario where the template should not
-/// append another opening assistant turn).  Returns `true` in all other cases.
-fn infer_add_assistant_prompt(messages: &[LlamaChatMessage]) -> bool {
-    messages.last().map(|m| m.role != "assistant").unwrap_or(true)
-}
 
 struct LlamaWorker {
     /// The engine: wraps both the library handle and inference workers.
@@ -228,35 +62,12 @@ struct LlamaWorker {
     /// - `Some(e)` where `e.inference_engine` is None → lib loaded, no model.
     /// - `Some(e)` where `e.inference_engine` is Some → lib + model loaded.
     engine: Option<Arc<GGMLLlamaEngine>>,
-    /// Maps caller-provided session keys to engine-internal session state.
-    sessions: HashMap<String, SessionBinding>,
-}
-
-#[derive(Debug, Clone)]
-struct SessionBinding {
-    sid: SessionId,
-    /// Prefix already committed in KV for this session (prompt + generated text).
-    cached_prompt: String,
-}
-
-#[derive(Debug)]
-struct PreparedSession {
-    key: Option<String>,
-    sid: Option<SessionId>,
-    delta_prompt: String,
-    full_prompt: String,
-}
-
-#[derive(Debug)]
-enum SessionUpdate {
-    Keep { key: String, sid: SessionId, cached_prompt: String },
-    Drop { key: String, sid: SessionId },
 }
 
 #[backend_handler]
 impl LlamaWorker {
     fn new(engine: Option<Arc<GGMLLlamaEngine>>) -> Self {
-        Self { engine, sessions: HashMap::new() }
+        Self { engine }
     }
 
     #[on_event(LoadModel)]
@@ -281,7 +92,7 @@ impl LlamaWorker {
             }
         };
         let BackendRequest { input, reply_tx, .. } = req;
-        let raw_options: TextGenerationOpOptions = match invocation.options.to_typed() {
+        let raw_options: LlamaInferenceParams = match invocation.options.to_typed() {
             Ok(options) => options,
             Err(error) => {
                 let _ = reply_tx
@@ -289,7 +100,7 @@ impl LlamaWorker {
                 return;
             }
         };
-        let options = InferenceOptions::from_options(&raw_options);
+        let options = InferenceOptions::from_params(raw_options);
         self.handle_inference(input, options, reply_tx).await;
     }
 
@@ -303,7 +114,7 @@ impl LlamaWorker {
             }
         };
         let BackendRequest { input, cancel_rx, reply_tx, .. } = req;
-        let raw_options: TextGenerationOpOptions = match invocation.options.to_typed() {
+        let raw_options: LlamaInferenceParams = match invocation.options.to_typed() {
             Ok(options) => options,
             Err(error) => {
                 let _ = reply_tx
@@ -311,7 +122,7 @@ impl LlamaWorker {
                 return;
             }
         };
-        let options = InferenceOptions::from_options(&raw_options);
+        let options = InferenceOptions::from_params(raw_options);
         self.handle_inference_stream(input, options, cancel_rx, reply_tx).await;
     }
 
@@ -319,79 +130,6 @@ impl LlamaWorker {
         if let Some(engine) = self.engine.as_ref() {
             let _ = engine.unload();
         }
-        self.sessions.clear();
-    }
-
-    async fn prepare_session(
-        &mut self,
-        engine: &GGMLLlamaEngine,
-        session_key: Option<&str>,
-        full_prompt: String,
-        grammar: Option<String>,
-    ) -> Result<PreparedSession, String> {
-        let Some(raw_key) = session_key else {
-            return Ok(PreparedSession {
-                key: None,
-                sid: None,
-                delta_prompt: full_prompt.clone(),
-                full_prompt,
-            });
-        };
-
-        let key = raw_key.to_owned();
-        let mut sid: Option<SessionId> = None;
-        let mut delta_prompt = full_prompt.clone();
-        let mut stale_sid: Option<SessionId> = None;
-
-        if let Some(binding) = self.sessions.get(&key) {
-            if let Some(delta) = full_prompt.strip_prefix(&binding.cached_prompt) {
-                if delta.is_empty() {
-                    // No incremental input was added; reset session so regenerate-style
-                    // requests still work instead of stalling on an empty append.
-                    stale_sid = Some(binding.sid);
-                } else {
-                    sid = Some(binding.sid);
-                    delta_prompt = delta.to_owned();
-                }
-            } else {
-                // Caller-supplied history diverged from cached prefix; reset session.
-                stale_sid = Some(binding.sid);
-            }
-        }
-
-        if let Some(old_sid) = stale_sid {
-            self.sessions.remove(&key);
-            let _ = engine.end_session(old_sid).await;
-        }
-
-        if sid.is_none() {
-            // Create a new session with the grammar constraint applied to the
-            // sampler chain.  If the same key is later reused with a different
-            // grammar the session is reset (stale_sid path above) and a fresh
-            // session with the new grammar is created here.
-            sid =
-                Some(engine.create_session_with_grammar(grammar).await.map_err(|e| e.to_string())?);
-            delta_prompt = full_prompt.clone();
-        }
-
-        Ok(PreparedSession { key: Some(key), sid, delta_prompt, full_prompt })
-    }
-
-    fn commit_session_success(
-        &mut self,
-        key: Option<String>,
-        sid: Option<SessionId>,
-        full_prompt: &str,
-        generated: &str,
-    ) {
-        let (Some(key), Some(sid)) = (key, sid) else {
-            return;
-        };
-
-        let mut cached_prompt = String::with_capacity(full_prompt.len() + generated.len());
-        cached_prompt.push_str(full_prompt);
-        cached_prompt.push_str(generated);
-        self.sessions.insert(key, SessionBinding { sid, cached_prompt });
     }
 
     #[on_runtime_control(GlobalUnload)]
@@ -432,7 +170,7 @@ impl LlamaWorker {
             }
         };
 
-        let config: GgmlLlamaLoadConfig = match input.to_typed() {
+        let config: LlamaLoadConfig = match input.to_typed() {
             Ok(c) => c,
             Err(e) => {
                 let _ =
@@ -445,9 +183,6 @@ impl LlamaWorker {
             let _ = reply_tx.send(BackendReply::Error("num_workers must be > 0".into()));
             return;
         }
-
-        // Reset sessions (old model is being replaced).
-        self.sessions.clear();
 
         // Model loading is CPU/blocking; use block_in_place to avoid stalling
         // the async runtime without the Send constraint of spawn_blocking.
@@ -503,25 +238,6 @@ impl LlamaWorker {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
             }
         }
-
-        self.sessions.clear();
-    }
-
-    fn apply_chat_template_if_possible(engine: &GGMLLlamaEngine, prompt: &str) -> String {
-        let Some(parsed) = parse_role_prefixed_chat_prompt(prompt) else {
-            return prompt.to_owned();
-        };
-
-        match engine.apply_chat_template(&parsed.messages, parsed.add_assistant_prompt) {
-            Ok(applied) => applied,
-            Err(e) => {
-                tracing::warn!(
-                    error = %e,
-                    "failed to apply llama chat template; falling back to raw prompt"
-                );
-                prompt.to_owned()
-            }
-        }
     }
 
     // ── inference ─────────────────────────────────────────────────────────────
@@ -554,48 +270,21 @@ impl LlamaWorker {
                 return;
             }
         };
-        let prompt = if apply_chat_template && !chat_messages.is_empty() {
-            let add_assistant = infer_add_assistant_prompt(&chat_messages);
-            match engine.apply_chat_template(&chat_messages, add_assistant) {
-                Ok(applied) => applied,
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "failed to apply embedded chat template; falling back to raw prompt"
-                    );
-                    prompt
-                }
-            }
-        } else {
-            Self::apply_chat_template_if_possible(engine.as_ref(), &prompt)
-        };
-        let prepared = match self
-            .prepare_session(engine.as_ref(), session_key.as_deref(), prompt, grammar.clone())
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e));
-                return;
-            }
+        let request = LlamaDispatchRequest {
+            prompt,
+            max_tokens,
+            session_key,
+            apply_chat_template,
+            chat_messages,
+            grammar,
         };
 
-        match engine.inference(&prepared.delta_prompt, max_tokens, prepared.sid, grammar).await {
+        match engine.dispatch_inference(request).await {
             Ok(text) => {
-                self.commit_session_success(
-                    prepared.key,
-                    prepared.sid,
-                    &prepared.full_prompt,
-                    &text,
-                );
                 let _ =
                     reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(text.as_bytes()))));
             }
             Err(e) => {
-                if let (Some(key), Some(sid)) = (prepared.key, prepared.sid) {
-                    self.sessions.remove(&key);
-                    let _ = engine.end_session(sid).await;
-                }
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
             }
         }
@@ -632,149 +321,21 @@ impl LlamaWorker {
                 return;
             }
         };
-        let prompt = if apply_chat_template && !chat_messages.is_empty() {
-            let add_assistant = infer_add_assistant_prompt(&chat_messages);
-            match engine.apply_chat_template(&chat_messages, add_assistant) {
-                Ok(applied) => applied,
-                Err(e) => {
-                    tracing::warn!(
-                        error = %e,
-                        "failed to apply embedded chat template; falling back to raw prompt"
-                    );
-                    prompt.as_ref().to_owned()
-                }
-            }
-        } else {
-            Self::apply_chat_template_if_possible(engine.as_ref(), prompt.as_ref())
-        };
-        let prepared = match self
-            .prepare_session(engine.as_ref(), session_key.as_deref(), prompt, grammar.clone())
-            .await
-        {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e));
-                return;
-            }
+        let request = LlamaDispatchRequest {
+            prompt: prompt.as_ref().to_owned(),
+            max_tokens,
+            session_key,
+            apply_chat_template,
+            chat_messages,
+            grammar,
         };
 
-        let (proto_tx, proto_rx) = mpsc::channel::<StreamChunk>(64);
-        let _ = reply_tx.send(BackendReply::Stream(proto_rx));
-
-        let (update_tx, update_rx) = tokio::sync::oneshot::channel::<Option<SessionUpdate>>();
-        let engine_for_spawn = Arc::clone(&engine);
-        let mut cancel_rx = cancel_rx;
-
-        tokio::spawn(async move {
-            use crate::internal::engine::ggml::llama::StreamChunk as LlamaChunk;
-            let PreparedSession { key, sid, delta_prompt, full_prompt } = prepared;
-
-            match engine_for_spawn.inference_stream(&delta_prompt, max_tokens, sid, grammar).await {
-                Ok((mut llama_rx, new_sid)) => {
-                    let mut generated = String::new();
-                    let mut completed = false;
-                    let mut forward_failed = false;
-                    let mut stream_error = false;
-                    let mut cancelled = false;
-                    loop {
-                        tokio::select! {
-                            cancel_changed = cancel_rx.changed(), if !completed && !stream_error && !forward_failed => {
-                                let cancel_requested = if cancel_changed.is_ok() {
-                                    *cancel_rx.borrow()
-                                } else {
-                                    false
-                                };
-                                if cancel_requested {
-                                    cancelled = true;
-                                    if let Err(error) = engine_for_spawn.cancel_generate(new_sid).await {
-                                        tracing::warn!(
-                                            session_id = new_sid,
-                                            error = %error,
-                                            "failed to cancel llama generation"
-                                        );
-                                    }
-                                } else if cancel_changed.is_ok() {
-                                    continue;
-                                }
-                                break;
-                            }
-                            chunk = llama_rx.recv() => {
-                                let Some(chunk) = chunk else {
-                                    break;
-                                };
-
-                                let mapped = match chunk {
-                                    LlamaChunk::Token(t) => {
-                                        generated.push_str(&t);
-                                        StreamChunk::Token(t)
-                                    }
-                                    LlamaChunk::Done => {
-                                        completed = true;
-                                        StreamChunk::Done
-                                    }
-                                    LlamaChunk::Error(e) => {
-                                        stream_error = true;
-                                        StreamChunk::Error(e)
-                                    }
-                                };
-
-                                if proto_tx.send(mapped).await.is_err() {
-                                    forward_failed = true;
-                                    if !completed
-                                        && !stream_error
-                                        && let Err(error) =
-                                            engine_for_spawn.cancel_generate(new_sid).await
-                                    {
-                                        tracing::warn!(
-                                            session_id = new_sid,
-                                            error = %error,
-                                            "failed to cancel llama generation after downstream disconnect"
-                                        );
-                                    }
-                                    break;
-                                }
-                                if completed || stream_error {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    let update = if let Some(key) = key {
-                        if completed && !forward_failed && !stream_error && !cancelled {
-                            let mut cached_prompt =
-                                String::with_capacity(full_prompt.len() + generated.len());
-                            cached_prompt.push_str(&full_prompt);
-                            cached_prompt.push_str(&generated);
-                            Some(SessionUpdate::Keep { key, sid: new_sid, cached_prompt })
-                        } else {
-                            Some(SessionUpdate::Drop { key, sid: new_sid })
-                        }
-                    } else {
-                        let _ = engine_for_spawn.end_session(new_sid).await;
-                        None
-                    };
-                    let _ = update_tx.send(update);
-                }
-                Err(e) => {
-                    let _ = proto_tx.send(StreamChunk::Error(e.to_string())).await;
-                    let update = match (key, sid) {
-                        (Some(key), Some(sid)) => Some(SessionUpdate::Drop { key, sid }),
-                        _ => None,
-                    };
-                    let _ = update_tx.send(update);
-                }
+        match engine.dispatch_inference_stream(request, cancel_rx).await {
+            Ok(stream) => {
+                let _ = reply_tx.send(BackendReply::Stream(stream));
             }
-        });
-
-        if let Ok(Some(update)) = update_rx.await {
-            match update {
-                SessionUpdate::Keep { key, sid, cached_prompt } => {
-                    self.sessions.insert(key, SessionBinding { sid, cached_prompt });
-                }
-                SessionUpdate::Drop { key, sid } => {
-                    self.sessions.remove(&key);
-                    let _ = engine.end_session(sid).await;
-                }
+            Err(error) => {
+                let _ = reply_tx.send(BackendReply::Error(error.to_string()));
             }
         }
     }
@@ -797,14 +358,10 @@ pub(crate) fn spawn_backend_with_engine(
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        LlamaWorker, SessionBinding, extract_chat_messages, infer_add_assistant_prompt,
-        resolve_grammar,
-    };
+    use super::LlamaWorker;
+    use crate::internal::engine::ggml::llama::adapter::infer_add_assistant_prompt;
     use crate::internal::scheduler::backend::protocol::RuntimeControlSignal;
     use crate::internal::scheduler::types::Payload;
-    use slab_types::TextGenerationOpOptions;
-    use slab_types::chat::{ConversationMessage, ConversationMessageContent};
 
     // ── infer_add_assistant_prompt ────────────────────────────────────────────
 
@@ -835,118 +392,20 @@ mod tests {
         );
     }
 
-    // ── extract_chat_messages ─────────────────────────────────────────────────
-
-    #[test]
-    fn extract_chat_messages_returns_empty_when_key_absent() {
-        let opts = TextGenerationOpOptions::default();
-        let result = extract_chat_messages(&opts);
-        assert!(result.is_empty(), "missing key should yield empty vec");
-    }
-
-    #[test]
-    fn extract_chat_messages_returns_empty_when_messages_are_empty() {
-        let opts = TextGenerationOpOptions { chat_messages: Vec::new(), ..Default::default() };
-        let result = extract_chat_messages(&opts);
-        assert!(result.is_empty(), "empty messages should yield empty vec");
-    }
-
-    #[test]
-    fn extract_chat_messages_skips_semantically_empty_entries() {
-        let opts = TextGenerationOpOptions {
-            chat_messages: vec![
-                ConversationMessage {
-                    role: "user".to_owned(),
-                    content: ConversationMessageContent::Text("hello".to_owned()),
-                    name: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                },
-                ConversationMessage {
-                    role: String::new(),
-                    content: ConversationMessageContent::Text("ignored".to_owned()),
-                    name: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                },
-                ConversationMessage {
-                    role: "assistant".to_owned(),
-                    content: ConversationMessageContent::Text(String::new()),
-                    name: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                },
-            ],
-            ..Default::default()
-        };
-        let result = extract_chat_messages(&opts);
-        assert_eq!(result.len(), 1);
-        assert_eq!(result[0].role, "user");
-        assert_eq!(result[0].content, "hello");
-    }
-
-    #[test]
-    fn extract_chat_messages_round_trips_valid_array() {
-        let opts = TextGenerationOpOptions {
-            chat_messages: vec![
-                ConversationMessage {
-                    role: "system".to_owned(),
-                    content: ConversationMessageContent::Text(
-                        "You are a helpful assistant.".to_owned(),
-                    ),
-                    name: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                },
-                ConversationMessage {
-                    role: "user".to_owned(),
-                    content: ConversationMessageContent::Text("Hi!".to_owned()),
-                    name: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                },
-                ConversationMessage {
-                    role: "assistant".to_owned(),
-                    content: ConversationMessageContent::Text("Hello there!".to_owned()),
-                    name: None,
-                    tool_call_id: None,
-                    tool_calls: Vec::new(),
-                },
-            ],
-            ..Default::default()
-        };
-        let result = extract_chat_messages(&opts);
-        assert_eq!(result.len(), 3);
-        assert_eq!(result[0].role, "system");
-        assert_eq!(result[0].content, "You are a helpful assistant.");
-        assert_eq!(result[1].role, "user");
-        assert_eq!(result[1].content, "Hi!");
-        assert_eq!(result[2].role, "assistant");
-        assert_eq!(result[2].content, "Hello there!");
-    }
-
     // ── LlamaWorker session management ────────────────────────────────────────
 
     #[tokio::test]
-    async fn runtime_global_unload_clears_sessions() {
+    async fn runtime_global_unload_is_safe_without_engine() {
         let mut worker = LlamaWorker::new(None);
-        worker
-            .sessions
-            .insert("s1".to_owned(), SessionBinding { sid: 7, cached_prompt: String::new() });
-        assert_eq!(worker.sessions.len(), 1);
 
         worker.apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 }).await;
 
-        assert!(worker.sessions.is_empty(), "global unload should clear llama session mappings");
+        assert!(worker.engine.is_none(), "global unload should remain safe without an engine");
     }
 
     #[tokio::test]
-    async fn runtime_global_load_clears_sessions_before_load_attempt() {
+    async fn runtime_global_load_is_safe_without_engine() {
         let mut worker = LlamaWorker::new(None);
-        worker
-            .sessions
-            .insert("s1".to_owned(), SessionBinding { sid: 9, cached_prompt: String::new() });
-        assert_eq!(worker.sessions.len(), 1);
 
         worker
             .apply_runtime_control(RuntimeControlSignal::GlobalLoad {
@@ -958,79 +417,6 @@ mod tests {
             })
             .await;
 
-        assert!(
-            worker.sessions.is_empty(),
-            "global load should clear stale llama session mappings before model load"
-        );
-    }
-
-    // ── resolve_grammar ───────────────────────────────────────────────────────
-
-    #[test]
-    fn resolve_grammar_returns_none_when_no_grammar_options_set() {
-        let opts = TextGenerationOpOptions { max_tokens: Some(64), ..Default::default() };
-        assert!(resolve_grammar(&opts).is_none(), "no grammar options should yield None");
-    }
-
-    #[test]
-    fn resolve_grammar_returns_raw_grammar_string() {
-        let gbnf = "root ::= \"hello\"";
-        let opts = TextGenerationOpOptions { grammar: Some(gbnf.to_owned()), ..Default::default() };
-        assert_eq!(resolve_grammar(&opts).as_deref(), Some(gbnf));
-    }
-
-    #[test]
-    fn resolve_grammar_ignores_empty_grammar_string() {
-        let opts = TextGenerationOpOptions { grammar: Some(String::new()), ..Default::default() };
-        assert!(resolve_grammar(&opts).is_none(), "empty grammar string should yield None");
-    }
-
-    #[test]
-    fn resolve_grammar_returns_json_grammar_when_flag_true() {
-        let opts = TextGenerationOpOptions { grammar_json: true, ..Default::default() };
-        let result = resolve_grammar(&opts);
-        assert!(result.is_some(), "grammar_json=true should yield Some");
-        assert!(result.unwrap().contains("root"), "JSON grammar should contain a root rule");
-    }
-
-    #[test]
-    fn resolve_grammar_returns_tool_call_grammar_when_flag_true() {
-        let opts = TextGenerationOpOptions { grammar_tool_call: true, ..Default::default() };
-        let result = resolve_grammar(&opts);
-        assert!(result.is_some(), "grammar_tool_call=true should yield Some");
-        assert!(
-            result.unwrap().contains("tool"),
-            "tool-call grammar should reference the tool key"
-        );
-    }
-
-    #[test]
-    fn resolve_grammar_raw_takes_precedence_over_json_flag() {
-        let gbnf = "root ::= \"raw\"";
-        let opts = TextGenerationOpOptions {
-            grammar: Some(gbnf.to_owned()),
-            grammar_json: true,
-            ..Default::default()
-        };
-        assert_eq!(
-            resolve_grammar(&opts).as_deref(),
-            Some(gbnf),
-            "raw grammar should win over grammar_json flag"
-        );
-    }
-
-    #[test]
-    fn resolve_grammar_json_flag_takes_precedence_over_tool_call_flag() {
-        let opts = TextGenerationOpOptions {
-            grammar_json: true,
-            grammar_tool_call: true,
-            ..Default::default()
-        };
-        let result = resolve_grammar(&opts).expect("should yield Some");
-        // JSON grammar contains `value` rule; tool-call grammar contains `arguments` literal.
-        assert!(
-            !result.contains("arguments"),
-            "grammar_json should take precedence over grammar_tool_call"
-        );
+        assert!(worker.engine.is_none(), "global load pre-cleanup should remain safe");
     }
 }
