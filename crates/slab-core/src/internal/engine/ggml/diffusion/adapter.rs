@@ -1,7 +1,5 @@
 use crate::internal::engine;
-use slab_diffusion::{
-    Context, ContextParams, Diffusion, DiffusionError, Image, ImgParams, SampleParams,
-};
+use slab_diffusion::{Context, ContextParams, Diffusion, DiffusionError, Image, ImgParams};
 use slab_utils::loader::load_library_from_dir;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -70,18 +68,6 @@ impl GGMLDiffusionEngine {
 
             Ok(Self { instance: Arc::new(diffusion), ctx: None })
         })
-    }
-
-    pub fn new_context_params(&self) -> ContextParams {
-        self.instance.new_context_params()
-    }
-
-    pub fn new_image_params(&self) -> ImgParams {
-        self.instance.new_image_params()
-    }
-
-    pub fn new_sample_params(&self) -> SampleParams {
-        self.instance.new_sample_params()
     }
 
     /// Create (or replace) the Stable Diffusion inference context.
@@ -162,18 +148,21 @@ mod test {
             return;
         }
 
-        let mut ctx_params = ds.new_context_params();
-        ctx_params.set_model_path(&model_path.to_string_lossy());
+        let ctx_params = ContextParams {
+            model_path: Some(model_path.clone()),
+            ..Default::default()
+        };
         ds.new_context(ctx_params).expect("failed to create diffusion context");
 
-        let mut sample_params = ds.new_sample_params();
-        sample_params.set_sample_steps(4);
+        let sample_params = slab_diffusion::SampleParams { sample_steps: Some(4), ..Default::default() };
 
-        let mut image_params = ds.new_image_params();
-        image_params.set_prompt("a lovely cat sitting on a roof");
-        image_params.set_width(256);
-        image_params.set_height(256);
-        image_params.set_sample_params(sample_params);
+        let image_params = ImgParams {
+            prompt: Some("a lovely cat sitting on a roof".to_owned()),
+            width: Some(256),
+            height: Some(256),
+            sample_params: Some(sample_params),
+            ..Default::default()
+        };
 
         let images = ds.generate_image(image_params).expect("generate_image failed");
 

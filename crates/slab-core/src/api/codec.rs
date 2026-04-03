@@ -1,9 +1,15 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use base64::Engine as _;
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use serde_json::Value;
+use slab_diffusion::{
+    ContextParams as DiffusionContextParams, GuidanceParams as DiffusionGuidanceParams,
+    Image as DiffusionImage, ImgParams as DiffusionImgParams, SampleMethod as DiffusionSampleMethod,
+    SampleParams as DiffusionSampleParams, Scheduler as DiffusionScheduler, SlgParams,
+};
 
 use crate::base::error::CoreError;
 use crate::base::types::{Payload, StreamChunk};
@@ -16,9 +22,8 @@ use crate::internal::dispatch::ResolvedDriver;
 use crate::model::{ModelFamily, ModelSpec};
 use slab_types::{
     AudioTranscriptionOpOptions, CandleDiffusionLoadConfig, CandleLlamaLoadConfig,
-    CandleWhisperLoadConfig, DiffusionImageRequest, DiffusionImageResponse,
-    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
-    TextGenerationOpOptions,
+    CandleWhisperLoadConfig, DiffusionImageRequest, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
+    OnnxLoadConfig, TextGenerationOpOptions,
 };
 
 pub(crate) fn encode_load_payload(
@@ -50,13 +55,9 @@ fn encode_ggml_whisper_load_payload(spec: &ModelSpec) -> Result<Payload, CoreErr
 }
 
 fn encode_ggml_diffusion_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
-    Ok(Payload::typed(GgmlDiffusionLoadConfig {
-        model_path: primary_model_path_buf(spec)?,
-        diffusion_model_path: artifact_or_option_path(
-            spec,
-            "diffusion_model",
-            "diffusion_model_path",
-        ),
+    Ok(Payload::typed(DiffusionContextParams {
+        model_path: Some(primary_model_path_buf(spec)?),
+        diffusion_model_path: artifact_or_option_path(spec, "diffusion_model", "diffusion_model_path"),
         vae_path: artifact_or_option_path(spec, "vae", "vae_path"),
         taesd_path: artifact_or_option_path(spec, "taesd", "taesd_path"),
         clip_l_path: artifact_or_option_path(spec, "clip_l", "clip_l_path"),
@@ -64,12 +65,13 @@ fn encode_ggml_diffusion_load_payload(spec: &ModelSpec) -> Result<Payload, CoreE
         t5xxl_path: artifact_or_option_path(spec, "t5xxl", "t5xxl_path"),
         clip_vision_path: artifact_or_option_path(spec, "clip_vision", "clip_vision_path"),
         control_net_path: artifact_or_option_path(spec, "control_net", "control_net_path"),
-        flash_attn: bool_option(spec, "flash_attn").unwrap_or(false),
+        flash_attn: bool_option(spec, "flash_attn"),
         vae_device: optional_nonempty_string_option(spec, "vae_device"),
         clip_device: optional_nonempty_string_option(spec, "clip_device"),
-        offload_params_to_cpu: bool_option(spec, "offload_params_to_cpu").unwrap_or(false),
-        enable_mmap: bool_option(spec, "enable_mmap").unwrap_or(false),
+        offload_params_to_cpu: bool_option(spec, "offload_params_to_cpu"),
+        enable_mmap: bool_option(spec, "enable_mmap"),
         n_threads: optional_nonzero_i32_option(spec, "n_threads"),
+        ..Default::default()
     }))
 }
 
@@ -250,24 +252,27 @@ pub(crate) fn decode_audio_transcription_response(
 
 pub(crate) fn encode_image_generation_request(
     request: &ImageGenerationRequest,
-    resolved: &ResolvedDriver,
+    _resolved: &ResolvedDriver,
 ) -> Result<(Payload, Payload), CoreError> {
-    let input = build_diffusion_image_request(request, resolved);
+    let input = build_diffusion_img_params(request)?;
     Ok((Payload::typed(input), Payload::None))
 }
 
 pub(crate) fn decode_image_generation_response(
     payload: Payload,
 ) -> Result<ImageGenerationResponse, CoreError> {
-    let response: DiffusionImageResponse =
+    let response: Vec<DiffusionImage> =
         payload.to_typed().map_err(|error| CoreError::ResultDecodeFailed {
             task_kind: "image_generation".to_owned(),
-            message: format!("invalid typed diffusion image response: {error}"),
+            message: format!("invalid typed diffusion image result: {error}"),
         })?;
 
     Ok(ImageGenerationResponse {
-        images: response.images.into_iter().map(|image| image.bytes).collect(),
-        metadata: response.metadata,
+        images: response
+            .iter()
+            .map(diffusion_image_to_png_bytes)
+            .collect::<Result<Vec<_>, CoreError>>()?,
+        metadata: Default::default(),
     })
 }
 
@@ -327,6 +332,67 @@ fn primary_model_path_buf(spec: &ModelSpec) -> Result<PathBuf, CoreError> {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+fn raw_image_input_to_diffusion_image(
+    image: &slab_types::RawImageInput,
+) -> Result<DiffusionImage, CoreError> {
+    if image.channels == 0 {
+        return Err(diffusion_param_error(
+            "image_generation",
+            "raw image input channels must be >= 1",
+        ));
+    }
+
+    Ok(DiffusionImage {
+        width: image.width,
+        height: image.height,
+        channel: u32::from(image.channels),
+        data: image.data.clone(),
+    })
+}
+
+fn diffusion_image_to_png_bytes(image: &DiffusionImage) -> Result<Vec<u8>, CoreError> {
+    let dynamic = match image.channel {
+        3 => image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(
+            image.width,
+            image.height,
+            image.data.clone(),
+        )
+        .map(DynamicImage::ImageRgb8),
+        4 => image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
+            image.width,
+            image.height,
+            image.data.clone(),
+        )
+        .map(DynamicImage::ImageRgba8),
+        other => {
+            return Err(CoreError::ResultDecodeFailed {
+                task_kind: "image_generation".to_owned(),
+                message: format!("unsupported diffusion image channel count: {other}"),
+            });
+        }
+    }
+    .ok_or_else(|| CoreError::ResultDecodeFailed {
+        task_kind: "image_generation".to_owned(),
+        message: format!(
+            "invalid raw diffusion image buffer for {}x{}x{}",
+            image.width, image.height, image.channel
+        ),
+    })?;
+
+    let mut png_bytes = Vec::new();
+    dynamic
+        .write_to(&mut std::io::Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+        .map_err(|error| CoreError::ResultDecodeFailed {
+            task_kind: "image_generation".to_owned(),
+            message: format!("failed to encode diffusion image as PNG: {error}"),
+        })?;
+    Ok(png_bytes)
+}
+
+fn diffusion_param_error(task_kind: &str, message: impl Into<String>) -> CoreError {
+    CoreError::ResultDecodeFailed { task_kind: task_kind.to_owned(), message: message.into() }
 }
 
 fn artifact_or_option(spec: &ModelSpec, artifact: &str, option: &str) -> Option<String> {
@@ -410,19 +476,78 @@ fn optional_nonzero_u32_option(spec: &ModelSpec, key: &str) -> Result<Option<u32
     }
 }
 
-fn build_diffusion_image_request(
-    request: &ImageGenerationRequest,
-    resolved: &ResolvedDriver,
-) -> DiffusionImageRequest {
-    let mut diffusion = DiffusionImageRequest {
+pub(crate) fn diffusion_image_request_to_params(
+    request: &DiffusionImageRequest,
+) -> Result<DiffusionImgParams, CoreError> {
+    let sample_method = request
+        .sample_method
+        .as_deref()
+        .map(DiffusionSampleMethod::from_str)
+        .transpose()
+        .map_err(|message| diffusion_param_error("image_generation", message))?;
+    let scheduler = request
+        .scheduler
+        .as_deref()
+        .map(DiffusionScheduler::from_str)
+        .transpose()
+        .map_err(|message| diffusion_param_error("image_generation", message))?;
+
+    if request.count < 1 {
+        return Err(diffusion_param_error("image_generation", "count must be >= 1"));
+    }
+    if request.width < 1 {
+        return Err(diffusion_param_error("image_generation", "width must be >= 1"));
+    }
+    if request.height < 1 {
+        return Err(diffusion_param_error("image_generation", "height must be >= 1"));
+    }
+    if let Some(steps) = request.steps
+        && steps < 1
+    {
+        return Err(diffusion_param_error("image_generation", "steps must be >= 1"));
+    }
+
+    let mut sample_params = DiffusionSampleParams::default();
+    if request.cfg_scale.is_some() || request.guidance.is_some() {
+        let cfg_scale = request.cfg_scale.or(request.guidance).unwrap_or_default();
+        let distilled_guidance = request.guidance.or(request.cfg_scale).unwrap_or_default();
+        sample_params.guidance = Some(DiffusionGuidanceParams {
+            txt_cfg: cfg_scale,
+            img_cfg: cfg_scale,
+            distilled_guidance,
+            slg: SlgParams::default(),
+        });
+    }
+    sample_params.scheduler = scheduler;
+    sample_params.sample_method = sample_method;
+    sample_params.sample_steps = request.steps;
+    sample_params.eta = request.eta;
+
+    Ok(DiffusionImgParams {
+        prompt: Some(request.prompt.clone()),
+        negative_prompt: request.negative_prompt.clone(),
+        clip_skip: request.clip_skip,
+        init_image: request.init_image.as_ref().map(raw_image_input_to_diffusion_image).transpose()?,
+        width: Some(request.width),
+        height: Some(request.height),
+        sample_params: (sample_params != DiffusionSampleParams::default()).then_some(sample_params),
+        strength: request.strength,
+        seed: request.seed,
+        batch_count: Some(request.count),
+        ..Default::default()
+    })
+}
+
+fn build_diffusion_img_params(request: &ImageGenerationRequest) -> Result<DiffusionImgParams, CoreError> {
+    diffusion_image_request_to_params(&DiffusionImageRequest {
         prompt: request.prompt.clone(),
         negative_prompt: request.negative_prompt.clone(),
-        count: request.count.max(1),
-        width: request.width.max(1),
-        height: request.height.max(1),
+        count: request.count,
+        width: request.width,
+        height: request.height,
         cfg_scale: request.cfg_scale,
         guidance: request.guidance,
-        steps: request.steps.map(|steps| steps.max(1)),
+        steps: request.steps,
         seed: request.seed,
         sample_method: request.sample_method.clone(),
         scheduler: request.scheduler.clone(),
@@ -430,26 +555,8 @@ fn build_diffusion_image_request(
         strength: request.strength,
         eta: request.eta,
         init_image: request.init_image.clone(),
-        options: Default::default(),
-    };
-
-    match resolved.driver_id.as_str() {
-        "candle.diffusion" => {
-            if diffusion.cfg_scale.is_none() {
-                diffusion.cfg_scale = request.guidance;
-            }
-        }
-        _ => {
-            if diffusion.cfg_scale.is_none() {
-                diffusion.cfg_scale = request.guidance;
-            }
-            if diffusion.guidance.is_none() {
-                diffusion.guidance = request.guidance;
-            }
-        }
-    }
-
-    diffusion
+        options: request.options.clone(),
+    })
 }
 
 fn encode_image_tensor(image_bytes: &[u8], input_name: &str) -> Result<Value, CoreError> {
@@ -526,15 +633,18 @@ fn decode_embedding_tensor(value: &Value, output_name: &str) -> Result<Vec<f32>,
 mod tests {
     use super::*;
     use crate::model::ModelSource;
+    use image::GenericImageView;
     use serde_json::json;
+    use slab_diffusion::{
+        ContextParams as DiffusionContextParams, Image as DiffusionImage, ImgParams as DiffusionImgParams,
+    };
     use slab_types::chat::{ConversationMessage, ConversationMessageContent};
     use slab_types::runtime::Capability;
     use slab_types::{
         AudioTranscriptionOpOptions, CandleDiffusionLoadConfig, CandleLlamaLoadConfig,
-        CandleWhisperLoadConfig, DiffusionImageRequest, DiffusionImageResponse, GeneratedImage,
-        GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
-        RawImageInput, TextGenerationOpOptions, WhisperDecodeOptions, WhisperVadOptions,
-        WhisperVadParams,
+        CandleWhisperLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
+        OnnxLoadConfig, RawImageInput, TextGenerationOpOptions, WhisperDecodeOptions,
+        WhisperVadOptions, WhisperVadParams,
     };
     use std::path::PathBuf;
 
@@ -617,9 +727,9 @@ mod tests {
         )
         .expect("ggml.diffusion encode should succeed");
         let ggml_diffusion = ggml_diffusion
-            .to_typed::<GgmlDiffusionLoadConfig>()
+            .to_typed::<DiffusionContextParams>()
             .expect("ggml.diffusion payload should decode as typed config");
-        assert_eq!(ggml_diffusion.model_path, PathBuf::from("model.gguf"));
+        assert_eq!(ggml_diffusion.model_path, Some(PathBuf::from("model.gguf")));
         assert_eq!(ggml_diffusion.n_threads, Some(6));
         assert_eq!(ggml_diffusion.vae_device.as_deref(), Some("cpu"));
 
@@ -905,22 +1015,57 @@ mod tests {
         assert!(matches!(op_options, Payload::None));
 
         let typed = input
-            .to_typed::<DiffusionImageRequest>()
+            .to_typed::<DiffusionImgParams>()
             .expect("image request should encode as typed diffusion payload");
 
-        assert_eq!(typed.prompt, "generate a cat");
+        assert_eq!(typed.prompt.as_deref(), Some("generate a cat"));
         assert_eq!(typed.negative_prompt.as_deref(), Some("dog"));
-        assert_eq!(typed.count, 2);
-        assert_eq!(typed.width, 256);
-        assert_eq!(typed.height, 128);
-        assert_eq!(typed.cfg_scale, Some(6.0));
-        assert_eq!(typed.guidance, Some(3.5));
-        assert_eq!(typed.sample_method.as_deref(), Some("euler"));
-        assert_eq!(typed.scheduler.as_deref(), Some("karras"));
+        assert_eq!(typed.batch_count, Some(2));
+        assert_eq!(typed.width, Some(256));
+        assert_eq!(typed.height, Some(128));
         assert_eq!(typed.clip_skip, Some(1));
         assert_eq!(typed.strength, Some(0.4));
-        assert_eq!(typed.eta, Some(0.1));
         assert_eq!(typed.init_image.as_ref().map(|image| image.data.clone()), Some(vec![1, 2, 3]));
+        let sample = typed.sample_params.expect("sample params should be present");
+        assert_eq!(sample.sample_steps, Some(4));
+        assert_eq!(sample.sample_method, Some(slab_diffusion::SampleMethod::Euler));
+        assert_eq!(sample.scheduler, Some(slab_diffusion::Scheduler::KARRAS));
+        assert_eq!(sample.eta, Some(0.1));
+        let guidance = sample.guidance.expect("guidance should be present");
+        assert_eq!(guidance.txt_cfg, 6.0);
+        assert_eq!(guidance.img_cfg, 6.0);
+        assert_eq!(guidance.distilled_guidance, 3.5);
+    }
+
+    #[test]
+    fn encode_image_generation_request_rejects_zero_channel_raw_input() {
+        let request = ImageGenerationRequest {
+            prompt: "generate a cat".to_owned(),
+            init_image: Some(RawImageInput {
+                data: vec![1, 2, 3],
+                width: 1,
+                height: 1,
+                channels: 0,
+            }),
+            ..Default::default()
+        };
+        let driver = make_driver(
+            "ggml.diffusion",
+            "diffusion",
+            ModelFamily::Diffusion,
+            Capability::ImageGeneration,
+        );
+
+        let error = encode_image_generation_request(&request, &driver)
+            .expect_err("zero-channel raw image input should be rejected");
+
+        match error {
+            CoreError::ResultDecodeFailed { task_kind, message } => {
+                assert_eq!(task_kind, "image_generation");
+                assert!(message.contains("channels must be >= 1"));
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
     }
 
     #[test]
@@ -940,27 +1085,30 @@ mod tests {
         let (input, _op_options) =
             encode_image_generation_request(&request, &driver).expect("encode should succeed");
         let typed = input
-            .to_typed::<DiffusionImageRequest>()
+            .to_typed::<DiffusionImgParams>()
             .expect("image request should encode as typed diffusion payload");
 
-        assert_eq!(typed.cfg_scale, Some(6.5));
-        assert_eq!(typed.guidance, Some(6.5));
+        let guidance = typed
+            .sample_params
+            .and_then(|sample| sample.guidance)
+            .expect("guidance should be present");
+        assert_eq!(guidance.txt_cfg, 6.5);
+        assert_eq!(guidance.distilled_guidance, 6.5);
     }
 
     #[test]
     fn decode_image_generation_response_accepts_typed_diffusion_response() {
-        let response = decode_image_generation_response(Payload::typed(DiffusionImageResponse {
-            images: vec![GeneratedImage {
-                bytes: b"mock-image".to_vec(),
-                width: 256,
-                height: 256,
-                channels: 3,
-            }],
-            metadata: Default::default(),
-        }))
+        let response = decode_image_generation_response(Payload::typed(vec![DiffusionImage {
+            width: 2,
+            height: 1,
+            channel: 3,
+            data: vec![255, 0, 0, 0, 255, 0],
+        }]))
         .expect("image response should decode");
 
-        assert_eq!(response.images, vec![b"mock-image".to_vec()]);
+        assert_eq!(response.images.len(), 1);
+        let decoded = image::load_from_memory(&response.images[0]).expect("png should decode");
+        assert_eq!(decoded.dimensions(), (2, 1));
     }
 
     #[test]
@@ -971,7 +1119,7 @@ mod tests {
         match error {
             CoreError::ResultDecodeFailed { task_kind, message } => {
                 assert_eq!(task_kind, "image_generation");
-                assert!(message.contains("invalid typed diffusion image response"));
+                assert!(message.contains("invalid typed diffusion image result"));
             }
             other => panic!("unexpected error: {other:?}"),
         }

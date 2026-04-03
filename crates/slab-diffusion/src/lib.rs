@@ -3,6 +3,7 @@ mod error;
 mod params;
 mod upscaler;
 
+use crate::params::InnerContextParams;
 use slab_ggml::GGML;
 use slab_ggml::load_runtime_with_ggml_sidecar;
 use std::ffi::CStr;
@@ -21,22 +22,30 @@ pub use upscaler::UpscalerContext;
 ///
 /// # Example
 /// ```no_run
-/// use slab_diffusion::{Diffusion, ImgParams, SampleMethod};
+/// use std::path::PathBuf;
+///
+/// use slab_diffusion::{ContextParams, Diffusion, ImgParams, SampleMethod, SampleParams};
 ///
 /// let sd = Diffusion::new("/usr/lib").unwrap();
-/// let params = sd.new_context_params();
-/// let ctx = sd.new_context(params).unwrap();
-/// let mut image_params = sd.new_image_params();
-/// image_params.set_width(256);
-/// image_params.set_height(256);
-/// image_params.set_prompt("A lovely cat");
-/// let mut sample_params = sd.new_sample_params();
-/// sample_params.set_sample_steps(15);
-/// sample_params.set_sample_method(SampleMethod::DPM2);
-/// image_params.set_sample_params(sample_params);
-/// let images = ctx.generate_image(
-///     image_params
-/// ).unwrap();
+/// let ctx = sd
+///     .new_context(ContextParams {
+///         model_path: Some(PathBuf::from("model.gguf")),
+///         ..Default::default()
+///     })
+///     .unwrap();
+/// let images = ctx
+///     .generate_image(ImgParams {
+///         prompt: Some("A lovely cat".to_owned()),
+///         width: Some(256),
+///         height: Some(256),
+///         sample_params: Some(SampleParams {
+///             sample_steps: Some(15),
+///             sample_method: Some(SampleMethod::DPM2),
+///             ..Default::default()
+///         }),
+///         ..Default::default()
+///     })
+///     .unwrap();
 /// println!("generated {} image(s)", images.len());
 /// ```
 #[derive(Clone)]
@@ -124,9 +133,9 @@ impl Diffusion {
     /// # Errors
     /// Returns [`DiffusionError::ContextCreationFailed`] when the native
     /// `new_sd_ctx` call returns a null pointer (e.g. invalid model path).
-    pub fn new_context(&self, mut params: ContextParams) -> Result<Context, DiffusionError> {
-        params.sync_backing();
-        let ctx = unsafe { self.lib.new_sd_ctx(&*params.fp) };
+    pub fn new_context(&self, params: ContextParams) -> Result<Context, DiffusionError> {
+        let inner = InnerContextParams::from_canonical(self.lib.as_ref(), &params);
+        let ctx = unsafe { self.lib.new_sd_ctx(&*inner.fp) };
         if ctx.is_null() {
             return Err(DiffusionError::ContextCreationFailed);
         }
@@ -224,20 +233,25 @@ mod tests {
     fn vendored_ffi_serializes_param_structs() {
         let diffusion = load_vendored_diffusion();
 
-        let mut context_params = diffusion.new_context_params();
-        context_params.set_model_path("missing-model.gguf");
-        assert!(context_params.to_str().is_some_and(|text| !text.trim().is_empty()));
+        let context_params = ContextParams {
+            model_path: Some(PathBuf::from("missing-model.gguf")),
+            ..Default::default()
+        };
+        assert!(diffusion
+            .context_params_to_str(&context_params)
+            .is_some_and(|text| !text.trim().is_empty()));
 
-        let mut sample_params = diffusion.new_sample_params();
-        sample_params.set_sample_steps(8);
+        let sample_params = SampleParams { sample_steps: Some(8), ..Default::default() };
         assert!(
             diffusion
                 .sample_params_to_str(&sample_params)
                 .is_some_and(|text| !text.trim().is_empty())
         );
 
-        let mut image_params = diffusion.new_image_params();
-        image_params.set_prompt("test prompt");
+        let image_params = ImgParams {
+            prompt: Some("test prompt".to_owned()),
+            ..Default::default()
+        };
         assert!(
             diffusion
                 .image_params_to_str(&image_params)

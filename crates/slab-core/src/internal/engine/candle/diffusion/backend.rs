@@ -15,9 +15,9 @@
 //!
 use std::sync::Arc;
 
-use slab_types::{
-    CandleDiffusionLoadConfig, DiffusionImageRequest, DiffusionImageResponse, GeneratedImage,
-};
+use image::GenericImageView;
+use slab_diffusion::{Image as DiffusionImage, ImgParams as DiffusionImgParams};
+use slab_types::CandleDiffusionLoadConfig;
 use tokio::sync::broadcast;
 
 use crate::internal::engine::candle::diffusion::adapter::{CandleDiffusionEngine, GenImageParams};
@@ -28,6 +28,70 @@ use crate::internal::scheduler::backend::protocol::{
 use crate::internal::scheduler::backend::runner::spawn_workers;
 use crate::internal::scheduler::types::Payload;
 use slab_core_macros::backend_handler;
+
+fn build_gen_image_params(raw: &DiffusionImgParams) -> Result<(GenImageParams, usize), String> {
+    let prompt = raw.prompt.as_deref().unwrap_or_default().trim();
+    if prompt.is_empty() {
+        return Err("prompt must not be empty".to_owned());
+    }
+
+    let mut params = GenImageParams {
+        prompt: prompt.to_owned(),
+        negative_prompt: raw.negative_prompt.clone().unwrap_or_default(),
+        ..GenImageParams::default()
+    };
+
+    if let Some(width) = raw.width {
+        if width < 1 {
+            return Err("width must be >= 1".to_owned());
+        }
+        params.width = width;
+    }
+    if let Some(height) = raw.height {
+        if height < 1 {
+            return Err("height must be >= 1".to_owned());
+        }
+        params.height = height;
+    }
+    if let Some(seed) = raw.seed {
+        params.seed = u64::try_from(seed).map_err(|_| "seed must be >= 0".to_owned())?;
+    }
+
+    if let Some(sample) = raw.sample_params.as_ref() {
+        if let Some(steps) = sample.sample_steps {
+            if steps < 1 {
+                return Err("sample_steps must be >= 1".to_owned());
+            }
+            params.steps = usize::try_from(steps).map_err(|_| "sample_steps exceeds usize range".to_owned())?;
+        }
+        if let Some(guidance) = sample.guidance.as_ref() {
+            params.cfg_scale = f64::from(guidance.txt_cfg.max(guidance.distilled_guidance));
+        }
+    }
+
+    let count = raw.batch_count.unwrap_or(1);
+    if count < 1 {
+        return Err("batch_count must be >= 1".to_owned());
+    }
+
+    Ok((
+        params,
+        usize::try_from(count).map_err(|_| "batch_count exceeds usize range".to_owned())?,
+    ))
+}
+
+fn decode_png_to_diffusion_image(png_bytes: Vec<u8>) -> Result<DiffusionImage, String> {
+    let image = image::load_from_memory(&png_bytes)
+        .map_err(|error| format!("failed to decode candle diffusion PNG output: {error}"))?;
+    let (width, height) = image.dimensions();
+    let (data, channel) = if image.color().channel_count() == 4 {
+        (image.to_rgba8().into_raw(), 4u32)
+    } else {
+        (image.to_rgb8().into_raw(), 3u32)
+    };
+
+    Ok(DiffusionImage { width, height, channel, data })
+}
 
 // ── Input parameters ──────────────────────────────────────────────────────────
 
@@ -218,7 +282,7 @@ impl CandleDiffusionWorker {
             }
         };
 
-        let raw: DiffusionImageRequest = match input.to_typed() {
+        let raw: DiffusionImgParams = match input.to_typed() {
             Ok(v) => v,
             Err(e) => {
                 let _ = reply_tx
@@ -227,37 +291,30 @@ impl CandleDiffusionWorker {
             }
         };
 
-        if raw.prompt.trim().is_empty() {
-            let _ = reply_tx.send(BackendReply::Error("prompt must not be empty".into()));
-            return;
-        }
-
-        let params = GenImageParams {
-            prompt: raw.prompt,
-            negative_prompt: raw.negative_prompt.unwrap_or_default(),
-            width: raw.width,
-            height: raw.height,
-            steps: raw.steps.unwrap_or(20).max(1) as usize,
-            cfg_scale: f64::from(raw.cfg_scale.or(raw.guidance).unwrap_or(7.5)),
-            seed: raw.seed.and_then(|value| u64::try_from(value).ok()).unwrap_or(42),
+        let (params, count) = match build_gen_image_params(&raw) {
+            Ok(params) => params,
+            Err(error) => {
+                let _ = reply_tx.send(BackendReply::Error(error));
+                return;
+            }
         };
-        let output_width = params.width;
-        let output_height = params.height;
 
-        let result = tokio::task::block_in_place(move || engine.inference(&params));
+        let result = tokio::task::block_in_place(move || {
+            let mut images = Vec::with_capacity(count);
+            for index in 0..count {
+                let mut item = params.clone();
+                if raw.seed.is_some() {
+                    item.seed = item.seed.saturating_add(index as u64);
+                }
+                let png_bytes = engine.inference(&item).map_err(|error| error.to_string())?;
+                images.push(decode_png_to_diffusion_image(png_bytes)?);
+            }
+            Ok::<Vec<DiffusionImage>, String>(images)
+        });
 
         match result {
-            Ok(png_bytes) => {
-                let response = DiffusionImageResponse {
-                    images: vec![GeneratedImage {
-                        bytes: png_bytes,
-                        width: output_width,
-                        height: output_height,
-                        channels: 3,
-                    }],
-                    metadata: Default::default(),
-                };
-                let _ = reply_tx.send(BackendReply::Value(Payload::typed(response)));
+            Ok(images) => {
+                let _ = reply_tx.send(BackendReply::Value(Payload::typed(images)));
             }
             Err(e) => {
                 let _ = reply_tx

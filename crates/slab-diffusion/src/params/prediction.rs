@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 // prediction parameters must keep code order
 #[rustfmt::skip]
 use slab_diffusion_sys::{
@@ -13,7 +15,7 @@ use slab_diffusion_sys::prediction_t;
 
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Prediction {
     Eps = prediction_t_EPS_PRED,
     V = prediction_t_V_PRED,
@@ -27,5 +29,11 @@ pub enum Prediction {
 impl From<Prediction> for prediction_t {
     fn from(value: Prediction) -> Self {
         value as Self
+    }
+}
+
+impl Default for Prediction {
+    fn default() -> Self {
+        Self::Unknown
     }
 }

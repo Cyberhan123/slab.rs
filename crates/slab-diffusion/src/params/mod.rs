@@ -13,8 +13,16 @@ mod support;
 mod vae_tiling;
 mod video_params;
 
+use serde::{Deserialize, Serialize};
+
 pub(crate) use image::owned_image_from_raw;
+pub(crate) use cache::InnerCacheParams;
+pub(crate) use context::InnerContextParams;
 pub(crate) use support::image_view;
+pub(crate) use image::InnerImgParams;
+pub(crate) use pm::InnerPmParams;
+pub(crate) use sampler::InnerSampleParams;
+pub(crate) use video_params::InnerVideoParams;
 
 pub use cache::CacheParams;
 pub use context::ContextParams;
@@ -43,7 +51,7 @@ use slab_diffusion_sys::{
 
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum LogLevel {
     Debug = sd_log_level_t_SD_LOG_DEBUG,
     Info = sd_log_level_t_SD_LOG_INFO,
@@ -70,7 +78,7 @@ use slab_diffusion_sys::{
 
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum RngType {
     Default = rng_type_t_STD_DEFAULT_RNG,
     Cuda = rng_type_t_CUDA_RNG,
@@ -81,6 +89,12 @@ pub enum RngType {
 impl From<RngType> for rng_type_t {
     fn from(value: RngType) -> Self {
         value as Self
+    }
+}
+
+impl Default for RngType {
+    fn default() -> Self {
+        Self::Default
     }
 }
 
@@ -127,7 +141,7 @@ use slab_diffusion_sys::{
 #[allow(non_camel_case_types)]
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
-#[derive(Debug, Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum WeightType {
     F32 = sd_type_t_SD_TYPE_F32,
     F16 = sd_type_t_SD_TYPE_F16,
@@ -167,5 +181,11 @@ pub enum WeightType {
 impl From<WeightType> for sd_type_t {
     fn from(value: WeightType) -> Self {
         value as Self
+    }
+}
+
+impl Default for WeightType {
+    fn default() -> Self {
+        Self::Unknown
     }
 }
