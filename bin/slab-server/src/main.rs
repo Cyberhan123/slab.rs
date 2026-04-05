@@ -22,7 +22,7 @@ use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
 
-use slab_app_core::config::Config;
+use slab_app_core::config::{Config, default_model_config_dir_for_settings_path};
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::PmidService;
 use slab_app_core::infra::db::{AnyStore, TaskStore};
@@ -98,6 +98,25 @@ impl Default for SupervisorArgs {
 
 impl SupervisorArgs {
     fn apply_bootstrap_config(&mut self, cfg: &mut Config) {
+        let previous_settings_path = cfg.settings_path.clone();
+        let previous_default_model_config_dir =
+            default_model_config_dir_for_settings_path(&previous_settings_path);
+
+        if let Some(database_url) = &self.database_url {
+            cfg.database_url = database_url.clone();
+        }
+        if let Some(settings_path) = &self.settings_path {
+            cfg.settings_path = settings_path.clone();
+
+            if self.model_config_dir.is_none()
+                && cfg.model_config_dir == previous_default_model_config_dir
+            {
+                cfg.model_config_dir = default_model_config_dir_for_settings_path(settings_path);
+            }
+        }
+        if let Some(model_config_dir) = &self.model_config_dir {
+            cfg.model_config_dir = model_config_dir.clone();
+        }
         if let Some(log_level) = &self.log_level {
             cfg.log_level = log_level.clone();
         }
@@ -679,6 +698,7 @@ async fn shutdown_signal(listen_stdin: bool) {
 #[cfg(test)]
 mod tests {
     use super::SupervisorArgs;
+    use slab_app_core::config::{Config, default_model_config_dir_for_settings_path};
     use std::path::PathBuf;
 
     #[test]
@@ -690,6 +710,48 @@ mod tests {
         };
 
         assert!(args.validate_no_legacy_launch_overrides().is_ok());
+    }
+
+    #[test]
+    fn bootstrap_args_apply_cli_overrides_to_runtime_config() {
+        let mut args = SupervisorArgs {
+            database_url: Some("sqlite:///tmp/api.db?mode=rwc".to_owned()),
+            settings_path: Some(PathBuf::from("D:/Slab/api-settings.json")),
+            ..SupervisorArgs::default()
+        };
+        let mut cfg = Config::from_env();
+
+        cfg.database_url = "sqlite:///tmp/default.db?mode=rwc".to_owned();
+        cfg.settings_path = PathBuf::from("C:/Slab/settings.json");
+        cfg.model_config_dir = default_model_config_dir_for_settings_path(&cfg.settings_path);
+
+        args.apply_bootstrap_config(&mut cfg);
+
+        assert_eq!(cfg.database_url, "sqlite:///tmp/api.db?mode=rwc");
+        assert_eq!(cfg.settings_path, PathBuf::from("D:/Slab/api-settings.json"));
+        assert_eq!(cfg.model_config_dir, PathBuf::from("D:/Slab/models"));
+        assert_eq!(
+            args.model_config_dir,
+            Some(PathBuf::from("D:/Slab/models"))
+        );
+    }
+
+    #[test]
+    fn bootstrap_args_preserve_explicit_model_config_override() {
+        let mut args = SupervisorArgs {
+            settings_path: Some(PathBuf::from("D:/Slab/api-settings.json")),
+            model_config_dir: Some(PathBuf::from("E:/custom-models")),
+            ..SupervisorArgs::default()
+        };
+        let mut cfg = Config::from_env();
+
+        cfg.settings_path = PathBuf::from("C:/Slab/settings.json");
+        cfg.model_config_dir = default_model_config_dir_for_settings_path(&cfg.settings_path);
+
+        args.apply_bootstrap_config(&mut cfg);
+
+        assert_eq!(cfg.settings_path, PathBuf::from("D:/Slab/api-settings.json"));
+        assert_eq!(cfg.model_config_dir, PathBuf::from("E:/custom-models"));
     }
 
     #[test]

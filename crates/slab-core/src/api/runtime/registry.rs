@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use slab_model_pack::ModelPackRuntimeBridge;
+
 use crate::base::error::CoreError;
 use crate::internal::dispatch::DriverResolver;
 use crate::internal::scheduler::orchestrator::Orchestrator;
@@ -31,6 +33,13 @@ impl Runtime {
 
     pub fn pipeline(&self, spec: ModelSpec) -> Result<Pipeline, CoreError> {
         Pipeline::new(self.clone(), spec)
+    }
+
+    pub fn pipeline_from_model_pack(
+        &self,
+        bridge: ModelPackRuntimeBridge,
+    ) -> Result<Pipeline, CoreError> {
+        Pipeline::new_with_model_pack_bridge(self.clone(), bridge)
     }
 
     pub fn drivers(&self) -> &DriversConfig {

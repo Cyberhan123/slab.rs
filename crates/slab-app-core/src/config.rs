@@ -97,6 +97,15 @@ pub struct Config {
 impl Config {
     /// Build [`Config`] from environment variables, falling back to defaults.
     pub fn from_env() -> Self {
+        let settings_path = std::env::var("SLAB_SETTINGS_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(default_settings_path);
+        let model_config_dir = std::env::var("SLAB_MODEL_CONFIG_DIR")
+            .ok()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| default_model_config_dir_for_settings_path(&settings_path));
+
         Self {
             bind_address: env_or("SLAB_BIND", "localhost:3000"),
             database_url: env_or("SLAB_DATABASE_URL", "sqlite://slab.db?mode=rwc"),
@@ -121,14 +130,8 @@ impl Config {
             diffusion_grpc_endpoint: std::env::var("SLAB_DIFFUSION_GRPC_ENDPOINT").ok(),
             lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(PathBuf::from),
             session_state_dir: env_or("SLAB_SESSION_STATE_DIR", "./tmp/slab-sessions"),
-            settings_path: std::env::var("SLAB_SETTINGS_PATH")
-                .ok()
-                .map(PathBuf::from)
-                .unwrap_or_else(default_settings_path),
-            model_config_dir: std::env::var("SLAB_MODEL_CONFIG_DIR")
-                .ok()
-                .map(PathBuf::from)
-                .unwrap_or_else(default_model_config_dir),
+            settings_path,
+            model_config_dir,
         }
     }
 }

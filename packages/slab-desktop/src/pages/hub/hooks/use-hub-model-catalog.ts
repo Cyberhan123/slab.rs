@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import api, { getErrorMessage } from '@/lib/api';
+import { tauriAwareFetch } from '@/lib/api/tauri-transport';
 import { inferWhisperVadModel, toCatalogModelList, type CatalogModelStatus } from '@/lib/api/models';
 import { SERVER_BASE_URL } from '@/lib/config';
 
@@ -156,10 +157,9 @@ export function useHubModelCatalog() {
 
     setCreateModelPending(true);
     try {
-      const payload = await readJsonFile(createFile);
-      const created = await importModelConfig(payload);
+      const created = await importModelFile(createFile);
 
-      toast.success('Model config imported.', {
+      toast.success('Model imported.', {
         description:
           typeof created?.display_name === 'string' && created.display_name.trim()
             ? created.display_name
@@ -171,7 +171,7 @@ export function useHubModelCatalog() {
       setCreateOpen(false);
       void refetch();
     } catch (createError) {
-      toast.error('Failed to import model config.', {
+      toast.error('Failed to import model.', {
         description: getErrorMessage(createError),
       });
     } finally {
@@ -283,13 +283,47 @@ async function readJsonFile(file: File): Promise<unknown> {
   }
 }
 
+function isModelPackFile(file: File): boolean {
+  return file.name.trim().toLowerCase().endsWith('.slab');
+}
+
+async function importModelFile(file: File): Promise<ImportedModelResponse | null> {
+  if (isModelPackFile(file)) {
+    return importModelPack(file);
+  }
+
+  const payload = await readJsonFile(file);
+  return importModelConfig(payload);
+}
+
 async function importModelConfig(payload: unknown): Promise<ImportedModelResponse | null> {
-  const response = await fetch(new URL('/v1/models/import', `${SERVER_BASE_URL}/`), {
+  const response = await tauriAwareFetch(new URL('/v1/models/import', `${SERVER_BASE_URL}/`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(payload),
+  });
+
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(parseApiError(raw, response.status));
+  }
+
+  if (!raw.trim()) {
+    return null;
+  }
+
+  return parseImportedModelResponse(raw);
+}
+
+async function importModelPack(file: File): Promise<ImportedModelResponse | null> {
+  const body = new FormData();
+  body.set('file', file, file.name);
+
+  const response = await tauriAwareFetch(new URL('/v1/models/import-pack', `${SERVER_BASE_URL}/`), {
+    method: 'POST',
+    body,
   });
 
   const raw = await response.text();

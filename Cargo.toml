@@ -7,6 +7,7 @@ members = [
     "crates/slab-proto",
     "crates/slab-agent",
     "crates/slab-build-utils",
+    "crates/slab-model-pack",
     "crates/slab-utils",
     "crates/slab-diffusion", 
     "crates/slab-diffusion-sys",
@@ -43,6 +44,7 @@ slab-runtime-core = { path = "./crates/slab-core", package = "slab-runtime-core"
 slab-app-core     = { path = "./crates/slab-app-core", package = "slab-app-core", version = "0.0.1" }
 slab-agent        = { path = "./crates/slab-agent", package = "slab-agent", version = "0.0.1" }
 slab-proto        = { path = "./crates/slab-proto", package = "slab-proto", version = "0.0.1" }
+slab-model-pack   = { path = "./crates/slab-model-pack", package = "slab-model-pack", version = "0.0.1" }
 slab-types        = { path = "./crates/slab-types", package = "slab-types", version = "0.0.1" }
 slab-diffusion-sys = { path = "./crates/slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.0.1" }
 slab-diffusion    = { path = "./crates/slab-diffusion", package = "slab-diffusion", version = "0.0.1" }

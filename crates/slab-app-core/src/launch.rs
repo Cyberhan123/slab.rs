@@ -313,13 +313,6 @@ fn resolve_managed_launch_spec_v2(
         .or_else(|| host_paths.runtime_lib_dir_fallback.clone());
     let enabled_backends = enabled_ggml_backends_v2(settings);
 
-    if enabled_backends.is_empty() {
-        return Err(AppCoreError::Internal(
-            "runtime.ggml.backends.* disables every managed GGML backend; enable at least one backend"
-                .to_owned(),
-        ));
-    }
-
     let mut children = Vec::new();
     let mut endpoints = ResolvedRuntimeEndpoints::default();
     let mut extra_dirs = BTreeSet::new();
@@ -409,13 +402,6 @@ fn resolve_external_launch_spec_v2(
 ) -> Result<ResolvedLaunchSpec, AppCoreError> {
     let transport = settings.runtime.transport;
     let enabled_backends = enabled_ggml_backends_v2(settings);
-
-    if enabled_backends.is_empty() {
-        return Err(AppCoreError::Internal(
-            "runtime.ggml.backends.* disables every external GGML backend; enable at least one backend"
-                .to_owned(),
-        ));
-    }
 
     let mut endpoints = ResolvedRuntimeEndpoints::default();
     let single_backend = enabled_backends.len() == 1;
@@ -991,6 +977,25 @@ mod tests {
     }
 
     #[test]
+    fn v2_managed_planner_allows_gateway_only_startup() {
+        let mut settings = SettingsDocumentV2::default();
+        settings.runtime.ggml.backends.llama.enabled = false;
+        settings.runtime.ggml.backends.whisper.enabled = false;
+        settings.runtime.ggml.backends.diffusion.enabled = false;
+
+        let spec = resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap();
+
+        assert!(spec.children.is_empty());
+        assert!(spec.endpoints.llama.is_none());
+        assert!(spec.endpoints.whisper.is_none());
+        assert!(spec.endpoints.diffusion.is_none());
+        assert_eq!(
+            spec.gateway.as_ref().map(|gateway| gateway.bind_address.as_str()),
+            Some("127.0.0.1:3000")
+        );
+    }
+
+    #[test]
     fn v2_external_planner_requires_explicit_endpoints() {
         let mut settings = SettingsDocumentV2::default();
         settings.runtime.mode = RuntimeMode::ExternalEndpoints;
@@ -1019,5 +1024,21 @@ mod tests {
         assert_eq!(spec.endpoints.llama.as_deref(), Some("127.0.0.1:9101"));
         assert_eq!(spec.endpoints.whisper.as_deref(), Some("127.0.0.1:9102"));
         assert_eq!(spec.endpoints.diffusion.as_deref(), Some("127.0.0.1:9103"));
+    }
+
+    #[test]
+    fn v2_external_planner_allows_zero_enabled_backends() {
+        let mut settings = SettingsDocumentV2::default();
+        settings.runtime.mode = RuntimeMode::ExternalEndpoints;
+        settings.runtime.ggml.backends.llama.enabled = false;
+        settings.runtime.ggml.backends.whisper.enabled = false;
+        settings.runtime.ggml.backends.diffusion.enabled = false;
+
+        let spec = resolve_launch_spec_v2(&settings, LaunchProfile::Server, &host_paths()).unwrap();
+
+        assert!(spec.children.is_empty());
+        assert!(spec.endpoints.llama.is_none());
+        assert!(spec.endpoints.whisper.is_none());
+        assert!(spec.endpoints.diffusion.is_none());
     }
 }

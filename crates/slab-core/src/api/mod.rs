@@ -11,6 +11,7 @@ pub use crate::inference::{
     TextGenerationChunk, TextGenerationRequest, TextGenerationResponse,
 };
 pub use crate::model::{Capability, DriverHints, ModelFamily, ModelSource, ModelSpec};
+pub use codec::encode_model_pack_load_payload;
 pub use pipeline::Pipeline;
 pub use runtime::{DriversConfig, Runtime, RuntimeBuilder};
 pub use task::{TaskHandle, TaskSnapshot, TaskState};

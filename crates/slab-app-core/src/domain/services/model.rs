@@ -18,6 +18,7 @@ use crate::domain::models::{
 use crate::error::AppCoreError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
 use crate::infra::model_configs;
+use crate::infra::model_packs;
 use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::{LoadedModelSpec, build_model_load_request};
 
@@ -28,6 +29,7 @@ struct ResolvedModelLoadTarget {
     backend_id: RuntimeBackendId,
     model_path: String,
     model_id: Option<String>,
+    pack_load_defaults: Option<slab_model_pack::ModelPackLoadDefaults>,
 }
 
 #[derive(Clone)]
@@ -53,6 +55,28 @@ impl ModelService {
         req: CreateModelCommand,
     ) -> Result<UnifiedModel, AppCoreError> {
         self.persist_model_definition(req).await
+    }
+
+    pub async fn import_model_pack_bytes(
+        &self,
+        bytes: &[u8],
+    ) -> Result<UnifiedModel, AppCoreError> {
+        let summary = model_packs::read_model_pack_summary_from_bytes(bytes)?;
+        let pack_path = model_packs::model_pack_file_path(self.model_config_dir(), &summary.id);
+        let command = model_packs::build_model_command_from_pack_bytes(&pack_path, bytes)?;
+        let pack_existed = pack_path.exists();
+
+        model_packs::write_model_pack(self.model_config_dir(), &summary.id, bytes)?;
+
+        match self.persist_model_definition_with_options(command, false).await {
+            Ok(model) => Ok(model),
+            Err(error) => {
+                if !pack_existed {
+                    let _ = model_packs::delete_model_pack_at_path(&pack_path);
+                }
+                Err(error)
+            }
+        }
     }
 
     pub async fn get_model(&self, id: &str) -> Result<UnifiedModel, AppCoreError> {
@@ -94,12 +118,26 @@ impl ModelService {
     }
 
     pub async fn delete_model(&self, id: &str) -> Result<DeletedModelView, AppCoreError> {
-        let exists = self.model_state.store().get_model(id).await?;
-        if exists.is_none() {
-            return Err(AppCoreError::NotFound(format!("model {id} not found")));
-        }
+        let record = self
+            .model_state
+            .store()
+            .get_model(id)
+            .await?
+            .ok_or_else(|| AppCoreError::NotFound(format!("model {id} not found")))?;
+        let model: UnifiedModel =
+            record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
 
         let _ = model_configs::delete_model_config(self.model_config_dir(), id)?;
+        let _ = model_packs::delete_model_pack(self.model_config_dir(), id)?;
+        if let Some(local_path) = model.spec.local_path.as_deref()
+            && model_packs::is_model_pack_path(local_path)
+        {
+            let pack_path = std::path::Path::new(local_path);
+            if pack_path.starts_with(self.model_config_dir()) {
+                let _ = model_packs::delete_model_pack_at_path(pack_path)?;
+            }
+        }
+
         self.model_state.store().delete_model(id).await?;
         Ok(DeletedModelView { id: id.to_owned(), status: "deleted".to_owned() })
     }
@@ -172,9 +210,12 @@ impl ModelService {
     pub async fn sync_model_configs_from_disk(&self) -> Result<(), AppCoreError> {
         let config_dir = self.model_config_dir().to_path_buf();
         let paths = model_configs::list_model_config_paths(&config_dir)?;
+        let pack_paths = model_packs::list_model_pack_paths(&config_dir)?;
         if paths.is_empty() {
-            info!(path = %config_dir.display(), "no model config files found during startup");
-            return Ok(());
+            if pack_paths.is_empty() {
+                info!(path = %config_dir.display(), "no model config files found during startup");
+                return Ok(());
+            }
         }
 
         let mut imported = 0usize;
@@ -194,6 +235,26 @@ impl ModelService {
                 }
                 Err(error) => {
                     warn!(path = %path.display(), error = %error, "failed to initialize model from config file");
+                }
+            }
+        }
+
+        for path in pack_paths {
+            let command = match model_packs::build_model_command_from_pack(&path) {
+                Ok(command) => command,
+                Err(error) => {
+                    warn!(path = %path.display(), error = %error, "skipping invalid model pack file");
+                    continue;
+                }
+            };
+
+            match self.persist_model_definition_with_options(command, false).await {
+                Ok(model) => {
+                    imported += 1;
+                    info!(model_id = %model.id, path = %path.display(), "initialized model from .slab pack");
+                }
+                Err(error) => {
+                    warn!(path = %path.display(), error = %error, "failed to initialize model from .slab pack");
                 }
             }
         }
@@ -415,8 +476,18 @@ impl ModelService {
         &self,
         req: CreateModelCommand,
     ) -> Result<UnifiedModel, AppCoreError> {
+        self.persist_model_definition_with_options(req, true).await
+    }
+
+    async fn persist_model_definition_with_options(
+        &self,
+        req: CreateModelCommand,
+        write_legacy_config: bool,
+    ) -> Result<UnifiedModel, AppCoreError> {
         let model = self.build_model_definition(req).await?;
-        self.write_model_config(&model)?;
+        if write_legacy_config {
+            self.write_model_config(&model)?;
+        }
 
         let record = model_to_record(&model)?;
         self.model_state.store().upsert_model(record).await?;
@@ -731,10 +802,37 @@ async fn load_model_with_state(
     validate_existing_model_file(&resolved_target.model_path)?;
 
     let (_, channel) = resolve_backend_channel(&state, resolved_target.backend_id)?;
-    let (num_workers, worker_source) =
-        resolve_model_workers(&state, resolved_target.backend_id, command.num_workers).await?;
-    let (context_length, context_source) =
-        resolve_llama_context_length(&state, resolved_target.backend_id).await?;
+    let (num_workers, worker_source) = if let Some(workers) = command.num_workers {
+        if workers == 0 {
+            return Err(AppCoreError::BadRequest("num_workers must be at least 1".into()));
+        }
+        (workers, "request")
+    } else if let Some(workers) = resolved_target
+        .pack_load_defaults
+        .as_ref()
+        .and_then(|defaults| defaults.num_workers)
+    {
+        (workers, "model_pack")
+    } else {
+        resolve_model_workers(&state, resolved_target.backend_id, None).await?
+    };
+    let (context_length, context_source) = if let Some(context_length) = resolved_target
+        .pack_load_defaults
+        .as_ref()
+        .and_then(|defaults| defaults.context_length)
+    {
+        (context_length, "model_pack")
+    } else {
+        resolve_llama_context_length(&state, resolved_target.backend_id).await?
+    };
+    let diffusion = if let Some(defaults) = resolved_target.pack_load_defaults.as_ref() {
+        model_packs::merge_diffusion_load_defaults(
+            defaults.diffusion.clone(),
+            resolve_diffusion_context_params(&state, resolved_target.backend_id).await?,
+        )
+    } else {
+        resolve_diffusion_context_params(&state, resolved_target.backend_id).await?
+    };
 
     info!(
         backend = %resolved_target.backend_id,
@@ -751,7 +849,11 @@ async fn load_model_with_state(
         model_path: PathBuf::from(resolved_target.model_path.clone()),
         num_workers,
         context_length: (context_length > 0).then_some(context_length),
-        diffusion: resolve_diffusion_context_params(&state, resolved_target.backend_id).await?,
+        chat_template: resolved_target
+            .pack_load_defaults
+            .as_ref()
+            .and_then(|defaults| defaults.chat_template.clone()),
+        diffusion,
     };
     let grpc_req = build_model_load_request(&load_spec);
     let response = rpc::client::load_model(channel, resolved_target.backend_id, grpc_req)
@@ -772,7 +874,27 @@ async fn resolve_model_load_target(
         let model = resolve_local_catalog_model(state, model_id).await?;
         let backend_id = resolve_local_backend_from_model(&model)?;
         let model_path = resolve_local_model_path(&model)?;
-        return Ok(ResolvedModelLoadTarget { backend_id, model_path, model_id: Some(model.id) });
+        if model_packs::is_model_pack_path(&model_path) {
+            let pack_target = model_packs::build_model_pack_load_target(std::path::Path::new(&model_path))?;
+            if pack_target.backend_id != backend_id {
+                return Err(AppCoreError::BadRequest(format!(
+                    "model '{}' pack backend '{}' does not match catalog provider backend '{}'",
+                    model.id, pack_target.backend_id, backend_id
+                )));
+            }
+            return Ok(ResolvedModelLoadTarget {
+                backend_id,
+                model_path: pack_target.model_path,
+                model_id: Some(model.id),
+                pack_load_defaults: Some(pack_target.load_defaults),
+            });
+        }
+        return Ok(ResolvedModelLoadTarget {
+            backend_id,
+            model_path,
+            model_id: Some(model.id),
+            pack_load_defaults: None,
+        });
     }
 
     let backend_id = command
@@ -797,7 +919,28 @@ async fn resolve_model_load_target(
         .map_err(|_| AppCoreError::BadRequest(format!("unknown backend: {backend_id}")))?;
     let (backend_id, _) = resolve_backend_channel(state, backend_id)?;
 
-    Ok(ResolvedModelLoadTarget { backend_id, model_path, model_id: None })
+    if model_packs::is_model_pack_path(&model_path) {
+        let pack_target = model_packs::build_model_pack_load_target(std::path::Path::new(&model_path))?;
+        if pack_target.backend_id != backend_id {
+            return Err(AppCoreError::BadRequest(format!(
+                "model pack backend '{}' does not match requested backend '{}'",
+                pack_target.backend_id, backend_id
+            )));
+        }
+        return Ok(ResolvedModelLoadTarget {
+            backend_id,
+            model_path: pack_target.model_path,
+            model_id: None,
+            pack_load_defaults: Some(pack_target.load_defaults),
+        });
+    }
+
+    Ok(ResolvedModelLoadTarget {
+        backend_id,
+        model_path,
+        model_id: None,
+        pack_load_defaults: None,
+    })
 }
 
 async fn resolve_unload_backend(

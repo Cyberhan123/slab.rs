@@ -17,6 +17,7 @@ axum = ["dep:axum"]
 slab-runtime-core = { workspace = true }
 slab-agent        = { workspace = true }
 slab-proto        = { workspace = true }
+slab-model-pack   = { workspace = true }
 slab-types        = { workspace = true }
 slab-libfetch     = { workspace = true }
 hf-hub            = { workspace = true }

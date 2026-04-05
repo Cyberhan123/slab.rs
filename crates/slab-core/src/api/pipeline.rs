@@ -2,6 +2,7 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use futures::stream::BoxStream;
+use slab_model_pack::ModelPackRuntimeBridge;
 use slab_diffusion::{Image as DiffusionImage, ImgParams as DiffusionImgParams};
 use tokio::sync::Mutex;
 
@@ -23,7 +24,8 @@ use super::codec::{
     decode_image_generation_response, decode_text_generation_chunk,
     decode_text_generation_response, encode_audio_transcription_options,
     encode_image_embedding_request, encode_image_generation_request, encode_load_payload,
-    encode_text_generation_request, image_embedding_input_name, image_embedding_output_name,
+    encode_model_pack_load_payload, encode_text_generation_request, image_embedding_input_name,
+    image_embedding_output_name,
 };
 use super::runtime::Runtime;
 use super::task::{TaskCodec, TaskHandle};
@@ -32,6 +34,7 @@ use super::task::{TaskCodec, TaskHandle};
 pub struct Pipeline {
     runtime: Runtime,
     spec: Arc<ModelSpec>,
+    pack_bridge: Option<Arc<ModelPackRuntimeBridge>>,
     deployment: Arc<Mutex<Option<LoadedDeployment>>>,
 }
 
@@ -42,11 +45,38 @@ struct LoadedDeployment {
 
 impl Pipeline {
     pub(crate) fn new(runtime: Runtime, spec: ModelSpec) -> Result<Self, CoreError> {
-        Ok(Self { runtime, spec: Arc::new(spec), deployment: Arc::new(Mutex::new(None)) })
+        Ok(Self {
+            runtime,
+            spec: Arc::new(spec),
+            pack_bridge: None,
+            deployment: Arc::new(Mutex::new(None)),
+        })
+    }
+
+    pub(crate) fn new_with_model_pack_bridge(
+        runtime: Runtime,
+        bridge: ModelPackRuntimeBridge,
+    ) -> Result<Self, CoreError> {
+        let mut spec = bridge.model_spec.clone();
+        let preferred_driver = bridge.backend.canonical_id().to_owned();
+        if !spec.driver_hints.prefer_drivers.iter().any(|driver| driver == &preferred_driver) {
+            spec.driver_hints.prefer_drivers.insert(0, preferred_driver);
+        }
+
+        Ok(Self {
+            runtime,
+            spec: Arc::new(spec),
+            pack_bridge: Some(Arc::new(bridge)),
+            deployment: Arc::new(Mutex::new(None)),
+        })
     }
 
     pub fn model(&self) -> &ModelSpec {
         self.spec.as_ref()
+    }
+
+    pub fn model_pack_bridge(&self) -> Option<&ModelPackRuntimeBridge> {
+        self.pack_bridge.as_deref()
     }
 
     pub fn capability(&self) -> Capability {
@@ -256,7 +286,12 @@ impl Pipeline {
 
         let resolved =
             self.runtime.resolver().resolve(self.spec.as_ref(), capability, streaming)?;
-        let payload = encode_load_payload(self.spec.as_ref(), &resolved)?;
+        let payload = match self.pack_bridge.as_deref() {
+            Some(bridge) if resolved_matches_model_pack_bridge(&resolved, bridge) => {
+                encode_model_pack_load_payload(bridge)?
+            }
+            _ => encode_load_payload(self.spec.as_ref(), &resolved)?,
+        };
         self.runtime.orchestrator().load_model_backend(&resolved.backend_id, payload).await?;
 
         let deployment = LoadedDeployment { resolved };
@@ -276,6 +311,16 @@ impl Pipeline {
             })
         }
     }
+}
+
+fn resolved_matches_model_pack_bridge(
+    resolved: &ResolvedDriver,
+    bridge: &ModelPackRuntimeBridge,
+) -> bool {
+    let canonical_backend = bridge.backend.canonical_id();
+    resolved.driver_id == canonical_backend
+        || resolved.backend_id == canonical_backend
+        || (canonical_backend == "onnx" && resolved.driver_id.starts_with("onnx."))
 }
 
 struct TextGenerationTaskCodec;
@@ -803,6 +848,35 @@ mod tests {
 
         let combined = chunks.into_iter().map(|chunk| chunk.delta).collect::<Vec<_>>().join("");
         assert_eq!(combined, "hello stream");
+    }
+
+    #[tokio::test]
+    async fn runtime_builds_pipeline_from_model_pack_bridge() {
+        let runtime = test_runtime();
+        let bridge = slab_model_pack::ModelPackRuntimeBridge {
+            backend: slab_types::RuntimeBackendId::CandleLlama,
+            capability: Capability::TextGeneration,
+            model_spec: text_spec(),
+            load_defaults: slab_model_pack::ModelPackLoadDefaults::default(),
+            inference_defaults: Default::default(),
+        };
+
+        let pipeline = runtime
+            .pipeline_from_model_pack(bridge.clone())
+            .expect("model pack pipeline should build");
+
+        assert_eq!(
+            pipeline.model().source.primary_path().map(|path| path.to_string_lossy().to_string()),
+            Some("fixtures/fake-model.gguf".to_owned())
+        );
+        assert_eq!(
+            pipeline.model_pack_bridge().map(|value| value.backend),
+            Some(slab_types::RuntimeBackendId::CandleLlama)
+        );
+        assert_eq!(
+            pipeline.model().driver_hints.prefer_drivers.first().map(String::as_str),
+            Some("candle.llama")
+        );
     }
 
     #[tokio::test]

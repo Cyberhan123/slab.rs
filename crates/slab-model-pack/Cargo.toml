@@ -1,0 +1,17 @@
+[package]
+name = "slab-model-pack"
+version.workspace = true
+edition.workspace = true
+description = "Strict JSON .slab model pack parsing and manifest types for slab.rs"
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+slab-types = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+schemars = { workspace = true }
+thiserror = { workspace = true }
+zip = { workspace = true }

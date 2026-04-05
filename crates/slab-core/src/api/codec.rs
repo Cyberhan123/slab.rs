@@ -19,6 +19,7 @@ use slab_whisper::{
     ContextParams as WhisperContextParams, FullParams as WhisperFullParams,
     SamplingStrategy as WhisperSamplingStrategy, WhisperVadParams as CanonicalWhisperVadParams,
 };
+use slab_model_pack::ModelPackRuntimeBridge;
 
 use crate::base::error::CoreError;
 use crate::base::types::{Payload, StreamChunk};
@@ -31,7 +32,8 @@ use crate::internal::dispatch::ResolvedDriver;
 use crate::model::{ModelFamily, ModelSpec};
 use slab_types::{
     AudioTranscriptionOpOptions, CandleDiffusionLoadConfig, CandleLlamaLoadConfig,
-    CandleWhisperLoadConfig, DiffusionImageRequest, OnnxLoadConfig, TextGenerationOpOptions,
+    CandleWhisperLoadConfig, DiffusionImageRequest, OnnxLoadConfig, RuntimeBackendId,
+    TextGenerationOpOptions,
 };
 
 pub(crate) fn encode_load_payload(
@@ -47,6 +49,25 @@ pub(crate) fn encode_load_payload(
         "candle.diffusion" => encode_candle_diffusion_load_payload(spec),
         "onnx.text" | "onnx.embedding" => encode_onnx_load_payload(spec),
         other => Err(CoreError::DriverNotRegistered { driver_id: other.to_owned() }),
+    }
+}
+
+pub fn encode_model_pack_load_payload(
+    bridge: &ModelPackRuntimeBridge,
+) -> Result<Payload, CoreError> {
+    match bridge.backend {
+        RuntimeBackendId::GgmlLlama => encode_ggml_llama_load_payload(&bridge.model_spec),
+        RuntimeBackendId::GgmlWhisper => encode_ggml_whisper_load_payload(&bridge.model_spec),
+        RuntimeBackendId::GgmlDiffusion => encode_ggml_diffusion_load_payload(&bridge.model_spec),
+        RuntimeBackendId::CandleLlama => encode_candle_llama_load_payload(&bridge.model_spec),
+        RuntimeBackendId::CandleWhisper => encode_candle_whisper_load_payload(&bridge.model_spec),
+        RuntimeBackendId::CandleDiffusion => {
+            encode_candle_diffusion_load_payload(&bridge.model_spec)
+        }
+        RuntimeBackendId::Onnx => encode_onnx_load_payload(&bridge.model_spec),
+        _ => Err(CoreError::DriverNotRegistered {
+            driver_id: bridge.backend.canonical_id().to_owned(),
+        }),
     }
 }
 
@@ -949,6 +970,35 @@ mod tests {
             config.chat_template.as_deref(),
             Some("{% for message in messages %}{{ message['content'] }}{% endfor %}")
         );
+    }
+
+    #[test]
+    fn encode_model_pack_load_payload_uses_bridge_model_spec() {
+        let bridge = slab_model_pack::ModelPackRuntimeBridge {
+            backend: RuntimeBackendId::GgmlLlama,
+            capability: Capability::TextGeneration,
+            model_spec: make_spec(ModelFamily::Llama, Capability::TextGeneration, "pack-model.gguf")
+                .with_load_option("num_workers", 2)
+                .with_load_option("context_length", 8192)
+                .with_load_option("chat_template", "chatml"),
+            load_defaults: slab_model_pack::ModelPackLoadDefaults {
+                num_workers: Some(2),
+                context_length: Some(8192),
+                chat_template: Some("chatml".to_owned()),
+                diffusion: None,
+            },
+            inference_defaults: Default::default(),
+        };
+
+        let payload = encode_model_pack_load_payload(&bridge).expect("encode should succeed");
+        let config = payload
+            .to_typed::<LlamaLoadConfig>()
+            .expect("model pack payload should decode as typed config");
+
+        assert_eq!(config.model_path, PathBuf::from("pack-model.gguf"));
+        assert_eq!(config.num_workers, 2);
+        assert_eq!(config.context_length, Some(8192));
+        assert_eq!(config.chat_template.as_deref(), Some("chatml"));
     }
 
     #[test]

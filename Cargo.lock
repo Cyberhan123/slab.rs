@@ -7834,6 +7834,7 @@ dependencies = [
  "serde_json",
  "slab-agent",
  "slab-libfetch",
+ "slab-model-pack",
  "slab-proto",
  "slab-runtime-core",
  "slab-types",
@@ -7961,6 +7962,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-model-pack"
+version = "0.0.1"
+dependencies = [
+ "schemars 1.2.1",
+ "serde",
+ "serde_json",
+ "slab-types",
+ "thiserror 2.0.18",
+ "zip 8.4.0",
+]
+
+[[package]]
 name = "slab-proto"
 version = "0.0.1"
 dependencies = [
@@ -8023,6 +8036,7 @@ dependencies = [
  "slab-diffusion",
  "slab-libfetch",
  "slab-llama",
+ "slab-model-pack",
  "slab-subtitle",
  "slab-types",
  "slab-utils",

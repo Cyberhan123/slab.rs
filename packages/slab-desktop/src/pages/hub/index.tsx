@@ -91,8 +91,8 @@ export default function Hub() {
                     Shape your local <span className="text-[var(--brand-teal)]">model catalog.</span>
                   </h1>
                   <p className="max-w-2xl text-sm leading-7 text-muted-foreground md:text-lg">
-                    Import JSON manifests, monitor runtime readiness, and keep every local inference
-                    asset organized without leaving the workspace.
+                    Import JSON manifests or .slab packs, monitor runtime readiness, and keep every
+                    local inference asset organized without leaving the workspace.
                   </p>
                 </div>
               </div>
@@ -204,7 +204,7 @@ export default function Hub() {
           <StageEmptyState
             icon={Boxes}
             title="No model entries match the current filters"
-            description="Try another category, adjust status, or import a new model config."
+            description="Try another category, adjust status, or import a new model manifest or pack."
             action={
               <Button variant="cta" size="pill" onClick={() => hub.setCreateOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
