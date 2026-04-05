@@ -207,6 +207,7 @@ impl LlamaWorker {
                 LlamaModelParams::default(),
                 ctx_params,
                 config.num_workers,
+                config.chat_template,
             )
         });
 

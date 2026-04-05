@@ -80,6 +80,7 @@ pub fn encode_model_load_request(spec: &RuntimeModelLoadSpec) -> pb::ModelLoadRe
         model_path: path_to_string(&spec.model_path),
         num_workers: spec.num_workers.max(1),
         context_length: spec.context_length.unwrap_or(0),
+        chat_template: spec.chat_template.clone().unwrap_or_default(),
         diffusion_model_path: opt_path_to_string(diffusion.diffusion_model_path),
         vae_path: opt_path_to_string(diffusion.vae_path),
         taesd_path: opt_path_to_string(diffusion.taesd_path),
@@ -104,6 +105,8 @@ pub fn decode_model_load_request(
         model_path: PathBuf::from(&request.model_path),
         num_workers: request.num_workers.max(1),
         context_length: (request.context_length > 0).then_some(request.context_length),
+        chat_template: (!request.chat_template.trim().is_empty())
+            .then_some(request.chat_template.clone()),
         diffusion: diffusion_load_options_from_model_load_request(request),
     })
 }
@@ -844,6 +847,7 @@ mod tests {
             model_path: PathBuf::from("C:/models/model.gguf"),
             num_workers: 2,
             context_length: Some(8192),
+            chat_template: Some("{% for message in messages %}{{ message['content'] }}{% endfor %}".to_owned()),
             diffusion: Some(DiffusionLoadOptions {
                 diffusion_model_path: Some(PathBuf::from("C:/models/diffusion.safetensors")),
                 vae_path: Some(PathBuf::from("C:/models/vae.safetensors")),

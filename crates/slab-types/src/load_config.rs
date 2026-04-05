@@ -9,6 +9,8 @@ pub struct GgmlLlamaLoadConfig {
     pub num_workers: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_template: Option<String>,
 }
 
 /// Typed `model.load` payload for the `ggml.whisper` backend.

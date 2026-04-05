@@ -185,6 +185,8 @@ pub struct RuntimeModelLoadSpec {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diffusion: Option<DiffusionLoadOptions>,
 }
 
@@ -194,6 +196,7 @@ impl Default for RuntimeModelLoadSpec {
             model_path: PathBuf::default(),
             num_workers: default_num_workers(),
             context_length: None,
+            chat_template: None,
             diffusion: None,
         }
     }

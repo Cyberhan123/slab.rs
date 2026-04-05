@@ -89,6 +89,8 @@ pub struct LlamaLoadConfig {
     pub model_path: PathBuf,
     pub num_workers: usize,
     pub context_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_template: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

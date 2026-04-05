@@ -6,6 +6,7 @@ message ModelLoadRequest {
   string model_path = 1;
   uint32 num_workers = 2;
   uint32 context_length = 3;
+  string chat_template = 4;
 
   // Diffusion-specific context params (ignored by non-diffusion backends).
   string diffusion_model_path = 10;
