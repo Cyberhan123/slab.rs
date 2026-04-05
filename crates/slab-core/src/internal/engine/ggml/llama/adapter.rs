@@ -158,6 +158,7 @@ pub struct GGMLLlamaEngine {
     instance: Arc<Llama>,
     inference_engine: RwLock<Option<LlamaRuntime>>,
     loaded_model: RwLock<Option<Arc<LlamaModel>>>,
+    explicit_chat_template: RwLock<Option<String>>,
     session_bindings: Mutex<HashMap<String, SessionBinding>>,
 }
 
@@ -198,6 +199,7 @@ impl GGMLLlamaEngine {
                 instance: Arc::new(llama),
                 inference_engine: RwLock::new(None),
                 loaded_model: RwLock::new(None),
+                explicit_chat_template: RwLock::new(None),
                 session_bindings: Mutex::new(HashMap::new()),
             }))
         })
@@ -212,6 +214,7 @@ impl GGMLLlamaEngine {
         model_params: LlamaModelParams,
         ctx_params: LlamaContextParams,
         num_workers: usize,
+        chat_template: Option<String>,
     ) -> Result<(), engine::EngineError> {
         if num_workers == 0 {
             return Err(GGMLLlamaEngineError::InvalidWorkerCount { num_workers }.into());
@@ -225,6 +228,12 @@ impl GGMLLlamaEngine {
             GGMLLlamaEngineError::LockPoisoned { operation: "lock loaded llama model state" }
         })?;
         *model_write_lock = None;
+        let mut template_write_lock = self.explicit_chat_template.write().map_err(|_| {
+            GGMLLlamaEngineError::LockPoisoned {
+                operation: "lock explicit llama chat template state",
+            }
+        })?;
+        *template_write_lock = None;
         self.session_bindings.blocking_lock().clear();
 
         let path =
@@ -240,7 +249,17 @@ impl GGMLLlamaEngine {
 
         *write_lock = Some(engine);
         *model_write_lock = Some(model);
+        *template_write_lock = chat_template.filter(|value| !value.trim().is_empty());
         Ok(())
+    }
+
+    fn explicit_chat_template(&self) -> Result<Option<String>, engine::EngineError> {
+        let read_lock = self.explicit_chat_template.read().map_err(|_| {
+            GGMLLlamaEngineError::LockPoisoned {
+                operation: "read explicit llama chat template state",
+            }
+        })?;
+        Ok(read_lock.clone())
     }
 
     fn require_engine(&self) -> Result<LlamaRuntime, engine::EngineError> {
@@ -267,6 +286,12 @@ impl GGMLLlamaEngine {
         add_assistant_prompt: bool,
     ) -> Result<String, engine::EngineError> {
         let model = self.require_model()?;
+        if let Some(template) = self.explicit_chat_template()? {
+            return model
+                .apply_chat_template_str(&template, messages, add_assistant_prompt)
+                .map_err(|source| GGMLLlamaEngineError::ApplyChatTemplate { source }.into());
+        }
+
         model
             .apply_chat_template(None, messages, add_assistant_prompt)
             .map_err(|source| GGMLLlamaEngineError::ApplyChatTemplate { source }.into())

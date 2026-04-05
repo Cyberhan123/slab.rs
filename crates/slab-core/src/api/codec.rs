@@ -55,6 +55,7 @@ fn encode_ggml_llama_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError
         model_path: primary_model_path_buf(spec)?,
         num_workers: usize_option(spec, "num_workers").unwrap_or(1),
         context_length: optional_nonzero_u32_option(spec, "context_length")?,
+        chat_template: optional_nonempty_string_option(spec, "chat_template"),
     }))
 }
 
@@ -932,7 +933,8 @@ mod tests {
     fn encode_load_payload_uses_typed_payload_for_ggml_llama() {
         let spec = make_spec(ModelFamily::Llama, Capability::TextGeneration, "model.gguf")
             .with_load_option("num_workers", 3)
-            .with_load_option("context_length", 2048);
+            .with_load_option("context_length", 2048)
+            .with_load_option("chat_template", "{% for message in messages %}{{ message['content'] }}{% endfor %}");
 
         let payload =
             encode_load_payload(&spec, &make_llama_driver()).expect("encode should succeed");
@@ -943,6 +945,10 @@ mod tests {
         assert_eq!(config.model_path, PathBuf::from("model.gguf"));
         assert_eq!(config.num_workers, 3);
         assert_eq!(config.context_length, Some(2048));
+        assert_eq!(
+            config.chat_template.as_deref(),
+            Some("{% for message in messages %}{{ message['content'] }}{% endfor %}")
+        );
     }
 
     #[test]

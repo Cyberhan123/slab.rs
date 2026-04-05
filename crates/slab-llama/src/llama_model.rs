@@ -460,6 +460,15 @@ impl LlamaModel {
         add_assistant_prompt: bool,
     ) -> Result<String, LlamaError> {
         let template = self.chat_template(name)?;
+        self.apply_chat_template_str(template, messages, add_assistant_prompt)
+    }
+
+    pub fn apply_chat_template_str(
+        &self,
+        template: &str,
+        messages: &[ChatMessage],
+        add_assistant_prompt: bool,
+    ) -> Result<String, LlamaError> {
         let c_template = CString::new(template)?;
 
         let mut roles: Vec<CString> = Vec::with_capacity(messages.len());

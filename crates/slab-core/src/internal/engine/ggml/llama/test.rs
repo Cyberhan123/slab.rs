@@ -44,6 +44,7 @@ async fn make_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
             LlamaModelParams::default(),
             LlamaContextParams::default(),
             num_workers,
+            None,
         )
         .expect("load model failed");
 
@@ -285,6 +286,7 @@ async fn make_local_service(num_workers: usize) -> Arc<GGMLLlamaEngine> {
             LlamaModelParams::default(),
             LlamaContextParams::default(),
             num_workers,
+            None,
         )
         .expect("load local model failed");
     service
