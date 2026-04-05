@@ -1,0 +1,163 @@
+{
+    "$schema": "./schemas/model.schemas.json",
+    "id": "qwen2.5-7b-instruct",
+    "label": "Qwen2.5 7B Instruct", // display_name 换成 label
+    "family": "qwen",
+    "capabilities": [
+        "text-generation"
+    ],
+    "backend_hints": {
+        "prefer_backends": [
+            "ggml.whisper"
+        ],
+        "avoid_backends": [],
+        "require_streaming": false
+    },
+    "metadata": {
+        "author": "slab-community",
+        "license": "apache-2.0",
+        "description": "Qwen2.5 7B Instruct is a powerful language model designed for instruction-following tasks. It is based on the Qwen architecture and has been fine-tuned to excel at understanding and generating human-like responses to a wide range of prompts. With its 7 billion parameters, it strikes a balance between performance and resource efficiency, making it suitable for various applications such as chatbots, content generation, and more.",
+        "homepage": "https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF",
+        "tags": [
+            "instruct",
+            "qwen",
+            "7b"
+        ]
+    },
+    "adapters": [
+        {
+            "id": "adapter-1",
+            "label": "适配器示例",
+            "description": "这是一个适配器示例，用于展示如何定义模型适配器。",
+            // 特殊标记这里需要引用另一个模型的配置，加载这个适配器时会先加载这个被引用的模型配置
+            "$config": "ref://models/llama/qwen/2.5-7b-instruct/adapter-1.json"
+        }
+    ],
+    "variants": [
+        {
+            "id": "Q4_K_M",
+            "label": "Q4_K_M (Balanced)",
+            "description": "这是量化模型的描述信息，",
+            "$config": "ref://models/llama/qwen/2.5-7b-instruct/Q4_K_M-1.json"
+        },
+        {
+            "id": "Q8_0",
+            "label": "Q8_0 (High Precision)",
+            "description": "这是量化模型的描述信息，",
+            "$config": "ref://models/llama/qwen/2.5-7b-instruct/Q8_0-1.json"
+        }
+    ],
+    // 资源足迹描述,如果用户配置达不到这个资源足迹则展示不可用
+    "footprint": {
+        // 这里会在presets 展示，如果用户配置的设备资源达不到这个要求则展示不可用
+        "ram_mb": null,
+        // 这里会在presets 展示，如果用户配置的设备资源达不到这个要求则展示不可用
+        "vram_mb": null
+
+    },
+    "source": {
+        "kind": "hugging_face",
+        "revision": "main",
+        "repo_id": "xxxx/sdxl-base-1.0",
+        "files": [
+            {
+                "id": "model",
+                "label": "Qwen2.5 7B Instruct Model",
+                "description": "这是模型的描述信息，可以包含一些关于模型的细节，比如训练数据、适用场景等。",
+                "path": "qq4_k_m.gguf"
+            }
+        ]
+        // 对于多个模型，我们可以通过components 来区分不同的模型组件，比如主模型、VAE、LoRA适配器等，每个组件都可以有独立的描述和配置
+        // "components": [
+        //     {
+        //         "id": "model",
+        //         "label": "SDXL Base 1.0 Diffusion Model",
+        //         "description": "这是模型的描述信息，可以包含一些关于模型的细节，比如训练数据、适用场景等。",
+        //         "$config": "sdxl-base-1.0/model.safetensors.json"
+        //     },
+        //     {
+        //         "id": "vae",
+        //         "label": "SDXL Base 1.0 VAE Model",
+        //         "description": "这是另一个模型的描述信息，可以包含一些关于模型的细节，比如训练数据、适用场景等。",
+        //         "$config": "sdxl-base-1.0/vae.safetensors.json"
+        //     }
+        // ]
+    },
+    "load_config": {
+        "$schema": "./schemas/ggml.llama-load-config.json",
+        "context_length": 8192,
+        "gpu_layers": null,
+        "flash_attn": true
+    },
+    "inference_params": {
+        "$schema": "./schemas/ggml.llama-inference-config.json",
+        "temperature": 0.7,
+        "top_p": 0.95,
+        "max_tokens": 2048,
+        "repeat_penalty": 1.1
+        // ...其他推理参数
+    },
+    "presets": [
+        {
+            "id": "production-chat-8k",
+            "name": "标准对话 (8K 上下文)",
+            "variant_id": "q4_k_m",
+            "is_default": true,
+            // 资源足迹描述,如果用户配置达不到这个资源足迹则展示不可用
+            "footprint": {
+                "vram_dynamic_mb": 10240,
+                "ram_dynamic_mb": 2048
+            },
+            "load_config": {
+                "$schema": "./schemas/ggml.llama-load-config.json",
+                "context_length": 8192
+            },
+            "inference_params": {
+                "$schema": "./schemas/ggml.llama-inference-config.json",
+                "temperature": 0.7,
+                "top_p": 0.95,
+                "max_tokens": 2048,
+                "repeat_penalty": 1.1
+                // ...其他推理参数
+            }
+        },
+        {
+            "id": "long-context-32k",
+            "name": "长文本处理 (32K 上下文)",
+            "variant_id": "q4_k_m",
+            "footprint": {
+                "vram_dynamic_mb": 10240,
+                "ram_dynamic_mb": 2048
+            },
+            "load_config": {
+                "$schema": "./schemas/ggml.llama-load-config.json",
+                "context_length": 32768,
+                "gpu_layers": -1,
+                "flash_attn": true
+            },
+            "inference_params": {
+                "$schema": "./schemas/ggml.llama-inference-config.json",
+                "temperature": 0.3,
+                "max_tokens": 4096
+            }
+        },
+        {
+            "id": "ultra-quality",
+            "name": "极致质量 (Q8 无损)",
+            "variant_id": "q8_0",
+            "footprint": {
+                "vram_dynamic_mb": 10240,
+                "ram_dynamic_mb": 2048
+            },
+            "load_config": {
+                "$schema": "./schemas/ggml.llama-load-config.json",
+                "context_length": 4096,
+                "gpu_layers": -1
+            },
+            "inference_params": {
+                "$schema": "./schemas/ggml.llama-inference-config.json",
+                "temperature": 0.6
+            }
+        }
+    ]
+}

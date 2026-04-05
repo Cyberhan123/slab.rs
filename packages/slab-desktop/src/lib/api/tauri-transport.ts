@@ -89,6 +89,7 @@ export const tauriStreamingFetch: typeof fetch = (input, init) => {
 };
 
 type TauriHttpMethod = 'DELETE' | 'GET' | 'POST' | 'PUT';
+type Awaitable<T> = Promise<T> | T;
 
 interface TauriErrorPayload {
   code: number;
@@ -104,7 +105,7 @@ interface RouteContext {
 }
 
 interface TauriRouteDefinition {
-  buildArgs?: (context: RouteContext) => Record<string, unknown> | undefined;
+  buildArgs?: (context: RouteContext) => Awaitable<Record<string, unknown> | undefined>;
   command: string;
   method: TauriHttpMethod;
   pattern: string;
@@ -181,6 +182,12 @@ const TAURI_ROUTE_DEFINITIONS: readonly TauriRouteDefinition[] = [
     pattern: '/v1/models/import',
     command: 'import_model_config',
     buildArgs: ({ body }) => ({ req: body }),
+  },
+  {
+    method: 'POST',
+    pattern: '/v1/models/import-pack',
+    command: 'import_model_pack',
+    buildArgs: async ({ body }) => buildModelPackImportArgs(body),
   },
   {
     method: 'POST',
@@ -321,7 +328,7 @@ export const tauriAwareFetch: typeof fetch = async (input, init) => {
   }
 
   const query = toQueryObject(url.searchParams);
-  const body = await readJsonBody(request);
+  const body = await readRequestBody(request);
 
   try {
     const args = routeMatch.route.buildArgs?.({
@@ -329,9 +336,10 @@ export const tauriAwareFetch: typeof fetch = async (input, init) => {
       pathParams: routeMatch.pathParams,
       query,
     });
+    const resolvedArgs = args ? await args : undefined;
 
-    const result = args
-      ? await invoke(routeMatch.route.command, args)
+    const result = resolvedArgs
+      ? await invoke(routeMatch.route.command, resolvedArgs)
       : await invoke(routeMatch.route.command);
 
     return new Response(JSON.stringify(result), {
@@ -418,9 +426,14 @@ function toQueryObject(searchParams: URLSearchParams): Record<string, unknown> {
   return query;
 }
 
-async function readJsonBody(request: Request): Promise<unknown> {
+async function readRequestBody(request: Request): Promise<unknown> {
   if (request.method === 'GET' || request.method === 'HEAD') {
     return undefined;
+  }
+
+  const contentType = request.headers.get('content-type')?.toLowerCase() ?? '';
+  if (contentType.includes('multipart/form-data')) {
+    return request.formData();
   }
 
   const rawBody = await request.text();
@@ -433,6 +446,23 @@ async function readJsonBody(request: Request): Promise<unknown> {
   } catch {
     return rawBody;
   }
+}
+
+async function buildModelPackImportArgs(body: unknown): Promise<Record<string, unknown>> {
+  if (!(body instanceof FormData)) {
+    throw new Error('model pack import requires multipart/form-data');
+  }
+
+  const file = body.get('file') ?? Array.from(body.values()).find((value) => value instanceof File);
+  if (!(file instanceof File)) {
+    throw new Error('model pack import requires a file field');
+  }
+
+  const bytes = Array.from(new Uint8Array(await file.arrayBuffer()));
+  return {
+    bytes,
+    fileName: file.name,
+  };
 }
 
 function normalizeTauriError(error: unknown): { body: TauriErrorPayload; status: number } {

@@ -1,0 +1,106 @@
+{
+  "$schema": "./settings-schema.json",
+  "schema_version": 2,
+ 
+  "logging": {
+    "level": "info",
+    "json": false
+  },
+
+  "runtime": {
+    "mode": "managed_children",
+    "transport": "ipc",
+    "sessions": {},
+    "logging": {},
+    "capacity": {
+      "queue": 64,
+      "concurrent_requests": 4
+    },
+    "endpoint": {
+      "http": {},
+      "ipc": {}
+    },
+    "ggml": {
+      "source": {},
+      "logging": {},
+      "capacity": {},
+      "endpoint": {
+        "http": {},
+        "ipc": {}
+      },
+      "backends": {
+        "llama": {
+          "enabled": false,
+          "source": {},
+          "logging": {},
+          "capacity": {},
+          "endpoint": {
+            "http": {},
+            "ipc": {}
+          }
+        },
+        "whisper": {
+          "enabled": false,
+          "source": {},
+          "logging": {},
+          "capacity": {},
+          "endpoint": {
+            "http": {},
+            "ipc": {}
+          }
+        },
+        "diffusion": {
+          "enabled": false,
+          "source": {},
+          "logging": {},
+          "capacity": {
+            "concurrent_requests": 1
+          },
+          "endpoint": {
+            "http": {},
+            "ipc": {}
+          }
+        }
+      }
+    },
+    "candle": {
+      "enabled": false,
+      "source": {},
+      "logging": {},
+      "capacity": {},
+      "endpoint": {
+        "http": {},
+        "ipc": {}
+      }
+    },
+    "onnx": {
+      "enabled": false,
+      "source": {},
+      "logging": {},
+      "capacity": {},
+      "endpoint": {
+        "http": {},
+        "ipc": {}
+      }
+    }
+  },
+  "providers": {
+    "registry": []
+  },
+  "models": {
+    "auto_unload": {
+      "enabled": false,
+      "idle_minutes": 10
+    }
+  },
+  "server": {
+    "address": "127.0.0.1:3000",
+    "logging": {},
+    "cors": {},
+    "admin": {},
+    "swagger": {
+      "enabled": true
+    },
+    "cloud_http_trace": false
+  }
+}

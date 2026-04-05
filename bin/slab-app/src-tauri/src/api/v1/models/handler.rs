@@ -39,6 +39,28 @@ pub async fn import_model_config(
 }
 
 #[tauri::command(async)]
+pub async fn import_model_pack(
+    state: tauri::State<'_, Arc<AppState>>,
+    bytes: Vec<u8>,
+    file_name: Option<String>,
+) -> Result<UnifiedModelResponse, String> {
+    if let Some(file_name) = file_name.as_deref() {
+        let trimmed = file_name.trim();
+        if trimmed.is_empty() {
+            return Err("file_name must not be empty when provided".into());
+        }
+        if !trimmed.to_ascii_lowercase().ends_with(".slab") {
+            return Err(format!("uploaded model pack must use the .slab extension: {trimmed}"));
+        }
+    }
+    if bytes.is_empty() {
+        return Err("model pack bytes must not be empty".into());
+    }
+
+    Ok(state.services.model.import_model_pack_bytes(&bytes).await.map_err(map_err)?.into())
+}
+
+#[tauri::command(async)]
 pub async fn get_model(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,

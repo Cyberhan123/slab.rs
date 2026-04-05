@@ -85,6 +85,7 @@ pub fn run() {
             api::v1::models::handler::list_models,
             api::v1::models::handler::create_model,
             api::v1::models::handler::import_model_config,
+            api::v1::models::handler::import_model_pack,
             api::v1::models::handler::get_model,
             api::v1::models::handler::update_model,
             api::v1::models::handler::delete_model,

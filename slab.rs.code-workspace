@@ -18,7 +18,8 @@
 			"cargo check": true,
 			"cargo test": true,
 			"bun": true,
-			"cargo fmt": true
+			"cargo fmt": true,
+			"cargo run": true
 		}
 	}
 }

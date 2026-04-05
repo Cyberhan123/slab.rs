@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Multipart, Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use serde::Deserialize;
-use utoipa::OpenApi;
+use utoipa::{OpenApi, ToSchema};
 use validator::Validate;
 
 use crate::api::v1::models::schema::{
@@ -19,12 +19,20 @@ use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::services::ModelService;
 
+#[allow(dead_code)]
+#[derive(ToSchema)]
+struct ImportModelPackMultipartRequest {
+    #[schema(value_type = String, format = Binary)]
+    file: Vec<u8>,
+}
+
 #[derive(OpenApi)]
 #[openapi(
     paths(
         list_models,
         create_model,
         import_model_config,
+        import_model_pack,
         get_model,
         update_model,
         delete_model,
@@ -37,6 +45,7 @@ use slab_app_core::domain::services::ModelService;
     components(schemas(
         CreateModelRequest,
         ImportModelConfigRequest,
+        ImportModelPackMultipartRequest,
         UpdateModelRequest,
         LoadModelRequest,
         UnloadModelRequest,
@@ -55,6 +64,7 @@ pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/models", get(list_models).post(create_model))
         .route("/models/import", post(import_model_config))
+        .route("/models/import-pack", post(import_model_pack))
         .route("/models/{id}", get(get_model).put(update_model).delete(delete_model))
         .route("/models/available", get(list_available_models))
         .route("/models/load", post(load_model))
@@ -97,6 +107,58 @@ async fn import_model_config(
     ValidatedJson(req): ValidatedJson<ImportModelConfigRequest>,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
     Ok(Json(service.import_model_config(req.into()).await?.into()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/v1/models/import-pack",
+    tag = "models",
+    request_body(
+        content = ImportModelPackMultipartRequest,
+        content_type = "multipart/form-data",
+        description = "Upload a .slab model pack as a multipart file field named `file`."
+    ),
+    responses(
+        (status = 200, description = "Model pack imported and stored", body = UnifiedModelResponse),
+        (status = 400, description = "Bad request"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn import_model_pack(
+    State(service): State<ModelService>,
+    mut multipart: Multipart,
+) -> Result<Json<UnifiedModelResponse>, ServerError> {
+    while let Some(field) = multipart
+        .next_field()
+        .await
+        .map_err(|error| ServerError::BadRequest(format!("failed to read multipart field: {error}")))?
+    {
+        let file_name = field.file_name().map(str::to_owned);
+        if file_name.is_none() {
+            continue;
+        }
+        if let Some(file_name) = file_name.as_deref()
+            && !file_name.trim().to_ascii_lowercase().ends_with(".slab")
+        {
+            return Err(ServerError::BadRequest(format!(
+                "uploaded model pack must use the .slab extension: {file_name}"
+            )));
+        }
+
+        let bytes = field
+            .bytes()
+            .await
+            .map_err(|error| ServerError::BadRequest(format!("failed to read model pack bytes: {error}")))?;
+        if bytes.is_empty() {
+            return Err(ServerError::BadRequest("uploaded model pack is empty".into()));
+        }
+
+        return Ok(Json(service.import_model_pack_bytes(bytes.as_ref()).await?.into()));
+    }
+
+    Err(ServerError::BadRequest(
+        "multipart body must contain a .slab file field".into(),
+    ))
 }
 
 #[utoipa::path(
