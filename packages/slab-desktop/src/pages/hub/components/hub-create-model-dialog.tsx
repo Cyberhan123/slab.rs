@@ -1,4 +1,4 @@
-import { FileJson, Loader2, Plus, Upload } from 'lucide-react';
+import { Loader2, Plus, Upload } from 'lucide-react';
 
 import {
   Dialog,
@@ -22,13 +22,28 @@ type HubCreateModelDialogProps = {
   onCreate: () => void;
 };
 
-const MODEL_CONFIG_EXAMPLE = `{
-  "id": "qwen2_5_0_5b_instruct_q4_k_m",
-  "display_name": "Qwen2.5 0.5B Instruct",
-  "provider": "local.ggml.llama",
-  "spec": {
-    "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
-    "filename": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+const MODEL_PACK_MANIFEST_EXAMPLE = `{
+  "$schema": "./slab-manifest.schema.json",
+  "version": 1,
+  "id": "openrouter-llama-3_1-8b-instruct",
+  "label": "Llama 3.1 8B Instruct (OpenRouter)",
+  "provider": "cloud.openrouter",
+  "status": "ready",
+  "family": "llama",
+  "capabilities": ["text_generation"],
+  "context_window": 131072,
+  "pricing": {
+    "input": 0.00018,
+    "output": 0.00018
+  },
+  "runtime_presets": {
+    "temperature": 0.7,
+    "top_p": 0.95
+  },
+  "source": {
+    "kind": "cloud",
+    "provider_id": "openrouter-main",
+    "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
   }
 }`;
 
@@ -47,19 +62,19 @@ export function HubCreateModelDialog({
         <DialogHeader className="border-b border-border/60 px-5 pt-5 pb-4">
           <DialogTitle>Import model</DialogTitle>
           <DialogDescription>
-            Upload a legacy JSON model config or a .slab model pack. The backend stores it under
-            the model config directory and reloads it during startup.
+            Upload a .slab model pack. Each pack must contain a root-level manifest.json, while
+            provider credentials stay in Settings and are referenced by provider_id.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5 overflow-y-auto px-5 py-4">
           <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/10 p-4">
             <div className="grid gap-2">
-              <Label htmlFor="hub-model-config-file">Model config or pack</Label>
+              <Label htmlFor="hub-model-config-file">Model pack</Label>
               <Input
                 id="hub-model-config-file"
                 type="file"
-                accept=".json,.slab,application/json"
+                accept=".slab"
                 onChange={(event) => setCreateFile(event.target.files?.[0] ?? null)}
                 disabled={createPending}
               />
@@ -68,30 +83,30 @@ export function HubCreateModelDialog({
             {selectedFileName ? (
               <div className="rounded-xl border border-border/70 bg-background px-3 py-3">
                 <div className="flex items-center gap-2 text-sm font-medium">
-                  <FileJson className="h-4 w-4 text-primary" />
+                  <Upload className="h-4 w-4 text-primary" />
                   <span className="truncate">{selectedFileName}</span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  This file will be validated, stored, and turned into a catalog entry.
+                  This pack will be validated, stored, and turned into a catalog entry.
                 </p>
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-border/70 bg-background px-4 py-6 text-center text-sm text-muted-foreground">
                 <Upload className="mx-auto mb-3 h-5 w-5" />
-                Choose a JSON config or .slab pack to import a model entry.
+                Choose a .slab pack to import a model entry.
               </div>
             )}
           </div>
 
           <div className="space-y-2 rounded-2xl border border-border/70 bg-background p-4">
-            <p className="text-sm font-medium">Expected inputs</p>
+            <p className="text-sm font-medium">Example manifest.json</p>
             <p className="text-xs text-muted-foreground">
-              JSON manifests should include <code>id</code>, <code>display_name</code>, <code>provider</code>,
-              and a provider-specific <code>spec</code> object. <code>.slab</code> packs embed their
-              own <code>manifest.json</code> and are uploaded as-is.
+              Cloud packs should set a top-level <code>provider</code> plus <code>source.kind = cloud</code>{' '}
+              with <code>provider_id</code> and <code>remote_model_id</code>. API keys and base URLs stay
+              in the provider registry, not inside the pack.
             </p>
             <pre className="overflow-x-auto rounded-xl border border-border/70 bg-muted/30 p-3 text-xs leading-5">
-              <code>{MODEL_CONFIG_EXAMPLE}</code>
+              <code>{MODEL_PACK_MANIFEST_EXAMPLE}</code>
             </pre>
           </div>
         </div>

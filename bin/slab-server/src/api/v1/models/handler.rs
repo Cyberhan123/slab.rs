@@ -9,9 +9,9 @@ use utoipa::{OpenApi, ToSchema};
 use validator::Validate;
 
 use crate::api::v1::models::schema::{
-    CreateModelRequest, DownloadModelRequest, ImportModelConfigRequest, ListAvailableQuery,
-    ListModelsQuery, LoadModelRequest, ModelStatusResponse, SwitchModelRequest,
-    UnifiedModelResponse, UnloadModelRequest, UpdateModelRequest,
+    CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
+    LoadModelRequest, ModelStatusResponse, SwitchModelRequest, UnifiedModelResponse,
+    UnloadModelRequest, UpdateModelRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::{ValidatedJson, ValidatedQuery, validate};
@@ -31,7 +31,6 @@ struct ImportModelPackMultipartRequest {
     paths(
         list_models,
         create_model,
-        import_model_config,
         import_model_pack,
         get_model,
         update_model,
@@ -44,7 +43,6 @@ struct ImportModelPackMultipartRequest {
     ),
     components(schemas(
         CreateModelRequest,
-        ImportModelConfigRequest,
         ImportModelPackMultipartRequest,
         UpdateModelRequest,
         LoadModelRequest,
@@ -63,7 +61,6 @@ pub struct ModelsApi;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/models", get(list_models).post(create_model))
-        .route("/models/import", post(import_model_config))
         .route("/models/import-pack", post(import_model_pack))
         .route("/models/{id}", get(get_model).put(update_model).delete(delete_model))
         .route("/models/available", get(list_available_models))
@@ -89,24 +86,6 @@ async fn create_model(
     ValidatedJson(req): ValidatedJson<CreateModelRequest>,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
     Ok(Json(service.create_model(req.into()).await?.into()))
-}
-
-#[utoipa::path(
-    post,
-    path = "/v1/models/import",
-    tag = "models",
-    request_body = ImportModelConfigRequest,
-    responses(
-        (status = 200, description = "Model config imported and stored", body = UnifiedModelResponse),
-        (status = 400, description = "Bad request"),
-        (status = 500, description = "Backend error"),
-    )
-)]
-async fn import_model_config(
-    State(service): State<ModelService>,
-    ValidatedJson(req): ValidatedJson<ImportModelConfigRequest>,
-) -> Result<Json<UnifiedModelResponse>, ServerError> {
-    Ok(Json(service.import_model_config(req.into()).await?.into()))
 }
 
 #[utoipa::path(

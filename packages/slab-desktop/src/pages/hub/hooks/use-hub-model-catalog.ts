@@ -271,50 +271,16 @@ function inferModelCategory(model: ModelItem): ModelCategory {
   return 'language';
 }
 
-async function readJsonFile(file: File): Promise<unknown> {
-  const raw = await file.text();
-
-  try {
-    return JSON.parse(raw);
-  } catch (error) {
-    throw new Error(
-      `Invalid JSON in ${file.name}: ${error instanceof Error ? error.message : 'Unknown parse error'}`,
-    );
-  }
-}
-
 function isModelPackFile(file: File): boolean {
   return file.name.trim().toLowerCase().endsWith('.slab');
 }
 
 async function importModelFile(file: File): Promise<ImportedModelResponse | null> {
-  if (isModelPackFile(file)) {
-    return importModelPack(file);
+  if (!isModelPackFile(file)) {
+    throw new Error('Only .slab model packs are supported.');
   }
 
-  const payload = await readJsonFile(file);
-  return importModelConfig(payload);
-}
-
-async function importModelConfig(payload: unknown): Promise<ImportedModelResponse | null> {
-  const response = await tauriAwareFetch(new URL('/v1/models/import', `${SERVER_BASE_URL}/`), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(payload),
-  });
-
-  const raw = await response.text();
-  if (!response.ok) {
-    throw new Error(parseApiError(raw, response.status));
-  }
-
-  if (!raw.trim()) {
-    return null;
-  }
-
-  return parseImportedModelResponse(raw);
+  return importModelPack(file);
 }
 
 async function importModelPack(file: File): Promise<ImportedModelResponse | null> {

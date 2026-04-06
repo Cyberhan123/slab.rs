@@ -49,7 +49,7 @@ pub async fn init_state<R: tauri::Runtime>(
         store,
         model_auto_unload,
     ));
-    state.services.model.sync_model_configs_from_disk().await?;
+    state.services.model.sync_model_packs_from_disk().await?;
     app.manage(state);
 
     Ok(())

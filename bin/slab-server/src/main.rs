@@ -325,7 +325,7 @@ where
         Arc::clone(&store),
         model_auto_unload,
     ));
-    state.services.model.sync_model_configs_from_disk().await?;
+    state.services.model.sync_model_packs_from_disk().await?;
 
     let app = api::build(Arc::clone(&state));
     let addr: SocketAddr = cfg.bind_address.parse()?;

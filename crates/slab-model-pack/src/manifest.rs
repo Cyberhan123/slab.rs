@@ -12,11 +12,21 @@ pub struct ModelPackManifest {
     pub version: u32,
     pub id: String,
     pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub provider: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<PackModelStatus>,
     pub family: ModelFamily,
     #[serde(default)]
     pub capabilities: Vec<Capability>,
     #[serde(default)]
     pub backend_hints: DriverHints,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_window: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pricing: Option<PackPricing>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runtime_presets: Option<PackRuntimePresets>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -33,6 +43,40 @@ pub struct ModelPackManifest {
     pub default_preset: Option<String>,
     #[serde(default)]
     pub footprint: ResourceFootprint,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PackModelStatus {
+    Ready,
+    NotDownloaded,
+    Downloading,
+    Error,
+}
+
+impl PackModelStatus {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Ready => "ready",
+            Self::NotDownloaded => "not_downloaded",
+            Self::Downloading => "downloading",
+            Self::Error => "error",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct PackPricing {
+    pub input: f64,
+    pub output: f64,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct PackRuntimePresets {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub temperature: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_p: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
@@ -62,6 +106,10 @@ pub enum PackSource {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         files: Vec<PackSourceFile>,
     },
+    Cloud {
+        provider_id: String,
+        remote_model_id: String,
+    },
 }
 
 impl PackSource {
@@ -70,6 +118,7 @@ impl PackSource {
             Self::LocalPath { .. } => "local_path",
             Self::LocalFiles { .. } => "local_files",
             Self::HuggingFace { .. } => "hugging_face",
+            Self::Cloud { .. } => "cloud",
         }
     }
 
@@ -82,6 +131,7 @@ impl PackSource {
                 path: path.clone(),
             }],
             Self::LocalFiles { files } | Self::HuggingFace { files, .. } => files.clone(),
+            Self::Cloud { .. } => Vec::new(),
         }
     }
 }

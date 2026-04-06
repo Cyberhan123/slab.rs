@@ -179,12 +179,6 @@ const TAURI_ROUTE_DEFINITIONS: readonly TauriRouteDefinition[] = [
   },
   {
     method: 'POST',
-    pattern: '/v1/models/import',
-    command: 'import_model_config',
-    buildArgs: ({ body }) => ({ req: body }),
-  },
-  {
-    method: 'POST',
     pattern: '/v1/models/import-pack',
     command: 'import_model_pack',
     buildArgs: async ({ body }) => buildModelPackImportArgs(body),

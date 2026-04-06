@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use slab_app_core::context::AppState;
 use slab_app_core::schemas::models::{
-    CreateModelRequest, DownloadModelRequest, ImportModelConfigRequest, ListAvailableQuery,
-    ListModelsQuery, LoadModelRequest, ModelStatusResponse, SwitchModelRequest,
-    UnifiedModelResponse, UnloadModelRequest, UpdateModelRequest,
+    CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
+    LoadModelRequest, ModelStatusResponse, SwitchModelRequest, UnifiedModelResponse,
+    UnloadModelRequest, UpdateModelRequest,
 };
 use slab_app_core::schemas::tasks::OperationAcceptedResponse;
 
@@ -27,15 +27,6 @@ pub async fn create_model(
 ) -> Result<UnifiedModelResponse, String> {
     let req = validate(req)?;
     Ok(state.services.model.create_model(req.into()).await.map_err(map_err)?.into())
-}
-
-#[tauri::command(async)]
-pub async fn import_model_config(
-    state: tauri::State<'_, Arc<AppState>>,
-    req: ImportModelConfigRequest,
-) -> Result<UnifiedModelResponse, String> {
-    let req = validate(req)?;
-    Ok(state.services.model.import_model_config(req.into()).await.map_err(map_err)?.into())
 }
 
 #[tauri::command(async)]

@@ -13,11 +13,10 @@ use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand,
     DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec,
-    ModelStatus, StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
+    ModelStatus, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
-use crate::infra::model_configs;
 use crate::infra::model_packs;
 use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::{LoadedModelSpec, build_model_load_request};
@@ -50,13 +49,6 @@ impl ModelService {
         self.persist_model_definition(req).await
     }
 
-    pub async fn import_model_config(
-        &self,
-        req: CreateModelCommand,
-    ) -> Result<UnifiedModel, AppCoreError> {
-        self.persist_model_definition(req).await
-    }
-
     pub async fn import_model_pack_bytes(
         &self,
         bytes: &[u8],
@@ -66,9 +58,10 @@ impl ModelService {
         let command = model_packs::build_model_command_from_pack_bytes(&pack_path, bytes)?;
         let pack_existed = pack_path.exists();
 
-        model_packs::write_model_pack(self.model_config_dir(), &summary.id, bytes)?;
+        let model = self.build_model_definition(command).await?;
+        model_packs::write_imported_model_pack(self.model_config_dir(), &model, bytes)?;
 
-        match self.persist_model_definition_with_options(command, false).await {
+        match self.store_model_definition(model).await {
             Ok(model) => Ok(model),
             Err(error) => {
                 if !pack_existed {
@@ -127,7 +120,6 @@ impl ModelService {
         let model: UnifiedModel =
             record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
 
-        let _ = model_configs::delete_model_config(self.model_config_dir(), id)?;
         let _ = model_packs::delete_model_pack(self.model_config_dir(), id)?;
         if let Some(local_path) = model.spec.local_path.as_deref()
             && model_packs::is_model_pack_path(local_path)
@@ -207,37 +199,15 @@ impl ModelService {
         self.load_model_command("switch_model", "switching model", command).await
     }
 
-    pub async fn sync_model_configs_from_disk(&self) -> Result<(), AppCoreError> {
+    pub async fn sync_model_packs_from_disk(&self) -> Result<(), AppCoreError> {
         let config_dir = self.model_config_dir().to_path_buf();
-        let paths = model_configs::list_model_config_paths(&config_dir)?;
         let pack_paths = model_packs::list_model_pack_paths(&config_dir)?;
-        if paths.is_empty() {
-            if pack_paths.is_empty() {
-                info!(path = %config_dir.display(), "no model config files found during startup");
-                return Ok(());
-            }
+        if pack_paths.is_empty() {
+            info!(path = %config_dir.display(), "no model pack files found during startup");
+            return Ok(());
         }
 
         let mut imported = 0usize;
-        for path in paths {
-            let config = match model_configs::read_model_config(&path) {
-                Ok(config) => config,
-                Err(error) => {
-                    warn!(path = %path.display(), error = %error, "skipping invalid model config file");
-                    continue;
-                }
-            };
-
-            match self.persist_model_definition(config.into()).await {
-                Ok(model) => {
-                    imported += 1;
-                    info!(model_id = %model.id, path = %path.display(), "initialized model from config file");
-                }
-                Err(error) => {
-                    warn!(path = %path.display(), error = %error, "failed to initialize model from config file");
-                }
-            }
-        }
 
         for path in pack_paths {
             let command = match model_packs::build_model_command_from_pack(&path) {
@@ -262,7 +232,7 @@ impl ModelService {
         info!(
             path = %config_dir.display(),
             imported,
-            "model config startup sync complete"
+            "model pack startup sync complete"
         );
         Ok(())
     }
@@ -422,11 +392,11 @@ impl ModelService {
                             };
 
                             if let Err(error) =
-                                sync_model_config_record(&model_config_dir, updated_record)
+                                sync_model_pack_record(&model_config_dir, updated_record)
                             {
-                                warn!(task_id = %operation_id, error = %error, "failed to sync downloaded model config file");
+                                warn!(task_id = %operation_id, error = %error, "failed to sync downloaded model pack");
                                 let message = format!(
-                                    "downloaded file but failed to sync model config: {error}"
+                                    "downloaded file but failed to sync model pack: {error}"
                                 );
                                 if let Err(db_error) = operation.mark_failed(&message).await {
                                     warn!(task_id = %operation_id, error = %db_error, "failed to persist config sync failure after download");
@@ -482,13 +452,17 @@ impl ModelService {
     async fn persist_model_definition_with_options(
         &self,
         req: CreateModelCommand,
-        write_legacy_config: bool,
+        sync_model_pack: bool,
     ) -> Result<UnifiedModel, AppCoreError> {
         let model = self.build_model_definition(req).await?;
-        if write_legacy_config {
-            self.write_model_config(&model)?;
+        if sync_model_pack {
+            self.write_model_pack(&model)?;
         }
 
+        self.store_model_definition(model).await
+    }
+
+    async fn store_model_definition(&self, model: UnifiedModel) -> Result<UnifiedModel, AppCoreError> {
         let record = model_to_record(&model)?;
         self.model_state.store().upsert_model(record).await?;
         Ok(model)
@@ -524,9 +498,8 @@ impl ModelService {
         })
     }
 
-    fn write_model_config(&self, model: &UnifiedModel) -> Result<(), AppCoreError> {
-        let config: StoredModelConfig = model.clone().into();
-        model_configs::write_model_config(self.model_config_dir(), &config)?;
+    fn write_model_pack(&self, model: &UnifiedModel) -> Result<(), AppCoreError> {
+        model_packs::write_persisted_model_pack(self.model_config_dir(), model)?;
         Ok(())
     }
 
@@ -630,14 +603,13 @@ fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord, AppCoreEr
     })
 }
 
-fn sync_model_config_record(
+fn sync_model_pack_record(
     config_dir: &std::path::Path,
     record: UnifiedModelRecord,
 ) -> Result<(), AppCoreError> {
     let model: UnifiedModel =
         record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
-    let config: StoredModelConfig = model.into();
-    model_configs::write_model_config(config_dir, &config)?;
+    model_packs::write_persisted_model_pack(config_dir, &model)?;
     Ok(())
 }
 
