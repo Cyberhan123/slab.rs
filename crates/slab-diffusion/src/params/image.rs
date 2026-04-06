@@ -1,13 +1,12 @@
 use std::ptr;
 use std::slice;
 
-use libc::free;
 use serde::{Deserialize, Serialize};
 use slab_diffusion_sys::{sd_image_t, sd_img_gen_params_t, sd_lora_t};
 
 use crate::Diffusion;
 use crate::params::support::{
-    copy_and_free_c_string, empty_image, image_view, new_c_string, sync_image_views,
+    empty_image, image_view, new_c_string, sync_image_views,
     sync_lora_views,
 };
 use crate::params::{
@@ -24,28 +23,57 @@ pub struct Image {
     pub data: Vec<u8>,
 }
 
-impl From<sd_image_t> for Image {
-    fn from(c_img: sd_image_t) -> Self {
-        let len = (c_img.width as usize)
-            .saturating_mul(c_img.height as usize)
-            .saturating_mul(c_img.channel as usize);
+pub struct InnerImage {
+    pub(crate) fp: sd_image_t,
+    data: Option<Vec<u8>>,
+}
 
-        let data = if c_img.data.is_null() || len == 0 {
-            Vec::new()
+impl From<Image> for InnerImage {
+    fn from(img: Image) -> Self {
+        let mut data = img.data;
+        let ptr = data.as_mut_ptr();
+
+        InnerImage {
+            fp: sd_image_t {
+                width: img.width,
+                height: img.height,
+                channel: img.channel,
+                data: ptr,
+            },
+            data: Some(data),
+        }
+    }
+}
+
+impl From<InnerImage> for Image {
+    fn from(mut inner: InnerImage) -> Self {
+        let data = if let Some(owned_vec) = inner.data.take() {
+            owned_vec
         } else {
-            unsafe { slice::from_raw_parts(c_img.data, len) }.to_vec()
+            copy_image_data(inner.fp)
         };
 
-        if !c_img.data.is_null() {
-            unsafe { free(c_img.data.cast()) };
-        }
-
-        Image { width: c_img.width, height: c_img.height, channel: c_img.channel, data }
+        Image { width: inner.fp.width, height: inner.fp.height, channel: inner.fp.channel, data }
     }
 }
 
 pub(crate) fn owned_image_from_raw(raw: sd_image_t) -> Image {
-    Image::from(raw)
+    Image {
+        width: raw.width,
+        height: raw.height,
+        channel: raw.channel,
+        data: copy_image_data(raw),
+    }
+}
+
+fn copy_image_data(raw: sd_image_t) -> Vec<u8> {
+    let len = (raw.width * raw.height * raw.channel) as usize;
+
+    if raw.data.is_null() || len == 0 {
+        Vec::new()
+    } else {
+        unsafe { slice::from_raw_parts(raw.data, len) }.to_vec()
+    }
 }
 
 /// Stable Rust-native image inference parameters shared across the runtime chain.
@@ -163,9 +191,7 @@ impl std::fmt::Debug for InnerImgParams {
 
 impl Diffusion {
     pub fn image_params_to_str(&self, image_params: &ImgParams) -> Option<String> {
-        let inner = InnerImgParams::from_canonical(self.lib.as_ref(), image_params).ok()?;
-        let c_buf = unsafe { self.lib.sd_img_gen_params_to_str(&*inner.fp) };
-        copy_and_free_c_string(c_buf)
+        Some(format!("{image_params:#?}"))
     }
 }
 
@@ -226,7 +252,7 @@ impl InnerImgParams {
             );
         }
         if let Some(sample_params) = value.sample_params.as_ref() {
-            inner.set_sample_params(InnerSampleParams::from_canonical(lib, sample_params)?);
+            inner.set_sample_params(InnerSampleParams::from_canonical(lib,  sample_params)?);
         }
         if let Some(strength) = value.strength {
             inner.set_strength(strength);
@@ -441,15 +467,20 @@ mod tests {
             channel: 3,
             data: alloc_image_buffer(&[1, 2, 3, 4, 5, 6]),
         };
-        let image = Image::from(raw);
+        let image = owned_image_from_raw(raw);
+        unsafe { libc::free(raw.data.cast()) };
 
         assert_eq!(image.width, 2);
         assert_eq!(image.height, 1);
         assert_eq!(image.channel, 3);
         assert_eq!(image.data, vec![1, 2, 3, 4, 5, 6]);
 
-        let empty =
-            Image::from(sd_image_t { width: 0, height: 0, channel: 4, data: std::ptr::null_mut() });
+        let empty = owned_image_from_raw(sd_image_t {
+            width: 0,
+            height: 0,
+            channel: 4,
+            data: std::ptr::null_mut(),
+        });
         assert_eq!(empty.channel, 4);
         assert!(empty.data.is_empty());
     }

@@ -30,6 +30,25 @@ fn vendored_runtime_dir(artifact: &str) -> PathBuf {
     workspace_root().join("vendor").join(artifact).join(subdir)
 }
 
+fn app_runtime_dir() -> PathBuf {
+    workspace_root().join("target").join("debug").join("resources").join("libs")
+}
+
+fn diffusion_runtime_dir() -> PathBuf {
+    let app_dir = app_runtime_dir();
+    let stable_diffusion_name = if cfg!(windows) {
+        "stable-diffusion.dll"
+    } else {
+        "libstable-diffusion.so"
+    };
+
+    if app_dir.join(stable_diffusion_name).is_file() {
+        app_dir
+    } else {
+        vendored_runtime_dir("diffusion")
+    }
+}
+
 #[cfg(windows)]
 fn add_dll_directory(path: &Path) -> Result<(), String> {
     use std::os::windows::ffi::OsStrExt;
@@ -53,8 +72,11 @@ fn add_dll_directory(path: &Path) -> Result<(), String> {
 #[cfg(windows)]
 fn ensure_vendored_runtime_dirs_registered() {
     let init = DLL_DIRS_INIT.get_or_init(|| {
-        add_dll_directory(&vendored_runtime_dir("diffusion"))?;
-        add_dll_directory(&vendored_runtime_dir("ggml"))?;
+        let runtime_dir = diffusion_runtime_dir();
+        add_dll_directory(&runtime_dir)?;
+        if runtime_dir != app_runtime_dir() {
+            add_dll_directory(&vendored_runtime_dir("ggml"))?;
+        }
         Ok(())
     });
 
@@ -69,7 +91,7 @@ fn ensure_vendored_runtime_dirs_registered() {}
 fn load_vendored_diffusion() -> Diffusion {
     ensure_vendored_runtime_dirs_registered();
 
-    Diffusion::new(vendored_runtime_dir("diffusion"))
+    Diffusion::new(diffusion_runtime_dir())
         .unwrap_or_else(|error| panic!("failed to load vendored diffusion runtime: {error}"))
 }
 
@@ -84,13 +106,10 @@ fn resolve_minisd_model_path() -> PathBuf {
 
 #[test]
 #[ignore = "requires vendored diffusion runtime and cached miniSD model"]
-fn minisd_generates_small_image_from_hf_hub_model() {
+fn minisd_generates_small_image_twice_from_same_context() {
     let diffusion = load_vendored_diffusion();
     let model_path = resolve_minisd_model_path();
 
-    diffusion
-        .backend_list_size()
-        .unwrap_or_else(|error| panic!("failed to get diffusion backend list size: {error}"));
     let context_params = ContextParams { model_path: Some(model_path), ..Default::default() };
 
     let ctx = diffusion
@@ -113,17 +132,19 @@ fn minisd_generates_small_image_from_hf_hub_model() {
         ..Default::default()
     };
 
-    let images = ctx
-        .generate_image(image_params)
-        .unwrap_or_else(|error| panic!("failed to generate miniSD test image: {error}"));
+    for run in 0..2 {
+        let images = ctx
+            .generate_image(image_params.clone())
+            .unwrap_or_else(|error| panic!("failed to generate miniSD test image on run {run}: {error}"));
 
-    assert_eq!(images.len(), 1);
-    assert_eq!(images[0].width, 256);
-    assert_eq!(images[0].height, 256);
-    assert!(images[0].channel == 3);
-    assert_eq!(
-        images[0].data.len(),
-        images[0].width as usize * images[0].height as usize * images[0].channel as usize,
-    );
-    assert!(images[0].data.iter().any(|value| *value != 0));
+        assert_eq!(images.len(), 1);
+        assert_eq!(images[0].width, 256);
+        assert_eq!(images[0].height, 256);
+        assert!(images[0].channel == 3);
+        assert_eq!(
+            images[0].data.len(),
+            images[0].width as usize * images[0].height as usize * images[0].channel as usize,
+        );
+        assert!(images[0].data.iter().any(|value| *value != 0));
+    }
 }

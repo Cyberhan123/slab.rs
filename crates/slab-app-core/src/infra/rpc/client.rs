@@ -157,6 +157,18 @@ fn log_grpc_error(rpc: &str, request_id: &str, status: &tonic::Status) {
     );
 }
 
+fn grpc_status_to_anyhow(
+    rpc: &str,
+    request_id: &str,
+    status: tonic::Status,
+) -> anyhow::Error {
+    let code = status.code();
+    let message = status.message().to_owned();
+    anyhow::Error::from(status).context(format!(
+        "{rpc} RPC failed (request_id={request_id}, code={code}, message={message})"
+    ))
+}
+
 pub fn is_transient_runtime_status(status: &tonic::Status) -> bool {
     let message = status.message();
     matches!(status.code(), tonic::Code::Unavailable)
@@ -207,33 +219,30 @@ pub async fn transcribe(channel: Channel, req: pb::TranscribeRequest) -> anyhow:
         decode_configured,
         "sending gRPC transcribe request"
     );
-    let response = client
-        .transcribe(req)
-        .await
-        .inspect_err(|s| log_grpc_error("transcribe", &request_id, s))
-        .context("transcribe RPC failed")?;
+    let response = client.transcribe(req).await.map_err(|status| {
+        log_grpc_error("transcribe", &request_id, &status);
+        grpc_status_to_anyhow("transcribe", &request_id, status)
+    })?;
     Ok(response.into_inner().text)
 }
 
 pub async fn generate_image(channel: Channel, req: pb::ImageRequest) -> anyhow::Result<Vec<u8>> {
     let (mut client, request_id) = diffusion_client(channel);
     debug!(request_id = %request_id, "sending gRPC generate_image request");
-    let response = client
-        .generate_image(req)
-        .await
-        .inspect_err(|s| log_grpc_error("generate_image", &request_id, s))
-        .context("generate_image RPC failed")?;
+    let response = client.generate_image(req).await.map_err(|status| {
+        log_grpc_error("generate_image", &request_id, &status);
+        grpc_status_to_anyhow("generate_image", &request_id, status)
+    })?;
     Ok(response.into_inner().images_json)
 }
 
 pub async fn generate_video(channel: Channel, req: pb::VideoRequest) -> anyhow::Result<Vec<u8>> {
     let (mut client, request_id) = diffusion_client(channel);
     debug!(request_id = %request_id, "sending gRPC generate_video request");
-    let response = client
-        .generate_video(req)
-        .await
-        .inspect_err(|s| log_grpc_error("generate_video", &request_id, s))
-        .context("generate_video RPC failed")?;
+    let response = client.generate_video(req).await.map_err(|status| {
+        log_grpc_error("generate_video", &request_id, &status);
+        grpc_status_to_anyhow("generate_video", &request_id, status)
+    })?;
     Ok(response.into_inner().frames_json)
 }
 

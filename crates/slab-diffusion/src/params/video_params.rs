@@ -131,6 +131,7 @@ impl InnerVideoParams {
 
     pub(crate) fn from_canonical(
         lib: &slab_diffusion_sys::DiffusionLib,
+        ctx: *mut slab_diffusion_sys::sd_ctx_t,
         value: &VideoParams,
     ) -> Result<Self, String> {
         let mut inner = InnerVideoParams::with_native_init(lib);

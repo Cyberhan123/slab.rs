@@ -312,11 +312,11 @@ where
 
     let grpc = Arc::new(grpc);
     let store = Arc::new(store.clone());
-    let model_auto_unload =
-        Arc::new(slab_app_core::model_auto_unload::ModelAutoUnloadManager::new(
-            Arc::clone(&pmid),
-            Arc::clone(&grpc),
-        ));
+    let model_auto_unload = Arc::new(slab_app_core::model_auto_unload::ModelAutoUnloadManager::new(
+        Arc::clone(&pmid),
+        Arc::clone(&grpc),
+        Arc::clone(&runtime_status),
+    ));
     let state = Arc::new(AppState::new(
         Arc::new(cfg.clone()),
         pmid,

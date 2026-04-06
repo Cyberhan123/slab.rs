@@ -74,7 +74,9 @@ fn register_ggml_drivers(
         llama::{GGMLLlamaEngine, spawn_backend_with_engine as spawn_llama},
         whisper::{GGMLWhisperEngine, WhisperWorker},
     };
-    use crate::internal::scheduler::backend::runner::spawn_workers;
+    use crate::internal::scheduler::backend::runner::{
+        spawn_dedicated_workers, spawn_workers,
+    };
 
     let llama_engine = drivers
         .llama_lib_dir
@@ -155,7 +157,7 @@ fn register_ggml_drivers(
             .collect();
         worker_engines.insert(0, diffusion_engine);
         let mut worker_engines = worker_engines.into_iter();
-        spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+        spawn_dedicated_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
             let worker_engine = worker_engines.next().unwrap_or(None);
             DiffusionWorker::new(worker_engine, bc_tx, worker_id)
         });

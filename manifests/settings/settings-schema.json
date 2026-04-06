@@ -485,13 +485,13 @@
         {
           "id": "diffusion_runtime",
           "title": "Diffusion Runtime",
-          "description_md": "Worker sizing for the ggml.diffusion runtime.",
+          "description_md": "Worker sizing for the ggml.diffusion runtime. Values above 1 are clamped to 1 because diffusion model state must stay on a single effective worker.",
           "order": 40,
           "properties": [
             {
               "pmid": "runtime.diffusion.num_workers",
               "label": "Diffusion Workers",
-              "description_md": "Worker count for ggml.diffusion runtime jobs.",
+              "description_md": "Effective worker count for ggml.diffusion runtime jobs. Values above 1 are currently clamped to 1.",
               "editable": true,
               "search_terms": [
                 "diffusion",
@@ -503,6 +503,7 @@
               "schema": {
                 "type": "integer",
                 "minimum": 1,
+                "maximum": 1,
                 "default_value": 1,
                 "order": 10
               }

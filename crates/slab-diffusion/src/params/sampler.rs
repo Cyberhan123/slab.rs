@@ -8,7 +8,6 @@ use slab_diffusion_sys::sd_sample_params_t;
 use crate::Diffusion;
 use crate::params::guidance::GuidanceParams;
 use crate::params::scheduler::Scheduler;
-use crate::params::support::copy_and_free_c_string;
 
 #[rustfmt::skip]
 use slab_diffusion_sys::{
@@ -168,9 +167,7 @@ impl std::fmt::Debug for InnerSampleParams {
 
 impl Diffusion {
     pub fn sample_params_to_str(&self, sample_params: &SampleParams) -> Option<String> {
-        let inner = InnerSampleParams::from_canonical(self.lib.as_ref(), sample_params).ok()?;
-        let c_buf = unsafe { self.lib.sd_sample_params_to_str(&*inner.fp) };
-        copy_and_free_c_string(c_buf)
+        Some(format!("{sample_params:#?}"))
     }
 }
 
@@ -213,6 +210,15 @@ impl InnerSampleParams {
         }
         if let Some(flow_shift) = value.flow_shift {
             inner.set_flow_shift(flow_shift);
+        }
+
+        // important: must set a sample method and scheduler for the native layer to consider the params valid
+        if inner.fp.sample_method == SampleMethod::Unknown.into() {
+            inner.set_sample_method(SampleMethod::Euler);
+        }
+
+        if inner.fp.scheduler == Scheduler::UNKNOWN.into() {
+            inner.set_scheduler(Scheduler::DISCRETE);
         }
 
         Ok(inner)

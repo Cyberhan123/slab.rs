@@ -146,6 +146,7 @@ impl OperationContext {
 pub struct WorkerState {
     store: Arc<crate::infra::db::AnyStore>,
     grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+    runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
     model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     operations: Arc<OperationManager>,
 }
@@ -154,10 +155,11 @@ impl WorkerState {
     pub fn new(
         store: Arc<crate::infra::db::AnyStore>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+        runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
         operations: Arc<OperationManager>,
     ) -> Self {
-        Self { store, grpc, model_auto_unload, operations }
+        Self { store, grpc, runtime_status, model_auto_unload, operations }
     }
 
     pub fn store(&self) -> &Arc<crate::infra::db::AnyStore> {
@@ -166,6 +168,10 @@ impl WorkerState {
 
     pub fn grpc(&self) -> &Arc<crate::infra::rpc::gateway::GrpcGateway> {
         &self.grpc
+    }
+
+    pub fn runtime_status(&self) -> &Arc<crate::runtime_supervisor::RuntimeSupervisorStatus> {
+        &self.runtime_status
     }
 
     pub fn auto_unload(&self) -> &Arc<crate::model_auto_unload::ModelAutoUnloadManager> {

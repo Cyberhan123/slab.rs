@@ -74,6 +74,7 @@ impl GGMLDiffusionEngine {
     ///
     /// Loading the model files specified in `params` may take several seconds.
     pub fn new_context(&mut self, params: ContextParams) -> Result<(), engine::EngineError> {
+          info!("new_context, unloading context first...");
         self.ctx = None;
 
         let ctx = self
@@ -89,6 +90,15 @@ impl GGMLDiffusionEngine {
     ///
     /// The returned `Vec` contains exactly `params.batch_count` images.
     pub fn generate_image(&self, params: ImgParams) -> Result<Vec<Image>, engine::EngineError> {
+        info!(
+            prompt_len = params.prompt.as_ref().map_or(0, |prompt| prompt.len()),
+            width = params.width,
+            height = params.height,
+            batch_count = params.batch_count,
+            has_init_image = params.init_image.is_some(),
+            has_negative_prompt = params.negative_prompt.is_some(),
+            "generating image"
+        );
         let ctx = self.ctx.as_ref().ok_or(GGMLDiffusionEngineError::ContextNotInitialized)?;
 
         ctx.generate_image(params)
@@ -97,6 +107,7 @@ impl GGMLDiffusionEngine {
 
     /// Unload the current context and release its resources.
     pub fn unload(&mut self) {
+        info!("unloading context...");
         self.ctx = None;
     }
 

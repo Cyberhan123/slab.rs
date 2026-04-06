@@ -1,23 +1,12 @@
-use std::ffi::{CStr, CString, c_char};
+use std::ffi::{CString, c_char};
 use std::ptr;
 
-use libc::free;
 use slab_diffusion_sys::{sd_embedding_t, sd_image_t, sd_lora_t};
 
 use super::{Embedding, Image, Lora};
 
 pub(crate) fn c_string_ptr(value: &CString) -> *const c_char {
     value.as_c_str().as_ptr()
-}
-
-pub(crate) fn copy_and_free_c_string(ptr: *mut c_char) -> Option<String> {
-    if ptr.is_null() {
-        return None;
-    }
-
-    let text = unsafe { CStr::from_ptr(ptr) }.to_string_lossy().into_owned();
-    unsafe { free(ptr.cast()) };
-    Some(text)
 }
 
 pub(crate) fn new_c_string(value: &str) -> CString {
@@ -84,21 +73,7 @@ pub(crate) fn sync_embedding_views(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn alloc_c_string(value: &str) -> *mut c_char {
-        let bytes = CString::new(value).unwrap().into_bytes_with_nul();
-        let ptr = unsafe { libc::malloc(bytes.len()).cast::<c_char>() };
-        assert!(!ptr.is_null());
-        unsafe { std::ptr::copy_nonoverlapping(bytes.as_ptr().cast::<c_char>(), ptr, bytes.len()) };
-        ptr
-    }
-
-    #[test]
-    fn copy_and_free_c_string_returns_owned_string() {
-        let text = copy_and_free_c_string(alloc_c_string("slab"));
-        assert_eq!(text.as_deref(), Some("slab"));
-        assert_eq!(copy_and_free_c_string(ptr::null_mut()), None);
-    }
+    use std::ffi::CStr;
 
     #[test]
     fn image_helpers_preserve_shape_and_data_pointers() {

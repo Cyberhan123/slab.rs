@@ -230,6 +230,18 @@ impl RuntimeChildSpawner for TauriRuntimeSpawner {
         child_spec: &slab_app_core::launch::ResolvedRuntimeChildSpec,
     ) -> Result<Box<dyn RuntimeChildHandle>, slab_app_core::error::AppCoreError> {
         let args = child_spec.command_args(self.log_level.as_deref(), self.log_json);
+        let log_file = child_spec.log_file.display().to_string();
+        info!(
+            "spawning slab-runtime child [{} {}] transport={} queue_capacity={} backend_capacity={} shutdown_on_stdin_close={} log_file={} args={:?}",
+            child_spec.backend.canonical_id(),
+            child_spec.grpc_bind_address,
+            child_spec.transport.as_str(),
+            child_spec.queue_capacity,
+            child_spec.backend_capacity,
+            child_spec.shutdown_on_stdin_close,
+            log_file,
+            args
+        );
         let run_on_main_thread = Arc::clone(&self.run_on_main_thread);
         let spawn_sidecar = Arc::clone(&self.spawn_sidecar);
         let (spawn_tx, spawn_rx) = oneshot::channel();
@@ -251,6 +263,7 @@ impl RuntimeChildSpawner for TauriRuntimeSpawner {
 
         let backend = child_spec.backend.canonical_id().to_owned();
         let bind_address = child_spec.grpc_bind_address.clone();
+        let log_file_for_events = log_file.clone();
         let backend_for_events = backend.clone();
         let bind_for_events = bind_address.clone();
         let (exit_tx, exit_rx) = oneshot::channel();
@@ -262,43 +275,47 @@ impl RuntimeChildSpawner for TauriRuntimeSpawner {
                     CommandEvent::Stdout(line) => {
                         let msg = String::from_utf8_lossy(&line);
                         info!(
-                            "runtime stdout [{} {}]: {}",
+                            "runtime stdout [{} {} {}]: {}",
                             backend_for_events,
                             bind_for_events,
+                            log_file_for_events,
                             msg.trim_end()
                         );
                     }
                     CommandEvent::Stderr(line) => {
                         let msg = String::from_utf8_lossy(&line);
                         warn!(
-                            "runtime stderr [{} {}]: {}",
+                            "runtime stderr [{} {} {}]: {}",
                             backend_for_events,
                             bind_for_events,
+                            log_file_for_events,
                             msg.trim_end()
                         );
                     }
                     CommandEvent::Error(err) => {
                         error!(
-                            "runtime process error [{} {}]: {}",
-                            backend_for_events, bind_for_events, err
+                            "runtime process error [{} {} {}]: {}",
+                            backend_for_events, bind_for_events, log_file_for_events, err
                         );
                     }
                     CommandEvent::Terminated(payload) => {
                         match payload.code {
                             Some(0) => {
                                 info!(
-                                    "runtime terminated [{} {}]: signal {:?} code {:?}",
+                                    "runtime terminated [{} {} {}]: signal {:?} code {:?}",
                                     backend_for_events,
                                     bind_for_events,
+                                    log_file_for_events,
                                     payload.signal,
                                     payload.code
                                 );
                             }
                             _ => {
                                 warn!(
-                                    "runtime terminated [{} {}]: signal {:?} code {:?}",
+                                    "runtime terminated [{} {} {}]: signal {:?} code {:?}",
                                     backend_for_events,
                                     bind_for_events,
+                                    log_file_for_events,
                                     payload.signal,
                                     payload.code
                                 );
@@ -315,14 +332,18 @@ impl RuntimeChildSpawner for TauriRuntimeSpawner {
                     }
                     other => {
                         info!(
-                            "runtime event [{} {}]: {:?}",
-                            backend_for_events, bind_for_events, other
+                            "runtime event [{} {} {}]: {:?}",
+                            backend_for_events, bind_for_events, log_file_for_events, other
                         );
                     }
                 }
             }
 
             if let Some(sender) = exit_tx.take() {
+                warn!(
+                    "runtime event stream closed [{} {} {}]",
+                    backend_for_events, bind_for_events, log_file_for_events
+                );
                 let _ = sender.send(RuntimeChildExit {
                     code: None,
                     signal: None,
@@ -332,9 +353,10 @@ impl RuntimeChildSpawner for TauriRuntimeSpawner {
         });
 
         info!(
-            "spawned slab-runtime child [{}] on {}",
+            "spawned slab-runtime child [{}] on {} with log_file={}",
             child_spec.backend.canonical_id(),
-            child_spec.grpc_bind_address
+            child_spec.grpc_bind_address,
+            child_spec.log_file.display()
         );
 
         Ok(Box::new(TauriRuntimeChildHandle { child: Some(child), exit_rx: Some(exit_rx) }))

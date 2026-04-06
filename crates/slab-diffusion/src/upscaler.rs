@@ -5,7 +5,7 @@ use slab_diffusion_sys::upscaler_ctx_t;
 
 use crate::Diffusion;
 use crate::DiffusionError;
-use crate::params::{Image, image_view, owned_image_from_raw};
+use crate::params::{Image, owned_image_from_raw, image_view};
 
 pub struct UpscalerContext {
     pub(crate) fp: *mut upscaler_ctx_t,
@@ -59,13 +59,16 @@ impl UpscalerContext {
         input_image: Image,
         upscale_factor: u32,
     ) -> Result<Image, DiffusionError> {
-        let image = unsafe { self.lib.upscale(self.fp, image_view(&input_image), upscale_factor) };
+        let mut image = unsafe { self.lib.upscale(self.fp, image_view(&input_image), upscale_factor) };
 
         if image.data.is_null() {
             return Err(DiffusionError::UpscalerFailed);
         }
 
-        Ok(owned_image_from_raw(image))
+        let owned = owned_image_from_raw(image);
+        unsafe { self.lib.free_sd_image_data(&mut image) };
+
+        Ok(owned)
     }
 }
 

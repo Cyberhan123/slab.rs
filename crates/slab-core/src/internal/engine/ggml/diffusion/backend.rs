@@ -121,6 +121,9 @@ impl DiffusionWorker {
             model_path = ?config.model_path.as_ref().map(|path| path.display().to_string()),
             diffusion_model_path = ?config.diffusion_model_path.as_ref().map(|p| p.display().to_string()),
             vae_path = ?config.vae_path.as_ref().map(|p| p.display().to_string()),
+            vae_decode_only = config.vae_decode_only.unwrap_or(false),
+            free_params_immediately = config.free_params_immediately.unwrap_or(false),
+            tae_preview_only = config.tae_preview_only.unwrap_or(false),
             flash_attn = ?config.flash_attn,
             offload_params_to_cpu = ?config.offload_params_to_cpu,
             n_threads = ?config.n_threads,
@@ -129,8 +132,9 @@ impl DiffusionWorker {
 
         let started_at = Instant::now();
 
-        // Model loading is CPU/I-O bound; use block_in_place on this thread.
-        let result = tokio::task::block_in_place(|| engine.new_context(config.clone()));
+        // Diffusion workers run on dedicated OS threads, so call the engine directly
+        // and keep the native context pinned to that thread.
+        let result = engine.new_context(config.clone());
 
         match result {
             Ok(()) => {
@@ -213,9 +217,7 @@ impl DiffusionWorker {
             }
         };
 
-        // Image generation is CPU/GPU-bound; use block_in_place so the engine
-        // context stays on this thread without needing an additional spawn_blocking.
-        let result = tokio::task::block_in_place(|| engine.generate_image(image_params));
+        let result = engine.generate_image(image_params);
 
         match result {
             Err(e) => {
@@ -243,7 +245,7 @@ impl DiffusionWorker {
         if let Some(engine) = self.engine.as_mut()
             && !engine.is_model_loaded()
         {
-            let result = tokio::task::block_in_place(|| engine.new_context(config.clone()));
+            let result = engine.new_context(config.clone());
             if let Err(e) = result {
                 tracing::warn!(
                     model_path = ?model_path.as_ref().map(|path| path.display().to_string()),
