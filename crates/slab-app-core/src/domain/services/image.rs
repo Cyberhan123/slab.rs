@@ -13,6 +13,7 @@ use crate::domain::models::{
 };
 use crate::error::AppCoreError;
 use crate::infra::rpc::{self, pb};
+use crate::runtime_supervisor::RuntimeBackendStatusSnapshot;
 
 #[derive(Clone)]
 pub struct ImageService {
@@ -93,10 +94,11 @@ impl ImageService {
         };
         let grpc_req = convert::encode_diffusion_image_request(req.model.clone(), &shared_request);
 
+        let worker_state = self.state.clone();
         let model_auto_unload = Arc::clone(self.state.auto_unload());
+        let runtime_status = Arc::clone(self.state.runtime_status());
         let generate_image_channel_for_spawn = generate_image_channel;
-        let operation_id = self
-            .state
+        let operation_id = worker_state
             .submit_operation(
                 SubmitOperation::running("ggml.diffusion", None, Some(input_json)),
                 move |operation| async move {
@@ -173,7 +175,23 @@ impl ImageService {
                             }
                         }
                         Err(error) => {
-                            let message = error.to_string();
+                            let runtime_snapshot =
+                                runtime_status.snapshot(RuntimeBackendId::GgmlDiffusion);
+                            let runtime_status =
+                                format_runtime_backend_snapshot(&runtime_snapshot);
+                            let transport_disconnect =
+                                rpc::client::transient_runtime_detail(&error);
+                            let message = format!(
+                                "{error:#}\nruntime_status: {runtime_status}"
+                            );
+                            warn!(
+                                task_id = %operation_id,
+                                error = %message,
+                                runtime_status = %runtime_status,
+                                transport_disconnect = transport_disconnect.is_some(),
+                                transport_detail = %transport_disconnect.as_deref().unwrap_or(""),
+                                "image generation task failed"
+                            );
                             if let Err(db_error) = operation.mark_failed(&message).await {
                                 warn!(task_id = %operation_id, error = %db_error, "failed to update image failure");
                             }
@@ -185,4 +203,24 @@ impl ImageService {
 
         Ok(AcceptedOperation { operation_id })
     }
+}
+
+fn format_runtime_backend_snapshot(snapshot: &RuntimeBackendStatusSnapshot) -> String {
+    let mut parts = vec![
+        format!("status={}", snapshot.status.as_str()),
+        format!("consecutive_failures={}", snapshot.consecutive_failures),
+        format!("restart_attempts={}", snapshot.restart_attempts),
+    ];
+
+    if let Some(last_error) = snapshot.last_error.as_deref().filter(|value| !value.is_empty()) {
+        parts.push(format!("last_error={last_error}"));
+    }
+
+    if let Some(last_exit) = snapshot.last_unexpected_exit.as_ref() {
+        parts.push(format!("last_exit={}", last_exit.exit.description()));
+        parts.push(format!("last_bind_address={}", last_exit.bind_address));
+        parts.push(format!("last_restart_delay_ms={}", last_exit.restart_delay.as_millis()));
+    }
+
+    parts.join(", ")
 }

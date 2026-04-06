@@ -23,6 +23,28 @@ use crate::model_auto_unload::{LoadedModelSpec, build_model_load_request};
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 
+fn validate_and_normalize_model_workers(
+    backend_id: RuntimeBackendId,
+    workers: u32,
+    source: &'static str,
+) -> Result<(u32, &'static str), AppCoreError> {
+    if workers == 0 {
+        return Err(AppCoreError::BadRequest("num_workers must be at least 1".into()));
+    }
+
+    if backend_id == RuntimeBackendId::GgmlDiffusion && workers > 1 {
+        warn!(
+            backend = %backend_id,
+            requested_workers = workers,
+            worker_source = source,
+            "ggml.diffusion currently supports only one effective worker; clamping num_workers to 1 to avoid inconsistent per-worker model state"
+        );
+        return Ok((1, source));
+    }
+
+    Ok((workers, source))
+}
+
 #[derive(Debug, Clone)]
 struct ResolvedModelLoadTarget {
     backend_id: RuntimeBackendId,
@@ -661,10 +683,7 @@ async fn resolve_model_workers(
     requested_workers: Option<u32>,
 ) -> Result<(u32, &'static str), AppCoreError> {
     if let Some(workers) = requested_workers {
-        if workers == 0 {
-            return Err(AppCoreError::BadRequest("num_workers must be at least 1".into()));
-        }
-        return Ok((workers, "request"));
+        return validate_and_normalize_model_workers(backend_id, workers, "request");
     }
 
     let configured_workers = {
@@ -677,9 +696,13 @@ async fn resolve_model_workers(
         }
     };
     let Some(workers) = configured_workers else {
-        return Ok((DEFAULT_MODEL_NUM_WORKERS, "default"));
+        return validate_and_normalize_model_workers(
+            backend_id,
+            DEFAULT_MODEL_NUM_WORKERS,
+            "default",
+        );
     };
-    Ok((workers, "settings"))
+    validate_and_normalize_model_workers(backend_id, workers, "settings")
 }
 
 async fn resolve_llama_context_length(
@@ -775,16 +798,17 @@ async fn load_model_with_state(
 
     let (_, channel) = resolve_backend_channel(&state, resolved_target.backend_id)?;
     let (num_workers, worker_source) = if let Some(workers) = command.num_workers {
-        if workers == 0 {
-            return Err(AppCoreError::BadRequest("num_workers must be at least 1".into()));
-        }
-        (workers, "request")
+        validate_and_normalize_model_workers(resolved_target.backend_id, workers, "request")?
     } else if let Some(workers) = resolved_target
         .pack_load_defaults
         .as_ref()
         .and_then(|defaults| defaults.num_workers)
     {
-        (workers, "model_pack")
+        validate_and_normalize_model_workers(
+            resolved_target.backend_id,
+            workers,
+            "model_pack",
+        )?
     } else {
         resolve_model_workers(&state, resolved_target.backend_id, None).await?
     };
@@ -989,10 +1013,11 @@ fn resolve_local_model_path(model: &UnifiedModel) -> Result<String, AppCoreError
 mod tests {
     use super::{
         canonicalize_model_spec, canonicalize_runtime_presets, map_grpc_model_error,
-        normalize_required_text,
+        normalize_required_text, validate_and_normalize_model_workers,
     };
     use crate::domain::models::{ModelSpec, RuntimePresets};
     use crate::error::AppCoreError;
+    use slab_types::RuntimeBackendId;
 
     #[test]
     fn cloud_models_require_remote_model_and_provider_reference() {
@@ -1049,5 +1074,43 @@ mod tests {
             }
             other => panic!("expected BackendNotReady, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn diffusion_workers_are_clamped_to_one() {
+        let (workers, source) = validate_and_normalize_model_workers(
+            RuntimeBackendId::GgmlDiffusion,
+            4,
+            "settings",
+        )
+        .expect("diffusion worker count should normalize");
+
+        assert_eq!(workers, 1);
+        assert_eq!(source, "settings");
+    }
+
+    #[test]
+    fn non_diffusion_workers_keep_requested_count() {
+        let (workers, source) = validate_and_normalize_model_workers(
+            RuntimeBackendId::GgmlWhisper,
+            3,
+            "request",
+        )
+        .expect("whisper worker count should normalize");
+
+        assert_eq!(workers, 3);
+        assert_eq!(source, "request");
+    }
+
+    #[test]
+    fn zero_workers_are_rejected() {
+        let error = validate_and_normalize_model_workers(
+            RuntimeBackendId::GgmlDiffusion,
+            0,
+            "request",
+        )
+        .expect_err("zero workers should fail validation");
+
+        assert!(matches!(error, AppCoreError::BadRequest(message) if message.contains("at least 1")));
     }
 }

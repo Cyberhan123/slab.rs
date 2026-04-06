@@ -418,7 +418,7 @@ pub fn decode_diffusion_image_request(
         seed: Some(request.seed),
         sample_method: (!request.sample_method.is_empty()).then_some(request.sample_method.clone()),
         scheduler: (!request.scheduler.is_empty()).then_some(request.scheduler.clone()),
-        clip_skip: Some(request.clip_skip),
+        clip_skip: (request.clip_skip > 0).then_some(request.clip_skip),
         strength: Some(request.strength),
         eta: Some(request.eta),
         init_image: raw_image_input_from_proto_parts(
@@ -451,7 +451,7 @@ pub fn encode_diffusion_image_request(
         seed: request.seed.unwrap_or(42),
         sample_method: request.sample_method.clone().unwrap_or_default(),
         scheduler: request.scheduler.clone().unwrap_or_default(),
-        clip_skip: request.clip_skip.unwrap_or_default(),
+        clip_skip: request.clip_skip.unwrap_or(-1),
         strength: request.strength.unwrap_or(0.75),
         eta: request.eta.unwrap_or_default(),
         init_image_data,
@@ -899,6 +899,23 @@ mod tests {
         let roundtrip = decode_diffusion_image_request(&proto).unwrap();
 
         assert_eq!(roundtrip, request);
+    }
+
+    #[test]
+    fn diffusion_image_request_preserves_unset_clip_skip_as_none() {
+        let request = DiffusionImageRequest {
+            prompt: "test".to_owned(),
+            width: 512,
+            height: 512,
+            clip_skip: None,
+            ..Default::default()
+        };
+
+        let proto = encode_diffusion_image_request("demo-model", &request);
+        assert_eq!(proto.clip_skip, -1);
+
+        let roundtrip = decode_diffusion_image_request(&proto).unwrap();
+        assert_eq!(roundtrip.clip_skip, None);
     }
 
     #[test]

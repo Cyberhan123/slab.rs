@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, instrument};
 
@@ -21,21 +23,44 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
     ) -> Result<Response<pb::ImageResponse>, Status> {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
+        let started_at = Instant::now();
 
         let req = request.into_inner();
-        let request = convert::decode_diffusion_image_request(&req).map_err(proto_to_status)?;
+        let request = convert::decode_diffusion_image_request(&req).map_err(|error| {
+            error!(error = %error, "failed to decode diffusion image request");
+            proto_to_status(error)
+        })?;
 
         debug!(
             prompt_len = request.prompt.len(),
             n = request.count,
             width = request.width,
             height = request.height,
+            has_init_image = request.init_image.is_some(),
+            steps = request.steps,
+            seed = request.seed,
             "diffusion generate_image request received"
         );
 
-        let pipeline = self.pipeline_for_backend(BackendKind::Diffusion).await?;
-        let generated =
-            pipeline.run_inference_image(build_image_params(&request)?).await.map_err(|error| {
+        let pipeline = self.pipeline_for_backend(BackendKind::Diffusion).await.map_err(|status| {
+            error!(
+                grpc.code = %status.code(),
+                grpc.message = %status.message(),
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "diffusion pipeline unavailable for image request"
+            );
+            status
+        })?;
+        let image_params = build_image_params(&request).map_err(|status| {
+            error!(
+                grpc.code = %status.code(),
+                grpc.message = %status.message(),
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "diffusion image request validation failed"
+            );
+            status
+        })?;
+        let generated = pipeline.run_inference_image(image_params).await.map_err(|error| {
                 error!(error = %error, "diffusion image generation failed");
                 runtime_to_status(error)
             })?;
@@ -44,6 +69,7 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
         info!(
             images_json_bytes = grpc_response.images_json.len(),
             image_count = generated.len(),
+            elapsed_ms = started_at.elapsed().as_millis(),
             "diffusion image generation completed"
         );
         Ok(Response::new(grpc_response))
@@ -56,23 +82,50 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
     ) -> Result<Response<pb::VideoResponse>, Status> {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
+        let started_at = Instant::now();
 
         let req = request.into_inner();
-        let request = convert::decode_diffusion_video_request(&req).map_err(proto_to_status)?;
+        let request = convert::decode_diffusion_video_request(&req).map_err(|error| {
+            error!(error = %error, "failed to decode diffusion video request");
+            proto_to_status(error)
+        })?;
 
         debug!(
             prompt_len = request.prompt.len(),
             video_frames = request.video_frames,
+            has_init_image = request.init_image.is_some(),
+            steps = request.steps,
+            seed = request.seed,
             "diffusion generate_video request received"
         );
 
-        let pipeline = self.pipeline_for_backend(BackendKind::Diffusion).await?;
-        let video_params = build_video_params(&request)?;
+        let pipeline = self.pipeline_for_backend(BackendKind::Diffusion).await.map_err(|status| {
+            error!(
+                grpc.code = %status.code(),
+                grpc.message = %status.message(),
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "diffusion pipeline unavailable for video request"
+            );
+            status
+        })?;
+        let video_params = build_video_params(&request).map_err(|status| {
+            error!(
+                grpc.code = %status.code(),
+                grpc.message = %status.message(),
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "diffusion video request validation failed"
+            );
+            status
+        })?;
         let generated = pipeline
             .run_inference_image(lower_video_to_image_params(&video_params))
             .await
             .map_err(|error| {
-                error!(error = %error, "diffusion video generation failed");
+                error!(
+                    error = %error,
+                    elapsed_ms = started_at.elapsed().as_millis(),
+                    "diffusion video generation failed"
+                );
                 runtime_to_status(error)
             })?;
 
@@ -80,6 +133,7 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
         info!(
             frames_json_bytes = grpc_response.frames_json.len(),
             frame_count = generated.len(),
+            elapsed_ms = started_at.elapsed().as_millis(),
             "diffusion video generation completed"
         );
         Ok(Response::new(grpc_response))

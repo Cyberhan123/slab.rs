@@ -256,9 +256,26 @@ impl ManagedRuntimeSupervisor {
             match spawner.spawn_child(child_spec).await {
                 Ok(handle) => {
                     status.mark_ready(child_spec.backend, 0);
+                    info!(
+                        backend = child_spec.backend.canonical_id(),
+                        bind_address = %child_spec.grpc_bind_address,
+                        transport = child_spec.transport.as_str(),
+                        queue_capacity = child_spec.queue_capacity,
+                        backend_capacity = child_spec.backend_capacity,
+                        log_file = %child_spec.log_file.display(),
+                        shutdown_on_stdin_close = child_spec.shutdown_on_stdin_close,
+                        "runtime child started"
+                    );
                     started_children.push((child_spec.clone(), handle));
                 }
                 Err(error) => {
+                    error!(
+                        backend = child_spec.backend.canonical_id(),
+                        bind_address = %child_spec.grpc_bind_address,
+                        log_file = %child_spec.log_file.display(),
+                        error = %error,
+                        "failed to start runtime child"
+                    );
                     rollback_started_children(&mut started_children, &options).await;
                     return Err(error);
                 }
@@ -391,6 +408,7 @@ async fn supervise_backend(
                     consecutive_failures,
                     restart_delay_ms = restart_delay.as_millis(),
                     exit = %exit_detail,
+                    log_file = %child_spec.log_file.display(),
                     "runtime child exited unexpectedly; scheduling restart"
                 );
 
@@ -416,6 +434,7 @@ async fn supervise_backend(
                                 bind_address = %bind_address,
                                 consecutive_failures,
                                 restart_attempts,
+                                log_file = %child_spec.log_file.display(),
                                 "runtime child restarted"
                             );
                             break;
@@ -449,6 +468,7 @@ async fn supervise_backend(
                                 consecutive_failures,
                                 retry_delay_ms = retry_delay.as_millis(),
                                 error = %error_text,
+                                log_file = %child_spec.log_file.display(),
                                 "failed to restart runtime child; will retry"
                             );
                         }
@@ -471,6 +491,7 @@ async fn shutdown_child(
         warn!(
             backend,
             bind_address = %bind_address,
+            log_file = %child_spec.log_file.display(),
             error = %error,
             "failed to request graceful runtime shutdown"
         );
@@ -481,6 +502,7 @@ async fn shutdown_child(
             info!(
                 backend,
                 bind_address = %bind_address,
+                log_file = %child_spec.log_file.display(),
                 exit = %exit.description(),
                 "runtime child exited during graceful shutdown"
             );
@@ -490,6 +512,7 @@ async fn shutdown_child(
             warn!(
                 backend,
                 bind_address = %bind_address,
+                log_file = %child_spec.log_file.display(),
                 error = %error,
                 "failed while waiting for graceful runtime shutdown"
             );
@@ -498,6 +521,7 @@ async fn shutdown_child(
             warn!(
                 backend,
                 bind_address = %bind_address,
+                log_file = %child_spec.log_file.display(),
                 timeout_ms = options.graceful_shutdown_timeout.as_millis(),
                 "timed out waiting for graceful runtime shutdown"
             );
@@ -508,6 +532,7 @@ async fn shutdown_child(
         error!(
             backend,
             bind_address = %bind_address,
+            log_file = %child_spec.log_file.display(),
             error = %error,
             "failed to force kill runtime child"
         );
@@ -519,6 +544,7 @@ async fn shutdown_child(
             warn!(
                 backend,
                 bind_address = %bind_address,
+                log_file = %child_spec.log_file.display(),
                 exit = %exit.description(),
                 "runtime child exited after force kill"
             );
@@ -527,6 +553,7 @@ async fn shutdown_child(
             warn!(
                 backend,
                 bind_address = %bind_address,
+                log_file = %child_spec.log_file.display(),
                 error = %error,
                 "failed while waiting for forced runtime shutdown"
             );
@@ -535,6 +562,7 @@ async fn shutdown_child(
             error!(
                 backend,
                 bind_address = %bind_address,
+                log_file = %child_spec.log_file.display(),
                 timeout_ms = options.force_shutdown_timeout.as_millis(),
                 "timed out waiting for runtime child after force kill"
             );

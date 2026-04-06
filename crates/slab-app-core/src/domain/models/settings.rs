@@ -418,14 +418,14 @@ fn legacy_settings_schema() -> RawSettingsSchema {
                     legacy_subsection(
                         "diffusion_runtime",
                         "Diffusion Runtime",
-                        "Worker sizing for the ggml.diffusion runtime.",
+                        "Worker sizing for the ggml.diffusion runtime. Values above 1 are clamped to 1 because diffusion model state must stay on a single effective worker.",
                         40,
                         vec![legacy_integer_property(
                             PMID.runtime.diffusion.num_workers().into_string(),
                             "Diffusion Workers",
                             json!(1),
                             Some(1),
-                            None,
+                            Some(1),
                             10,
                         )],
                     ),

@@ -17,12 +17,14 @@ struct BackendRefState {
     idle_seq: u64,
     auto_unloaded: bool,
     last_loaded: Option<LoadedModelSpec>,
+    runtime_restart_attempts: usize,
 }
 
 #[derive(Debug)]
 pub struct ModelAutoUnloadManager {
     pmid: Arc<crate::domain::services::PmidService>,
     grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+    runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
     states: tokio::sync::Mutex<HashMap<RuntimeBackendId, BackendRefState>>,
 }
 
@@ -47,8 +49,9 @@ impl ModelAutoUnloadManager {
     pub fn new(
         pmid: Arc<crate::domain::services::PmidService>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
+        runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
     ) -> Self {
-        Self { pmid, grpc, states: tokio::sync::Mutex::new(HashMap::new()) }
+        Self { pmid, grpc, runtime_status, states: tokio::sync::Mutex::new(HashMap::new()) }
     }
 
     pub async fn acquire(self: &Arc<Self>, backend_id: RuntimeBackendId) -> ModelUsageGuard {
@@ -97,6 +100,7 @@ impl ModelAutoUnloadManager {
             state.idle_seq = state.idle_seq.saturating_add(1);
             state.auto_unloaded = false;
             state.last_loaded = Some(spec);
+            state.runtime_restart_attempts = self.runtime_status.snapshot(backend).restart_attempts;
             if state.active_refs == 0 {
                 should_schedule = Some(state.idle_seq);
             }
@@ -224,9 +228,24 @@ impl ModelAutoUnloadManager {
 
     async fn try_reload_if_needed(&self, backend_id: RuntimeBackendId) -> Result<(), String> {
         let backend = backend_id;
+        let runtime_snapshot = self.runtime_status.snapshot(backend);
         let spec = {
             let mut states = self.states.lock().await;
             let state = states.entry(backend).or_default();
+            if runtime_snapshot.restart_attempts > state.runtime_restart_attempts {
+                let previous_restart_attempts = state.runtime_restart_attempts;
+                state.runtime_restart_attempts = runtime_snapshot.restart_attempts;
+                if state.last_loaded.is_some() {
+                    state.auto_unloaded = true;
+                    info!(
+                        backend = %backend,
+                        previous_restart_attempts,
+                        current_restart_attempts = runtime_snapshot.restart_attempts,
+                        runtime_status = runtime_snapshot.status.as_str(),
+                        "runtime restart detected; model will be auto-reloaded before inference"
+                    );
+                }
+            }
             if !state.auto_unloaded {
                 return Ok(());
             }
@@ -258,12 +277,14 @@ impl ModelAutoUnloadManager {
                     model_path = %spec.model_path.display(),
                     num_workers = spec.num_workers,
                     context_length = spec.context_length.unwrap_or(0),
-                    "auto-reloaded model after idle auto-unload"
+                    restart_attempts = runtime_snapshot.restart_attempts,
+                    "auto-reloaded model before inference"
                 );
                 let mut states = self.states.lock().await;
                 let state = states.entry(backend).or_default();
                 state.last_loaded = Some(spec);
                 state.auto_unloaded = false;
+                state.runtime_restart_attempts = runtime_snapshot.restart_attempts;
                 Ok(())
             }
             Err(error) => {

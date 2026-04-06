@@ -140,56 +140,107 @@ pub async fn dispatch_control_lagged<T>(handler: &mut T, route: Option<LaggedDis
 /// - `tokio::select! { biased; ... }`,
 /// - ingress/control listening, and
 /// - peer command sequence/self-echo filtering.
-pub fn spawn_runtime_worker<H>(
+async fn runtime_worker_loop<H>(
     shared_ingress: SharedIngressRx,
     mut control_rx: broadcast::Receiver<WorkerCommand>,
     worker_id: usize,
     mut handler: H,
+) 
+where
+    H: RuntimeWorkerHandler,
+{
+    let mut last_applied_seq = 0u64;
+    loop {
+        tokio::select! {
+            biased; // prioritize control traffic before ingress requests
+
+            cmd = control_rx.recv() => {
+                match cmd {
+                    Ok(WorkerCommand::Peer(peer_cmd)) => {
+                        let seq_id = peer_cmd.seq_id();
+                        if seq_id <= last_applied_seq {
+                            continue;
+                        }
+                        last_applied_seq = seq_id;
+                        if peer_cmd.sender_id() == worker_id {
+                            continue;
+                        }
+                        handler.handle_peer_control(peer_cmd).await;
+                    }
+                    Ok(WorkerCommand::Runtime(signal)) => {
+                        handler.handle_runtime_control(signal).await;
+                    }
+                    Err(broadcast::error::RecvError::Lagged(_)) => {
+                        handler.handle_control_lagged().await;
+                    }
+                    Err(broadcast::error::RecvError::Closed) => break,
+                }
+            }
+
+            req = async {
+                let mut lock = shared_ingress.lock().await;
+                lock.recv().await
+            } => {
+                match req {
+                    Some(req) => handler.handle_request(req).await,
+                    None => break,
+                }
+            }
+        }
+    }
+}
+
+pub fn spawn_runtime_worker<H>(
+    shared_ingress: SharedIngressRx,
+    control_rx: broadcast::Receiver<WorkerCommand>,
+    worker_id: usize,
+    handler: H,
 ) -> tokio::task::JoinHandle<()>
 where
     H: RuntimeWorkerHandler,
 {
-    tokio::spawn(async move {
-        let mut last_applied_seq = 0u64;
-        loop {
-            tokio::select! {
-                biased; // prioritize control traffic before ingress requests
+    tokio::spawn(runtime_worker_loop(shared_ingress, control_rx, worker_id, handler))
+}
 
-                cmd = control_rx.recv() => {
-                    match cmd {
-                        Ok(WorkerCommand::Peer(peer_cmd)) => {
-                            let seq_id = peer_cmd.seq_id();
-                            if seq_id <= last_applied_seq {
-                                continue;
-                            }
-                            last_applied_seq = seq_id;
-                            if peer_cmd.sender_id() == worker_id {
-                                continue;
-                            }
-                            handler.handle_peer_control(peer_cmd).await;
-                        }
-                        Ok(WorkerCommand::Runtime(signal)) => {
-                            handler.handle_runtime_control(signal).await;
-                        }
-                        Err(broadcast::error::RecvError::Lagged(_)) => {
-                            handler.handle_control_lagged().await;
-                        }
-                        Err(broadcast::error::RecvError::Closed) => break,
-                    }
-                }
+pub fn spawn_dedicated_runtime_worker<H>(
+    shared_ingress: SharedIngressRx,
+    control_tx: broadcast::Sender<WorkerCommand>,
+    worker_id: usize,
+    handler: H,
+) where
+    H: RuntimeWorkerHandler,
+{
+    let thread_name = format!("runtime-worker-{worker_id}");
+    let thread_name_for_spawn = thread_name.clone();
 
-                req = async {
-                    let mut lock = shared_ingress.lock().await;
-                    lock.recv().await
-                } => {
-                    match req {
-                        Some(req) => handler.handle_request(req).await,
-                        None => break,
-                    }
-                }
+    if let Err(error) = std::thread::Builder::new().name(thread_name.clone()).spawn(move || {
+        let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                tracing::error!(
+                    worker_id,
+                    thread = %thread_name_for_spawn,
+                    error = %error,
+                    "failed to build dedicated backend worker runtime"
+                );
+                return;
             }
-        }
-    })
+        };
+
+        runtime.block_on(runtime_worker_loop(
+            shared_ingress,
+            control_tx.subscribe(),
+            worker_id,
+            handler,
+        ));
+    }) {
+        tracing::error!(
+            worker_id,
+            thread = %thread_name,
+            error = %error,
+            "failed to spawn dedicated backend worker thread"
+        );
+    }
 }
 
 /// Spawn N runtime workers from one shared ingress/control bus using a factory.
@@ -208,6 +259,28 @@ pub fn spawn_workers<H, F>(
         spawn_runtime_worker(
             Arc::clone(&shared_ingress),
             control_tx.subscribe(),
+            worker_id,
+            handler,
+        );
+    }
+}
+
+/// Spawn N runtime workers pinned to dedicated OS threads.
+pub fn spawn_dedicated_workers<H, F>(
+    shared_ingress: SharedIngressRx,
+    control_tx: broadcast::Sender<WorkerCommand>,
+    worker_count: usize,
+    mut make_handler: F,
+) where
+    H: RuntimeWorkerHandler,
+    F: FnMut(usize, broadcast::Sender<WorkerCommand>) -> H,
+{
+    let worker_count = worker_count.max(1);
+    for worker_id in 0..worker_count {
+        let handler = make_handler(worker_id, control_tx.clone());
+        spawn_dedicated_runtime_worker(
+            Arc::clone(&shared_ingress),
+            control_tx.clone(),
             worker_id,
             handler,
         );

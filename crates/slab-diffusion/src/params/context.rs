@@ -7,7 +7,7 @@ use slab_diffusion_sys::{sd_ctx_params_t, sd_embedding_t};
 
 use crate::Diffusion;
 use crate::params::support::{
-    c_string_ptr, copy_and_free_c_string, new_c_string, sync_embedding_views,
+    c_string_ptr, new_c_string, sync_embedding_views,
 };
 use crate::params::{Embedding, LoraApplyMode, Prediction, RngType, WeightType};
 
@@ -215,9 +215,7 @@ impl std::fmt::Debug for InnerContextParams {
 
 impl Diffusion {
     pub fn context_params_to_str(&self, params: &ContextParams) -> Option<String> {
-        let inner = InnerContextParams::from_canonical(self.lib.as_ref(), params);
-        let c_buf = unsafe { self.lib.sd_ctx_params_to_str(&*inner.fp) };
-        copy_and_free_c_string(c_buf)
+        Some(format!("{params:#?}"))
     }
 }
 
@@ -228,11 +226,21 @@ impl InnerContextParams {
         inner
     }
 
+    fn apply_server_compatible_defaults(&mut self, value: &ContextParams) {
+        // `sd_ctx_params_init` enables short-lived one-shot defaults that do not match
+        // the upstream long-lived server context behavior. Keep unset flags aligned with
+        // the server path so reused contexts survive multiple inference calls.
+        self.fp.vae_decode_only = value.vae_decode_only.unwrap_or(false);
+        self.fp.free_params_immediately = value.free_params_immediately.unwrap_or(false);
+        self.fp.tae_preview_only = value.tae_preview_only.unwrap_or(false);
+    }
+
     pub(crate) fn from_canonical(
         lib: &slab_diffusion_sys::DiffusionLib,
         value: &ContextParams,
     ) -> Self {
         let mut inner = InnerContextParams::with_native_init(lib);
+        inner.apply_server_compatible_defaults(value);
 
         if value.model_path.is_some() {
             Self::set_path(
@@ -328,12 +336,6 @@ impl InnerContextParams {
                 value.tensor_type_rules.as_deref(),
             );
         }
-        if let Some(vae_decode_only) = value.vae_decode_only {
-            inner.fp.vae_decode_only = vae_decode_only;
-        }
-        if let Some(free_params_immediately) = value.free_params_immediately {
-            inner.fp.free_params_immediately = free_params_immediately;
-        }
         if let Some(n_threads) = value.n_threads {
             inner.fp.n_threads = n_threads;
         }
@@ -363,9 +365,6 @@ impl InnerContextParams {
         }
         if let Some(diffusion_flash_attn) = value.diffusion_flash_attn {
             inner.fp.diffusion_flash_attn = diffusion_flash_attn;
-        }
-        if let Some(tae_preview_only) = value.tae_preview_only {
-            inner.fp.tae_preview_only = tae_preview_only;
         }
         if let Some(diffusion_conv_direct) = value.diffusion_conv_direct {
             inner.fp.diffusion_conv_direct = diffusion_conv_direct;
@@ -516,5 +515,41 @@ impl InnerContextParams {
         self.fp.photomaker_device =
             self.photomaker_device.as_ref().map_or(ptr::null(), c_string_ptr);
         self.fp.vision_device = self.vision_device.as_ref().map_or(ptr::null(), c_string_ptr);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn unset_context_flags_use_server_compatible_defaults() {
+        let mut inner = InnerContextParams::default();
+        inner.fp.vae_decode_only = true;
+        inner.fp.free_params_immediately = true;
+        inner.fp.tae_preview_only = true;
+
+        inner.apply_server_compatible_defaults(&ContextParams::default());
+
+        assert!(!inner.fp.vae_decode_only);
+        assert!(!inner.fp.free_params_immediately);
+        assert!(!inner.fp.tae_preview_only);
+    }
+
+    #[test]
+    fn explicit_context_flags_override_server_compatible_defaults() {
+        let mut inner = InnerContextParams::default();
+        let params = ContextParams {
+            vae_decode_only: Some(true),
+            free_params_immediately: Some(true),
+            tae_preview_only: Some(true),
+            ..Default::default()
+        };
+
+        inner.apply_server_compatible_defaults(&params);
+
+        assert!(inner.fp.vae_decode_only);
+        assert!(inner.fp.free_params_immediately);
+        assert!(inner.fp.tae_preview_only);
     }
 }

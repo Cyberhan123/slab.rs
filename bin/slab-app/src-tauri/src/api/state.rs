@@ -38,8 +38,11 @@ pub async fn init_state<R: tauri::Runtime>(
     let store = Arc::new(AnyStore::connect(&cfg.database_url).await?);
     let pmid = Arc::new(PmidService::load_from_path(cfg.settings_path.clone()).await?);
     let grpc = Arc::new(GrpcGateway::connect_from_config(&cfg).await?);
-    let model_auto_unload =
-        Arc::new(ModelAutoUnloadManager::new(Arc::clone(&pmid), Arc::clone(&grpc)));
+    let model_auto_unload = Arc::new(ModelAutoUnloadManager::new(
+        Arc::clone(&pmid),
+        Arc::clone(&grpc),
+        Arc::clone(&runtime_status),
+    ));
 
     let state = Arc::new(AppState::new(
         Arc::new(cfg),
