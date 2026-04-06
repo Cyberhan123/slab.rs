@@ -172,6 +172,11 @@ fn build_model_source_from_components(preset: &ResolvedPreset) -> Result<ModelSo
                     local_files.insert(key, path);
                 }
             }
+            PackSource::Cloud { .. } => {
+                return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
+                    source_kind: "cloud".into(),
+                })
+            }
         }
     }
 
@@ -209,6 +214,11 @@ fn pack_source_to_model_source(source: PackSource) -> Result<ModelSource, ModelP
             revision,
             files: source_file_map(None, &files),
         },
+        PackSource::Cloud { .. } => {
+            return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
+                source_kind: "cloud".into(),
+            })
+        }
     })
 }
 
@@ -393,5 +403,57 @@ mod tests {
         assert_eq!(bridge.model_spec.source.primary_path().map(|path| path.to_string_lossy().to_string()).as_deref(), Some("C:/models/qwen.gguf"));
         assert_eq!(load_spec.context_length, Some(8192));
         assert_eq!(bridge.inference_defaults.get("temperature").and_then(Value::as_f64), Some(0.7));
+    }
+
+    #[test]
+    fn rejects_cloud_source_when_building_runtime_bridge() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "gpt-4.1-mini",
+                    "label": "GPT-4.1 mini",
+                    "provider": "cloud.openai",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "source": {
+                        "kind": "cloud",
+                        "provider_id": "openai-main",
+                        "remote_model_id": "gpt-4.1-mini"
+                    },
+                    "variants": [{"id": "default-variant", "label": "Default Variant", "$config": "ref://models/variants/default.json"}],
+                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/default.json",
+                json!({
+                    "kind": "variant",
+                    "id": "default-variant",
+                    "label": "Default Variant",
+                    "backend": "ggml_llama"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "variant_id": "default-variant"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let error = resolved.compile_default_runtime_bridge().expect_err("cloud source must not compile runtime bridge");
+
+        assert!(error.to_string().contains("source kind 'cloud'"));
     }
 }

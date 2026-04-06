@@ -39,7 +39,7 @@ fn main() {
             "completions",
             "list_models",
             "create_model",
-            "import_model_config",
+            "import_model_pack",
             "get_model",
             "update_model",
             "delete_model",

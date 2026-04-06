@@ -1,18 +1,46 @@
+use std::collections::BTreeMap;
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
 use base64::Engine as _;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
+use sha2::{Digest, Sha256};
 use slab_model_pack::{
-    ModelPack, ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults,
-    ModelPackRuntimeBridge, PACK_EXTENSION,
+    BackendConfigDocument, BackendConfigScope, ConfigEntryRef, ConfigRef, ModelPack,
+    ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults, ModelPackManifest,
+    ModelPackRuntimeBridge, PackModelStatus, PackPricing, PackRuntimePresets, PackSource,
+    PackSourceFile, PresetDocument, VariantDocument, MANIFEST_FILE_NAME, PACK_EXTENSION,
 };
-use slab_types::{DiffusionLoadOptions, RuntimeBackendId};
+use slab_types::{Capability, DiffusionLoadOptions, ModelFamily, RuntimeBackendId};
 use uuid::Uuid;
+use zip::CompressionMethod;
+use zip::ZipArchive;
+use zip::ZipWriter;
+use zip::write::SimpleFileOptions;
 
-use crate::domain::models::{CreateModelCommand, ModelSpec, RuntimePresets, UnifiedModelStatus};
+use crate::domain::models::{
+    CreateModelCommand, ModelSpec, Pricing, RuntimePresets, StoredModelConfig, UnifiedModel,
+    UnifiedModelStatus,
+};
 use crate::error::AppCoreError;
-use crate::infra::model_configs;
+
+const INTERNAL_MODEL_STATE_ENTRY: &str = "internal/stored-model-config";
+const GENERATED_VARIANT_ID: &str = "default-variant";
+const GENERATED_VARIANT_PATH: &str = "models/variants/default.json";
+const GENERATED_PRESET_ID: &str = "default";
+const GENERATED_PRESET_PATH: &str = "models/presets/default.json";
+const GENERATED_LOAD_CONFIG_ID: &str = "load";
+const GENERATED_LOAD_CONFIG_PATH: &str = "models/configs/load.json";
+const GENERATED_INFERENCE_CONFIG_ID: &str = "inference";
+const GENERATED_INFERENCE_CONFIG_PATH: &str = "models/configs/inference.json";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PersistedModelPackState {
+    manifest_sha256: String,
+    config: StoredModelConfig,
+}
 
 pub fn open_model_pack(path: &Path) -> Result<ModelPack, AppCoreError> {
     ModelPack::open(path).map_err(map_model_pack_error)
@@ -44,13 +72,13 @@ pub fn list_model_pack_paths(dir: &Path) -> Result<Vec<PathBuf>, AppCoreError> {
 
     for entry in fs::read_dir(dir).map_err(|error| {
         AppCoreError::Internal(format!(
-            "failed to read model config directory '{}': {error}",
+            "failed to read model pack directory '{}': {error}",
             dir.display()
         ))
     })? {
         let entry = entry.map_err(|error| {
             AppCoreError::Internal(format!(
-                "failed to iterate model config directory '{}': {error}",
+                "failed to iterate model pack directory '{}': {error}",
                 dir.display()
             ))
         })?;
@@ -84,29 +112,76 @@ pub fn read_model_pack_runtime_bridge_from_bytes(
 }
 
 pub fn build_model_command_from_pack(path: &Path) -> Result<CreateModelCommand, AppCoreError> {
-    let summary = read_model_pack_summary(path)?;
-    let bridge = read_model_pack_runtime_bridge(path)?;
-    Ok(build_model_command(path, &summary, &bridge))
+    let bytes = read_pack_bytes(path)?;
+    build_model_command_from_pack_bytes(path, &bytes)
 }
 
 pub fn build_model_command_from_pack_bytes(
     path: &Path,
     bytes: &[u8],
 ) -> Result<CreateModelCommand, AppCoreError> {
-    let summary = read_model_pack_summary_from_bytes(bytes)?;
-    let bridge = read_model_pack_runtime_bridge_from_bytes(bytes)?;
-    Ok(build_model_command(path, &summary, &bridge))
+    if let Some(config) = read_persisted_model_config_from_pack_bytes(bytes)? {
+        return Ok(config.into());
+    }
+
+    let pack = open_model_pack_from_bytes(bytes)?;
+    let resolved = pack.resolve().map_err(map_model_pack_error)?;
+    build_model_command(path, pack.manifest(), &resolved)
 }
 
 pub fn model_pack_file_path(dir: &Path, id: &str) -> PathBuf {
     dir.join(model_pack_file_name(id))
 }
 
+pub fn ensure_model_pack_dir(path: &Path) -> Result<(), AppCoreError> {
+    fs::create_dir_all(path).map_err(|error| {
+        AppCoreError::Internal(format!(
+            "failed to create model pack directory '{}': {error}",
+            path.display()
+        ))
+    })
+}
+
 pub fn write_model_pack(dir: &Path, id: &str, bytes: &[u8]) -> Result<PathBuf, AppCoreError> {
-    model_configs::ensure_model_config_dir(dir)?;
+    ensure_model_pack_dir(dir)?;
 
     let path = model_pack_file_path(dir, id);
     write_bytes_file(&path, bytes)?;
+    Ok(path)
+}
+
+pub fn write_imported_model_pack(
+    dir: &Path,
+    model: &UnifiedModel,
+    bytes: &[u8],
+) -> Result<PathBuf, AppCoreError> {
+    let config: StoredModelConfig = model.clone().into();
+    let payload = attach_persisted_state_to_pack_bytes(bytes, &config)?;
+    write_model_pack(dir, &model.id, &payload)
+}
+
+pub fn write_persisted_model_pack(
+    dir: &Path,
+    model: &UnifiedModel,
+) -> Result<PathBuf, AppCoreError> {
+    let config: StoredModelConfig = model.clone().into();
+    write_persisted_model_pack_from_config(dir, &config)
+}
+
+pub fn write_persisted_model_pack_from_config(
+    dir: &Path,
+    config: &StoredModelConfig,
+) -> Result<PathBuf, AppCoreError> {
+    ensure_model_pack_dir(dir)?;
+
+    let path = model_pack_file_path(dir, &config.id);
+    let payload = if path.exists() {
+        attach_persisted_state_to_pack_bytes(&read_pack_bytes(&path)?, config)?
+    } else {
+        build_generated_model_pack_bytes(config)?
+    };
+
+    write_bytes_file(&path, &payload)?;
     Ok(path)
 }
 
@@ -131,25 +206,15 @@ pub fn delete_model_pack_at_path(path: &Path) -> Result<bool, AppCoreError> {
 
 fn build_model_command(
     path: &Path,
-    summary: &ModelPackCatalogSummary,
-    bridge: &ModelPackRuntimeBridge,
-) -> CreateModelCommand {
-    let provider = format!("local.{}", bridge.backend.canonical_id());
-    let status = Some(default_status_for_runtime_bridge(&bridge));
-    let runtime_presets = build_runtime_presets(&bridge.inference_defaults);
-
-    CreateModelCommand {
-        id: Some(summary.id.clone()),
-        display_name: summary.label.clone(),
-        provider,
-        status,
-        spec: ModelSpec {
-            local_path: Some(path.display().to_string()),
-            context_window: bridge.load_defaults.context_length,
-            chat_template: bridge.load_defaults.chat_template.clone(),
-            ..Default::default()
-        },
-        runtime_presets,
+    manifest: &ModelPackManifest,
+    resolved: &slab_model_pack::ResolvedModelPack,
+) -> Result<CreateModelCommand, AppCoreError> {
+    match manifest.source.as_ref() {
+        Some(PackSource::Cloud {
+            provider_id,
+            remote_model_id,
+        }) => build_cloud_model_command(manifest, provider_id, remote_model_id),
+        _ => build_local_model_command(path, manifest, resolved),
     }
 }
 
@@ -197,6 +262,12 @@ fn value_to_f32(value: &serde_json::Value) -> Option<f32> {
     value.as_f64().map(|value| value as f32)
 }
 
+fn read_pack_bytes(path: &Path) -> Result<Vec<u8>, AppCoreError> {
+    fs::read(path).map_err(|error| {
+        AppCoreError::Internal(format!("failed to read model pack '{}': {error}", path.display()))
+    })
+}
+
 fn model_pack_file_name(id: &str) -> String {
     let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(id.as_bytes());
     format!("{encoded}.{PACK_EXTENSION}")
@@ -209,7 +280,7 @@ fn write_bytes_file(path: &Path, payload: &[u8]) -> Result<(), AppCoreError> {
             path.display()
         ))
     })?;
-    model_configs::ensure_model_config_dir(parent)?;
+    ensure_model_pack_dir(parent)?;
 
     let file_name = path.file_name().and_then(|value| value.to_str()).ok_or_else(|| {
         AppCoreError::Internal(format!(
@@ -277,6 +348,416 @@ fn write_bytes_file(path: &Path, payload: &[u8]) -> Result<(), AppCoreError> {
     write_result
 }
 
+fn read_persisted_model_config_from_pack_bytes(
+    bytes: &[u8],
+) -> Result<Option<StoredModelConfig>, AppCoreError> {
+    let Some(state_bytes) = read_pack_entry_bytes(bytes, INTERNAL_MODEL_STATE_ENTRY)? else {
+        return Ok(None);
+    };
+
+    let Ok(state) = serde_json::from_slice::<PersistedModelPackState>(&state_bytes) else {
+        return Ok(None);
+    };
+
+    let manifest_sha256 = manifest_sha256_from_pack_bytes(bytes)?;
+    if state.manifest_sha256 != manifest_sha256 {
+        return Ok(None);
+    }
+
+    Ok(Some(state.config))
+}
+
+fn attach_persisted_state_to_pack_bytes(
+    bytes: &[u8],
+    config: &StoredModelConfig,
+) -> Result<Vec<u8>, AppCoreError> {
+    let manifest_sha256 = manifest_sha256_from_pack_bytes(bytes)?;
+    let mut entries = collect_pack_entries(bytes)?;
+    entries.retain(|(path, _)| path != INTERNAL_MODEL_STATE_ENTRY);
+    entries.push((
+        INTERNAL_MODEL_STATE_ENTRY.to_owned(),
+        build_persisted_state_bytes(&manifest_sha256, config)?,
+    ));
+    build_pack_bytes(entries)
+}
+
+fn build_generated_model_pack_bytes(config: &StoredModelConfig) -> Result<Vec<u8>, AppCoreError> {
+    let mut entries = build_generated_pack_entries(config)?;
+    let manifest_sha256 = entries
+        .iter()
+        .find_map(|(path, payload)| (path == MANIFEST_FILE_NAME).then(|| hash_bytes_hex(payload)))
+        .ok_or_else(|| AppCoreError::Internal("generated model pack is missing manifest.json".into()))?;
+    entries.push((
+        INTERNAL_MODEL_STATE_ENTRY.to_owned(),
+        build_persisted_state_bytes(&manifest_sha256, config)?,
+    ));
+    build_pack_bytes(entries)
+}
+
+fn build_generated_pack_entries(
+    config: &StoredModelConfig,
+) -> Result<Vec<(String, Vec<u8>)>, AppCoreError> {
+    let mut manifest = build_generated_manifest(config);
+    let mut entries = Vec::new();
+
+    if let Some(backend) = infer_runtime_backend_from_provider(&config.provider) {
+        let variant_ref = ConfigEntryRef {
+            id: GENERATED_VARIANT_ID.to_owned(),
+            label: "Default Variant".to_owned(),
+            description: Some("Generated from catalog state".to_owned()),
+            config_ref: ConfigRef::parse(format!("ref://{GENERATED_VARIANT_PATH}"))
+                .map_err(map_model_pack_error)?,
+        };
+        let preset_ref = ConfigEntryRef {
+            id: GENERATED_PRESET_ID.to_owned(),
+            label: "Default".to_owned(),
+            description: Some("Generated from catalog state".to_owned()),
+            config_ref: ConfigRef::parse(format!("ref://{GENERATED_PRESET_PATH}"))
+                .map_err(map_model_pack_error)?,
+        };
+
+        let load_config_ref = build_generated_load_config(config, backend)
+            .transpose()?
+            .map(|document| {
+                let config_ref = ConfigRef::parse(format!("ref://{GENERATED_LOAD_CONFIG_PATH}"))
+                    .map_err(map_model_pack_error)?;
+                entries.push((
+                    GENERATED_LOAD_CONFIG_PATH.to_owned(),
+                    serialize_pretty_json(&document, "generated load config")?,
+                ));
+                Ok::<ConfigRef, AppCoreError>(config_ref)
+            })
+            .transpose()?;
+
+        let inference_config_ref = build_generated_inference_config(config, backend)
+            .transpose()?
+            .map(|document| {
+                let config_ref = ConfigRef::parse(format!("ref://{GENERATED_INFERENCE_CONFIG_PATH}"))
+                    .map_err(map_model_pack_error)?;
+                entries.push((
+                    GENERATED_INFERENCE_CONFIG_PATH.to_owned(),
+                    serialize_pretty_json(&document, "generated inference config")?,
+                ));
+                Ok::<ConfigRef, AppCoreError>(config_ref)
+            })
+            .transpose()?;
+
+        let variant = VariantDocument {
+            id: GENERATED_VARIANT_ID.to_owned(),
+            label: "Default Variant".to_owned(),
+            description: Some("Generated from catalog state".to_owned()),
+            source: None,
+            backend: Some(backend),
+            component_ids: Vec::new(),
+            load_config: load_config_ref,
+            inference_config: inference_config_ref,
+            metadata: BTreeMap::new(),
+        };
+        let preset = PresetDocument {
+            id: GENERATED_PRESET_ID.to_owned(),
+            label: "Default".to_owned(),
+            variant_id: GENERATED_VARIANT_ID.to_owned(),
+            description: Some("Generated from catalog state".to_owned()),
+            adapter_ids: Vec::new(),
+            load_config: None,
+            inference_config: None,
+            footprint: Default::default(),
+            metadata: BTreeMap::new(),
+        };
+
+        manifest.variants.push(variant_ref);
+        manifest.presets.push(preset_ref);
+        manifest.default_preset = Some(GENERATED_PRESET_ID.to_owned());
+
+        entries.push((
+            GENERATED_VARIANT_PATH.to_owned(),
+            serialize_pretty_json(&variant, "generated variant")?,
+        ));
+        entries.push((
+            GENERATED_PRESET_PATH.to_owned(),
+            serialize_pretty_json(&preset, "generated preset")?,
+        ));
+    }
+
+    entries.insert(
+        0,
+        (
+            MANIFEST_FILE_NAME.to_owned(),
+            serialize_pretty_json(&manifest, "generated manifest")?,
+        ),
+    );
+    Ok(entries)
+}
+
+fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
+    let family = infer_model_family(&config.provider);
+    let capability = infer_capability(family);
+    let mut metadata = BTreeMap::new();
+    metadata.insert("generated_by".into(), "slab-app-core".into());
+
+    ModelPackManifest {
+        version: 1,
+        id: config.id.clone(),
+        label: config.display_name.clone(),
+        provider: Some(config.provider.clone()),
+        status: config.status.clone().map(pack_status_from_unified),
+        family,
+        capabilities: vec![capability],
+        backend_hints: Default::default(),
+        context_window: config.spec.context_window,
+        pricing: config.spec.pricing.as_ref().map(|pricing| PackPricing {
+            input: pricing.input,
+            output: pricing.output,
+        }),
+        runtime_presets: config.runtime_presets.as_ref().and_then(pack_runtime_presets_from_model),
+        metadata,
+        source: build_pack_source_from_config(config),
+        components: Vec::new(),
+        variants: Vec::new(),
+        adapters: Vec::new(),
+        presets: Vec::new(),
+        default_preset: None,
+        footprint: Default::default(),
+    }
+}
+
+fn build_pack_source_from_config(config: &StoredModelConfig) -> Option<PackSource> {
+    if let (Some(provider_id), Some(remote_model_id)) = (
+        config.spec.provider_id.as_deref(),
+        config.spec.remote_model_id.as_deref(),
+    ) {
+        return Some(PackSource::Cloud {
+            provider_id: provider_id.to_owned(),
+            remote_model_id: remote_model_id.to_owned(),
+        });
+    }
+
+    if let Some(local_path) = config
+        .spec
+        .local_path
+        .as_deref()
+        .filter(|path| !is_model_pack_path(path))
+    {
+        return Some(PackSource::LocalPath {
+            path: local_path.to_owned(),
+        });
+    }
+
+    if let (Some(repo_id), Some(filename)) = (
+        config.spec.repo_id.as_deref(),
+        config.spec.filename.as_deref(),
+    ) {
+        return Some(PackSource::HuggingFace {
+            repo_id: repo_id.to_owned(),
+            revision: None,
+            files: vec![PackSourceFile {
+                id: "model".to_owned(),
+                label: None,
+                description: None,
+                path: filename.to_owned(),
+            }],
+        });
+    }
+
+    None
+}
+
+fn build_generated_load_config(
+    config: &StoredModelConfig,
+    backend: RuntimeBackendId,
+) -> Option<Result<BackendConfigDocument, AppCoreError>> {
+    let mut payload = Map::new();
+
+    if let Some(context_window) = config.spec.context_window {
+        payload.insert("context_length".into(), Value::from(context_window));
+    }
+    if let Some(chat_template) = config.spec.chat_template.as_deref() {
+        payload.insert("chat_template".into(), Value::from(chat_template.to_owned()));
+    }
+
+    (!payload.is_empty()).then_some(Ok(BackendConfigDocument {
+        id: GENERATED_LOAD_CONFIG_ID.to_owned(),
+        label: "Generated Load Config".to_owned(),
+        backend,
+        scope: BackendConfigScope::Load,
+        description: Some("Generated from catalog state".to_owned()),
+        payload: Value::Object(payload),
+        metadata: BTreeMap::new(),
+    }))
+}
+
+fn build_generated_inference_config(
+    config: &StoredModelConfig,
+    backend: RuntimeBackendId,
+) -> Option<Result<BackendConfigDocument, AppCoreError>> {
+    let mut payload = Map::new();
+    if let Some(runtime_presets) = config.runtime_presets.as_ref() {
+        if let Some(temperature) = runtime_presets.temperature {
+            payload.insert("temperature".into(), Value::from(temperature));
+        }
+        if let Some(top_p) = runtime_presets.top_p {
+            payload.insert("top_p".into(), Value::from(top_p));
+        }
+    }
+
+    (!payload.is_empty()).then_some(Ok(BackendConfigDocument {
+        id: GENERATED_INFERENCE_CONFIG_ID.to_owned(),
+        label: "Generated Inference Config".to_owned(),
+        backend,
+        scope: BackendConfigScope::Inference,
+        description: Some("Generated from catalog state".to_owned()),
+        payload: Value::Object(payload),
+        metadata: BTreeMap::new(),
+    }))
+}
+
+fn serialize_pretty_json<T: Serialize>(
+    value: &T,
+    label: &str,
+) -> Result<Vec<u8>, AppCoreError> {
+    let mut payload = serde_json::to_vec_pretty(value).map_err(|error| {
+        AppCoreError::Internal(format!("failed to serialize {label}: {error}"))
+    })?;
+    payload.push(b'\n');
+    Ok(payload)
+}
+
+fn build_persisted_state_bytes(
+    manifest_sha256: &str,
+    config: &StoredModelConfig,
+) -> Result<Vec<u8>, AppCoreError> {
+    serialize_pretty_json(
+        &PersistedModelPackState {
+            manifest_sha256: manifest_sha256.to_owned(),
+            config: config.clone(),
+        },
+        "persisted model pack state",
+    )
+}
+
+fn build_pack_bytes(entries: Vec<(String, Vec<u8>)>) -> Result<Vec<u8>, AppCoreError> {
+    let mut cursor = Cursor::new(Vec::new());
+    let mut writer = ZipWriter::new(&mut cursor);
+    let options = SimpleFileOptions::default().compression_method(CompressionMethod::Deflated);
+
+    for (path, payload) in entries {
+        writer.start_file(&path, options).map_err(|error| {
+            AppCoreError::Internal(format!("failed to create pack entry '{path}': {error}"))
+        })?;
+        writer.write_all(&payload).map_err(|error| {
+            AppCoreError::Internal(format!("failed to write pack entry '{path}': {error}"))
+        })?;
+    }
+
+    writer
+        .finish()
+        .map_err(|error| AppCoreError::Internal(format!("failed to finalize model pack bytes: {error}")))?;
+    Ok(cursor.into_inner())
+}
+
+fn collect_pack_entries(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, AppCoreError> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes))
+        .map_err(|error| AppCoreError::Internal(format!("failed to open model pack archive: {error}")))?;
+    let mut entries = Vec::new();
+
+    for index in 0..archive.len() {
+        let mut entry = archive.by_index(index).map_err(|error| {
+            AppCoreError::Internal(format!("failed to access model pack archive entry {index}: {error}"))
+        })?;
+        if entry.is_dir() {
+            continue;
+        }
+
+        let path = entry.name().trim().to_owned();
+        let mut payload = Vec::new();
+        entry.read_to_end(&mut payload).map_err(|error| {
+            AppCoreError::Internal(format!("failed to read model pack archive entry '{path}': {error}"))
+        })?;
+        entries.push((path, payload));
+    }
+
+    Ok(entries)
+}
+
+fn read_pack_entry_bytes(bytes: &[u8], entry_name: &str) -> Result<Option<Vec<u8>>, AppCoreError> {
+    let mut archive = ZipArchive::new(Cursor::new(bytes))
+        .map_err(|error| AppCoreError::Internal(format!("failed to open model pack archive: {error}")))?;
+
+    match archive.by_name(entry_name) {
+        Ok(mut entry) => {
+            let mut payload = Vec::new();
+            entry.read_to_end(&mut payload).map_err(|error| {
+                AppCoreError::Internal(format!("failed to read model pack archive entry '{entry_name}': {error}"))
+            })?;
+            Ok(Some(payload))
+        }
+        Err(zip::result::ZipError::FileNotFound) => Ok(None),
+        Err(error) => Err(AppCoreError::Internal(format!(
+            "failed to access model pack archive entry '{entry_name}': {error}"
+        ))),
+    }
+}
+
+fn manifest_sha256_from_pack_bytes(bytes: &[u8]) -> Result<String, AppCoreError> {
+    let manifest_bytes = read_pack_entry_bytes(bytes, MANIFEST_FILE_NAME)?.ok_or_else(|| {
+        AppCoreError::BadRequest("missing required manifest.json in .slab archive".into())
+    })?;
+    Ok(hash_bytes_hex(&manifest_bytes))
+}
+
+fn hash_bytes_hex(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for byte in digest {
+        hex.push_str(&format!("{byte:02x}"));
+    }
+    hex
+}
+
+fn infer_runtime_backend_from_provider(provider: &str) -> Option<RuntimeBackendId> {
+    provider.strip_prefix("local.").and_then(|backend| backend.parse().ok())
+}
+
+fn infer_model_family(provider: &str) -> ModelFamily {
+    if provider.contains("whisper") {
+        ModelFamily::Whisper
+    } else if provider.contains("diffusion") {
+        ModelFamily::Diffusion
+    } else if provider.contains("onnx") {
+        ModelFamily::Onnx
+    } else {
+        ModelFamily::Llama
+    }
+}
+
+fn infer_capability(family: ModelFamily) -> Capability {
+    match family {
+        ModelFamily::Whisper => Capability::AudioTranscription,
+        ModelFamily::Diffusion => Capability::ImageGeneration,
+        ModelFamily::Onnx => Capability::ImageEmbedding,
+        ModelFamily::Llama => Capability::TextGeneration,
+        _ => Capability::TextGeneration,
+    }
+}
+
+fn pack_status_from_unified(status: UnifiedModelStatus) -> PackModelStatus {
+    match status {
+        UnifiedModelStatus::Ready => PackModelStatus::Ready,
+        UnifiedModelStatus::NotDownloaded => PackModelStatus::NotDownloaded,
+        UnifiedModelStatus::Downloading => PackModelStatus::Downloading,
+        UnifiedModelStatus::Error => PackModelStatus::Error,
+    }
+}
+
+fn pack_runtime_presets_from_model(runtime_presets: &RuntimePresets) -> Option<PackRuntimePresets> {
+    (runtime_presets.temperature.is_some() || runtime_presets.top_p.is_some()).then_some(
+        PackRuntimePresets {
+            temperature: runtime_presets.temperature,
+            top_p: runtime_presets.top_p,
+        },
+    )
+}
+
 pub fn merge_diffusion_load_defaults(
     pack: Option<DiffusionLoadOptions>,
     settings: Option<DiffusionLoadOptions>,
@@ -291,5 +772,500 @@ fn map_model_pack_error(error: ModelPackError) -> AppCoreError {
         | ModelPackError::AccessArchiveEntry { .. }
         | ModelPackError::ReadArchiveEntry { .. } => AppCoreError::Internal(error.to_string()),
         _ => AppCoreError::BadRequest(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Write;
+    use std::path::Path;
+
+    use serde_json::json;
+    use zip::CompressionMethod;
+    use zip::ZipWriter;
+    use zip::write::SimpleFileOptions;
+
+    use super::{
+        attach_persisted_state_to_pack_bytes, build_generated_model_pack_bytes,
+        build_model_command_from_pack_bytes, build_pack_bytes, collect_pack_entries,
+        read_persisted_model_config_from_pack_bytes,
+    };
+    use crate::domain::models::{ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModelStatus};
+
+    fn build_pack(entries: Vec<(&str, String)>) -> Vec<u8> {
+        let mut cursor = std::io::Cursor::new(Vec::new());
+        let mut writer = ZipWriter::new(&mut cursor);
+        let options = SimpleFileOptions::default().compression_method(CompressionMethod::Stored);
+
+        for (path, content) in entries {
+            writer.start_file(path, options).expect("start file");
+            writer.write_all(content.as_bytes()).expect("write file");
+        }
+
+        writer.finish().expect("finish zip");
+        cursor.into_inner()
+    }
+
+    #[test]
+    fn builds_cloud_model_command_from_pack_manifest() {
+        let bytes = build_pack(vec![(
+            "manifest.json",
+            json!({
+                "version": 2,
+                "id": "gpt_4_1_mini",
+                "label": "GPT-4.1 mini",
+                "provider": "cloud.openai",
+                "status": "ready",
+                "family": "llama",
+                "context_window": 128000,
+                "pricing": {
+                    "input": 0.4,
+                    "output": 1.6
+                },
+                "runtime_presets": {
+                    "temperature": 0.7,
+                    "top_p": 0.95
+                },
+                "source": {
+                    "kind": "cloud",
+                    "provider_id": "openai-main",
+                    "remote_model_id": "gpt-4.1-mini"
+                }
+            })
+            .to_string(),
+        )]);
+
+        let command = build_model_command_from_pack_bytes(Path::new("gpt-4.1-mini.slab"), &bytes)
+            .expect("cloud command");
+
+        assert_eq!(command.id.as_deref(), Some("gpt_4_1_mini"));
+        assert_eq!(command.display_name, "GPT-4.1 mini");
+        assert_eq!(command.provider, "cloud.openai");
+        assert_eq!(command.status, Some(UnifiedModelStatus::Ready));
+        assert_eq!(command.spec.provider_id.as_deref(), Some("openai-main"));
+        assert_eq!(command.spec.remote_model_id.as_deref(), Some("gpt-4.1-mini"));
+        assert_eq!(command.spec.context_window, Some(128000));
+        assert_eq!(command.spec.pricing.as_ref().map(|pricing| pricing.input), Some(0.4));
+        assert_eq!(command.spec.pricing.as_ref().map(|pricing| pricing.output), Some(1.6));
+        assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.temperature), Some(0.7));
+        assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.top_p), Some(0.95));
+    }
+
+    #[test]
+    fn builds_local_model_command_from_pack_manifest() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "qwen2.5-7b-instruct",
+                    "label": "Qwen2.5 7B Instruct",
+                    "provider": "local.ggml.llama",
+                    "family": "llama",
+                    "context_window": 32768,
+                    "runtime_presets": {
+                        "temperature": 0.4,
+                        "top_p": 0.9
+                    },
+                    "capabilities": ["text_generation"],
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+                        "files": [
+                            {
+                                "id": "model",
+                                "path": "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
+                            }
+                        ]
+                    },
+                    "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$config": "ref://models/variants/q4.json"}],
+                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "load",
+                    "label": "Load",
+                    "backend": "ggml_llama",
+                    "scope": "load",
+                    "payload": {
+                        "context_length": 8192,
+                        "chat_template": "chatml",
+                        "num_workers": 2
+                    }
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/inference.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "inference",
+                    "label": "Inference",
+                    "backend": "ggml_llama",
+                    "scope": "inference",
+                    "payload": {
+                        "temperature": 0.7,
+                        "top_p": 0.95
+                    }
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q4.json",
+                json!({
+                    "kind": "variant",
+                    "id": "q4_k_m",
+                    "label": "Q4",
+                    "backend": "ggml_llama",
+                    "load_config": "ref://models/configs/load.json",
+                    "inference_config": "ref://models/configs/inference.json"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "variant_id": "q4_k_m"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let command = build_model_command_from_pack_bytes(
+            Path::new("qwen2.5-7b-instruct.slab"),
+            &bytes,
+        )
+        .expect("local command");
+
+        assert_eq!(command.provider, "local.ggml.llama");
+        assert_eq!(command.status, Some(UnifiedModelStatus::NotDownloaded));
+        assert_eq!(command.spec.repo_id.as_deref(), Some("bartowski/Qwen2.5-7B-Instruct-GGUF"));
+        assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
+        assert_eq!(command.spec.local_path, None);
+        assert_eq!(command.spec.context_window, Some(32768));
+        assert_eq!(command.spec.chat_template.as_deref(), Some("chatml"));
+        assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.temperature), Some(0.4));
+        assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.top_p), Some(0.9));
+    }
+
+    #[test]
+    fn uses_persisted_state_when_manifest_matches() {
+        let base_bytes = build_pack(vec![(
+            "manifest.json",
+            json!({
+                "version": 1,
+                "id": "openrouter-llama-3_1-8b-instruct",
+                "label": "Manifest Label",
+                "provider": "cloud.openrouter",
+                "family": "llama",
+                "capabilities": ["text_generation"],
+                "source": {
+                    "kind": "cloud",
+                    "provider_id": "openrouter-main",
+                    "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
+                }
+            })
+            .to_string(),
+        )]);
+        let config = StoredModelConfig {
+            id: "openrouter-llama-3_1-8b-instruct".to_owned(),
+            display_name: "Persisted Label".to_owned(),
+            provider: "cloud.openrouter".to_owned(),
+            status: Some(UnifiedModelStatus::Ready),
+            spec: ModelSpec {
+                provider_id: Some("openrouter-main".to_owned()),
+                remote_model_id: Some("meta-llama/llama-3.1-8b-instruct".to_owned()),
+                ..Default::default()
+            },
+            runtime_presets: Some(RuntimePresets {
+                temperature: Some(0.2),
+                top_p: Some(0.8),
+            }),
+        };
+
+        let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &config).expect("attach persisted state");
+        let command =
+            build_model_command_from_pack_bytes(Path::new("openrouter.slab"), &bytes).expect("command from pack");
+
+        assert_eq!(command.display_name, "Persisted Label");
+        assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.temperature), Some(0.2));
+    }
+
+    #[test]
+    fn ignores_persisted_state_after_manifest_change() {
+        let base_bytes = build_pack(vec![(
+            "manifest.json",
+            json!({
+                "version": 1,
+                "id": "openrouter-llama-3_1-8b-instruct",
+                "label": "Original Manifest Label",
+                "provider": "cloud.openrouter",
+                "family": "llama",
+                "capabilities": ["text_generation"],
+                "source": {
+                    "kind": "cloud",
+                    "provider_id": "openrouter-main",
+                    "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
+                }
+            })
+            .to_string(),
+        )]);
+        let config = StoredModelConfig {
+            id: "openrouter-llama-3_1-8b-instruct".to_owned(),
+            display_name: "Persisted Label".to_owned(),
+            provider: "cloud.openrouter".to_owned(),
+            status: Some(UnifiedModelStatus::Ready),
+            spec: ModelSpec {
+                provider_id: Some("openrouter-main".to_owned()),
+                remote_model_id: Some("meta-llama/llama-3.1-8b-instruct".to_owned()),
+                ..Default::default()
+            },
+            runtime_presets: None,
+        };
+
+        let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &config).expect("attach persisted state");
+        let mut entries = collect_pack_entries(&bytes).expect("collect entries");
+        for (path, payload) in &mut entries {
+            if path == "manifest.json" {
+                *payload = serde_json::to_vec_pretty(&json!({
+                    "version": 1,
+                    "id": "openrouter-llama-3_1-8b-instruct",
+                    "label": "Changed Manifest Label",
+                    "provider": "cloud.openrouter",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "source": {
+                        "kind": "cloud",
+                        "provider_id": "openrouter-main",
+                        "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
+                    }
+                }))
+                .expect("serialize manifest");
+            }
+        }
+        let bytes = build_pack_bytes(entries).expect("rebuild pack");
+        let command =
+            build_model_command_from_pack_bytes(Path::new("openrouter.slab"), &bytes).expect("command from pack");
+
+        assert_eq!(command.display_name, "Changed Manifest Label");
+    }
+
+    #[test]
+    fn generated_pack_carries_persisted_state() {
+        let config = StoredModelConfig {
+            id: "local-qwen".to_owned(),
+            display_name: "Local Qwen".to_owned(),
+            provider: "local.ggml.llama".to_owned(),
+            status: Some(UnifiedModelStatus::NotDownloaded),
+            spec: ModelSpec {
+                repo_id: Some("bartowski/Qwen2.5-7B-Instruct-GGUF".to_owned()),
+                filename: Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf".to_owned()),
+                context_window: Some(8192),
+                ..Default::default()
+            },
+            runtime_presets: Some(RuntimePresets {
+                temperature: Some(0.6),
+                top_p: Some(0.9),
+            }),
+        };
+
+        let bytes = build_generated_model_pack_bytes(&config).expect("generate pack");
+        let restored = read_persisted_model_config_from_pack_bytes(&bytes)
+            .expect("read state")
+            .expect("state exists");
+        let command =
+            build_model_command_from_pack_bytes(Path::new("local-qwen.slab"), &bytes).expect("command from pack");
+
+        assert_eq!(restored.id, "local-qwen");
+        assert_eq!(command.display_name, "Local Qwen");
+        assert_eq!(command.spec.repo_id.as_deref(), Some("bartowski/Qwen2.5-7B-Instruct-GGUF"));
+        assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
+    }
+}
+
+fn build_local_model_command(
+    _path: &Path,
+    manifest: &ModelPackManifest,
+    resolved: &slab_model_pack::ResolvedModelPack,
+) -> Result<CreateModelCommand, AppCoreError> {
+    let bridge = resolved.compile_default_runtime_bridge().map_err(map_model_pack_error)?;
+    let derived_provider = format!("local.{}", bridge.backend.canonical_id());
+    let provider = match normalize_optional_manifest_text(manifest.provider.as_deref()) {
+        Some(provider) => {
+            if provider != derived_provider {
+                return Err(AppCoreError::BadRequest(format!(
+                    "local model pack provider '{}' must match resolved runtime backend '{}'",
+                    provider, derived_provider
+                )));
+            }
+            provider
+        }
+        None => derived_provider,
+    };
+    let status = manifest_status(manifest.status).unwrap_or_else(|| default_status_for_runtime_bridge(&bridge));
+    let runtime_presets = build_runtime_presets_from_manifest(manifest.runtime_presets.as_ref())
+        .or_else(|| build_runtime_presets(&bridge.inference_defaults));
+    let (repo_id, filename, local_path) = local_source_fields(resolved, &bridge);
+    let allow_local_path_fallback = repo_id.is_none();
+
+    Ok(CreateModelCommand {
+        id: Some(manifest.id.clone()),
+        display_name: manifest.label.clone(),
+        provider,
+        status: Some(status),
+        spec: ModelSpec {
+            pricing: build_pricing_from_manifest(manifest.pricing.as_ref()),
+            repo_id,
+            filename,
+            local_path: local_path.or_else(|| {
+                allow_local_path_fallback.then(|| {
+                    bridge
+                        .model_spec
+                        .source
+                        .primary_path()
+                        .map(|value| value.to_string_lossy().into_owned())
+                })
+                .flatten()
+            }),
+            context_window: manifest.context_window.or(bridge.load_defaults.context_length),
+            chat_template: bridge.load_defaults.chat_template.clone(),
+            ..Default::default()
+        },
+        runtime_presets,
+    })
+}
+
+fn build_cloud_model_command(
+    manifest: &ModelPackManifest,
+    provider_id: &str,
+    remote_model_id: &str,
+) -> Result<CreateModelCommand, AppCoreError> {
+    let provider = normalize_optional_manifest_text(manifest.provider.as_deref()).ok_or_else(|| {
+        AppCoreError::BadRequest(
+            "cloud model pack must set a top-level provider such as 'cloud.openai'".into(),
+        )
+    })?;
+    if !provider.starts_with("cloud.") {
+        return Err(AppCoreError::BadRequest(format!(
+            "cloud model pack provider '{}' must start with 'cloud.'",
+            provider
+        )));
+    }
+
+    let provider_id = normalize_required_manifest_text(provider_id, "source.provider_id")?;
+    let remote_model_id =
+        normalize_required_manifest_text(remote_model_id, "source.remote_model_id")?;
+
+    Ok(CreateModelCommand {
+        id: Some(manifest.id.clone()),
+        display_name: manifest.label.clone(),
+        provider,
+        status: manifest_status(manifest.status),
+        spec: ModelSpec {
+            provider_id: Some(provider_id),
+            remote_model_id: Some(remote_model_id),
+            pricing: build_pricing_from_manifest(manifest.pricing.as_ref()),
+            context_window: manifest.context_window,
+            ..Default::default()
+        },
+        runtime_presets: build_runtime_presets_from_manifest(manifest.runtime_presets.as_ref()),
+    })
+}
+
+fn manifest_status(status: Option<PackModelStatus>) -> Option<UnifiedModelStatus> {
+    status.map(|status| match status {
+        PackModelStatus::Ready => UnifiedModelStatus::Ready,
+        PackModelStatus::NotDownloaded => UnifiedModelStatus::NotDownloaded,
+        PackModelStatus::Downloading => UnifiedModelStatus::Downloading,
+        PackModelStatus::Error => UnifiedModelStatus::Error,
+    })
+}
+
+fn build_pricing_from_manifest(pricing: Option<&PackPricing>) -> Option<Pricing> {
+    pricing.map(|pricing| Pricing { input: pricing.input, output: pricing.output })
+}
+
+fn build_runtime_presets_from_manifest(
+    runtime_presets: Option<&PackRuntimePresets>,
+) -> Option<RuntimePresets> {
+    let runtime_presets = runtime_presets?;
+    (runtime_presets.temperature.is_some() || runtime_presets.top_p.is_some()).then_some(
+        RuntimePresets {
+            temperature: runtime_presets.temperature,
+            top_p: runtime_presets.top_p,
+        },
+    )
+}
+
+fn normalize_optional_manifest_text(value: Option<&str>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    })
+}
+
+fn normalize_required_manifest_text(value: &str, label: &str) -> Result<String, AppCoreError> {
+    normalize_optional_manifest_text(Some(value)).ok_or_else(|| {
+        AppCoreError::BadRequest(format!("{} must not be empty", label))
+    })
+}
+
+fn local_source_fields(
+    resolved: &slab_model_pack::ResolvedModelPack,
+    bridge: &ModelPackRuntimeBridge,
+) -> (Option<String>, Option<String>, Option<String>) {
+    let source = resolved
+        .default_preset()
+        .and_then(|preset| {
+            preset.variant.effective_source.as_ref().or_else(|| {
+                preset
+                    .variant
+                    .components
+                    .get("model")
+                    .map(|component| &component.document.source)
+                    .or_else(|| preset.variant.components.values().next().map(|component| &component.document.source))
+            })
+        })
+        .or(resolved.manifest.source.as_ref());
+
+    match source {
+        Some(PackSource::HuggingFace { repo_id, files, .. }) => {
+            let filename = files
+                .iter()
+                .find(|file| file.id == "model")
+                .or_else(|| files.first())
+                .map(|file| file.path.clone());
+            (Some(repo_id.clone()), filename, None)
+        }
+        Some(PackSource::LocalPath { path }) => (None, None, Some(path.clone())),
+        Some(PackSource::LocalFiles { files }) => {
+            let local_path = files
+                .iter()
+                .find(|file| file.id == "model")
+                .or_else(|| files.first())
+                .map(|file| file.path.clone());
+            (None, None, local_path)
+        }
+        _ => (
+            None,
+            None,
+            bridge
+                .model_spec
+                .source
+                .primary_path()
+                .map(|value| value.to_string_lossy().into_owned()),
+        ),
     }
 }

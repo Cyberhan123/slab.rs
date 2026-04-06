@@ -1,0 +1,35 @@
+{
+  "$schema": "./slab-manifest.schema.json",
+  "version": 1,
+  "id": "openrouter-llama-3_1-8b-instruct",
+  "label": "Llama 3.1 8B Instruct (OpenRouter)",
+  "provider": "cloud.openrouter",
+  "status": "ready",
+  "family": "llama",
+  "capabilities": [
+    "text_generation"
+  ],
+  "backend_hints": {
+    "require_streaming": true
+  },
+  "context_window": 131072,
+  "pricing": {
+    "input": 0.00018,
+    "output": 0.00018
+  },
+  "runtime_presets": {
+    "temperature": 0.7,
+    "top_p": 0.95
+  },
+  "metadata": {
+    "homepage": "https://openrouter.ai/meta-llama/llama-3.1-8b-instruct",
+    "owner": "meta-llama",
+    "transport": "openrouter"
+  },
+  "source": {
+    "kind": "cloud",
+    "provider_id": "openrouter-main",
+    "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
+  },
+  "footprint": {}
+}

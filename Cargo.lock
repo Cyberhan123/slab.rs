@@ -7832,6 +7832,7 @@ dependencies = [
  "reqwest 0.13.2",
  "serde",
  "serde_json",
+ "sha2 0.11.0",
  "slab-agent",
  "slab-libfetch",
  "slab-model-pack",
@@ -7849,6 +7850,7 @@ dependencies = [
  "uuid",
  "validator",
  "windows-sys 0.61.2",
+ "zip 8.4.0",
 ]
 
 [[package]]

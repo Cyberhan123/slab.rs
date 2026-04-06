@@ -62,6 +62,9 @@ pub enum ModelPackError {
     #[error("resolved preset '{preset_id}' uses non-materialized source kind '{source_kind}' and cannot build a runtime load spec yet")]
     NonMaterializedSource { preset_id: String, source_kind: String },
 
+    #[error("source kind '{source_kind}' is not supported when building a runtime bridge")]
+    UnsupportedRuntimeBridgeSource { source_kind: String },
+
     #[error("document '{path}' has kind '{found}' but '{expected}' was required")]
     UnexpectedDocumentKind {
         path: String,

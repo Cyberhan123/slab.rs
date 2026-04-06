@@ -39,7 +39,7 @@
     "allow-completions",
     "allow-list-models",
     "allow-create-model",
-    "allow-import-model-config",
+    "allow-import-model-pack",
     "allow-get-model",
     "allow-update-model",
     "allow-delete-model",

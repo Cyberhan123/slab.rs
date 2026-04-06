@@ -37,7 +37,7 @@ export function HubDeleteModelDialog({
             {model ? (
               <>
                 Remove <strong>{model.display_name}</strong> from the model catalog and delete its
-                stored JSON config. This does not delete any downloaded model file on disk.
+                stored .slab pack. This does not delete any downloaded model file on disk.
               </>
             ) : (
               'Remove this model entry from the catalog.'
