@@ -7881,7 +7881,7 @@ dependencies = [
  "bindgen",
  "hf-hub",
  "libc",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "serde",
  "slab-diffusion-sys",
  "slab-ggml",
@@ -7895,7 +7895,7 @@ name = "slab-diffusion-sys"
 version = "0.0.1"
 dependencies = [
  "bindgen",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "slab-build-utils",
 ]
 
@@ -7905,7 +7905,7 @@ version = "0.0.1"
 dependencies = [
  "bindgen",
  "libc",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "slab-ggml-sys",
  "slab-libfetch",
  "slab-utils",
@@ -7918,7 +7918,7 @@ name = "slab-ggml-sys"
 version = "0.0.1"
 dependencies = [
  "bindgen",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "slab-build-utils",
 ]
 
@@ -7945,7 +7945,7 @@ name = "slab-llama"
 version = "0.0.1"
 dependencies = [
  "anyhow",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "serde",
  "slab-ggml",
  "slab-llama-sys",
@@ -7959,7 +7959,7 @@ name = "slab-llama-sys"
 version = "0.0.1"
 dependencies = [
  "bindgen",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "slab-build-utils",
 ]
 
@@ -8030,7 +8030,7 @@ dependencies = [
  "futures",
  "hf-hub",
  "image",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "ort",
  "serde",
  "serde_json",
@@ -8129,7 +8129,7 @@ dependencies = [
 name = "slab-utils"
 version = "0.0.1"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "slab-diffusion-sys",
  "slab-ggml-sys",
  "slab-llama-sys",
@@ -8140,7 +8140,7 @@ dependencies = [
 name = "slab-whisper"
 version = "0.0.1"
 dependencies = [
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "log",
  "rand 0.10.0",
  "serde",
@@ -8156,7 +8156,7 @@ name = "slab-whisper-sys"
 version = "0.0.1"
 dependencies = [
  "bindgen",
- "libloading 0.8.9",
+ "libloading 0.9.0",
  "slab-build-utils",
 ]
 
