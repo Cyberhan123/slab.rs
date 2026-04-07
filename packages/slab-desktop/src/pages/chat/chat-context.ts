@@ -182,10 +182,14 @@ export const getChatMessageTextContent = (
     return '';
 };
 
+const hasMeaningfulChatRequestContent = (
+    message?: Pick<XModelMessage, 'content'> | null,
+): boolean => getChatMessageTextContent(message).trim().length > 0;
+
 export const toChatRequestMessage = (
     message?: Pick<XModelMessage, 'role' | 'content'> | null,
 ): XModelMessage | null => {
-    if (!message) {
+    if (!message || !hasMeaningfulChatRequestContent(message)) {
         return null;
     }
 

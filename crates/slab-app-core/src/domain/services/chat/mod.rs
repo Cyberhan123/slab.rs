@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 use slab_types::RuntimeBackendId;
 use slab_types::inference::{TextGenerationResponse, TextGenerationUsage};
 use std::sync::{Arc, Mutex};
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::context::ModelState;
@@ -27,6 +27,7 @@ use crate::infra::db::{ChatMessage, ChatStore};
 
 const LLAMA_BACKEND_ID: RuntimeBackendId = RuntimeBackendId::GgmlLlama;
 const CLOUD_MODEL_ID_PREFIX: &str = "cloud";
+const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
 const SYSTEM_FINGERPRINT: &str = "b-slab";
 
 enum GeneratedChatOutput {
@@ -334,6 +335,17 @@ fn build_streamed_assistant_message(
     ))
 }
 
+fn text_response_has_visible_output(response: &TextGenerationResponse) -> bool {
+    let has_content = !response.text.trim_end_matches('\0').trim().is_empty();
+    let has_reasoning = response
+        .metadata
+        .get(REASONING_CONTENT_METADATA_KEY)
+        .and_then(Value::as_str)
+        .is_some_and(|value| !value.trim().is_empty());
+
+    has_content || has_reasoning
+}
+
 fn with_stream_session_persistence(
     stream: BoxStream<'static, ChatStreamChunk>,
     state: ModelState,
@@ -350,10 +362,24 @@ fn with_stream_session_persistence(
 
     let persist_target = Arc::clone(&assistant);
     let persist = stream::once(async move {
-        let message = {
+        let (message, saw_error, content_len, reasoning_len) = {
             let assistant = persist_target.lock().expect("assistant stream accumulator poisoned");
-            build_streamed_assistant_message(&assistant)
+            (
+                build_streamed_assistant_message(&assistant),
+                assistant.saw_error,
+                assistant.content.trim().len(),
+                assistant.reasoning.trim().len(),
+            )
         };
+
+        if message.is_none() && !saw_error {
+            warn!(
+                session_id = %session_id,
+                content_len,
+                reasoning_len,
+                "chat stream completed without visible assistant output"
+            );
+        }
 
         if let Some(message) = message.as_ref() {
             persist_session_message(&state, &session_id, message).await;
@@ -695,6 +721,16 @@ async fn create_chat_completion_with_state(
         }
 
         merge_usage(&mut usage, generated.usage.clone());
+        if !text_response_has_visible_output(&generated) {
+            warn!(
+                model = %resolved_model,
+                route = if route_to_cloud { "cloud" } else { "local" },
+                finish_reason = generated.finish_reason.as_deref().unwrap_or("unknown"),
+                completion_tokens = generated.tokens_used.unwrap_or(0),
+                message_count = resolved_messages.len(),
+                "chat completion returned without visible assistant output"
+            );
+        }
         let assistant_message = assistant_message_from_text_response(&generated);
         choices.push(ChatResultChoice {
             index,
