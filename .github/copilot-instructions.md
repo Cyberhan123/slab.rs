@@ -14,6 +14,7 @@ Key repo facts:
 - `packages/slab-desktop` is the React 19 + Vite + React Router 7 frontend app, managed as a bun workspace package (`@slab/desktop`).
 - `packages/slab-components` is the shared shadcn/ui-based React component library (`@slab/components`), with Radix UI + Tailwind 4 primitives.
 - `packages/slab-i18n` is the shared i18n package (`@slab/i18n`) using i18next and react-i18next.
+- Public VitePress pages live in `docs/`, internal contributor docs live in `docs/development/`, and published JSON Schemas are generated into `docs/public/manifests/v1/` with `bun run docs:schemas`.
 - Frontend server state uses TanStack Query with `openapi-fetch` and `openapi-react-query`.
 - Frontend client state uses Zustand.
 - AI-focused frontend components use Ant Design X, with shared Tailwind 4 primitives from `packages/slab-components/src`.

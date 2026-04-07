@@ -1,8 +1,8 @@
 # slab.rs 项目统一审计报告（2026-03-31）
 
 > 来源报告：
-> - `docs/audits/slab-core-dataflow-audit-2026-03-31.md`
-> - `docs/audits/slab-server-audit-2026-03-31.md`
+> - `./slab-core-dataflow-audit-2026-03-31.md`
+> - `./slab-server-audit-2026-03-31.md`
 >
 > 复核方式：基于当前仓库实现抽样核对关键代码路径，按“重复根因合并、同类问题归并、保留当前仍存在的问题”重写。
 

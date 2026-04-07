@@ -60,7 +60,7 @@ match raw.trim().to_ascii_lowercase().as_str() {
   other => return Err(BackendError::Unknown(other.to_owned())),
 }
 // After: 统一复用 RuntimeBackendId
-let backend = RuntimeBackendId::from_str(raw)?; // 或 raw.parse::<RuntimeBackendId>()?
+let backend = RuntimeBackendId::from_str(raw)?; // 或 `raw.parse::<RuntimeBackendId>()`?
 let canonical = backend.canonical_id();
 // 如需能力矩阵，可以在 types 层单独定义映射，而不是重新发明 id：
 fn backend_capabilities(backend: RuntimeBackendId) -> BackendCapabilities {

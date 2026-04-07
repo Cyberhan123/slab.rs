@@ -22,7 +22,7 @@ Only the skills that actually exist in `.agents/skills` should be treated as rep
 
 If a task does not clearly match one of the skills above, work directly from the codebase without adding an extra routing layer.
 
-See [docs/ai-skill-map.md](docs/ai-skill-map.md) for the short routing map.
+See [docs/development/ai-skill-map.md](docs/development/ai-skill-map.md) for the short routing map.
 
 ## Architecture Snapshot
 
@@ -80,6 +80,9 @@ crates/slab-core (slab-runtime-core: runtime builder, scheduler, engine adapters
 - `packages/slab-components/src`: shared UI component library (shadcn/ui, Radix UI, Tailwind CSS).
 - `packages/slab-i18n/src`: shared i18n setup and locale files.
 - `bin/slab-app/src-tauri`: Tauri host, sidecar startup, plugin runtime, capabilities, permissions, and security boundaries.
+- `docs`: public VitePress site source.
+- `docs/development`: internal planning, audits, engineering notes, AI maintenance docs, and contributor-only references.
+- `docs/public/manifests/v1`: published schemars-generated JSON Schemas served at `https://slab.reorgix.com/manifests/v1/*`.
 - `plugins`: local runtime plugin packages loaded by the Tauri host from `plugins/<plugin-id>/`.
 - `manifests`: JSON schemas and manifest assets used by settings/model tooling.
 - `vendor`: vendored runtime artifacts and external resources kept in-repo.
@@ -131,6 +134,10 @@ bun run tauri dev
 cd packages/slab-desktop
 bun run api
 
+# Refresh published docs schema assets
+cd ../..
+bun run docs:schemas
+
 # Generate OKLCH color tokens
 bun run color:oklch -- background=#f7f9fb primary=#0d9488
 ```
@@ -144,6 +151,6 @@ pytest bin/slab-server/tests
 
 ## AI Docs Maintenance
 
-- Keep `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, and `docs/ai-skill-map.md` aligned when the skill list, workflow, architecture snapshot, plugin/runtime boundaries, or build commands change.
+- Keep `AGENTS.md`, `CLAUDE.md`, `.github/copilot-instructions.md`, and `docs/development/ai-skill-map.md` aligned when the skill list, workflow, architecture snapshot, plugin/runtime boundaries, or build commands change.
 - Do not document repo-local skills that do not exist on disk.
 - When adding or removing workspace members, plugin surfaces, or desktop sidecar behavior, update this doc set in the same change.

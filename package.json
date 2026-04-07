@@ -6,19 +6,26 @@
   "scripts": {
     "build:desktop": "bun run --filter @slab/desktop build",
     "dev:desktop": "bun run --filter @slab/desktop dev",
-    "api:desktop": "bun run --filter @slab/desktop api"
+    "api:desktop": "bun run --filter @slab/desktop api",
+    "docs:schemas": "cargo run -p slab-model-pack --bin generate_manifest_schema && cargo run -p slab-types --bin generate_settings_document_schema",
+    "docs:dev": "bun run docs:schemas && vitepress dev docs",
+    "docs:build": "bun run docs:schemas && vitepress build docs",
+    "docs:preview": "vitepress preview docs"
   },
   "workspaces": [
     "packages/slab-desktop",
     "packages/slab-components",
     "packages/slab-i18n",
-    "bin/slab-app"
+    "bin/slab-app",
+    "docs"
   ],
   "devDependencies": {
+    "@tailwindcss/vite": "^4.2.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "tailwindcss": "^4.2.2",
-    "typescript": "~6.0.2"
+    "typescript": "~6.0.2",
+    "vitepress": "^2.0.0-alpha.17"
   },
   "license": "AGPL-3.0-only"
 }

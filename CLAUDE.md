@@ -17,6 +17,7 @@ Read [AGENTS.md](AGENTS.md) before making changes. This file only keeps the repo
 - `packages/slab-components` is the shadcn/ui-based shared component library (workspace package `@slab/components`).
 - `packages/slab-i18n` is the shared i18n package (workspace package `@slab/i18n`) with i18next and react-i18next.
 - `packages/slab-desktop` is the main React frontend app (workspace package `@slab/desktop`).
+- Public VitePress pages live in `docs/`, internal contributor docs live in `docs/development/`, and published JSON Schemas are generated into `docs/public/manifests/v1/` with `bun run docs:schemas`.
 - All Rust library crates live in `crates/` (e.g., `crates/slab-core`, `crates/slab-types`, `crates/slab-app-core`).
 - Binary executables live in `bin/` (e.g., `bin/slab-server`, `bin/slab-runtime`, `bin/slab-app`).
 - `crates/slab-app-core` (package: `slab-app-core`) is the HTTP-free business logic library. Contains `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and the shared `runtime_supervisor`. Migrations are in `crates/slab-app-core/migrations/`.

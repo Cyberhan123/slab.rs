@@ -23,7 +23,7 @@ type HubCreateModelDialogProps = {
 };
 
 const MODEL_PACK_MANIFEST_EXAMPLE = `{
-  "$schema": "./slab-manifest.schema.json",
+  "$schema": "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json",
   "version": 1,
   "id": "openrouter-llama-3_1-8b-instruct",
   "label": "Llama 3.1 8B Instruct (OpenRouter)",

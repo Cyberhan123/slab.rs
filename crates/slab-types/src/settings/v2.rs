@@ -6,8 +6,11 @@ use serde_json::{Value, json};
 
 use super::launch::RuntimeTransportMode;
 
+pub const PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL: &str =
+    "https://slab.reorgix.com/manifests/v1/settings-document.schema.json";
+
 fn default_schema_ref() -> Option<String> {
-    Some("./settings-schema.json".to_owned())
+    Some(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL.to_owned())
 }
 
 const fn default_schema_version() -> u32 {
@@ -594,8 +597,36 @@ impl Default for SwaggerConfig {
 }
 
 pub fn settings_document_v2_json_schema() -> Value {
-    serde_json::to_value(schema_for!(SettingsDocumentV2))
-        .expect("SettingsDocumentV2 schema should serialize")
+    let mut schema = serde_json::to_value(schema_for!(SettingsDocumentV2))
+        .expect("SettingsDocumentV2 schema should serialize");
+    let root = schema
+        .as_object_mut()
+        .expect("SettingsDocumentV2 schema root should be an object");
+
+    root.insert(
+        "$schema".into(),
+        Value::String("https://json-schema.org/draft/2020-12/schema".into()),
+    );
+    root.insert(
+        "$id".into(),
+        Value::String(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL.into()),
+    );
+    root.insert("title".into(), Value::String("Slab Settings Document".into()));
+    root.insert(
+        "description".into(),
+        Value::String(
+            "Schema for the persisted SettingsDocumentV2 configuration used by Slab hosts.".into(),
+        ),
+    );
+
+    schema
+}
+
+pub fn render_settings_document_v2_json_schema() -> String {
+    let mut rendered = serde_json::to_string_pretty(&settings_document_v2_json_schema())
+        .expect("SettingsDocumentV2 schema should render");
+    rendered.push('\n');
+    rendered
 }
 
 pub fn provider_registry_json_schema() -> Value {
@@ -692,13 +723,19 @@ pub fn string_list_json_schema(title: &str) -> Value {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+    use std::path::PathBuf;
+
     use super::*;
 
     #[test]
     fn document_defaults_to_v2_schema() {
         let settings = SettingsDocumentV2::default();
 
-        assert_eq!(settings.schema.as_deref(), Some("./settings-schema.json"));
+        assert_eq!(
+            settings.schema.as_deref(),
+            Some(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL)
+        );
         assert_eq!(settings.schema_version, 2);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.server.address, "127.0.0.1:3000");
@@ -721,7 +758,20 @@ mod tests {
         let schema = settings_document_v2_json_schema();
 
         assert_eq!(schema.get("type"), Some(&Value::String("object".to_owned())));
+        assert_eq!(
+            schema.get("$id"),
+            Some(&Value::String(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL.to_owned()))
+        );
         assert!(schema.get("properties").and_then(Value::as_object).is_some());
+    }
+
+    #[test]
+    fn generated_document_schema_matches_checked_in_file() {
+        let schema_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../docs/public/manifests/v1/settings-document.schema.json");
+        let expected = fs::read_to_string(&schema_path).expect("read checked-in schema");
+
+        assert_eq!(render_settings_document_v2_json_schema(), expected);
     }
 
     #[test]
