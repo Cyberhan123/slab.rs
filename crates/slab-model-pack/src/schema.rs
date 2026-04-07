@@ -71,16 +71,11 @@ pub fn render_manifest_schema() -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
-    use std::path::PathBuf;
-
     use super::render_manifest_schema;
 
     #[test]
     fn generated_manifest_schema_matches_checked_in_file() {
-        let schema_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../docs/public/manifests/v1/slab-manifest.schema.json");
-        let expected = fs::read_to_string(&schema_path).expect("read checked-in schema");
+        let expected = include_str!("../../../docs/public/manifests/v1/slab-manifest.schema.json");
 
         assert_eq!(render_manifest_schema(), expected);
     }

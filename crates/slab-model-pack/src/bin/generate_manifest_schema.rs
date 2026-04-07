@@ -12,9 +12,4 @@ fn main() {
     }
     fs::write(&output_path, &rendered)
         .unwrap_or_else(|error| panic!("failed to write {}: {error}", output_path.display()));
-
-    let mirror_path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../manifests/models/slab-manifest.schema.json");
-    fs::write(&mirror_path, rendered)
-        .unwrap_or_else(|error| panic!("failed to write {}: {error}", mirror_path.display()));
 }
