@@ -1,0 +1,928 @@
+{
+  "$defs": {
+    "AdminConfig": {
+      "description": "Server admin settings.",
+      "properties": {
+        "token": {
+          "description": "Optional bearer token required for admin APIs.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "AutoUnloadConfig": {
+      "description": "Automatic model-unload settings.",
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Whether idle models should be unloaded automatically.",
+          "type": "boolean"
+        },
+        "idle_minutes": {
+          "default": 10,
+          "description": "Idle timeout before unloading a model.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "CapacityConfig": {
+      "description": "Shared queue and concurrency limits.",
+      "properties": {
+        "concurrent_requests": {
+          "default": 4,
+          "description": "Maximum in-flight requests for the target node.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "queue": {
+          "default": 64,
+          "description": "Submission queue size.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "type": "object"
+    },
+    "CapacityOverrideConfig": {
+      "description": "Capacity overrides applied on top of inherited defaults.",
+      "properties": {
+        "concurrent_requests": {
+          "description": "Override maximum in-flight requests.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "queue": {
+          "description": "Override submission queue size.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "CorsConfig": {
+      "description": "Server CORS settings.",
+      "properties": {
+        "allowed_origins": {
+          "description": "Allowed browser origins.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "DatabaseConfig": {
+      "description": "Shared database configuration.",
+      "properties": {
+        "url": {
+          "description": "Database connection string.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url"
+      ],
+      "type": "object"
+    },
+    "EndpointConfig": {
+      "description": "HTTP and IPC endpoint configuration.",
+      "properties": {
+        "http": {
+          "$ref": "#/$defs/HttpEndpointConfig",
+          "default": {}
+        },
+        "ipc": {
+          "$ref": "#/$defs/IpcEndpointConfig",
+          "default": {}
+        }
+      },
+      "type": "object"
+    },
+    "FfmpegToolConfig": {
+      "description": "FFmpeg dependency configuration.",
+      "properties": {
+        "auto_download": {
+          "default": true,
+          "description": "Whether FFmpeg should be auto-downloaded when missing.",
+          "type": "boolean"
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether FFmpeg integration is enabled.",
+          "type": "boolean"
+        },
+        "install_dir": {
+          "description": "Installation directory for the ffmpeg sidecar.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "source": {
+          "$ref": "#/$defs/SourceConfig",
+          "default": {}
+        }
+      },
+      "type": "object"
+    },
+    "GgmlRuntimeBackendsConfig": {
+      "description": "GGML leaf backend configuration.",
+      "properties": {
+        "diffusion": {
+          "$ref": "#/$defs/RuntimeLeafConfig",
+          "default": {
+            "capacity": {},
+            "enabled": true,
+            "endpoint": {
+              "http": {},
+              "ipc": {}
+            },
+            "logging": {},
+            "source": {}
+          }
+        },
+        "llama": {
+          "$ref": "#/$defs/LlamaRuntimeLeafConfig",
+          "default": {
+            "capacity": {},
+            "enabled": true,
+            "endpoint": {
+              "http": {},
+              "ipc": {}
+            },
+            "logging": {},
+            "source": {}
+          }
+        },
+        "whisper": {
+          "$ref": "#/$defs/RuntimeLeafConfig",
+          "default": {
+            "capacity": {},
+            "enabled": true,
+            "endpoint": {
+              "http": {},
+              "ipc": {}
+            },
+            "logging": {},
+            "source": {}
+          }
+        }
+      },
+      "type": "object"
+    },
+    "GgmlRuntimeFamilyConfig": {
+      "description": "GGML runtime family configuration.",
+      "properties": {
+        "backends": {
+          "$ref": "#/$defs/GgmlRuntimeBackendsConfig",
+          "default": {
+            "diffusion": {
+              "capacity": {},
+              "enabled": true,
+              "endpoint": {
+                "http": {},
+                "ipc": {}
+              },
+              "logging": {},
+              "source": {}
+            },
+            "llama": {
+              "capacity": {},
+              "enabled": true,
+              "endpoint": {
+                "http": {},
+                "ipc": {}
+              },
+              "logging": {},
+              "source": {}
+            },
+            "whisper": {
+              "capacity": {},
+              "enabled": true,
+              "endpoint": {
+                "http": {},
+                "ipc": {}
+              },
+              "logging": {},
+              "source": {}
+            }
+          }
+        },
+        "capacity": {
+          "$ref": "#/$defs/CapacityOverrideConfig",
+          "default": {}
+        },
+        "endpoint": {
+          "$ref": "#/$defs/EndpointConfig",
+          "default": {
+            "http": {},
+            "ipc": {}
+          }
+        },
+        "install_dir": {
+          "description": "Shared install directory for GGML runtime libraries.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logging": {
+          "$ref": "#/$defs/LoggingOverrideConfig",
+          "default": {}
+        },
+        "source": {
+          "$ref": "#/$defs/SourceConfig",
+          "default": {}
+        }
+      },
+      "type": "object"
+    },
+    "HttpEndpointConfig": {
+      "description": "HTTP endpoint configuration.",
+      "properties": {
+        "address": {
+          "description": "Bind or target address used for HTTP/gRPC transport.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "IpcEndpointConfig": {
+      "description": "IPC endpoint configuration.",
+      "properties": {
+        "path": {
+          "description": "IPC socket or named-pipe path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LlamaRuntimeLeafConfig": {
+      "description": "Llama leaf config with llama-specific controls.",
+      "properties": {
+        "capacity": {
+          "$ref": "#/$defs/CapacityOverrideConfig",
+          "default": {}
+        },
+        "context_length": {
+          "description": "Optional context length override.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether the llama backend is enabled.",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/EndpointConfig",
+          "default": {
+            "http": {},
+            "ipc": {}
+          }
+        },
+        "logging": {
+          "$ref": "#/$defs/LoggingOverrideConfig",
+          "default": {}
+        },
+        "source": {
+          "$ref": "#/$defs/SourceConfig",
+          "default": {}
+        }
+      },
+      "type": "object"
+    },
+    "LoggingConfig": {
+      "description": "Shared logging configuration.",
+      "properties": {
+        "json": {
+          "default": false,
+          "description": "Emit newline-delimited JSON logs.",
+          "type": "boolean"
+        },
+        "level": {
+          "default": "info",
+          "description": "Tracing filter or log level.",
+          "type": "string"
+        },
+        "path": {
+          "description": "Optional log directory path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "LoggingOverrideConfig": {
+      "description": "Logging overrides applied on top of inherited defaults.",
+      "properties": {
+        "json": {
+          "description": "Override JSON logging mode.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "level": {
+          "description": "Override tracing filter or log level.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "description": "Override log directory path.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ModelsConfigV2": {
+      "description": "Model storage settings.",
+      "properties": {
+        "auto_unload": {
+          "$ref": "#/$defs/AutoUnloadConfig",
+          "default": {
+            "enabled": false,
+            "idle_minutes": 10
+          }
+        },
+        "cache_dir": {
+          "description": "Directory used for cached model artifacts.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "config_dir": {
+          "description": "Directory containing model configuration documents.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ProviderAuthConfig": {
+      "description": "Provider authentication settings.",
+      "properties": {
+        "api_key": {
+          "description": "Literal API key stored in settings.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "api_key_env": {
+          "description": "Environment variable containing the API key.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ProviderDefaultsConfig": {
+      "description": "Provider-level default headers and query parameters.",
+      "properties": {
+        "headers": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        },
+        "query": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "ProviderFamily": {
+      "description": "Supported provider transport families.",
+      "enum": [
+        "openai_compatible"
+      ],
+      "type": "string"
+    },
+    "ProviderRegistryEntry": {
+      "description": "A single global provider entry.",
+      "properties": {
+        "api_base": {
+          "description": "Provider API base URL.",
+          "type": "string"
+        },
+        "auth": {
+          "$ref": "#/$defs/ProviderAuthConfig",
+          "default": {}
+        },
+        "defaults": {
+          "$ref": "#/$defs/ProviderDefaultsConfig",
+          "default": {}
+        },
+        "display_name": {
+          "description": "Human-readable display name.",
+          "type": "string"
+        },
+        "family": {
+          "$ref": "#/$defs/ProviderFamily",
+          "default": "openai_compatible",
+          "description": "Provider family implementation."
+        },
+        "id": {
+          "description": "Stable provider identifier.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "display_name",
+        "api_base"
+      ],
+      "type": "object"
+    },
+    "ProvidersConfig": {
+      "description": "Global provider registry configuration.",
+      "properties": {
+        "registry": {
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ProviderRegistryEntry"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeConfigV2": {
+      "description": "Shared runtime configuration.",
+      "properties": {
+        "candle": {
+          "$ref": "#/$defs/SingleRuntimeFamilyConfig",
+          "default": {
+            "capacity": {},
+            "enabled": false,
+            "endpoint": {
+              "http": {},
+              "ipc": {}
+            },
+            "logging": {},
+            "source": {}
+          }
+        },
+        "capacity": {
+          "$ref": "#/$defs/CapacityConfig",
+          "default": {
+            "concurrent_requests": 4,
+            "queue": 64
+          }
+        },
+        "endpoint": {
+          "$ref": "#/$defs/EndpointConfig",
+          "default": {
+            "http": {},
+            "ipc": {}
+          }
+        },
+        "ggml": {
+          "$ref": "#/$defs/GgmlRuntimeFamilyConfig",
+          "default": {
+            "backends": {
+              "diffusion": {
+                "capacity": {},
+                "enabled": true,
+                "endpoint": {
+                  "http": {},
+                  "ipc": {}
+                },
+                "logging": {},
+                "source": {}
+              },
+              "llama": {
+                "capacity": {},
+                "enabled": true,
+                "endpoint": {
+                  "http": {},
+                  "ipc": {}
+                },
+                "logging": {},
+                "source": {}
+              },
+              "whisper": {
+                "capacity": {},
+                "enabled": true,
+                "endpoint": {
+                  "http": {},
+                  "ipc": {}
+                },
+                "logging": {},
+                "source": {}
+              }
+            },
+            "capacity": {},
+            "endpoint": {
+              "http": {},
+              "ipc": {}
+            },
+            "logging": {},
+            "source": {}
+          }
+        },
+        "logging": {
+          "$ref": "#/$defs/LoggingOverrideConfig",
+          "default": {}
+        },
+        "mode": {
+          "$ref": "#/$defs/RuntimeMode",
+          "default": "managed_children"
+        },
+        "onnx": {
+          "$ref": "#/$defs/SingleRuntimeFamilyConfig",
+          "default": {
+            "capacity": {},
+            "enabled": false,
+            "endpoint": {
+              "http": {},
+              "ipc": {}
+            },
+            "logging": {},
+            "source": {}
+          }
+        },
+        "sessions": {
+          "$ref": "#/$defs/RuntimeSessionsConfig",
+          "default": {}
+        },
+        "transport": {
+          "$ref": "#/$defs/RuntimeTransportMode",
+          "default": "ipc"
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeLeafConfig": {
+      "description": "Shared runtime leaf configuration.",
+      "properties": {
+        "capacity": {
+          "$ref": "#/$defs/CapacityOverrideConfig",
+          "default": {}
+        },
+        "enabled": {
+          "default": true,
+          "description": "Whether the leaf backend is enabled.",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/EndpointConfig",
+          "default": {
+            "http": {},
+            "ipc": {}
+          }
+        },
+        "logging": {
+          "$ref": "#/$defs/LoggingOverrideConfig",
+          "default": {}
+        },
+        "source": {
+          "$ref": "#/$defs/SourceConfig",
+          "default": {}
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeMode": {
+      "description": "Runtime topology mode.",
+      "enum": [
+        "managed_children",
+        "external_endpoints"
+      ],
+      "type": "string"
+    },
+    "RuntimeSessionsConfig": {
+      "description": "Shared session-state location for runtime-backed features.",
+      "properties": {
+        "state_dir": {
+          "description": "Directory where session state files are stored.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "RuntimeTransportMode": {
+      "description": "Shared runtime transport modes supported by the supervisor and gateway.",
+      "enum": [
+        "http",
+        "ipc"
+      ],
+      "type": "string"
+    },
+    "ServerConfigV2": {
+      "description": "Server-only settings.",
+      "properties": {
+        "address": {
+          "description": "HTTP bind address for slab-server.",
+          "type": "string"
+        },
+        "admin": {
+          "$ref": "#/$defs/AdminConfig",
+          "default": {}
+        },
+        "cloud_http_trace": {
+          "default": false,
+          "description": "Whether to log redacted cloud HTTP payloads.",
+          "type": "boolean"
+        },
+        "cors": {
+          "$ref": "#/$defs/CorsConfig",
+          "default": {}
+        },
+        "logging": {
+          "$ref": "#/$defs/LoggingOverrideConfig",
+          "default": {}
+        },
+        "swagger": {
+          "$ref": "#/$defs/SwaggerConfig",
+          "default": {
+            "enabled": true
+          }
+        }
+      },
+      "required": [
+        "address"
+      ],
+      "type": "object"
+    },
+    "SingleRuntimeFamilyConfig": {
+      "description": "Single-node runtime family configuration used for candle and onnx.",
+      "properties": {
+        "capacity": {
+          "$ref": "#/$defs/CapacityOverrideConfig",
+          "default": {}
+        },
+        "enabled": {
+          "default": false,
+          "description": "Whether this runtime family is enabled.",
+          "type": "boolean"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/EndpointConfig",
+          "default": {
+            "http": {},
+            "ipc": {}
+          }
+        },
+        "install_dir": {
+          "description": "Install directory for family-specific artifacts.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "logging": {
+          "$ref": "#/$defs/LoggingOverrideConfig",
+          "default": {}
+        },
+        "source": {
+          "$ref": "#/$defs/SourceConfig",
+          "default": {}
+        }
+      },
+      "type": "object"
+    },
+    "SourceConfig": {
+      "description": "Download source metadata.",
+      "properties": {
+        "artifact": {
+          "description": "Artifact name or asset selector.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "version": {
+          "description": "Version or release identifier.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "SwaggerConfig": {
+      "description": "Swagger exposure settings.",
+      "properties": {
+        "enabled": {
+          "default": true,
+          "description": "Whether Swagger UI and OpenAPI docs are exposed.",
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "ToolsConfig": {
+      "description": "External tool configuration.",
+      "properties": {
+        "ffmpeg": {
+          "$ref": "#/$defs/FfmpegToolConfig",
+          "default": {
+            "auto_download": true,
+            "enabled": true,
+            "source": {}
+          }
+        }
+      },
+      "type": "object"
+    }
+  },
+  "$id": "https://slab.reorgix.com/manifests/v1/settings-document.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Schema for the persisted SettingsDocumentV2 configuration used by Slab hosts.",
+  "properties": {
+    "$schema": {
+      "default": "https://slab.reorgix.com/manifests/v1/settings-document.schema.json",
+      "description": "Relative schema reference for editor tooling.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "database": {
+      "$ref": "#/$defs/DatabaseConfig",
+      "default": {
+        "url": "sqlite://slab.db?mode=rwc"
+      }
+    },
+    "logging": {
+      "$ref": "#/$defs/LoggingConfig",
+      "default": {
+        "json": false,
+        "level": "info"
+      }
+    },
+    "models": {
+      "$ref": "#/$defs/ModelsConfigV2",
+      "default": {
+        "auto_unload": {
+          "enabled": false,
+          "idle_minutes": 10
+        }
+      }
+    },
+    "providers": {
+      "$ref": "#/$defs/ProvidersConfig",
+      "default": {
+        "registry": []
+      }
+    },
+    "runtime": {
+      "$ref": "#/$defs/RuntimeConfigV2",
+      "default": {
+        "candle": {
+          "capacity": {},
+          "enabled": false,
+          "endpoint": {
+            "http": {},
+            "ipc": {}
+          },
+          "logging": {},
+          "source": {}
+        },
+        "capacity": {
+          "concurrent_requests": 4,
+          "queue": 64
+        },
+        "endpoint": {
+          "http": {},
+          "ipc": {}
+        },
+        "ggml": {
+          "backends": {
+            "diffusion": {
+              "capacity": {},
+              "enabled": true,
+              "endpoint": {
+                "http": {},
+                "ipc": {}
+              },
+              "logging": {},
+              "source": {}
+            },
+            "llama": {
+              "capacity": {},
+              "enabled": true,
+              "endpoint": {
+                "http": {},
+                "ipc": {}
+              },
+              "logging": {},
+              "source": {}
+            },
+            "whisper": {
+              "capacity": {},
+              "enabled": true,
+              "endpoint": {
+                "http": {},
+                "ipc": {}
+              },
+              "logging": {},
+              "source": {}
+            }
+          },
+          "capacity": {},
+          "endpoint": {
+            "http": {},
+            "ipc": {}
+          },
+          "logging": {},
+          "source": {}
+        },
+        "logging": {},
+        "mode": "managed_children",
+        "onnx": {
+          "capacity": {},
+          "enabled": false,
+          "endpoint": {
+            "http": {},
+            "ipc": {}
+          },
+          "logging": {},
+          "source": {}
+        },
+        "sessions": {},
+        "transport": "ipc"
+      }
+    },
+    "schema_version": {
+      "default": 2,
+      "description": "Settings document schema version.",
+      "format": "uint32",
+      "minimum": 0,
+      "type": "integer"
+    },
+    "server": {
+      "$ref": "#/$defs/ServerConfigV2",
+      "default": {
+        "address": "127.0.0.1:3000",
+        "admin": {},
+        "cloud_http_trace": false,
+        "cors": {},
+        "logging": {},
+        "swagger": {
+          "enabled": true
+        }
+      }
+    },
+    "tools": {
+      "$ref": "#/$defs/ToolsConfig",
+      "default": {
+        "ffmpeg": {
+          "auto_download": true,
+          "enabled": true,
+          "source": {}
+        }
+      }
+    }
+  },
+  "title": "Slab Settings Document",
+  "type": "object"
+}

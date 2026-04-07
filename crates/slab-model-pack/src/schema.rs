@@ -2,6 +2,9 @@ use serde_json::{Value, json};
 
 use crate::manifest::ModelPackManifest;
 
+pub const PUBLIC_MANIFEST_SCHEMA_URL: &str =
+    "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json";
+
 pub fn generate_manifest_schema() -> Value {
     let mut schema = serde_json::to_value(schemars::schema_for!(ModelPackManifest))
         .expect("manifest schema should serialize");
@@ -13,7 +16,7 @@ pub fn generate_manifest_schema() -> Value {
     );
     root.insert(
         "$id".into(),
-        Value::String("https://slab.rs/schemas/slab-manifest.schema.json".into()),
+        Value::String(PUBLIC_MANIFEST_SCHEMA_URL.into()),
     );
     root.insert("title".into(), Value::String("slab.rs Model Pack Manifest".into()));
     root.insert(
@@ -76,7 +79,7 @@ mod tests {
     #[test]
     fn generated_manifest_schema_matches_checked_in_file() {
         let schema_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../manifests/models/slab-manifest.schema.json");
+            .join("../../docs/public/manifests/v1/slab-manifest.schema.json");
         let expected = fs::read_to_string(&schema_path).expect("read checked-in schema");
 
         assert_eq!(render_manifest_schema(), expected);

@@ -33,3 +33,6 @@ packages/*/dist/
 bin/*/node_modules/
 
 llama.cpp-master/
+
+docs/.vitepress/dist/
+docs/.vitepress/.temp/

@@ -4,7 +4,7 @@
 
 位置：slab-server/src/domain/services/task.rs、slab-server/src/infra/db/entities/task.rs
 
-问题描述：任务状态用字符串字面量判断，result_data/input_data 用 Option<String> 承载 JSON，再在运行时兜底解析；失败时回退为文本。这种契约会造成隐式行为分叉，难以静态校验，容易产生“看似成功、实际语义错位”的数据腐烂。
+问题描述：任务状态用字符串字面量判断，result_data/input_data 用 `Option<String>` 承载 JSON，再在运行时兜底解析；失败时回退为文本。这种契约会造成隐式行为分叉，难以静态校验，容易产生“看似成功、实际语义错位”的数据腐烂。
 
 影响程度：高
 

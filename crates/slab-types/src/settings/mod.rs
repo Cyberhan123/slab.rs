@@ -34,7 +34,9 @@ pub use v2::{
     GgmlRuntimeFamilyConfig, HttpEndpointConfig, IpcEndpointConfig, LlamaRuntimeLeafConfig,
     LoggingConfig, LoggingOverrideConfig, ModelsConfigV2, ProviderAuthConfig,
     ProviderDefaultsConfig, ProviderFamily, ProviderRegistryEntry, ProvidersConfig,
+    PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL,
     RuntimeConfigV2, RuntimeLeafConfig, RuntimeMode, RuntimeSessionsConfig, ServerConfigV2,
     SettingsDocumentV2, SingleRuntimeFamilyConfig, SourceConfig, SwaggerConfig, ToolsConfig,
-    provider_registry_json_schema, settings_document_v2_json_schema, string_list_json_schema,
+    provider_registry_json_schema, render_settings_document_v2_json_schema,
+    settings_document_v2_json_schema, string_list_json_schema,
 };
