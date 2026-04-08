@@ -1,9 +1,12 @@
-pub use crate::base::types::{Payload, StreamChunk};
+pub use crate::base::types::{Payload, StreamChunk, StreamHandle};
 pub use crate::internal::scheduler::backend::admission::{ResourceManager, ResourceManagerConfig};
 pub use crate::internal::scheduler::backend::protocol::{
-    BackendReply, BackendRequest, ManagementEvent, PeerWorkerCommand, RequestRoute,
-    RuntimeControlSignal, WorkerCommand,
+    BackendOp, BackendReply, BackendRequest, BackendRequestKind, DeploymentSnapshot,
+    ManagementEvent, PeerWorkerCommand, RequestRoute, RuntimeControlSignal, SyncMessage,
+    WorkerCommand,
 };
+#[cfg(test)]
+pub use crate::internal::scheduler::backend::protocol::DriverRequestKind;
 pub use crate::internal::scheduler::backend::runner::{
     HandlerFuture, LaggedDispatchFn, PeerDispatchFn, PeerRoute, RequestDispatchFn,
     RequestRouteMatcher, RuntimeDispatchFn, RuntimeRoute, RuntimeWorkerHandler,

@@ -1,5 +1,6 @@
 mod grpc;
 mod backends;
+mod runtime;
 
 use std::fs::OpenOptions;
 use std::io::ErrorKind;
@@ -8,16 +9,19 @@ use std::pin::Pin;
 use std::task::{Context as TaskContext, Poll};
 
 use anyhow::Context;
+use backends::{RuntimeDriversConfig, descriptors, register_backends};
 use clap::Parser;
 use futures::StreamExt;
 use slab_proto::slab::ipc::v1 as pb;
+use slab_runtime_core::backend::{ResourceManager, ResourceManagerConfig};
+use slab_runtime_core::scheduler::Orchestrator;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, BufReader, ReadBuf};
 use tonic::transport::server::Connected;
 use tracing::{error, info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
-use backends::{RuntimeDriversConfig, runtime_registrations};
+use runtime::{DriverResolver, Runtime};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "slab-runtime", version, about = "Slab gRPC runtime worker")]
@@ -422,13 +426,17 @@ async fn main() -> anyhow::Result<()> {
         enable_candle_diffusion: false,
         onnx_enabled: false,
     };
-    let mut builder = slab_runtime_core::api::RuntimeBuilder::new()
-        .queue_capacity(cli.queue_capacity.unwrap_or(64))
-        .backend_capacity(cli.backend_capacity.unwrap_or(4));
-    for registration in runtime_registrations(&drivers)? {
-        builder = builder.register_backend(registration);
-    }
-    let runtime = builder.build().context("failed to initialize slab-core runtime")?;
+    let worker_count = cli.backend_capacity.unwrap_or(4);
+    let mut resource_manager = ResourceManager::with_config(ResourceManagerConfig {
+        backend_capacity: worker_count,
+        ..ResourceManagerConfig::default()
+    });
+    register_backends(&drivers, &mut resource_manager, worker_count)
+        .context("failed to register runtime backends")?;
+    let runtime = Runtime::new(
+        Orchestrator::start(resource_manager, cli.queue_capacity.unwrap_or(64)),
+        DriverResolver::new(descriptors(&drivers)),
+    );
     info!("slab-core runtime initialized");
 
     let grpc_service = grpc::GrpcServiceImpl::new(runtime, enabled);
