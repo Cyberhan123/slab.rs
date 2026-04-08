@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use serde_json::Value;
 use slab_types::{
     Capability, DiffusionLoadOptions, DriverHints, JsonOptions, ModelSource, ModelSpec,
-    RuntimeBackendId, RuntimeModelLoadSpec,
+    RuntimeBackendId, RuntimeBackendLoadSpec, RuntimeModelLoadCommand, RuntimeModelLoadSpec,
 };
 
 use crate::error::ModelPackError;
@@ -77,6 +77,21 @@ impl ResolvedModelPack {
 }
 
 impl ModelPackRuntimeBridge {
+    pub fn runtime_load_command(
+        &self,
+        preset_id: &str,
+    ) -> Result<RuntimeModelLoadCommand, ModelPackError> {
+        let legacy = self.runtime_load_spec(preset_id)?;
+        let spec = RuntimeBackendLoadSpec::from_legacy(self.backend, legacy).map_err(|error| {
+            ModelPackError::InvalidRuntimeLoadCommand {
+                preset_id: preset_id.to_owned(),
+                message: error.to_string(),
+            }
+        })?;
+
+        Ok(RuntimeModelLoadCommand { backend: self.backend, spec })
+    }
+
     pub fn runtime_load_spec(
         &self,
         preset_id: &str,

@@ -1,0 +1,5 @@
+error: duplicate event handler for `:: slab_runtime_core :: backend :: RequestRoute :: Inference`
+  --> tests/ui/backend_handler_duplicate_route.rs:17:14
+   |
+17 |     async fn on_inference_b(&mut self, _req: BackendRequest) {}
+   |              ^^^^^^^^^^^^^^

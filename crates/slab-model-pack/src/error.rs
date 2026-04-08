@@ -75,6 +75,9 @@ pub enum ModelPackError {
     #[error("backend config '{id}' payload must be a JSON object")]
     InvalidBackendConfigPayloadShape { id: String },
 
+    #[error("resolved preset '{preset_id}' could not build a typed runtime load command: {message}")]
+    InvalidRuntimeLoadCommand { preset_id: String, message: String },
+
     #[error("resolved preset '{preset_id}' does not expose a loadable primary model artifact")]
     MissingPrimaryArtifact { preset_id: String },
 

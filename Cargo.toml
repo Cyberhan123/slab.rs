@@ -7,7 +7,9 @@ members = [
     "crates/slab-proto",
     "crates/slab-agent",
     "crates/slab-build-utils",
+    "crates/slab-candle",
     "crates/slab-model-pack",
+    "crates/slab-onnx",
     "crates/slab-utils",
     "crates/slab-diffusion", 
     "crates/slab-diffusion-sys",
@@ -16,9 +18,9 @@ members = [
     "crates/slab-llama-sys",
     "crates/slab-whisper",
     "crates/slab-whisper-sys",
-    "crates/slab-core-macros",
+    "crates/slab-runtime-macros",
     "crates/slab-app-core",
-    "crates/slab-core",
+    "crates/slab-runtime-core",
     "crates/slab-types",
     "crates/slab-subtitle",
     "crates/slab-ggml",
@@ -40,7 +42,7 @@ license = "AGPL-3.0-only"
 
 [workspace.dependencies]
 # Internal crates
-slab-runtime-core = { path = "./crates/slab-core", package = "slab-runtime-core", version = "0.0.1" }
+slab-runtime-core = { path = "./crates/slab-runtime-core", package = "slab-runtime-core", version = "0.0.1" }
 slab-app-core     = { path = "./crates/slab-app-core", package = "slab-app-core", version = "0.0.1" }
 slab-agent        = { path = "./crates/slab-agent", package = "slab-agent", version = "0.0.1" }
 slab-proto        = { path = "./crates/slab-proto", package = "slab-proto", version = "0.0.1" }
@@ -54,8 +56,10 @@ slab-whisper      = { path = "./crates/slab-whisper", package = "slab-whisper", 
 slab-whisper-sys  = { path = "./crates/slab-whisper-sys", package = "slab-whisper-sys", version = "0.0.1" }
 slab-libfetch     = { path = "./crates/slab-libfetch", package = "slab-libfetch", version = "0.0.1" }
 slab-build-utils  = { path = "./crates/slab-build-utils", package = "slab-build-utils", version = "0.0.1" }
+slab-candle       = { path = "./crates/slab-candle", package = "slab-candle", version = "0.0.1" }
 slab-utils        = { path = "./crates/slab-utils", package = "slab-utils", version = "0.0.1" }
-slab-core-macros  = { path = "./crates/slab-core-macros", package = "slab-core-macros", version = "0.0.1" }
+slab-runtime-macros = { path = "./crates/slab-runtime-macros", package = "slab-runtime-macros", version = "0.0.1" }
+slab-onnx         = { path = "./crates/slab-onnx", package = "slab-onnx", version = "0.0.1" }
 slab-subtitle     = { path = "./crates/slab-subtitle", package = "slab-subtitle", version = "0.0.1" }
 slab-ggml-sys     = { path = "./crates/slab-ggml-sys", package = "slab-ggml-sys", version = "0.0.1" }
 slab-ggml         = { path = "./crates/slab-ggml", package = "slab-ggml", version = "0.0.1" }

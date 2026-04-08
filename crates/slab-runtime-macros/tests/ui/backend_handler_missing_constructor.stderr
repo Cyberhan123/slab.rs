@@ -1,0 +1,5 @@
+error: #[backend_handler] impl blocks must expose exactly one associated constructor named `new`
+ --> tests/ui/backend_handler_missing_constructor.rs:8:6
+  |
+8 | impl Worker {
+  |      ^^^^^^
