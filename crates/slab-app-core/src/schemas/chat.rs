@@ -819,7 +819,7 @@ impl From<DomainChatModelOption> for ChatModelOption {
             downloaded: value.downloaded,
             pending: value.pending,
             capabilities: value.capabilities.into(),
-            backend_id: value.backend_id,
+            backend_id: value.backend_id.map(|backend_id| backend_id.to_string()),
             provider_id: value.provider_id,
             provider_name: value.provider_name,
         }

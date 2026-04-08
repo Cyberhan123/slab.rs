@@ -1,15 +1,15 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use slab_proto::convert;
-use slab_types::RuntimeBackendId;
-use slab_types::runtime::RuntimeModelLoadSpec;
+use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
 use tracing::{debug, info, warn};
 
 use crate::infra::rpc;
 
-pub type LoadedModelSpec = RuntimeModelLoadSpec;
+pub type LoadedModelSpec = RuntimeBackendLoadSpec;
 
 #[derive(Debug, Default, Clone)]
 struct BackendRefState {
@@ -274,9 +274,9 @@ impl ModelAutoUnloadManager {
             Ok(_) => {
                 info!(
                     backend = %backend,
-                    model_path = %spec.model_path.display(),
-                    num_workers = spec.num_workers,
-                    context_length = spec.context_length.unwrap_or(0),
+                    model_path = %load_spec_model_path(&spec).display(),
+                    num_workers = load_spec_num_workers(&spec).unwrap_or(0),
+                    context_length = load_spec_context_length(&spec).unwrap_or(0),
                     restart_attempts = runtime_snapshot.restart_attempts,
                     "auto-reloaded model before inference"
                 );
@@ -312,5 +312,31 @@ impl ModelAutoUnloadManager {
 }
 
 pub(crate) fn build_model_load_request(spec: &LoadedModelSpec) -> rpc::pb::ModelLoadRequest {
-    convert::encode_model_load_request(spec)
+    convert::encode_model_load_request(&spec.to_legacy_spec())
+}
+
+fn load_spec_model_path(spec: &LoadedModelSpec) -> &Path {
+    match spec {
+        LoadedModelSpec::GgmlLlama(config) => config.model_path.as_path(),
+        LoadedModelSpec::GgmlWhisper(config) => config.model_path.as_path(),
+        LoadedModelSpec::GgmlDiffusion(config) => config.model_path.as_path(),
+        LoadedModelSpec::CandleLlama(config) => config.model_path.as_path(),
+        LoadedModelSpec::CandleWhisper(config) => config.model_path.as_path(),
+        LoadedModelSpec::CandleDiffusion(config) => config.model_path.as_path(),
+        LoadedModelSpec::Onnx(config) => config.model_path.as_path(),
+    }
+}
+
+fn load_spec_num_workers(spec: &LoadedModelSpec) -> Option<usize> {
+    match spec {
+        LoadedModelSpec::GgmlLlama(config) => Some(config.num_workers),
+        _ => None,
+    }
+}
+
+fn load_spec_context_length(spec: &LoadedModelSpec) -> Option<u32> {
+    match spec {
+        LoadedModelSpec::GgmlLlama(config) => config.context_length,
+        _ => None,
+    }
 }

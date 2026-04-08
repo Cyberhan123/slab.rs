@@ -31,9 +31,10 @@ pub use image::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
 pub use model::{
     AvailableModelsQuery, AvailableModelsView, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
     CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION, CreateModelCommand, DeletedModelView,
-    DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus, Pricing,
-    RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
-    UpdateModelCommand, default_model_capabilities, normalize_model_capabilities,
+    DownloadModelCommand, ListModelsFilter, ManagedModelBackendId, ModelLoadCommand, ModelSpec,
+    ModelStatus, Pricing, RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind,
+    UnifiedModelStatus, UpdateModelCommand, default_model_capabilities,
+    normalize_model_capabilities,
     upgrade_stored_model_config,
 };
 pub use pmid::PMID;

@@ -1,6 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use slab_types::Capability;
+use slab_types::{Capability, RuntimeBackendId};
+use std::fmt;
 use std::str::FromStr;
 
 // ---------------------------------------------------------------------------
@@ -68,6 +69,86 @@ impl FromStr for UnifiedModelKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ManagedModelBackendId {
+    GgmlLlama,
+    GgmlWhisper,
+    GgmlDiffusion,
+}
+
+impl ManagedModelBackendId {
+    pub const ALL: [Self; 3] = [Self::GgmlLlama, Self::GgmlWhisper, Self::GgmlDiffusion];
+
+    pub const fn as_runtime_backend_id(self) -> RuntimeBackendId {
+        match self {
+            Self::GgmlLlama => RuntimeBackendId::GgmlLlama,
+            Self::GgmlWhisper => RuntimeBackendId::GgmlWhisper,
+            Self::GgmlDiffusion => RuntimeBackendId::GgmlDiffusion,
+        }
+    }
+
+    pub const fn canonical_id(self) -> &'static str {
+        self.as_runtime_backend_id().canonical_id()
+    }
+}
+
+impl fmt::Display for ManagedModelBackendId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.canonical_id())
+    }
+}
+
+impl Serialize for ManagedModelBackendId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_str(self.canonical_id())
+    }
+}
+
+impl<'de> Deserialize<'de> for ManagedModelBackendId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::from_str(&value).map_err(serde::de::Error::custom)
+    }
+}
+
+impl From<ManagedModelBackendId> for RuntimeBackendId {
+    fn from(value: ManagedModelBackendId) -> Self {
+        value.as_runtime_backend_id()
+    }
+}
+
+impl TryFrom<RuntimeBackendId> for ManagedModelBackendId {
+    type Error = String;
+
+    fn try_from(value: RuntimeBackendId) -> Result<Self, Self::Error> {
+        match value {
+            RuntimeBackendId::GgmlLlama => Ok(Self::GgmlLlama),
+            RuntimeBackendId::GgmlWhisper => Ok(Self::GgmlWhisper),
+            RuntimeBackendId::GgmlDiffusion => Ok(Self::GgmlDiffusion),
+            other => Err(format!(
+                "unsupported managed model backend id: {}",
+                other.canonical_id()
+            )),
+        }
+    }
+}
+
+impl FromStr for ManagedModelBackendId {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        let backend = RuntimeBackendId::from_str(value)
+            .map_err(|_| format!("unknown managed model backend id: {}", value.trim()))?;
+        Self::try_from(backend)
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Spec and runtime presets (shared with JSON schema)
 // ---------------------------------------------------------------------------
@@ -124,7 +205,7 @@ pub struct UnifiedModel {
     pub id: String,
     pub display_name: String,
     pub kind: UnifiedModelKind,
-    pub backend_id: Option<String>,
+    pub backend_id: Option<ManagedModelBackendId>,
     pub capabilities: Vec<Capability>,
     pub status: UnifiedModelStatus,
     pub spec: ModelSpec,
@@ -142,7 +223,7 @@ pub struct CreateModelCommand {
     pub id: Option<String>,
     pub display_name: String,
     pub kind: UnifiedModelKind,
-    pub backend_id: Option<String>,
+    pub backend_id: Option<ManagedModelBackendId>,
     pub capabilities: Option<Vec<Capability>>,
     /// If `None`, the status is inferred from the model kind.
     pub status: Option<UnifiedModelStatus>,
@@ -151,7 +232,7 @@ pub struct CreateModelCommand {
 }
 
 pub const CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION: u32 = 2;
-pub const CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION: u32 = 2;
+pub const CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION: u32 = 3;
 
 const fn current_stored_model_config_schema_version() -> u32 {
     CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION
@@ -171,7 +252,7 @@ pub struct StoredModelConfig {
     pub display_name: String,
     pub kind: UnifiedModelKind,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub backend_id: Option<String>,
+    pub backend_id: Option<ManagedModelBackendId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capabilities: Vec<Capability>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -227,10 +308,9 @@ fn upgrade_stored_model_config_policy(
     }
 
     if config.policy_version < CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION {
-        return Err(format!(
-            "missing stored model config policy upgrader for version {}",
-            config.policy_version
-        ));
+        let mut upgraded = config;
+        upgraded.policy_version = CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION;
+        return Ok(upgraded);
     }
 
     Ok(config)
@@ -240,7 +320,7 @@ fn upgrade_stored_model_config_policy(
 pub struct UpdateModelCommand {
     pub display_name: Option<String>,
     pub kind: Option<UnifiedModelKind>,
-    pub backend_id: Option<String>,
+    pub backend_id: Option<ManagedModelBackendId>,
     pub capabilities: Option<Vec<Capability>>,
     pub status: Option<UnifiedModelStatus>,
     pub spec: Option<ModelSpec>,
@@ -322,28 +402,21 @@ impl From<UnifiedModel> for StoredModelConfig {
 
 pub fn default_model_capabilities(
     kind: UnifiedModelKind,
-    backend_id: Option<&str>,
+    backend_id: Option<ManagedModelBackendId>,
     display_name: &str,
     spec: &ModelSpec,
 ) -> Vec<Capability> {
-    let normalized_backend =
-        backend_id.map(str::trim).filter(|value| !value.is_empty()).map(str::to_ascii_lowercase);
-
-    match (kind, normalized_backend.as_deref()) {
+    match (kind, backend_id) {
         (UnifiedModelKind::Cloud, _) => vec![Capability::TextGeneration, Capability::ChatGeneration],
-        (UnifiedModelKind::Local, Some(backend))
-            if backend.contains("whisper") && looks_like_vad_model(display_name, spec) =>
-        {
+        (UnifiedModelKind::Local, Some(ManagedModelBackendId::GgmlWhisper))
+            if looks_like_vad_model(display_name, spec) => {
             vec![Capability::AudioVad]
         }
-        (UnifiedModelKind::Local, Some(backend)) if backend.contains("whisper") => {
+        (UnifiedModelKind::Local, Some(ManagedModelBackendId::GgmlWhisper)) => {
             vec![Capability::AudioTranscription]
         }
-        (UnifiedModelKind::Local, Some(backend)) if backend.contains("diffusion") => {
+        (UnifiedModelKind::Local, Some(ManagedModelBackendId::GgmlDiffusion)) => {
             vec![Capability::ImageGeneration, Capability::VideoGeneration]
-        }
-        (UnifiedModelKind::Local, Some(backend)) if backend.contains("onnx") => {
-            vec![Capability::ImageEmbedding]
         }
         _ => vec![Capability::TextGeneration, Capability::ChatGeneration],
     }
@@ -351,7 +424,7 @@ pub fn default_model_capabilities(
 
 pub fn normalize_model_capabilities(
     kind: UnifiedModelKind,
-    backend_id: Option<&str>,
+    backend_id: Option<ManagedModelBackendId>,
     display_name: &str,
     spec: &ModelSpec,
     capabilities: Option<Vec<Capability>>,
@@ -379,7 +452,7 @@ pub fn normalize_model_capabilities(
 fn normalize_stored_model_capabilities(mut config: StoredModelConfig) -> StoredModelConfig {
     config.capabilities = normalize_model_capabilities(
         config.kind,
-        config.backend_id.as_deref(),
+        config.backend_id,
         &config.display_name,
         &config.spec,
         Some(config.capabilities),
@@ -419,8 +492,9 @@ fn looks_like_vad_model(display_name: &str, spec: &ModelSpec) -> bool {
 mod tests {
     use super::{
         CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
-        ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind,
-        UnifiedModelStatus, default_model_capabilities, upgrade_stored_model_config,
+        ManagedModelBackendId, ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel,
+        UnifiedModelKind, UnifiedModelStatus, default_model_capabilities,
+        upgrade_stored_model_config,
     };
     use chrono::Utc;
     use serde_json::json;
@@ -451,7 +525,7 @@ mod tests {
             id: "local-qwen".to_owned(),
             display_name: "Local Qwen".to_owned(),
             kind: UnifiedModelKind::Local,
-            backend_id: Some("ggml.llama".to_owned()),
+            backend_id: Some(ManagedModelBackendId::GgmlLlama),
             capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
             status: UnifiedModelStatus::NotDownloaded,
             spec: ModelSpec {
@@ -520,7 +594,7 @@ mod tests {
     fn default_capabilities_distinguish_chat_vad_and_video_models() {
         let chat_caps = default_model_capabilities(
             UnifiedModelKind::Local,
-            Some("ggml.llama"),
+            Some(ManagedModelBackendId::GgmlLlama),
             "Local Chat",
             &ModelSpec::default(),
         );
@@ -528,7 +602,7 @@ mod tests {
 
         let vad_caps = default_model_capabilities(
             UnifiedModelKind::Local,
-            Some("ggml.whisper"),
+            Some(ManagedModelBackendId::GgmlWhisper),
             "Silero VAD",
             &ModelSpec {
                 filename: Some("silero_vad.bin".into()),
@@ -539,7 +613,7 @@ mod tests {
 
         let video_caps = default_model_capabilities(
             UnifiedModelKind::Local,
-            Some("ggml.diffusion"),
+            Some(ManagedModelBackendId::GgmlDiffusion),
             "Diffusion",
             &ModelSpec::default(),
         );

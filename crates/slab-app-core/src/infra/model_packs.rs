@@ -21,8 +21,9 @@ use zip::ZipWriter;
 use zip::write::SimpleFileOptions;
 
 use crate::domain::models::{
-    CreateModelCommand, ModelSpec, Pricing, RuntimePresets, StoredModelConfig, UnifiedModel,
-    UnifiedModelKind, UnifiedModelStatus, upgrade_stored_model_config,
+    CreateModelCommand, ManagedModelBackendId, ModelSpec, Pricing, RuntimePresets,
+    StoredModelConfig, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
+    upgrade_stored_model_config,
 };
 use crate::error::AppCoreError;
 
@@ -495,7 +496,7 @@ fn build_generated_pack_entries(
 }
 
 fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
-    let family = infer_model_family(config.kind, config.backend_id.as_deref());
+    let family = infer_model_family(config.kind, config.backend_id);
     let mut metadata = BTreeMap::new();
     metadata.insert("generated_by".into(), "slab-app-core".into());
 
@@ -724,22 +725,21 @@ fn infer_runtime_backend_from_config(config: &StoredModelConfig) -> Option<Runti
         return None;
     }
 
-    config.backend_id.as_deref().and_then(|backend| backend.parse().ok())
+    config.backend_id.map(Into::into)
 }
 
-fn infer_model_family(kind: UnifiedModelKind, backend_id: Option<&str>) -> ModelFamily {
+fn infer_model_family(
+    kind: UnifiedModelKind,
+    backend_id: Option<ManagedModelBackendId>,
+) -> ModelFamily {
     let Some(backend_id) = (kind == UnifiedModelKind::Local).then_some(backend_id).flatten() else {
         return ModelFamily::Llama;
     };
 
-    if backend_id.contains("whisper") {
-        ModelFamily::Whisper
-    } else if backend_id.contains("diffusion") {
-        ModelFamily::Diffusion
-    } else if backend_id.contains("onnx") {
-        ModelFamily::Onnx
-    } else {
-        ModelFamily::Llama
+    match backend_id {
+        ManagedModelBackendId::GgmlWhisper => ModelFamily::Whisper,
+        ManagedModelBackendId::GgmlDiffusion => ModelFamily::Diffusion,
+        ManagedModelBackendId::GgmlLlama => ModelFamily::Llama,
     }
 }
 
@@ -796,7 +796,8 @@ mod tests {
     };
     use crate::domain::models::{
         CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
-        ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModelKind, UnifiedModelStatus,
+        ManagedModelBackendId, ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModelKind,
+        UnifiedModelStatus,
     };
     use crate::error::AppCoreError;
 
@@ -954,7 +955,7 @@ mod tests {
                 .expect("local command");
 
         assert_eq!(command.kind, UnifiedModelKind::Local);
-        assert_eq!(command.backend_id.as_deref(), Some("ggml.llama"));
+        assert_eq!(command.backend_id, Some(ManagedModelBackendId::GgmlLlama));
         assert_eq!(command.status, Some(UnifiedModelStatus::NotDownloaded));
         assert_eq!(command.spec.repo_id.as_deref(), Some("bartowski/Qwen2.5-7B-Instruct-GGUF"));
         assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
@@ -1085,7 +1086,7 @@ mod tests {
             id: "local-qwen".to_owned(),
             display_name: "Local Qwen".to_owned(),
             kind: UnifiedModelKind::Local,
-            backend_id: Some("ggml.llama".to_owned()),
+            backend_id: Some(ManagedModelBackendId::GgmlLlama),
             capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
             status: Some(UnifiedModelStatus::NotDownloaded),
             spec: ModelSpec {
@@ -1221,6 +1222,12 @@ fn build_local_model_command(
     resolved: &slab_model_pack::ResolvedModelPack,
 ) -> Result<CreateModelCommand, AppCoreError> {
     let bridge = resolved.compile_default_runtime_bridge().map_err(map_model_pack_error)?;
+    let backend_id = ManagedModelBackendId::try_from(bridge.backend).map_err(|error| {
+        AppCoreError::BadRequest(format!(
+            "model pack backend '{}' is not supported by managed local models: {}",
+            bridge.backend, error
+        ))
+    })?;
     let status = manifest_status(manifest.status)
         .unwrap_or_else(|| default_status_for_runtime_bridge(&bridge));
     let runtime_presets = build_runtime_presets_from_manifest(manifest.runtime_presets.as_ref())
@@ -1232,7 +1239,7 @@ fn build_local_model_command(
         id: Some(manifest.id.clone()),
         display_name: manifest.label.clone(),
         kind: UnifiedModelKind::Local,
-        backend_id: Some(bridge.backend.to_string()),
+        backend_id: Some(backend_id),
         capabilities: Some(manifest.capabilities.clone()),
         status: Some(status),
         spec: ModelSpec {

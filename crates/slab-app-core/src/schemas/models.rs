@@ -9,6 +9,7 @@ use crate::domain::models::{
     AvailableModelsQuery as DomainAvailableModelsQuery,
     CreateModelCommand as DomainCreateModelCommand,
     DownloadModelCommand as DomainDownloadModelCommand, ListModelsFilter as DomainListModelsFilter,
+    ManagedModelBackendId as DomainManagedModelBackendId,
     ModelLoadCommand as DomainModelLoadCommand, ModelSpec as DomainModelSpec,
     ModelStatus as DomainModelStatus, Pricing as DomainPricing,
     RuntimePresets as DomainRuntimePresets, UnifiedModel as DomainUnifiedModel,
@@ -104,6 +105,10 @@ pub struct CreateModelRequest {
     /// Whether this model is backed by the local runtime or a cloud provider.
     pub kind: ModelKind,
     /// Runtime backend identifier for local models, e.g. `"ggml.llama"`.
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_managed_model_backend_id",
+        message = "backend_id must be one of ggml.llama, ggml.whisper, ggml.diffusion"
+    ))]
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub backend_id: Option<String>,
     /// Initial status. If omitted, defaults to `"ready"` for cloud models and
@@ -127,6 +132,10 @@ pub struct UpdateModelRequest {
     /// Whether this model is backed by the local runtime or a cloud provider.
     pub kind: Option<ModelKind>,
     /// Runtime backend identifier for local models, e.g. `"ggml.llama"`.
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_managed_model_backend_id",
+        message = "backend_id must be one of ggml.llama, ggml.whisper, ggml.diffusion"
+    ))]
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub backend_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -388,7 +397,7 @@ impl From<DomainUnifiedModel> for UnifiedModelResponse {
             id: model.id,
             display_name: model.display_name,
             kind: model.kind.into(),
-            backend_id: model.backend_id,
+            backend_id: model.backend_id.map(|backend_id| backend_id.to_string()),
             capabilities: model.capabilities.into_iter().map(Into::into).collect(),
             chat_capabilities,
             status: model.status.as_str().to_owned(),
@@ -427,7 +436,9 @@ impl From<CreateModelRequest> for DomainCreateModelCommand {
             id: None,
             display_name: req.display_name,
             kind: req.kind.into(),
-            backend_id: req.backend_id,
+            backend_id: req.backend_id.map(|backend_id| {
+                backend_id.parse::<DomainManagedModelBackendId>().expect("backend_id was validated")
+            }),
             capabilities: req.capabilities.map(|capabilities| {
                 capabilities.into_iter().map(Into::into).collect()
             }),
@@ -443,7 +454,9 @@ impl From<UpdateModelRequest> for DomainUpdateModelCommand {
         Self {
             display_name: req.display_name,
             kind: req.kind.map(Into::into),
-            backend_id: req.backend_id,
+            backend_id: req.backend_id.map(|backend_id| {
+                backend_id.parse::<DomainManagedModelBackendId>().expect("backend_id was validated")
+            }),
             capabilities: req.capabilities.map(|capabilities| {
                 capabilities.into_iter().map(Into::into).collect()
             }),
@@ -557,7 +570,7 @@ fn validate_model_lifecycle_request(
             },
         ));
     };
-    crate::schemas::validation::validate_backend_id(backend_id)?;
+    crate::schemas::validation::validate_managed_model_backend_id(backend_id)?;
 
     if require_model_path {
         let Some(model_path) = model_path else {

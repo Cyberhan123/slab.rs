@@ -5,8 +5,8 @@ use std::sync::Arc;
 use chrono::Utc;
 use hf_hub::api::sync::{Api, ApiBuilder};
 use slab_proto::convert;
-use slab_types::Capability;
-use slab_types::RuntimeBackendId;
+use slab_types::load_config::{GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig};
+use slab_types::{Capability, RuntimeBackendId, RuntimeBackendLoadSpec};
 use slab_types::runtime::DiffusionLoadOptions;
 use tonic::transport::Channel;
 use tracing::{info, warn};
@@ -17,14 +17,14 @@ use crate::domain::models::{
     CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
     ChatModelCapabilities, ChatModelOption, ChatModelSource, CreateModelCommand,
     DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec,
-    ModelStatus, UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
-    normalize_model_capabilities,
+    ManagedModelBackendId, ModelStatus, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
+    UpdateModelCommand, normalize_model_capabilities,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
 use crate::infra::model_packs;
 use crate::infra::rpc::{self, pb};
-use crate::model_auto_unload::{LoadedModelSpec, build_model_load_request};
+use crate::model_auto_unload::build_model_load_request;
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 type CloudProviderConfig = slab_types::settings::CloudProviderConfig;
@@ -499,7 +499,7 @@ impl ModelService {
         let (backend_id, spec) = canonicalize_model_spec(req.kind, req.backend_id, req.spec)?;
         let capabilities = normalize_model_capabilities(
             req.kind,
-            backend_id.as_deref(),
+            backend_id,
             &display_name,
             &spec,
             req.capabilities,
@@ -698,10 +698,9 @@ fn build_cloud_chat_model_option(
 
 fn canonicalize_model_spec(
     kind: UnifiedModelKind,
-    backend_id: Option<String>,
+    backend_id: Option<ManagedModelBackendId>,
     mut spec: ModelSpec,
-) -> Result<(Option<String>, ModelSpec), AppCoreError> {
-    let backend_id = normalize_optional_text(backend_id);
+) -> Result<(Option<ManagedModelBackendId>, ModelSpec), AppCoreError> {
     spec.provider_id = normalize_optional_text(spec.provider_id);
     spec.remote_model_id = normalize_optional_text(spec.remote_model_id);
     spec.repo_id = normalize_optional_text(spec.repo_id);
@@ -737,11 +736,8 @@ fn canonicalize_model_spec(
             let backend_id = backend_id.ok_or_else(|| {
                 AppCoreError::BadRequest("local models must set backend_id".into())
             })?;
-            let backend: RuntimeBackendId = backend_id.parse().map_err(|_| {
-                AppCoreError::BadRequest(format!("unknown backend_id: {backend_id}"))
-            })?;
 
-            Ok((Some(backend.to_string()), spec))
+            Ok((Some(backend_id), spec))
         }
     }
 }
@@ -790,7 +786,7 @@ fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord, AppCoreEr
         display_name: model.display_name.clone(),
         provider: legacy_provider_value(model),
         kind: model.kind.as_str().to_owned(),
-        backend_id: model.backend_id.clone(),
+        backend_id: model.backend_id.map(|backend_id| backend_id.to_string()),
         capabilities: capabilities_json,
         status: model.status.as_str().to_owned(),
         spec: spec_json,
@@ -806,7 +802,6 @@ fn legacy_provider_value(model: &UnifiedModel) -> String {
     match model.kind {
         UnifiedModelKind::Local => model
             .backend_id
-            .as_deref()
             .map(|backend_id| format!("local.{backend_id}"))
             .unwrap_or_else(|| "local".to_owned()),
         UnifiedModelKind::Cloud => model
@@ -1026,16 +1021,17 @@ async fn load_model_with_state(
         "{log_message}"
     );
 
-    let load_spec = LoadedModelSpec {
-        model_path: PathBuf::from(resolved_target.model_path.clone()),
+    let load_spec = build_backend_load_spec(
+        resolved_target.backend_id,
+        &resolved_target.model_path,
         num_workers,
-        context_length: (context_length > 0).then_some(context_length),
-        chat_template: resolved_target
+        context_length,
+        resolved_target
             .pack_load_defaults
             .as_ref()
             .and_then(|defaults| defaults.chat_template.clone()),
         diffusion,
-    };
+    )?;
     let grpc_req = build_model_load_request(&load_spec);
     let response = rpc::client::load_model(channel, resolved_target.backend_id, grpc_req)
         .await
@@ -1043,6 +1039,60 @@ async fn load_model_with_state(
     state.auto_unload().notify_model_loaded(resolved_target.backend_id, load_spec).await;
 
     decode_model_status(response)
+}
+
+fn build_backend_load_spec(
+    backend_id: RuntimeBackendId,
+    model_path: &str,
+    num_workers: u32,
+    context_length: u32,
+    chat_template: Option<String>,
+    diffusion: Option<DiffusionLoadOptions>,
+) -> Result<RuntimeBackendLoadSpec, AppCoreError> {
+    let model_path = PathBuf::from(model_path);
+
+    match backend_id {
+        RuntimeBackendId::GgmlLlama => Ok(RuntimeBackendLoadSpec::GgmlLlama(
+            GgmlLlamaLoadConfig {
+                model_path,
+                num_workers: usize::try_from(num_workers).map_err(|error| {
+                    AppCoreError::Internal(format!(
+                        "failed to convert num_workers into usize for ggml.llama: {error}"
+                    ))
+                })?,
+                context_length: (context_length > 0).then_some(context_length),
+                chat_template,
+            },
+        )),
+        RuntimeBackendId::GgmlWhisper => {
+            Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path }))
+        }
+        RuntimeBackendId::GgmlDiffusion => {
+            let diffusion = diffusion.unwrap_or_default();
+            Ok(RuntimeBackendLoadSpec::GgmlDiffusion(GgmlDiffusionLoadConfig {
+                model_path,
+                diffusion_model_path: diffusion.diffusion_model_path,
+                vae_path: diffusion.vae_path,
+                taesd_path: diffusion.taesd_path,
+                clip_l_path: diffusion.clip_l_path,
+                clip_g_path: diffusion.clip_g_path,
+                t5xxl_path: diffusion.t5xxl_path,
+                clip_vision_path: None,
+                control_net_path: None,
+                flash_attn: diffusion.flash_attn,
+                vae_device: (!diffusion.vae_device.is_empty()).then_some(diffusion.vae_device),
+                clip_device: (!diffusion.clip_device.is_empty())
+                    .then_some(diffusion.clip_device),
+                offload_params_to_cpu: diffusion.offload_params_to_cpu,
+                enable_mmap: false,
+                n_threads: None,
+            }))
+        }
+        other => Err(AppCoreError::Internal(format!(
+            "unsupported backend for managed model load spec assembly: {}",
+            other.canonical_id()
+        ))),
+    }
 }
 
 async fn resolve_model_load_target(
@@ -1175,16 +1225,11 @@ fn resolve_local_backend_from_model(
         )));
     }
 
-    let backend_id = model.backend_id.as_deref().ok_or_else(|| {
+    let backend_id = model.backend_id.ok_or_else(|| {
         AppCoreError::BadRequest(format!("model '{}' is local but is missing backend_id", model.id))
     })?;
 
-    backend_id.parse().map_err(|_| {
-        AppCoreError::BadRequest(format!(
-            "unknown backend_id '{}' for model '{}'",
-            backend_id, model.id
-        ))
-    })
+    Ok(backend_id.into())
 }
 
 fn resolve_local_model_path(model: &UnifiedModel) -> Result<String, AppCoreError> {
@@ -1211,8 +1256,8 @@ mod tests {
         normalize_required_text, validate_and_normalize_model_workers,
     };
     use crate::domain::models::{
-        ChatModelSource, ModelSpec, RuntimePresets, UnifiedModel, UnifiedModelKind,
-        UnifiedModelStatus, default_model_capabilities,
+        ChatModelSource, ManagedModelBackendId, ModelSpec, RuntimePresets, UnifiedModel,
+        UnifiedModelKind, UnifiedModelStatus, default_model_capabilities,
     };
     use crate::error::AppCoreError;
     use chrono::Utc;
@@ -1302,7 +1347,7 @@ mod tests {
     fn local_models_clear_cloud_only_fields_and_canonicalize_backend_id() {
         let (backend_id, spec) = canonicalize_model_spec(
             UnifiedModelKind::Local,
-            Some(" ggml.llama ".into()),
+            Some(ManagedModelBackendId::GgmlLlama),
             ModelSpec {
                 provider_id: Some("openai-main".into()),
                 remote_model_id: Some("gpt-4.1-mini".into()),
@@ -1311,7 +1356,7 @@ mod tests {
         )
         .expect("local spec");
 
-        assert_eq!(backend_id.as_deref(), Some("ggml.llama"));
+        assert_eq!(backend_id, Some(ManagedModelBackendId::GgmlLlama));
         assert!(spec.provider_id.is_none());
         assert!(spec.remote_model_id.is_none());
     }
@@ -1339,7 +1384,7 @@ mod tests {
         let option = build_local_chat_model_option(&llama).expect("llama option");
 
         assert_eq!(option.source, ChatModelSource::Local);
-        assert_eq!(option.backend_id.as_deref(), Some("ggml.llama"));
+        assert_eq!(option.backend_id, Some(ManagedModelBackendId::GgmlLlama));
         assert!(option.pending);
         assert!(!option.downloaded);
     }
@@ -1444,11 +1489,13 @@ mod tests {
         status: UnifiedModelStatus,
         local_path: Option<&str>,
     ) -> UnifiedModel {
+        let backend_id = backend_id.map(|value| value.parse().expect("managed model backend id"));
+
         UnifiedModel {
             id: "model-1".to_owned(),
             display_name: "Model 1".to_owned(),
             kind,
-            backend_id: backend_id.map(str::to_owned),
+            backend_id,
             capabilities: default_model_capabilities(
                 kind,
                 backend_id,
