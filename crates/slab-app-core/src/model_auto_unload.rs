@@ -9,14 +9,19 @@ use tracing::{debug, info, warn};
 
 use crate::infra::rpc;
 
-pub type LoadedModelSpec = RuntimeBackendLoadSpec;
+#[derive(Debug, Clone)]
+pub struct ModelReplayPlan {
+    pub backend_id: RuntimeBackendId,
+    pub model_id: Option<String>,
+    pub load_spec: RuntimeBackendLoadSpec,
+}
 
 #[derive(Debug, Default, Clone)]
 struct BackendRefState {
     active_refs: u64,
     idle_seq: u64,
     auto_unloaded: bool,
-    last_loaded: Option<LoadedModelSpec>,
+    replay_plan: Option<ModelReplayPlan>,
     runtime_restart_attempts: usize,
 }
 
@@ -86,12 +91,8 @@ impl ModelAutoUnloadManager {
         Ok(guard)
     }
 
-    pub async fn notify_model_loaded(
-        self: &Arc<Self>,
-        backend_id: RuntimeBackendId,
-        spec: LoadedModelSpec,
-    ) {
-        let backend = backend_id;
+    pub async fn notify_model_loaded(self: &Arc<Self>, plan: ModelReplayPlan) {
+        let backend = plan.backend_id;
         let mut should_schedule = None;
 
         {
@@ -99,7 +100,7 @@ impl ModelAutoUnloadManager {
             let state = states.entry(backend).or_default();
             state.idle_seq = state.idle_seq.saturating_add(1);
             state.auto_unloaded = false;
-            state.last_loaded = Some(spec);
+            state.replay_plan = Some(plan);
             state.runtime_restart_attempts = self.runtime_status.snapshot(backend).restart_attempts;
             if state.active_refs == 0 {
                 should_schedule = Some(state.idle_seq);
@@ -117,7 +118,45 @@ impl ModelAutoUnloadManager {
         let state = states.entry(backend).or_default();
         state.idle_seq = state.idle_seq.saturating_add(1);
         state.auto_unloaded = false;
+        state.replay_plan = None;
         debug!(backend = %backend, "model unload state updated (manual)");
+    }
+
+    pub async fn invalidate_model_replay(&self, model_id: &str, reason: &'static str) {
+        let model_id = model_id.trim();
+        if model_id.is_empty() {
+            return;
+        }
+
+        let mut invalidated_backends = Vec::new();
+        {
+            let mut states = self.states.lock().await;
+            for (backend_id, state) in states.iter_mut() {
+                let matches_model = state
+                    .replay_plan
+                    .as_ref()
+                    .and_then(|plan| plan.model_id.as_deref())
+                    .is_some_and(|candidate| candidate == model_id);
+
+                if !matches_model {
+                    continue;
+                }
+
+                state.replay_plan = None;
+                state.auto_unloaded = false;
+                invalidated_backends.push(*backend_id);
+            }
+        }
+
+        if invalidated_backends.is_empty() {
+            return;
+        }
+
+        let backends = invalidated_backends
+            .into_iter()
+            .map(|backend_id| backend_id.to_string())
+            .collect::<Vec<_>>();
+        info!(model_id, ?backends, reason, "invalidated compiled model replay plan");
     }
 
     fn release_ref(self: &Arc<Self>, backend_id: RuntimeBackendId) {
@@ -229,20 +268,20 @@ impl ModelAutoUnloadManager {
     async fn try_reload_if_needed(&self, backend_id: RuntimeBackendId) -> Result<(), String> {
         let backend = backend_id;
         let runtime_snapshot = self.runtime_status.snapshot(backend);
-        let spec = {
+        let plan = {
             let mut states = self.states.lock().await;
             let state = states.entry(backend).or_default();
             if runtime_snapshot.restart_attempts > state.runtime_restart_attempts {
                 let previous_restart_attempts = state.runtime_restart_attempts;
                 state.runtime_restart_attempts = runtime_snapshot.restart_attempts;
-                if state.last_loaded.is_some() {
+                if state.replay_plan.is_some() {
                     state.auto_unloaded = true;
                     info!(
                         backend = %backend,
                         previous_restart_attempts,
                         current_restart_attempts = runtime_snapshot.restart_attempts,
                         runtime_status = runtime_snapshot.status.as_str(),
-                        "runtime restart detected; model will be auto-reloaded before inference"
+                        "runtime restart detected; replay plan will be re-applied before inference"
                     );
                 }
             }
@@ -250,15 +289,16 @@ impl ModelAutoUnloadManager {
                 return Ok(());
             }
 
-            let Some(spec) = state.last_loaded.clone() else {
+            let Some(plan) = state.replay_plan.clone() else {
+                state.auto_unloaded = false;
                 warn!(
                     backend = %backend,
-                    "cannot auto-reload because last loaded model spec is unavailable"
+                    "cannot auto-reload because compiled replay plan is unavailable"
                 );
                 return Ok(());
             };
 
-            spec
+            plan
         };
 
         let Some(channel) = self.grpc.backend_channel(backend) else {
@@ -268,21 +308,22 @@ impl ModelAutoUnloadManager {
             return Err(format!("backend channel unavailable for auto-reload: {backend}"));
         };
 
-        let req = build_model_load_request(&spec);
+        let req = build_model_load_request(&plan.load_spec);
 
         match rpc::client::load_model(channel, backend, req).await {
             Ok(_) => {
                 info!(
                     backend = %backend,
-                    model_path = %load_spec_model_path(&spec).display(),
-                    num_workers = load_spec_num_workers(&spec).unwrap_or(0),
-                    context_length = load_spec_context_length(&spec).unwrap_or(0),
+                    model_id = ?plan.model_id,
+                    model_path = %load_spec_model_path(&plan.load_spec).display(),
+                    num_workers = load_spec_num_workers(&plan.load_spec).unwrap_or(0),
+                    context_length = load_spec_context_length(&plan.load_spec).unwrap_or(0),
                     restart_attempts = runtime_snapshot.restart_attempts,
-                    "auto-reloaded model before inference"
+                    "re-applied model replay plan before inference"
                 );
                 let mut states = self.states.lock().await;
                 let state = states.entry(backend).or_default();
-                state.last_loaded = Some(spec);
+                state.replay_plan = Some(plan);
                 state.auto_unloaded = false;
                 state.runtime_restart_attempts = runtime_snapshot.restart_attempts;
                 Ok(())
@@ -311,32 +352,32 @@ impl ModelAutoUnloadManager {
     }
 }
 
-pub(crate) fn build_model_load_request(spec: &LoadedModelSpec) -> rpc::pb::ModelLoadRequest {
+pub(crate) fn build_model_load_request(spec: &RuntimeBackendLoadSpec) -> rpc::pb::ModelLoadRequest {
     convert::encode_model_load_request(&spec.to_legacy_spec())
 }
 
-fn load_spec_model_path(spec: &LoadedModelSpec) -> &Path {
+fn load_spec_model_path(spec: &RuntimeBackendLoadSpec) -> &Path {
     match spec {
-        LoadedModelSpec::GgmlLlama(config) => config.model_path.as_path(),
-        LoadedModelSpec::GgmlWhisper(config) => config.model_path.as_path(),
-        LoadedModelSpec::GgmlDiffusion(config) => config.model_path.as_path(),
-        LoadedModelSpec::CandleLlama(config) => config.model_path.as_path(),
-        LoadedModelSpec::CandleWhisper(config) => config.model_path.as_path(),
-        LoadedModelSpec::CandleDiffusion(config) => config.model_path.as_path(),
-        LoadedModelSpec::Onnx(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::GgmlLlama(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::GgmlWhisper(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::GgmlDiffusion(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::CandleLlama(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::CandleWhisper(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::CandleDiffusion(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::Onnx(config) => config.model_path.as_path(),
     }
 }
 
-fn load_spec_num_workers(spec: &LoadedModelSpec) -> Option<usize> {
+fn load_spec_num_workers(spec: &RuntimeBackendLoadSpec) -> Option<usize> {
     match spec {
-        LoadedModelSpec::GgmlLlama(config) => Some(config.num_workers),
+        RuntimeBackendLoadSpec::GgmlLlama(config) => Some(config.num_workers),
         _ => None,
     }
 }
 
-fn load_spec_context_length(spec: &LoadedModelSpec) -> Option<u32> {
+fn load_spec_context_length(spec: &RuntimeBackendLoadSpec) -> Option<u32> {
     match spec {
-        LoadedModelSpec::GgmlLlama(config) => config.context_length,
+        RuntimeBackendLoadSpec::GgmlLlama(config) => config.context_length,
         _ => None,
     }
 }

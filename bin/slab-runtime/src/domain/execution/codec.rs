@@ -29,11 +29,11 @@ use slab_types::{
 use slab_runtime_core::backend::StreamChunk;
 use slab_runtime_core::{CoreError, Payload};
 
-use super::dispatch::ResolvedDriver;
+use super::backend::ResolvedBackend;
 
 pub(crate) fn encode_load_payload(
     spec: &ModelSpec,
-    resolved: &ResolvedDriver,
+    resolved: &ResolvedBackend,
 ) -> Result<Payload, CoreError> {
     match resolved.driver_id.as_str() {
         "ggml.llama" => encode_ggml_llama_load_payload(spec),
@@ -156,7 +156,7 @@ fn encode_onnx_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
 
 pub(crate) fn encode_text_generation_request(
     request: &TextGenerationRequest,
-    resolved: &ResolvedDriver,
+    resolved: &ResolvedBackend,
 ) -> Result<(Payload, Payload), CoreError> {
     let input = if matches!(resolved.family, ModelFamily::Onnx) {
         let value: Value = serde_json::from_str(&request.prompt).map_err(|error| {
@@ -283,7 +283,7 @@ pub(crate) fn decode_text_generation_chunk(
 
 pub(crate) fn encode_audio_transcription_options(
     request: &AudioTranscriptionRequest,
-    resolved: &ResolvedDriver,
+    resolved: &ResolvedBackend,
 ) -> Result<Payload, CoreError> {
     match resolved.driver_id.as_str() {
         "ggml.whisper" => Ok(Payload::typed(build_ggml_whisper_full_params(request)?)),
@@ -493,7 +493,7 @@ pub(crate) fn decode_audio_transcription_response(
 
 pub(crate) fn encode_image_generation_request(
     request: &ImageGenerationRequest,
-    _resolved: &ResolvedDriver,
+    _resolved: &ResolvedBackend,
 ) -> Result<(Payload, Payload), CoreError> {
     let input = build_diffusion_img_params(request)?;
     Ok((Payload::typed(input), Payload::None))

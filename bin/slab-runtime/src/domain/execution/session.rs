@@ -21,13 +21,13 @@ use super::codec::{
     encode_text_generation_request, image_embedding_input_name,
     image_embedding_output_name,
 };
-use super::dispatch::{InvocationPlan, ResolvedDriver};
-use super::registry::Runtime;
+use super::backend::{InvocationPlan, ResolvedBackend};
+use super::hub::ExecutionHub;
 use super::task::{TaskCodec, TaskHandle};
 
 #[derive(Clone, Debug)]
-pub struct Pipeline {
-    runtime: Runtime,
+pub struct BackendSession {
+    execution: ExecutionHub,
     spec: Arc<ModelSpec>,
     bound_backend_target: Arc<str>,
     deployment: Arc<Mutex<Option<LoadedDeployment>>>,
@@ -35,17 +35,17 @@ pub struct Pipeline {
 
 #[derive(Clone, Debug)]
 struct LoadedDeployment {
-    resolved: ResolvedDriver,
+    resolved: ResolvedBackend,
 }
 
-impl Pipeline {
+impl BackendSession {
     pub(crate) fn new_for_backend(
-        runtime: Runtime,
+        execution: ExecutionHub,
         spec: ModelSpec,
         backend_target: impl Into<String>,
     ) -> Result<Self, CoreError> {
         Ok(Self {
-            runtime,
+            execution,
             spec: Arc::new(spec),
             bound_backend_target: Arc::<str>::from(backend_target.into()),
             deployment: Arc::new(Mutex::new(None)),
@@ -72,7 +72,7 @@ impl Pipeline {
         };
 
         if let Some(resolved) = resolved {
-            self.runtime.orchestrator().unload_model_backend(&resolved.backend_id).await?;
+            self.execution.orchestrator().unload_model_backend(&resolved.backend_id).await?;
             let mut guard = self.deployment.lock().await;
             *guard = None;
         }
@@ -112,7 +112,7 @@ impl Pipeline {
             Vec::new(),
             op_options,
         )?;
-        submit_plan(&self.runtime, plan, TextGenerationTaskCodec).await
+        submit_plan(&self.execution, plan, TextGenerationTaskCodec).await
     }
 
     pub async fn run_audio_transcription(
@@ -146,7 +146,7 @@ impl Pipeline {
             op_options,
         )?;
         submit_plan(
-            &self.runtime,
+            &self.execution,
             plan,
             AudioTranscriptionTaskCodec { fallback_language: request.language.clone() },
         )
@@ -183,7 +183,7 @@ impl Pipeline {
             Vec::new(),
             op_options,
         )?;
-        submit_plan(&self.runtime, plan, ImageGenerationTaskCodec).await
+        submit_plan(&self.execution, plan, ImageGenerationTaskCodec).await
     }
 
     pub async fn submit_inference_image(
@@ -201,7 +201,7 @@ impl Pipeline {
             Vec::new(),
             Payload::None,
         )?;
-        submit_plan(&self.runtime, plan, InferenceImageTaskCodec).await
+        submit_plan(&self.execution, plan, InferenceImageTaskCodec).await
     }
 
     pub async fn run_image_embedding(
@@ -229,7 +229,7 @@ impl Pipeline {
             Vec::new(),
             op_options,
         )?;
-        submit_plan(&self.runtime, plan, ImageEmbeddingTaskCodec { output_name }).await
+        submit_plan(&self.execution, plan, ImageEmbeddingTaskCodec { output_name }).await
     }
 
     async fn ensure_loaded_for(
@@ -256,14 +256,14 @@ impl Pipeline {
             }
         }
 
-        let resolved = self.runtime.resolver().resolve_for_target(
+        let resolved = self.execution.catalog().bind_for_target(
             self.spec.as_ref(),
             self.bound_backend_target.as_ref(),
             capability,
             streaming,
         )?;
         let payload = encode_load_payload(self.spec.as_ref(), &resolved)?;
-        self.runtime.orchestrator().load_model_backend(&resolved.backend_id, payload).await?;
+        self.execution.orchestrator().load_model_backend(&resolved.backend_id, payload).await?;
 
         let deployment = LoadedDeployment { resolved };
 
@@ -372,7 +372,7 @@ impl TaskCodec<ImageEmbeddingResponse, Infallible> for ImageEmbeddingTaskCodec {
 }
 
 async fn submit_plan<R, C>(
-    runtime: &Runtime,
+    execution: &ExecutionHub,
     plan: InvocationPlan,
     codec: impl TaskCodec<R, C>,
 ) -> Result<TaskHandle<R, C>, CoreError>
@@ -380,14 +380,14 @@ where
     R: Send + 'static,
     C: Send + 'static,
 {
-    let task_id = submit_invocation_plan(runtime, plan).await?;
-    Ok(TaskHandle::new(runtime.orchestrator(), task_id, Arc::new(codec)))
+    let task_id = submit_invocation_plan(execution, plan).await?;
+    Ok(TaskHandle::new(execution.orchestrator(), task_id, Arc::new(codec)))
 }
 
-async fn submit_invocation_plan(runtime: &Runtime, plan: InvocationPlan) -> Result<u64, CoreError> {
+async fn submit_invocation_plan(execution: &ExecutionHub, plan: InvocationPlan) -> Result<u64, CoreError> {
     let op = BackendOp { name: plan.invocation.op_name.clone(), options: plan.op_options };
 
-    let mut builder = PipelineBuilder::new(runtime.orchestrator(), plan.initial_payload);
+    let mut builder = PipelineBuilder::new(execution.orchestrator(), plan.initial_payload);
     for stage in plan.preprocess_stages {
         builder = builder.cpu_stage(stage);
     }
@@ -396,14 +396,14 @@ async fn submit_invocation_plan(runtime: &Runtime, plan: InvocationPlan) -> Resu
         builder
             .gpu_stream(
                 plan.invocation.op_name.clone(),
-                plan.invocation.driver.backend_id.clone(),
+                plan.invocation.backend.backend_id.clone(),
                 op,
             )
             .run_stream()
             .await
     } else {
         builder
-            .gpu(plan.invocation.op_name.clone(), plan.invocation.driver.backend_id.clone(), op)
+            .gpu(plan.invocation.op_name.clone(), plan.invocation.backend.backend_id.clone(), op)
             .run()
             .await
     }
