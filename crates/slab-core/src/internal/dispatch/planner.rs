@@ -25,6 +25,13 @@ impl DriverResolver {
         capability: Capability,
         streaming: bool,
     ) -> Result<ResolvedDriver, CoreError> {
+        if !spec.capability.is_runtime_execution() || !capability.is_runtime_execution() {
+            return Err(CoreError::UnsupportedCapability {
+                family: format!("{:?}", spec.family),
+                capability: format!("{:?}", capability),
+            });
+        }
+
         if spec.capability != capability {
             return Err(CoreError::UnsupportedCapability {
                 family: format!("{:?}", spec.family),

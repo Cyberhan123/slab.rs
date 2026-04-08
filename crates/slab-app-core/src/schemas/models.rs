@@ -1,6 +1,7 @@
 //! Request / response types for the model-management API (`/v1/models/...`).
 
 use serde::{Deserialize, Serialize};
+use slab_types::Capability as DomainCapability;
 use utoipa::{IntoParams, ToSchema};
 use validator::{Validate, ValidationError};
 
@@ -13,6 +14,7 @@ use crate::domain::models::{
     RuntimePresets as DomainRuntimePresets, UnifiedModel as DomainUnifiedModel,
     UnifiedModelKind as DomainUnifiedModelKind, UpdateModelCommand as DomainUpdateModelCommand,
 };
+use crate::schemas::chat::ChatModelCapabilities;
 
 // ---------------------------------------------------------------------------
 // Nested request schemas
@@ -64,6 +66,18 @@ pub enum ModelKind {
     Cloud,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelCapability {
+    TextGeneration,
+    AudioTranscription,
+    ImageGeneration,
+    ImageEmbedding,
+    ChatGeneration,
+    AudioVad,
+    VideoGeneration,
+}
+
 /// Default runtime parameters (request).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 pub struct RuntimePresetsRequest {
@@ -96,6 +110,8 @@ pub struct CreateModelRequest {
     /// `"not_downloaded"` for local models.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub capabilities: Option<Vec<ModelCapability>>,
     pub spec: Option<ModelSpecRequest>,
     pub runtime_presets: Option<RuntimePresetsRequest>,
 }
@@ -113,6 +129,8 @@ pub struct UpdateModelRequest {
     /// Runtime backend identifier for local models, e.g. `"ggml.llama"`.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub backend_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub capabilities: Option<Vec<ModelCapability>>,
     pub status: Option<String>,
     pub spec: Option<ModelSpecRequest>,
     pub runtime_presets: Option<RuntimePresetsRequest>,
@@ -208,7 +226,8 @@ pub struct ListAvailableQuery {
 /// Query parameters for `GET /v1/models`.
 #[derive(Debug, Clone, Deserialize, IntoParams, ToSchema, Default)]
 pub struct ListModelsQuery {
-    // Reserved for future filtering (e.g. by kind or status).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub capability: Option<ModelCapability>,
 }
 
 // ---------------------------------------------------------------------------
@@ -262,6 +281,9 @@ pub struct UnifiedModelResponse {
     /// Runtime backend identifier for local models, e.g. `"ggml.llama"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub backend_id: Option<String>,
+    pub capabilities: Vec<ModelCapability>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub chat_capabilities: Option<ChatModelCapabilities>,
     /// Status: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`.
     pub status: String,
     pub spec: ModelSpecResponse,
@@ -320,13 +342,55 @@ impl From<ModelKind> for DomainUnifiedModelKind {
     }
 }
 
+impl From<ModelCapability> for DomainCapability {
+    fn from(value: ModelCapability) -> Self {
+        match value {
+            ModelCapability::TextGeneration => Self::TextGeneration,
+            ModelCapability::AudioTranscription => Self::AudioTranscription,
+            ModelCapability::ImageGeneration => Self::ImageGeneration,
+            ModelCapability::ImageEmbedding => Self::ImageEmbedding,
+            ModelCapability::ChatGeneration => Self::ChatGeneration,
+            ModelCapability::AudioVad => Self::AudioVad,
+            ModelCapability::VideoGeneration => Self::VideoGeneration,
+        }
+    }
+}
+
+impl From<DomainCapability> for ModelCapability {
+    fn from(value: DomainCapability) -> Self {
+        match value {
+            DomainCapability::TextGeneration => Self::TextGeneration,
+            DomainCapability::AudioTranscription => Self::AudioTranscription,
+            DomainCapability::ImageGeneration => Self::ImageGeneration,
+            DomainCapability::ImageEmbedding => Self::ImageEmbedding,
+            DomainCapability::ChatGeneration => Self::ChatGeneration,
+            DomainCapability::AudioVad => Self::AudioVad,
+            DomainCapability::VideoGeneration => Self::VideoGeneration,
+            _ => unreachable!("new slab_types::Capability variant must be mapped into ModelCapability"),
+        }
+    }
+}
+
 impl From<DomainUnifiedModel> for UnifiedModelResponse {
     fn from(model: DomainUnifiedModel) -> Self {
+        let chat_capabilities = model
+            .capabilities
+            .contains(&DomainCapability::ChatGeneration)
+            .then(|| match model.kind {
+                DomainUnifiedModelKind::Local => ChatModelCapabilities::from(
+                    crate::domain::models::ChatModelCapabilities::local(),
+                ),
+                DomainUnifiedModelKind::Cloud => ChatModelCapabilities::from(
+                    crate::domain::models::ChatModelCapabilities::cloud(),
+                ),
+            });
         Self {
             id: model.id,
             display_name: model.display_name,
             kind: model.kind.into(),
             backend_id: model.backend_id,
+            capabilities: model.capabilities.into_iter().map(Into::into).collect(),
+            chat_capabilities,
             status: model.status.as_str().to_owned(),
             spec: model.spec.into(),
             runtime_presets: model.runtime_presets.map(Into::into),
@@ -364,6 +428,9 @@ impl From<CreateModelRequest> for DomainCreateModelCommand {
             display_name: req.display_name,
             kind: req.kind.into(),
             backend_id: req.backend_id,
+            capabilities: req.capabilities.map(|capabilities| {
+                capabilities.into_iter().map(Into::into).collect()
+            }),
             status: req.status.and_then(|status| status.parse().ok()),
             spec: req.spec.map(Into::into).unwrap_or_default(),
             runtime_presets: req.runtime_presets.map(Into::into),
@@ -377,6 +444,9 @@ impl From<UpdateModelRequest> for DomainUpdateModelCommand {
             display_name: req.display_name,
             kind: req.kind.map(Into::into),
             backend_id: req.backend_id,
+            capabilities: req.capabilities.map(|capabilities| {
+                capabilities.into_iter().map(Into::into).collect()
+            }),
             status: req.status.and_then(|status| status.parse().ok()),
             spec: req.spec.map(Into::into),
             runtime_presets: req.runtime_presets.map(Into::into),
@@ -418,8 +488,8 @@ impl From<UnloadModelRequest> for DomainModelLoadCommand {
 }
 
 impl From<ListModelsQuery> for DomainListModelsFilter {
-    fn from(_query: ListModelsQuery) -> Self {
-        Self::default()
+    fn from(query: ListModelsQuery) -> Self {
+        Self { capability: query.capability.map(Into::into) }
     }
 }
 

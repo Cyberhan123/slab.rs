@@ -3,7 +3,12 @@ import { toast } from 'sonner';
 
 import api, { getErrorMessage } from '@/lib/api';
 import { tauriAwareFetch } from '@/lib/api/tauri-transport';
-import { inferWhisperVadModel, toCatalogModelList, type CatalogModelStatus } from '@/lib/api/models';
+import {
+  modelSupportsCapability,
+  toCatalogModelList,
+  type CatalogModelStatus,
+  type ModelCapability,
+} from '@/lib/api/models';
 import { SERVER_BASE_URL } from '@/lib/config';
 
 const DEFAULT_VISIBLE_COUNT = 10;
@@ -32,6 +37,7 @@ export type ModelItem = {
   kind: 'local' | 'cloud';
   repo_id: string;
   filename: string;
+  capabilities: ModelCapability[];
   backend_ids: string[];
   is_vad_model: boolean;
   status: ModelStatus;
@@ -65,15 +71,15 @@ export function useHubModelCatalog() {
   const models = useMemo<ModelItem[]>(
     () =>
       toCatalogModelList(data)
-        .filter((model) => model.backend_id !== null)
         .map((model) => ({
           id: model.id,
           display_name: model.display_name,
           kind: model.kind,
           repo_id: model.repo_id,
           filename: model.filename,
+          capabilities: model.capabilities,
           backend_ids: model.backend_ids,
-          is_vad_model: model.backend_id === 'ggml.whisper' && inferWhisperVadModel(model),
+          is_vad_model: modelSupportsCapability(model, 'audio_vad'),
           status: model.status,
           local_path: model.local_path,
           pending: model.pending,
@@ -236,12 +242,13 @@ function inferModelCategory(model: ModelItem): ModelCategory {
     .toLowerCase()
     .trim();
 
-  if (haystack.includes('embed')) {
+  if (model.capabilities.includes('image_embedding') || haystack.includes('embed')) {
     return 'embedding';
   }
 
   if (
-    model.backend_ids.includes('ggml.diffusion') ||
+    model.capabilities.includes('image_generation') ||
+    model.capabilities.includes('video_generation') ||
     haystack.includes('stable diffusion') ||
     haystack.includes('sdxl') ||
     haystack.includes('vision') ||
@@ -251,7 +258,8 @@ function inferModelCategory(model: ModelItem): ModelCategory {
   }
 
   if (
-    model.backend_ids.includes('ggml.whisper') ||
+    model.capabilities.includes('audio_transcription') ||
+    model.capabilities.includes('audio_vad') ||
     haystack.includes('whisper') ||
     haystack.includes('audio') ||
     haystack.includes('speech') ||
@@ -266,6 +274,13 @@ function inferModelCategory(model: ModelItem): ModelCategory {
     haystack.includes('programming')
   ) {
     return 'coding';
+  }
+
+  if (
+    model.capabilities.includes('chat_generation') ||
+    model.capabilities.includes('text_generation')
+  ) {
+    return 'language';
   }
 
   return 'language';

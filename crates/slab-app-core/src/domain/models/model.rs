@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use slab_types::Capability;
 use std::str::FromStr;
 
 // ---------------------------------------------------------------------------
@@ -124,6 +125,7 @@ pub struct UnifiedModel {
     pub display_name: String,
     pub kind: UnifiedModelKind,
     pub backend_id: Option<String>,
+    pub capabilities: Vec<Capability>,
     pub status: UnifiedModelStatus,
     pub spec: ModelSpec,
     pub runtime_presets: Option<RuntimePresets>,
@@ -141,14 +143,15 @@ pub struct CreateModelCommand {
     pub display_name: String,
     pub kind: UnifiedModelKind,
     pub backend_id: Option<String>,
+    pub capabilities: Option<Vec<Capability>>,
     /// If `None`, the status is inferred from the model kind.
     pub status: Option<UnifiedModelStatus>,
     pub spec: ModelSpec,
     pub runtime_presets: Option<RuntimePresets>,
 }
 
-pub const CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION: u32 = 1;
-pub const CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION: u32 = 1;
+pub const CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION: u32 = 2;
+pub const CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION: u32 = 2;
 
 const fn current_stored_model_config_schema_version() -> u32 {
     CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION
@@ -169,6 +172,8 @@ pub struct StoredModelConfig {
     pub kind: UnifiedModelKind,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub backend_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub capabilities: Vec<Capability>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub status: Option<UnifiedModelStatus>,
     #[serde(default)]
@@ -179,7 +184,8 @@ pub struct StoredModelConfig {
 
 pub fn upgrade_stored_model_config(config: StoredModelConfig) -> Result<StoredModelConfig, String> {
     let config = upgrade_stored_model_config_schema(config)?;
-    upgrade_stored_model_config_policy(config)
+    let config = upgrade_stored_model_config_policy(config)?;
+    Ok(normalize_stored_model_capabilities(config))
 }
 
 fn upgrade_stored_model_config_schema(
@@ -235,6 +241,7 @@ pub struct UpdateModelCommand {
     pub display_name: Option<String>,
     pub kind: Option<UnifiedModelKind>,
     pub backend_id: Option<String>,
+    pub capabilities: Option<Vec<Capability>>,
     pub status: Option<UnifiedModelStatus>,
     pub spec: Option<ModelSpec>,
     pub runtime_presets: Option<RuntimePresets>,
@@ -242,7 +249,7 @@ pub struct UpdateModelCommand {
 
 #[derive(Debug, Clone, Default)]
 pub struct ListModelsFilter {
-    // No filters currently; reserved for future use (e.g. by kind or status).
+    pub capability: Option<Capability>,
 }
 
 #[derive(Debug, Clone)]
@@ -288,6 +295,7 @@ impl From<StoredModelConfig> for CreateModelCommand {
             display_name: config.display_name,
             kind: config.kind,
             backend_id: config.backend_id,
+            capabilities: Some(config.capabilities),
             status: config.status,
             spec: config.spec,
             runtime_presets: config.runtime_presets,
@@ -304,6 +312,7 @@ impl From<UnifiedModel> for StoredModelConfig {
             display_name: model.display_name,
             kind: model.kind,
             backend_id: model.backend_id,
+            capabilities: model.capabilities,
             status: Some(model.status),
             spec: model.spec,
             runtime_presets: model.runtime_presets,
@@ -311,15 +320,111 @@ impl From<UnifiedModel> for StoredModelConfig {
     }
 }
 
+pub fn default_model_capabilities(
+    kind: UnifiedModelKind,
+    backend_id: Option<&str>,
+    display_name: &str,
+    spec: &ModelSpec,
+) -> Vec<Capability> {
+    let normalized_backend =
+        backend_id.map(str::trim).filter(|value| !value.is_empty()).map(str::to_ascii_lowercase);
+
+    match (kind, normalized_backend.as_deref()) {
+        (UnifiedModelKind::Cloud, _) => vec![Capability::TextGeneration, Capability::ChatGeneration],
+        (UnifiedModelKind::Local, Some(backend))
+            if backend.contains("whisper") && looks_like_vad_model(display_name, spec) =>
+        {
+            vec![Capability::AudioVad]
+        }
+        (UnifiedModelKind::Local, Some(backend)) if backend.contains("whisper") => {
+            vec![Capability::AudioTranscription]
+        }
+        (UnifiedModelKind::Local, Some(backend)) if backend.contains("diffusion") => {
+            vec![Capability::ImageGeneration, Capability::VideoGeneration]
+        }
+        (UnifiedModelKind::Local, Some(backend)) if backend.contains("onnx") => {
+            vec![Capability::ImageEmbedding]
+        }
+        _ => vec![Capability::TextGeneration, Capability::ChatGeneration],
+    }
+}
+
+pub fn normalize_model_capabilities(
+    kind: UnifiedModelKind,
+    backend_id: Option<&str>,
+    display_name: &str,
+    spec: &ModelSpec,
+    capabilities: Option<Vec<Capability>>,
+) -> Vec<Capability> {
+    let mut normalized = capabilities.unwrap_or_default();
+    normalized.retain(|capability| {
+        capability.is_runtime_execution() || capability.is_product_placement()
+    });
+    dedupe_capabilities(&mut normalized);
+
+    if normalized.is_empty() {
+        return default_model_capabilities(kind, backend_id, display_name, spec);
+    }
+
+    if normalized.contains(&Capability::ChatGeneration)
+        && !normalized.contains(&Capability::TextGeneration)
+    {
+        normalized.insert(0, Capability::TextGeneration);
+    }
+
+    dedupe_capabilities(&mut normalized);
+    normalized
+}
+
+fn normalize_stored_model_capabilities(mut config: StoredModelConfig) -> StoredModelConfig {
+    config.capabilities = normalize_model_capabilities(
+        config.kind,
+        config.backend_id.as_deref(),
+        &config.display_name,
+        &config.spec,
+        Some(config.capabilities),
+    );
+    config
+}
+
+fn dedupe_capabilities(capabilities: &mut Vec<Capability>) {
+    let mut deduped = Vec::with_capacity(capabilities.len());
+    for capability in capabilities.drain(..) {
+        if !deduped.contains(&capability) {
+            deduped.push(capability);
+        }
+    }
+    *capabilities = deduped;
+}
+
+fn looks_like_vad_model(display_name: &str, spec: &ModelSpec) -> bool {
+    let haystack = format!(
+        "{} {} {}",
+        display_name,
+        spec.repo_id.as_deref().unwrap_or_default(),
+        spec.filename.as_deref().unwrap_or_default()
+    )
+    .to_ascii_lowercase();
+
+    haystack.contains(" silero")
+        || haystack.contains("silero ")
+        || haystack.contains("-vad")
+        || haystack.contains("_vad")
+        || haystack.contains(" vad")
+        || haystack.contains("vad ")
+        || haystack.ends_with("vad")
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
         CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
         ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind,
-        UnifiedModelStatus, upgrade_stored_model_config,
+        UnifiedModelStatus, default_model_capabilities, upgrade_stored_model_config,
     };
     use chrono::Utc;
     use serde_json::json;
+    use slab_types::Capability;
 
     #[test]
     fn legacy_stored_model_config_defaults_versions_during_deserialization() {
@@ -337,6 +442,7 @@ mod tests {
 
         assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
         assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
+        assert_eq!(config.capabilities, vec![Capability::TextGeneration, Capability::ChatGeneration]);
     }
 
     #[test]
@@ -346,6 +452,7 @@ mod tests {
             display_name: "Local Qwen".to_owned(),
             kind: UnifiedModelKind::Local,
             backend_id: Some("ggml.llama".to_owned()),
+            capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
             status: UnifiedModelStatus::NotDownloaded,
             spec: ModelSpec {
                 repo_id: Some("bartowski/Qwen2.5-7B-Instruct-GGUF".to_owned()),
@@ -372,6 +479,7 @@ mod tests {
             display_name: "Cloud Model".to_owned(),
             kind: UnifiedModelKind::Cloud,
             backend_id: None,
+            capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
             status: Some(UnifiedModelStatus::Ready),
             spec: ModelSpec {
                 provider_id: Some("openai-main".to_owned()),
@@ -394,6 +502,7 @@ mod tests {
             display_name: "Cloud Model".to_owned(),
             kind: UnifiedModelKind::Cloud,
             backend_id: None,
+            capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
             status: Some(UnifiedModelStatus::Ready),
             spec: ModelSpec {
                 provider_id: Some("openai-main".to_owned()),
@@ -405,5 +514,35 @@ mod tests {
         .expect_err("future policy version should fail");
 
         assert!(error.contains("unsupported stored model config policy_version"));
+    }
+
+    #[test]
+    fn default_capabilities_distinguish_chat_vad_and_video_models() {
+        let chat_caps = default_model_capabilities(
+            UnifiedModelKind::Local,
+            Some("ggml.llama"),
+            "Local Chat",
+            &ModelSpec::default(),
+        );
+        assert_eq!(chat_caps, vec![Capability::TextGeneration, Capability::ChatGeneration]);
+
+        let vad_caps = default_model_capabilities(
+            UnifiedModelKind::Local,
+            Some("ggml.whisper"),
+            "Silero VAD",
+            &ModelSpec {
+                filename: Some("silero_vad.bin".into()),
+                ..ModelSpec::default()
+            },
+        );
+        assert_eq!(vad_caps, vec![Capability::AudioVad]);
+
+        let video_caps = default_model_capabilities(
+            UnifiedModelKind::Local,
+            Some("ggml.diffusion"),
+            "Diffusion",
+            &ModelSpec::default(),
+        );
+        assert_eq!(video_caps, vec![Capability::ImageGeneration, Capability::VideoGeneration]);
     }
 }

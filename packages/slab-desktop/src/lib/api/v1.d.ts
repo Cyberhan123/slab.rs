@@ -973,6 +973,7 @@ export interface components {
         CreateModelRequest: {
             /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
             backend_id?: string | null;
+            capabilities?: components["schemas"]["ModelCapability"][] | null;
             display_name: string;
             /** @description Whether this model is backed by the local runtime or a cloud provider. */
             kind: components["schemas"]["ModelKind"];
@@ -1138,7 +1139,9 @@ export interface components {
             repo_id: string;
         };
         /** @description Query parameters for `GET /v1/models`. */
-        ListModelsQuery: Record<string, never>;
+        ListModelsQuery: {
+            capability?: components["schemas"]["ModelCapability"] | null;
+        };
         /** @description Request body for `POST /v1/models/load`. */
         LoadModelRequest: {
             /** @description Legacy backend identifier, e.g. `"ggml.llama"`. */
@@ -1201,6 +1204,8 @@ export interface components {
         };
         /** @enum {string} */
         ModelKind: "local" | "cloud";
+        /** @enum {string} */
+        ModelCapability: "text_generation" | "audio_transcription" | "image_generation" | "image_embedding" | "chat_generation" | "audio_vad" | "video_generation";
         /** @description Response body for load / status endpoints. */
         ModelStatusResponse: {
             /** @description Backend identifier. */
@@ -1496,6 +1501,8 @@ export interface components {
         UnifiedModelResponse: {
             /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
             backend_id?: string | null;
+            capabilities: components["schemas"]["ModelCapability"][];
+            chat_capabilities?: null | components["schemas"]["ChatModelCapabilities"];
             created_at: string;
             display_name: string;
             id: string;
@@ -1518,6 +1525,7 @@ export interface components {
         UpdateModelRequest: {
             /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
             backend_id?: string | null;
+            capabilities?: components["schemas"]["ModelCapability"][] | null;
             display_name?: string | null;
             /** @description Whether this model is backed by the local runtime or a cloud provider. */
             kind?: components["schemas"]["ModelKind"] | null;
@@ -2094,7 +2102,7 @@ export interface operations {
     };
     list_models: {
         parameters: {
-            query?: never;
+            query?: components["schemas"]["ListModelsQuery"];
             header?: never;
             path?: never;
             cookie?: never;

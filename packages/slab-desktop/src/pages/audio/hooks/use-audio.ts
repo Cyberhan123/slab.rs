@@ -6,12 +6,11 @@ import { toast } from 'sonner';
 import useFile, { type SelectedFile } from '@/hooks/use-file';
 import useIsTauri from '@/hooks/use-tauri';
 import api from '@/lib/api';
-import { inferWhisperVadModel, toCatalogModelList } from '@/lib/api/models';
+import { modelSupportsCapability, toCatalogModelList, type CatalogModel } from '@/lib/api/models';
 import { usePageHeader, usePageHeaderModelPicker } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } from './use-transcribe';
 import {
-  WHISPER_BACKEND_ID,
   MODEL_DOWNLOAD_POLL_INTERVAL_MS,
   MODEL_DOWNLOAD_TIMEOUT_MS,
   type PreparingStage,
@@ -55,34 +54,53 @@ export function useAudio() {
   const { handleFile } = useFile();
   const transcribe = useTranscribe();
   const {
-    data: catalogModels,
-    isLoading: catalogModelsLoading,
-    error: catalogModelsError,
-    refetch: refetchCatalogModels,
-  } = api.useQuery('get', '/v1/models');
+    data: transcriptionCatalogModels,
+    isLoading: transcriptionModelsLoading,
+    error: transcriptionModelsError,
+    refetch: refetchTranscriptionModels,
+  } = api.useQuery('get', '/v1/models', {
+    params: {
+      query: {
+        capability: 'audio_transcription',
+      },
+    },
+  });
+  const {
+    data: vadCatalogModels,
+    isLoading: vadModelsLoading,
+    error: vadModelsError,
+    refetch: refetchVadModels,
+  } = api.useQuery('get', '/v1/models', {
+    params: {
+      query: {
+        capability: 'audio_vad',
+      },
+    },
+  });
   const downloadModelMutation = api.useMutation('post', '/v1/models/download');
   const loadModelMutation = api.useMutation('post', '/v1/models/load');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
-  const normalizedCatalogModels = useMemo(
-    () => toCatalogModelList(catalogModels),
-    [catalogModels],
-  );
-
-  const whisperModels = useMemo(
-    () => normalizedCatalogModels.filter((model) => model.backend_id === WHISPER_BACKEND_ID),
-    [normalizedCatalogModels],
-  );
-
   const whisperTranscribeModels = useMemo(
-    () => whisperModels.filter((model) => !inferWhisperVadModel(model)),
-    [whisperModels],
+    () => toCatalogModelList(transcriptionCatalogModels).filter((model) => model.kind === 'local'),
+    [transcriptionCatalogModels],
   );
 
   const whisperVadModels = useMemo(
-    () => whisperModels.filter((model) => inferWhisperVadModel(model)),
-    [whisperModels],
+    () => toCatalogModelList(vadCatalogModels).filter((model) => model.kind === 'local'),
+    [vadCatalogModels],
   );
+
+  const audioModels = useMemo(() => {
+    const merged = new Map<string, CatalogModel>();
+    whisperTranscribeModels.forEach((model) => {
+      merged.set(model.id, model);
+    });
+    whisperVadModels.forEach((model) => {
+      merged.set(model.id, model);
+    });
+    return Array.from(merged.values());
+  }, [whisperTranscribeModels, whisperVadModels]);
 
   const selectedModel = useMemo(
     () => whisperTranscribeModels.find((model) => model.id === selectedModelId),
@@ -93,6 +111,8 @@ export function useAudio() {
     () => whisperVadModels.find((model) => model.id === selectedVadModelId),
     [whisperVadModels, selectedVadModelId],
   );
+  const catalogModelsLoading = transcriptionModelsLoading || vadModelsLoading;
+  const catalogModelsError = transcriptionModelsError ?? vadModelsError;
 
   const isBusy =
     Boolean(preparingStage) ||
@@ -184,8 +204,14 @@ export function useAudio() {
   };
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
-    const refreshed = await refetchCatalogModels();
-    const models = toCatalogModelList(refreshed.data);
+    const [transcriptionRefresh, vadRefresh] = await Promise.all([
+      refetchTranscriptionModels(),
+      refetchVadModels(),
+    ]);
+    const models = [
+      ...toCatalogModelList(transcriptionRefresh.data),
+      ...toCatalogModelList(vadRefresh.data),
+    ];
     return models.find((model) => model.id === modelId);
   };
 
@@ -230,7 +256,7 @@ export function useAudio() {
   const ensureDownloadedModelPath = async (
     modelId: string,
   ): Promise<{ modelPath: string; downloadedNow: boolean }> => {
-    let model = whisperModels.find((item) => item.id === modelId);
+    let model = audioModels.find((item) => item.id === modelId);
     if (!model) {
       model = await refreshCatalogAndFindModel(modelId);
     }
@@ -239,8 +265,8 @@ export function useAudio() {
       throw new Error('Selected model does not exist in catalog');
     }
 
-    if (model.backend_id !== WHISPER_BACKEND_ID) {
-      throw new Error(`Selected model does not support ${WHISPER_BACKEND_ID}`);
+    if (model.kind !== 'local') {
+      throw new Error('Selected model is not a local audio model.');
     }
 
     if (model.local_path) {
@@ -305,7 +331,7 @@ export function useAudio() {
     if (!model) {
       throw new Error('Selected VAD model no longer exists in catalog.');
     }
-    if (!inferWhisperVadModel(model)) {
+    if (!modelSupportsCapability(model, 'audio_vad')) {
       throw new Error('Selected model is not a dedicated VAD model.');
     }
 

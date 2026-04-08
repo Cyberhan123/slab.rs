@@ -13,7 +13,7 @@ use slab_model_pack::{
     ModelPackRuntimeBridge, PACK_EXTENSION, PackModelStatus, PackPricing, PackRuntimePresets,
     PackSource, PackSourceFile, PresetDocument, VariantDocument,
 };
-use slab_types::{Capability, DiffusionLoadOptions, ModelFamily, RuntimeBackendId};
+use slab_types::{DiffusionLoadOptions, ModelFamily, RuntimeBackendId};
 use uuid::Uuid;
 use zip::CompressionMethod;
 use zip::ZipArchive;
@@ -496,7 +496,6 @@ fn build_generated_pack_entries(
 
 fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
     let family = infer_model_family(config.kind, config.backend_id.as_deref());
-    let capability = infer_capability(family);
     let mut metadata = BTreeMap::new();
     metadata.insert("generated_by".into(), "slab-app-core".into());
 
@@ -506,7 +505,7 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
         label: config.display_name.clone(),
         status: config.status.clone().map(pack_status_from_unified),
         family,
-        capabilities: vec![capability],
+        capabilities: config.capabilities.clone(),
         backend_hints: Default::default(),
         context_window: config.spec.context_window,
         pricing: config
@@ -744,16 +743,6 @@ fn infer_model_family(kind: UnifiedModelKind, backend_id: Option<&str>) -> Model
     }
 }
 
-fn infer_capability(family: ModelFamily) -> Capability {
-    match family {
-        ModelFamily::Whisper => Capability::AudioTranscription,
-        ModelFamily::Diffusion => Capability::ImageGeneration,
-        ModelFamily::Onnx => Capability::ImageEmbedding,
-        ModelFamily::Llama => Capability::TextGeneration,
-        _ => Capability::TextGeneration,
-    }
-}
-
 fn pack_status_from_unified(status: UnifiedModelStatus) -> PackModelStatus {
     match status {
         UnifiedModelStatus::Ready => PackModelStatus::Ready,
@@ -795,6 +784,7 @@ mod tests {
     use std::path::Path;
 
     use serde_json::json;
+    use slab_types::Capability;
     use zip::CompressionMethod;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
@@ -1003,6 +993,7 @@ mod tests {
             display_name: "Persisted Label".to_owned(),
             kind: UnifiedModelKind::Cloud,
             backend_id: None,
+            capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
             status: Some(UnifiedModelStatus::Ready),
             spec: ModelSpec {
                 provider_id: Some("openrouter-main".to_owned()),
@@ -1049,6 +1040,7 @@ mod tests {
             display_name: "Persisted Label".to_owned(),
             kind: UnifiedModelKind::Cloud,
             backend_id: None,
+            capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
             status: Some(UnifiedModelStatus::Ready),
             spec: ModelSpec {
                 provider_id: Some("openrouter-main".to_owned()),
@@ -1094,6 +1086,7 @@ mod tests {
             display_name: "Local Qwen".to_owned(),
             kind: UnifiedModelKind::Local,
             backend_id: Some("ggml.llama".to_owned()),
+            capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
             status: Some(UnifiedModelStatus::NotDownloaded),
             spec: ModelSpec {
                 repo_id: Some("bartowski/Qwen2.5-7B-Instruct-GGUF".to_owned()),
@@ -1240,6 +1233,7 @@ fn build_local_model_command(
         display_name: manifest.label.clone(),
         kind: UnifiedModelKind::Local,
         backend_id: Some(bridge.backend.to_string()),
+        capabilities: Some(manifest.capabilities.clone()),
         status: Some(status),
         spec: ModelSpec {
             pricing: build_pricing_from_manifest(manifest.pricing.as_ref()),
@@ -1278,6 +1272,7 @@ fn build_cloud_model_command(
         display_name: manifest.label.clone(),
         kind: UnifiedModelKind::Cloud,
         backend_id: None,
+        capabilities: Some(manifest.capabilities.clone()),
         status: manifest_status(manifest.status),
         spec: ModelSpec {
             provider_id: Some(provider_id),

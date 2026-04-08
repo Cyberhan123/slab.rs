@@ -38,6 +38,7 @@ type ModelRow = (
     String,         // provider
     String,         // kind
     Option<String>, // backend_id
+    String,         // capabilities
     String,         // status
     String,         // spec
     Option<String>, // runtime_presets
@@ -54,6 +55,7 @@ fn row_to_record(
         provider,
         kind,
         backend_id,
+        capabilities,
         status,
         spec,
         runtime_presets,
@@ -69,6 +71,7 @@ fn row_to_record(
         provider,
         kind,
         backend_id,
+        capabilities,
         status,
         spec,
         runtime_presets,
@@ -85,13 +88,14 @@ impl ModelStore for AnyStore {
         let updated_at = record.updated_at.to_rfc3339();
         sqlx::query(
             "INSERT INTO models \
-             (id, display_name, provider, kind, backend_id, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12) \
+             (id, display_name, provider, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13) \
              ON CONFLICT(id) DO UPDATE SET \
                   display_name = excluded.display_name, \
                   provider = excluded.provider, \
                   kind = excluded.kind, \
                   backend_id = excluded.backend_id, \
+                  capabilities = excluded.capabilities, \
                   status = excluded.status, \
                   spec = excluded.spec, \
                   runtime_presets = excluded.runtime_presets, \
@@ -105,6 +109,7 @@ impl ModelStore for AnyStore {
         .bind(&record.provider)
         .bind(&record.kind)
         .bind(&record.backend_id)
+        .bind(&record.capabilities)
         .bind(&record.status)
         .bind(&record.spec)
         .bind(&record.runtime_presets)
@@ -119,7 +124,7 @@ impl ModelStore for AnyStore {
 
     async fn get_model(&self, id: &str) -> Result<Option<UnifiedModelRecord>, sqlx::Error> {
         let row: Option<ModelRow> = sqlx::query_as(
-            "SELECT id, display_name, provider, kind, backend_id, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at \
+            "SELECT id, display_name, provider, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at \
              FROM models WHERE id = ?1",
         )
         .bind(id)
@@ -131,7 +136,7 @@ impl ModelStore for AnyStore {
 
     async fn list_models(&self) -> Result<Vec<UnifiedModelRecord>, sqlx::Error> {
         let rows: Vec<ModelRow> = sqlx::query_as(
-            "SELECT id, display_name, provider, kind, backend_id, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at \
+            "SELECT id, display_name, provider, kind, backend_id, capabilities, status, spec, runtime_presets, config_schema_version, config_policy_version, created_at, updated_at \
              FROM models ORDER BY created_at DESC",
         )
         .fetch_all(&self.pool)

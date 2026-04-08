@@ -63,8 +63,8 @@ pub enum ModelPackError {
     #[error("manifest must declare default_preset when multiple presets exist")]
     MissingDefaultPresetDeclaration,
 
-    #[error("manifest must declare at least one capability to build a runtime bridge")]
-    MissingCapability,
+    #[error("manifest must declare at least one runtime execution capability to build a runtime bridge")]
+    MissingRuntimeCapability,
 
     #[error("model pack could not determine a runtime backend for preset '{preset_id}'")]
     MissingRuntimeBackend { preset_id: String },
