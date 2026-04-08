@@ -7849,6 +7849,7 @@ dependencies = [
  "utoipa",
  "uuid",
  "validator",
+ "winapi",
  "windows-sys 0.61.2",
  "zip 8.4.0",
 ]
@@ -7861,13 +7862,6 @@ dependencies = [
  "cargo_metadata 0.23.1",
  "slab-libfetch",
  "tokio",
-]
-
-[[package]]
-name = "slab-candle"
-version = "0.0.1"
-dependencies = [
- "slab-runtime-core",
 ]
 
 [[package]]
@@ -7972,13 +7966,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "slab-onnx"
-version = "0.0.1"
-dependencies = [
- "slab-runtime-core",
-]
-
-[[package]]
 name = "slab-proto"
 version = "0.0.1"
 dependencies = [
@@ -8007,49 +7994,93 @@ dependencies = [
  "image",
  "parity-tokio-ipc",
  "serde_json",
- "slab-candle",
  "slab-diffusion",
- "slab-onnx",
+ "slab-llama",
+ "slab-model-pack",
  "slab-proto",
+ "slab-runtime-backend-candle",
+ "slab-runtime-backend-ggml",
+ "slab-runtime-backend-onnx",
  "slab-runtime-core",
  "slab-types",
+ "slab-whisper",
  "tokio",
  "tokio-stream",
  "tonic",
  "tracing",
  "tracing-appender",
  "tracing-subscriber",
+ "winapi",
 ]
 
 [[package]]
-name = "slab-runtime-core"
+name = "slab-runtime-backend-candle"
 version = "0.0.1"
 dependencies = [
- "anyhow",
  "async-trait",
- "base64 0.22.1",
- "bytes",
  "candle-core",
  "candle-nn",
  "candle-transformers",
- "futures",
- "hf-hub",
  "image",
- "libloading 0.8.9",
- "ort",
- "serde",
  "serde_json",
  "slab-diffusion",
- "slab-libfetch",
+ "slab-runtime-core",
+ "slab-runtime-macros",
+ "slab-types",
+ "thiserror 2.0.18",
+ "tokenizers",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "slab-runtime-backend-ggml"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "image",
+ "libloading 0.8.9",
+ "serde_json",
+ "slab-diffusion",
  "slab-llama",
- "slab-model-pack",
+ "slab-runtime-core",
  "slab-runtime-macros",
  "slab-subtitle",
  "slab-types",
  "slab-utils",
  "slab-whisper",
  "thiserror 2.0.18",
- "tokenizers",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "slab-runtime-backend-onnx"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "ort",
+ "serde",
+ "serde_json",
+ "slab-runtime-core",
+ "slab-runtime-macros",
+ "slab-types",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "slab-runtime-core"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "serde",
+ "serde_json",
+ "slab-types",
+ "thiserror 2.0.18",
  "tokio",
  "tracing",
  "tracing-test",
@@ -8115,6 +8146,7 @@ dependencies = [
  "utoipa-swagger-ui",
  "uuid",
  "validator",
+ "winapi",
  "windows-sys 0.61.2",
 ]
 

@@ -41,7 +41,7 @@ mod error_codes {
 pub enum ServerError {
     /// Propagated from slab-core's AI runtime.
     #[error("runtime error: {0}")]
-    Runtime(#[from] slab_runtime_core::api::CoreError),
+    Runtime(#[from] slab_runtime_core::CoreError),
 
     /// Propagated from the SQLite (or other) store.
     #[error("database error: {0}")]
@@ -112,12 +112,12 @@ impl IntoResponse for ServerError {
             ServerError::Runtime(e) => {
                 error!(error = %e, "AI runtime error");
                 let message = match e {
-                    slab_runtime_core::api::CoreError::NotInitialized
-                    | slab_runtime_core::api::CoreError::ModelNotLoaded => {
+                    slab_runtime_core::CoreError::NotInitialized
+                    | slab_runtime_core::CoreError::ModelNotLoaded => {
                         "Backend not initialized. Please ensure the Whisper library and model are loaded. \
                         Set SLAB_WHISPER_LIB_DIR environment variable or use POST /v1/backends/reload".to_owned()
                     }
-                    slab_runtime_core::api::CoreError::LibraryLoadFailed { backend, .. } => {
+                    slab_runtime_core::CoreError::LibraryLoadFailed { backend, .. } => {
                         format!("{} library failed to load. Check SLAB_{}_LIB_DIR environment variable.",
                             backend, backend.to_uppercase().replace(".", "_"))
                     }

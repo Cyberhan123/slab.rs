@@ -61,6 +61,36 @@ pub struct DriverHints {
     pub require_streaming: bool,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelSourceKind {
+    LocalPath,
+    LocalArtifacts,
+    HuggingFace,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
+#[serde(rename_all = "snake_case")]
+pub enum DriverLoadStyle {
+    DynamicLibraryThenModel,
+    ModelOnly,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct DriverDescriptor {
+    pub driver_id: String,
+    pub backend_id: String,
+    pub family: ModelFamily,
+    pub capability: Capability,
+    #[serde(default)]
+    pub supported_sources: Vec<ModelSourceKind>,
+    #[serde(default)]
+    pub supports_streaming: bool,
+    pub load_style: DriverLoadStyle,
+    #[serde(default)]
+    pub priority: i32,
+}
+
 #[non_exhaustive]
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]

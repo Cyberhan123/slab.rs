@@ -6,8 +6,9 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, error, info, instrument, warn};
 
 use slab_proto::slab::ipc::v1 as pb;
-use slab_runtime_core::api::AudioTranscriptionRequest;
-use slab_types::{WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams};
+use slab_types::{
+    AudioTranscriptionRequest, WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams,
+};
 
 use super::{BackendKind, GrpcServiceImpl, extract_request_id, runtime_to_status};
 

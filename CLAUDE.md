@@ -22,7 +22,7 @@ Read [AGENTS.md](AGENTS.md) before making changes. This file only keeps the repo
 - Binary executables live in `bin/` (e.g., `bin/slab-server`, `bin/slab-runtime`, `bin/slab-app`).
 - `crates/slab-app-core` (package: `slab-app-core`) is the HTTP-free business logic library. Contains `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and the shared `runtime_supervisor`. Migrations are in `crates/slab-app-core/migrations/`.
 - `bin/slab-server` is the thin HTTP gateway (axum) and headless host. It depends on `crates/slab-app-core` for all domain logic; adds axum `FromRef` extractors in `state_extractors.rs`, `ServerError` → HTTP response conversion, and uses the shared core runtime supervisor through a `tokio::process` adapter. Exposes `/v1` plus `/api-docs/openapi.json`.
-- `bin/slab-runtime` serves gRPC over TCP or IPC and can enable llama, whisper, and diffusion backends independently.
-- `crates/slab-runtime-core` (package: `slab-runtime-core`) is runtime/orchestration only; backend composition belongs in `bin/slab-runtime`, and shared contracts belong in `crates/slab-types` and `crates/slab-proto`.
+- `bin/slab-runtime` serves gRPC over TCP or IPC and is the only runtime composition root. It resolves drivers locally and wires `crates/slab-runtime-backend-ggml`, `crates/slab-runtime-backend-candle`, and `crates/slab-runtime-backend-onnx`.
+- `crates/slab-runtime-core` (package: `slab-runtime-core`) is the pure scheduler/backend-protocol crate; backend composition and typed runtime codecs belong in `bin/slab-runtime`, and shared contracts belong in `crates/slab-types` and `crates/slab-proto`.
 - Preserve the current Tauri CSP, permissions, capabilities, and plugin host boundaries unless the task explicitly requires a change.
 - If repo docs and code disagree, follow the code and update the docs.

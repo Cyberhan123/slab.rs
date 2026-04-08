@@ -40,8 +40,9 @@ pub use diffusion::{
 pub use error::SlabTypeError;
 pub use inference::{
     AudioTranscriptionOpOptions, AudioTranscriptionRequest, AudioTranscriptionResponse,
-    ImageGenerationRequest, ImageGenerationResponse, JsonOptions, TextGenerationChunk,
-    TextGenerationOpOptions, TextGenerationRequest, TextGenerationResponse,
+    ImageEmbeddingRequest, ImageEmbeddingResponse, ImageGenerationRequest,
+    ImageGenerationResponse, JsonOptions, TextGenerationChunk, TextGenerationOpOptions,
+    TextGenerationRequest, TextGenerationResponse,
 };
 pub use load_config::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
@@ -50,7 +51,8 @@ pub use load_config::{
 };
 pub use media::{GeneratedFrame, GeneratedImage, RawImageInput};
 pub use runtime::{
-    Capability, DiffusionLoadOptions, DriverHints, ModelFamily, ModelSource, ModelSpec,
-    RuntimeModelLoadCommand, RuntimeModelLoadSpec, RuntimeModelStatus,
+    Capability, DiffusionLoadOptions, DriverDescriptor, DriverHints, DriverLoadStyle, ModelFamily,
+    ModelSource, ModelSourceKind, ModelSpec, RuntimeModelLoadCommand, RuntimeModelLoadSpec,
+    RuntimeModelStatus,
 };
 pub use whisper::{WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams};

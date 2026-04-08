@@ -20,11 +20,11 @@ Key repo facts:
 - AI-focused frontend components use Ant Design X, with shared Tailwind 4 primitives from `packages/slab-components/src`.
 - `crates/slab-app-core` (directory: `crates/slab-app-core/`) holds the HTTP-free business logic: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and `runtime_supervisor`. Native IPC wrappers live in `bin/slab-app/src-tauri/src/api/`. Migrations live in `crates/slab-app-core/migrations/`.
 - `bin/slab-server` is the thin HTTP (axum) gateway and headless host. It depends on `crates/slab-app-core` for domain/infra logic; `state_extractors.rs` provides axum `FromRef` impls, `error.rs` provides `ServerError` → HTTP response conversion, and runtime process supervision is delegated to the shared core supervisor through a `tokio::process` adapter. The server exposes `/v1` plus `/api-docs/openapi.json`.
-- AI inference must stay behind `host -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime -> crates/slab-core`. Do not reintroduce separate app/server runtime management paths.
-- `bin/slab-runtime` supports TCP or IPC transport for llama, whisper, and diffusion workers.
-- `crates/slab-core` (package: `slab-runtime-core`) holds runtime orchestration, scheduler, and engine adapters. Keep HTTP and SQL concerns out.
+- AI inference must stay behind `host -> crates/slab-app-core runtime supervisor -> GrpcGateway -> bin/slab-runtime local composition layer -> crates/slab-runtime-core`. Do not reintroduce separate app/server runtime management paths.
+- `bin/slab-runtime` supports TCP or IPC transport and is the only runtime composition root. It wires `crates/slab-runtime-backend-ggml`, `crates/slab-runtime-backend-candle`, and `crates/slab-runtime-backend-onnx`.
+- `crates/slab-runtime-core` (package: `slab-runtime-core`) holds the scheduler, backend protocol, worker runner, task state, and generic payload/error types. Keep HTTP, SQL, typed runtime codecs, and backend composition concerns out.
 - `crates/slab-types` and `crates/slab-proto` are the shared Rust contract crates for semantic types, settings/runtime models, and server/runtime IPC.
-- All Rust library crates live in `crates/` (e.g., `crates/slab-core`, `crates/slab-types`, `crates/slab-agent`, `crates/slab-app-core`).
+- All Rust library crates live in `crates/` (e.g., `crates/slab-runtime-core`, `crates/slab-types`, `crates/slab-agent`, `crates/slab-app-core`).
 - Binary executables live in `bin/` (e.g., `bin/slab-server`, `bin/slab-runtime`, `bin/slab-app`).
 - Tauri security settings are explicit in `bin/slab-app/src-tauri/tauri.conf.json`; preserve CSP, permissions, capabilities, and plugin boundaries unless the task requires a deliberate change.
 - If documentation and code disagree, trust the code and update the documentation.

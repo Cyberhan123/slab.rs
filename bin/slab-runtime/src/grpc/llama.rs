@@ -1,5 +1,6 @@
 use futures::StreamExt;
 use serde_json::Value;
+use slab_types::{JsonOptions, TextGenerationChunk, TextGenerationResponse};
 use slab_types::inference::{TextGenerationUsage, TextPromptTokensDetails};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
@@ -7,7 +8,6 @@ use tonic::{Request, Response, Status};
 use tracing::{Instrument, debug, error, info, instrument, warn};
 
 use slab_proto::{convert, slab::ipc::v1 as pb};
-use slab_runtime_core::api::TextGenerationChunk;
 
 use super::{BackendKind, GrpcServiceImpl, extract_request_id, proto_to_status, runtime_to_status};
 
@@ -118,7 +118,7 @@ impl ThinkingStreamState {
     }
 }
 
-fn attach_reasoning_metadata(response: &mut slab_runtime_core::api::TextGenerationResponse) {
+fn attach_reasoning_metadata(response: &mut TextGenerationResponse) {
     let parsed = parse_thinking_output(&response.text, true);
     let reasoning = parsed.reasoning.trim();
     if reasoning.is_empty() {
@@ -142,7 +142,7 @@ fn text_chunk(delta: String) -> TextGenerationChunk {
 }
 
 fn reasoning_chunk(delta: String) -> TextGenerationChunk {
-    let mut metadata = slab_runtime_core::api::JsonOptions::default();
+    let mut metadata = JsonOptions::default();
     metadata.insert(REASONING_CONTENT_METADATA_KEY.into(), Value::String(delta));
     TextGenerationChunk {
         delta: String::new(),
@@ -408,7 +408,7 @@ mod tests {
 
     #[test]
     fn attach_reasoning_metadata_moves_reasoning_out_of_text() {
-        let mut response = slab_runtime_core::api::TextGenerationResponse {
+        let mut response = TextGenerationResponse {
             text: "<think>step by step</think>\n\nanswer".to_owned(),
             metadata: Default::default(),
             ..Default::default()

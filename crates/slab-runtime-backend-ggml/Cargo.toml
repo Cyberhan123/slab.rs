@@ -1,0 +1,30 @@
+[package]
+name = "slab-runtime-backend-ggml"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[features]
+default = ["ggml"]
+ggml = ["dep:slab-llama", "dep:slab-whisper"]
+
+[dependencies]
+slab-runtime-core = { workspace = true }
+slab-runtime-macros = { workspace = true }
+slab-types = { workspace = true }
+slab-utils = { workspace = true }
+slab-subtitle = { workspace = true }
+slab-diffusion = { workspace = true }
+slab-llama = { workspace = true, optional = true }
+slab-whisper = { workspace = true, optional = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+serde_json = { workspace = true }
+image = { workspace = true }
+libloading = { workspace = true }
