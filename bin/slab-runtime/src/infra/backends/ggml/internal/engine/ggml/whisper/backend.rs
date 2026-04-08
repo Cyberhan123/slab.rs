@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::domain::runtime::codec::build_ggml_whisper_full_params_from_legacy;
+use crate::domain::execution::codec::build_ggml_whisper_full_params_from_legacy;
 use crate::infra::backends::ggml::internal::engine::ggml::whisper::adapter::GGMLWhisperEngine;
 use slab_runtime_core::backend::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,

@@ -42,8 +42,8 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             "diffusion generate_image request received"
         );
 
-        let pipeline =
-            self.pipeline_for_backend(BackendKind::Diffusion).await.map_err(|status| {
+        let session =
+            self.session_for_backend(BackendKind::Diffusion).await.map_err(|status| {
                 error!(
                     grpc.code = %status.code(),
                     grpc.message = %status.message(),
@@ -61,7 +61,7 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             );
             status
         })?;
-        let generated = pipeline.run_inference_image(image_params).await.map_err(|error| {
+        let generated = session.run_inference_image(image_params).await.map_err(|error| {
             error!(error = %error, "diffusion image generation failed");
             runtime_to_status(error)
         })?;
@@ -100,8 +100,8 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             "diffusion generate_video request received"
         );
 
-        let pipeline =
-            self.pipeline_for_backend(BackendKind::Diffusion).await.map_err(|status| {
+        let session =
+            self.session_for_backend(BackendKind::Diffusion).await.map_err(|status| {
                 error!(
                     grpc.code = %status.code(),
                     grpc.message = %status.message(),
@@ -119,7 +119,7 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             );
             status
         })?;
-        let generated = pipeline
+        let generated = session
             .run_inference_image(lower_video_to_image_params(&video_params))
             .await
             .map_err(|error| {

@@ -24,7 +24,7 @@ use crate::error::AppCoreError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
 use crate::infra::model_packs;
 use crate::infra::rpc::{self, pb};
-use crate::model_auto_unload::build_model_load_request;
+use crate::model_auto_unload::{ModelReplayPlan, build_model_load_request};
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 type CloudProviderConfig = slab_types::settings::CloudProviderConfig;
@@ -161,6 +161,10 @@ impl ModelService {
         }
 
         self.model_state.store().delete_model(id).await?;
+        self.model_state
+            .auto_unload()
+            .invalidate_model_replay(id, "model deleted from catalog")
+            .await;
         Ok(DeletedModelView { id: id.to_owned(), status: "deleted".to_owned() })
     }
 
@@ -306,6 +310,7 @@ impl ModelService {
 
         let store = Arc::clone(self.model_state.store());
         let model_config_dir = self.model_config_dir().to_path_buf();
+        let auto_unload = Arc::clone(self.model_state.auto_unload());
         let operation_id = self
             .worker_state
             .submit_operation(
@@ -420,6 +425,13 @@ impl ModelService {
                                 return;
                             }
 
+                            auto_unload
+                                .invalidate_model_replay(
+                                    &model_id,
+                                    "model download updated catalog local_path",
+                                )
+                                .await;
+
                             let result_json =
                                 serde_json::json!({ "local_path": local_path }).to_string();
                             if let Err(db_error) = operation.mark_succeeded(&result_json).await {
@@ -484,6 +496,10 @@ impl ModelService {
     ) -> Result<UnifiedModel, AppCoreError> {
         let record = model_to_record(&model)?;
         self.model_state.store().upsert_model(record).await?;
+        self.model_state
+            .auto_unload()
+            .invalidate_model_replay(&model.id, "model definition upserted")
+            .await;
         Ok(model)
     }
 
@@ -1036,7 +1052,14 @@ async fn load_model_with_state(
     let response = rpc::client::load_model(channel, resolved_target.backend_id, grpc_req)
         .await
         .map_err(|error| map_grpc_model_error(action, error))?;
-    state.auto_unload().notify_model_loaded(resolved_target.backend_id, load_spec).await;
+    state
+        .auto_unload()
+        .notify_model_loaded(ModelReplayPlan {
+            backend_id: resolved_target.backend_id,
+            model_id: resolved_target.model_id,
+            load_spec,
+        })
+        .await;
 
     decode_model_status(response)
 }

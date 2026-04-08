@@ -170,9 +170,9 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
             "llama chat request received"
         );
 
-        let pipeline = self.pipeline_for_backend(BackendKind::Llama).await?;
+        let session = self.session_for_backend(BackendKind::Llama).await?;
         let request = convert::decode_chat_request(&req, false).map_err(proto_to_status)?;
-        let mut response = pipeline.run_text_generation(request).await.map_err(|error| {
+        let mut response = session.run_text_generation(request).await.map_err(|error| {
             error!(error = %error, "llama text generation failed");
             runtime_to_status(error)
         })?;
@@ -199,11 +199,11 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
             "llama chat_stream request received"
         );
 
-        let pipeline = self.pipeline_for_backend(BackendKind::Llama).await?;
+        let session = self.session_for_backend(BackendKind::Llama).await?;
         let max_tokens = req.max_tokens;
         let prompt_for_usage = req.prompt.clone();
         let request = convert::decode_chat_request(&req, true).map_err(proto_to_status)?;
-        let stream_handle = pipeline.submit_text_generation(request).await.map_err(|error| {
+        let stream_handle = session.submit_text_generation(request).await.map_err(|error| {
             error!(error = %error, "llama text generation stream setup failed");
             runtime_to_status(error)
         })?;

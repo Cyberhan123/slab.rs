@@ -15,7 +15,7 @@ use tonic::Status;
 use tracing::instrument;
 
 use crate::config::EnabledBackends;
-use crate::domain::runtime::{Pipeline, Runtime};
+use crate::domain::execution::{BackendSession, ExecutionHub};
 
 mod diffusion;
 mod llama;
@@ -28,9 +28,9 @@ pub struct GrpcServiceImpl {
 
 #[derive(Debug)]
 struct RuntimeState {
-    runtime: Runtime,
+    execution: ExecutionHub,
     enabled_backends: EnabledBackends,
-    pipelines: HashMap<BackendKind, Pipeline>,
+    sessions: HashMap<BackendKind, BackendSession>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -45,26 +45,26 @@ pub(super) enum BackendKind {
 
 impl GrpcServiceImpl {
     pub fn new(
-        runtime: Runtime,
+        execution: ExecutionHub,
         enabled_backends: EnabledBackends,
     ) -> Self {
         Self {
             state: Arc::new(RwLock::new(RuntimeState {
-                runtime,
+                execution,
                 enabled_backends,
-                pipelines: HashMap::new(),
+                sessions: HashMap::new(),
             })),
         }
     }
 
-    pub(super) async fn pipeline_for_backend(
+    pub(super) async fn session_for_backend(
         &self,
         backend: BackendKind,
-    ) -> Result<Pipeline, Status> {
+    ) -> Result<BackendSession, Status> {
         let state = self.state.read().await;
         state.ensure_enabled(backend).map_err(Status::from)?;
         state
-            .pipelines
+            .sessions
             .get(&backend)
             .cloned()
             .ok_or_else(|| runtime_to_status(CoreError::ModelNotLoaded))
@@ -84,9 +84,12 @@ impl GrpcServiceImpl {
         let typed_load_spec = RuntimeBackendLoadSpec::from_legacy(backend.runtime_backend_id(), load_spec)
             .map_err(|error| Status::invalid_argument(error.to_string()))?;
         let spec = build_model_spec(backend, &typed_load_spec);
-        let pipeline = state.runtime.pipeline(spec).map_err(runtime_to_status)?;
-        pipeline.load().await.map_err(runtime_to_status)?;
-        state.pipelines.insert(backend, pipeline);
+        let session = state
+            .execution
+            .session_for_backend(spec, backend.canonical_id())
+            .map_err(runtime_to_status)?;
+        session.load().await.map_err(runtime_to_status)?;
+        state.sessions.insert(backend, session);
 
         Ok(model_status_response(backend, "loaded"))
     }
@@ -99,11 +102,11 @@ impl GrpcServiceImpl {
         let mut state = self.state.write().await;
         state.ensure_enabled(backend).map_err(Status::from)?;
 
-        let pipeline = state
-            .pipelines
+        let session = state
+            .sessions
             .remove(&backend)
             .ok_or_else(|| runtime_to_status(CoreError::ModelNotLoaded))?;
-        pipeline.unload().await.map_err(runtime_to_status)?;
+        session.unload().await.map_err(runtime_to_status)?;
 
         Ok(model_status_response(backend, "unloaded"))
     }
@@ -136,10 +139,6 @@ impl BackendKind {
 
     pub(super) fn canonical_id(self) -> &'static str {
         self.runtime_backend_id().canonical_id()
-    }
-
-    fn driver_id(self) -> &'static str {
-        self.canonical_id()
     }
 
     fn family(self) -> ModelFamily {
@@ -181,8 +180,6 @@ fn build_model_spec(backend: BackendKind, load_spec: &RuntimeBackendLoadSpec) ->
         backend.capability(),
         ModelSource::LocalPath { path: model_path },
     );
-
-    spec.driver_hints.prefer_drivers.push(backend.driver_id().to_owned());
 
     match backend {
         BackendKind::Llama => {

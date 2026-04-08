@@ -45,8 +45,8 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
             .map_err(|error| Status::internal(format!("ffmpeg worker failed: {error}")))?
             .map_err(Status::internal)?;
 
-        let pipeline = self.pipeline_for_backend(BackendKind::Whisper).await?;
-        let response = pipeline
+        let session = self.session_for_backend(BackendKind::Whisper).await?;
+        let response = session
             .run_audio_transcription(AudioTranscriptionRequest {
                 audio_path: PathBuf::from(req.path),
                 pcm_samples: Some(pcm_samples),

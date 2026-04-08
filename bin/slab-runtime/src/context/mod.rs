@@ -5,13 +5,13 @@ use slab_runtime_core::backend::{ResourceManager, ResourceManagerConfig};
 use slab_runtime_core::scheduler::Orchestrator;
 
 use crate::config::RuntimeConfig;
-use crate::domain::runtime::{DriverResolver, Runtime};
+use crate::domain::execution::{BackendCatalog, ExecutionHub};
 use crate::infra::{backends, grpc::GrpcServiceImpl};
 
 #[derive(Clone)]
 pub struct RuntimeContext {
     pub config: Arc<RuntimeConfig>,
-    pub runtime: Runtime,
+    pub execution: ExecutionHub,
     pub grpc_service: GrpcServiceImpl,
 }
 
@@ -26,12 +26,12 @@ impl RuntimeContext {
         backends::register_backends(&drivers, &mut resource_manager, worker_count)
             .context("failed to register runtime backends")?;
 
-        let runtime = Runtime::new(
+        let execution = ExecutionHub::new(
             Orchestrator::start(resource_manager, config.queue_capacity),
-            DriverResolver::new(backends::descriptors(&drivers)),
+            BackendCatalog::new(backends::descriptors(&drivers)),
         );
-        let grpc_service = GrpcServiceImpl::new(runtime.clone(), config.enabled_backends);
+        let grpc_service = GrpcServiceImpl::new(execution.clone(), config.enabled_backends);
 
-        Ok(Self { config, runtime, grpc_service })
+        Ok(Self { config, execution, grpc_service })
     }
 }
