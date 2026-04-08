@@ -70,6 +70,8 @@ pub fn router() -> Router<Arc<AppState>> {
     get,
     path = "/v1/chat/models",
     tag = "chat",
+    summary = "Deprecated chat model listing compatibility route",
+    description = "Compatibility wrapper over GET /v1/models filtered by capability=chat_generation.",
     responses(
         (status = 200, description = "Selectable chat model options", body = [ChatModelOption]),
         (status = 500, description = "Backend error"),

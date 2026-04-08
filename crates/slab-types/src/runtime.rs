@@ -6,6 +6,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::backend::RuntimeBackendId;
 use crate::inference::JsonOptions;
+use crate::load_config::RuntimeBackendLoadSpec;
 
 #[non_exhaustive]
 #[derive(
@@ -225,7 +226,20 @@ impl Default for RuntimeModelLoadSpec {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct RuntimeModelLoadCommand {
     pub backend: RuntimeBackendId,
-    pub spec: RuntimeModelLoadSpec,
+    pub spec: RuntimeBackendLoadSpec,
+}
+
+impl RuntimeModelLoadCommand {
+    pub fn from_legacy(
+        backend: RuntimeBackendId,
+        spec: RuntimeModelLoadSpec,
+    ) -> Result<Self, crate::error::SlabTypeError> {
+        Ok(Self { backend, spec: RuntimeBackendLoadSpec::from_legacy(backend, spec)? })
+    }
+
+    pub fn legacy_spec(&self) -> RuntimeModelLoadSpec {
+        self.spec.to_legacy_spec()
+    }
 }
 
 /// Runtime-reported model status on the server/runtime boundary.

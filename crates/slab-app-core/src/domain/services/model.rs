@@ -168,24 +168,7 @@ impl ModelService {
         &self,
         query: ListModelsFilter,
     ) -> Result<Vec<UnifiedModel>, AppCoreError> {
-        let records = self.model_state.store().list_models().await?;
-        let requested_capability = query.capability;
-        let models: Vec<UnifiedModel> = records
-            .into_iter()
-            .filter_map(|record| {
-                record
-                    .try_into()
-                    .map_err(|e: String| {
-                        warn!(error = %e, "failed to deserialize model record; skipping");
-                    })
-                    .ok()
-            })
-            .filter(|model: &UnifiedModel| {
-                requested_capability
-                    .is_none_or(|capability| model.capabilities.contains(&capability))
-            })
-            .collect();
-        Ok(models)
+        load_models_from_state(&self.model_state, query).await
     }
 
     pub async fn list_chat_models(&self) -> Result<Vec<ChatModelOption>, AppCoreError> {
@@ -561,18 +544,14 @@ pub(crate) async fn list_chat_models_from_state(
     state: &ModelState,
 ) -> Result<Vec<ChatModelOption>, AppCoreError> {
     let providers = load_cloud_provider_map_for_chat(state).await?;
-    let records = state.store().list_models().await?;
+    let records = load_models_from_state(
+        state,
+        ListModelsFilter { capability: Some(Capability::ChatGeneration) },
+    )
+    .await?;
     let mut items = Vec::new();
 
-    for record in records {
-        let model: UnifiedModel = match record.try_into() {
-            Ok(model) => model,
-            Err(error) => {
-                warn!(error = %error, "failed to deserialize chat model record; skipping");
-                continue;
-            }
-        };
-
+    for model in records {
         if let Some(item) = build_local_chat_model_option(&model) {
             items.push(item);
             continue;
@@ -591,6 +570,30 @@ pub(crate) async fn list_chat_models_from_state(
     });
 
     Ok(items)
+}
+
+async fn load_models_from_state(
+    state: &ModelState,
+    query: ListModelsFilter,
+) -> Result<Vec<UnifiedModel>, AppCoreError> {
+    let records = state.store().list_models().await?;
+    let requested_capability = query.capability;
+    let models = records
+        .into_iter()
+        .filter_map(|record| {
+            record
+                .try_into()
+                .map_err(|error: String| {
+                    warn!(error = %error, "failed to deserialize model record; skipping");
+                })
+                .ok()
+        })
+        .filter(|model: &UnifiedModel| {
+            requested_capability
+                .is_none_or(|capability| model.capabilities.contains(&capability))
+        })
+        .collect();
+    Ok(models)
 }
 
 async fn load_cloud_provider_map_for_chat(

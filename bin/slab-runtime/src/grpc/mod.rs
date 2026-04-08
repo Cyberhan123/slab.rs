@@ -4,10 +4,13 @@ use std::sync::Arc;
 
 use slab_proto::{convert, slab::ipc::v1 as pb};
 use slab_runtime_core::api::{
-    Capability, CoreError, DriversConfig, ModelFamily, ModelSource, ModelSpec, Pipeline, Runtime,
+    Capability, CoreError, ModelFamily, ModelSource, ModelSpec, Pipeline, Runtime,
 };
 use slab_types::backend::RuntimeBackendId;
-use slab_types::runtime::{RuntimeModelLoadSpec, RuntimeModelStatus};
+use slab_types::runtime::RuntimeModelStatus;
+use slab_types::{
+    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, RuntimeBackendLoadSpec,
+};
 use tokio::sync::RwLock;
 use tonic::Status;
 use tracing::instrument;
@@ -43,7 +46,6 @@ pub(super) enum BackendKind {
 impl GrpcServiceImpl {
     pub fn new(
         runtime: Runtime,
-        _drivers: DriversConfig,
         enabled_backends: EnabledBackends,
     ) -> Self {
         Self {
@@ -79,7 +81,9 @@ impl GrpcServiceImpl {
         let mut state = self.state.write().await;
         state.ensure_enabled(backend).map_err(Status::from)?;
 
-        let spec = build_model_spec(backend, &load_spec);
+        let typed_load_spec = RuntimeBackendLoadSpec::from_legacy(backend.runtime_backend_id(), load_spec)
+            .map_err(|error| Status::invalid_argument(error.to_string()))?;
+        let spec = build_model_spec(backend, &typed_load_spec);
         let pipeline = state.runtime.pipeline(spec).map_err(runtime_to_status)?;
         pipeline.load().await.map_err(runtime_to_status)?;
         state.pipelines.insert(backend, pipeline);
@@ -163,50 +167,61 @@ impl BackendKind {
     }
 }
 
-fn build_model_spec(backend: BackendKind, load_spec: &RuntimeModelLoadSpec) -> ModelSpec {
+fn build_model_spec(backend: BackendKind, load_spec: &RuntimeBackendLoadSpec) -> ModelSpec {
+    let model_path = match load_spec {
+        RuntimeBackendLoadSpec::GgmlLlama(GgmlLlamaLoadConfig { model_path, .. })
+        | RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path })
+        | RuntimeBackendLoadSpec::GgmlDiffusion(GgmlDiffusionLoadConfig { model_path, .. }) => {
+            model_path.clone()
+        }
+        other => other.to_legacy_spec().model_path,
+    };
     let mut spec = ModelSpec::new(
         backend.family(),
         backend.capability(),
-        ModelSource::LocalPath { path: load_spec.model_path.clone() },
+        ModelSource::LocalPath { path: model_path },
     );
 
     spec.driver_hints.prefer_drivers.push(backend.driver_id().to_owned());
 
     match backend {
         BackendKind::Llama => {
-            spec.load_options
-                .insert("num_workers".to_owned(), serde_json::json!(load_spec.num_workers));
-            spec.load_options.insert(
-                "context_length".to_owned(),
-                serde_json::json!(load_spec.context_length.unwrap_or(0)),
-            );
+            if let RuntimeBackendLoadSpec::GgmlLlama(load_config) = load_spec {
+                spec.load_options
+                    .insert("num_workers".to_owned(), serde_json::json!(load_config.num_workers));
+                spec.load_options.insert(
+                    "context_length".to_owned(),
+                    serde_json::json!(load_config.context_length.unwrap_or(0)),
+                );
+                if let Some(chat_template) = &load_config.chat_template {
+                    spec.load_options.insert(
+                        "chat_template".to_owned(),
+                        serde_json::json!(chat_template),
+                    );
+                }
+            }
         }
         BackendKind::Diffusion => {
-            if let Some(diffusion) = load_spec.diffusion.as_ref() {
+            if let RuntimeBackendLoadSpec::GgmlDiffusion(load_config) = load_spec {
                 insert_opt_path_option(
                     &mut spec,
                     "diffusion_model_path",
-                    diffusion.diffusion_model_path.as_ref(),
+                    load_config.diffusion_model_path.as_ref(),
                 );
-                insert_opt_path_option(&mut spec, "vae_path", diffusion.vae_path.as_ref());
-                insert_opt_path_option(&mut spec, "taesd_path", diffusion.taesd_path.as_ref());
-                insert_opt_path_option(
-                    &mut spec,
-                    "lora_model_dir",
-                    diffusion.lora_model_dir.as_ref(),
-                );
-                insert_opt_path_option(&mut spec, "clip_l_path", diffusion.clip_l_path.as_ref());
-                insert_opt_path_option(&mut spec, "clip_g_path", diffusion.clip_g_path.as_ref());
-                insert_opt_path_option(&mut spec, "t5xxl_path", diffusion.t5xxl_path.as_ref());
+                insert_opt_path_option(&mut spec, "vae_path", load_config.vae_path.as_ref());
+                insert_opt_path_option(&mut spec, "taesd_path", load_config.taesd_path.as_ref());
+                insert_opt_path_option(&mut spec, "clip_l_path", load_config.clip_l_path.as_ref());
+                insert_opt_path_option(&mut spec, "clip_g_path", load_config.clip_g_path.as_ref());
+                insert_opt_path_option(&mut spec, "t5xxl_path", load_config.t5xxl_path.as_ref());
                 spec.load_options
-                    .insert("flash_attn".to_owned(), serde_json::json!(diffusion.flash_attn));
+                    .insert("flash_attn".to_owned(), serde_json::json!(load_config.flash_attn));
                 spec.load_options
-                    .insert("vae_device".to_owned(), serde_json::json!(diffusion.vae_device));
+                    .insert("vae_device".to_owned(), serde_json::json!(load_config.vae_device));
                 spec.load_options
-                    .insert("clip_device".to_owned(), serde_json::json!(diffusion.clip_device));
+                    .insert("clip_device".to_owned(), serde_json::json!(load_config.clip_device));
                 spec.load_options.insert(
                     "offload_params_to_cpu".to_owned(),
-                    serde_json::json!(diffusion.offload_params_to_cpu),
+                    serde_json::json!(load_config.offload_params_to_cpu),
                 );
             }
         }

@@ -7864,14 +7864,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "slab-core-macros"
+name = "slab-candle"
 version = "0.0.1"
 dependencies = [
- "async-trait",
- "proc-macro2",
- "quote",
- "syn 2.0.117",
- "trybuild",
+ "slab-runtime-core",
 ]
 
 [[package]]
@@ -7976,6 +7972,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "slab-onnx"
+version = "0.0.1"
+dependencies = [
+ "slab-runtime-core",
+]
+
+[[package]]
 name = "slab-proto"
 version = "0.0.1"
 dependencies = [
@@ -8004,7 +8007,9 @@ dependencies = [
  "image",
  "parity-tokio-ipc",
  "serde_json",
+ "slab-candle",
  "slab-diffusion",
+ "slab-onnx",
  "slab-proto",
  "slab-runtime-core",
  "slab-types",
@@ -8034,11 +8039,11 @@ dependencies = [
  "ort",
  "serde",
  "serde_json",
- "slab-core-macros",
  "slab-diffusion",
  "slab-libfetch",
  "slab-llama",
  "slab-model-pack",
+ "slab-runtime-macros",
  "slab-subtitle",
  "slab-types",
  "slab-utils",
@@ -8048,6 +8053,17 @@ dependencies = [
  "tokio",
  "tracing",
  "tracing-test",
+ "trybuild",
+]
+
+[[package]]
+name = "slab-runtime-macros"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
  "trybuild",
 ]
 

@@ -7,8 +7,8 @@ Standalone gRPC worker process for Slab inference backends.
 `slab-runtime` is the model execution worker. It:
 
 - Accepts gRPC requests from `bin/slab-server` over TCP or Unix IPC.
-- Independently enables and manages `ggml.llama`, `ggml.whisper`, and `ggml.diffusion` backends.
-- Uses `crates/slab-core` (package: `slab-runtime-core`) for runtime orchestration, scheduling, and engine adapters.
+- Acts as the backend composition root for GGML, Candle, and ONNX runtime registrations.
+- Uses `crates/slab-runtime-core` (package: `slab-runtime-core`) for runtime orchestration, scheduling, worker lifecycle, and dispatch contracts.
 - Runs as a separate OS process, isolating model memory and native library state from the HTTP gateway.
 
 ## Type

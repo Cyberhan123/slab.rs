@@ -13,6 +13,8 @@ name = "slab-runtime"
 path = "src/main.rs"
 
 [dependencies]
+slab-candle = { workspace = true }
+slab-onnx = { workspace = true }
 slab-runtime-core = { workspace = true }
 slab-proto = { workspace = true }
 slab-types = { workspace = true }

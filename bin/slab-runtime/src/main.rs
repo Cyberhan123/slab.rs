@@ -1,4 +1,5 @@
 mod grpc;
+mod backends;
 
 use std::fs::OpenOptions;
 use std::io::ErrorKind;
@@ -16,6 +17,7 @@ use tracing::{error, info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
+use backends::{RuntimeDriversConfig, runtime_registrations};
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "slab-runtime", version, about = "Slab gRPC runtime worker")]
@@ -411,7 +413,7 @@ async fn main() -> anyhow::Result<()> {
         "initializing slab-core runtime"
     );
 
-    let drivers = slab_runtime_core::api::DriversConfig {
+    let drivers = RuntimeDriversConfig {
         llama_lib_dir,
         whisper_lib_dir,
         diffusion_lib_dir,
@@ -420,15 +422,16 @@ async fn main() -> anyhow::Result<()> {
         enable_candle_diffusion: false,
         onnx_enabled: false,
     };
-    let runtime = slab_runtime_core::api::RuntimeBuilder::new()
+    let mut builder = slab_runtime_core::api::RuntimeBuilder::new()
         .queue_capacity(cli.queue_capacity.unwrap_or(64))
-        .backend_capacity(cli.backend_capacity.unwrap_or(4))
-        .drivers(drivers.clone())
-        .build()
-        .context("failed to initialize slab-core runtime")?;
+        .backend_capacity(cli.backend_capacity.unwrap_or(4));
+    for registration in runtime_registrations(&drivers)? {
+        builder = builder.register_backend(registration);
+    }
+    let runtime = builder.build().context("failed to initialize slab-core runtime")?;
     info!("slab-core runtime initialized");
 
-    let grpc_service = grpc::GrpcServiceImpl::new(runtime, drivers, enabled);
+    let grpc_service = grpc::GrpcServiceImpl::new(runtime, enabled);
     info!(grpc_bind = %cli.grpc_bind, "starting slab-runtime gRPC server");
     serve_grpc(&cli.grpc_bind, cli.shutdown_on_stdin_close, grpc_service).await?;
     info!("slab-runtime stopped");

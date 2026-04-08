@@ -1,0 +1,5 @@
+error: only one bare #[on_peer_control] fallback handler is allowed
+  --> tests/ui/backend_handler_bare_peer_conflict.rs:17:14
+   |
+17 |     async fn on_peer_any_b(&mut self, _cmd: PeerWorkerCommand) {}
+   |              ^^^^^^^^^^^^^

@@ -46,6 +46,7 @@ pub use inference::{
 pub use load_config::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
+    RuntimeBackendLoadSpec,
 };
 pub use media::{GeneratedFrame, GeneratedImage, RawImageInput};
 pub use runtime::{
