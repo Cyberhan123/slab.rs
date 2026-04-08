@@ -29,6 +29,25 @@ pub enum Capability {
     AudioTranscription,
     ImageGeneration,
     ImageEmbedding,
+    ChatGeneration,
+    AudioVad,
+    VideoGeneration,
+}
+
+impl Capability {
+    pub const fn is_runtime_execution(self) -> bool {
+        matches!(
+            self,
+            Self::TextGeneration
+                | Self::AudioTranscription
+                | Self::ImageGeneration
+                | Self::ImageEmbedding
+        )
+    }
+
+    pub const fn is_product_placement(self) -> bool {
+        matches!(self, Self::ChatGeneration | Self::AudioVad | Self::VideoGeneration)
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]

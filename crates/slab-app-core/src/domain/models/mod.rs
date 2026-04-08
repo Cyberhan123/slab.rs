@@ -33,7 +33,8 @@ pub use model::{
     CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION, CreateModelCommand, DeletedModelView,
     DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus, Pricing,
     RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
-    UpdateModelCommand, upgrade_stored_model_config,
+    UpdateModelCommand, default_model_capabilities, normalize_model_capabilities,
+    upgrade_stored_model_config,
 };
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};

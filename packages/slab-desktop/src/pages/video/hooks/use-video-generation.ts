@@ -7,7 +7,6 @@ import { usePageHeader, usePageHeaderModelPicker } from '@/hooks/use-global-head
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import {
   API_BASE_URL,
-  DIFFUSION_BACKEND_ID,
   MAX_POLL_ATTEMPTS,
   POLL_INTERVAL_MS,
   type ModelOption,
@@ -56,11 +55,18 @@ export function useVideoGeneration() {
   const { data: catalogModels, isLoading: catalogLoading } = api.useQuery(
     'get',
     '/v1/models',
+    {
+      params: {
+        query: {
+          capability: 'video_generation',
+        },
+      },
+    },
   );
 
   useEffect(() => {
     const diffusionModels = toCatalogModelList(catalogModels)
-      .filter((model) => model.backend_id === DIFFUSION_BACKEND_ID)
+      .filter((model) => model.kind === 'local')
       .map<ModelOption>((model) => ({
         id: model.id,
         label: model.display_name,

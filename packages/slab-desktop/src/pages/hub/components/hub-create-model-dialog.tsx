@@ -29,7 +29,7 @@ const MODEL_PACK_MANIFEST_EXAMPLE = `{
   "label": "Llama 3.1 8B Instruct (OpenRouter)",
   "status": "ready",
   "family": "llama",
-  "capabilities": ["text_generation"],
+  "capabilities": ["text_generation", "chat_generation"],
   "context_window": 131072,
   "pricing": {
     "input": 0.00018,

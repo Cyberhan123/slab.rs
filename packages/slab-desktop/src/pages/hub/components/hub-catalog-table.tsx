@@ -173,7 +173,8 @@ function getModelIcon(model: ModelItem) {
   const haystack = `${model.display_name} ${model.repo_id} ${model.filename}`.toLowerCase();
 
   if (
-    model.backend_ids.includes('ggml.diffusion') ||
+    model.capabilities.includes('video_generation') ||
+    model.capabilities.includes('image_generation') ||
     haystack.includes('image') ||
     haystack.includes('diffusion')
   ) {
@@ -181,7 +182,8 @@ function getModelIcon(model: ModelItem) {
   }
 
   if (
-    model.backend_ids.includes('ggml.whisper') ||
+    model.capabilities.includes('audio_transcription') ||
+    model.capabilities.includes('audio_vad') ||
     haystack.includes('audio') ||
     haystack.includes('whisper')
   ) {

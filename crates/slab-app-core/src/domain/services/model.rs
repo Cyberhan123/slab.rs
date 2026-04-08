@@ -5,6 +5,7 @@ use std::sync::Arc;
 use chrono::Utc;
 use hf_hub::api::sync::{Api, ApiBuilder};
 use slab_proto::convert;
+use slab_types::Capability;
 use slab_types::RuntimeBackendId;
 use slab_types::runtime::DiffusionLoadOptions;
 use tonic::transport::Channel;
@@ -14,9 +15,10 @@ use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView,
     CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
-    ChatModelCapabilities, ChatModelOption, ChatModelSource, CreateModelCommand, DeletedModelView,
-    DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus, UnifiedModel,
-    UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
+    ChatModelCapabilities, ChatModelOption, ChatModelSource, CreateModelCommand,
+    DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec,
+    ModelStatus, UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
+    normalize_model_capabilities,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
@@ -25,8 +27,6 @@ use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::{LoadedModelSpec, build_model_load_request};
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
-const CHAT_LOCAL_BACKEND_ID: RuntimeBackendId = RuntimeBackendId::GgmlLlama;
-
 type CloudProviderConfig = slab_types::settings::CloudProviderConfig;
 
 fn validate_and_normalize_model_workers(
@@ -131,6 +131,7 @@ impl ModelService {
             display_name: req.display_name.unwrap_or(existing_model.display_name),
             kind: req.kind.unwrap_or(existing_model.kind),
             backend_id: req.backend_id.or(existing_model.backend_id),
+            capabilities: req.capabilities.or(Some(existing_model.capabilities)),
             status: Some(req.status.unwrap_or(existing_model.status)),
             spec: req.spec.unwrap_or(existing_model.spec),
             runtime_presets: req.runtime_presets.or(existing_model.runtime_presets),
@@ -165,9 +166,10 @@ impl ModelService {
 
     pub async fn list_models(
         &self,
-        _query: ListModelsFilter,
+        query: ListModelsFilter,
     ) -> Result<Vec<UnifiedModel>, AppCoreError> {
         let records = self.model_state.store().list_models().await?;
+        let requested_capability = query.capability;
         let models: Vec<UnifiedModel> = records
             .into_iter()
             .filter_map(|record| {
@@ -177,6 +179,10 @@ impl ModelService {
                         warn!(error = %e, "failed to deserialize model record; skipping");
                     })
                     .ok()
+            })
+            .filter(|model: &UnifiedModel| {
+                requested_capability
+                    .is_none_or(|capability| model.capabilities.contains(&capability))
             })
             .collect();
         Ok(models)
@@ -508,6 +514,13 @@ impl ModelService {
         )?;
         let display_name = normalize_required_text(req.display_name, "display_name")?;
         let (backend_id, spec) = canonicalize_model_spec(req.kind, req.backend_id, req.spec)?;
+        let capabilities = normalize_model_capabilities(
+            req.kind,
+            backend_id.as_deref(),
+            &display_name,
+            &spec,
+            req.capabilities,
+        );
         let runtime_presets = canonicalize_runtime_presets(req.runtime_presets);
         let status = req.status.unwrap_or_else(|| default_status_for_kind(req.kind));
 
@@ -520,6 +533,7 @@ impl ModelService {
             display_name,
             kind: req.kind,
             backend_id,
+            capabilities,
             status,
             spec,
             runtime_presets,
@@ -594,11 +608,12 @@ async fn load_cloud_provider_map_for_chat(
 
 fn is_cloud_catalog_model_for_chat(model: &UnifiedModel) -> bool {
     model.kind == UnifiedModelKind::Cloud
+        && model.capabilities.contains(&Capability::ChatGeneration)
 }
 
 fn is_local_chat_model(model: &UnifiedModel) -> bool {
     model.kind == UnifiedModelKind::Local
-        && model.backend_id.as_deref() == Some(CHAT_LOCAL_BACKEND_ID.canonical_id())
+        && model.capabilities.contains(&Capability::ChatGeneration)
 }
 
 fn referenced_cloud_provider_id(model: &UnifiedModel) -> Option<String> {
@@ -631,7 +646,7 @@ fn build_local_chat_model_option(model: &UnifiedModel) -> Option<ChatModelOption
         downloaded: local_chat_model_downloaded(model),
         pending: local_chat_model_pending(model),
         capabilities: ChatModelCapabilities::local(),
-        backend_id: Some(CHAT_LOCAL_BACKEND_ID.to_string()),
+        backend_id: model.backend_id.clone(),
         provider_id: None,
         provider_name: None,
     })
@@ -759,6 +774,9 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
 fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord, AppCoreError> {
     let spec_json = serde_json::to_string(&model.spec)
         .map_err(|error| AppCoreError::Internal(format!("failed to serialize spec: {error}")))?;
+    let capabilities_json = serde_json::to_string(&model.capabilities).map_err(|error| {
+        AppCoreError::Internal(format!("failed to serialize capabilities: {error}"))
+    })?;
     let runtime_presets_json =
         model.runtime_presets.as_ref().map(serde_json::to_string).transpose().map_err(|error| {
             AppCoreError::Internal(format!("failed to serialize runtime_presets: {error}"))
@@ -770,6 +788,7 @@ fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord, AppCoreEr
         provider: legacy_provider_value(model),
         kind: model.kind.as_str().to_owned(),
         backend_id: model.backend_id.clone(),
+        capabilities: capabilities_json,
         status: model.status.as_str().to_owned(),
         spec: spec_json,
         runtime_presets: runtime_presets_json,
@@ -1190,7 +1209,7 @@ mod tests {
     };
     use crate::domain::models::{
         ChatModelSource, ModelSpec, RuntimePresets, UnifiedModel, UnifiedModelKind,
-        UnifiedModelStatus,
+        UnifiedModelStatus, default_model_capabilities,
     };
     use crate::error::AppCoreError;
     use chrono::Utc;
@@ -1427,6 +1446,17 @@ mod tests {
             display_name: "Model 1".to_owned(),
             kind,
             backend_id: backend_id.map(str::to_owned),
+            capabilities: default_model_capabilities(
+                kind,
+                backend_id,
+                "Model 1",
+                &ModelSpec {
+                    provider_id: provider_id.map(str::to_owned),
+                    remote_model_id: remote_model_id.map(str::to_owned),
+                    local_path: local_path.map(str::to_owned),
+                    ..ModelSpec::default()
+                },
+            ),
             status,
             spec: ModelSpec {
                 provider_id: provider_id.map(str::to_owned),

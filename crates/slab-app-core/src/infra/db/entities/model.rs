@@ -4,6 +4,7 @@ use crate::domain::models::{
     ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind,
     UnifiedModelStatus, upgrade_stored_model_config,
 };
+use slab_types::Capability;
 
 /// A model entry in the unified `models` table.
 /// Both local and cloud models share this structure.
@@ -18,6 +19,8 @@ pub struct UnifiedModelRecord {
     pub kind: String,
     /// Optional runtime backend identifier for local models.
     pub backend_id: Option<String>,
+    /// JSON-serialized `Capability[]`.
+    pub capabilities: String,
     /// Status string: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`.
     pub status: String,
     /// JSON-serialized `ModelSpec`.
@@ -68,6 +71,7 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             provider,
             kind: raw_kind,
             backend_id: raw_backend_id,
+            capabilities: raw_capabilities,
             status: raw_status,
             spec: raw_spec,
             runtime_presets: raw_runtime_presets,
@@ -108,6 +112,15 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
 
         let runtime_presets: Option<RuntimePresets> =
             raw_runtime_presets.as_deref().and_then(|value| serde_json::from_str(value).ok());
+        let capabilities: Vec<Capability> =
+            serde_json::from_str(&raw_capabilities).unwrap_or_else(|error| {
+                tracing::warn!(
+                    id = %id,
+                    error = %error,
+                    "failed to deserialize model capabilities JSON; using empty capabilities"
+                );
+                Vec::new()
+            });
         let backend_id = if kind == UnifiedModelKind::Local {
             normalize_optional_text(raw_backend_id)
                 .or_else(|| derive_backend_id_from_legacy_provider(&provider))
@@ -122,6 +135,7 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             display_name,
             kind,
             backend_id,
+            capabilities,
             status: Some(status),
             spec,
             runtime_presets,
@@ -132,6 +146,7 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             display_name: config.display_name,
             kind: config.kind,
             backend_id: config.backend_id,
+            capabilities: config.capabilities,
             status: config.status.unwrap_or(default_status),
             spec: config.spec,
             runtime_presets: config.runtime_presets,
@@ -150,6 +165,7 @@ mod tests {
     };
     use chrono::Utc;
     use serde_json::json;
+    use slab_types::Capability;
 
     #[test]
     fn converts_records_with_current_config_versions() {
@@ -160,6 +176,7 @@ mod tests {
             provider: "cloud.openai-main".to_owned(),
             kind: "cloud".to_owned(),
             backend_id: None,
+            capabilities: serde_json::to_string(&vec![Capability::TextGeneration, Capability::ChatGeneration]).unwrap(),
             status: "ready".to_owned(),
             spec: json!({
                 "provider_id": "openai-main",
@@ -190,6 +207,7 @@ mod tests {
             provider: "cloud.openai-main".to_owned(),
             kind: "cloud".to_owned(),
             backend_id: None,
+            capabilities: serde_json::to_string(&vec![Capability::TextGeneration, Capability::ChatGeneration]).unwrap(),
             status: "ready".to_owned(),
             spec: json!({
                 "provider_id": "openai-main",

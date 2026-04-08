@@ -17,7 +17,7 @@ import {
   type ChatSessionSummaryItem,
 } from "@/pages/chat/components/chat-session-summary-card"
 import api from "@/lib/api"
-import { toCatalogModelList } from "@/lib/api/models"
+import { toCatalogModelList, type CatalogModel } from "@/lib/api/models"
 import { PAGE_HEADER_META } from "@/layouts/header-meta"
 import { usePageHeader, usePageHeaderModelPicker } from "@/hooks/use-global-header-meta"
 
@@ -31,7 +31,6 @@ import { useChat } from "./hooks/use-chat"
 import { useMarkdownTheme } from "./hooks/use-markdowm-theme"
 import locale from "./local"
 
-const LLAMA_BACKEND_ID = "ggml.llama"
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000
 const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000
 
@@ -41,16 +40,6 @@ type ChatModelCapabilities = {
   raw_grammar: boolean
   structured_output: boolean
   reasoning_controls: boolean
-}
-
-type ChatModelPickerOption = {
-  id: string
-  display_name: string
-  downloaded: boolean
-  pending: boolean
-  source: ModelOptionSource
-  provider_name?: string | null
-  capabilities: ChatModelCapabilities
 }
 
 type ModelOption = {
@@ -84,10 +73,6 @@ function createConversationLabel(value: string) {
   return trimmed.length > 42 ? `${trimmed.slice(0, 42)}...` : trimmed
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
-}
-
 function defaultCapabilitiesForSource(source: ModelOptionSource): ChatModelCapabilities {
   return source === "cloud"
     ? {
@@ -102,64 +87,10 @@ function defaultCapabilitiesForSource(source: ModelOptionSource): ChatModelCapab
       }
 }
 
-function parseChatModelCapabilities(
-  value: unknown,
-  source: ModelOptionSource
+function resolveChatModelCapabilities(
+  model: Pick<CatalogModel, "chat_capabilities" | "kind">
 ): ChatModelCapabilities {
-  const defaults = defaultCapabilitiesForSource(source)
-  if (!isRecord(value)) {
-    return defaults
-  }
-
-  return {
-    raw_grammar:
-      typeof value.raw_grammar === "boolean" ? value.raw_grammar : defaults.raw_grammar,
-    structured_output:
-      typeof value.structured_output === "boolean"
-        ? value.structured_output
-        : defaults.structured_output,
-    reasoning_controls:
-      typeof value.reasoning_controls === "boolean"
-        ? value.reasoning_controls
-        : defaults.reasoning_controls,
-  }
-}
-
-function parseChatModelPickerOptions(value: unknown): ChatModelPickerOption[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.flatMap((item) => {
-    if (!isRecord(item)) {
-      return []
-    }
-
-    const id = typeof item.id === "string" ? item.id.trim() : ""
-    const display_name =
-      typeof item.display_name === "string" ? item.display_name.trim() : ""
-    const source =
-      item.source === "local" || item.source === "cloud" ? item.source : null
-
-    if (!id || !display_name || !source) {
-      return []
-    }
-
-    return [
-      {
-        id,
-        display_name,
-        downloaded: Boolean(item.downloaded),
-        pending: Boolean(item.pending),
-        source,
-        provider_name:
-          typeof item.provider_name === "string" && item.provider_name.trim()
-            ? item.provider_name.trim()
-            : null,
-        capabilities: parseChatModelCapabilities(item.capabilities, source),
-      },
-    ]
-  })
+  return model.chat_capabilities ?? defaultCapabilitiesForSource(model.kind)
 }
 
 function getGreeting(date: Date) {
@@ -327,12 +258,13 @@ function Chat() {
     data: catalogModels,
     isLoading: catalogModelsLoading,
     refetch: refetchCatalogModels,
-  } = api.useQuery("get", "/v1/models")
-  const {
-    data: chatModelPickerData,
-    isLoading: chatModelOptionsLoading,
-    refetch: refetchChatModelOptions,
-  } = api.useQuery("get", "/v1/chat/models")
+  } = api.useQuery("get", "/v1/models", {
+    params: {
+      query: {
+        capability: "chat_generation",
+      },
+    },
+  })
 
   const downloadModelMutation = api.useMutation("post", "/v1/models/download")
   const loadModelMutation = api.useMutation("post", "/v1/models/load")
@@ -353,38 +285,34 @@ function Chat() {
     () => toCatalogModelList(catalogModels),
     [catalogModels]
   )
-  const chatModelPickerOptions = useMemo(
-    () => parseChatModelPickerOptions(chatModelPickerData),
-    [chatModelPickerData]
-  )
   const sessionRecords = useMemo<SessionRecord[]>(
     () => (Array.isArray(sessionData) ? sessionData : []),
     [sessionData]
   )
 
-  const llamaModels = useMemo(
-    () => parsedCatalogModels.filter((model) => model.backend_id === LLAMA_BACKEND_ID),
+  const localChatModels = useMemo(
+    () => parsedCatalogModels.filter((model) => model.kind === "local"),
     [parsedCatalogModels]
   )
 
   const modelOptions = useMemo<ModelOption[]>(
     () =>
-      chatModelPickerOptions.map((model) => {
-        const catalogModel = parsedCatalogModels.find((item) => item.id === model.id)
+      parsedCatalogModels.map((model) => {
+        const downloaded =
+          model.kind === "cloud" ||
+          (model.status === "ready" && typeof model.local_path === "string" && model.local_path.length > 0)
+
         return {
           id: model.id,
-          label:
-            model.source === "cloud" && model.provider_name
-              ? `${model.provider_name} / ${model.display_name}`
-              : model.display_name,
-          downloaded: model.downloaded,
+          label: model.display_name,
+          downloaded,
           pending: model.pending,
-          source: model.source,
-          capabilities: model.capabilities,
-          contextWindow: catalogModel?.spec.context_window ?? null,
+          source: model.kind,
+          capabilities: resolveChatModelCapabilities(model),
+          contextWindow: model.spec.context_window ?? null,
         }
       }),
-    [chatModelPickerOptions, parsedCatalogModels]
+    [parsedCatalogModels]
   )
   const selectedModel = useMemo(
     () => modelOptions.find((item) => item.id === selectedModelId),
@@ -523,10 +451,7 @@ function Chat() {
   }
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
-    const [refreshed] = await Promise.all([
-      refetchCatalogModels(),
-      refetchChatModelOptions(),
-    ])
+    const refreshed = await refetchCatalogModels()
     const models = toCatalogModelList(refreshed.data)
     return models.find((model) => model.id === modelId)
   }
@@ -535,7 +460,7 @@ function Chat() {
     modelId: string,
     forceDownload = false
   ): Promise<{ modelPath: string; downloadedNow: boolean }> => {
-    let model = llamaModels.find((item) => item.id === modelId)
+    let model = localChatModels.find((item) => item.id === modelId)
     if (!model) {
       model = await refreshCatalogAndFindModel(modelId)
     }
@@ -544,8 +469,8 @@ function Chat() {
       throw new Error("Selected model does not exist in catalog")
     }
 
-    if (model.backend_id !== LLAMA_BACKEND_ID) {
-      throw new Error(`Selected model does not support ${LLAMA_BACKEND_ID}`)
+    if (model.kind !== "local") {
+      throw new Error("Selected model is not a local chat model")
     }
 
     if (model.local_path && !forceDownload) {
@@ -611,7 +536,7 @@ function Chat() {
       return
     }
 
-    const selectedLocal = llamaModels.find((item) => item.id === selectedModelId)
+    const selectedLocal = localChatModels.find((item) => item.id === selectedModelId)
     const { downloadedNow } = await ensureDownloadedModelPath(selectedModelId)
 
     if (downloadedNow) {
@@ -666,7 +591,7 @@ function Chat() {
     ensureChatModelReady
   )
 
-  const modelLoading = catalogModelsLoading || chatModelOptionsLoading
+  const modelLoading = catalogModelsLoading
   const isPreparingModel =
     loadModelMutation.isPending ||
     switchModelMutation.isPending ||

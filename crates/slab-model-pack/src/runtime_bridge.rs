@@ -39,8 +39,13 @@ impl ResolvedModelPack {
         &self,
         preset: &ResolvedPreset,
     ) -> Result<ModelPackRuntimeBridge, ModelPackError> {
-        let capability =
-            self.manifest.capabilities.first().copied().ok_or(ModelPackError::MissingCapability)?;
+        let capability = self
+            .manifest
+            .capabilities
+            .iter()
+            .copied()
+            .find(|capability| capability.is_runtime_execution())
+            .ok_or(ModelPackError::MissingRuntimeCapability)?;
         let backend = resolve_runtime_backend(preset)?;
         let source = build_model_source(preset)?;
         let load_options = config_payload_as_options(preset.effective_load_config.as_ref())?;
