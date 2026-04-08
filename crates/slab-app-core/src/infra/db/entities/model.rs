@@ -1,8 +1,8 @@
 use chrono::{DateTime, Utc};
 
 use crate::domain::models::{
-    ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind,
-    UnifiedModelStatus, upgrade_stored_model_config,
+    ManagedModelBackendId, ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel,
+    UnifiedModelKind, UnifiedModelStatus, upgrade_stored_model_config,
 };
 use slab_types::Capability;
 
@@ -41,13 +41,13 @@ fn derive_kind_from_legacy_provider(provider: &str) -> UnifiedModelKind {
     }
 }
 
-fn derive_backend_id_from_legacy_provider(provider: &str) -> Option<String> {
+fn derive_backend_id_from_legacy_provider(provider: &str) -> Option<ManagedModelBackendId> {
     provider
         .trim()
         .strip_prefix("local.")
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .map(str::to_owned)
+    .and_then(|value| value.parse().ok())
 }
 
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
@@ -55,6 +55,21 @@ fn normalize_optional_text(value: Option<String>) -> Option<String> {
         let trimmed = value.trim();
         if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
     })
+}
+
+fn parse_backend_id(
+    raw_backend_id: Option<String>,
+    fallback_provider: &str,
+    id: &str,
+) -> Result<Option<ManagedModelBackendId>, String> {
+    match normalize_optional_text(raw_backend_id).or_else(|| {
+        derive_backend_id_from_legacy_provider(fallback_provider).map(|backend| backend.to_string())
+    }) {
+        Some(value) => value.parse::<ManagedModelBackendId>().map(Some).map_err(|error| {
+            format!("invalid backend_id '{}' for model '{}': {}", value, id, error)
+        }),
+        None => Ok(None),
+    }
 }
 
 fn parse_config_version(raw: i64, field: &str) -> Result<u32, String> {
@@ -122,8 +137,7 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
                 Vec::new()
             });
         let backend_id = if kind == UnifiedModelKind::Local {
-            normalize_optional_text(raw_backend_id)
-                .or_else(|| derive_backend_id_from_legacy_provider(&provider))
+            parse_backend_id(raw_backend_id, &provider, &id)?
         } else {
             None
         };
