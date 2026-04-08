@@ -4,7 +4,7 @@ use slab_runtime_core::backend::ResourceManager;
 use slab_runtime_core::CoreError;
 use slab_types::DriverDescriptor;
 
-use crate::config::RuntimeConfig;
+use crate::infra::config::RuntimeConfig;
 
 #[cfg(feature = "candle")]
 pub(crate) mod candle;

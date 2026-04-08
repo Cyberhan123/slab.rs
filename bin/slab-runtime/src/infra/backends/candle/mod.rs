@@ -1,10 +1,46 @@
-mod internal;
+pub mod diffusion;
+pub mod llama;
+pub mod whisper;
 
 use slab_runtime_core::backend::ResourceManager;
 use slab_runtime_core::CoreError;
 use slab_types::{
     Capability, DriverDescriptor, DriverLoadStyle, ModelFamily, ModelSourceKind,
 };
+use thiserror::Error;
+
+pub use slab_runtime_core::CoreError as EngineError;
+
+#[derive(Debug, Error)]
+pub enum CandleEngineError {
+    #[error("candle/llama/error {0}")]
+    Llama(#[from] llama::CandleLlamaEngineError),
+
+    #[error("candle/whisper/error {0}")]
+    Whisper(#[from] whisper::CandleWhisperEngineError),
+
+    #[error("candle/diffusion/error {0}")]
+    Diffusion(#[from] diffusion::CandleDiffusionEngineError),
+}
+
+macro_rules! impl_candle_from {
+    ($($ty:path),+ $(,)?) => {
+        $(
+            impl From<$ty> for slab_runtime_core::CoreError {
+                fn from(error: $ty) -> Self {
+                    slab_runtime_core::CoreError::CandleEngine(error.to_string())
+                }
+            }
+        )+
+    };
+}
+
+impl_candle_from!(
+    CandleEngineError,
+    llama::CandleLlamaEngineError,
+    whisper::CandleWhisperEngineError,
+    diffusion::CandleDiffusionEngineError,
+);
 
 #[derive(Debug, Clone, Default)]
 pub struct CandleBackendConfig {
@@ -62,19 +98,19 @@ pub fn register(
 ) -> Result<(), CoreError> {
     if config.enable_llama {
         resource_manager.register_backend("candle.llama", move |shared_rx, control_tx| {
-            internal::engine::candle::llama::spawn_backend_with_engine(shared_rx, control_tx, None);
+            llama::spawn_backend_with_engine(shared_rx, control_tx, None);
         });
     }
 
     if config.enable_whisper {
         resource_manager.register_backend("candle.whisper", move |shared_rx, control_tx| {
-            internal::engine::candle::whisper::spawn_backend(shared_rx, control_tx, worker_count);
+            whisper::spawn_backend(shared_rx, control_tx, worker_count);
         });
     }
 
     if config.enable_diffusion {
         resource_manager.register_backend("candle.diffusion", move |shared_rx, control_tx| {
-            internal::engine::candle::diffusion::spawn_backend(shared_rx, control_tx, worker_count);
+            diffusion::spawn_backend(shared_rx, control_tx, worker_count);
         });
     }
 
