@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -11,9 +12,11 @@ use tracing::{info, warn};
 
 use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
-    AcceptedOperation, AvailableModelsQuery, AvailableModelsView, CreateModelCommand,
-    DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec,
-    ModelStatus, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
+    AcceptedOperation, AvailableModelsQuery, AvailableModelsView,
+    CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+    ChatModelCapabilities, ChatModelOption, ChatModelSource, CreateModelCommand, DeletedModelView,
+    DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus, UnifiedModel,
+    UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
@@ -22,6 +25,9 @@ use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::{LoadedModelSpec, build_model_load_request};
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
+const CHAT_LOCAL_BACKEND_ID: RuntimeBackendId = RuntimeBackendId::GgmlLlama;
+
+type CloudProviderConfig = slab_types::settings::CloudProviderConfig;
 
 fn validate_and_normalize_model_workers(
     backend_id: RuntimeBackendId,
@@ -123,7 +129,8 @@ impl ModelService {
         let next = CreateModelCommand {
             id: Some(existing_model.id),
             display_name: req.display_name.unwrap_or(existing_model.display_name),
-            provider: req.provider.unwrap_or(existing_model.provider),
+            kind: req.kind.unwrap_or(existing_model.kind),
+            backend_id: req.backend_id.or(existing_model.backend_id),
             status: Some(req.status.unwrap_or(existing_model.status)),
             spec: req.spec.unwrap_or(existing_model.spec),
             runtime_presets: req.runtime_presets.or(existing_model.runtime_presets),
@@ -173,6 +180,10 @@ impl ModelService {
             })
             .collect();
         Ok(models)
+    }
+
+    pub async fn list_chat_models(&self) -> Result<Vec<ChatModelOption>, AppCoreError> {
+        list_chat_models_from_state(&self.model_state).await
     }
 
     pub async fn load_model(&self, command: ModelLoadCommand) -> Result<ModelStatus, AppCoreError> {
@@ -280,13 +291,7 @@ impl ModelService {
         let model: UnifiedModel =
             record.try_into().map_err(|e: String| AppCoreError::Internal(e))?;
 
-        // Derive backend from provider. Only local models can be downloaded.
-        let backend_id = backend_id_from_provider(&model.provider).ok_or_else(|| {
-            AppCoreError::BadRequest(format!(
-                "model provider '{}' does not support download (only providers with prefix \"local.\" support download)",
-                model.provider
-            ))
-        })?;
+        let backend_id = resolve_local_backend_from_model(&model)?;
 
         let canonical_backend_id = backend_id.to_string();
 
@@ -484,7 +489,10 @@ impl ModelService {
         self.store_model_definition(model).await
     }
 
-    async fn store_model_definition(&self, model: UnifiedModel) -> Result<UnifiedModel, AppCoreError> {
+    async fn store_model_definition(
+        &self,
+        model: UnifiedModel,
+    ) -> Result<UnifiedModel, AppCoreError> {
         let record = model_to_record(&model)?;
         self.model_state.store().upsert_model(record).await?;
         Ok(model)
@@ -499,10 +507,9 @@ impl ModelService {
             "id",
         )?;
         let display_name = normalize_required_text(req.display_name, "display_name")?;
-        let provider = normalize_required_text(req.provider, "provider")?;
-        let spec = canonicalize_model_spec(&provider, req.spec)?;
+        let (backend_id, spec) = canonicalize_model_spec(req.kind, req.backend_id, req.spec)?;
         let runtime_presets = canonicalize_runtime_presets(req.runtime_presets);
-        let status = req.status.unwrap_or_else(|| default_status_for_provider(&provider));
+        let status = req.status.unwrap_or_else(|| default_status_for_kind(req.kind));
 
         let existing_record = self.model_state.store().get_model(&id).await?;
         let now = Utc::now();
@@ -511,7 +518,8 @@ impl ModelService {
         Ok(UnifiedModel {
             id,
             display_name,
-            provider,
+            kind: req.kind,
+            backend_id,
             status,
             spec,
             runtime_presets,
@@ -535,21 +543,147 @@ impl ModelService {
     }
 }
 
-/// Derive the gRPC backend id from a local provider string.
-/// e.g. `"local.ggml.llama"` -> `"ggml.llama"`.
-fn backend_id_from_provider(provider: &str) -> Option<RuntimeBackendId> {
-    provider.strip_prefix("local.").and_then(|backend| backend.parse().ok())
+pub(crate) async fn list_chat_models_from_state(
+    state: &ModelState,
+) -> Result<Vec<ChatModelOption>, AppCoreError> {
+    let providers = load_cloud_provider_map_for_chat(state).await?;
+    let records = state.store().list_models().await?;
+    let mut items = Vec::new();
+
+    for record in records {
+        let model: UnifiedModel = match record.try_into() {
+            Ok(model) => model,
+            Err(error) => {
+                warn!(error = %error, "failed to deserialize chat model record; skipping");
+                continue;
+            }
+        };
+
+        if let Some(item) = build_local_chat_model_option(&model) {
+            items.push(item);
+            continue;
+        }
+
+        if let Some(item) = build_cloud_chat_model_option(&providers, &model) {
+            items.push(item);
+        }
+    }
+
+    items.sort_by(|left, right| {
+        left.display_name
+            .to_ascii_lowercase()
+            .cmp(&right.display_name.to_ascii_lowercase())
+            .then_with(|| left.id.cmp(&right.id))
+    });
+
+    Ok(items)
 }
 
-fn provider_id_from_provider(provider: &str) -> Option<String> {
-    provider
-        .strip_prefix("cloud.")
+async fn load_cloud_provider_map_for_chat(
+    state: &ModelState,
+) -> Result<BTreeMap<String, CloudProviderConfig>, AppCoreError> {
+    Ok(state
+        .pmid()
+        .config()
+        .chat
+        .providers
+        .into_iter()
+        .map(|provider| (provider.id.clone(), provider))
+        .collect())
+}
+
+fn is_cloud_catalog_model_for_chat(model: &UnifiedModel) -> bool {
+    model.kind == UnifiedModelKind::Cloud
+}
+
+fn is_local_chat_model(model: &UnifiedModel) -> bool {
+    model.kind == UnifiedModelKind::Local
+        && model.backend_id.as_deref() == Some(CHAT_LOCAL_BACKEND_ID.canonical_id())
+}
+
+fn referenced_cloud_provider_id(model: &UnifiedModel) -> Option<String> {
+    model
+        .spec
+        .provider_id
+        .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
 }
 
-fn canonicalize_model_spec(provider: &str, mut spec: ModelSpec) -> Result<ModelSpec, AppCoreError> {
+fn local_chat_model_downloaded(model: &UnifiedModel) -> bool {
+    matches!(model.status, UnifiedModelStatus::Ready) && model.spec.local_path.is_some()
+}
+
+fn local_chat_model_pending(model: &UnifiedModel) -> bool {
+    matches!(model.status, UnifiedModelStatus::Downloading)
+}
+
+fn build_local_chat_model_option(model: &UnifiedModel) -> Option<ChatModelOption> {
+    if !is_local_chat_model(model) {
+        return None;
+    }
+
+    Some(ChatModelOption {
+        id: model.id.clone(),
+        display_name: model.display_name.clone(),
+        source: ChatModelSource::Local,
+        downloaded: local_chat_model_downloaded(model),
+        pending: local_chat_model_pending(model),
+        capabilities: ChatModelCapabilities::local(),
+        backend_id: Some(CHAT_LOCAL_BACKEND_ID.to_string()),
+        provider_id: None,
+        provider_name: None,
+    })
+}
+
+fn build_cloud_chat_model_option(
+    providers: &BTreeMap<String, CloudProviderConfig>,
+    model: &UnifiedModel,
+) -> Option<ChatModelOption> {
+    if !is_cloud_catalog_model_for_chat(model) {
+        return None;
+    }
+
+    let provider_id = referenced_cloud_provider_id(model)?;
+    let remote_model_id =
+        model.spec.remote_model_id.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    if remote_model_id.is_none() {
+        warn!(
+            model_id = %model.id,
+            provider_id = %provider_id,
+            "cloud model is missing remote_model_id; hiding from chat picker"
+        );
+        return None;
+    }
+    let Some(provider) = providers.get(&provider_id) else {
+        warn!(
+            model_id = %model.id,
+            provider_id = %provider_id,
+            "cloud model references unknown provider; hiding from chat picker"
+        );
+        return None;
+    };
+
+    Some(ChatModelOption {
+        id: model.id.clone(),
+        display_name: model.display_name.clone(),
+        source: ChatModelSource::Cloud,
+        downloaded: true,
+        pending: false,
+        capabilities: ChatModelCapabilities::cloud(),
+        backend_id: None,
+        provider_id: Some(provider_id),
+        provider_name: Some(provider.name.clone()),
+    })
+}
+
+fn canonicalize_model_spec(
+    kind: UnifiedModelKind,
+    backend_id: Option<String>,
+    mut spec: ModelSpec,
+) -> Result<(Option<String>, ModelSpec), AppCoreError> {
+    let backend_id = normalize_optional_text(backend_id);
     spec.provider_id = normalize_optional_text(spec.provider_id);
     spec.remote_model_id = normalize_optional_text(spec.remote_model_id);
     spec.repo_id = normalize_optional_text(spec.repo_id);
@@ -557,23 +691,41 @@ fn canonicalize_model_spec(provider: &str, mut spec: ModelSpec) -> Result<ModelS
     spec.local_path = normalize_optional_text(spec.local_path);
     spec.chat_template = normalize_optional_text(spec.chat_template);
 
-    if provider.starts_with("cloud.") {
-        if spec.provider_id.is_none() {
-            spec.provider_id = provider_id_from_provider(provider);
+    match kind {
+        UnifiedModelKind::Cloud => {
+            spec.repo_id = None;
+            spec.filename = None;
+            spec.local_path = None;
+            spec.chat_template = None;
+
+            if spec.provider_id.is_none() {
+                return Err(AppCoreError::BadRequest(
+                    "cloud models must set spec.provider_id to a configured providers.registry entry"
+                        .into(),
+                ));
+            }
+            if spec.remote_model_id.is_none() {
+                return Err(AppCoreError::BadRequest(
+                    "cloud models must set spec.remote_model_id".into(),
+                ));
+            }
+
+            Ok((None, spec))
         }
-        if spec.provider_id.is_none() {
-            return Err(AppCoreError::BadRequest(
-                "cloud models must set spec.provider_id to a configured chat provider".into(),
-            ));
-        }
-        if spec.remote_model_id.is_none() {
-            return Err(AppCoreError::BadRequest(
-                "cloud models must set spec.remote_model_id".into(),
-            ));
+        UnifiedModelKind::Local => {
+            spec.provider_id = None;
+            spec.remote_model_id = None;
+
+            let backend_id = backend_id.ok_or_else(|| {
+                AppCoreError::BadRequest("local models must set backend_id".into())
+            })?;
+            let backend: RuntimeBackendId = backend_id.parse().map_err(|_| {
+                AppCoreError::BadRequest(format!("unknown backend_id: {backend_id}"))
+            })?;
+
+            Ok((Some(backend.to_string()), spec))
         }
     }
-
-    Ok(spec)
 }
 
 fn canonicalize_runtime_presets(
@@ -582,11 +734,10 @@ fn canonicalize_runtime_presets(
     runtime_presets.filter(|presets| presets.temperature.is_some() || presets.top_p.is_some())
 }
 
-fn default_status_for_provider(provider: &str) -> UnifiedModelStatus {
-    if provider.starts_with("cloud.") {
-        UnifiedModelStatus::Ready
-    } else {
-        UnifiedModelStatus::NotDownloaded
+fn default_status_for_kind(kind: UnifiedModelKind) -> UnifiedModelStatus {
+    match kind {
+        UnifiedModelKind::Cloud => UnifiedModelStatus::Ready,
+        UnifiedModelKind::Local => UnifiedModelStatus::NotDownloaded,
     }
 }
 
@@ -616,13 +767,33 @@ fn model_to_record(model: &UnifiedModel) -> Result<UnifiedModelRecord, AppCoreEr
     Ok(UnifiedModelRecord {
         id: model.id.clone(),
         display_name: model.display_name.clone(),
-        provider: model.provider.clone(),
+        provider: legacy_provider_value(model),
+        kind: model.kind.as_str().to_owned(),
+        backend_id: model.backend_id.clone(),
         status: model.status.as_str().to_owned(),
         spec: spec_json,
         runtime_presets: runtime_presets_json,
+        config_schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION as i64,
+        config_policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION as i64,
         created_at: model.created_at,
         updated_at: model.updated_at,
     })
+}
+
+fn legacy_provider_value(model: &UnifiedModel) -> String {
+    match model.kind {
+        UnifiedModelKind::Local => model
+            .backend_id
+            .as_deref()
+            .map(|backend_id| format!("local.{backend_id}"))
+            .unwrap_or_else(|| "local".to_owned()),
+        UnifiedModelKind::Cloud => model
+            .spec
+            .provider_id
+            .as_deref()
+            .map(|provider_id| format!("cloud.{provider_id}"))
+            .unwrap_or_else(|| "cloud".to_owned()),
+    }
 }
 
 fn sync_model_pack_record(
@@ -799,23 +970,15 @@ async fn load_model_with_state(
     let (_, channel) = resolve_backend_channel(&state, resolved_target.backend_id)?;
     let (num_workers, worker_source) = if let Some(workers) = command.num_workers {
         validate_and_normalize_model_workers(resolved_target.backend_id, workers, "request")?
-    } else if let Some(workers) = resolved_target
-        .pack_load_defaults
-        .as_ref()
-        .and_then(|defaults| defaults.num_workers)
+    } else if let Some(workers) =
+        resolved_target.pack_load_defaults.as_ref().and_then(|defaults| defaults.num_workers)
     {
-        validate_and_normalize_model_workers(
-            resolved_target.backend_id,
-            workers,
-            "model_pack",
-        )?
+        validate_and_normalize_model_workers(resolved_target.backend_id, workers, "model_pack")?
     } else {
         resolve_model_workers(&state, resolved_target.backend_id, None).await?
     };
-    let (context_length, context_source) = if let Some(context_length) = resolved_target
-        .pack_load_defaults
-        .as_ref()
-        .and_then(|defaults| defaults.context_length)
+    let (context_length, context_source) = if let Some(context_length) =
+        resolved_target.pack_load_defaults.as_ref().and_then(|defaults| defaults.context_length)
     {
         (context_length, "model_pack")
     } else {
@@ -871,10 +1034,11 @@ async fn resolve_model_load_target(
         let backend_id = resolve_local_backend_from_model(&model)?;
         let model_path = resolve_local_model_path(&model)?;
         if model_packs::is_model_pack_path(&model_path) {
-            let pack_target = model_packs::build_model_pack_load_target(std::path::Path::new(&model_path))?;
+            let pack_target =
+                model_packs::build_model_pack_load_target(std::path::Path::new(&model_path))?;
             if pack_target.backend_id != backend_id {
                 return Err(AppCoreError::BadRequest(format!(
-                    "model '{}' pack backend '{}' does not match catalog provider backend '{}'",
+                    "model '{}' pack backend '{}' does not match catalog backend '{}'",
                     model.id, pack_target.backend_id, backend_id
                 )));
             }
@@ -916,7 +1080,8 @@ async fn resolve_model_load_target(
     let (backend_id, _) = resolve_backend_channel(state, backend_id)?;
 
     if model_packs::is_model_pack_path(&model_path) {
-        let pack_target = model_packs::build_model_pack_load_target(std::path::Path::new(&model_path))?;
+        let pack_target =
+            model_packs::build_model_pack_load_target(std::path::Path::new(&model_path))?;
         if pack_target.backend_id != backend_id {
             return Err(AppCoreError::BadRequest(format!(
                 "model pack backend '{}' does not match requested backend '{}'",
@@ -931,12 +1096,7 @@ async fn resolve_model_load_target(
         });
     }
 
-    Ok(ResolvedModelLoadTarget {
-        backend_id,
-        model_path,
-        model_id: None,
-        pack_load_defaults: None,
-    })
+    Ok(ResolvedModelLoadTarget { backend_id, model_path, model_id: None, pack_load_defaults: None })
 }
 
 async fn resolve_unload_backend(
@@ -985,10 +1145,22 @@ async fn resolve_local_catalog_model(
 fn resolve_local_backend_from_model(
     model: &UnifiedModel,
 ) -> Result<RuntimeBackendId, AppCoreError> {
-    backend_id_from_provider(&model.provider).ok_or_else(|| {
+    if model.kind != UnifiedModelKind::Local {
+        return Err(AppCoreError::BadRequest(format!(
+            "model '{}' is '{}' and cannot be managed with local runtime lifecycle endpoints",
+            model.id,
+            model.kind.as_str()
+        )));
+    }
+
+    let backend_id = model.backend_id.as_deref().ok_or_else(|| {
+        AppCoreError::BadRequest(format!("model '{}' is local but is missing backend_id", model.id))
+    })?;
+
+    backend_id.parse().map_err(|_| {
         AppCoreError::BadRequest(format!(
-            "model '{}' uses provider '{}' and cannot be managed with local runtime lifecycle endpoints",
-            model.id, model.provider
+            "unknown backend_id '{}' for model '{}'",
+            backend_id, model.id
         ))
     })
 }
@@ -1012,17 +1184,40 @@ fn resolve_local_model_path(model: &UnifiedModel) -> Result<String, AppCoreError
 #[cfg(test)]
 mod tests {
     use super::{
+        CloudProviderConfig, build_cloud_chat_model_option, build_local_chat_model_option,
         canonicalize_model_spec, canonicalize_runtime_presets, map_grpc_model_error,
         normalize_required_text, validate_and_normalize_model_workers,
     };
-    use crate::domain::models::{ModelSpec, RuntimePresets};
+    use crate::domain::models::{
+        ChatModelSource, ModelSpec, RuntimePresets, UnifiedModel, UnifiedModelKind,
+        UnifiedModelStatus,
+    };
     use crate::error::AppCoreError;
+    use chrono::Utc;
     use slab_types::RuntimeBackendId;
+    use std::collections::BTreeMap;
 
     #[test]
-    fn cloud_models_require_remote_model_and_provider_reference() {
-        let error = canonicalize_model_spec("cloud.openai", ModelSpec::default())
+    fn cloud_models_require_provider_reference() {
+        let error = canonicalize_model_spec(UnifiedModelKind::Cloud, None, ModelSpec::default())
             .expect_err("missing cloud fields");
+
+        assert!(
+            error.to_string().contains(
+                "cloud models must set spec.provider_id to a configured providers.registry entry"
+            ),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn cloud_models_require_remote_model_id() {
+        let error = canonicalize_model_spec(
+            UnifiedModelKind::Cloud,
+            None,
+            ModelSpec { provider_id: Some("openai-main".into()), ..ModelSpec::default() },
+        )
+        .expect_err("missing remote_model_id");
 
         assert!(
             error.to_string().contains("cloud models must set spec.remote_model_id"),
@@ -1032,8 +1227,9 @@ mod tests {
 
     #[test]
     fn cloud_models_trim_provider_and_remote_model() {
-        let spec = canonicalize_model_spec(
-            "cloud.openai",
+        let (_, spec) = canonicalize_model_spec(
+            UnifiedModelKind::Cloud,
+            None,
             ModelSpec {
                 provider_id: Some(" openai-main ".into()),
                 remote_model_id: Some(" gpt-4.1-mini ".into()),
@@ -1044,6 +1240,117 @@ mod tests {
 
         assert_eq!(spec.provider_id.as_deref(), Some("openai-main"));
         assert_eq!(spec.remote_model_id.as_deref(), Some("gpt-4.1-mini"));
+    }
+
+    #[test]
+    fn cloud_models_clear_local_only_fields() {
+        let (_, spec) = canonicalize_model_spec(
+            UnifiedModelKind::Cloud,
+            None,
+            ModelSpec {
+                provider_id: Some("openai-main".into()),
+                remote_model_id: Some("gpt-4.1-mini".into()),
+                repo_id: Some("Qwen/Qwen3-8B-GGUF".into()),
+                filename: Some("qwen3-8b.gguf".into()),
+                local_path: Some("C:/models/qwen3-8b.gguf".into()),
+                chat_template: Some("chatml".into()),
+                ..ModelSpec::default()
+            },
+        )
+        .expect("cloud spec");
+
+        assert!(spec.repo_id.is_none());
+        assert!(spec.filename.is_none());
+        assert!(spec.local_path.is_none());
+        assert!(spec.chat_template.is_none());
+    }
+
+    #[test]
+    fn local_models_require_backend_id() {
+        let error = canonicalize_model_spec(UnifiedModelKind::Local, None, ModelSpec::default())
+            .expect_err("missing backend_id");
+
+        assert!(
+            error.to_string().contains("local models must set backend_id"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn local_models_clear_cloud_only_fields_and_canonicalize_backend_id() {
+        let (backend_id, spec) = canonicalize_model_spec(
+            UnifiedModelKind::Local,
+            Some(" ggml.llama ".into()),
+            ModelSpec {
+                provider_id: Some("openai-main".into()),
+                remote_model_id: Some("gpt-4.1-mini".into()),
+                ..ModelSpec::default()
+            },
+        )
+        .expect("local spec");
+
+        assert_eq!(backend_id.as_deref(), Some("ggml.llama"));
+        assert!(spec.provider_id.is_none());
+        assert!(spec.remote_model_id.is_none());
+    }
+
+    #[test]
+    fn local_chat_picker_only_includes_llama_models() {
+        let whisper = make_model(
+            UnifiedModelKind::Local,
+            Some("ggml.whisper"),
+            None,
+            None,
+            UnifiedModelStatus::Ready,
+            Some("C:/models/whisper.bin"),
+        );
+        assert!(build_local_chat_model_option(&whisper).is_none());
+
+        let llama = make_model(
+            UnifiedModelKind::Local,
+            Some("ggml.llama"),
+            None,
+            None,
+            UnifiedModelStatus::Downloading,
+            None,
+        );
+        let option = build_local_chat_model_option(&llama).expect("llama option");
+
+        assert_eq!(option.source, ChatModelSource::Local);
+        assert_eq!(option.backend_id.as_deref(), Some("ggml.llama"));
+        assert!(option.pending);
+        assert!(!option.downloaded);
+    }
+
+    #[test]
+    fn cloud_chat_picker_requires_known_provider() {
+        let model = make_model(
+            UnifiedModelKind::Cloud,
+            None,
+            Some("openai-main"),
+            Some("gpt-4.1-mini"),
+            UnifiedModelStatus::Ready,
+            None,
+        );
+
+        assert!(build_cloud_chat_model_option(&BTreeMap::new(), &model).is_none());
+
+        let mut providers = BTreeMap::new();
+        providers.insert(
+            "openai-main".to_owned(),
+            CloudProviderConfig {
+                id: "openai-main".to_owned(),
+                name: "OpenAI".to_owned(),
+                api_base: "https://api.openai.com/v1".to_owned(),
+                api_key: None,
+                api_key_env: None,
+            },
+        );
+
+        let option = build_cloud_chat_model_option(&providers, &model).expect("cloud option");
+        assert_eq!(option.source, ChatModelSource::Cloud);
+        assert_eq!(option.provider_id.as_deref(), Some("openai-main"));
+        assert_eq!(option.provider_name.as_deref(), Some("OpenAI"));
     }
 
     #[test]
@@ -1078,12 +1385,9 @@ mod tests {
 
     #[test]
     fn diffusion_workers_are_clamped_to_one() {
-        let (workers, source) = validate_and_normalize_model_workers(
-            RuntimeBackendId::GgmlDiffusion,
-            4,
-            "settings",
-        )
-        .expect("diffusion worker count should normalize");
+        let (workers, source) =
+            validate_and_normalize_model_workers(RuntimeBackendId::GgmlDiffusion, 4, "settings")
+                .expect("diffusion worker count should normalize");
 
         assert_eq!(workers, 1);
         assert_eq!(source, "settings");
@@ -1091,12 +1395,9 @@ mod tests {
 
     #[test]
     fn non_diffusion_workers_keep_requested_count() {
-        let (workers, source) = validate_and_normalize_model_workers(
-            RuntimeBackendId::GgmlWhisper,
-            3,
-            "request",
-        )
-        .expect("whisper worker count should normalize");
+        let (workers, source) =
+            validate_and_normalize_model_workers(RuntimeBackendId::GgmlWhisper, 3, "request")
+                .expect("whisper worker count should normalize");
 
         assert_eq!(workers, 3);
         assert_eq!(source, "request");
@@ -1104,13 +1405,38 @@ mod tests {
 
     #[test]
     fn zero_workers_are_rejected() {
-        let error = validate_and_normalize_model_workers(
-            RuntimeBackendId::GgmlDiffusion,
-            0,
-            "request",
-        )
-        .expect_err("zero workers should fail validation");
+        let error =
+            validate_and_normalize_model_workers(RuntimeBackendId::GgmlDiffusion, 0, "request")
+                .expect_err("zero workers should fail validation");
 
-        assert!(matches!(error, AppCoreError::BadRequest(message) if message.contains("at least 1")));
+        assert!(
+            matches!(error, AppCoreError::BadRequest(message) if message.contains("at least 1"))
+        );
+    }
+
+    fn make_model(
+        kind: UnifiedModelKind,
+        backend_id: Option<&str>,
+        provider_id: Option<&str>,
+        remote_model_id: Option<&str>,
+        status: UnifiedModelStatus,
+        local_path: Option<&str>,
+    ) -> UnifiedModel {
+        UnifiedModel {
+            id: "model-1".to_owned(),
+            display_name: "Model 1".to_owned(),
+            kind,
+            backend_id: backend_id.map(str::to_owned),
+            status,
+            spec: ModelSpec {
+                provider_id: provider_id.map(str::to_owned),
+                remote_model_id: remote_model_id.map(str::to_owned),
+                local_path: local_path.map(str::to_owned),
+                ..ModelSpec::default()
+            },
+            runtime_presets: None,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
     }
 }

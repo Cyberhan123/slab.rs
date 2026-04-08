@@ -74,7 +74,7 @@ impl GGMLDiffusionEngine {
     ///
     /// Loading the model files specified in `params` may take several seconds.
     pub fn new_context(&mut self, params: ContextParams) -> Result<(), engine::EngineError> {
-          info!("new_context, unloading context first...");
+        info!("new_context, unloading context first...");
         self.ctx = None;
 
         let ctx = self

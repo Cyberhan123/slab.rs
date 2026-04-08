@@ -16,11 +16,11 @@ use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatModelOption,
-    ChatResultChoice, ChatStreamChunk, ConversationMessage as DomainConversationMessage,
-    ConversationMessageContent, StructuredOutput, TextCompletionCommand, TextCompletionOutput,
-    TextCompletionResult, TextResultChoice, assistant_message_from_parts,
-    assistant_message_from_text_response, serialize_session_message,
+    ChatCompletionCommand, ChatCompletionOutput, ChatCompletionResult, ChatResultChoice,
+    ChatStreamChunk, ConversationMessage as DomainConversationMessage, ConversationMessageContent,
+    StructuredOutput, TextCompletionCommand, TextCompletionOutput, TextCompletionResult,
+    TextResultChoice, assistant_message_from_parts, assistant_message_from_text_response,
+    serialize_session_message,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{ChatMessage, ChatStore};
@@ -50,10 +50,6 @@ pub struct ChatService {
 impl ChatService {
     pub fn new(state: ModelState) -> Self {
         Self { state }
-    }
-
-    pub async fn list_chat_models(&self) -> Result<Vec<ChatModelOption>, AppCoreError> {
-        cloud::list_chat_models(&self.state).await
     }
 
     pub async fn create_chat_completion(
@@ -401,7 +397,7 @@ async fn resolve_requested_model(
         return Ok(trimmed.to_owned());
     }
 
-    let options = cloud::list_chat_models(state).await?;
+    let options = crate::domain::services::model::list_chat_models_from_state(state).await?;
     let preferred = options
         .iter()
         .find(|item| item.downloaded || item.provider_id.is_some())

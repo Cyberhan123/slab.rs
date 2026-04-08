@@ -57,9 +57,8 @@ pub use llama_model::{ChatMessage, LlamaModel};
 pub use llama_sampler::{LlamaSampler, SamplerChainBuilder};
 pub use model_params::LlamaModelParams;
 pub use runtime::{
-    LlamaInferenceParams, LlamaLoadConfig, LlamaRuntime, LlamaRuntimeError, SessionId,
-    StreamChunk, StreamHandle,
-    LlamaSessionSnapshot,
+    LlamaInferenceParams, LlamaLoadConfig, LlamaRuntime, LlamaRuntimeError, LlamaSessionSnapshot,
+    SessionId, StreamChunk, StreamHandle,
 };
 pub use token::{LlamaPos, LlamaSeqId, LlamaToken};
 

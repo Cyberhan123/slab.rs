@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use sha2::{Digest, Sha256};
 use slab_model_pack::{
-    BackendConfigDocument, BackendConfigScope, ConfigEntryRef, ConfigRef, ModelPack,
-    ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults, ModelPackManifest,
-    ModelPackRuntimeBridge, PackModelStatus, PackPricing, PackRuntimePresets, PackSource,
-    PackSourceFile, PresetDocument, VariantDocument, MANIFEST_FILE_NAME, PACK_EXTENSION,
+    BackendConfigDocument, BackendConfigScope, ConfigEntryRef, ConfigRef, MANIFEST_FILE_NAME,
+    ModelPack, ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults, ModelPackManifest,
+    ModelPackRuntimeBridge, PACK_EXTENSION, PackModelStatus, PackPricing, PackRuntimePresets,
+    PackSource, PackSourceFile, PresetDocument, VariantDocument,
 };
 use slab_types::{Capability, DiffusionLoadOptions, ModelFamily, RuntimeBackendId};
 use uuid::Uuid;
@@ -22,7 +22,7 @@ use zip::write::SimpleFileOptions;
 
 use crate::domain::models::{
     CreateModelCommand, ModelSpec, Pricing, RuntimePresets, StoredModelConfig, UnifiedModel,
-    UnifiedModelStatus,
+    UnifiedModelKind, UnifiedModelStatus, upgrade_stored_model_config,
 };
 use crate::error::AppCoreError;
 
@@ -210,20 +210,24 @@ fn build_model_command(
     resolved: &slab_model_pack::ResolvedModelPack,
 ) -> Result<CreateModelCommand, AppCoreError> {
     match manifest.source.as_ref() {
-        Some(PackSource::Cloud {
-            provider_id,
-            remote_model_id,
-        }) => build_cloud_model_command(manifest, provider_id, remote_model_id),
+        Some(PackSource::Cloud { provider_id, remote_model_id }) => {
+            build_cloud_model_command(manifest, provider_id, remote_model_id)
+        }
         _ => build_local_model_command(path, manifest, resolved),
     }
 }
 
-pub fn build_model_pack_load_target(
-    path: &Path,
-) -> Result<ModelPackLoadTarget, AppCoreError> {
+pub fn build_model_pack_load_target(path: &Path) -> Result<ModelPackLoadTarget, AppCoreError> {
     let bridge = read_model_pack_runtime_bridge(path)?;
     let load_spec = bridge
-        .runtime_load_spec(bridge.model_spec.metadata.get("default_preset").map(String::as_str).unwrap_or("default"))
+        .runtime_load_spec(
+            bridge
+                .model_spec
+                .metadata
+                .get("default_preset")
+                .map(String::as_str)
+                .unwrap_or("default"),
+        )
         .map_err(map_model_pack_error)?;
 
     Ok(ModelPackLoadTarget {
@@ -291,11 +295,8 @@ fn write_bytes_file(path: &Path, payload: &[u8]) -> Result<(), AppCoreError> {
     let temp_path = parent.join(format!(".{}.tmp-{}", file_name, Uuid::new_v4()));
 
     let write_result = (|| -> Result<(), AppCoreError> {
-        let mut temp_file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
-            .open(&temp_path)
-            .map_err(|error| {
+        let mut temp_file =
+            OpenOptions::new().create_new(true).write(true).open(&temp_path).map_err(|error| {
                 AppCoreError::Internal(format!(
                     "failed to create temp model pack file '{}': {error}",
                     temp_path.display()
@@ -364,7 +365,11 @@ fn read_persisted_model_config_from_pack_bytes(
         return Ok(None);
     }
 
-    Ok(Some(state.config))
+    let config = upgrade_stored_model_config(state.config).map_err(|error| {
+        AppCoreError::BadRequest(format!("invalid persisted model config: {error}"))
+    })?;
+
+    Ok(Some(config))
 }
 
 fn attach_persisted_state_to_pack_bytes(
@@ -386,7 +391,9 @@ fn build_generated_model_pack_bytes(config: &StoredModelConfig) -> Result<Vec<u8
     let manifest_sha256 = entries
         .iter()
         .find_map(|(path, payload)| (path == MANIFEST_FILE_NAME).then(|| hash_bytes_hex(payload)))
-        .ok_or_else(|| AppCoreError::Internal("generated model pack is missing manifest.json".into()))?;
+        .ok_or_else(|| {
+            AppCoreError::Internal("generated model pack is missing manifest.json".into())
+        })?;
     entries.push((
         INTERNAL_MODEL_STATE_ENTRY.to_owned(),
         build_persisted_state_bytes(&manifest_sha256, config)?,
@@ -400,7 +407,7 @@ fn build_generated_pack_entries(
     let mut manifest = build_generated_manifest(config);
     let mut entries = Vec::new();
 
-    if let Some(backend) = infer_runtime_backend_from_provider(&config.provider) {
+    if let Some(backend) = infer_runtime_backend_from_config(config) {
         let variant_ref = ConfigEntryRef {
             id: GENERATED_VARIANT_ID.to_owned(),
             label: "Default Variant".to_owned(),
@@ -432,8 +439,9 @@ fn build_generated_pack_entries(
         let inference_config_ref = build_generated_inference_config(config, backend)
             .transpose()?
             .map(|document| {
-                let config_ref = ConfigRef::parse(format!("ref://{GENERATED_INFERENCE_CONFIG_PATH}"))
-                    .map_err(map_model_pack_error)?;
+                let config_ref =
+                    ConfigRef::parse(format!("ref://{GENERATED_INFERENCE_CONFIG_PATH}"))
+                        .map_err(map_model_pack_error)?;
                 entries.push((
                     GENERATED_INFERENCE_CONFIG_PATH.to_owned(),
                     serialize_pretty_json(&document, "generated inference config")?,
@@ -481,16 +489,13 @@ fn build_generated_pack_entries(
 
     entries.insert(
         0,
-        (
-            MANIFEST_FILE_NAME.to_owned(),
-            serialize_pretty_json(&manifest, "generated manifest")?,
-        ),
+        (MANIFEST_FILE_NAME.to_owned(), serialize_pretty_json(&manifest, "generated manifest")?),
     );
     Ok(entries)
 }
 
 fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
-    let family = infer_model_family(&config.provider);
+    let family = infer_model_family(config.kind, config.backend_id.as_deref());
     let capability = infer_capability(family);
     let mut metadata = BTreeMap::new();
     metadata.insert("generated_by".into(), "slab-app-core".into());
@@ -499,16 +504,16 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
         version: 1,
         id: config.id.clone(),
         label: config.display_name.clone(),
-        provider: Some(config.provider.clone()),
         status: config.status.clone().map(pack_status_from_unified),
         family,
         capabilities: vec![capability],
         backend_hints: Default::default(),
         context_window: config.spec.context_window,
-        pricing: config.spec.pricing.as_ref().map(|pricing| PackPricing {
-            input: pricing.input,
-            output: pricing.output,
-        }),
+        pricing: config
+            .spec
+            .pricing
+            .as_ref()
+            .map(|pricing| PackPricing { input: pricing.input, output: pricing.output }),
         runtime_presets: config.runtime_presets.as_ref().and_then(pack_runtime_presets_from_model),
         metadata,
         source: build_pack_source_from_config(config),
@@ -522,31 +527,28 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
 }
 
 fn build_pack_source_from_config(config: &StoredModelConfig) -> Option<PackSource> {
-    if let (Some(provider_id), Some(remote_model_id)) = (
-        config.spec.provider_id.as_deref(),
-        config.spec.remote_model_id.as_deref(),
-    ) {
-        return Some(PackSource::Cloud {
-            provider_id: provider_id.to_owned(),
-            remote_model_id: remote_model_id.to_owned(),
-        });
+    if config.kind == UnifiedModelKind::Cloud {
+        if let (Some(provider_id), Some(remote_model_id)) =
+            (config.spec.provider_id.as_deref(), config.spec.remote_model_id.as_deref())
+        {
+            return Some(PackSource::Cloud {
+                provider_id: provider_id.to_owned(),
+                remote_model_id: remote_model_id.to_owned(),
+            });
+        }
+
+        return None;
     }
 
-    if let Some(local_path) = config
-        .spec
-        .local_path
-        .as_deref()
-        .filter(|path| !is_model_pack_path(path))
+    if let Some(local_path) =
+        config.spec.local_path.as_deref().filter(|path| !is_model_pack_path(path))
     {
-        return Some(PackSource::LocalPath {
-            path: local_path.to_owned(),
-        });
+        return Some(PackSource::LocalPath { path: local_path.to_owned() });
     }
 
-    if let (Some(repo_id), Some(filename)) = (
-        config.spec.repo_id.as_deref(),
-        config.spec.filename.as_deref(),
-    ) {
+    if let (Some(repo_id), Some(filename)) =
+        (config.spec.repo_id.as_deref(), config.spec.filename.as_deref())
+    {
         return Some(PackSource::HuggingFace {
             repo_id: repo_id.to_owned(),
             revision: None,
@@ -611,13 +613,9 @@ fn build_generated_inference_config(
     }))
 }
 
-fn serialize_pretty_json<T: Serialize>(
-    value: &T,
-    label: &str,
-) -> Result<Vec<u8>, AppCoreError> {
-    let mut payload = serde_json::to_vec_pretty(value).map_err(|error| {
-        AppCoreError::Internal(format!("failed to serialize {label}: {error}"))
-    })?;
+fn serialize_pretty_json<T: Serialize>(value: &T, label: &str) -> Result<Vec<u8>, AppCoreError> {
+    let mut payload = serde_json::to_vec_pretty(value)
+        .map_err(|error| AppCoreError::Internal(format!("failed to serialize {label}: {error}")))?;
     payload.push(b'\n');
     Ok(payload)
 }
@@ -649,20 +647,23 @@ fn build_pack_bytes(entries: Vec<(String, Vec<u8>)>) -> Result<Vec<u8>, AppCoreE
         })?;
     }
 
-    writer
-        .finish()
-        .map_err(|error| AppCoreError::Internal(format!("failed to finalize model pack bytes: {error}")))?;
+    writer.finish().map_err(|error| {
+        AppCoreError::Internal(format!("failed to finalize model pack bytes: {error}"))
+    })?;
     Ok(cursor.into_inner())
 }
 
 fn collect_pack_entries(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, AppCoreError> {
-    let mut archive = ZipArchive::new(Cursor::new(bytes))
-        .map_err(|error| AppCoreError::Internal(format!("failed to open model pack archive: {error}")))?;
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|error| {
+        AppCoreError::Internal(format!("failed to open model pack archive: {error}"))
+    })?;
     let mut entries = Vec::new();
 
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).map_err(|error| {
-            AppCoreError::Internal(format!("failed to access model pack archive entry {index}: {error}"))
+            AppCoreError::Internal(format!(
+                "failed to access model pack archive entry {index}: {error}"
+            ))
         })?;
         if entry.is_dir() {
             continue;
@@ -671,7 +672,9 @@ fn collect_pack_entries(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, AppCoreE
         let path = entry.name().trim().to_owned();
         let mut payload = Vec::new();
         entry.read_to_end(&mut payload).map_err(|error| {
-            AppCoreError::Internal(format!("failed to read model pack archive entry '{path}': {error}"))
+            AppCoreError::Internal(format!(
+                "failed to read model pack archive entry '{path}': {error}"
+            ))
         })?;
         entries.push((path, payload));
     }
@@ -680,14 +683,17 @@ fn collect_pack_entries(bytes: &[u8]) -> Result<Vec<(String, Vec<u8>)>, AppCoreE
 }
 
 fn read_pack_entry_bytes(bytes: &[u8], entry_name: &str) -> Result<Option<Vec<u8>>, AppCoreError> {
-    let mut archive = ZipArchive::new(Cursor::new(bytes))
-        .map_err(|error| AppCoreError::Internal(format!("failed to open model pack archive: {error}")))?;
+    let mut archive = ZipArchive::new(Cursor::new(bytes)).map_err(|error| {
+        AppCoreError::Internal(format!("failed to open model pack archive: {error}"))
+    })?;
 
     match archive.by_name(entry_name) {
         Ok(mut entry) => {
             let mut payload = Vec::new();
             entry.read_to_end(&mut payload).map_err(|error| {
-                AppCoreError::Internal(format!("failed to read model pack archive entry '{entry_name}': {error}"))
+                AppCoreError::Internal(format!(
+                    "failed to read model pack archive entry '{entry_name}': {error}"
+                ))
             })?;
             Ok(Some(payload))
         }
@@ -714,16 +720,24 @@ fn hash_bytes_hex(bytes: &[u8]) -> String {
     hex
 }
 
-fn infer_runtime_backend_from_provider(provider: &str) -> Option<RuntimeBackendId> {
-    provider.strip_prefix("local.").and_then(|backend| backend.parse().ok())
+fn infer_runtime_backend_from_config(config: &StoredModelConfig) -> Option<RuntimeBackendId> {
+    if config.kind != UnifiedModelKind::Local {
+        return None;
+    }
+
+    config.backend_id.as_deref().and_then(|backend| backend.parse().ok())
 }
 
-fn infer_model_family(provider: &str) -> ModelFamily {
-    if provider.contains("whisper") {
+fn infer_model_family(kind: UnifiedModelKind, backend_id: Option<&str>) -> ModelFamily {
+    let Some(backend_id) = (kind == UnifiedModelKind::Local).then_some(backend_id).flatten() else {
+        return ModelFamily::Llama;
+    };
+
+    if backend_id.contains("whisper") {
         ModelFamily::Whisper
-    } else if provider.contains("diffusion") {
+    } else if backend_id.contains("diffusion") {
         ModelFamily::Diffusion
-    } else if provider.contains("onnx") {
+    } else if backend_id.contains("onnx") {
         ModelFamily::Onnx
     } else {
         ModelFamily::Llama
@@ -788,9 +802,13 @@ mod tests {
     use super::{
         attach_persisted_state_to_pack_bytes, build_generated_model_pack_bytes,
         build_model_command_from_pack_bytes, build_pack_bytes, collect_pack_entries,
-        read_persisted_model_config_from_pack_bytes,
+        manifest_sha256_from_pack_bytes, read_persisted_model_config_from_pack_bytes,
     };
-    use crate::domain::models::{ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModelStatus};
+    use crate::domain::models::{
+        CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+        ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModelKind, UnifiedModelStatus,
+    };
+    use crate::error::AppCoreError;
 
     fn build_pack(entries: Vec<(&str, String)>) -> Vec<u8> {
         let mut cursor = std::io::Cursor::new(Vec::new());
@@ -814,7 +832,6 @@ mod tests {
                 "version": 2,
                 "id": "gpt_4_1_mini",
                 "label": "GPT-4.1 mini",
-                "provider": "cloud.openai",
                 "status": "ready",
                 "family": "llama",
                 "context_window": 128000,
@@ -840,14 +857,18 @@ mod tests {
 
         assert_eq!(command.id.as_deref(), Some("gpt_4_1_mini"));
         assert_eq!(command.display_name, "GPT-4.1 mini");
-        assert_eq!(command.provider, "cloud.openai");
+        assert_eq!(command.kind, UnifiedModelKind::Cloud);
+        assert_eq!(command.backend_id, None);
         assert_eq!(command.status, Some(UnifiedModelStatus::Ready));
         assert_eq!(command.spec.provider_id.as_deref(), Some("openai-main"));
         assert_eq!(command.spec.remote_model_id.as_deref(), Some("gpt-4.1-mini"));
         assert_eq!(command.spec.context_window, Some(128000));
         assert_eq!(command.spec.pricing.as_ref().map(|pricing| pricing.input), Some(0.4));
         assert_eq!(command.spec.pricing.as_ref().map(|pricing| pricing.output), Some(1.6));
-        assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.temperature), Some(0.7));
+        assert_eq!(
+            command.runtime_presets.as_ref().and_then(|presets| presets.temperature),
+            Some(0.7)
+        );
         assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.top_p), Some(0.95));
     }
 
@@ -860,7 +881,6 @@ mod tests {
                     "version": 2,
                     "id": "qwen2.5-7b-instruct",
                     "label": "Qwen2.5 7B Instruct",
-                    "provider": "local.ggml.llama",
                     "family": "llama",
                     "context_window": 32768,
                     "runtime_presets": {
@@ -939,20 +959,22 @@ mod tests {
             ),
         ]);
 
-        let command = build_model_command_from_pack_bytes(
-            Path::new("qwen2.5-7b-instruct.slab"),
-            &bytes,
-        )
-        .expect("local command");
+        let command =
+            build_model_command_from_pack_bytes(Path::new("qwen2.5-7b-instruct.slab"), &bytes)
+                .expect("local command");
 
-        assert_eq!(command.provider, "local.ggml.llama");
+        assert_eq!(command.kind, UnifiedModelKind::Local);
+        assert_eq!(command.backend_id.as_deref(), Some("ggml.llama"));
         assert_eq!(command.status, Some(UnifiedModelStatus::NotDownloaded));
         assert_eq!(command.spec.repo_id.as_deref(), Some("bartowski/Qwen2.5-7B-Instruct-GGUF"));
         assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
         assert_eq!(command.spec.local_path, None);
         assert_eq!(command.spec.context_window, Some(32768));
         assert_eq!(command.spec.chat_template.as_deref(), Some("chatml"));
-        assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.temperature), Some(0.4));
+        assert_eq!(
+            command.runtime_presets.as_ref().and_then(|presets| presets.temperature),
+            Some(0.4)
+        );
         assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.top_p), Some(0.9));
     }
 
@@ -964,7 +986,6 @@ mod tests {
                 "version": 1,
                 "id": "openrouter-llama-3_1-8b-instruct",
                 "label": "Manifest Label",
-                "provider": "cloud.openrouter",
                 "family": "llama",
                 "capabilities": ["text_generation"],
                 "source": {
@@ -976,27 +997,31 @@ mod tests {
             .to_string(),
         )]);
         let config = StoredModelConfig {
+            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
             id: "openrouter-llama-3_1-8b-instruct".to_owned(),
             display_name: "Persisted Label".to_owned(),
-            provider: "cloud.openrouter".to_owned(),
+            kind: UnifiedModelKind::Cloud,
+            backend_id: None,
             status: Some(UnifiedModelStatus::Ready),
             spec: ModelSpec {
                 provider_id: Some("openrouter-main".to_owned()),
                 remote_model_id: Some("meta-llama/llama-3.1-8b-instruct".to_owned()),
                 ..Default::default()
             },
-            runtime_presets: Some(RuntimePresets {
-                temperature: Some(0.2),
-                top_p: Some(0.8),
-            }),
+            runtime_presets: Some(RuntimePresets { temperature: Some(0.2), top_p: Some(0.8) }),
         };
 
-        let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &config).expect("attach persisted state");
-        let command =
-            build_model_command_from_pack_bytes(Path::new("openrouter.slab"), &bytes).expect("command from pack");
+        let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &config)
+            .expect("attach persisted state");
+        let command = build_model_command_from_pack_bytes(Path::new("openrouter.slab"), &bytes)
+            .expect("command from pack");
 
         assert_eq!(command.display_name, "Persisted Label");
-        assert_eq!(command.runtime_presets.as_ref().and_then(|presets| presets.temperature), Some(0.2));
+        assert_eq!(
+            command.runtime_presets.as_ref().and_then(|presets| presets.temperature),
+            Some(0.2)
+        );
     }
 
     #[test]
@@ -1007,7 +1032,6 @@ mod tests {
                 "version": 1,
                 "id": "openrouter-llama-3_1-8b-instruct",
                 "label": "Original Manifest Label",
-                "provider": "cloud.openrouter",
                 "family": "llama",
                 "capabilities": ["text_generation"],
                 "source": {
@@ -1019,9 +1043,12 @@ mod tests {
             .to_string(),
         )]);
         let config = StoredModelConfig {
+            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
             id: "openrouter-llama-3_1-8b-instruct".to_owned(),
             display_name: "Persisted Label".to_owned(),
-            provider: "cloud.openrouter".to_owned(),
+            kind: UnifiedModelKind::Cloud,
+            backend_id: None,
             status: Some(UnifiedModelStatus::Ready),
             spec: ModelSpec {
                 provider_id: Some("openrouter-main".to_owned()),
@@ -1031,7 +1058,8 @@ mod tests {
             runtime_presets: None,
         };
 
-        let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &config).expect("attach persisted state");
+        let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &config)
+            .expect("attach persisted state");
         let mut entries = collect_pack_entries(&bytes).expect("collect entries");
         for (path, payload) in &mut entries {
             if path == "manifest.json" {
@@ -1039,7 +1067,6 @@ mod tests {
                     "version": 1,
                     "id": "openrouter-llama-3_1-8b-instruct",
                     "label": "Changed Manifest Label",
-                    "provider": "cloud.openrouter",
                     "family": "llama",
                     "capabilities": ["text_generation"],
                     "source": {
@@ -1052,8 +1079,8 @@ mod tests {
             }
         }
         let bytes = build_pack_bytes(entries).expect("rebuild pack");
-        let command =
-            build_model_command_from_pack_bytes(Path::new("openrouter.slab"), &bytes).expect("command from pack");
+        let command = build_model_command_from_pack_bytes(Path::new("openrouter.slab"), &bytes)
+            .expect("command from pack");
 
         assert_eq!(command.display_name, "Changed Manifest Label");
     }
@@ -1061,9 +1088,12 @@ mod tests {
     #[test]
     fn generated_pack_carries_persisted_state() {
         let config = StoredModelConfig {
+            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
             id: "local-qwen".to_owned(),
             display_name: "Local Qwen".to_owned(),
-            provider: "local.ggml.llama".to_owned(),
+            kind: UnifiedModelKind::Local,
+            backend_id: Some("ggml.llama".to_owned()),
             status: Some(UnifiedModelStatus::NotDownloaded),
             spec: ModelSpec {
                 repo_id: Some("bartowski/Qwen2.5-7B-Instruct-GGUF".to_owned()),
@@ -1071,23 +1101,124 @@ mod tests {
                 context_window: Some(8192),
                 ..Default::default()
             },
-            runtime_presets: Some(RuntimePresets {
-                temperature: Some(0.6),
-                top_p: Some(0.9),
-            }),
+            runtime_presets: Some(RuntimePresets { temperature: Some(0.6), top_p: Some(0.9) }),
         };
 
         let bytes = build_generated_model_pack_bytes(&config).expect("generate pack");
         let restored = read_persisted_model_config_from_pack_bytes(&bytes)
             .expect("read state")
             .expect("state exists");
-        let command =
-            build_model_command_from_pack_bytes(Path::new("local-qwen.slab"), &bytes).expect("command from pack");
+        let command = build_model_command_from_pack_bytes(Path::new("local-qwen.slab"), &bytes)
+            .expect("command from pack");
 
         assert_eq!(restored.id, "local-qwen");
+        assert_eq!(restored.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
+        assert_eq!(restored.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
         assert_eq!(command.display_name, "Local Qwen");
         assert_eq!(command.spec.repo_id.as_deref(), Some("bartowski/Qwen2.5-7B-Instruct-GGUF"));
         assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
+    }
+
+    #[test]
+    fn legacy_persisted_state_without_versions_still_loads() {
+        let base_bytes = build_pack(vec![(
+            "manifest.json",
+            json!({
+                "version": 2,
+                "id": "gpt_4_1_mini",
+                "label": "GPT-4.1 mini",
+                "status": "ready",
+                "family": "llama",
+                "source": {
+                    "kind": "cloud",
+                    "provider_id": "openai-main",
+                    "remote_model_id": "gpt-4.1-mini"
+                }
+            })
+            .to_string(),
+        )]);
+        let manifest_sha256 = manifest_sha256_from_pack_bytes(&base_bytes).expect("manifest hash");
+        let mut entries = collect_pack_entries(&base_bytes).expect("collect entries");
+        entries.push((
+            "internal/stored-model-config".to_owned(),
+            serde_json::to_vec_pretty(&json!({
+                "manifest_sha256": manifest_sha256,
+                "config": {
+                    "id": "gpt_4_1_mini",
+                    "display_name": "Persisted GPT-4.1 mini",
+                    "kind": "cloud",
+                    "status": "ready",
+                    "spec": {
+                        "provider_id": "openai-main",
+                        "remote_model_id": "gpt-4.1-mini",
+                        "context_window": 128000
+                    },
+                    "runtime_presets": {
+                        "temperature": 0.6
+                    }
+                }
+            }))
+            .expect("serialize state"),
+        ));
+        let bytes = build_pack_bytes(entries).expect("build pack");
+
+        let restored = read_persisted_model_config_from_pack_bytes(&bytes)
+            .expect("read state")
+            .expect("state exists");
+
+        assert_eq!(restored.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
+        assert_eq!(restored.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
+        assert_eq!(restored.display_name, "Persisted GPT-4.1 mini");
+        assert_eq!(restored.spec.context_window, Some(128000));
+    }
+
+    #[test]
+    fn future_persisted_state_versions_are_rejected() {
+        let base_bytes = build_pack(vec![(
+            "manifest.json",
+            json!({
+                "version": 2,
+                "id": "gpt_4_1_mini",
+                "label": "GPT-4.1 mini",
+                "status": "ready",
+                "family": "llama",
+                "source": {
+                    "kind": "cloud",
+                    "provider_id": "openai-main",
+                    "remote_model_id": "gpt-4.1-mini"
+                }
+            })
+            .to_string(),
+        )]);
+        let manifest_sha256 = manifest_sha256_from_pack_bytes(&base_bytes).expect("manifest hash");
+        let mut entries = collect_pack_entries(&base_bytes).expect("collect entries");
+        entries.push((
+            "internal/stored-model-config".to_owned(),
+            serde_json::to_vec_pretty(&json!({
+                "manifest_sha256": manifest_sha256,
+                "config": {
+                    "schema_version": CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION + 1,
+                    "policy_version": CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
+                    "id": "gpt_4_1_mini",
+                    "display_name": "Persisted GPT-4.1 mini",
+                    "kind": "cloud",
+                    "status": "ready",
+                    "spec": {
+                        "provider_id": "openai-main",
+                        "remote_model_id": "gpt-4.1-mini"
+                    }
+                }
+            }))
+            .expect("serialize state"),
+        ));
+        let bytes = build_pack_bytes(entries).expect("build pack");
+
+        let error = read_persisted_model_config_from_pack_bytes(&bytes)
+            .expect_err("future version should be rejected");
+
+        assert!(
+            matches!(error, AppCoreError::BadRequest(message) if message.contains("unsupported stored model config schema_version"))
+        );
     }
 }
 
@@ -1097,20 +1228,8 @@ fn build_local_model_command(
     resolved: &slab_model_pack::ResolvedModelPack,
 ) -> Result<CreateModelCommand, AppCoreError> {
     let bridge = resolved.compile_default_runtime_bridge().map_err(map_model_pack_error)?;
-    let derived_provider = format!("local.{}", bridge.backend.canonical_id());
-    let provider = match normalize_optional_manifest_text(manifest.provider.as_deref()) {
-        Some(provider) => {
-            if provider != derived_provider {
-                return Err(AppCoreError::BadRequest(format!(
-                    "local model pack provider '{}' must match resolved runtime backend '{}'",
-                    provider, derived_provider
-                )));
-            }
-            provider
-        }
-        None => derived_provider,
-    };
-    let status = manifest_status(manifest.status).unwrap_or_else(|| default_status_for_runtime_bridge(&bridge));
+    let status = manifest_status(manifest.status)
+        .unwrap_or_else(|| default_status_for_runtime_bridge(&bridge));
     let runtime_presets = build_runtime_presets_from_manifest(manifest.runtime_presets.as_ref())
         .or_else(|| build_runtime_presets(&bridge.inference_defaults));
     let (repo_id, filename, local_path) = local_source_fields(resolved, &bridge);
@@ -1119,21 +1238,23 @@ fn build_local_model_command(
     Ok(CreateModelCommand {
         id: Some(manifest.id.clone()),
         display_name: manifest.label.clone(),
-        provider,
+        kind: UnifiedModelKind::Local,
+        backend_id: Some(bridge.backend.to_string()),
         status: Some(status),
         spec: ModelSpec {
             pricing: build_pricing_from_manifest(manifest.pricing.as_ref()),
             repo_id,
             filename,
             local_path: local_path.or_else(|| {
-                allow_local_path_fallback.then(|| {
-                    bridge
-                        .model_spec
-                        .source
-                        .primary_path()
-                        .map(|value| value.to_string_lossy().into_owned())
-                })
-                .flatten()
+                allow_local_path_fallback
+                    .then(|| {
+                        bridge
+                            .model_spec
+                            .source
+                            .primary_path()
+                            .map(|value| value.to_string_lossy().into_owned())
+                    })
+                    .flatten()
             }),
             context_window: manifest.context_window.or(bridge.load_defaults.context_length),
             chat_template: bridge.load_defaults.chat_template.clone(),
@@ -1148,18 +1269,6 @@ fn build_cloud_model_command(
     provider_id: &str,
     remote_model_id: &str,
 ) -> Result<CreateModelCommand, AppCoreError> {
-    let provider = normalize_optional_manifest_text(manifest.provider.as_deref()).ok_or_else(|| {
-        AppCoreError::BadRequest(
-            "cloud model pack must set a top-level provider such as 'cloud.openai'".into(),
-        )
-    })?;
-    if !provider.starts_with("cloud.") {
-        return Err(AppCoreError::BadRequest(format!(
-            "cloud model pack provider '{}' must start with 'cloud.'",
-            provider
-        )));
-    }
-
     let provider_id = normalize_required_manifest_text(provider_id, "source.provider_id")?;
     let remote_model_id =
         normalize_required_manifest_text(remote_model_id, "source.remote_model_id")?;
@@ -1167,7 +1276,8 @@ fn build_cloud_model_command(
     Ok(CreateModelCommand {
         id: Some(manifest.id.clone()),
         display_name: manifest.label.clone(),
-        provider,
+        kind: UnifiedModelKind::Cloud,
+        backend_id: None,
         status: manifest_status(manifest.status),
         spec: ModelSpec {
             provider_id: Some(provider_id),
@@ -1198,28 +1308,20 @@ fn build_runtime_presets_from_manifest(
 ) -> Option<RuntimePresets> {
     let runtime_presets = runtime_presets?;
     (runtime_presets.temperature.is_some() || runtime_presets.top_p.is_some()).then_some(
-        RuntimePresets {
-            temperature: runtime_presets.temperature,
-            top_p: runtime_presets.top_p,
-        },
+        RuntimePresets { temperature: runtime_presets.temperature, top_p: runtime_presets.top_p },
     )
 }
 
 fn normalize_optional_manifest_text(value: Option<&str>) -> Option<String> {
     value.and_then(|value| {
         let trimmed = value.trim();
-        if trimmed.is_empty() {
-            None
-        } else {
-            Some(trimmed.to_owned())
-        }
+        if trimmed.is_empty() { None } else { Some(trimmed.to_owned()) }
     })
 }
 
 fn normalize_required_manifest_text(value: &str, label: &str) -> Result<String, AppCoreError> {
-    normalize_optional_manifest_text(Some(value)).ok_or_else(|| {
-        AppCoreError::BadRequest(format!("{} must not be empty", label))
-    })
+    normalize_optional_manifest_text(Some(value))
+        .ok_or_else(|| AppCoreError::BadRequest(format!("{} must not be empty", label)))
 }
 
 fn local_source_fields(
@@ -1235,7 +1337,14 @@ fn local_source_fields(
                     .components
                     .get("model")
                     .map(|component| &component.document.source)
-                    .or_else(|| preset.variant.components.values().next().map(|component| &component.document.source))
+                    .or_else(|| {
+                        preset
+                            .variant
+                            .components
+                            .values()
+                            .next()
+                            .map(|component| &component.document.source)
+                    })
             })
         })
         .or(resolved.manifest.source.as_ref());

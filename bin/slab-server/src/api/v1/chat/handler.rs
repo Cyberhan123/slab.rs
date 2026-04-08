@@ -23,7 +23,7 @@ use crate::api::validation::ValidatedJson;
 use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::models::{ChatCompletionOutput, ChatStreamChunk, TextCompletionOutput};
-use slab_app_core::domain::services::ChatService;
+use slab_app_core::domain::services::{ChatService, ModelService};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -76,7 +76,7 @@ pub fn router() -> Router<Arc<AppState>> {
     )
 )]
 async fn list_chat_models(
-    State(service): State<ChatService>,
+    State(service): State<ModelService>,
 ) -> Result<Json<Vec<ChatModelOption>>, ServerError> {
     let items = service.list_chat_models().await?.into_iter().map(Into::into).collect();
     Ok(Json(items))

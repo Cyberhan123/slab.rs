@@ -30,7 +30,8 @@ pub struct ModelPackRuntimeBridge {
 
 impl ResolvedModelPack {
     pub fn compile_default_runtime_bridge(&self) -> Result<ModelPackRuntimeBridge, ModelPackError> {
-        let preset = self.default_preset().ok_or_else(|| ModelPackError::MissingDefaultPresetDeclaration)?;
+        let preset =
+            self.default_preset().ok_or_else(|| ModelPackError::MissingDefaultPresetDeclaration)?;
         self.compile_runtime_bridge(preset)
     }
 
@@ -38,12 +39,19 @@ impl ResolvedModelPack {
         &self,
         preset: &ResolvedPreset,
     ) -> Result<ModelPackRuntimeBridge, ModelPackError> {
-        let capability = self.manifest.capabilities.first().copied().ok_or(ModelPackError::MissingCapability)?;
+        let capability =
+            self.manifest.capabilities.first().copied().ok_or(ModelPackError::MissingCapability)?;
         let backend = resolve_runtime_backend(preset)?;
         let source = build_model_source(preset)?;
         let load_options = config_payload_as_options(preset.effective_load_config.as_ref())?;
-        let inference_defaults = config_payload_as_options(preset.effective_inference_config.as_ref())?;
-        let load_defaults = build_load_defaults(&preset.document.id, backend, &source, preset.effective_load_config.as_ref())?;
+        let inference_defaults =
+            config_payload_as_options(preset.effective_inference_config.as_ref())?;
+        let load_defaults = build_load_defaults(
+            &preset.document.id,
+            backend,
+            &source,
+            preset.effective_load_config.as_ref(),
+        )?;
         let metadata = merged_metadata(self, preset);
         let driver_hints = merged_driver_hints(&self.manifest.backend_hints, backend);
 
@@ -64,7 +72,10 @@ impl ResolvedModelPack {
 }
 
 impl ModelPackRuntimeBridge {
-    pub fn runtime_load_spec(&self, preset_id: &str) -> Result<RuntimeModelLoadSpec, ModelPackError> {
+    pub fn runtime_load_spec(
+        &self,
+        preset_id: &str,
+    ) -> Result<RuntimeModelLoadSpec, ModelPackError> {
         let model_path = match &self.model_spec.source {
             ModelSource::LocalPath { path } => path.clone(),
             ModelSource::LocalArtifacts { files } => files
@@ -72,18 +83,20 @@ impl ModelPackRuntimeBridge {
                 .or_else(|| files.get("diffusion_model"))
                 .or_else(|| files.values().next())
                 .cloned()
-                .ok_or_else(|| ModelPackError::MissingPrimaryArtifact { preset_id: preset_id.to_owned() })?,
+                .ok_or_else(|| ModelPackError::MissingPrimaryArtifact {
+                    preset_id: preset_id.to_owned(),
+                })?,
             ModelSource::HuggingFace { .. } => {
                 return Err(ModelPackError::NonMaterializedSource {
                     preset_id: preset_id.to_owned(),
                     source_kind: "hugging_face".into(),
-                })
+                });
             }
             _ => {
                 return Err(ModelPackError::NonMaterializedSource {
                     preset_id: preset_id.to_owned(),
                     source_kind: "unknown".into(),
-                })
+                });
             }
         };
 
@@ -121,7 +134,9 @@ fn resolve_runtime_backend(preset: &ResolvedPreset) -> Result<RuntimeBackendId, 
     match candidates.as_slice() {
         [backend] => Ok(*backend),
         [] => Err(ModelPackError::MissingRuntimeBackend { preset_id: preset.document.id.clone() }),
-        _ => Err(ModelPackError::ConflictingRuntimeBackend { preset_id: preset.document.id.clone() }),
+        _ => {
+            Err(ModelPackError::ConflictingRuntimeBackend { preset_id: preset.document.id.clone() })
+        }
     }
 }
 
@@ -131,13 +146,17 @@ fn build_model_source(preset: &ResolvedPreset) -> Result<ModelSource, ModelPackE
     }
 
     let Some(source) = preset.variant.effective_source.clone() else {
-        return Err(ModelPackError::MissingPrimaryArtifact { preset_id: preset.document.id.clone() });
+        return Err(ModelPackError::MissingPrimaryArtifact {
+            preset_id: preset.document.id.clone(),
+        });
     };
 
     pack_source_to_model_source(source)
 }
 
-fn build_model_source_from_components(preset: &ResolvedPreset) -> Result<ModelSource, ModelPackError> {
+fn build_model_source_from_components(
+    preset: &ResolvedPreset,
+) -> Result<ModelSource, ModelPackError> {
     let mut local_files = BTreeMap::new();
     let mut hf_repo_id: Option<String> = None;
     let mut hf_revision: Option<String> = None;
@@ -175,7 +194,7 @@ fn build_model_source_from_components(preset: &ResolvedPreset) -> Result<ModelSo
             PackSource::Cloud { .. } => {
                 return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
                     source_kind: "cloud".into(),
-                })
+                });
             }
         }
     }
@@ -206,18 +225,16 @@ fn build_model_source_from_components(preset: &ResolvedPreset) -> Result<ModelSo
 fn pack_source_to_model_source(source: PackSource) -> Result<ModelSource, ModelPackError> {
     Ok(match source {
         PackSource::LocalPath { path } => ModelSource::LocalPath { path: PathBuf::from(path) },
-        PackSource::LocalFiles { files } => ModelSource::LocalArtifacts {
-            files: source_file_map(None, &files),
-        },
-        PackSource::HuggingFace { repo_id, revision, files } => ModelSource::HuggingFace {
-            repo_id,
-            revision,
-            files: source_file_map(None, &files),
-        },
+        PackSource::LocalFiles { files } => {
+            ModelSource::LocalArtifacts { files: source_file_map(None, &files) }
+        }
+        PackSource::HuggingFace { repo_id, revision, files } => {
+            ModelSource::HuggingFace { repo_id, revision, files: source_file_map(None, &files) }
+        }
         PackSource::Cloud { .. } => {
             return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
                 source_kind: "cloud".into(),
-            })
+            });
         }
     })
 }
@@ -231,9 +248,14 @@ fn component_files_to_entries(
     files: &[PackSourceFile],
 ) -> BTreeMap<String, PathBuf> {
     let use_component_id = files.len() == 1;
-    files.iter()
+    files
+        .iter()
         .map(|file| {
-            let key = if use_component_id { component_id.to_owned() } else { format!("{component_id}/{}", file.id) };
+            let key = if use_component_id {
+                component_id.to_owned()
+            } else {
+                format!("{component_id}/{}", file.id)
+            };
             (key, PathBuf::from(&file.path))
         })
         .collect()
@@ -283,7 +305,8 @@ fn build_diffusion_load_defaults(
     }
 
     Ok(DiffusionLoadOptions {
-        diffusion_model_path: artifact_path(source, "diffusion_model").or_else(|| artifact_path(source, "model")),
+        diffusion_model_path: artifact_path(source, "diffusion_model")
+            .or_else(|| artifact_path(source, "model")),
         vae_path: artifact_path(source, "vae"),
         taesd_path: artifact_path(source, "taesd"),
         lora_model_dir: options.get("lora_model_dir").and_then(as_string).map(PathBuf::from),
@@ -400,7 +423,15 @@ mod tests {
         let load_spec = bridge.runtime_load_spec("default").expect("load spec");
 
         assert_eq!(bridge.backend.canonical_id(), "ggml.llama");
-        assert_eq!(bridge.model_spec.source.primary_path().map(|path| path.to_string_lossy().to_string()).as_deref(), Some("C:/models/qwen.gguf"));
+        assert_eq!(
+            bridge
+                .model_spec
+                .source
+                .primary_path()
+                .map(|path| path.to_string_lossy().to_string())
+                .as_deref(),
+            Some("C:/models/qwen.gguf")
+        );
         assert_eq!(load_spec.context_length, Some(8192));
         assert_eq!(bridge.inference_defaults.get("temperature").and_then(Value::as_f64), Some(0.7));
     }
@@ -414,7 +445,6 @@ mod tests {
                     "version": 2,
                     "id": "gpt-4.1-mini",
                     "label": "GPT-4.1 mini",
-                    "provider": "cloud.openai",
                     "family": "llama",
                     "capabilities": ["text_generation"],
                     "source": {
@@ -452,7 +482,9 @@ mod tests {
 
         let pack = ModelPack::from_bytes(&bytes).expect("load pack");
         let resolved = pack.resolve().expect("resolve pack");
-        let error = resolved.compile_default_runtime_bridge().expect_err("cloud source must not compile runtime bridge");
+        let error = resolved
+            .compile_default_runtime_bridge()
+            .expect_err("cloud source must not compile runtime bridge");
 
         assert!(error.to_string().contains("source kind 'cloud'"));
     }

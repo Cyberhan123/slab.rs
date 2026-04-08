@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use slab_llama::{runtime::LlamaRuntimeError, LlamaError};
+use slab_llama::{LlamaError, runtime::LlamaRuntimeError};
 use thiserror::Error;
 
 pub use slab_llama::runtime::{SessionId, StreamChunk, StreamHandle};

@@ -11,7 +11,7 @@ use crate::domain::models::{
     ModelLoadCommand as DomainModelLoadCommand, ModelSpec as DomainModelSpec,
     ModelStatus as DomainModelStatus, Pricing as DomainPricing,
     RuntimePresets as DomainRuntimePresets, UnifiedModel as DomainUnifiedModel,
-    UpdateModelCommand as DomainUpdateModelCommand,
+    UnifiedModelKind as DomainUnifiedModelKind, UpdateModelCommand as DomainUpdateModelCommand,
 };
 
 // ---------------------------------------------------------------------------
@@ -30,7 +30,8 @@ pub struct PricingRequest {
 /// Provider-specific model configuration (request).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 pub struct ModelSpecRequest {
-    /// Cloud provider settings id from `chat.providers` (e.g. `"openai-main"`).
+    /// Cloud provider id from the settings document `providers.registry` list
+    /// (e.g. `"openai-main"`).
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub provider_id: Option<String>,
     /// Remote model identifier for cloud providers (e.g. `"gpt-4o"`).
@@ -56,6 +57,13 @@ pub struct ModelSpecRequest {
     pub chat_template: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelKind {
+    Local,
+    Cloud,
+}
+
 /// Default runtime parameters (request).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 pub struct RuntimePresetsRequest {
@@ -79,13 +87,13 @@ pub struct CreateModelRequest {
         message = "display_name must not be empty"
     ))]
     pub display_name: String,
-    #[validate(custom(
-        function = "crate::schemas::validation::validate_non_blank",
-        message = "provider must not be empty"
-    ))]
-    pub provider: String,
-    /// Initial status. If omitted, defaults to `"ready"` for cloud providers and
-    /// `"not_downloaded"` for local providers.
+    /// Whether this model is backed by the local runtime or a cloud provider.
+    pub kind: ModelKind,
+    /// Runtime backend identifier for local models, e.g. `"ggml.llama"`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub backend_id: Option<String>,
+    /// Initial status. If omitted, defaults to `"ready"` for cloud models and
+    /// `"not_downloaded"` for local models.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub status: Option<String>,
     pub spec: Option<ModelSpecRequest>,
@@ -100,7 +108,11 @@ pub struct UpdateModelRequest {
         message = "display_name must not be empty"
     ))]
     pub display_name: Option<String>,
-    pub provider: Option<String>,
+    /// Whether this model is backed by the local runtime or a cloud provider.
+    pub kind: Option<ModelKind>,
+    /// Runtime backend identifier for local models, e.g. `"ggml.llama"`.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub backend_id: Option<String>,
     pub status: Option<String>,
     pub spec: Option<ModelSpecRequest>,
     pub runtime_presets: Option<RuntimePresetsRequest>,
@@ -196,7 +208,7 @@ pub struct ListAvailableQuery {
 /// Query parameters for `GET /v1/models`.
 #[derive(Debug, Clone, Deserialize, IntoParams, ToSchema, Default)]
 pub struct ListModelsQuery {
-    // Reserved for future filtering (e.g. by provider prefix or status).
+    // Reserved for future filtering (e.g. by kind or status).
 }
 
 // ---------------------------------------------------------------------------
@@ -245,8 +257,11 @@ pub struct RuntimePresetsResponse {
 pub struct UnifiedModelResponse {
     pub id: String,
     pub display_name: String,
-    /// Provider identifier, e.g. `"cloud.openai"`, `"local.ggml.llama"`.
-    pub provider: String,
+    /// Whether this model is backed by the local runtime or a cloud provider.
+    pub kind: ModelKind,
+    /// Runtime backend identifier for local models, e.g. `"ggml.llama"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backend_id: Option<String>,
     /// Status: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`.
     pub status: String,
     pub spec: ModelSpecResponse,
@@ -287,12 +302,31 @@ impl From<DomainRuntimePresets> for RuntimePresetsResponse {
     }
 }
 
+impl From<DomainUnifiedModelKind> for ModelKind {
+    fn from(kind: DomainUnifiedModelKind) -> Self {
+        match kind {
+            DomainUnifiedModelKind::Local => Self::Local,
+            DomainUnifiedModelKind::Cloud => Self::Cloud,
+        }
+    }
+}
+
+impl From<ModelKind> for DomainUnifiedModelKind {
+    fn from(kind: ModelKind) -> Self {
+        match kind {
+            ModelKind::Local => Self::Local,
+            ModelKind::Cloud => Self::Cloud,
+        }
+    }
+}
+
 impl From<DomainUnifiedModel> for UnifiedModelResponse {
     fn from(model: DomainUnifiedModel) -> Self {
         Self {
             id: model.id,
             display_name: model.display_name,
-            provider: model.provider,
+            kind: model.kind.into(),
+            backend_id: model.backend_id,
             status: model.status.as_str().to_owned(),
             spec: model.spec.into(),
             runtime_presets: model.runtime_presets.map(Into::into),
@@ -328,7 +362,8 @@ impl From<CreateModelRequest> for DomainCreateModelCommand {
         Self {
             id: None,
             display_name: req.display_name,
-            provider: req.provider,
+            kind: req.kind.into(),
+            backend_id: req.backend_id,
             status: req.status.and_then(|status| status.parse().ok()),
             spec: req.spec.map(Into::into).unwrap_or_default(),
             runtime_presets: req.runtime_presets.map(Into::into),
@@ -340,7 +375,8 @@ impl From<UpdateModelRequest> for DomainUpdateModelCommand {
     fn from(req: UpdateModelRequest) -> Self {
         Self {
             display_name: req.display_name,
-            provider: req.provider,
+            kind: req.kind.map(Into::into),
+            backend_id: req.backend_id,
             status: req.status.and_then(|status| status.parse().ok()),
             spec: req.spec.map(Into::into),
             runtime_presets: req.runtime_presets.map(Into::into),

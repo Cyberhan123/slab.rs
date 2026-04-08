@@ -74,9 +74,7 @@ fn register_ggml_drivers(
         llama::{GGMLLlamaEngine, spawn_backend_with_engine as spawn_llama},
         whisper::{GGMLWhisperEngine, WhisperWorker},
     };
-    use crate::internal::scheduler::backend::runner::{
-        spawn_dedicated_workers, spawn_workers,
-    };
+    use crate::internal::scheduler::backend::runner::{spawn_dedicated_workers, spawn_workers};
 
     let llama_engine = drivers
         .llama_lib_dir

@@ -847,7 +847,9 @@ mod tests {
             model_path: PathBuf::from("C:/models/model.gguf"),
             num_workers: 2,
             context_length: Some(8192),
-            chat_template: Some("{% for message in messages %}{{ message['content'] }}{% endfor %}".to_owned()),
+            chat_template: Some(
+                "{% for message in messages %}{{ message['content'] }}{% endfor %}".to_owned(),
+            ),
             diffusion: Some(DiffusionLoadOptions {
                 diffusion_model_path: Some(PathBuf::from("C:/models/diffusion.safetensors")),
                 vae_path: Some(PathBuf::from("C:/models/vae.safetensors")),

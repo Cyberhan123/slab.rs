@@ -59,7 +59,9 @@ impl ResolvedModelPack {
 }
 
 fn push_backend(backends: &mut Vec<RuntimeBackendId>, candidate: Option<RuntimeBackendId>) {
-    if let Some(candidate) = candidate && !backends.contains(&candidate) {
+    if let Some(candidate) = candidate
+        && !backends.contains(&candidate)
+    {
         backends.push(candidate);
     }
 }

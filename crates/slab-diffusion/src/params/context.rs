@@ -6,9 +6,7 @@ use serde::{Deserialize, Serialize};
 use slab_diffusion_sys::{sd_ctx_params_t, sd_embedding_t};
 
 use crate::Diffusion;
-use crate::params::support::{
-    c_string_ptr, new_c_string, sync_embedding_views,
-};
+use crate::params::support::{c_string_ptr, new_c_string, sync_embedding_views};
 use crate::params::{Embedding, LoraApplyMode, Prediction, RngType, WeightType};
 
 /// Stable Rust-native context parameters shared across the runtime chain.

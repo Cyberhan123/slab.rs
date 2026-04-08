@@ -2,8 +2,8 @@ use std::convert::Infallible;
 use std::sync::Arc;
 
 use futures::stream::BoxStream;
-use slab_model_pack::ModelPackRuntimeBridge;
 use slab_diffusion::{Image as DiffusionImage, ImgParams as DiffusionImgParams};
+use slab_model_pack::ModelPackRuntimeBridge;
 use tokio::sync::Mutex;
 
 use crate::base::error::CoreError;

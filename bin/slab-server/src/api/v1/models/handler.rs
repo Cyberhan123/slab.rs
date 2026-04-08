@@ -107,11 +107,9 @@ async fn import_model_pack(
     State(service): State<ModelService>,
     mut multipart: Multipart,
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
-    while let Some(field) = multipart
-        .next_field()
-        .await
-        .map_err(|error| ServerError::BadRequest(format!("failed to read multipart field: {error}")))?
-    {
+    while let Some(field) = multipart.next_field().await.map_err(|error| {
+        ServerError::BadRequest(format!("failed to read multipart field: {error}"))
+    })? {
         let file_name = field.file_name().map(str::to_owned);
         if file_name.is_none() {
             continue;
@@ -124,10 +122,9 @@ async fn import_model_pack(
             )));
         }
 
-        let bytes = field
-            .bytes()
-            .await
-            .map_err(|error| ServerError::BadRequest(format!("failed to read model pack bytes: {error}")))?;
+        let bytes = field.bytes().await.map_err(|error| {
+            ServerError::BadRequest(format!("failed to read model pack bytes: {error}"))
+        })?;
         if bytes.is_empty() {
             return Err(ServerError::BadRequest("uploaded model pack is empty".into()));
         }
@@ -135,9 +132,7 @@ async fn import_model_pack(
         return Ok(Json(service.import_model_pack_bytes(bytes.as_ref()).await?.into()));
     }
 
-    Err(ServerError::BadRequest(
-        "multipart body must contain a .slab file field".into(),
-    ))
+    Err(ServerError::BadRequest("multipart body must contain a .slab file field".into()))
 }
 
 #[utoipa::path(

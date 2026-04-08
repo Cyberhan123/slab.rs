@@ -145,8 +145,7 @@ async fn runtime_worker_loop<H>(
     mut control_rx: broadcast::Receiver<WorkerCommand>,
     worker_id: usize,
     mut handler: H,
-) 
-where
+) where
     H: RuntimeWorkerHandler,
 {
     let mut last_applied_seq = 0u64;

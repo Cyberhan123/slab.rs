@@ -599,18 +599,13 @@ impl Default for SwaggerConfig {
 pub fn settings_document_v2_json_schema() -> Value {
     let mut schema = serde_json::to_value(schema_for!(SettingsDocumentV2))
         .expect("SettingsDocumentV2 schema should serialize");
-    let root = schema
-        .as_object_mut()
-        .expect("SettingsDocumentV2 schema root should be an object");
+    let root = schema.as_object_mut().expect("SettingsDocumentV2 schema root should be an object");
 
     root.insert(
         "$schema".into(),
         Value::String("https://json-schema.org/draft/2020-12/schema".into()),
     );
-    root.insert(
-        "$id".into(),
-        Value::String(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL.into()),
-    );
+    root.insert("$id".into(), Value::String(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL.into()));
     root.insert("title".into(), Value::String("Slab Settings Document".into()));
     root.insert(
         "description".into(),
@@ -732,10 +727,7 @@ mod tests {
     fn document_defaults_to_v2_schema() {
         let settings = SettingsDocumentV2::default();
 
-        assert_eq!(
-            settings.schema.as_deref(),
-            Some(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL)
-        );
+        assert_eq!(settings.schema.as_deref(), Some(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL));
         assert_eq!(settings.schema_version, 2);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.server.address, "127.0.0.1:3000");
