@@ -93,7 +93,7 @@ function HubModelCard({
               {backendLabel}
             </Badge>
             <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
-              {formatProvider(model.provider)}
+              {formatKind(model.kind)}
             </Badge>
             {model.is_vad_model ? (
               <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
@@ -161,11 +161,8 @@ function formatBackend(id: string) {
   }
 }
 
-function formatProvider(provider: string) {
-  return provider
-    .replace(/^local\./, '')
-    .replace(/[._-]+/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+function formatKind(kind: 'local' | 'cloud') {
+  return kind === 'cloud' ? 'Cloud' : 'Local';
 }
 
 function shortFileName(filename: string) {

@@ -2,9 +2,7 @@ use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
-use crate::domain::models::{
-    BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand,
-};
+use crate::domain::models::{BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand};
 
 #[derive(Debug, Deserialize, ToSchema, Validate)]
 pub struct DownloadLibRequest {

@@ -26,9 +26,7 @@ impl ModelPack {
         let path = path.as_ref();
         let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default();
         if !extension.eq_ignore_ascii_case(PACK_EXTENSION) {
-            return Err(ModelPackError::InvalidPackExtension {
-                path: path.display().to_string(),
-            });
+            return Err(ModelPackError::InvalidPackExtension { path: path.display().to_string() });
         }
 
         let bytes = fs::read(path).map_err(|source| ModelPackError::ReadPack {
@@ -41,8 +39,8 @@ impl ModelPack {
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, ModelPackError> {
         let cursor = Cursor::new(bytes);
-        let mut archive = ZipArchive::new(cursor)
-            .map_err(|source| ModelPackError::OpenArchive { source })?;
+        let mut archive =
+            ZipArchive::new(cursor).map_err(|source| ModelPackError::OpenArchive { source })?;
 
         let mut manifest = None;
         let mut documents = BTreeMap::new();
@@ -82,10 +80,7 @@ impl ModelPack {
             }
         }
 
-        let pack = Self {
-            manifest: manifest.ok_or(ModelPackError::MissingManifest)?,
-            documents,
-        };
+        let pack = Self { manifest: manifest.ok_or(ModelPackError::MissingManifest)?, documents };
 
         pack.validate_manifest_references()?;
         Ok(pack)
@@ -100,15 +95,18 @@ impl ModelPack {
     }
 
     pub fn document(&self, config_ref: &ConfigRef) -> Result<&PackDocument, ModelPackError> {
-        self.documents
-            .get(config_ref.path())
-            .ok_or_else(|| ModelPackError::MissingReferencedDocument {
+        self.documents.get(config_ref.path()).ok_or_else(|| {
+            ModelPackError::MissingReferencedDocument {
                 from: MANIFEST_FILE_NAME.into(),
                 path: config_ref.path().into(),
-            })
+            }
+        })
     }
 
-    pub fn resolve_variant(&self, config_ref: &ConfigRef) -> Result<&VariantDocument, ModelPackError> {
+    pub fn resolve_variant(
+        &self,
+        config_ref: &ConfigRef,
+    ) -> Result<&VariantDocument, ModelPackError> {
         match self.document(config_ref)? {
             PackDocument::Variant(document) => Ok(document),
             other => Err(ModelPackError::UnexpectedDocumentKind {
@@ -133,7 +131,10 @@ impl ModelPack {
         }
     }
 
-    pub fn resolve_preset(&self, config_ref: &ConfigRef) -> Result<&PresetDocument, ModelPackError> {
+    pub fn resolve_preset(
+        &self,
+        config_ref: &ConfigRef,
+    ) -> Result<&PresetDocument, ModelPackError> {
         match self.document(config_ref)? {
             PackDocument::Preset(document) => Ok(document),
             other => Err(ModelPackError::UnexpectedDocumentKind {
@@ -293,9 +294,7 @@ fn normalize_archive_path(path: &str) -> Result<String, ModelPackError> {
         || trimmed.contains('\\')
         || trimmed.split('/').any(|segment| segment.is_empty() || segment == "." || segment == "..")
     {
-        return Err(ModelPackError::InvalidArchivePath {
-            path: path.to_owned(),
-        });
+        return Err(ModelPackError::InvalidArchivePath { path: path.to_owned() });
     }
 
     Ok(trimmed.to_owned())
@@ -305,10 +304,8 @@ fn parse_json_document<T: serde::de::DeserializeOwned>(
     path: &str,
     raw: &str,
 ) -> Result<T, ModelPackError> {
-    serde_json::from_str(raw).map_err(|source| ModelPackError::InvalidJsonDocument {
-        path: path.to_owned(),
-        source,
-    })
+    serde_json::from_str(raw)
+        .map_err(|source| ModelPackError::InvalidJsonDocument { path: path.to_owned(), source })
 }
 
 #[cfg(test)]

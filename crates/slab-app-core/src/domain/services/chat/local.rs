@@ -141,10 +141,9 @@ fn attach_reasoning_metadata(response: &mut TextGenerationResponse) {
     }
 
     response.text = parsed.content;
-    response.metadata.insert(
-        REASONING_CONTENT_METADATA_KEY.into(),
-        Value::String(reasoning.to_owned()),
-    );
+    response
+        .metadata
+        .insert(REASONING_CONTENT_METADATA_KEY.into(), Value::String(reasoning.to_owned()));
 }
 
 #[derive(Debug, Clone, Default)]
@@ -346,113 +345,125 @@ pub(super) async fn create_chat_completion(
         let token_stream_terminal_metadata = Arc::clone(&terminal_metadata);
         let thinking_state = Arc::new(Mutex::new(ThinkingStreamState::default()));
         let token_stream_thinking_state = Arc::clone(&thinking_state);
-        let token_stream = backend_stream.then(move |chunk| {
-            let completion_id = completion_id_for_tokens.clone();
-            let model_name = model_name_for_tokens.clone();
-            let error_flag = Arc::clone(&token_stream_error_flag);
-            let completion_tokens = Arc::clone(&token_stream_completion_tokens);
-            let terminal_metadata = Arc::clone(&token_stream_terminal_metadata);
-            let thinking_state = Arc::clone(&token_stream_thinking_state);
-            async move {
-                match chunk {
-                    Ok(message) if !message.error.is_empty() => {
-                        error_flag.store(true, Ordering::SeqCst);
-                        vec![ChatStreamChunk::Data(super::build_error_chunk(&message.error))]
-                    }
-                    Ok(message) => {
-                        let decoded = convert::decode_chat_stream_chunk(&message);
-                        if decoded.done {
-                            let mut terminal = terminal_metadata
-                                .lock()
-                                .expect("local chat terminal metadata lock poisoned");
-                            if decoded.finish_reason.is_some() {
-                                terminal.finish_reason = decoded.finish_reason;
-                            }
-                            if decoded.usage.is_some() {
-                                terminal.usage = decoded.usage;
-                            }
-                            thinking_state
-                                .lock()
-                                .expect("local thinking state lock poisoned")
-                                .finish()
-                                .into_iter()
-                                .filter_map(|delta| match delta {
-                                    ThinkingDelta::Reasoning(token) if !token.is_empty() => {
-                                        Some(ChatStreamChunk::Data(super::build_reasoning_chunk(
+        let token_stream = backend_stream
+            .then(move |chunk| {
+                let completion_id = completion_id_for_tokens.clone();
+                let model_name = model_name_for_tokens.clone();
+                let error_flag = Arc::clone(&token_stream_error_flag);
+                let completion_tokens = Arc::clone(&token_stream_completion_tokens);
+                let terminal_metadata = Arc::clone(&token_stream_terminal_metadata);
+                let thinking_state = Arc::clone(&token_stream_thinking_state);
+                async move {
+                    match chunk {
+                        Ok(message) if !message.error.is_empty() => {
+                            error_flag.store(true, Ordering::SeqCst);
+                            vec![ChatStreamChunk::Data(super::build_error_chunk(&message.error))]
+                        }
+                        Ok(message) => {
+                            let decoded = convert::decode_chat_stream_chunk(&message);
+                            if decoded.done {
+                                let mut terminal = terminal_metadata
+                                    .lock()
+                                    .expect("local chat terminal metadata lock poisoned");
+                                if decoded.finish_reason.is_some() {
+                                    terminal.finish_reason = decoded.finish_reason;
+                                }
+                                if decoded.usage.is_some() {
+                                    terminal.usage = decoded.usage;
+                                }
+                                thinking_state
+                                    .lock()
+                                    .expect("local thinking state lock poisoned")
+                                    .finish()
+                                    .into_iter()
+                                    .filter_map(|delta| match delta {
+                                        ThinkingDelta::Reasoning(token) if !token.is_empty() => {
+                                            Some(ChatStreamChunk::Data(
+                                                super::build_reasoning_chunk(
+                                                    &completion_id,
+                                                    created_ts,
+                                                    &model_name,
+                                                    &token,
+                                                ),
+                                            ))
+                                        }
+                                        ThinkingDelta::Content(token) if !token.is_empty() => {
+                                            Some(ChatStreamChunk::Data(super::build_chunk(
+                                                &completion_id,
+                                                created_ts,
+                                                &model_name,
+                                                &token,
+                                            )))
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect()
+                            } else if let Some(reasoning) =
+                                reasoning_content_from_metadata(&decoded.metadata)
+                            {
+                                let mut chunks = Vec::new();
+                                if !reasoning.is_empty() {
+                                    chunks.push(ChatStreamChunk::Data(
+                                        super::build_reasoning_chunk(
                                             &completion_id,
                                             created_ts,
                                             &model_name,
-                                            &token,
-                                        )))
-                                    }
-                                    ThinkingDelta::Content(token) if !token.is_empty() => {
-                                        Some(ChatStreamChunk::Data(super::build_chunk(
-                                            &completion_id,
-                                            created_ts,
-                                            &model_name,
-                                            &token,
-                                        )))
-                                    }
-                                    _ => None,
-                                })
-                                .collect()
-                        } else if let Some(reasoning) = reasoning_content_from_metadata(&decoded.metadata) {
-                            let mut chunks = Vec::new();
-                            if !reasoning.is_empty() {
-                                chunks.push(ChatStreamChunk::Data(super::build_reasoning_chunk(
-                                    &completion_id,
-                                    created_ts,
-                                    &model_name,
-                                    reasoning,
-                                )));
+                                            reasoning,
+                                        ),
+                                    ));
+                                }
+                                if !decoded.delta.is_empty() {
+                                    chunks.push(ChatStreamChunk::Data(super::build_chunk(
+                                        &completion_id,
+                                        created_ts,
+                                        &model_name,
+                                        &decoded.delta,
+                                    )));
+                                }
+                                chunks
+                            } else if decoded.delta.is_empty() {
+                                Vec::new()
+                            } else {
+                                completion_tokens.fetch_add(1, Ordering::SeqCst);
+                                thinking_state
+                                    .lock()
+                                    .expect("local thinking state lock poisoned")
+                                    .ingest(&decoded.delta)
+                                    .into_iter()
+                                    .filter_map(|delta| match delta {
+                                        ThinkingDelta::Reasoning(token) if !token.is_empty() => {
+                                            Some(ChatStreamChunk::Data(
+                                                super::build_reasoning_chunk(
+                                                    &completion_id,
+                                                    created_ts,
+                                                    &model_name,
+                                                    &token,
+                                                ),
+                                            ))
+                                        }
+                                        ThinkingDelta::Content(token) if !token.is_empty() => {
+                                            Some(ChatStreamChunk::Data(super::build_chunk(
+                                                &completion_id,
+                                                created_ts,
+                                                &model_name,
+                                                &token,
+                                            )))
+                                        }
+                                        _ => None,
+                                    })
+                                    .collect()
                             }
-                            if !decoded.delta.is_empty() {
-                                chunks.push(ChatStreamChunk::Data(super::build_chunk(
-                                    &completion_id,
-                                    created_ts,
-                                    &model_name,
-                                    &decoded.delta,
-                                )));
-                            }
-                            chunks
-                        } else if decoded.delta.is_empty() {
-                            Vec::new()
-                        } else {
-                            completion_tokens.fetch_add(1, Ordering::SeqCst);
-                            thinking_state
-                                .lock()
-                                .expect("local thinking state lock poisoned")
-                                .ingest(&decoded.delta)
-                                .into_iter()
-                                .filter_map(|delta| match delta {
-                                    ThinkingDelta::Reasoning(token) if !token.is_empty() => {
-                                        Some(ChatStreamChunk::Data(super::build_reasoning_chunk(
-                                            &completion_id,
-                                            created_ts,
-                                            &model_name,
-                                            &token,
-                                        )))
-                                    }
-                                    ThinkingDelta::Content(token) if !token.is_empty() => {
-                                        Some(ChatStreamChunk::Data(super::build_chunk(
-                                            &completion_id,
-                                            created_ts,
-                                            &model_name,
-                                            &token,
-                                        )))
-                                    }
-                                    _ => None,
-                                })
-                                .collect()
+                        }
+                        Err(error) => {
+                            error_flag.store(true, Ordering::SeqCst);
+                            vec![ChatStreamChunk::Data(super::build_error_chunk(
+                                &error.to_string(),
+                            ))]
                         }
                     }
-                    Err(error) => {
-                        error_flag.store(true, Ordering::SeqCst);
-                        vec![ChatStreamChunk::Data(super::build_error_chunk(&error.to_string()))]
-                    }
                 }
-            }
-        }).flat_map(stream::iter);
+            })
+            .flat_map(stream::iter);
 
         let finish_chunk_error_flag = Arc::clone(&error_flag);
         let finish_chunk_completion_tokens = Arc::clone(&completion_tokens);
@@ -553,11 +564,8 @@ pub(super) async fn create_text_completion(
     prompt: &str,
     config: LocalTextRequestConfig,
 ) -> Result<slab_types::inference::TextGenerationResponse, AppCoreError> {
-    let prompt = apply_local_reasoning_controls_to_prompt(
-        prompt,
-        config.reasoning_effort,
-        config.verbosity,
-    );
+    let prompt =
+        apply_local_reasoning_controls_to_prompt(prompt, config.reasoning_effort, config.verbosity);
     let request = TextGenerationRequest {
         prompt: prompt.clone(),
         system_prompt: None,
@@ -626,10 +634,9 @@ fn map_runtime_chat_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        ParsedThinkingOutput, ThinkingDelta, ThinkingStreamState,
-        apply_local_reasoning_controls, apply_local_reasoning_controls_to_prompt,
-        attach_reasoning_metadata, local_reasoning_guidance, parse_thinking_output,
-        reasoning_content_from_metadata,
+        ParsedThinkingOutput, ThinkingDelta, ThinkingStreamState, apply_local_reasoning_controls,
+        apply_local_reasoning_controls_to_prompt, attach_reasoning_metadata,
+        local_reasoning_guidance, parse_thinking_output, reasoning_content_from_metadata,
     };
     use crate::domain::models::{
         ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
@@ -669,7 +676,10 @@ mod tests {
     fn thinking_stream_state_splits_reasoning_and_content_deltas() {
         let mut state = ThinkingStreamState::default();
         assert!(state.ingest("<th").is_empty());
-        assert_eq!(state.ingest("ink>first thought"), vec![ThinkingDelta::Reasoning("first thought".to_owned())]);
+        assert_eq!(
+            state.ingest("ink>first thought"),
+            vec![ThinkingDelta::Reasoning("first thought".to_owned())]
+        );
         assert_eq!(
             state.ingest("</think>\n\nfinal answer"),
             vec![ThinkingDelta::Content("\n\nfinal answer".to_owned())]
@@ -688,10 +698,7 @@ mod tests {
         attach_reasoning_metadata(&mut response);
 
         assert_eq!(response.text, "\n\nanswer");
-        assert_eq!(
-            response.metadata.get("reasoning_content"),
-            Some(&json!("step by step"))
-        );
+        assert_eq!(response.metadata.get("reasoning_content"), Some(&json!("step by step")));
     }
 
     #[test]

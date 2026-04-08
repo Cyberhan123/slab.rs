@@ -182,7 +182,13 @@ mod tests {
         let resolved = pack.resolve().expect("pack should resolve");
         let artifacts = resolved.default_preset().expect("default preset").artifact_map();
 
-        assert_eq!(artifacts.get("model").map(|artifact| artifact.path.as_str()), Some("C:/models/sdxl/model.safetensors"));
-        assert_eq!(artifacts.get("vae/weights").map(|artifact| artifact.path.as_str()), Some("C:/models/sdxl/vae.safetensors"));
+        assert_eq!(
+            artifacts.get("model").map(|artifact| artifact.path.as_str()),
+            Some("C:/models/sdxl/model.safetensors")
+        );
+        assert_eq!(
+            artifacts.get("vae/weights").map(|artifact| artifact.path.as_str()),
+            Some("C:/models/sdxl/vae.safetensors")
+        );
     }
 }

@@ -29,9 +29,11 @@ pub use chat::{
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
 pub use model::{
-    AvailableModelsQuery, AvailableModelsView, CreateModelCommand, DeletedModelView,
+    AvailableModelsQuery, AvailableModelsView, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
+    CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION, CreateModelCommand, DeletedModelView,
     DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus, Pricing,
-    RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
+    RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
+    UpdateModelCommand, upgrade_stored_model_config,
 };
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};

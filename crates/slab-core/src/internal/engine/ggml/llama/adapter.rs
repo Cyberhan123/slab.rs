@@ -1,13 +1,13 @@
-use crate::internal::engine;
 use crate::base::types::{StreamChunk as BaseStreamChunk, StreamHandle as BaseStreamHandle};
+use crate::internal::engine;
 use slab_llama::Llama;
 use slab_llama::{
     ChatMessage, LlamaContextParams, LlamaModel, LlamaModelParams, LlamaRuntime,
     LlamaSessionSnapshot,
 };
 use slab_types::inference::{TextGenerationUsage, TextPromptTokensDetails};
-use std::collections::HashMap;
 use slab_utils::loader::load_library_from_dir;
+use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use tokio::sync::{Mutex, mpsc, watch};
@@ -33,25 +33,14 @@ pub(crate) struct LlamaDispatchOutput {
 
 #[derive(Debug, Clone)]
 enum SessionBinding {
-    Ready {
-        snapshot: LlamaSessionSnapshot,
-        cached_prompt: String,
-        grammar: Option<String>,
-    },
+    Ready { snapshot: LlamaSessionSnapshot, cached_prompt: String, grammar: Option<String> },
     Busy,
 }
 
 #[derive(Debug, Clone)]
 enum SessionReusePlan {
-    CreateFresh {
-        delta_prompt: String,
-        cached_tokens: u32,
-    },
-    RestoreSnapshot {
-        snapshot: LlamaSessionSnapshot,
-        delta_prompt: String,
-        cached_tokens: u32,
-    },
+    CreateFresh { delta_prompt: String, cached_tokens: u32 },
+    RestoreSnapshot { snapshot: LlamaSessionSnapshot, delta_prompt: String, cached_tokens: u32 },
 }
 
 #[derive(Debug)]
@@ -126,11 +115,7 @@ fn plan_session_reuse(
         Some(SessionBinding::Busy) => {
             Err(GGMLLlamaEngineError::SessionKeyBusy { key: key.to_owned() })
         }
-        Some(SessionBinding::Ready {
-            snapshot,
-            cached_prompt,
-            grammar: cached_grammar,
-        }) => {
+        Some(SessionBinding::Ready { snapshot, cached_prompt, grammar: cached_grammar }) => {
             if cached_grammar.as_deref() != grammar {
                 return Ok(SessionReusePlan::CreateFresh {
                     delta_prompt: full_prompt.to_owned(),
@@ -254,11 +239,10 @@ impl GGMLLlamaEngine {
     }
 
     fn explicit_chat_template(&self) -> Result<Option<String>, engine::EngineError> {
-        let read_lock = self.explicit_chat_template.read().map_err(|_| {
-            GGMLLlamaEngineError::LockPoisoned {
+        let read_lock =
+            self.explicit_chat_template.read().map_err(|_| GGMLLlamaEngineError::LockPoisoned {
                 operation: "read explicit llama chat template state",
-            }
-        })?;
+            })?;
         Ok(read_lock.clone())
     }
 
@@ -432,11 +416,7 @@ impl GGMLLlamaEngine {
         Ok(())
     }
 
-    async fn drop_managed_session(
-        &self,
-        key: Option<String>,
-        sid: Option<SessionId>,
-    ) {
+    async fn drop_managed_session(&self, key: Option<String>, sid: Option<SessionId>) {
         if let Some(key) = key {
             self.session_bindings.lock().await.remove(&key);
         }
@@ -457,14 +437,11 @@ impl GGMLLlamaEngine {
         let grammar = request.grammar.clone();
         let session_key = request.session_key.clone();
         let commit_grammar = request.grammar.clone();
-        let prepared = self
-            .prepare_managed_session(session_key, prompt, grammar.clone())
-            .await?;
+        let prepared = self.prepare_managed_session(session_key, prompt, grammar.clone()).await?;
 
         match self.inference(&prepared.delta_prompt, max_tokens, prepared.sid, grammar).await {
             Ok(text) => {
-                let usage =
-                    self.build_usage(&prepared.full_prompt, &text, prepared.cached_tokens);
+                let usage = self.build_usage(&prepared.full_prompt, &text, prepared.cached_tokens);
                 if let Err(error) = self
                     .commit_managed_session(
                         prepared.key,
@@ -496,9 +473,7 @@ impl GGMLLlamaEngine {
         let grammar = request.grammar.clone();
         let session_key = request.session_key.clone();
         let commit_grammar = request.grammar.clone();
-        let prepared = self
-            .prepare_managed_session(session_key, prompt, grammar.clone())
-            .await?;
+        let prepared = self.prepare_managed_session(session_key, prompt, grammar.clone()).await?;
 
         let (mut llama_rx, sid) = match self
             .inference_stream(&prepared.delta_prompt, max_tokens, prepared.sid, grammar)
@@ -590,7 +565,9 @@ impl GGMLLlamaEngine {
                 }
             }
 
-            if completed && !forward_failed && !stream_error
+            if completed
+                && !forward_failed
+                && !stream_error
                 && stream_tx.send(BaseStreamChunk::Done).await.is_err()
             {
                 forward_failed = true;
@@ -878,9 +855,8 @@ mod tests {
             grammar: Some("grammar".to_owned()),
         };
 
-        let plan =
-            plan_session_reuse("chat-1", Some(&binding), "hello world!!!", Some("grammar"))
-                .expect("plan should succeed");
+        let plan = plan_session_reuse("chat-1", Some(&binding), "hello world!!!", Some("grammar"))
+            .expect("plan should succeed");
 
         match plan {
             SessionReusePlan::RestoreSnapshot { snapshot, delta_prompt, cached_tokens } => {

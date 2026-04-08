@@ -5,21 +5,21 @@ use std::str::FromStr;
 use base64::Engine as _;
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use serde_json::Value;
-use slab_llama::{
-    ChatMessage as LlamaChatMessage,
-    runtime::{LlamaInferenceParams, LlamaLoadConfig, resolve_grammar as resolve_llama_grammar},
-};
 use slab_diffusion::{
     ContextParams as DiffusionContextParams, GuidanceParams as DiffusionGuidanceParams,
     Image as DiffusionImage, ImgParams as DiffusionImgParams,
     SampleMethod as DiffusionSampleMethod, SampleParams as DiffusionSampleParams,
     Scheduler as DiffusionScheduler, SlgParams,
 };
+use slab_llama::{
+    ChatMessage as LlamaChatMessage,
+    runtime::{LlamaInferenceParams, LlamaLoadConfig, resolve_grammar as resolve_llama_grammar},
+};
+use slab_model_pack::ModelPackRuntimeBridge;
 use slab_whisper::{
     ContextParams as WhisperContextParams, FullParams as WhisperFullParams,
     SamplingStrategy as WhisperSamplingStrategy, WhisperVadParams as CanonicalWhisperVadParams,
 };
-use slab_model_pack::ModelPackRuntimeBridge;
 
 use crate::base::error::CoreError;
 use crate::base::types::{Payload, StreamChunk};
@@ -955,7 +955,10 @@ mod tests {
         let spec = make_spec(ModelFamily::Llama, Capability::TextGeneration, "model.gguf")
             .with_load_option("num_workers", 3)
             .with_load_option("context_length", 2048)
-            .with_load_option("chat_template", "{% for message in messages %}{{ message['content'] }}{% endfor %}");
+            .with_load_option(
+                "chat_template",
+                "{% for message in messages %}{{ message['content'] }}{% endfor %}",
+            );
 
         let payload =
             encode_load_payload(&spec, &make_llama_driver()).expect("encode should succeed");
@@ -977,10 +980,14 @@ mod tests {
         let bridge = slab_model_pack::ModelPackRuntimeBridge {
             backend: RuntimeBackendId::GgmlLlama,
             capability: Capability::TextGeneration,
-            model_spec: make_spec(ModelFamily::Llama, Capability::TextGeneration, "pack-model.gguf")
-                .with_load_option("num_workers", 2)
-                .with_load_option("context_length", 8192)
-                .with_load_option("chat_template", "chatml"),
+            model_spec: make_spec(
+                ModelFamily::Llama,
+                Capability::TextGeneration,
+                "pack-model.gguf",
+            )
+            .with_load_option("num_workers", 2)
+            .with_load_option("context_length", 8192)
+            .with_load_option("chat_template", "chatml"),
             load_defaults: slab_model_pack::ModelPackLoadDefaults {
                 num_workers: Some(2),
                 context_length: Some(8192),
@@ -1317,14 +1324,13 @@ mod tests {
 
         let (_input, opts_payload) =
             encode_text_generation_request(&request, &make_llama_driver()).expect("encode ok");
-        let opts = opts_payload
-            .to_typed::<LlamaInferenceParams>()
-            .expect("llama params should decode");
+        let opts =
+            opts_payload.to_typed::<LlamaInferenceParams>().expect("llama params should decode");
 
-        assert_eq!(opts.chat_messages, vec![LlamaChatMessage {
-            role: "system".to_owned(),
-            content: "policy".to_owned(),
-        }]);
+        assert_eq!(
+            opts.chat_messages,
+            vec![LlamaChatMessage { role: "system".to_owned(), content: "policy".to_owned() }]
+        );
     }
 
     #[test]

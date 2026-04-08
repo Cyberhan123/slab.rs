@@ -157,11 +157,7 @@ fn log_grpc_error(rpc: &str, request_id: &str, status: &tonic::Status) {
     );
 }
 
-fn grpc_status_to_anyhow(
-    rpc: &str,
-    request_id: &str,
-    status: tonic::Status,
-) -> anyhow::Error {
+fn grpc_status_to_anyhow(rpc: &str, request_id: &str, status: tonic::Status) -> anyhow::Error {
     let code = status.code();
     let message = status.message().to_owned();
     anyhow::Error::from(status).context(format!(

@@ -39,13 +39,42 @@ impl FromStr for UnifiedModelStatus {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UnifiedModelKind {
+    Local,
+    Cloud,
+}
+
+impl UnifiedModelKind {
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Cloud => "cloud",
+        }
+    }
+}
+
+impl FromStr for UnifiedModelKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "local" => Ok(Self::Local),
+            "cloud" => Ok(Self::Cloud),
+            other => Err(format!("unknown model kind: {other}")),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Spec and runtime presets (shared with JSON schema)
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ModelSpec {
-    /// Cloud provider settings id from `chat.providers` (e.g. `"openai-main"`).
+    /// Cloud provider id from the settings document `providers.registry` list
+    /// (e.g. `"openai-main"`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
     /// Remote model identifier used by cloud providers (e.g. `"gpt-4o"`).
@@ -93,7 +122,8 @@ pub struct RuntimePresets {
 pub struct UnifiedModel {
     pub id: String,
     pub display_name: String,
-    pub provider: String,
+    pub kind: UnifiedModelKind,
+    pub backend_id: Option<String>,
     pub status: UnifiedModelStatus,
     pub spec: ModelSpec,
     pub runtime_presets: Option<RuntimePresets>,
@@ -109,18 +139,36 @@ pub struct UnifiedModel {
 pub struct CreateModelCommand {
     pub id: Option<String>,
     pub display_name: String,
-    pub provider: String,
-    /// If `None`, the status is inferred from the provider prefix.
+    pub kind: UnifiedModelKind,
+    pub backend_id: Option<String>,
+    /// If `None`, the status is inferred from the model kind.
     pub status: Option<UnifiedModelStatus>,
     pub spec: ModelSpec,
     pub runtime_presets: Option<RuntimePresets>,
 }
 
+pub const CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION: u32 = 1;
+pub const CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION: u32 = 1;
+
+const fn current_stored_model_config_schema_version() -> u32 {
+    CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION
+}
+
+const fn current_stored_model_config_policy_version() -> u32 {
+    CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StoredModelConfig {
+    #[serde(default = "current_stored_model_config_schema_version")]
+    pub schema_version: u32,
+    #[serde(default = "current_stored_model_config_policy_version")]
+    pub policy_version: u32,
     pub id: String,
     pub display_name: String,
-    pub provider: String,
+    pub kind: UnifiedModelKind,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub backend_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub status: Option<UnifiedModelStatus>,
     #[serde(default)]
@@ -129,10 +177,64 @@ pub struct StoredModelConfig {
     pub runtime_presets: Option<RuntimePresets>,
 }
 
+pub fn upgrade_stored_model_config(config: StoredModelConfig) -> Result<StoredModelConfig, String> {
+    let config = upgrade_stored_model_config_schema(config)?;
+    upgrade_stored_model_config_policy(config)
+}
+
+fn upgrade_stored_model_config_schema(
+    config: StoredModelConfig,
+) -> Result<StoredModelConfig, String> {
+    if config.schema_version == 0 {
+        return Err("stored model config schema_version must be at least 1".to_owned());
+    }
+
+    if config.schema_version > CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION {
+        return Err(format!(
+            "unsupported stored model config schema_version: {}",
+            config.schema_version
+        ));
+    }
+
+    if config.schema_version < CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION {
+        return Err(format!(
+            "missing stored model config schema upgrader for version {}",
+            config.schema_version
+        ));
+    }
+
+    Ok(config)
+}
+
+fn upgrade_stored_model_config_policy(
+    config: StoredModelConfig,
+) -> Result<StoredModelConfig, String> {
+    if config.policy_version == 0 {
+        return Err("stored model config policy_version must be at least 1".to_owned());
+    }
+
+    if config.policy_version > CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION {
+        return Err(format!(
+            "unsupported stored model config policy_version: {}",
+            config.policy_version
+        ));
+    }
+
+    if config.policy_version < CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION {
+        return Err(format!(
+            "missing stored model config policy upgrader for version {}",
+            config.policy_version
+        ));
+    }
+
+    Ok(config)
+}
+
 #[derive(Debug, Clone)]
 pub struct UpdateModelCommand {
     pub display_name: Option<String>,
-    pub provider: Option<String>,
+    pub kind: Option<UnifiedModelKind>,
+    pub backend_id: Option<String>,
     pub status: Option<UnifiedModelStatus>,
     pub spec: Option<ModelSpec>,
     pub runtime_presets: Option<RuntimePresets>,
@@ -140,7 +242,7 @@ pub struct UpdateModelCommand {
 
 #[derive(Debug, Clone, Default)]
 pub struct ListModelsFilter {
-    // No filters currently; reserved for future use (e.g. provider prefix filter).
+    // No filters currently; reserved for future use (e.g. by kind or status).
 }
 
 #[derive(Debug, Clone)]
@@ -184,7 +286,8 @@ impl From<StoredModelConfig> for CreateModelCommand {
         Self {
             id: Some(config.id),
             display_name: config.display_name,
-            provider: config.provider,
+            kind: config.kind,
+            backend_id: config.backend_id,
             status: config.status,
             spec: config.spec,
             runtime_presets: config.runtime_presets,
@@ -195,12 +298,112 @@ impl From<StoredModelConfig> for CreateModelCommand {
 impl From<UnifiedModel> for StoredModelConfig {
     fn from(model: UnifiedModel) -> Self {
         Self {
+            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
             id: model.id,
             display_name: model.display_name,
-            provider: model.provider,
+            kind: model.kind,
+            backend_id: model.backend_id,
             status: Some(model.status),
             spec: model.spec,
             runtime_presets: model.runtime_presets,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+        ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind,
+        UnifiedModelStatus, upgrade_stored_model_config,
+    };
+    use chrono::Utc;
+    use serde_json::json;
+
+    #[test]
+    fn legacy_stored_model_config_defaults_versions_during_deserialization() {
+        let config: StoredModelConfig = serde_json::from_value(json!({
+            "id": "cloud-model",
+            "display_name": "Cloud Model",
+            "kind": "cloud",
+            "status": "ready",
+            "spec": {
+                "provider_id": "openai-main",
+                "remote_model_id": "gpt-4.1-mini"
+            }
+        }))
+        .expect("deserialize legacy config");
+
+        assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
+        assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
+    }
+
+    #[test]
+    fn unified_model_conversion_uses_current_config_versions() {
+        let config: StoredModelConfig = UnifiedModel {
+            id: "local-qwen".to_owned(),
+            display_name: "Local Qwen".to_owned(),
+            kind: UnifiedModelKind::Local,
+            backend_id: Some("ggml.llama".to_owned()),
+            status: UnifiedModelStatus::NotDownloaded,
+            spec: ModelSpec {
+                repo_id: Some("bartowski/Qwen2.5-7B-Instruct-GGUF".to_owned()),
+                filename: Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf".to_owned()),
+                context_window: Some(8192),
+                ..ModelSpec::default()
+            },
+            runtime_presets: Some(RuntimePresets { temperature: Some(0.7), top_p: Some(0.95) }),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+        .into();
+
+        assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
+        assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
+    }
+
+    #[test]
+    fn future_schema_versions_are_rejected() {
+        let error = upgrade_stored_model_config(StoredModelConfig {
+            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION + 1,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
+            id: "cloud-model".to_owned(),
+            display_name: "Cloud Model".to_owned(),
+            kind: UnifiedModelKind::Cloud,
+            backend_id: None,
+            status: Some(UnifiedModelStatus::Ready),
+            spec: ModelSpec {
+                provider_id: Some("openai-main".to_owned()),
+                remote_model_id: Some("gpt-4.1-mini".to_owned()),
+                ..ModelSpec::default()
+            },
+            runtime_presets: None,
+        })
+        .expect_err("future schema version should fail");
+
+        assert!(error.contains("unsupported stored model config schema_version"));
+    }
+
+    #[test]
+    fn future_policy_versions_are_rejected() {
+        let error = upgrade_stored_model_config(StoredModelConfig {
+            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION + 1,
+            id: "cloud-model".to_owned(),
+            display_name: "Cloud Model".to_owned(),
+            kind: UnifiedModelKind::Cloud,
+            backend_id: None,
+            status: Some(UnifiedModelStatus::Ready),
+            spec: ModelSpec {
+                provider_id: Some("openai-main".to_owned()),
+                remote_model_id: Some("gpt-4.1-mini".to_owned()),
+                ..ModelSpec::default()
+            },
+            runtime_presets: None,
+        })
+        .expect_err("future policy version should fail");
+
+        assert!(error.contains("unsupported stored model config policy_version"));
     }
 }

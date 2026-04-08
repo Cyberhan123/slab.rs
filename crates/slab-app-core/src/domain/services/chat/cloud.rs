@@ -20,9 +20,9 @@ use uuid::Uuid;
 
 use crate::context::ModelState;
 use crate::domain::models::{
-    ChatModelCapabilities, ChatModelOption, ChatModelSource, ChatReasoningEffort, ChatStreamChunk,
-    ChatVerbosity, ConversationMessage as DomainConversationMessage, StructuredOutput,
-    UnifiedModel, UnifiedModelStatus,
+    ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
+    ConversationMessage as DomainConversationMessage, StructuredOutput, UnifiedModel,
+    UnifiedModelKind,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::ModelStore;
@@ -89,42 +89,6 @@ pub(super) async fn should_route_to_cloud(
     let model: UnifiedModel =
         record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
     Ok(is_cloud_catalog_model(&model))
-}
-
-pub(super) async fn list_chat_models(
-    state: &ModelState,
-) -> Result<Vec<ChatModelOption>, AppCoreError> {
-    let providers = load_cloud_provider_map(state).await?;
-    let records = state.store().list_models().await?;
-    let mut items = Vec::new();
-
-    for record in records {
-        let model: UnifiedModel = match record.try_into() {
-            Ok(model) => model,
-            Err(error) => {
-                warn!(error = %error, "failed to deserialize chat model record; skipping");
-                continue;
-            }
-        };
-
-        if let Some(item) = build_local_chat_model_option(&model) {
-            items.push(item);
-            continue;
-        }
-
-        if let Some(item) = build_cloud_chat_model_option(&providers, &model) {
-            items.push(item);
-        }
-    }
-
-    items.sort_by(|left, right| {
-        left.display_name
-            .to_ascii_lowercase()
-            .cmp(&right.display_name.to_ascii_lowercase())
-            .then_with(|| left.id.cmp(&right.id))
-    });
-
-    Ok(items)
 }
 
 pub(super) async fn create_chat_completion(
@@ -335,19 +299,7 @@ async fn resolve_cloud_model(
 }
 
 fn is_cloud_catalog_model(model: &UnifiedModel) -> bool {
-    model.provider.starts_with("cloud.")
-}
-
-fn is_local_chat_model(model: &UnifiedModel) -> bool {
-    model.provider == format!("local.{}", super::LLAMA_BACKEND_ID)
-}
-
-fn provider_id_from_provider_string(provider: &str) -> Option<String> {
-    provider
-        .strip_prefix("cloud.")
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned)
+    model.kind == UnifiedModelKind::Cloud
 }
 
 fn referenced_provider_id(model: &UnifiedModel) -> Option<String> {
@@ -358,74 +310,6 @@ fn referenced_provider_id(model: &UnifiedModel) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_owned)
-        .or_else(|| provider_id_from_provider_string(&model.provider))
-}
-
-fn local_model_downloaded(model: &UnifiedModel) -> bool {
-    matches!(model.status, UnifiedModelStatus::Ready) && model.spec.local_path.is_some()
-}
-
-fn local_model_pending(model: &UnifiedModel) -> bool {
-    matches!(model.status, UnifiedModelStatus::Downloading)
-}
-
-fn build_local_chat_model_option(model: &UnifiedModel) -> Option<ChatModelOption> {
-    if !is_local_chat_model(model) {
-        return None;
-    }
-
-    Some(ChatModelOption {
-        id: model.id.clone(),
-        display_name: model.display_name.clone(),
-        source: ChatModelSource::Local,
-        downloaded: local_model_downloaded(model),
-        pending: local_model_pending(model),
-        capabilities: ChatModelCapabilities::local(),
-        backend_id: Some(super::LLAMA_BACKEND_ID.to_string()),
-        provider_id: None,
-        provider_name: None,
-    })
-}
-
-fn build_cloud_chat_model_option(
-    providers: &BTreeMap<String, CloudProviderConfig>,
-    model: &UnifiedModel,
-) -> Option<ChatModelOption> {
-    if !is_cloud_catalog_model(model) {
-        return None;
-    }
-
-    let provider_id = referenced_provider_id(model)?;
-    let remote_model_id =
-        model.spec.remote_model_id.as_deref().map(str::trim).filter(|value| !value.is_empty());
-    if remote_model_id.is_none() {
-        warn!(
-            model_id = %model.id,
-            provider_id = %provider_id,
-            "cloud model is missing remote_model_id; hiding from chat picker"
-        );
-        return None;
-    }
-    let Some(provider) = providers.get(&provider_id) else {
-        warn!(
-            model_id = %model.id,
-            provider_id = %provider_id,
-            "cloud model references unknown provider; hiding from chat picker"
-        );
-        return None;
-    };
-
-    Some(ChatModelOption {
-        id: model.id.clone(),
-        display_name: model.display_name.clone(),
-        source: ChatModelSource::Cloud,
-        downloaded: true,
-        pending: false,
-        capabilities: ChatModelCapabilities::cloud(),
-        backend_id: None,
-        provider_id: Some(provider_id),
-        provider_name: Some(provider.name.clone()),
-    })
 }
 
 fn resolve_cloud_catalog_model(

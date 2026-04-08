@@ -118,9 +118,7 @@ impl ThinkingStreamState {
     }
 }
 
-fn attach_reasoning_metadata(
-    response: &mut slab_runtime_core::api::TextGenerationResponse,
-) {
+fn attach_reasoning_metadata(response: &mut slab_runtime_core::api::TextGenerationResponse) {
     let parsed = parse_thinking_output(&response.text, true);
     let reasoning = parsed.reasoning.trim();
     if reasoning.is_empty() {
@@ -128,10 +126,9 @@ fn attach_reasoning_metadata(
     }
 
     response.text = parsed.content;
-    response.metadata.insert(
-        REASONING_CONTENT_METADATA_KEY.into(),
-        Value::String(reasoning.to_owned()),
-    );
+    response
+        .metadata
+        .insert(REASONING_CONTENT_METADATA_KEY.into(), Value::String(reasoning.to_owned()));
 }
 
 fn text_chunk(delta: String) -> TextGenerationChunk {
@@ -398,7 +395,10 @@ mod tests {
     fn thinking_stream_state_splits_reasoning_and_content_deltas() {
         let mut state = ThinkingStreamState::default();
         assert!(state.ingest("<th").is_empty());
-        assert_eq!(state.ingest("ink>first thought"), vec![ThinkingDelta::Reasoning("first thought".to_owned())]);
+        assert_eq!(
+            state.ingest("ink>first thought"),
+            vec![ThinkingDelta::Reasoning("first thought".to_owned())]
+        );
         assert_eq!(
             state.ingest("</think>\n\nfinal answer"),
             vec![ThinkingDelta::Content("\n\nfinal answer".to_owned())]

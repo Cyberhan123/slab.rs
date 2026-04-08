@@ -27,7 +27,6 @@ const MODEL_PACK_MANIFEST_EXAMPLE = `{
   "version": 1,
   "id": "openrouter-llama-3_1-8b-instruct",
   "label": "Llama 3.1 8B Instruct (OpenRouter)",
-  "provider": "cloud.openrouter",
   "status": "ready",
   "family": "llama",
   "capabilities": ["text_generation"],
@@ -101,9 +100,9 @@ export function HubCreateModelDialog({
           <div className="space-y-2 rounded-2xl border border-border/70 bg-background p-4">
             <p className="text-sm font-medium">Example manifest.json</p>
             <p className="text-xs text-muted-foreground">
-              Cloud packs should set a top-level <code>provider</code> plus <code>source.kind = cloud</code>{' '}
-              with <code>provider_id</code> and <code>remote_model_id</code>. API keys and base URLs stay
-              in the provider registry, not inside the pack.
+              Cloud packs should set <code>source.kind = cloud</code> with <code>provider_id</code> and{' '}
+              <code>remote_model_id</code>. API keys and base URLs stay in the provider registry, not
+              inside the pack.
             </p>
             <pre className="overflow-x-auto rounded-xl border border-border/70 bg-muted/30 p-3 text-xs leading-5">
               <code>{MODEL_PACK_MANIFEST_EXAMPLE}</code>

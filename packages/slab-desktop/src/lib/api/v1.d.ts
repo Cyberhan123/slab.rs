@@ -971,8 +971,11 @@ export interface components {
         };
         /** @description Request body for `POST /v1/models`. */
         CreateModelRequest: {
+            /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
+            backend_id?: string | null;
             display_name: string;
-            provider: string;
+            /** @description Whether this model is backed by the local runtime or a cloud provider. */
+            kind: components["schemas"]["ModelKind"];
             runtime_presets?: null | components["schemas"]["RuntimePresetsRequest"];
             spec?: null | components["schemas"]["ModelSpecRequest"];
             /**
@@ -1177,7 +1180,7 @@ export interface components {
             /** @description Absolute path to the downloaded model file (populated after download). */
             local_path?: string | null;
             pricing?: null | components["schemas"]["PricingRequest"];
-            /** @description Cloud provider settings id from `chat.providers` (e.g. `"openai-main"`). */
+            /** @description Cloud provider id from the settings document `providers.registry` list (e.g. `"openai-main"`). */
             provider_id?: string | null;
             /** @description Remote model identifier for cloud providers (e.g. `"gpt-4o"`). */
             remote_model_id?: string | null;
@@ -1196,6 +1199,8 @@ export interface components {
             remote_model_id?: string | null;
             repo_id?: string | null;
         };
+        /** @enum {string} */
+        ModelKind: "local" | "cloud";
         /** @description Response body for load / status endpoints. */
         ModelStatusResponse: {
             /** @description Backend identifier. */
@@ -1489,11 +1494,13 @@ export interface components {
         };
         /** @description Unified model response returned by `/v1/models`. */
         UnifiedModelResponse: {
+            /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
+            backend_id?: string | null;
             created_at: string;
             display_name: string;
             id: string;
-            /** @description Provider identifier, e.g. `"cloud.openai"`, `"local.ggml.llama"`. */
-            provider: string;
+            /** @description Whether this model is backed by the local runtime or a cloud provider. */
+            kind: components["schemas"]["ModelKind"];
             runtime_presets?: null | components["schemas"]["RuntimePresetsResponse"];
             spec: components["schemas"]["ModelSpecResponse"];
             /** @description Status: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`. */
@@ -1509,8 +1516,11 @@ export interface components {
         };
         /** @description Request body for `PUT /v1/models/{id}`. */
         UpdateModelRequest: {
+            /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
+            backend_id?: string | null;
             display_name?: string | null;
-            provider?: string | null;
+            /** @description Whether this model is backed by the local runtime or a cloud provider. */
+            kind?: components["schemas"]["ModelKind"] | null;
             runtime_presets?: null | components["schemas"]["RuntimePresetsRequest"];
             spec?: null | components["schemas"]["ModelSpecRequest"];
             status?: string | null;

@@ -8,8 +8,8 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
 use crate::{
-    ChatMessage, LlamaBatch, LlamaContext, LlamaContextParams, LlamaError, LlamaModel,
-    LlamaSeqId, LlamaToken,
+    ChatMessage, LlamaBatch, LlamaContext, LlamaContextParams, LlamaError, LlamaModel, LlamaSeqId,
+    LlamaToken,
 };
 
 pub type SessionId = u64;
@@ -66,22 +66,22 @@ ws        ::= ([ \t\n] ws)?
 "#;
 
 pub fn resolve_grammar(
-        grammar: Option<&str>,
-        grammar_json: bool,
-        grammar_tool_call: bool,
+    grammar: Option<&str>,
+    grammar_json: bool,
+    grammar_tool_call: bool,
 ) -> Option<String> {
-        if let Some(grammar) = grammar
-                && !grammar.is_empty()
-        {
-                return Some(grammar.to_owned());
-        }
-        if grammar_json {
-                return Some(GRAMMAR_JSON.to_owned());
-        }
-        if grammar_tool_call {
-                return Some(GRAMMAR_TOOL_CALL.to_owned());
-        }
-        None
+    if let Some(grammar) = grammar
+        && !grammar.is_empty()
+    {
+        return Some(grammar.to_owned());
+    }
+    if grammar_json {
+        return Some(GRAMMAR_JSON.to_owned());
+    }
+    if grammar_tool_call {
+        return Some(GRAMMAR_TOOL_CALL.to_owned());
+    }
+    None
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -276,8 +276,8 @@ impl MasterWorkerState {
                 GlobalCommand::AppendInput { session_id, text_delta, reply_tx } => {
                     match self.session_map.get(&session_id) {
                         None => {
-                            let _ =
-                                reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                            let _ = reply_tx
+                                .send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
                         }
                         Some(&worker_id) => {
                             let (ack_tx, ack_rx) = oneshot::channel();
@@ -312,7 +312,8 @@ impl MasterWorkerState {
                     reply_tx,
                 } => match self.session_map.get(&session_id) {
                     None => {
-                        let _ = reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                        let _ =
+                            reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
                     }
                     Some(&worker_id) => {
                         let (ack_tx, ack_rx) = oneshot::channel();
@@ -343,15 +344,13 @@ impl MasterWorkerState {
                 GlobalCommand::EndSession { session_id, reply_tx } => {
                     match self.session_map.remove(&session_id) {
                         None => {
-                            let _ = reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                            let _ = reply_tx
+                                .send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
                         }
                         Some(worker_id) => {
                             let (ack_tx, ack_rx) = oneshot::channel();
                             if self.worker_txs[worker_id]
-                                .send(WorkerCommand::EndSession {
-                                    session_id,
-                                    reply_tx: ack_tx,
-                                })
+                                .send(WorkerCommand::EndSession { session_id, reply_tx: ack_tx })
                                 .await
                                 .is_err()
                             {
@@ -373,7 +372,8 @@ impl MasterWorkerState {
                 GlobalCommand::SnapshotSession { session_id, reply_tx } => {
                     match self.session_map.get(&session_id) {
                         None => {
-                            let _ = reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                            let _ = reply_tx
+                                .send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
                         }
                         Some(&worker_id) => {
                             let (ack_tx, ack_rx) = oneshot::channel();
@@ -407,15 +407,13 @@ impl MasterWorkerState {
                 GlobalCommand::Cancel { session_id, reply_tx } => {
                     match self.session_map.get(&session_id) {
                         None => {
-                            let _ = reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                            let _ = reply_tx
+                                .send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
                         }
                         Some(&worker_id) => {
                             let (ack_tx, ack_rx) = oneshot::channel();
                             if self.worker_txs[worker_id]
-                                .send(WorkerCommand::Cancel {
-                                    session_id,
-                                    reply_tx: ack_tx,
-                                })
+                                .send(WorkerCommand::Cancel { session_id, reply_tx: ack_tx })
                                 .await
                                 .is_err()
                             {
@@ -559,8 +557,7 @@ impl InferenceWorkerState {
         if !can_shift {
             warn!(
                 seq_id = session.seq_id,
-                context_length,
-                "KV cache shift unsupported; clearing session cache to continue"
+                context_length, "KV cache shift unsupported; clearing session cache to continue"
             );
             let _ = ctx.kv_cache_seq_rm(session.seq_id, 0, i32::MAX);
             session.n_past = 0;
@@ -621,7 +618,9 @@ impl InferenceWorkerState {
                 };
 
                 if let Some(snapshot) = snapshot {
-                    if let Err(source) = self.ctx.state_seq_set_data(snapshot.state.as_ref(), seq_id) {
+                    if let Err(source) =
+                        self.ctx.state_seq_set_data(snapshot.state.as_ref(), seq_id)
+                    {
                         self.free_seq_ids.push(seq_id);
                         let _ = reply_tx.send(Err(LlamaRuntimeError::RestoreState { source }));
                         return;
@@ -633,46 +632,58 @@ impl InferenceWorkerState {
                 let _ = reply_tx.send(Ok(()));
             }
 
-            WorkerCommand::AppendInput { session_id, text_delta, reply_tx } => match self.sessions.get_mut(&session_id) {
-                None => {
-                    let _ = reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+            WorkerCommand::AppendInput { session_id, text_delta, reply_tx } => {
+                match self.sessions.get_mut(&session_id) {
+                    None => {
+                        let _ =
+                            reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                    }
+                    Some(session) => {
+                        let result = self
+                            .model
+                            .tokenize(&text_delta, false, true)
+                            .map(|tokens| {
+                                session.pending_tokens.extend(tokens);
+                            })
+                            .map_err(|source| LlamaRuntimeError::TokenizeFailed { source });
+                        let _ = reply_tx.send(result);
+                    }
                 }
-                Some(session) => {
-                    let result = self
-                        .model
-                        .tokenize(&text_delta, false, true)
-                        .map(|tokens| {
-                            session.pending_tokens.extend(tokens);
-                        })
-                        .map_err(|source| LlamaRuntimeError::TokenizeFailed { source });
-                    let _ = reply_tx.send(result);
-                }
-            },
+            }
 
-            WorkerCommand::GenerateStream { session_id, max_new_tokens, stream_tx, reply_tx } => match self.sessions.get_mut(&session_id) {
-                None => {
-                    let _ = reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+            WorkerCommand::GenerateStream { session_id, max_new_tokens, stream_tx, reply_tx } => {
+                match self.sessions.get_mut(&session_id) {
+                    None => {
+                        let _ =
+                            reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                    }
+                    Some(session) => {
+                        session.stream_tx = Some(stream_tx);
+                        session.remaining_tokens = max_new_tokens;
+                        session.cancelled = false;
+                        let _ = reply_tx.send(Ok(()));
+                    }
                 }
-                Some(session) => {
-                    session.stream_tx = Some(stream_tx);
-                    session.remaining_tokens = max_new_tokens;
-                    session.cancelled = false;
-                    let _ = reply_tx.send(Ok(()));
-                }
-            },
+            }
 
-            WorkerCommand::EndSession { session_id, reply_tx } => match self.sessions.remove(&session_id) {
-                None => {
-                    let _ = reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+            WorkerCommand::EndSession { session_id, reply_tx } => {
+                match self.sessions.remove(&session_id) {
+                    None => {
+                        let _ =
+                            reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                    }
+                    Some(session) => {
+                        self.ctx.kv_cache_seq_rm(session.seq_id, 0, i32::MAX);
+                        self.free_seq_ids.push(session.seq_id);
+                        let _ = reply_tx.send(Ok(()));
+                    }
                 }
-                Some(session) => {
-                    self.ctx.kv_cache_seq_rm(session.seq_id, 0, i32::MAX);
-                    self.free_seq_ids.push(session.seq_id);
-                    let _ = reply_tx.send(Ok(()));
-                }
-            },
+            }
 
-            WorkerCommand::SnapshotSession { session_id, reply_tx } => match self.sessions.get(&session_id) {
+            WorkerCommand::SnapshotSession { session_id, reply_tx } => match self
+                .sessions
+                .get(&session_id)
+            {
                 None => {
                     let _ = reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
                 }
@@ -704,15 +715,18 @@ impl InferenceWorkerState {
                 }
             },
 
-            WorkerCommand::Cancel { session_id, reply_tx } => match self.sessions.get_mut(&session_id) {
-                None => {
-                    let _ = reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+            WorkerCommand::Cancel { session_id, reply_tx } => {
+                match self.sessions.get_mut(&session_id) {
+                    None => {
+                        let _ =
+                            reply_tx.send(Err(LlamaRuntimeError::SessionNotFound { session_id }));
+                    }
+                    Some(session) => {
+                        session.cancelled = true;
+                        let _ = reply_tx.send(Ok(()));
+                    }
                 }
-                Some(session) => {
-                    session.cancelled = true;
-                    let _ = reply_tx.send(Ok(()));
-                }
-            },
+            }
         }
     }
 
@@ -877,7 +891,8 @@ impl InferenceWorkerState {
                         match tx.blocking_send(StreamChunk::Token(piece)) {
                             Ok(()) => {
                                 session.last_token = Some(token);
-                                session.remaining_tokens = session.remaining_tokens.saturating_sub(1);
+                                session.remaining_tokens =
+                                    session.remaining_tokens.saturating_sub(1);
                             }
                             Err(_) => {
                                 session.stream_tx = None;
@@ -942,7 +957,8 @@ impl LlamaRuntime {
                 .new_context(ctx_params.clone())
                 .map_err(|source| LlamaRuntimeError::CreateContext { source })?;
 
-            let worker_state = InferenceWorkerState::new(worker_id, Arc::clone(&model), ctx, cmd_rx);
+            let worker_state =
+                InferenceWorkerState::new(worker_id, Arc::clone(&model), ctx, cmd_rx);
 
             std::thread::Builder::new()
                 .name(format!("llama-worker-{worker_id}"))
@@ -1015,12 +1031,7 @@ impl LlamaRuntime {
         let (stream_tx, stream_rx) = mpsc::channel::<StreamChunk>(64);
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
-            .send(GlobalCommand::GenerateStream {
-                session_id,
-                max_new_tokens,
-                stream_tx,
-                reply_tx,
-            })
+            .send(GlobalCommand::GenerateStream { session_id, max_new_tokens, stream_tx, reply_tx })
             .await
             .map_err(|_| LlamaRuntimeError::WorkerShutdown)?;
         reply_rx.await.map_err(|_| LlamaRuntimeError::WorkerShutdown)??;

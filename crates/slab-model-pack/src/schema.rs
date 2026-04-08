@@ -14,10 +14,7 @@ pub fn generate_manifest_schema() -> Value {
         "$schema".into(),
         Value::String("https://json-schema.org/draft/2020-12/schema".into()),
     );
-    root.insert(
-        "$id".into(),
-        Value::String(PUBLIC_MANIFEST_SCHEMA_URL.into()),
-    );
+    root.insert("$id".into(), Value::String(PUBLIC_MANIFEST_SCHEMA_URL.into()));
     root.insert("title".into(), Value::String("slab.rs Model Pack Manifest".into()));
     root.insert(
         "description".into(),
@@ -27,44 +24,16 @@ pub fn generate_manifest_schema() -> Value {
     );
 
     let properties = root.entry("properties").or_insert_with(|| json!({}));
-    let properties = properties
-        .as_object_mut()
-        .expect("manifest schema properties should be an object");
+    let properties =
+        properties.as_object_mut().expect("manifest schema properties should be an object");
     properties.insert("$schema".into(), json!({ "type": "string" }));
-
-    let all_of = root.entry("allOf").or_insert_with(|| json!([]));
-    let all_of = all_of
-        .as_array_mut()
-        .expect("manifest schema allOf should be an array");
-    all_of.push(json!({
-        "if": {
-            "properties": {
-                "source": {
-                    "type": "object",
-                    "properties": {
-                        "kind": { "const": "cloud" }
-                    },
-                    "required": ["kind"]
-                }
-            },
-            "required": ["source"]
-        },
-        "then": {
-            "required": ["provider"],
-            "properties": {
-                "provider": {
-                    "pattern": "^cloud\\."
-                }
-            }
-        }
-    }));
 
     schema
 }
 
 pub fn render_manifest_schema() -> String {
-    let mut rendered =
-        serde_json::to_string_pretty(&generate_manifest_schema()).expect("manifest schema should render");
+    let mut rendered = serde_json::to_string_pretty(&generate_manifest_schema())
+        .expect("manifest schema should render");
     rendered.push('\n');
     rendered
 }

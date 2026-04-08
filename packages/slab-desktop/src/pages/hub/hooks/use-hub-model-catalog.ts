@@ -29,7 +29,7 @@ export type ModelStatus = CatalogModelStatus;
 export type ModelItem = {
   id: string;
   display_name: string;
-  provider: string;
+  kind: 'local' | 'cloud';
   repo_id: string;
   filename: string;
   backend_ids: string[];
@@ -69,7 +69,7 @@ export function useHubModelCatalog() {
         .map((model) => ({
           id: model.id,
           display_name: model.display_name,
-          provider: model.provider,
+          kind: model.kind,
           repo_id: model.repo_id,
           filename: model.filename,
           backend_ids: model.backend_ids,
@@ -232,7 +232,7 @@ export function useHubModelCatalog() {
 }
 
 function inferModelCategory(model: ModelItem): ModelCategory {
-  const haystack = `${model.display_name} ${model.provider} ${model.repo_id} ${model.filename}`
+  const haystack = `${model.display_name} ${model.kind} ${model.backend_ids.join(' ')} ${model.repo_id} ${model.filename}`
     .toLowerCase()
     .trim();
 

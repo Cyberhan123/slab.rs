@@ -97,8 +97,12 @@ impl ModelPack {
                 }
             };
 
-            let resolved_components = resolve_named_components(components, &document.component_ids)?;
-            resolved.insert(entry.id.clone(), ResolvedAdapter { document, components: resolved_components });
+            let resolved_components =
+                resolve_named_components(components, &document.component_ids)?;
+            resolved.insert(
+                entry.id.clone(),
+                ResolvedAdapter { document, components: resolved_components },
+            );
         }
         Ok(resolved)
     }
@@ -110,12 +114,16 @@ impl ModelPack {
         let mut resolved = BTreeMap::new();
         for entry in &self.manifest().variants {
             let document = self.resolve_variant(&entry.config_ref)?.clone();
-            let resolved_components = resolve_named_components(components, &document.component_ids)?;
-            let effective_source = document.source.clone().or_else(|| self.manifest().source.clone());
+            let resolved_components =
+                resolve_named_components(components, &document.component_ids)?;
+            let effective_source =
+                document.source.clone().or_else(|| self.manifest().source.clone());
             let load_config = document
                 .load_config
                 .as_ref()
-                .map(|config_ref| self.resolve_backend_config(config_ref, BackendConfigScope::Load).cloned())
+                .map(|config_ref| {
+                    self.resolve_backend_config(config_ref, BackendConfigScope::Load).cloned()
+                })
                 .transpose()?;
             let inference_config = document
                 .inference_config
@@ -157,10 +165,7 @@ impl ModelPack {
             let mut resolved_adapters = BTreeMap::new();
             for adapter_id in &document.adapter_ids {
                 let adapter = adapters.get(adapter_id).cloned().ok_or_else(|| {
-                    ModelPackError::MissingNamedDocument {
-                        kind: "adapter",
-                        id: adapter_id.clone(),
-                    }
+                    ModelPackError::MissingNamedDocument { kind: "adapter", id: adapter_id.clone() }
                 })?;
                 resolved_adapters.insert(adapter_id.clone(), adapter);
             }
@@ -200,9 +205,7 @@ impl ModelPack {
             if presets.contains_key(default_preset_id) {
                 return Ok(Some(default_preset_id.clone()));
             }
-            return Err(ModelPackError::MissingDefaultPreset {
-                id: default_preset_id.clone(),
-            });
+            return Err(ModelPackError::MissingDefaultPreset { id: default_preset_id.clone() });
         }
 
         match presets.len() {
@@ -220,10 +223,7 @@ fn resolve_named_components(
     let mut resolved = BTreeMap::new();
     for component_id in component_ids {
         let component = components.get(component_id).cloned().ok_or_else(|| {
-            ModelPackError::MissingNamedDocument {
-                kind: "component",
-                id: component_id.clone(),
-            }
+            ModelPackError::MissingNamedDocument { kind: "component", id: component_id.clone() }
         })?;
         resolved.insert(component_id.clone(), component);
     }

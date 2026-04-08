@@ -13,8 +13,6 @@ pub struct ModelPackManifest {
     pub id: String,
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub status: Option<PackModelStatus>,
     pub family: ModelFamily,
     #[serde(default)]

@@ -1,7 +1,5 @@
 import type { components } from './v1.d.ts';
 
-const LOCAL_PROVIDER_PREFIX = 'local.';
-
 type UnknownRecord = Record<string, unknown>;
 
 export type UnifiedModelResponse = components['schemas']['UnifiedModelResponse'];
@@ -17,15 +15,6 @@ export type CatalogModel = Omit<UnifiedModelResponse, 'status'> & {
   pending: boolean;
 };
 
-export function getLocalBackendId(provider: string): string | null {
-  if (!provider.startsWith(LOCAL_PROVIDER_PREFIX)) {
-    return null;
-  }
-
-  const backendId = provider.slice(LOCAL_PROVIDER_PREFIX.length).trim();
-  return backendId.length > 0 ? backendId : null;
-}
-
 export function normalizeModelStatus(status: string): CatalogModelStatus {
   switch (status) {
     case 'ready':
@@ -39,7 +28,7 @@ export function normalizeModelStatus(status: string): CatalogModelStatus {
 }
 
 export function normalizeCatalogModel(model: UnifiedModelResponse): CatalogModel {
-  const backendId = getLocalBackendId(model.provider);
+  const backendId = model.backend_id ?? null;
   const status = normalizeModelStatus(model.status);
   const localPath = model.spec.local_path ?? null;
 
@@ -89,7 +78,7 @@ function isUnifiedModelResponse(value: unknown): value is UnifiedModelResponse {
   if (
     typeof model.id !== 'string' ||
     typeof model.display_name !== 'string' ||
-    typeof model.provider !== 'string' ||
+    (model.kind !== 'local' && model.kind !== 'cloud') ||
     typeof model.status !== 'string' ||
     typeof model.created_at !== 'string' ||
     typeof model.updated_at !== 'string'
@@ -103,6 +92,7 @@ function isUnifiedModelResponse(value: unknown): value is UnifiedModelResponse {
 
   const spec = model.spec as UnknownRecord;
   return (
+    isOptionalString(model.backend_id) &&
     isOptionalString(spec.provider_id) &&
     isOptionalString(spec.remote_model_id) &&
     isOptionalString(spec.repo_id) &&

@@ -312,11 +312,12 @@ where
 
     let grpc = Arc::new(grpc);
     let store = Arc::new(store.clone());
-    let model_auto_unload = Arc::new(slab_app_core::model_auto_unload::ModelAutoUnloadManager::new(
-        Arc::clone(&pmid),
-        Arc::clone(&grpc),
-        Arc::clone(&runtime_status),
-    ));
+    let model_auto_unload =
+        Arc::new(slab_app_core::model_auto_unload::ModelAutoUnloadManager::new(
+            Arc::clone(&pmid),
+            Arc::clone(&grpc),
+            Arc::clone(&runtime_status),
+        ));
     let state = Arc::new(AppState::new(
         Arc::new(cfg.clone()),
         pmid,
@@ -730,10 +731,7 @@ mod tests {
         assert_eq!(cfg.database_url, "sqlite:///tmp/api.db?mode=rwc");
         assert_eq!(cfg.settings_path, PathBuf::from("D:/Slab/api-settings.json"));
         assert_eq!(cfg.model_config_dir, PathBuf::from("D:/Slab/models"));
-        assert_eq!(
-            args.model_config_dir,
-            Some(PathBuf::from("D:/Slab/models"))
-        );
+        assert_eq!(args.model_config_dir, Some(PathBuf::from("D:/Slab/models")));
     }
 
     #[test]

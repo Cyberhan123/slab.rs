@@ -63,9 +63,8 @@ impl Context {
     /// Returns [`DiffusionError::GenerationFailed`] when the native library
     /// returns a null pointer (e.g. out of memory or bad parameters).
     pub fn generate_image(&self, params: ImgParams) -> Result<Vec<Image>, DiffusionError> {
-        let inner: InnerImgParams =
-            InnerImgParams::from_canonical(self.lib.as_ref(),  &params)
-                .map_err(DiffusionError::InvalidParameters)?;
+        let inner: InnerImgParams = InnerImgParams::from_canonical(self.lib.as_ref(), &params)
+            .map_err(DiffusionError::InvalidParameters)?;
 
         if self.ctx.is_null() {
             return Err(DiffusionError::ContextNull);
