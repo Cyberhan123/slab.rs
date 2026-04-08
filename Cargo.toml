@@ -19,9 +19,6 @@ members = [
     "crates/slab-runtime-macros",
     "crates/slab-app-core",
     "crates/slab-runtime-core",
-    "crates/slab-runtime-backend-candle",
-    "crates/slab-runtime-backend-ggml",
-    "crates/slab-runtime-backend-onnx",
     "crates/slab-types",
     "crates/slab-subtitle",
     "crates/slab-ggml",
@@ -49,9 +46,6 @@ slab-agent        = { path = "./crates/slab-agent", package = "slab-agent", vers
 slab-proto        = { path = "./crates/slab-proto", package = "slab-proto", version = "0.0.1" }
 slab-model-pack   = { path = "./crates/slab-model-pack", package = "slab-model-pack", version = "0.0.1" }
 slab-types        = { path = "./crates/slab-types", package = "slab-types", version = "0.0.1" }
-slab-runtime-backend-candle = { path = "./crates/slab-runtime-backend-candle", package = "slab-runtime-backend-candle", version = "0.0.1" }
-slab-runtime-backend-ggml   = { path = "./crates/slab-runtime-backend-ggml", package = "slab-runtime-backend-ggml", version = "0.0.1" }
-slab-runtime-backend-onnx   = { path = "./crates/slab-runtime-backend-onnx", package = "slab-runtime-backend-onnx", version = "0.0.1" }
 slab-diffusion-sys = { path = "./crates/slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.0.1" }
 slab-diffusion    = { path = "./crates/slab-diffusion", package = "slab-diffusion", version = "0.0.1" }
 slab-llama        = { path = "./crates/slab-llama", package = "slab-llama", version = "0.0.1" }

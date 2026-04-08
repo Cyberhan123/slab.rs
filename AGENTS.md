@@ -57,23 +57,20 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `packages/slab-i18n` is the shared internationalization package (i18next + react-i18next) with locale definitions.
 - `bin/slab-server` is the thin HTTP gateway and headless host (axum). It depends on `crates/slab-app-core` for all domain/infra logic, adds axum `FromRef` extractors (`state_extractors.rs`) and `ServerError` → HTTP response conversion, and launches `bin/slab-runtime` through the same shared supervisor using a `tokio::process` adapter. Runtime crashes restart per backend; the HTTP host stays up unless the gateway itself fails. It exposes `/v1` plus `/api-docs/openapi.json`.
 - `crates/slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and `runtime_supervisor`. It is usable both from `bin/slab-server` (HTTP path) and from `bin/slab-app` (native Tauri IPC path). SQLx migrations live in `crates/slab-app-core/migrations/`.
-- `bin/slab-runtime` is the standalone gRPC worker that can serve TCP or IPC transports. It is the only backend composition root: it owns driver resolution, load/inference codecs, task submission, and wires GGML, Candle, and ONNX backend registrations.
+- `bin/slab-runtime` is the standalone gRPC worker that can serve TCP or IPC transports. It is the only backend composition root: it owns driver resolution, load/inference codecs, task submission, and now keeps its DDD-style `config/`, `context/`, `domain/`, `infra/`, and `launch` layers in-package, including GGML, Candle, and ONNX backend registrations under `src/infra/backends/`.
 - `crates/slab-runtime-core` (package name: `slab-runtime-core`) now holds only the scheduler, backend protocol, worker runner, task state, common error surface, and generic payload types. Keep HTTP, SQL, typed inference codecs, and backend composition concerns out of this crate.
 - `crates/slab-agent` is a pure control-plane library for agent threads, tool routing, and port-based orchestration.
 - `crates/slab-proto` owns the protobuf contract between `bin/slab-server` and `bin/slab-runtime`.
 - `crates/slab-types` is the shared semantic types, settings, runtime, and JSON-schema-friendly contract crate used across the workspace.
-- `crates/slab-runtime-backend-ggml`, `crates/slab-runtime-backend-candle`, and `crates/slab-runtime-backend-onnx` provide the concrete runtime backend registrations and worker implementations that `bin/slab-runtime` composes.
 - `crates/slab-llama`, `crates/slab-whisper`, `crates/slab-diffusion`, `crates/slab-ggml`, `crates/slab-libfetch`, `crates/slab-subtitle`, `crates/slab-build-utils`, `crates/slab-runtime-macros`, and the `*-sys` crates provide engine bindings, low-level runtime utilities, artifact fetching, and supporting infrastructure.
 
 ## Repo Layout
 
 - `bin/slab-server`: thin HTTP gateway; exposes `/v1` routes via axum. Business logic lives in `crates/slab-app-core`.
-- `bin/slab-runtime`: gRPC server and runtime worker entry points.
+- `bin/slab-runtime`: gRPC server and runtime worker package. `src/main.rs` is the thin binary entrypoint; `src/config`, `src/context`, `src/domain`, `src/infra`, and `src/launch.rs` hold the worker logic and backend composition.
 - `crates/slab-app-core`: HTTP-free business logic (domain, infra, context, config) plus the shared runtime supervisor used by both `slab-app` and `slab-server`. Native IPC wrappers now live in `bin/slab-app/src-tauri/src/api/`. Migrations are in `crates/slab-app-core/migrations/`.
 - `crates/slab-runtime-core`: pure scheduler/backend-protocol library only (package: `slab-runtime-core`); keep HTTP, SQL, driver resolution, typed codecs, and backend composition concerns out.
-- `crates/slab-runtime-backend-ggml`: GGML-backed runtime workers, adapters, and registration entry points for llama, whisper, and diffusion backends.
-- `crates/slab-runtime-backend-candle`: Candle-backed runtime workers, adapters, and registration entry points.
-- `crates/slab-runtime-backend-onnx`: ONNX-backed runtime workers, adapters, and registration entry points.
+- `bin/slab-runtime/src/infra/backends`: in-package GGML, Candle, and ONNX backend registrations, engines, adapters, and worker implementations.
 - `crates/slab-agent`: agent orchestration library and tool router abstractions.
 - `crates/slab-types`: shared semantic types, settings models, load specs, and other reusable Rust contracts.
 - `crates/slab-proto`: protobuf definitions and generated conversion helpers for server/runtime IPC.
