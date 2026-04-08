@@ -7987,62 +7987,24 @@ name = "slab-runtime"
 version = "0.0.1"
 dependencies = [
  "anyhow",
+ "async-trait",
  "base64 0.22.1",
  "bytemuck",
+ "candle-core",
+ "candle-nn",
+ "candle-transformers",
  "clap",
  "futures",
  "image",
+ "libloading 0.8.9",
+ "ort",
  "parity-tokio-ipc",
+ "serde",
  "serde_json",
  "slab-diffusion",
  "slab-llama",
  "slab-model-pack",
  "slab-proto",
- "slab-runtime-backend-candle",
- "slab-runtime-backend-ggml",
- "slab-runtime-backend-onnx",
- "slab-runtime-core",
- "slab-types",
- "slab-whisper",
- "tokio",
- "tokio-stream",
- "tonic",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "winapi",
-]
-
-[[package]]
-name = "slab-runtime-backend-candle"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "candle-core",
- "candle-nn",
- "candle-transformers",
- "image",
- "serde_json",
- "slab-diffusion",
- "slab-runtime-core",
- "slab-runtime-macros",
- "slab-types",
- "thiserror 2.0.18",
- "tokenizers",
- "tokio",
- "tracing",
-]
-
-[[package]]
-name = "slab-runtime-backend-ggml"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "image",
- "libloading 0.8.9",
- "serde_json",
- "slab-diffusion",
- "slab-llama",
  "slab-runtime-core",
  "slab-runtime-macros",
  "slab-subtitle",
@@ -8050,25 +8012,14 @@ dependencies = [
  "slab-utils",
  "slab-whisper",
  "thiserror 2.0.18",
+ "tokenizers",
  "tokio",
+ "tokio-stream",
+ "tonic",
  "tracing",
-]
-
-[[package]]
-name = "slab-runtime-backend-onnx"
-version = "0.0.1"
-dependencies = [
- "async-trait",
- "base64 0.22.1",
- "ort",
- "serde",
- "serde_json",
- "slab-runtime-core",
- "slab-runtime-macros",
- "slab-types",
- "thiserror 2.0.18",
- "tokio",
- "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "winapi",
 ]
 
 [[package]]

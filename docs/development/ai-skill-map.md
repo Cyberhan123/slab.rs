@@ -22,7 +22,7 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
 - Agent control-plane work
   Start in `crates/slab-agent/**`, `slab-server/src/api/v1/agent/**`, and `slab-server/src/infra/agent_adapter.rs`.
 - Runtime and engine work
-  Start in `bin/slab-runtime/**`, `crates/slab-runtime-core/**`, `crates/slab-runtime-backend-ggml/**`, `crates/slab-runtime-backend-candle/**`, `crates/slab-runtime-backend-onnx/**`, `crates/slab-llama/**`, `crates/slab-whisper/**`, `crates/slab-diffusion/**`, and `crates/slab-ggml/**`.
+  Start in `bin/slab-runtime/**`, especially `bin/slab-runtime/src/{config,context,domain,infra}/**` and `bin/slab-runtime/src/infra/backends/**`, plus `crates/slab-runtime-core/**`, `crates/slab-llama/**`, `crates/slab-whisper/**`, `crates/slab-diffusion/**`, and `crates/slab-ggml/**`.
 - Plugin package and bridge work
   Start in `plugins/**`, `packages/slab-desktop/src/pages/plugins/**`, `packages/slab-desktop/src/lib/plugin-sdk.ts`, and `bin/slab-app/src-tauri/src/plugins/**`.
 - Shared contracts, settings, and manifests
