@@ -559,4 +559,75 @@ mod tests {
         assert_eq!(diffusion.vae_device, "cpu");
         assert!(load_error.to_string().contains("hugging_face"));
     }
+
+    #[test]
+    fn compiles_hugging_face_bridge_using_selected_variant_file() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "qwen2.5-0.5b-instruct",
+                    "label": "Qwen2.5 0.5B Instruct",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": false},
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+                        "files": [
+                            {"id": "model", "path": "Qwen2.5-0.5B-Instruct-f16.gguf"},
+                            {"id": "Q8_0", "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf"}
+                        ]
+                    },
+                    "variants": [{"id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json"}],
+                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q8_0.json",
+                json!({
+                    "kind": "variant",
+                    "id": "Q8_0",
+                    "label": "Q8_0"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "variant_id": "Q8_0"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
+
+        assert_eq!(
+            bridge
+                .model_spec
+                .source
+                .artifact("model")
+                .map(|path| path.to_string_lossy().to_string())
+                .as_deref(),
+            Some("Qwen2.5-0.5B-Instruct-Q8_0.gguf")
+        );
+        assert_eq!(
+            bridge
+                .model_spec
+                .source
+                .primary_path()
+                .map(|path| path.to_string_lossy().to_string())
+                .as_deref(),
+            Some("Qwen2.5-0.5B-Instruct-Q8_0.gguf")
+        );
+    }
 }

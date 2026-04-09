@@ -193,6 +193,14 @@ pub struct RuntimePresets {
     pub top_p: Option<f32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ModelPackSelection {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub preset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub variant_id: Option<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Unified domain model view
 // ---------------------------------------------------------------------------
@@ -258,6 +266,8 @@ pub struct StoredModelConfig {
     pub spec: ModelSpec,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub runtime_presets: Option<RuntimePresets>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub pack_selection: Option<ModelPackSelection>,
 }
 
 pub fn upgrade_stored_model_config(config: StoredModelConfig) -> Result<StoredModelConfig, String> {
@@ -321,6 +331,46 @@ pub struct UpdateModelCommand {
     pub capabilities: Option<Vec<Capability>>,
     pub status: Option<UnifiedModelStatus>,
     pub spec: Option<ModelSpec>,
+    pub runtime_presets: Option<RuntimePresets>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelEnhancementPresetOption {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub variant_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelEnhancementVariantOption {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub repo_id: Option<String>,
+    pub filename: Option<String>,
+    pub local_path: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelEnhancementView {
+    pub model: UnifiedModel,
+    pub default_preset_id: Option<String>,
+    pub selected_preset_id: Option<String>,
+    pub selected_variant_id: Option<String>,
+    pub presets: Vec<ModelEnhancementPresetOption>,
+    pub variants: Vec<ModelEnhancementVariantOption>,
+    pub resolved_spec: ModelSpec,
+    pub resolved_runtime_presets: Option<RuntimePresets>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateModelEnhancementCommand {
+    pub display_name: String,
+    pub selected_preset_id: Option<String>,
+    pub selected_variant_id: Option<String>,
+    pub context_window: Option<u32>,
+    pub chat_template: Option<String>,
     pub runtime_presets: Option<RuntimePresets>,
 }
 
@@ -393,6 +443,7 @@ impl From<UnifiedModel> for StoredModelConfig {
             status: Some(model.status),
             spec: model.spec,
             runtime_presets: model.runtime_presets,
+            pack_selection: None,
         }
     }
 }
@@ -516,6 +567,28 @@ mod tests {
 
         assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
         assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
+        assert!(config.capabilities.is_empty());
+    }
+
+    #[test]
+    fn upgrading_legacy_stored_model_config_restores_default_capabilities() {
+        let config = upgrade_stored_model_config(
+            serde_json::from_value(json!({
+                "id": "cloud-model",
+                "display_name": "Cloud Model",
+                "kind": "cloud",
+                "status": "ready",
+                "spec": {
+                    "provider_id": "openai-main",
+                    "remote_model_id": "gpt-4.1-mini"
+                }
+            }))
+            .expect("deserialize legacy config"),
+        )
+        .expect("upgrade legacy config");
+
+        assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
+        assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
         assert_eq!(
             config.capabilities,
             vec![Capability::TextGeneration, Capability::ChatGeneration]
@@ -564,6 +637,7 @@ mod tests {
                 ..ModelSpec::default()
             },
             runtime_presets: None,
+            pack_selection: None,
         })
         .expect_err("future schema version should fail");
 
@@ -587,6 +661,7 @@ mod tests {
                 ..ModelSpec::default()
             },
             runtime_presets: None,
+            pack_selection: None,
         })
         .expect_err("future policy version should fail");
 

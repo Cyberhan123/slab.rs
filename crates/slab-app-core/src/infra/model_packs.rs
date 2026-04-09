@@ -11,7 +11,7 @@ use slab_model_pack::{
     BackendConfigDocument, BackendConfigScope, ConfigEntryRef, ConfigRef, MANIFEST_FILE_NAME,
     ModelPack, ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults, ModelPackManifest,
     ModelPackRuntimeBridge, PACK_EXTENSION, PackModelStatus, PackPricing, PackRuntimePresets,
-    PackSource, PackSourceFile, PresetDocument, VariantDocument,
+    PackSource, PackSourceFile, PresetDocument, PresetEntryRef, VariantDocument,
 };
 use slab_types::{DiffusionLoadOptions, DriverHints, ModelFamily, RuntimeBackendId};
 use uuid::Uuid;
@@ -161,6 +161,12 @@ pub fn write_imported_model_pack(
     write_model_pack(dir, &model.id, &payload)
 }
 
+pub fn read_persisted_model_config_from_pack(
+    path: &Path,
+) -> Result<Option<StoredModelConfig>, AppCoreError> {
+    read_persisted_model_config_from_pack_bytes(&read_pack_bytes(path)?)
+}
+
 pub fn write_persisted_model_pack(
     dir: &Path,
     model: &UnifiedModel,
@@ -176,10 +182,14 @@ pub fn write_persisted_model_pack_from_config(
     ensure_model_pack_dir(dir)?;
 
     let path = model_pack_file_path(dir, &config.id);
+    let mut next_config = config.clone();
     let payload = if path.exists() {
-        attach_persisted_state_to_pack_bytes(&read_pack_bytes(&path)?, config)?
+        if let Some(existing_config) = read_persisted_model_config_from_pack(&path)? {
+            merge_persisted_pack_config(&mut next_config, &existing_config);
+        }
+        attach_persisted_state_to_pack_bytes(&read_pack_bytes(&path)?, &next_config)?
     } else {
-        build_generated_model_pack_bytes(config)?
+        build_generated_model_pack_bytes(&next_config)?
     };
 
     write_bytes_file(&path, &payload)?;
@@ -388,6 +398,12 @@ fn attach_persisted_state_to_pack_bytes(
     build_pack_bytes(entries)
 }
 
+fn merge_persisted_pack_config(next: &mut StoredModelConfig, existing: &StoredModelConfig) {
+    if next.pack_selection.is_none() {
+        next.pack_selection = existing.pack_selection.clone();
+    }
+}
+
 fn build_generated_model_pack_bytes(config: &StoredModelConfig) -> Result<Vec<u8>, AppCoreError> {
     let mut entries = build_generated_pack_entries(config)?;
     let manifest_sha256 = entries
@@ -417,10 +433,11 @@ fn build_generated_pack_entries(
             config_ref: ConfigRef::parse(format!("ref://{GENERATED_VARIANT_PATH}"))
                 .map_err(map_model_pack_error)?,
         };
-        let preset_ref = ConfigEntryRef {
+        let preset_ref = PresetEntryRef {
             id: GENERATED_PRESET_ID.to_owned(),
             label: "Default".to_owned(),
             description: Some("Generated from catalog state".to_owned()),
+            variant_id: None,
             config_ref: ConfigRef::parse(format!("ref://{GENERATED_PRESET_PATH}"))
                 .map_err(map_model_pack_error)?,
         };
@@ -800,12 +817,13 @@ mod tests {
     use super::{
         attach_persisted_state_to_pack_bytes, build_generated_model_pack_bytes,
         build_model_command_from_pack_bytes, build_pack_bytes, collect_pack_entries,
-        manifest_sha256_from_pack_bytes, read_persisted_model_config_from_pack_bytes,
+        manifest_sha256_from_pack_bytes, merge_persisted_pack_config,
+        read_persisted_model_config_from_pack_bytes,
     };
     use crate::domain::models::{
         CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
-        ManagedModelBackendId, ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModelKind,
-        UnifiedModelStatus,
+        ManagedModelBackendId, ModelPackSelection, ModelSpec, RuntimePresets,
+        StoredModelConfig, UnifiedModelKind, UnifiedModelStatus,
     };
     use crate::error::AppCoreError;
 
@@ -1047,6 +1065,147 @@ mod tests {
     }
 
     #[test]
+    fn builds_local_model_command_using_selected_variant_file_from_manifest_source() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "qwen2.5-0.5b-instruct",
+                    "label": "Qwen2.5 0.5B Instruct",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "backend_hints": {
+                        "prefer_drivers": ["ggml.llama"],
+                        "avoid_drivers": [],
+                        "require_streaming": false
+                    },
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+                        "files": [
+                            {
+                                "id": "model",
+                                "path": "Qwen2.5-0.5B-Instruct-f16.gguf"
+                            },
+                            {
+                                "id": "Q4_K_M",
+                                "path": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+                            },
+                            {
+                                "id": "Q8_0",
+                                "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf"
+                            }
+                        ]
+                    },
+                    "variants": [{"id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json"}],
+                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q8_0.json",
+                json!({
+                    "kind": "variant",
+                    "id": "Q8_0",
+                    "label": "Q8_0"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "variant_id": "Q8_0"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let command =
+            build_model_command_from_pack_bytes(Path::new("qwen2.5-0.5b-instruct.slab"), &bytes)
+                .expect("local command");
+
+        assert_eq!(command.kind, UnifiedModelKind::Local);
+        assert_eq!(command.backend_id, Some(ManagedModelBackendId::GgmlLlama));
+        assert_eq!(command.status, Some(UnifiedModelStatus::NotDownloaded));
+        assert_eq!(command.spec.repo_id.as_deref(), Some("bartowski/Qwen2.5-0.5B-Instruct-GGUF"));
+        assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-0.5B-Instruct-Q8_0.gguf"));
+        assert_eq!(command.spec.local_path, None);
+    }
+
+    #[test]
+    fn builds_local_model_command_using_manifest_preset_variant_override() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "qwen2.5-0.5b-instruct",
+                    "label": "Qwen2.5 0.5B Instruct",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "backend_hints": {
+                        "prefer_drivers": ["ggml.llama"],
+                        "avoid_drivers": [],
+                        "require_streaming": false
+                    },
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+                        "files": [
+                            {
+                                "id": "model",
+                                "path": "Qwen2.5-0.5B-Instruct-f16.gguf"
+                            },
+                            {
+                                "id": "Q8_0",
+                                "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf"
+                            }
+                        ]
+                    },
+                    "variants": [{"id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json"}],
+                    "presets": [{
+                        "id": "default",
+                        "label": "Default",
+                        "variant_id": "Q8_0",
+                        "$config": "ref://models/presets/default.json"
+                    }],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q8_0.json",
+                json!({
+                    "kind": "variant",
+                    "id": "Q8_0",
+                    "label": "Q8_0"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let command =
+            build_model_command_from_pack_bytes(Path::new("qwen2.5-0.5b-instruct.slab"), &bytes)
+                .expect("local command");
+
+        assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-0.5B-Instruct-Q8_0.gguf"));
+    }
+
+    #[test]
     fn uses_persisted_state_when_manifest_matches() {
         let base_bytes = build_pack(vec![(
             "manifest.json",
@@ -1079,6 +1238,7 @@ mod tests {
                 ..Default::default()
             },
             runtime_presets: Some(RuntimePresets { temperature: Some(0.2), top_p: Some(0.8) }),
+            pack_selection: None,
         };
 
         let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &config)
@@ -1126,6 +1286,7 @@ mod tests {
                 ..Default::default()
             },
             runtime_presets: None,
+            pack_selection: None,
         };
 
         let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &config)
@@ -1173,6 +1334,7 @@ mod tests {
                 ..Default::default()
             },
             runtime_presets: Some(RuntimePresets { temperature: Some(0.6), top_p: Some(0.9) }),
+            pack_selection: None,
         };
 
         let bytes = build_generated_model_pack_bytes(&config).expect("generate pack");
@@ -1290,6 +1452,54 @@ mod tests {
         assert!(
             matches!(error, AppCoreError::BadRequest(message) if message.contains("unsupported stored model config schema_version"))
         );
+    }
+
+    #[test]
+    fn merge_preserves_existing_pack_selection() {
+        let mut next = StoredModelConfig {
+            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
+            id: "local-qwen".to_owned(),
+            display_name: "Local Qwen".to_owned(),
+            kind: UnifiedModelKind::Local,
+            backend_id: Some(ManagedModelBackendId::GgmlLlama),
+            capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
+            status: Some(UnifiedModelStatus::NotDownloaded),
+            spec: ModelSpec {
+                repo_id: Some("bartowski/Qwen2.5-7B-Instruct-GGUF".to_owned()),
+                filename: Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf".to_owned()),
+                ..Default::default()
+            },
+            runtime_presets: None,
+            pack_selection: None,
+        };
+        let existing = StoredModelConfig {
+            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
+            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
+            id: "local-qwen".to_owned(),
+            display_name: "Local Qwen".to_owned(),
+            kind: UnifiedModelKind::Local,
+            backend_id: Some(ManagedModelBackendId::GgmlLlama),
+            capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
+            status: Some(UnifiedModelStatus::Ready),
+            spec: ModelSpec {
+                repo_id: Some("bartowski/Qwen2.5-7B-Instruct-GGUF".to_owned()),
+                filename: Some("Qwen2.5-7B-Instruct-Q8_0.gguf".to_owned()),
+                local_path: Some("C:/models/Qwen2.5-7B-Instruct-Q8_0.gguf".to_owned()),
+                ..Default::default()
+            },
+            runtime_presets: Some(RuntimePresets { temperature: Some(0.7), top_p: Some(0.95) }),
+            pack_selection: Some(ModelPackSelection {
+                preset_id: Some("default".to_owned()),
+                variant_id: Some("Q8_0".to_owned()),
+            }),
+        };
+
+        merge_persisted_pack_config(&mut next, &existing);
+
+        let selection = next.pack_selection.expect("pack selection should be preserved");
+        assert_eq!(selection.preset_id.as_deref(), Some("default"));
+        assert_eq!(selection.variant_id.as_deref(), Some("Q8_0"));
     }
 }
 

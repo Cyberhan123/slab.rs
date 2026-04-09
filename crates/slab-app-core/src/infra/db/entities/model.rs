@@ -153,6 +153,7 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             status: Some(status),
             spec,
             runtime_presets,
+            pack_selection: None,
         })?;
 
         Ok(UnifiedModel {
