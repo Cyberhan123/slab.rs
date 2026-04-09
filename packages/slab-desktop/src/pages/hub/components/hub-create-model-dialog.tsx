@@ -61,8 +61,9 @@ export function HubCreateModelDialog({
         <DialogHeader className="border-b border-border/60 px-5 pt-5 pb-4">
           <DialogTitle>Import model</DialogTitle>
           <DialogDescription>
-            Upload a .slab model pack. Each pack must contain a root-level manifest.json, while
-            provider credentials stay in Settings and are referenced by provider_id.
+            Upload a .slab model pack. Import only adds the entry to the catalog. Provider
+            credentials stay in Settings, and supported local models can be downloaded later from
+            their catalog cards.
           </DialogDescription>
         </DialogHeader>
 
@@ -86,7 +87,8 @@ export function HubCreateModelDialog({
                   <span className="truncate">{selectedFileName}</span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  This pack will be validated, stored, and turned into a catalog entry.
+                  This pack will be validated, stored, and turned into a catalog entry without
+                  pulling remote model files yet.
                 </p>
               </div>
             ) : (

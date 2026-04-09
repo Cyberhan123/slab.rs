@@ -48,7 +48,8 @@ pub struct RuntimeConfig {
 impl Cli {
     pub fn into_runtime_config(self) -> anyhow::Result<RuntimeConfig> {
         let enabled_backends = parse_enabled_backends(self.enabled_backends.as_deref())?;
-        let base_lib_path = self.lib_dir.unwrap_or_else(|| Path::new("./resources/libs").to_path_buf());
+        let base_lib_path =
+            self.lib_dir.unwrap_or_else(|| Path::new("./resources/libs").to_path_buf());
         let llama_lib_dir = enabled_backends.llama.then(|| base_lib_path.clone());
         let whisper_lib_dir = enabled_backends.whisper.then(|| base_lib_path.clone());
         let diffusion_lib_dir = enabled_backends.diffusion.then(|| base_lib_path.clone());

@@ -1,7 +1,7 @@
 use futures::StreamExt;
 use serde_json::Value;
-use slab_types::{JsonOptions, TextGenerationChunk, TextGenerationResponse};
 use slab_types::inference::{TextGenerationUsage, TextPromptTokensDetails};
+use slab_types::{JsonOptions, TextGenerationChunk, TextGenerationResponse};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};

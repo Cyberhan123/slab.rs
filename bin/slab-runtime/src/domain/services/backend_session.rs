@@ -18,8 +18,7 @@ use super::codec::{
     decode_image_generation_response, decode_text_generation_chunk,
     decode_text_generation_response, encode_audio_transcription_options,
     encode_image_embedding_request, encode_image_generation_request, encode_load_payload,
-    encode_text_generation_request, image_embedding_input_name,
-    image_embedding_output_name,
+    encode_text_generation_request, image_embedding_input_name, image_embedding_output_name,
 };
 use super::execution_hub::ExecutionHub;
 use crate::domain::models::{InvocationPlan, ResolvedBackend, TaskCodec, TaskHandle};
@@ -383,7 +382,10 @@ where
     Ok(TaskHandle::new(execution.orchestrator(), task_id, Arc::new(codec)))
 }
 
-async fn submit_invocation_plan(execution: &ExecutionHub, plan: InvocationPlan) -> Result<u64, CoreError> {
+async fn submit_invocation_plan(
+    execution: &ExecutionHub,
+    plan: InvocationPlan,
+) -> Result<u64, CoreError> {
     let op = BackendOp { name: plan.invocation.op_name.clone(), options: plan.op_options };
 
     let mut builder = PipelineBuilder::new(execution.orchestrator(), plan.initial_payload);

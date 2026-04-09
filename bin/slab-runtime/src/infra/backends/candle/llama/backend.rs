@@ -23,11 +23,11 @@ use tokio::sync::mpsc;
 
 use crate::infra::backends::candle::llama::adapter::CandleLlamaEngine;
 use crate::infra::backends::candle::llama::errors::SessionId;
+use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
     BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
 };
 use slab_runtime_core::backend::{SharedIngressRx, spawn_runtime_worker};
-use slab_runtime_core::Payload;
 use slab_runtime_macros::backend_handler;
 use tokio::sync::broadcast;
 

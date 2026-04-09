@@ -1,7 +1,7 @@
 extern crate self as slab_runtime_core;
 
-mod base;
 pub mod backend;
+mod base;
 mod internal;
 pub mod scheduler;
 

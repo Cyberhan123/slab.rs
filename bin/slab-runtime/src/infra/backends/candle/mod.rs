@@ -2,11 +2,9 @@ pub mod diffusion;
 pub mod llama;
 pub mod whisper;
 
-use slab_runtime_core::backend::ResourceManager;
 use slab_runtime_core::CoreError;
-use slab_types::{
-    Capability, DriverDescriptor, DriverLoadStyle, ModelFamily, ModelSourceKind,
-};
+use slab_runtime_core::backend::ResourceManager;
+use slab_types::{Capability, DriverDescriptor, DriverLoadStyle, ModelFamily, ModelSourceKind};
 use thiserror::Error;
 
 pub use slab_runtime_core::CoreError as EngineError;

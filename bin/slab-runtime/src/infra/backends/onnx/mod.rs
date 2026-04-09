@@ -2,11 +2,9 @@ pub mod adapter;
 pub mod backend;
 pub(crate) mod config;
 
-use slab_runtime_core::backend::{ResourceManager, spawn_workers};
 use slab_runtime_core::CoreError;
-use slab_types::{
-    Capability, DriverDescriptor, DriverLoadStyle, ModelFamily, ModelSourceKind,
-};
+use slab_runtime_core::backend::{ResourceManager, spawn_workers};
+use slab_types::{Capability, DriverDescriptor, DriverLoadStyle, ModelFamily, ModelSourceKind};
 use thiserror::Error;
 
 #[derive(Debug, Error)]

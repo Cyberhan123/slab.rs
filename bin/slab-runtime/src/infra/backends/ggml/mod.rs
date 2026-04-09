@@ -6,11 +6,9 @@ pub mod whisper;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use slab_runtime_core::backend::{ResourceManager, spawn_dedicated_workers, spawn_workers};
 use slab_runtime_core::CoreError;
-use slab_types::{
-    Capability, DriverDescriptor, DriverLoadStyle, ModelFamily, ModelSourceKind,
-};
+use slab_runtime_core::backend::{ResourceManager, spawn_dedicated_workers, spawn_workers};
+use slab_types::{Capability, DriverDescriptor, DriverLoadStyle, ModelFamily, ModelSourceKind};
 use thiserror::Error;
 
 use crate::infra::backends::ggml::diffusion::{DiffusionWorker, GGMLDiffusionEngine};
@@ -120,9 +118,8 @@ pub fn register(
         let whisper_engine = load_whisper_engine(path)?;
         resource_manager.register_backend("ggml.whisper", move |shared_rx, control_tx| {
             let count = worker_count.max(1);
-            let mut worker_engines: Vec<Option<GGMLWhisperEngine>> = (1..count)
-                .map(|_| Some(whisper_engine.fork_library()))
-                .collect();
+            let mut worker_engines: Vec<Option<GGMLWhisperEngine>> =
+                (1..count).map(|_| Some(whisper_engine.fork_library())).collect();
             worker_engines.insert(0, Some(whisper_engine));
             let mut worker_engines = worker_engines.into_iter();
             spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
@@ -136,9 +133,8 @@ pub fn register(
         let diffusion_engine = load_diffusion_engine(path)?;
         resource_manager.register_backend("ggml.diffusion", move |shared_rx, control_tx| {
             let count = worker_count.max(1);
-            let mut worker_engines: Vec<Option<GGMLDiffusionEngine>> = (1..count)
-                .map(|_| Some(diffusion_engine.fork_library()))
-                .collect();
+            let mut worker_engines: Vec<Option<GGMLDiffusionEngine>> =
+                (1..count).map(|_| Some(diffusion_engine.fork_library())).collect();
             worker_engines.insert(0, Some(diffusion_engine));
             let mut worker_engines = worker_engines.into_iter();
             spawn_dedicated_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {

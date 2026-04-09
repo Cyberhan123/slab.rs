@@ -140,19 +140,17 @@ impl RuntimeBackendLoadSpec {
         } = spec;
 
         Ok(match backend {
-            crate::backend::RuntimeBackendId::GgmlLlama => {
-                Self::GgmlLlama(GgmlLlamaLoadConfig {
-                    model_path,
-                    num_workers: usize::try_from(num_workers).map_err(|error| {
-                        crate::error::SlabTypeError::Validation {
-                            path: "num_workers".to_owned(),
-                            message: error.to_string(),
-                        }
-                    })?,
-                    context_length,
-                    chat_template,
-                })
-            }
+            crate::backend::RuntimeBackendId::GgmlLlama => Self::GgmlLlama(GgmlLlamaLoadConfig {
+                model_path,
+                num_workers: usize::try_from(num_workers).map_err(|error| {
+                    crate::error::SlabTypeError::Validation {
+                        path: "num_workers".to_owned(),
+                        message: error.to_string(),
+                    }
+                })?,
+                context_length,
+                chat_template,
+            }),
             crate::backend::RuntimeBackendId::GgmlWhisper => {
                 Self::GgmlWhisper(GgmlWhisperLoadConfig { model_path })
             }
@@ -185,10 +183,7 @@ impl RuntimeBackendLoadSpec {
                 })
             }
             crate::backend::RuntimeBackendId::CandleWhisper => {
-                Self::CandleWhisper(CandleWhisperLoadConfig {
-                    model_path,
-                    tokenizer_path: None,
-                })
+                Self::CandleWhisper(CandleWhisperLoadConfig { model_path, tokenizer_path: None })
             }
             crate::backend::RuntimeBackendId::CandleDiffusion => {
                 let diffusion = diffusion.unwrap_or_default();

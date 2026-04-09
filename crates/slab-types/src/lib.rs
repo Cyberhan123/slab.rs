@@ -40,9 +40,9 @@ pub use diffusion::{
 pub use error::SlabTypeError;
 pub use inference::{
     AudioTranscriptionOpOptions, AudioTranscriptionRequest, AudioTranscriptionResponse,
-    ImageEmbeddingRequest, ImageEmbeddingResponse, ImageGenerationRequest,
-    ImageGenerationResponse, JsonOptions, TextGenerationChunk, TextGenerationOpOptions,
-    TextGenerationRequest, TextGenerationResponse,
+    ImageEmbeddingRequest, ImageEmbeddingResponse, ImageGenerationRequest, ImageGenerationResponse,
+    JsonOptions, TextGenerationChunk, TextGenerationOpOptions, TextGenerationRequest,
+    TextGenerationResponse,
 };
 pub use load_config::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,

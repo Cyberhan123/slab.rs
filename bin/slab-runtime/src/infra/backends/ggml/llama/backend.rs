@@ -28,11 +28,11 @@ use tokio::sync::{broadcast, watch};
 use crate::infra::backends::ggml::llama::adapter::{
     GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest,
 };
+use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
     BackendReply, BackendRequest, RuntimeControlSignal, WorkerCommand,
 };
 use slab_runtime_core::backend::{SharedIngressRx, spawn_runtime_worker};
-use slab_runtime_core::Payload;
 use slab_runtime_macros::backend_handler;
 
 // ── Configurations ────────────────────────────────────────────────────────────
@@ -369,8 +369,8 @@ pub fn spawn_backend_with_engine(
 mod tests {
     use super::LlamaWorker;
     use crate::infra::backends::ggml::llama::adapter::infer_add_assistant_prompt;
-    use slab_runtime_core::backend::RuntimeControlSignal;
     use slab_runtime_core::Payload;
+    use slab_runtime_core::backend::RuntimeControlSignal;
 
     // ── infer_add_assistant_prompt ────────────────────────────────────────────
 

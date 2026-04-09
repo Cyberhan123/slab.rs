@@ -2,8 +2,8 @@ use std::path::PathBuf;
 
 use slab_types::runtime::RuntimeModelStatus;
 use slab_types::{
-    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, ModelSource,
-    ModelSpec, RuntimeBackendLoadSpec,
+    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, ModelSource, ModelSpec,
+    RuntimeBackendLoadSpec,
 };
 
 use super::{BackendKind, RuntimeApplicationError, SharedRuntimeState};
@@ -80,10 +80,8 @@ fn build_model_spec(backend: BackendKind, load_spec: &RuntimeBackendLoadSpec) ->
                     serde_json::json!(load_config.context_length.unwrap_or(0)),
                 );
                 if let Some(chat_template) = &load_config.chat_template {
-                    spec.load_options.insert(
-                        "chat_template".to_owned(),
-                        serde_json::json!(chat_template),
-                    );
+                    spec.load_options
+                        .insert("chat_template".to_owned(), serde_json::json!(chat_template));
                 }
             }
         }
@@ -125,8 +123,5 @@ fn insert_opt_path_option(spec: &mut ModelSpec, key: &str, value: Option<&PathBu
 }
 
 fn model_status(backend: BackendKind, status: &str) -> RuntimeModelStatus {
-    RuntimeModelStatus {
-        backend: backend.runtime_backend_id(),
-        status: status.to_owned(),
-    }
+    RuntimeModelStatus { backend: backend.runtime_backend_id(), status: status.to_owned() }
 }

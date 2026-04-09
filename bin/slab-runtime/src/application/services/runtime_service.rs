@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use slab_types::runtime::RuntimeModelStatus;
 use slab_types::RuntimeBackendLoadSpec;
+use slab_types::runtime::RuntimeModelStatus;
 use tokio::sync::RwLock;
 
 use crate::domain::services::{BackendSession, ExecutionHub};
@@ -45,17 +45,13 @@ impl RuntimeApplication {
         backend: BackendKind,
         load_spec: RuntimeBackendLoadSpec,
     ) -> Result<RuntimeModelStatus, RuntimeApplicationError> {
-        self.model_lifecycle_service
-            .load_model_for_backend(backend, load_spec)
-            .await
+        self.model_lifecycle_service.load_model_for_backend(backend, load_spec).await
     }
 
     pub async fn unload_model_for_backend(
         &self,
         backend: BackendKind,
     ) -> Result<RuntimeModelStatus, RuntimeApplicationError> {
-        self.model_lifecycle_service
-            .unload_model_for_backend(backend)
-            .await
+        self.model_lifecycle_service.unload_model_for_backend(backend).await
     }
 }

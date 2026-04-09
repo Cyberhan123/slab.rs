@@ -1,9 +1,11 @@
-use slab_runtime_core::backend::{StreamChunk as BaseStreamChunk, StreamHandle as BaseStreamHandle};
 use crate::infra::backends::ggml;
 use slab_llama::Llama;
 use slab_llama::{
     ChatMessage, LlamaContextParams, LlamaModel, LlamaModelParams, LlamaRuntime,
     LlamaSessionSnapshot,
+};
+use slab_runtime_core::backend::{
+    StreamChunk as BaseStreamChunk, StreamHandle as BaseStreamHandle,
 };
 use slab_types::inference::{TextGenerationUsage, TextPromptTokensDetails};
 use slab_utils::loader::load_library_from_dir;

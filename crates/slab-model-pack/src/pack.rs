@@ -202,10 +202,12 @@ impl ModelPack {
                     self.validate_component_ids(&adapter.component_ids, &component_ids)?;
                 }
                 PackDocument::Preset(preset) => {
-                    if !variant_ids.contains(&preset.variant_id) {
+                    if let Some(variant_id) = &preset.variant_id
+                        && !variant_ids.contains(variant_id)
+                    {
                         return Err(ModelPackError::MissingNamedDocument {
                             kind: "variant",
-                            id: preset.variant_id.clone(),
+                            id: variant_id.clone(),
                         });
                     }
                     for adapter_id in &preset.adapter_ids {
@@ -437,7 +439,6 @@ mod tests {
                     "kind": "preset",
                     "id": "default",
                     "label": "Default",
-                    "variant_id": "q4_k_m",
                     "$load_config": "ref://models/configs/load.json",
                     "$inference_config": "ref://models/configs/inference.json"
                 })
@@ -459,7 +460,7 @@ mod tests {
             pack.resolve_preset(&pack.manifest().presets[0].config_ref)
                 .expect("preset should resolve")
                 .variant_id,
-            "q4_k_m"
+            None
         );
     }
 
