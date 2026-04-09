@@ -1,6 +1,5 @@
 use slab_proto::{convert, slab::ipc::v1 as pb};
 use slab_runtime_core::CoreError;
-use slab_types::RuntimeBackendLoadSpec;
 use tonic::Status;
 use tracing::instrument;
 
@@ -34,10 +33,17 @@ impl GrpcServiceImpl {
         backend: BackendKind,
         request: pb::ModelLoadRequest,
     ) -> Result<pb::ModelStatusResponse, Status> {
-        let load_spec = convert::decode_model_load_request(&request).map_err(proto_to_status)?;
         let typed_load_spec =
-            RuntimeBackendLoadSpec::from_legacy(backend.runtime_backend_id(), load_spec)
-                .map_err(|error| Status::invalid_argument(error.to_string()))?;
+            convert::decode_model_load_request(&request).map_err(proto_to_status)?;
+        let expected_backend = backend.runtime_backend_id();
+        let actual_backend = typed_load_spec.backend();
+        if actual_backend != expected_backend {
+            return Err(Status::invalid_argument(format!(
+                "model load payload targets backend '{}' but request was sent to '{}'",
+                actual_backend.canonical_id(),
+                expected_backend.canonical_id()
+            )));
+        }
         let status = self
             .application
             .load_model_for_backend(backend, typed_load_spec)
