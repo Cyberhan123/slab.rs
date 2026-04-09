@@ -209,8 +209,8 @@ const TAURI_ROUTE_DEFINITIONS: readonly TauriRouteDefinition[] = [
   },
   {
     method: 'GET',
-    pattern: '/v1/models/{id}/enhancement',
-    command: 'get_model_enhancement',
+    pattern: '/v1/models/{id}/config-document',
+    command: 'get_model_config_document',
     buildArgs: ({ pathParams }) => ({ id: pathParams.id }),
   },
   {
@@ -221,8 +221,8 @@ const TAURI_ROUTE_DEFINITIONS: readonly TauriRouteDefinition[] = [
   },
   {
     method: 'PUT',
-    pattern: '/v1/models/{id}/enhancement',
-    command: 'update_model_enhancement',
+    pattern: '/v1/models/{id}/config-selection',
+    command: 'update_model_config_selection',
     buildArgs: ({ body, pathParams }) => ({ id: pathParams.id, req: body }),
   },
   {

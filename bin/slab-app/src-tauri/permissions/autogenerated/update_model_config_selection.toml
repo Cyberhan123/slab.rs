@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-update-model-config-selection"
+description = "Enables the update_model_config_selection command without any pre-configured scope."
+commands.allow = ["update_model_config_selection"]
+
+[[permission]]
+identifier = "deny-update-model-config-selection"
+description = "Denies the update_model_config_selection command without any pre-configured scope."
+commands.deny = ["update_model_config_selection"]

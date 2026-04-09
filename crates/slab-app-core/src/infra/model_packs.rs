@@ -10,8 +10,9 @@ use sha2::{Digest, Sha256};
 use slab_model_pack::{
     BackendConfigDocument, BackendConfigScope, ConfigEntryRef, ConfigRef, MANIFEST_FILE_NAME,
     ModelPack, ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults, ModelPackManifest,
-    ModelPackRuntimeBridge, PACK_EXTENSION, PackModelStatus, PackPricing, PackRuntimePresets,
-    PackSource, PackSourceFile, PresetDocument, PresetEntryRef, VariantDocument,
+    ModelPackRuntimeBridge, PACK_EXTENSION, PackDocument, PackModelStatus, PackPricing,
+    PackRuntimePresets, PackSource, PackSourceFile, PresetDocument, PresetEntryRef,
+    VariantDocument,
 };
 use slab_types::{DiffusionLoadOptions, DriverHints, ModelFamily, RuntimeBackendId};
 use uuid::Uuid;
@@ -121,13 +122,13 @@ pub fn build_model_command_from_pack_bytes(
     path: &Path,
     bytes: &[u8],
 ) -> Result<CreateModelCommand, AppCoreError> {
-    if let Some(config) = read_persisted_model_config_from_pack_bytes(bytes)? {
-        return Ok(config.into());
-    }
-
     let pack = open_model_pack_from_bytes(bytes)?;
     let resolved = pack.resolve().map_err(map_model_pack_error)?;
-    build_model_command(path, pack.manifest(), &resolved)
+    let mut command = build_model_command(path, pack.manifest(), &resolved)?;
+    if let Some(config) = read_persisted_model_config_from_pack_bytes(bytes)? {
+        apply_persisted_projection_state(&mut command, &config);
+    }
+    Ok(command)
 }
 
 pub fn model_pack_file_path(dir: &Path, id: &str) -> PathBuf {
@@ -156,9 +157,7 @@ pub fn write_imported_model_pack(
     model: &UnifiedModel,
     bytes: &[u8],
 ) -> Result<PathBuf, AppCoreError> {
-    let config: StoredModelConfig = model.clone().into();
-    let payload = attach_persisted_state_to_pack_bytes(bytes, &config)?;
-    write_model_pack(dir, &model.id, &payload)
+    write_model_pack(dir, &model.id, bytes)
 }
 
 pub fn read_persisted_model_config_from_pack(
@@ -183,10 +182,8 @@ pub fn write_persisted_model_pack_from_config(
 
     let path = model_pack_file_path(dir, &config.id);
     let mut next_config = config.clone();
+    next_config.pack_selection = None;
     let payload = if path.exists() {
-        if let Some(existing_config) = read_persisted_model_config_from_pack(&path)? {
-            merge_persisted_pack_config(&mut next_config, &existing_config);
-        }
         attach_persisted_state_to_pack_bytes(&read_pack_bytes(&path)?, &next_config)?
     } else {
         build_generated_model_pack_bytes(&next_config)?
@@ -398,9 +395,20 @@ fn attach_persisted_state_to_pack_bytes(
     build_pack_bytes(entries)
 }
 
-fn merge_persisted_pack_config(next: &mut StoredModelConfig, existing: &StoredModelConfig) {
-    if next.pack_selection.is_none() {
-        next.pack_selection = existing.pack_selection.clone();
+fn apply_persisted_projection_state(command: &mut CreateModelCommand, persisted: &StoredModelConfig) {
+    if same_download_source(&persisted.spec, &command.spec) {
+        command.spec.local_path = persisted.spec.local_path.clone();
+        if let Some(status) = persisted.status.clone() {
+            command.status = Some(status);
+        }
+    }
+}
+
+fn same_download_source(current: &ModelSpec, next: &ModelSpec) -> bool {
+    match (current.repo_id.as_deref(), next.repo_id.as_deref()) {
+        (Some(_), Some(_)) => current.repo_id == next.repo_id && current.filename == next.filename,
+        (None, None) => current.local_path == next.local_path,
+        _ => false,
     }
 }
 
@@ -449,7 +457,10 @@ fn build_generated_pack_entries(
                     .map_err(map_model_pack_error)?;
                 entries.push((
                     GENERATED_LOAD_CONFIG_PATH.to_owned(),
-                    serialize_pretty_json(&document, "generated load config")?,
+                    serialize_pretty_json(
+                        &PackDocument::BackendConfig(document),
+                        "generated load config",
+                    )?,
                 ));
                 Ok::<ConfigRef, AppCoreError>(config_ref)
             })
@@ -463,7 +474,10 @@ fn build_generated_pack_entries(
                         .map_err(map_model_pack_error)?;
                 entries.push((
                     GENERATED_INFERENCE_CONFIG_PATH.to_owned(),
-                    serialize_pretty_json(&document, "generated inference config")?,
+                    serialize_pretty_json(
+                        &PackDocument::BackendConfig(document),
+                        "generated inference config",
+                    )?,
                 ));
                 Ok::<ConfigRef, AppCoreError>(config_ref)
             })
@@ -497,11 +511,11 @@ fn build_generated_pack_entries(
 
         entries.push((
             GENERATED_VARIANT_PATH.to_owned(),
-            serialize_pretty_json(&variant, "generated variant")?,
+            serialize_pretty_json(&PackDocument::Variant(variant), "generated variant")?,
         ));
         entries.push((
             GENERATED_PRESET_PATH.to_owned(),
-            serialize_pretty_json(&preset, "generated preset")?,
+            serialize_pretty_json(&PackDocument::Preset(preset), "generated preset")?,
         ));
     }
 
@@ -817,8 +831,7 @@ mod tests {
     use super::{
         attach_persisted_state_to_pack_bytes, build_generated_model_pack_bytes,
         build_model_command_from_pack_bytes, build_pack_bytes, collect_pack_entries,
-        manifest_sha256_from_pack_bytes, merge_persisted_pack_config,
-        read_persisted_model_config_from_pack_bytes,
+        manifest_sha256_from_pack_bytes, read_persisted_model_config_from_pack_bytes,
     };
     use crate::domain::models::{
         CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
@@ -1206,7 +1219,7 @@ mod tests {
     }
 
     #[test]
-    fn uses_persisted_state_when_manifest_matches() {
+    fn manifest_remains_the_source_of_truth_when_persisted_state_matches() {
         let base_bytes = build_pack(vec![(
             "manifest.json",
             json!({
@@ -1246,11 +1259,8 @@ mod tests {
         let command = build_model_command_from_pack_bytes(Path::new("openrouter.slab"), &bytes)
             .expect("command from pack");
 
-        assert_eq!(command.display_name, "Persisted Label");
-        assert_eq!(
-            command.runtime_presets.as_ref().and_then(|presets| presets.temperature),
-            Some(0.2)
-        );
+        assert_eq!(command.display_name, "Manifest Label");
+        assert!(command.runtime_presets.is_none());
     }
 
     #[test]
@@ -1455,51 +1465,85 @@ mod tests {
     }
 
     #[test]
-    fn merge_preserves_existing_pack_selection() {
-        let mut next = StoredModelConfig {
+    fn persisted_state_preserves_download_projection_without_overriding_pack_selection() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "local-qwen",
+                    "label": "Local Qwen",
+                    "family": "llama",
+                    "capabilities": ["text_generation", "chat_generation"],
+                    "backend_hints": {
+                        "prefer_drivers": ["ggml.llama"],
+                        "avoid_drivers": [],
+                        "require_streaming": false
+                    },
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
+                        "files": [{ "id": "model", "path": "Qwen2.5-7B-Instruct-Q4_K_M.gguf" }]
+                    },
+                    "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$config": "ref://models/variants/q4.json"}],
+                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q4.json",
+                json!({
+                    "kind": "variant",
+                    "id": "q4_k_m",
+                    "label": "Q4_K_M"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default"
+                })
+                .to_string(),
+            ),
+        ]);
+        let persisted = StoredModelConfig {
             schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
             policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
             id: "local-qwen".to_owned(),
-            display_name: "Local Qwen".to_owned(),
-            kind: UnifiedModelKind::Local,
-            backend_id: Some(ManagedModelBackendId::GgmlLlama),
-            capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
-            status: Some(UnifiedModelStatus::NotDownloaded),
-            spec: ModelSpec {
-                repo_id: Some("bartowski/Qwen2.5-7B-Instruct-GGUF".to_owned()),
-                filename: Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf".to_owned()),
-                ..Default::default()
-            },
-            runtime_presets: None,
-            pack_selection: None,
-        };
-        let existing = StoredModelConfig {
-            schema_version: CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
-            policy_version: CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
-            id: "local-qwen".to_owned(),
-            display_name: "Local Qwen".to_owned(),
+            display_name: "Old Local Qwen".to_owned(),
             kind: UnifiedModelKind::Local,
             backend_id: Some(ManagedModelBackendId::GgmlLlama),
             capabilities: vec![Capability::TextGeneration, Capability::ChatGeneration],
             status: Some(UnifiedModelStatus::Ready),
             spec: ModelSpec {
                 repo_id: Some("bartowski/Qwen2.5-7B-Instruct-GGUF".to_owned()),
-                filename: Some("Qwen2.5-7B-Instruct-Q8_0.gguf".to_owned()),
-                local_path: Some("C:/models/Qwen2.5-7B-Instruct-Q8_0.gguf".to_owned()),
+                filename: Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf".to_owned()),
+                local_path: Some("C:/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf".to_owned()),
                 ..Default::default()
             },
             runtime_presets: Some(RuntimePresets { temperature: Some(0.7), top_p: Some(0.95) }),
             pack_selection: Some(ModelPackSelection {
                 preset_id: Some("default".to_owned()),
-                variant_id: Some("Q8_0".to_owned()),
+                variant_id: Some("q8_0".to_owned()),
             }),
         };
+        let bytes =
+            attach_persisted_state_to_pack_bytes(&bytes, &persisted).expect("attach persisted state");
 
-        merge_persisted_pack_config(&mut next, &existing);
+        let command =
+            build_model_command_from_pack_bytes(Path::new("local-qwen.slab"), &bytes).expect("command");
 
-        let selection = next.pack_selection.expect("pack selection should be preserved");
-        assert_eq!(selection.preset_id.as_deref(), Some("default"));
-        assert_eq!(selection.variant_id.as_deref(), Some("Q8_0"));
+        assert_eq!(command.display_name, "Local Qwen");
+        assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
+        assert_eq!(
+            command.spec.local_path.as_deref(),
+            Some("C:/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf")
+        );
+        assert_eq!(command.status, Some(UnifiedModelStatus::Ready));
     }
 }
 

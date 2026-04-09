@@ -33,9 +33,13 @@ pub use model::{
     CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION, CreateModelCommand, DeletedModelView,
     DownloadModelCommand, ListModelsFilter, ManagedModelBackendId, ModelEnhancementPresetOption,
     ModelEnhancementVariantOption, ModelEnhancementView, ModelLoadCommand, ModelPackSelection,
-    ModelSpec, ModelStatus, Pricing, RuntimePresets, StoredModelConfig, UnifiedModel,
-    UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand, UpdateModelEnhancementCommand,
-    default_model_capabilities, normalize_model_capabilities, upgrade_stored_model_config,
+    ModelConfigDocument, ModelConfigFieldScope, ModelConfigFieldView, ModelConfigOrigin,
+    ModelConfigPresetOption, ModelConfigSectionView, ModelConfigSelectionView,
+    ModelConfigSourceArtifact, ModelConfigSourceSummary, ModelConfigValueType,
+    ModelConfigVariantOption, ModelSpec, ModelStatus, Pricing, RuntimePresets, StoredModelConfig,
+    UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
+    UpdateModelConfigSelectionCommand, UpdateModelEnhancementCommand, default_model_capabilities,
+    normalize_model_capabilities, upgrade_stored_model_config,
 };
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};

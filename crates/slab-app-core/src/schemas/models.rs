@@ -10,12 +10,24 @@ use crate::domain::models::{
     CreateModelCommand as DomainCreateModelCommand,
     DownloadModelCommand as DomainDownloadModelCommand, ListModelsFilter as DomainListModelsFilter,
     ManagedModelBackendId as DomainManagedModelBackendId,
+    ModelConfigDocument as DomainModelConfigDocument,
+    ModelConfigFieldScope as DomainModelConfigFieldScope,
+    ModelConfigFieldView as DomainModelConfigFieldView,
+    ModelConfigOrigin as DomainModelConfigOrigin,
+    ModelConfigPresetOption as DomainModelConfigPresetOption,
+    ModelConfigSectionView as DomainModelConfigSectionView,
+    ModelConfigSelectionView as DomainModelConfigSelectionView,
+    ModelConfigSourceArtifact as DomainModelConfigSourceArtifact,
+    ModelConfigSourceSummary as DomainModelConfigSourceSummary,
+    ModelConfigValueType as DomainModelConfigValueType,
+    ModelConfigVariantOption as DomainModelConfigVariantOption,
     ModelEnhancementPresetOption as DomainModelEnhancementPresetOption,
     ModelEnhancementVariantOption as DomainModelEnhancementVariantOption,
     ModelEnhancementView as DomainModelEnhancementView, ModelLoadCommand as DomainModelLoadCommand,
     ModelSpec as DomainModelSpec, ModelStatus as DomainModelStatus, Pricing as DomainPricing,
     RuntimePresets as DomainRuntimePresets, UnifiedModel as DomainUnifiedModel,
     UnifiedModelKind as DomainUnifiedModelKind, UpdateModelCommand as DomainUpdateModelCommand,
+    UpdateModelConfigSelectionCommand as DomainUpdateModelConfigSelectionCommand,
     UpdateModelEnhancementCommand as DomainUpdateModelEnhancementCommand,
 };
 use crate::schemas::chat::ChatModelCapabilities;
@@ -166,6 +178,15 @@ pub struct UpdateModelEnhancementRequest {
     pub chat_template: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub runtime_presets: Option<RuntimePresetsRequest>,
+}
+
+/// Request body for `PUT /v1/models/{id}/config-selection`.
+#[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+pub struct UpdateModelConfigSelectionRequest {
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub selected_preset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub selected_variant_id: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +364,137 @@ pub struct ModelEnhancementResponse {
     pub resolved_runtime_presets: Option<RuntimePresetsResponse>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelConfigFieldScopeResponse {
+    Summary,
+    Source,
+    Load,
+    Inference,
+    Advanced,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelConfigValueTypeResponse {
+    String,
+    Integer,
+    Number,
+    Boolean,
+    Path,
+    Json,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelConfigOriginResponse {
+    PackManifest,
+    SelectedPreset,
+    SelectedVariant,
+    SelectedBackendConfig,
+    PmidFallback,
+    Derived,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelConfigPresetOptionResponse {
+    pub id: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_id: Option<String>,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelConfigVariantOptionResponse {
+    pub id: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelConfigSelectionResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_preset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_variant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_preset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_variant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_preset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub effective_variant_id: Option<String>,
+    pub presets: Vec<ModelConfigPresetOptionResponse>,
+    pub variants: Vec<ModelConfigVariantOptionResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelConfigSourceArtifactResponse {
+    pub id: String,
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelConfigSourceSummaryResponse {
+    pub source_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
+    pub artifacts: Vec<ModelConfigSourceArtifactResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelConfigFieldResponse {
+    pub path: String,
+    pub scope: ModelConfigFieldScopeResponse,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description_md: Option<String>,
+    pub value_type: ModelConfigValueTypeResponse,
+    pub effective_value: serde_json::Value,
+    pub origin: ModelConfigOriginResponse,
+    pub editable: bool,
+    pub locked: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub json_schema: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelConfigSectionResponse {
+    pub id: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description_md: Option<String>,
+    pub fields: Vec<ModelConfigFieldResponse>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelConfigDocumentResponse {
+    pub model_summary: UnifiedModelResponse,
+    pub selection: ModelConfigSelectionResponse,
+    pub sections: Vec<ModelConfigSectionResponse>,
+    pub source_summary: ModelConfigSourceSummaryResponse,
+    pub resolved_load_spec: serde_json::Value,
+    pub resolved_inference_spec: serde_json::Value,
+    pub warnings: Vec<String>,
+}
+
 /// Unified model response returned by `/v1/models`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UnifiedModelResponse {
@@ -431,6 +583,145 @@ impl From<DomainModelEnhancementView> for ModelEnhancementResponse {
             variants: view.variants.into_iter().map(Into::into).collect(),
             resolved_spec: view.resolved_spec.into(),
             resolved_runtime_presets: view.resolved_runtime_presets.map(Into::into),
+        }
+    }
+}
+
+impl From<DomainModelConfigFieldScope> for ModelConfigFieldScopeResponse {
+    fn from(value: DomainModelConfigFieldScope) -> Self {
+        match value {
+            DomainModelConfigFieldScope::Summary => Self::Summary,
+            DomainModelConfigFieldScope::Source => Self::Source,
+            DomainModelConfigFieldScope::Load => Self::Load,
+            DomainModelConfigFieldScope::Inference => Self::Inference,
+            DomainModelConfigFieldScope::Advanced => Self::Advanced,
+        }
+    }
+}
+
+impl From<DomainModelConfigValueType> for ModelConfigValueTypeResponse {
+    fn from(value: DomainModelConfigValueType) -> Self {
+        match value {
+            DomainModelConfigValueType::String => Self::String,
+            DomainModelConfigValueType::Integer => Self::Integer,
+            DomainModelConfigValueType::Number => Self::Number,
+            DomainModelConfigValueType::Boolean => Self::Boolean,
+            DomainModelConfigValueType::Path => Self::Path,
+            DomainModelConfigValueType::Json => Self::Json,
+        }
+    }
+}
+
+impl From<DomainModelConfigOrigin> for ModelConfigOriginResponse {
+    fn from(value: DomainModelConfigOrigin) -> Self {
+        match value {
+            DomainModelConfigOrigin::PackManifest => Self::PackManifest,
+            DomainModelConfigOrigin::SelectedPreset => Self::SelectedPreset,
+            DomainModelConfigOrigin::SelectedVariant => Self::SelectedVariant,
+            DomainModelConfigOrigin::SelectedBackendConfig => Self::SelectedBackendConfig,
+            DomainModelConfigOrigin::PmidFallback => Self::PmidFallback,
+            DomainModelConfigOrigin::Derived => Self::Derived,
+        }
+    }
+}
+
+impl From<DomainModelConfigPresetOption> for ModelConfigPresetOptionResponse {
+    fn from(value: DomainModelConfigPresetOption) -> Self {
+        Self {
+            id: value.id,
+            label: value.label,
+            description: value.description,
+            variant_id: value.variant_id,
+            is_default: value.is_default,
+        }
+    }
+}
+
+impl From<DomainModelConfigVariantOption> for ModelConfigVariantOptionResponse {
+    fn from(value: DomainModelConfigVariantOption) -> Self {
+        Self {
+            id: value.id,
+            label: value.label,
+            description: value.description,
+            repo_id: value.repo_id,
+            filename: value.filename,
+            local_path: value.local_path,
+            is_default: value.is_default,
+        }
+    }
+}
+
+impl From<DomainModelConfigSelectionView> for ModelConfigSelectionResponse {
+    fn from(value: DomainModelConfigSelectionView) -> Self {
+        Self {
+            default_preset_id: value.default_preset_id,
+            default_variant_id: value.default_variant_id,
+            selected_preset_id: value.selected_preset_id,
+            selected_variant_id: value.selected_variant_id,
+            effective_preset_id: value.effective_preset_id,
+            effective_variant_id: value.effective_variant_id,
+            presets: value.presets.into_iter().map(Into::into).collect(),
+            variants: value.variants.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<DomainModelConfigSourceArtifact> for ModelConfigSourceArtifactResponse {
+    fn from(value: DomainModelConfigSourceArtifact) -> Self {
+        Self { id: value.id, label: value.label, value: value.value }
+    }
+}
+
+impl From<DomainModelConfigSourceSummary> for ModelConfigSourceSummaryResponse {
+    fn from(value: DomainModelConfigSourceSummary) -> Self {
+        Self {
+            source_kind: value.source_kind,
+            repo_id: value.repo_id,
+            filename: value.filename,
+            local_path: value.local_path,
+            artifacts: value.artifacts.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<DomainModelConfigFieldView> for ModelConfigFieldResponse {
+    fn from(value: DomainModelConfigFieldView) -> Self {
+        Self {
+            path: value.path,
+            scope: value.scope.into(),
+            label: value.label,
+            description_md: value.description_md,
+            value_type: value.value_type.into(),
+            effective_value: value.effective_value,
+            origin: value.origin.into(),
+            editable: value.editable,
+            locked: value.locked,
+            json_schema: value.json_schema,
+        }
+    }
+}
+
+impl From<DomainModelConfigSectionView> for ModelConfigSectionResponse {
+    fn from(value: DomainModelConfigSectionView) -> Self {
+        Self {
+            id: value.id,
+            label: value.label,
+            description_md: value.description_md,
+            fields: value.fields.into_iter().map(Into::into).collect(),
+        }
+    }
+}
+
+impl From<DomainModelConfigDocument> for ModelConfigDocumentResponse {
+    fn from(value: DomainModelConfigDocument) -> Self {
+        Self {
+            model_summary: value.model_summary.into(),
+            selection: value.selection.into(),
+            sections: value.sections.into_iter().map(Into::into).collect(),
+            source_summary: value.source_summary.into(),
+            resolved_load_spec: value.resolved_load_spec,
+            resolved_inference_spec: value.resolved_inference_spec,
+            warnings: value.warnings,
         }
     }
 }
@@ -580,6 +871,15 @@ impl From<UpdateModelEnhancementRequest> for DomainUpdateModelEnhancementCommand
             context_window: req.context_window,
             chat_template: req.chat_template,
             runtime_presets: req.runtime_presets.map(Into::into),
+        }
+    }
+}
+
+impl From<UpdateModelConfigSelectionRequest> for DomainUpdateModelConfigSelectionCommand {
+    fn from(req: UpdateModelConfigSelectionRequest) -> Self {
+        Self {
+            selected_preset_id: req.selected_preset_id,
+            selected_variant_id: req.selected_variant_id,
         }
     }
 }
