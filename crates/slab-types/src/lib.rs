@@ -35,7 +35,9 @@ pub use chat::{
 };
 pub use common::{Id, Timestamp};
 pub use diffusion::{
-    DiffusionImageRequest, DiffusionImageResponse, DiffusionVideoRequest, DiffusionVideoResponse,
+    DiffusionImageBackend, DiffusionImageRequest, DiffusionImageResponse, DiffusionRequestCommon,
+    DiffusionVideoBackend, DiffusionVideoRequest, DiffusionVideoResponse, GgmlDiffusionImageParams,
+    GgmlDiffusionVideoParams,
 };
 pub use error::SlabTypeError;
 pub use inference::{

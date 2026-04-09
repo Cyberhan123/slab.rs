@@ -163,14 +163,13 @@ impl ModelService {
             .resolve_model_pack_selection(id, &context.resolved, context.persisted.as_ref(), true)
             .await?;
         let command = build_model_command_from_pack_context(&context, &selection.selected_preset)?;
-        let bridge = context
-            .resolved
-            .compile_runtime_bridge(&selection.selected_preset)
-            .map_err(|error| {
+        let bridge = context.resolved.compile_runtime_bridge(&selection.selected_preset).map_err(
+            |error| {
                 AppCoreError::BadRequest(format!(
                     "failed to compile selected pack preset for config document: {error}"
                 ))
-            })?;
+            },
+        )?;
         let source_summary = build_model_config_source_summary(&bridge.model_spec.source);
         let selection_view = build_model_config_selection_view(
             &context.resolved,
@@ -638,10 +637,7 @@ impl ModelService {
         self.model_state.config().model_config_dir.as_path()
     }
 
-    fn load_model_pack_context(
-        &self,
-        id: &str,
-    ) -> Result<ModelPackContext, AppCoreError> {
+    fn load_model_pack_context(&self, id: &str) -> Result<ModelPackContext, AppCoreError> {
         let pack_path = model_packs::model_pack_file_path(self.model_config_dir(), id);
         if !pack_path.exists() {
             return Err(AppCoreError::NotFound(format!(
@@ -719,11 +715,8 @@ impl ModelService {
             legacy_selection
                 .as_ref()
                 .filter(|selection| {
-                    effective_model_pack_selection(
-                        resolved,
-                        selection,
-                        &selected_preset,
-                    ) != default_model_pack_selection(resolved)
+                    effective_model_pack_selection(resolved, selection, &selected_preset)
+                        != default_model_pack_selection(resolved)
                 })
                 .cloned()
         } else {
@@ -767,18 +760,16 @@ impl ModelService {
             .map(|config| config.payload.clone())
             .unwrap_or_else(|| Value::Object(Map::new()));
         let object = ensure_json_object(&mut payload);
-        let display_model_path = command
-            .spec
-            .local_path
-            .clone()
-            .or_else(|| command.spec.filename.clone())
-            .or_else(|| {
-                bridge
-                    .model_spec
-                    .source
-                    .primary_path()
-                    .map(|path| path.to_string_lossy().into_owned())
-            });
+        let display_model_path =
+            command.spec.local_path.clone().or_else(|| command.spec.filename.clone()).or_else(
+                || {
+                    bridge
+                        .model_spec
+                        .source
+                        .primary_path()
+                        .map(|path| path.to_string_lossy().into_owned())
+                },
+            );
 
         if let Some(model_path) = display_model_path {
             object.insert("model_path".into(), Value::String(model_path));
@@ -1072,7 +1063,12 @@ impl ModelService {
                 Some("Resolved sampling temperature exposed by the pack.".into()),
                 ModelConfigValueType::Number,
                 json_property_or_null(resolved_inference_spec, "temperature"),
-                if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.temperature).is_some()
+                if resolved
+                    .manifest
+                    .runtime_presets
+                    .as_ref()
+                    .and_then(|value| value.temperature)
+                    .is_some()
                 {
                     ModelConfigOrigin::PackManifest
                 } else {
@@ -1090,7 +1086,13 @@ impl ModelService {
                 Some("Resolved nucleus sampling value exposed by the pack.".into()),
                 ModelConfigValueType::Number,
                 json_property_or_null(resolved_inference_spec, "top_p"),
-                if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.top_p).is_some() {
+                if resolved
+                    .manifest
+                    .runtime_presets
+                    .as_ref()
+                    .and_then(|value| value.top_p)
+                    .is_some()
+                {
                     ModelConfigOrigin::PackManifest
                 } else {
                     ModelConfigOrigin::SelectedBackendConfig
@@ -1129,7 +1131,9 @@ impl ModelService {
             ModelConfigSectionView {
                 id: "source".into(),
                 label: "Source / Artifacts".into(),
-                description_md: Some("Resolved source and artifacts for the active selection.".into()),
+                description_md: Some(
+                    "Resolved source and artifacts for the active selection.".into(),
+                ),
                 fields: source_fields,
             },
             ModelConfigSectionView {
@@ -1147,7 +1151,9 @@ impl ModelService {
             ModelConfigSectionView {
                 id: "advanced".into(),
                 label: "Advanced".into(),
-                description_md: Some("Fallback JSON for fields not yet promoted into the canonical catalog.".into()),
+                description_md: Some(
+                    "Fallback JSON for fields not yet promoted into the canonical catalog.".into(),
+                ),
                 fields: advanced_fields,
             },
         ])
@@ -1742,15 +1748,21 @@ fn build_model_command_from_pack_context(
     context: &ModelPackContext,
     preset: &slab_model_pack::ResolvedPreset,
 ) -> Result<CreateModelCommand, AppCoreError> {
-    let mut command =
-        build_local_model_command_from_pack_preset(&context.resolved.manifest, &context.resolved, preset)?;
+    let mut command = build_local_model_command_from_pack_preset(
+        &context.resolved.manifest,
+        &context.resolved,
+        preset,
+    )?;
     if let Some(persisted) = context.persisted.as_ref() {
         apply_persisted_projection_state(&mut command, persisted);
     }
     Ok(command)
 }
 
-fn apply_persisted_projection_state(command: &mut CreateModelCommand, persisted: &StoredModelConfig) {
+fn apply_persisted_projection_state(
+    command: &mut CreateModelCommand,
+    persisted: &StoredModelConfig,
+) {
     if same_model_download_source(&persisted.spec, &command.spec) {
         command.spec.local_path = persisted.spec.local_path.clone();
         if let Some(status) = persisted.status.clone() {
@@ -1932,9 +1944,7 @@ fn build_model_config_source_summary(source: &ModelSource) -> ModelConfigSourceS
             source_kind: "local_artifacts".into(),
             repo_id: None,
             filename: None,
-            local_path: source
-                .primary_path()
-                .map(|path| path.to_string_lossy().into_owned()),
+            local_path: source.primary_path().map(|path| path.to_string_lossy().into_owned()),
             artifacts: source
                 .files()
                 .into_iter()
@@ -1979,7 +1989,8 @@ fn build_model_config_field(
 }
 
 fn model_source_origin(selected_preset: &slab_model_pack::ResolvedPreset) -> ModelConfigOrigin {
-    if selected_preset.variant.document.source.is_some() || !selected_preset.variant.components.is_empty()
+    if selected_preset.variant.document.source.is_some()
+        || !selected_preset.variant.components.is_empty()
     {
         ModelConfigOrigin::SelectedVariant
     } else {
@@ -2027,29 +2038,18 @@ fn ensure_json_object(value: &mut Value) -> &mut Map<String, Value> {
     }
 }
 
-fn insert_optional_path(
-    object: &mut Map<String, Value>,
-    key: &str,
-    value: Option<&PathBuf>,
-) {
+fn insert_optional_path(object: &mut Map<String, Value>, key: &str, value: Option<&PathBuf>) {
     if let Some(value) = value {
         object.insert(key.to_owned(), Value::String(value.to_string_lossy().into_owned()));
     }
 }
 
 fn json_property_or_null(value: &Value, key: &str) -> Value {
-    value
-        .as_object()
-        .and_then(|map| map.get(key))
-        .cloned()
-        .unwrap_or(Value::Null)
+    value.as_object().and_then(|map| map.get(key)).cloned().unwrap_or(Value::Null)
 }
 
 fn value_is_present(value: &Value, key: &str) -> bool {
-    value
-        .as_object()
-        .and_then(|map| map.get(key))
-        .is_some_and(|value| !value.is_null())
+    value.as_object().and_then(|map| map.get(key)).is_some_and(|value| !value.is_null())
 }
 
 fn humanize_artifact_label(id: &str) -> String {
@@ -2352,9 +2352,12 @@ async fn resolve_model_load_target(
         let backend_id = resolve_local_backend_from_model(&model)?;
         let model_path = resolve_local_model_path(&model)?;
         if model_packs::is_model_pack_path(&model_path) {
-            let pack_target =
-                build_selected_model_pack_load_target(state, &model.id, std::path::Path::new(&model_path))
-                    .await?;
+            let pack_target = build_selected_model_pack_load_target(
+                state,
+                &model.id,
+                std::path::Path::new(&model_path),
+            )
+            .await?;
             if pack_target.backend_id != backend_id {
                 return Err(AppCoreError::BadRequest(format!(
                     "model '{}' pack backend '{}' does not match catalog backend '{}'",

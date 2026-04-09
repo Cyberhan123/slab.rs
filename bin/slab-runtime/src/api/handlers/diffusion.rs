@@ -30,15 +30,16 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             error!(error = %error, "failed to decode diffusion image request");
             proto_to_status(error)
         })?;
+        let ggml = request.backend.as_ggml();
 
         debug!(
-            prompt_len = request.prompt.len(),
-            n = request.count,
-            width = request.width,
-            height = request.height,
-            has_init_image = request.init_image.is_some(),
-            steps = request.steps,
-            seed = request.seed,
+            prompt_len = request.common.prompt.len(),
+            n = ggml.count.unwrap_or(1),
+            width = request.common.width,
+            height = request.common.height,
+            has_init_image = request.common.init_image.is_some(),
+            steps = ggml.steps,
+            seed = ggml.seed,
             "diffusion generate_image request received"
         );
 
@@ -89,13 +90,14 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             error!(error = %error, "failed to decode diffusion video request");
             proto_to_status(error)
         })?;
+        let ggml = request.backend.as_ggml();
 
         debug!(
-            prompt_len = request.prompt.len(),
-            video_frames = request.video_frames,
-            has_init_image = request.init_image.is_some(),
-            steps = request.steps,
-            seed = request.seed,
+            prompt_len = request.common.prompt.len(),
+            video_frames = ggml.video_frames.unwrap_or(16),
+            has_init_image = request.common.init_image.is_some(),
+            steps = ggml.steps,
+            seed = ggml.seed,
             "diffusion generate_video request received"
         );
 
@@ -197,38 +199,43 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
 }
 
 fn build_image_params(req: &DiffusionImageRequest) -> Result<DiffusionImgParams, Status> {
-    let sample_method = req
+    let common = &req.common;
+    let ggml = req.backend.as_ggml();
+
+    let sample_method = ggml
         .sample_method
         .as_deref()
         .map(str::parse::<DiffusionSampleMethod>)
         .transpose()
         .map_err(Status::invalid_argument)?;
-    let scheduler = req
+    let scheduler = ggml
         .scheduler
         .as_deref()
         .map(str::parse::<DiffusionScheduler>)
         .transpose()
         .map_err(Status::invalid_argument)?;
 
-    if req.count < 1 {
+    if let Some(count) = ggml.count
+        && count < 1
+    {
         return Err(Status::invalid_argument("count must be >= 1"));
     }
-    if req.width < 1 {
+    if common.width < 1 {
         return Err(Status::invalid_argument("width must be >= 1"));
     }
-    if req.height < 1 {
+    if common.height < 1 {
         return Err(Status::invalid_argument("height must be >= 1"));
     }
-    if let Some(steps) = req.steps
+    if let Some(steps) = ggml.steps
         && steps < 1
     {
         return Err(Status::invalid_argument("steps must be >= 1"));
     }
 
     let mut sample_params = DiffusionSampleParams::default();
-    if req.cfg_scale.is_some() || req.guidance.is_some() {
-        let cfg_scale = req.cfg_scale.or(req.guidance).unwrap_or_default();
-        let distilled_guidance = req.guidance.or(req.cfg_scale).unwrap_or_default();
+    if ggml.cfg_scale.is_some() || ggml.guidance.is_some() {
+        let cfg_scale = ggml.cfg_scale.or(ggml.guidance).unwrap_or_default();
+        let distilled_guidance = ggml.guidance.or(ggml.cfg_scale).unwrap_or_default();
         sample_params.guidance = Some(DiffusionGuidanceParams {
             txt_cfg: cfg_scale,
             img_cfg: cfg_scale,
@@ -238,57 +245,62 @@ fn build_image_params(req: &DiffusionImageRequest) -> Result<DiffusionImgParams,
     }
     sample_params.sample_method = sample_method;
     sample_params.scheduler = scheduler;
-    sample_params.sample_steps = req.steps;
-    sample_params.eta = req.eta;
+    sample_params.sample_steps = ggml.steps;
+    sample_params.eta = ggml.eta;
 
     Ok(DiffusionImgParams {
-        prompt: Some(req.prompt.clone()),
-        negative_prompt: req.negative_prompt.clone(),
-        clip_skip: req.clip_skip,
-        init_image: req.init_image.as_ref().map(raw_image_to_diffusion_image).transpose()?,
-        width: Some(req.width),
-        height: Some(req.height),
+        prompt: Some(common.prompt.clone()),
+        negative_prompt: common.negative_prompt.clone(),
+        clip_skip: ggml.clip_skip,
+        init_image: common.init_image.as_ref().map(raw_image_to_diffusion_image).transpose()?,
+        width: Some(common.width),
+        height: Some(common.height),
         sample_params: (sample_params != DiffusionSampleParams::default()).then_some(sample_params),
-        strength: req.strength,
-        seed: req.seed,
-        batch_count: Some(req.count),
+        strength: ggml.strength,
+        seed: ggml.seed,
+        batch_count: Some(ggml.count.unwrap_or(1)),
         ..Default::default()
     })
 }
 
 fn build_video_params(req: &DiffusionVideoRequest) -> Result<DiffusionVideoParams, Status> {
-    let sample_method = req
+    let common = &req.common;
+    let ggml = req.backend.as_ggml();
+
+    let sample_method = ggml
         .sample_method
         .as_deref()
         .map(str::parse::<DiffusionSampleMethod>)
         .transpose()
         .map_err(Status::invalid_argument)?;
-    let scheduler = req
+    let scheduler = ggml
         .scheduler
         .as_deref()
         .map(str::parse::<DiffusionScheduler>)
         .transpose()
         .map_err(Status::invalid_argument)?;
 
-    if req.width < 1 {
+    if common.width < 1 {
         return Err(Status::invalid_argument("width must be >= 1"));
     }
-    if req.height < 1 {
+    if common.height < 1 {
         return Err(Status::invalid_argument("height must be >= 1"));
     }
-    if req.video_frames < 1 {
+    if let Some(video_frames) = ggml.video_frames
+        && video_frames < 1
+    {
         return Err(Status::invalid_argument("video_frames must be >= 1"));
     }
-    if let Some(steps) = req.steps
+    if let Some(steps) = ggml.steps
         && steps < 1
     {
         return Err(Status::invalid_argument("steps must be >= 1"));
     }
 
     let mut sample_params = DiffusionSampleParams::default();
-    if req.cfg_scale.is_some() || req.guidance.is_some() {
-        let cfg_scale = req.cfg_scale.or(req.guidance).unwrap_or_default();
-        let distilled_guidance = req.guidance.or(req.cfg_scale).unwrap_or_default();
+    if ggml.cfg_scale.is_some() || ggml.guidance.is_some() {
+        let cfg_scale = ggml.cfg_scale.or(ggml.guidance).unwrap_or_default();
+        let distilled_guidance = ggml.guidance.or(ggml.cfg_scale).unwrap_or_default();
         sample_params.guidance = Some(DiffusionGuidanceParams {
             txt_cfg: cfg_scale,
             img_cfg: cfg_scale,
@@ -298,19 +310,19 @@ fn build_video_params(req: &DiffusionVideoRequest) -> Result<DiffusionVideoParam
     }
     sample_params.sample_method = sample_method;
     sample_params.scheduler = scheduler;
-    sample_params.sample_steps = req.steps;
+    sample_params.sample_steps = ggml.steps;
 
     Ok(DiffusionVideoParams {
-        prompt: Some(req.prompt.clone()),
-        negative_prompt: req.negative_prompt.clone(),
-        init_image: req.init_image.as_ref().map(raw_image_to_diffusion_image).transpose()?,
-        width: Some(req.width),
-        height: Some(req.height),
+        prompt: Some(common.prompt.clone()),
+        negative_prompt: common.negative_prompt.clone(),
+        init_image: common.init_image.as_ref().map(raw_image_to_diffusion_image).transpose()?,
+        width: Some(common.width),
+        height: Some(common.height),
         sample_params: (sample_params != DiffusionSampleParams::default()).then_some(sample_params),
-        strength: req.strength,
-        seed: req.seed,
+        strength: ggml.strength,
+        seed: ggml.seed,
         video_frames: Some(
-            u32::try_from(req.video_frames)
+            u32::try_from(ggml.video_frames.unwrap_or(16))
                 .map_err(|_| Status::invalid_argument("video_frames exceeds u32 range"))?,
         ),
         ..Default::default()

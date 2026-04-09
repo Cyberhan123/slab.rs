@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use slab_proto::convert;
 use slab_types::RuntimeBackendId;
-use slab_types::diffusion::DiffusionVideoRequest;
+use slab_types::diffusion::{
+    DiffusionRequestCommon, DiffusionVideoBackend, DiffusionVideoRequest, GgmlDiffusionVideoParams,
+};
 use slab_types::media::RawImageInput;
 use tracing::{debug, info, warn};
 
@@ -50,26 +52,30 @@ impl VideoService {
         .to_string();
 
         let grpc_request = DiffusionVideoRequest {
-            prompt: req.prompt.clone(),
-            negative_prompt: req.negative_prompt.clone(),
-            width: req.width,
-            height: req.height,
-            video_frames: req.video_frames,
-            fps: req.fps,
-            cfg_scale: req.cfg_scale,
-            guidance: req.guidance,
-            steps: req.steps,
-            seed: req.seed,
-            sample_method: req.sample_method.clone(),
-            scheduler: req.scheduler.clone(),
-            strength: req.strength,
-            init_image: req.init_image.map(|image| RawImageInput {
-                data: image.data,
-                width: image.width,
-                height: image.height,
-                channels: image.channels.clamp(1, u8::MAX as u32) as u8,
+            common: DiffusionRequestCommon {
+                prompt: req.prompt.clone(),
+                negative_prompt: req.negative_prompt.clone(),
+                width: req.width,
+                height: req.height,
+                init_image: req.init_image.map(|image| RawImageInput {
+                    data: image.data,
+                    width: image.width,
+                    height: image.height,
+                    channels: image.channels.clamp(1, u8::MAX as u32) as u8,
+                }),
+                options: Default::default(),
+            },
+            backend: DiffusionVideoBackend::Ggml(GgmlDiffusionVideoParams {
+                video_frames: Some(req.video_frames),
+                fps: Some(req.fps),
+                cfg_scale: req.cfg_scale,
+                guidance: req.guidance,
+                steps: req.steps,
+                seed: req.seed,
+                sample_method: req.sample_method.clone(),
+                scheduler: req.scheduler.clone(),
+                strength: req.strength,
             }),
-            options: Default::default(),
         };
         let grpc_req = convert::encode_diffusion_video_request(req.model.clone(), &grpc_request);
 
