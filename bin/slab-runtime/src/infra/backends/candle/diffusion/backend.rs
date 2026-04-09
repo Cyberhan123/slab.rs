@@ -21,12 +21,12 @@ use slab_types::CandleDiffusionLoadConfig;
 use tokio::sync::broadcast;
 
 use crate::infra::backends::candle::diffusion::adapter::{CandleDiffusionEngine, GenImageParams};
+use slab_runtime_core::Payload;
+use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
-use slab_runtime_core::backend::spawn_workers;
-use slab_runtime_core::Payload;
 use slab_runtime_macros::backend_handler;
 
 fn build_gen_image_params(raw: &DiffusionImgParams) -> Result<(GenImageParams, usize), String> {
@@ -340,10 +340,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::CandleDiffusionWorker;
-    use slab_runtime_core::backend::{
-        DeploymentSnapshot, RuntimeControlSignal, WorkerCommand,
-    };
     use slab_runtime_core::Payload;
+    use slab_runtime_core::backend::{DeploymentSnapshot, RuntimeControlSignal, WorkerCommand};
     use slab_types::CandleDiffusionLoadConfig;
     use tokio::sync::broadcast;
 

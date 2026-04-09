@@ -91,8 +91,8 @@ export default function Hub() {
                     Shape your local <span className="text-[var(--brand-teal)]">model catalog.</span>
                   </h1>
                   <p className="max-w-2xl text-sm leading-7 text-muted-foreground md:text-lg">
-                    Import JSON manifests or .slab packs, monitor runtime readiness, and keep every
-                    local inference asset organized without leaving the workspace.
+                    Import JSON manifests or .slab packs into the catalog, then download the local
+                    runtimes you want from each card when you are ready to use them.
                   </p>
                 </div>
               </div>
@@ -140,7 +140,7 @@ export default function Hub() {
               description={
                 hub.pendingCount > 0
                   ? `${hub.pendingCount} download${hub.pendingCount === 1 ? '' : 's'} currently syncing`
-                  : 'Catalog state is persisted locally for runtime pickup'
+                  : 'Imported packs stay in the catalog until you pull a local runtime copy'
               }
               tone="blue"
             />
@@ -217,6 +217,7 @@ export default function Hub() {
             <HubCatalogTable
               models={hub.visibleModels}
               deletePending={hub.deleteModelPending}
+              onDownloadClick={(model) => void hub.downloadModel(model)}
               onDeleteClick={hub.setModelToDelete}
             />
             {hub.hasMore ? <div ref={loadMoreRef} className="h-8 w-full" aria-hidden="true" /> : null}

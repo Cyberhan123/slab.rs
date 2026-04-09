@@ -19,11 +19,11 @@ use slab_diffusion::{ContextParams as DiffusionContextParams, ImgParams as Diffu
 use tokio::sync::broadcast;
 
 use crate::infra::backends::ggml::diffusion::adapter::GGMLDiffusionEngine;
+use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
-use slab_runtime_core::Payload;
 use slab_runtime_macros::backend_handler;
 
 // ── Configurations ────────────────────────────────────────────────────────────

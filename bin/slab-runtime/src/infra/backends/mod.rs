@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
-use slab_runtime_core::backend::ResourceManager;
 use slab_runtime_core::CoreError;
+use slab_runtime_core::backend::ResourceManager;
 use slab_types::DriverDescriptor;
 
 use crate::infra::config::RuntimeConfig;
@@ -38,9 +38,7 @@ impl From<&RuntimeConfig> for RuntimeDriversConfig {
     }
 }
 
-pub fn descriptors(
-    _config: &RuntimeDriversConfig,
-) -> Vec<DriverDescriptor> {
+pub fn descriptors(_config: &RuntimeDriversConfig) -> Vec<DriverDescriptor> {
     #[allow(unused_mut)]
     let mut descriptors = Vec::new();
 
@@ -59,9 +57,8 @@ pub fn descriptors(
     }));
 
     #[cfg(feature = "onnx")]
-    descriptors.extend(onnx::descriptors(&onnx::OnnxBackendConfig {
-        enabled: _config.onnx_enabled,
-    }));
+    descriptors
+        .extend(onnx::descriptors(&onnx::OnnxBackendConfig { enabled: _config.onnx_enabled }));
 
     descriptors
 }
@@ -95,9 +92,7 @@ pub fn register_backends(
 
     #[cfg(feature = "onnx")]
     onnx::register(
-        &onnx::OnnxBackendConfig {
-            enabled: _config.onnx_enabled,
-        },
+        &onnx::OnnxBackendConfig { enabled: _config.onnx_enabled },
         _resource_manager,
         _worker_count,
     )?;

@@ -15,10 +15,8 @@ use slab_llama::{
     ChatMessage as LlamaChatMessage,
     runtime::{LlamaInferenceParams, LlamaLoadConfig, resolve_grammar as resolve_llama_grammar},
 };
-use slab_whisper::{
-    ContextParams as WhisperContextParams, FullParams as WhisperFullParams,
-    SamplingStrategy as WhisperSamplingStrategy, WhisperVadParams as CanonicalWhisperVadParams,
-};
+use slab_runtime_core::backend::StreamChunk;
+use slab_runtime_core::{CoreError, Payload};
 use slab_types::{
     AudioTranscriptionOpOptions, AudioTranscriptionRequest, AudioTranscriptionResponse,
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
@@ -26,8 +24,10 @@ use slab_types::{
     ImageGenerationResponse, ModelFamily, ModelSpec, OnnxLoadConfig, TextGenerationChunk,
     TextGenerationOpOptions, TextGenerationRequest, TextGenerationResponse,
 };
-use slab_runtime_core::backend::StreamChunk;
-use slab_runtime_core::{CoreError, Payload};
+use slab_whisper::{
+    ContextParams as WhisperContextParams, FullParams as WhisperFullParams,
+    SamplingStrategy as WhisperSamplingStrategy, WhisperVadParams as CanonicalWhisperVadParams,
+};
 
 use crate::domain::models::ResolvedBackend;
 

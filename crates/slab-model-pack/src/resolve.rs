@@ -58,7 +58,7 @@ impl ModelPack {
         let components = self.resolve_components()?;
         let adapters = self.resolve_adapters(&components)?;
         let variants = self.resolve_variants(&components)?;
-        let presets = self.resolve_presets(&variants, &adapters)?;
+        let presets = self.resolve_presets(&components, &variants, &adapters)?;
         let default_preset_id = self.resolve_default_preset_id(&presets)?;
 
         Ok(ResolvedModelPack {
@@ -149,18 +149,14 @@ impl ModelPack {
 
     fn resolve_presets(
         &self,
+        components: &BTreeMap<String, ResolvedComponent>,
         variants: &BTreeMap<String, ResolvedVariant>,
         adapters: &BTreeMap<String, ResolvedAdapter>,
     ) -> Result<BTreeMap<String, ResolvedPreset>, ModelPackError> {
         let mut resolved = BTreeMap::new();
         for entry in &self.manifest().presets {
             let document = self.resolve_preset(&entry.config_ref)?.clone();
-            let variant = variants.get(&document.variant_id).cloned().ok_or_else(|| {
-                ModelPackError::MissingNamedDocument {
-                    kind: "variant",
-                    id: document.variant_id.clone(),
-                }
-            })?;
+            let variant = resolve_preset_variant(self, components, variants, &document)?;
 
             let mut resolved_adapters = BTreeMap::new();
             for adapter_id in &document.adapter_ids {
@@ -230,6 +226,51 @@ fn resolve_named_components(
     Ok(resolved)
 }
 
+fn resolve_preset_variant(
+    pack: &ModelPack,
+    components: &BTreeMap<String, ResolvedComponent>,
+    variants: &BTreeMap<String, ResolvedVariant>,
+    preset: &PresetDocument,
+) -> Result<ResolvedVariant, ModelPackError> {
+    let Some(variant_id) = preset.variant_id.as_deref() else {
+        return Ok(resolve_manifest_default_variant(pack, components));
+    };
+
+    variants.get(variant_id).cloned().ok_or_else(|| ModelPackError::MissingNamedDocument {
+        kind: "variant",
+        id: variant_id.to_owned(),
+    })
+}
+
+fn resolve_manifest_default_variant(
+    pack: &ModelPack,
+    components: &BTreeMap<String, ResolvedComponent>,
+) -> ResolvedVariant {
+    let (component_ids, resolved_components, effective_source) = if pack.manifest().source.is_some()
+    {
+        (Vec::new(), BTreeMap::new(), pack.manifest().source.clone())
+    } else {
+        (components.keys().cloned().collect(), components.clone(), None)
+    };
+
+    ResolvedVariant {
+        document: VariantDocument {
+            id: String::new(),
+            label: "Original Model".to_owned(),
+            description: Some("Resolved from manifest without an explicit variant".to_owned()),
+            source: None,
+            component_ids,
+            load_config: None,
+            inference_config: None,
+            metadata: BTreeMap::new(),
+        },
+        effective_source,
+        components: resolved_components,
+        load_config: None,
+        inference_config: None,
+    }
+}
+
 fn resolve_effective_backend_config(
     pack: &ModelPack,
     override_ref: Option<&ConfigRef>,
@@ -252,6 +293,7 @@ mod tests {
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
 
+    use crate::manifest::PackSource;
     use crate::pack::ModelPack;
 
     fn build_pack(entries: Vec<(&str, String)>) -> Vec<u8> {
@@ -421,6 +463,75 @@ mod tests {
                 .and_then(|config| config.payload.get("context_length"))
                 .and_then(|value| value.as_u64()),
             Some(32768)
+        );
+    }
+
+    #[test]
+    fn resolves_preset_without_variant_id_to_manifest_source() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "demo",
+                    "label": "Demo",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "source": {
+                        "kind": "local_path",
+                        "path": "C:/models/base.gguf"
+                    },
+                    "presets": [
+                        {
+                            "id": "default",
+                            "label": "Default",
+                            "$config": "ref://models/presets/default.json"
+                        }
+                    ],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "load-default",
+                    "label": "Load Default",
+                    "scope": "load",
+                    "payload": {
+                        "context_length": 4096
+                    }
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "$load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
+        let resolved = pack.resolve().expect("pack should resolve");
+        let preset = resolved.default_preset().expect("default preset");
+
+        assert_eq!(
+            preset.variant.effective_source,
+            Some(PackSource::LocalPath { path: "C:/models/base.gguf".to_owned() })
+        );
+        assert_eq!(
+            preset
+                .effective_load_config
+                .as_ref()
+                .and_then(|config| config.payload.get("context_length"))
+                .and_then(|value| value.as_u64()),
+            Some(4096)
         );
     }
 

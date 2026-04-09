@@ -19,12 +19,12 @@ use slab_types::CandleWhisperLoadConfig;
 use tokio::sync::broadcast;
 
 use crate::infra::backends::candle::whisper::adapter::CandleWhisperEngine;
+use slab_runtime_core::Payload;
+use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
-use slab_runtime_core::backend::spawn_workers;
-use slab_runtime_core::Payload;
 use slab_runtime_macros::backend_handler;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
@@ -263,10 +263,10 @@ mod tests {
     use std::path::PathBuf;
 
     use super::CandleWhisperWorker;
+    use slab_runtime_core::Payload;
     use slab_runtime_core::backend::DeploymentSnapshot;
     use slab_runtime_core::backend::RuntimeControlSignal;
     use slab_runtime_core::backend::WorkerCommand;
-    use slab_runtime_core::Payload;
     use slab_types::CandleWhisperLoadConfig;
     use tokio::sync::broadcast;
 

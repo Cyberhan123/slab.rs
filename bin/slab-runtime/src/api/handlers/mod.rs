@@ -35,8 +35,9 @@ impl GrpcServiceImpl {
         request: pb::ModelLoadRequest,
     ) -> Result<pb::ModelStatusResponse, Status> {
         let load_spec = convert::decode_model_load_request(&request).map_err(proto_to_status)?;
-        let typed_load_spec = RuntimeBackendLoadSpec::from_legacy(backend.runtime_backend_id(), load_spec)
-            .map_err(|error| Status::invalid_argument(error.to_string()))?;
+        let typed_load_spec =
+            RuntimeBackendLoadSpec::from_legacy(backend.runtime_backend_id(), load_spec)
+                .map_err(|error| Status::invalid_argument(error.to_string()))?;
         let status = self
             .application
             .load_model_for_backend(backend, typed_load_spec)
@@ -141,9 +142,8 @@ mod tests {
         assert_eq!(engine_io.code(), Code::Internal);
         assert!(engine_io.message().contains("engine I/O error"));
 
-        let ggml = runtime_to_status(slab_runtime_core::CoreError::GGMLEngine(
-            "session not found".into(),
-        ));
+        let ggml =
+            runtime_to_status(slab_runtime_core::CoreError::GGMLEngine("session not found".into()));
         assert_eq!(ggml.code(), Code::Internal);
         assert!(ggml.message().contains("GGML engine error"));
     }

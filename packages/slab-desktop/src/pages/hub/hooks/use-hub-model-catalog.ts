@@ -12,6 +12,8 @@ import {
 import { SERVER_BASE_URL } from '@/lib/config';
 
 const DEFAULT_VISIBLE_COUNT = 10;
+const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
+const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
 export const CATEGORY_OPTIONS = [
   { value: 'all', label: 'All models' },
   { value: 'language', label: 'Large language' },
@@ -50,6 +52,13 @@ type ImportedModelResponse = {
   display_name?: string;
 };
 
+type TaskStatusResponse = {
+  status: string;
+  error_msg?: string | null;
+};
+
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
 export function useHubModelCatalog() {
   const [category, setCategory] = useState<ModelCategory>('all');
   const [status, setStatus] = useState<ModelFilterStatus>('all');
@@ -58,6 +67,7 @@ export function useHubModelCatalog() {
   const [createFile, setCreateFile] = useState<File | null>(null);
   const [createModelPending, setCreateModelPending] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
+  const [activeDownloadTasks, setActiveDownloadTasks] = useState<Record<string, string>>({});
 
   const {
     data,
@@ -66,26 +76,32 @@ export function useHubModelCatalog() {
     isRefetching,
     refetch,
   } = api.useQuery('get', '/v1/models');
+  const downloadModelMutation = api.useMutation('post', '/v1/models/download');
   const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
+  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
   const models = useMemo<ModelItem[]>(
     () =>
       toCatalogModelList(data)
-        .map((model) => ({
-          id: model.id,
-          display_name: model.display_name,
-          kind: model.kind,
-          repo_id: model.repo_id,
-          filename: model.filename,
-          capabilities: model.capabilities,
-          backend_ids: model.backend_ids,
-          is_vad_model: modelSupportsCapability(model, 'audio_vad'),
-          status: model.status,
-          local_path: model.local_path,
-          pending: model.pending,
-          updated_at: model.updated_at,
-        })),
-    [data],
+        .map((model) => {
+          const pending = model.pending || Boolean(activeDownloadTasks[model.id]);
+
+          return {
+            id: model.id,
+            display_name: model.display_name,
+            kind: model.kind,
+            repo_id: model.repo_id,
+            filename: model.filename,
+            capabilities: model.capabilities,
+            backend_ids: model.backend_ids,
+            is_vad_model: modelSupportsCapability(model, 'audio_vad'),
+            status: pending ? 'downloading' : model.status,
+            local_path: model.local_path,
+            pending,
+            updated_at: model.updated_at,
+          };
+        }),
+    [activeDownloadTasks, data],
   );
   const filteredModels = useMemo(
     () =>
@@ -106,10 +122,7 @@ export function useHubModelCatalog() {
     () => models.filter((model) => Boolean(model.local_path)).length,
     [models],
   );
-  const pendingCount = useMemo(
-    () => models.filter((model) => model.status === 'downloading').length,
-    [models],
-  );
+  const pendingCount = useMemo(() => models.filter((model) => model.pending).length, [models]);
   const visibleModels = useMemo(
     () => filteredModels.slice(0, visibleCount),
     [filteredModels, visibleCount],
@@ -122,7 +135,7 @@ export function useHubModelCatalog() {
   }, [category, status]);
 
   useEffect(() => {
-    if (!models.some((model) => model.status === 'downloading')) {
+    if (!models.some((model) => model.pending)) {
       return;
     }
 
@@ -165,7 +178,7 @@ export function useHubModelCatalog() {
     try {
       const created = await importModelFile(createFile);
 
-      toast.success('Model imported.', {
+      toast.success('Model imported to catalog.', {
         description:
           typeof created?.display_name === 'string' && created.display_name.trim()
             ? created.display_name
@@ -182,6 +195,96 @@ export function useHubModelCatalog() {
       });
     } finally {
       setCreateModelPending(false);
+    }
+  }
+
+  const waitForTaskToFinish = async (taskId: string) => {
+    const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
+
+    while (Date.now() < deadline) {
+      const task = (await getTaskMutation.mutateAsync({
+        params: { path: { id: taskId } },
+      })) as TaskStatusResponse;
+
+      if (task.status === 'succeeded') {
+        return;
+      }
+
+      if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted') {
+        throw new Error(task.error_msg ?? `Task ${taskId} ended with status: ${task.status}`);
+      }
+
+      await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
+    }
+
+    throw new Error('Model download timed out');
+  };
+
+  const refreshCatalogAndFindModel = async (modelId: string) => {
+    const refreshed = await refetch();
+    const refreshedModels = toCatalogModelList(refreshed.data);
+    return refreshedModels.find((model) => model.id === modelId);
+  };
+
+  async function trackModelDownload(model: ModelItem, taskId: string) {
+    try {
+      await waitForTaskToFinish(taskId);
+
+      const refreshedModel = await refreshCatalogAndFindModel(model.id);
+      if (!refreshedModel?.local_path) {
+        throw new Error('Model download completed, but local_path is empty');
+      }
+
+      toast.success('Model downloaded.', {
+        description: model.display_name,
+      });
+    } catch (downloadError) {
+      toast.error('Model download failed.', {
+        description: getErrorMessage(downloadError),
+      });
+    } finally {
+      setActiveDownloadTasks((current) => {
+        if (!current[model.id]) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[model.id];
+        return next;
+      });
+      void refetch();
+    }
+  }
+
+  async function downloadModel(model: ModelItem) {
+    if (!canDownloadModel(model) || activeDownloadTasks[model.id]) {
+      return;
+    }
+
+    try {
+      const response = await downloadModelMutation.mutateAsync({
+        body: {
+          model_id: model.id,
+        },
+      });
+      const taskId = extractTaskId(response);
+
+      if (!taskId) {
+        throw new Error('Failed to start model download task');
+      }
+
+      setActiveDownloadTasks((current) => ({
+        ...current,
+        [model.id]: taskId,
+      }));
+      toast.success('Download started.', {
+        description: model.display_name,
+      });
+      void trackModelDownload(model, taskId);
+    } catch (downloadError) {
+      toast.error('Failed to start download.', {
+        description: getErrorMessage(downloadError),
+      });
     }
   }
 
@@ -231,10 +334,23 @@ export function useHubModelCatalog() {
     refetch,
     canCreate,
     createModel,
+    downloadModel,
     deleteModel,
     createModelPending,
     deleteModelPending: deleteModelMutation.isPending,
   };
+}
+
+export function canDownloadModel(
+  model: Pick<ModelItem, 'kind' | 'local_path' | 'pending' | 'repo_id' | 'filename'>,
+) {
+  return (
+    model.kind === 'local' &&
+    !model.local_path &&
+    !model.pending &&
+    model.repo_id.trim().length > 0 &&
+    model.filename.trim().length > 0
+  );
 }
 
 function inferModelCategory(model: ModelItem): ModelCategory {
@@ -330,6 +446,23 @@ function parseImportedModelResponse(raw: string): ImportedModelResponse | null {
   } catch {
     return null;
   }
+}
+
+function extractTaskId(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) {
+    return null;
+  }
+
+  const taskId =
+    (payload as { operation_id?: unknown }).operation_id ??
+    (payload as { task_id?: unknown }).task_id;
+
+  if (typeof taskId !== 'string') {
+    return null;
+  }
+
+  const trimmed = taskId.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function parseApiError(raw: string, status: number) {

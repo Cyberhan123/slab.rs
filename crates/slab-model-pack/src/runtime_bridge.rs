@@ -413,11 +413,11 @@ mod tests {
                 "payload": {"temperature": 0.7, "top_p": 0.95}
             }).to_string()),
             ("models/variants/q4.json", json!({
-                "kind": "variant", "id": "q4_k_m", "label": "Q4", "component_ids": ["model"],
-                "$load_config": "ref://models/configs/load.json", "$inference_config": "ref://models/configs/inference.json"
+                "kind": "variant", "id": "q4_k_m", "label": "Q4", "component_ids": ["model"]
             }).to_string()),
             ("models/presets/default.json", json!({
-                "kind": "preset", "id": "default", "label": "Default", "variant_id": "q4_k_m"
+                "kind": "preset", "id": "default", "label": "Default",
+                "$load_config": "ref://models/configs/load.json", "$inference_config": "ref://models/configs/inference.json"
             }).to_string()),
         ]);
 

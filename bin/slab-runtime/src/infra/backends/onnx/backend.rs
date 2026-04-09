@@ -48,11 +48,11 @@ use tracing::warn;
 
 use crate::infra::backends::onnx::adapter::OnnxEngine;
 use crate::infra::backends::onnx::config::OnnxInferenceInput;
+use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
-use slab_runtime_core::Payload;
 use slab_runtime_macros::backend_handler;
 
 // ── Worker ────────────────────────────────────────────────────────────────────

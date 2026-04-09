@@ -42,16 +42,15 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             "diffusion generate_image request received"
         );
 
-        let session =
-            self.session_for_backend(BackendKind::Diffusion).await.map_err(|status| {
-                error!(
-                    grpc.code = %status.code(),
-                    grpc.message = %status.message(),
-                    elapsed_ms = started_at.elapsed().as_millis(),
-                    "diffusion pipeline unavailable for image request"
-                );
-                status
-            })?;
+        let session = self.session_for_backend(BackendKind::Diffusion).await.map_err(|status| {
+            error!(
+                grpc.code = %status.code(),
+                grpc.message = %status.message(),
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "diffusion pipeline unavailable for image request"
+            );
+            status
+        })?;
         let image_params = build_image_params(&request).map_err(|status| {
             error!(
                 grpc.code = %status.code(),
@@ -100,16 +99,15 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             "diffusion generate_video request received"
         );
 
-        let session =
-            self.session_for_backend(BackendKind::Diffusion).await.map_err(|status| {
-                error!(
-                    grpc.code = %status.code(),
-                    grpc.message = %status.message(),
-                    elapsed_ms = started_at.elapsed().as_millis(),
-                    "diffusion pipeline unavailable for video request"
-                );
-                status
-            })?;
+        let session = self.session_for_backend(BackendKind::Diffusion).await.map_err(|status| {
+            error!(
+                grpc.code = %status.code(),
+                grpc.message = %status.message(),
+                elapsed_ms = started_at.elapsed().as_millis(),
+                "diffusion pipeline unavailable for video request"
+            );
+            status
+        })?;
         let video_params = build_video_params(&request).map_err(|status| {
             error!(
                 grpc.code = %status.code(),

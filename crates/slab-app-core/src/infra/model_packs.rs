@@ -220,16 +220,17 @@ fn build_model_command(
 
 pub fn build_model_pack_load_target(path: &Path) -> Result<ModelPackLoadTarget, AppCoreError> {
     let bridge = read_model_pack_runtime_bridge(path)?;
+    let default_preset =
+        bridge.model_spec.metadata.get("default_preset").map(String::as_str).unwrap_or("default");
     let load_spec = bridge
-        .runtime_load_spec(
-            bridge
-                .model_spec
-                .metadata
-                .get("default_preset")
-                .map(String::as_str)
-                .unwrap_or("default"),
-        )
-        .map_err(map_model_pack_error)?;
+        .runtime_load_spec(default_preset)
+        .map_err(|error| match error {
+            ModelPackError::NonMaterializedSource { .. } => AppCoreError::BadRequest(format!(
+                "model pack '{}' points to a remote source and must be downloaded from the model catalog before loading",
+                path.display()
+            )),
+            other => map_model_pack_error(other),
+        })?;
 
     Ok(ModelPackLoadTarget {
         backend_id: bridge.backend,
@@ -464,7 +465,7 @@ fn build_generated_pack_entries(
         let preset = PresetDocument {
             id: GENERATED_PRESET_ID.to_owned(),
             label: "Default".to_owned(),
-            variant_id: GENERATED_VARIANT_ID.to_owned(),
+            variant_id: Some(GENERATED_VARIANT_ID.to_owned()),
             description: Some("Generated from catalog state".to_owned()),
             adapter_ids: Vec::new(),
             load_config: None,
@@ -941,9 +942,7 @@ mod tests {
                 json!({
                     "kind": "variant",
                     "id": "q4_k_m",
-                    "label": "Q4",
-                    "$load_config": "ref://models/configs/load.json",
-                    "$inference_config": "ref://models/configs/inference.json"
+                    "label": "Q4"
                 })
                 .to_string(),
             ),
@@ -953,7 +952,8 @@ mod tests {
                     "kind": "preset",
                     "id": "default",
                     "label": "Default",
-                    "variant_id": "q4_k_m"
+                    "$load_config": "ref://models/configs/load.json",
+                    "$inference_config": "ref://models/configs/inference.json"
                 })
                 .to_string(),
             ),

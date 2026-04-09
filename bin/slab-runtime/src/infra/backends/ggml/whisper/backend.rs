@@ -20,11 +20,11 @@ use tokio::sync::broadcast;
 
 use crate::domain::services::codec::build_ggml_whisper_full_params_from_legacy;
 use crate::infra::backends::ggml::whisper::adapter::GGMLWhisperEngine;
+use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
     BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
-use slab_runtime_core::Payload;
 use slab_runtime_macros::backend_handler;
 use slab_types::{AudioTranscriptionOpOptions, GgmlWhisperLoadConfig};
 use slab_whisper::{ContextParams as WhisperContextParams, FullParams as WhisperFullParams};
