@@ -34,8 +34,7 @@ pub use model::{
     DownloadModelCommand, ListModelsFilter, ManagedModelBackendId, ModelLoadCommand, ModelSpec,
     ModelStatus, Pricing, RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind,
     UnifiedModelStatus, UpdateModelCommand, default_model_capabilities,
-    normalize_model_capabilities,
-    upgrade_stored_model_config,
+    normalize_model_capabilities, upgrade_stored_model_config,
 };
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};

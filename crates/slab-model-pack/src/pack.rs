@@ -393,7 +393,7 @@ mod tests {
                     "kind": "backend_config",
                     "id": "load-default",
                     "label": "Default load",
-                    "backend": "ggml_llama",
+                    // "backend": "ggml_llama", 我们不需要这个字段，因为主文件已经提供了backend_hints
                     "scope": "load",
                     "payload": {
                         "context_length": 8192,
@@ -408,7 +408,7 @@ mod tests {
                     "kind": "backend_config",
                     "id": "inference-default",
                     "label": "Default inference",
-                    "backend": "ggml_llama",
+                    // "backend": "ggml_llama",
                     "scope": "inference",
                     "payload": {
                         "temperature": 0.7,
@@ -424,10 +424,10 @@ mod tests {
                     "kind": "variant",
                     "id": "q4_k_m",
                     "label": "Q4_K_M",
-                    "backend": "ggml_llama",
+                    // "backend": "ggml_llama", 我们不需要这个字段，因为主文件已经提供了backend_hints
                     "component_ids": ["model"],
-                    "load_config": "ref://models/configs/load.json",
-                    "inference_config": "ref://models/configs/inference.json"
+                    "$load_config": "ref://models/configs/load.json",
+                    "$inference_config": "ref://models/configs/inference.json"
                 })
                 .to_string(),
             ),
@@ -438,8 +438,8 @@ mod tests {
                     "id": "default",
                     "label": "Default",
                     "variant_id": "q4_k_m",
-                    "load_config": "ref://models/configs/load.json",
-                    "inference_config": "ref://models/configs/inference.json"
+                    "$load_config": "ref://models/configs/load.json",
+                    "$inference_config": "ref://models/configs/inference.json"
                 })
                 .to_string(),
             ),
@@ -461,6 +461,105 @@ mod tests {
                 .variant_id,
             "q4_k_m"
         );
+    }
+
+    #[test]
+    fn rejects_legacy_ref_field_names_without_dollar_prefix() {
+        let bytes = build_pack(vec![
+            (
+                MANIFEST_FILE_NAME,
+                json!({
+                    "version": 2,
+                    "id": "demo",
+                    "label": "Demo",
+                    "family": "llama",
+                    "variants": [
+                        {
+                            "id": "q4_k_m",
+                            "label": "Q4_K_M",
+                            "$config": "ref://models/variants/q4_k_m.json"
+                        }
+                    ]
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q4_k_m.json",
+                json!({
+                    "kind": "variant",
+                    "id": "q4_k_m",
+                    "label": "Q4_K_M",
+                    "load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "load-default",
+                    "label": "Default load",
+                    "scope": "load",
+                    "payload": {
+                        "context_length": 8192
+                    }
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let error = ModelPack::from_bytes(&bytes).unwrap_err();
+        assert!(error.to_string().contains("unknown field `load_config`"));
+    }
+
+    #[test]
+    fn rejects_removed_backend_field_in_sub_configs() {
+        let bytes = build_pack(vec![
+            (
+                MANIFEST_FILE_NAME,
+                json!({
+                    "version": 2,
+                    "id": "demo",
+                    "label": "Demo",
+                    "family": "llama",
+                    "variants": [
+                        {
+                            "id": "q4_k_m",
+                            "label": "Q4_K_M",
+                            "$config": "ref://models/variants/q4_k_m.json"
+                        }
+                    ]
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q4_k_m.json",
+                json!({
+                    "kind": "variant",
+                    "id": "q4_k_m",
+                    "label": "Q4_K_M",
+                    "$load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "load-default",
+                    "label": "Default load",
+                    "backend": "ggml_llama",
+                    "scope": "load",
+                    "payload": {
+                        "context_length": 8192
+                    }
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let error = ModelPack::from_bytes(&bytes).unwrap_err();
+        assert!(error.to_string().contains("unknown field `backend`"));
     }
 
     #[test]

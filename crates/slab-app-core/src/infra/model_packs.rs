@@ -13,7 +13,7 @@ use slab_model_pack::{
     ModelPackRuntimeBridge, PACK_EXTENSION, PackModelStatus, PackPricing, PackRuntimePresets,
     PackSource, PackSourceFile, PresetDocument, VariantDocument,
 };
-use slab_types::{DiffusionLoadOptions, ModelFamily, RuntimeBackendId};
+use slab_types::{DiffusionLoadOptions, DriverHints, ModelFamily, RuntimeBackendId};
 use uuid::Uuid;
 use zip::CompressionMethod;
 use zip::ZipArchive;
@@ -408,7 +408,7 @@ fn build_generated_pack_entries(
     let mut manifest = build_generated_manifest(config);
     let mut entries = Vec::new();
 
-    if let Some(backend) = infer_runtime_backend_from_config(config) {
+    if infer_runtime_backend_from_config(config).is_some() {
         let variant_ref = ConfigEntryRef {
             id: GENERATED_VARIANT_ID.to_owned(),
             label: "Default Variant".to_owned(),
@@ -424,7 +424,7 @@ fn build_generated_pack_entries(
                 .map_err(map_model_pack_error)?,
         };
 
-        let load_config_ref = build_generated_load_config(config, backend)
+        let load_config_ref = build_generated_load_config(config)
             .transpose()?
             .map(|document| {
                 let config_ref = ConfigRef::parse(format!("ref://{GENERATED_LOAD_CONFIG_PATH}"))
@@ -437,7 +437,7 @@ fn build_generated_pack_entries(
             })
             .transpose()?;
 
-        let inference_config_ref = build_generated_inference_config(config, backend)
+        let inference_config_ref = build_generated_inference_config(config)
             .transpose()?
             .map(|document| {
                 let config_ref =
@@ -456,7 +456,6 @@ fn build_generated_pack_entries(
             label: "Default Variant".to_owned(),
             description: Some("Generated from catalog state".to_owned()),
             source: None,
-            backend: Some(backend),
             component_ids: Vec::new(),
             load_config: load_config_ref,
             inference_config: inference_config_ref,
@@ -507,7 +506,7 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
         status: config.status.clone().map(pack_status_from_unified),
         family,
         capabilities: config.capabilities.clone(),
-        backend_hints: Default::default(),
+        backend_hints: build_generated_backend_hints(config.backend_id),
         context_window: config.spec.context_window,
         pricing: config
             .spec
@@ -564,9 +563,20 @@ fn build_pack_source_from_config(config: &StoredModelConfig) -> Option<PackSourc
     None
 }
 
+fn build_generated_backend_hints(backend: Option<ManagedModelBackendId>) -> DriverHints {
+    let Some(backend) = backend else {
+        return DriverHints::default();
+    };
+
+    DriverHints {
+        prefer_drivers: vec![backend.canonical_id().to_owned()],
+        avoid_drivers: Vec::new(),
+        require_streaming: false,
+    }
+}
+
 fn build_generated_load_config(
     config: &StoredModelConfig,
-    backend: RuntimeBackendId,
 ) -> Option<Result<BackendConfigDocument, AppCoreError>> {
     let mut payload = Map::new();
 
@@ -580,7 +590,6 @@ fn build_generated_load_config(
     (!payload.is_empty()).then_some(Ok(BackendConfigDocument {
         id: GENERATED_LOAD_CONFIG_ID.to_owned(),
         label: "Generated Load Config".to_owned(),
-        backend,
         scope: BackendConfigScope::Load,
         description: Some("Generated from catalog state".to_owned()),
         payload: Value::Object(payload),
@@ -590,7 +599,6 @@ fn build_generated_load_config(
 
 fn build_generated_inference_config(
     config: &StoredModelConfig,
-    backend: RuntimeBackendId,
 ) -> Option<Result<BackendConfigDocument, AppCoreError>> {
     let mut payload = Map::new();
     if let Some(runtime_presets) = config.runtime_presets.as_ref() {
@@ -605,7 +613,6 @@ fn build_generated_inference_config(
     (!payload.is_empty()).then_some(Ok(BackendConfigDocument {
         id: GENERATED_INFERENCE_CONFIG_ID.to_owned(),
         label: "Generated Inference Config".to_owned(),
-        backend,
         scope: BackendConfigScope::Inference,
         description: Some("Generated from catalog state".to_owned()),
         payload: Value::Object(payload),
@@ -879,6 +886,11 @@ mod tests {
                         "top_p": 0.9
                     },
                     "capabilities": ["text_generation"],
+                    "backend_hints": {
+                        "prefer_drivers": ["ggml.llama"],
+                        "avoid_drivers": [],
+                        "require_streaming": false
+                    },
                     "source": {
                         "kind": "hugging_face",
                         "repo_id": "bartowski/Qwen2.5-7B-Instruct-GGUF",
@@ -901,7 +913,6 @@ mod tests {
                     "kind": "backend_config",
                     "id": "load",
                     "label": "Load",
-                    "backend": "ggml_llama",
                     "scope": "load",
                     "payload": {
                         "context_length": 8192,
@@ -917,7 +928,6 @@ mod tests {
                     "kind": "backend_config",
                     "id": "inference",
                     "label": "Inference",
-                    "backend": "ggml_llama",
                     "scope": "inference",
                     "payload": {
                         "temperature": 0.7,
@@ -932,9 +942,8 @@ mod tests {
                     "kind": "variant",
                     "id": "q4_k_m",
                     "label": "Q4",
-                    "backend": "ggml_llama",
-                    "load_config": "ref://models/configs/load.json",
-                    "inference_config": "ref://models/configs/inference.json"
+                    "$load_config": "ref://models/configs/load.json",
+                    "$inference_config": "ref://models/configs/inference.json"
                 })
                 .to_string(),
             ),

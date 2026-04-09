@@ -47,7 +47,7 @@ fn derive_backend_id_from_legacy_provider(provider: &str) -> Option<ManagedModel
         .strip_prefix("local.")
         .map(str::trim)
         .filter(|value| !value.is_empty())
-    .and_then(|value| value.parse().ok())
+        .and_then(|value| value.parse().ok())
 }
 
 fn normalize_optional_text(value: Option<String>) -> Option<String> {
@@ -190,7 +190,11 @@ mod tests {
             provider: "cloud.openai-main".to_owned(),
             kind: "cloud".to_owned(),
             backend_id: None,
-            capabilities: serde_json::to_string(&vec![Capability::TextGeneration, Capability::ChatGeneration]).unwrap(),
+            capabilities: serde_json::to_string(&vec![
+                Capability::TextGeneration,
+                Capability::ChatGeneration,
+            ])
+            .unwrap(),
             status: "ready".to_owned(),
             spec: json!({
                 "provider_id": "openai-main",
@@ -221,7 +225,11 @@ mod tests {
             provider: "cloud.openai-main".to_owned(),
             kind: "cloud".to_owned(),
             backend_id: None,
-            capabilities: serde_json::to_string(&vec![Capability::TextGeneration, Capability::ChatGeneration]).unwrap(),
+            capabilities: serde_json::to_string(&vec![
+                Capability::TextGeneration,
+                Capability::ChatGeneration,
+            ])
+            .unwrap(),
             status: "ready".to_owned(),
             spec: json!({
                 "provider_id": "openai-main",

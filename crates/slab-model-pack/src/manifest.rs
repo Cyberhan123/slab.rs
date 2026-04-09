@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use slab_types::{Capability, DriverHints, ModelFamily, RuntimeBackendId};
+use slab_types::{Capability, DriverHints, ModelFamily};
 
 use crate::refs::ConfigRef;
 
@@ -219,6 +219,7 @@ impl PackDocument {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct VariantDocument {
     pub id: String,
     pub label: String,
@@ -226,13 +227,11 @@ pub struct VariantDocument {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub source: Option<PackSource>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub backend: Option<RuntimeBackendId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub component_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "$load_config", default, skip_serializing_if = "Option::is_none")]
     pub load_config: Option<ConfigRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "$inference_config", default, skip_serializing_if = "Option::is_none")]
     pub inference_config: Option<ConfigRef>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
@@ -264,6 +263,7 @@ pub struct ComponentDocument {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct PresetDocument {
     pub id: String,
     pub label: String,
@@ -272,9 +272,9 @@ pub struct PresetDocument {
     pub description: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub adapter_ids: Vec<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "$load_config", default, skip_serializing_if = "Option::is_none")]
     pub load_config: Option<ConfigRef>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(rename = "$inference_config", default, skip_serializing_if = "Option::is_none")]
     pub inference_config: Option<ConfigRef>,
     #[serde(default)]
     pub footprint: DynamicFootprint,
@@ -299,10 +299,10 @@ impl BackendConfigScope {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct BackendConfigDocument {
     pub id: String,
     pub label: String,
-    pub backend: RuntimeBackendId,
     pub scope: BackendConfigScope,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,

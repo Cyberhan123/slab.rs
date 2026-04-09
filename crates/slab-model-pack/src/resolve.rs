@@ -333,7 +333,6 @@ mod tests {
                     "kind": "backend_config",
                     "id": "load-default",
                     "label": "Load Default",
-                    "backend": "ggml_llama",
                     "scope": "load",
                     "payload": {
                         "context_length": 8192
@@ -347,7 +346,6 @@ mod tests {
                     "kind": "backend_config",
                     "id": "load-long",
                     "label": "Load Long",
-                    "backend": "ggml_llama",
                     "scope": "load",
                     "payload": {
                         "context_length": 32768
@@ -361,7 +359,6 @@ mod tests {
                     "kind": "backend_config",
                     "id": "inference-default",
                     "label": "Inference Default",
-                    "backend": "ggml_llama",
                     "scope": "inference",
                     "payload": {
                         "temperature": 0.7
@@ -376,8 +373,8 @@ mod tests {
                     "id": "q4_k_m",
                     "label": "Q4_K_M",
                     "component_ids": ["model"],
-                    "load_config": "ref://models/configs/load-default.json",
-                    "inference_config": "ref://models/configs/inference-default.json"
+                    "$load_config": "ref://models/configs/load-default.json",
+                    "$inference_config": "ref://models/configs/inference-default.json"
                 })
                 .to_string(),
             ),
@@ -398,7 +395,7 @@ mod tests {
                     "id": "long-context",
                     "label": "Long Context",
                     "variant_id": "q4_k_m",
-                    "load_config": "ref://models/configs/load-long.json"
+                    "$load_config": "ref://models/configs/load-long.json"
                 })
                 .to_string(),
             ),
