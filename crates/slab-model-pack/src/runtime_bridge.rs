@@ -1,5 +1,6 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use serde_json::Value;
 use slab_types::{
@@ -46,7 +47,7 @@ impl ResolvedModelPack {
             .copied()
             .find(|capability| capability.is_runtime_execution())
             .ok_or(ModelPackError::MissingRuntimeCapability)?;
-        let backend = resolve_runtime_backend(preset)?;
+        let backend = resolve_runtime_backend(&self.manifest.backend_hints, &preset.document.id)?;
         let source = build_model_source(preset)?;
         let load_options = config_payload_as_options(preset.effective_load_config.as_ref())?;
         let inference_defaults =
@@ -58,11 +59,10 @@ impl ResolvedModelPack {
             preset.effective_load_config.as_ref(),
         )?;
         let metadata = merged_metadata(self, preset);
-        let driver_hints = merged_driver_hints(&self.manifest.backend_hints, backend);
 
         let mut model_spec = ModelSpec::new(self.manifest.family, capability, source)
             .named(self.manifest.id.clone())
-            .with_driver_hints(driver_hints);
+            .with_driver_hints(self.manifest.backend_hints.clone());
         model_spec.load_options = load_options;
         model_spec.metadata = metadata;
 
@@ -130,34 +130,27 @@ impl ModelPackRuntimeBridge {
     }
 }
 
-fn resolve_runtime_backend(preset: &ResolvedPreset) -> Result<RuntimeBackendId, ModelPackError> {
-    let mut candidates = Vec::new();
-    if let Some(backend) = preset.variant.document.backend {
-        candidates.push(backend);
-    }
-    if let Some(config) = &preset.variant.load_config {
-        candidates.push(config.backend);
-    }
-    if let Some(config) = &preset.variant.inference_config {
-        candidates.push(config.backend);
-    }
-    if let Some(config) = &preset.effective_load_config {
-        candidates.push(config.backend);
-    }
-    if let Some(config) = &preset.effective_inference_config {
-        candidates.push(config.backend);
-    }
-
-    candidates.sort_by_key(|backend| backend.canonical_id());
-    candidates.dedup();
-
-    match candidates.as_slice() {
-        [backend] => Ok(*backend),
-        [] => Err(ModelPackError::MissingRuntimeBackend { preset_id: preset.document.id.clone() }),
-        _ => {
-            Err(ModelPackError::ConflictingRuntimeBackend { preset_id: preset.document.id.clone() })
+pub(crate) fn preferred_runtime_backends_from_hints(hints: &DriverHints) -> Vec<RuntimeBackendId> {
+    let mut backends = Vec::new();
+    for driver in &hints.prefer_drivers {
+        let Ok(backend) = RuntimeBackendId::from_str(driver) else {
+            continue;
+        };
+        if !backends.contains(&backend) {
+            backends.push(backend);
         }
     }
+    backends
+}
+
+fn resolve_runtime_backend(
+    hints: &DriverHints,
+    preset_id: &str,
+) -> Result<RuntimeBackendId, ModelPackError> {
+    preferred_runtime_backends_from_hints(hints)
+        .into_iter()
+        .next()
+        .ok_or_else(|| ModelPackError::MissingRuntimeBackend { preset_id: preset_id.to_owned() })
 }
 
 fn build_model_source(preset: &ResolvedPreset) -> Result<ModelSource, ModelPackError> {
@@ -347,15 +340,6 @@ fn artifact_path(source: &ModelSource, key: &str) -> Option<PathBuf> {
     source.artifact(key).map(PathBuf::from)
 }
 
-fn merged_driver_hints(hints: &DriverHints, backend: RuntimeBackendId) -> DriverHints {
-    let mut merged = hints.clone();
-    let preferred = backend.canonical_id().to_owned();
-    if !merged.prefer_drivers.iter().any(|value| value == &preferred) {
-        merged.prefer_drivers.insert(0, preferred);
-    }
-    merged
-}
-
 fn merged_metadata(pack: &ResolvedModelPack, preset: &ResolvedPreset) -> BTreeMap<String, String> {
     let mut metadata = pack.manifest.metadata.clone();
     for (key, value) in &preset.variant.document.metadata {
@@ -410,7 +394,7 @@ mod tests {
                 "label": "Qwen2.5 7B Instruct",
                 "family": "llama",
                 "capabilities": ["text_generation"],
-                "backend_hints": {"prefer_drivers": [], "avoid_drivers": [], "require_streaming": true},
+                "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": true},
                 "components": [{"id": "model", "label": "Model", "$config": "ref://models/components/model.json"}],
                 "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$config": "ref://models/variants/q4.json"}],
                 "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
@@ -421,16 +405,16 @@ mod tests {
                 "source": {"kind": "local_path", "path": "C:/models/qwen.gguf"}
             }).to_string()),
             ("models/configs/load.json", json!({
-                "kind": "backend_config", "id": "load", "label": "Load", "backend": "ggml_llama", "scope": "load",
+                "kind": "backend_config", "id": "load", "label": "Load", "scope": "load",
                 "payload": {"context_length": 8192, "chat_template": "chatml", "num_workers": 2}
             }).to_string()),
             ("models/configs/inference.json", json!({
-                "kind": "backend_config", "id": "inference", "label": "Inference", "backend": "ggml_llama", "scope": "inference",
+                "kind": "backend_config", "id": "inference", "label": "Inference", "scope": "inference",
                 "payload": {"temperature": 0.7, "top_p": 0.95}
             }).to_string()),
             ("models/variants/q4.json", json!({
-                "kind": "variant", "id": "q4_k_m", "label": "Q4", "backend": "ggml_llama", "component_ids": ["model"],
-                "load_config": "ref://models/configs/load.json", "inference_config": "ref://models/configs/inference.json"
+                "kind": "variant", "id": "q4_k_m", "label": "Q4", "component_ids": ["model"],
+                "$load_config": "ref://models/configs/load.json", "$inference_config": "ref://models/configs/inference.json"
             }).to_string()),
             ("models/presets/default.json", json!({
                 "kind": "preset", "id": "default", "label": "Default", "variant_id": "q4_k_m"
@@ -467,6 +451,7 @@ mod tests {
                     "label": "GPT-4.1 mini",
                     "family": "llama",
                     "capabilities": ["text_generation"],
+                    "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": true},
                     "source": {
                         "kind": "cloud",
                         "provider_id": "openai-main",
@@ -483,8 +468,7 @@ mod tests {
                 json!({
                     "kind": "variant",
                     "id": "default-variant",
-                    "label": "Default Variant",
-                    "backend": "ggml_llama"
+                    "label": "Default Variant"
                 })
                 .to_string(),
             ),

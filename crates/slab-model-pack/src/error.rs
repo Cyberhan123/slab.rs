@@ -63,7 +63,9 @@ pub enum ModelPackError {
     #[error("manifest must declare default_preset when multiple presets exist")]
     MissingDefaultPresetDeclaration,
 
-    #[error("manifest must declare at least one runtime execution capability to build a runtime bridge")]
+    #[error(
+        "manifest must declare at least one runtime execution capability to build a runtime bridge"
+    )]
     MissingRuntimeCapability,
 
     #[error("model pack could not determine a runtime backend for preset '{preset_id}'")]
@@ -75,7 +77,9 @@ pub enum ModelPackError {
     #[error("backend config '{id}' payload must be a JSON object")]
     InvalidBackendConfigPayloadShape { id: String },
 
-    #[error("resolved preset '{preset_id}' could not build a typed runtime load command: {message}")]
+    #[error(
+        "resolved preset '{preset_id}' could not build a typed runtime load command: {message}"
+    )]
     InvalidRuntimeLoadCommand { preset_id: String, message: String },
 
     #[error("resolved preset '{preset_id}' does not expose a loadable primary model artifact")]

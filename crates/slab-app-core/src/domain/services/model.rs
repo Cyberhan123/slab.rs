@@ -5,9 +5,11 @@ use std::sync::Arc;
 use chrono::Utc;
 use hf_hub::api::sync::{Api, ApiBuilder};
 use slab_proto::convert;
-use slab_types::load_config::{GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig};
-use slab_types::{Capability, RuntimeBackendId, RuntimeBackendLoadSpec};
+use slab_types::load_config::{
+    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
+};
 use slab_types::runtime::DiffusionLoadOptions;
+use slab_types::{Capability, RuntimeBackendId, RuntimeBackendLoadSpec};
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
@@ -15,10 +17,10 @@ use crate::context::{ModelState, SubmitOperation, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView,
     CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
-    ChatModelCapabilities, ChatModelOption, ChatModelSource, CreateModelCommand,
-    DeletedModelView, DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec,
-    ManagedModelBackendId, ModelStatus, UnifiedModel, UnifiedModelKind, UnifiedModelStatus,
-    UpdateModelCommand, normalize_model_capabilities,
+    ChatModelCapabilities, ChatModelOption, ChatModelSource, CreateModelCommand, DeletedModelView,
+    DownloadModelCommand, ListModelsFilter, ManagedModelBackendId, ModelLoadCommand, ModelSpec,
+    ModelStatus, UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
+    normalize_model_capabilities,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{ModelStore, UnifiedModelRecord};
@@ -605,8 +607,7 @@ async fn load_models_from_state(
                 .ok()
         })
         .filter(|model: &UnifiedModel| {
-            requested_capability
-                .is_none_or(|capability| model.capabilities.contains(&capability))
+            requested_capability.is_none_or(|capability| model.capabilities.contains(&capability))
         })
         .collect();
     Ok(models)
@@ -1075,18 +1076,16 @@ fn build_backend_load_spec(
     let model_path = PathBuf::from(model_path);
 
     match backend_id {
-        RuntimeBackendId::GgmlLlama => Ok(RuntimeBackendLoadSpec::GgmlLlama(
-            GgmlLlamaLoadConfig {
-                model_path,
-                num_workers: usize::try_from(num_workers).map_err(|error| {
-                    AppCoreError::Internal(format!(
-                        "failed to convert num_workers into usize for ggml.llama: {error}"
-                    ))
-                })?,
-                context_length: (context_length > 0).then_some(context_length),
-                chat_template,
-            },
-        )),
+        RuntimeBackendId::GgmlLlama => Ok(RuntimeBackendLoadSpec::GgmlLlama(GgmlLlamaLoadConfig {
+            model_path,
+            num_workers: usize::try_from(num_workers).map_err(|error| {
+                AppCoreError::Internal(format!(
+                    "failed to convert num_workers into usize for ggml.llama: {error}"
+                ))
+            })?,
+            context_length: (context_length > 0).then_some(context_length),
+            chat_template,
+        })),
         RuntimeBackendId::GgmlWhisper => {
             Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path }))
         }
@@ -1104,8 +1103,7 @@ fn build_backend_load_spec(
                 control_net_path: None,
                 flash_attn: diffusion.flash_attn,
                 vae_device: (!diffusion.vae_device.is_empty()).then_some(diffusion.vae_device),
-                clip_device: (!diffusion.clip_device.is_empty())
-                    .then_some(diffusion.clip_device),
+                clip_device: (!diffusion.clip_device.is_empty()).then_some(diffusion.clip_device),
                 offload_params_to_cpu: diffusion.offload_params_to_cpu,
                 enable_mmap: false,
                 n_threads: None,

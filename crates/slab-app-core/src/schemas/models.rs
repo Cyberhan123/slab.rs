@@ -375,7 +375,9 @@ impl From<DomainCapability> for ModelCapability {
             DomainCapability::ChatGeneration => Self::ChatGeneration,
             DomainCapability::AudioVad => Self::AudioVad,
             DomainCapability::VideoGeneration => Self::VideoGeneration,
-            _ => unreachable!("new slab_types::Capability variant must be mapped into ModelCapability"),
+            _ => unreachable!(
+                "new slab_types::Capability variant must be mapped into ModelCapability"
+            ),
         }
     }
 }
@@ -439,9 +441,9 @@ impl From<CreateModelRequest> for DomainCreateModelCommand {
             backend_id: req.backend_id.map(|backend_id| {
                 backend_id.parse::<DomainManagedModelBackendId>().expect("backend_id was validated")
             }),
-            capabilities: req.capabilities.map(|capabilities| {
-                capabilities.into_iter().map(Into::into).collect()
-            }),
+            capabilities: req
+                .capabilities
+                .map(|capabilities| capabilities.into_iter().map(Into::into).collect()),
             status: req.status.and_then(|status| status.parse().ok()),
             spec: req.spec.map(Into::into).unwrap_or_default(),
             runtime_presets: req.runtime_presets.map(Into::into),
@@ -457,9 +459,9 @@ impl From<UpdateModelRequest> for DomainUpdateModelCommand {
             backend_id: req.backend_id.map(|backend_id| {
                 backend_id.parse::<DomainManagedModelBackendId>().expect("backend_id was validated")
             }),
-            capabilities: req.capabilities.map(|capabilities| {
-                capabilities.into_iter().map(Into::into).collect()
-            }),
+            capabilities: req
+                .capabilities
+                .map(|capabilities| capabilities.into_iter().map(Into::into).collect()),
             status: req.status.and_then(|status| status.parse().ok()),
             spec: req.spec.map(Into::into),
             runtime_presets: req.runtime_presets.map(Into::into),

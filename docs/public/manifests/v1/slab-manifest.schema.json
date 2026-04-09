@@ -5,7 +5,10 @@
         "text_generation",
         "audio_transcription",
         "image_generation",
-        "image_embedding"
+        "image_embedding",
+        "chat_generation",
+        "audio_vad",
+        "video_generation"
       ],
       "type": "string"
     },

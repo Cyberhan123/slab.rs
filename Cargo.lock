@@ -7861,6 +7861,7 @@ dependencies = [
  "anyhow",
  "cargo_metadata 0.23.1",
  "slab-libfetch",
+ "slab-model-pack",
  "tokio",
 ]
 

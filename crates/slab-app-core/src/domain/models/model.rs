@@ -131,10 +131,7 @@ impl TryFrom<RuntimeBackendId> for ManagedModelBackendId {
             RuntimeBackendId::GgmlLlama => Ok(Self::GgmlLlama),
             RuntimeBackendId::GgmlWhisper => Ok(Self::GgmlWhisper),
             RuntimeBackendId::GgmlDiffusion => Ok(Self::GgmlDiffusion),
-            other => Err(format!(
-                "unsupported managed model backend id: {}",
-                other.canonical_id()
-            )),
+            other => Err(format!("unsupported managed model backend id: {}", other.canonical_id())),
         }
     }
 }
@@ -407,9 +404,12 @@ pub fn default_model_capabilities(
     spec: &ModelSpec,
 ) -> Vec<Capability> {
     match (kind, backend_id) {
-        (UnifiedModelKind::Cloud, _) => vec![Capability::TextGeneration, Capability::ChatGeneration],
+        (UnifiedModelKind::Cloud, _) => {
+            vec![Capability::TextGeneration, Capability::ChatGeneration]
+        }
         (UnifiedModelKind::Local, Some(ManagedModelBackendId::GgmlWhisper))
-            if looks_like_vad_model(display_name, spec) => {
+            if looks_like_vad_model(display_name, spec) =>
+        {
             vec![Capability::AudioVad]
         }
         (UnifiedModelKind::Local, Some(ManagedModelBackendId::GgmlWhisper)) => {
@@ -516,7 +516,10 @@ mod tests {
 
         assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
         assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
-        assert_eq!(config.capabilities, vec![Capability::TextGeneration, Capability::ChatGeneration]);
+        assert_eq!(
+            config.capabilities,
+            vec![Capability::TextGeneration, Capability::ChatGeneration]
+        );
     }
 
     #[test]
@@ -604,10 +607,7 @@ mod tests {
             UnifiedModelKind::Local,
             Some(ManagedModelBackendId::GgmlWhisper),
             "Silero VAD",
-            &ModelSpec {
-                filename: Some("silero_vad.bin".into()),
-                ..ModelSpec::default()
-            },
+            &ModelSpec { filename: Some("silero_vad.bin".into()), ..ModelSpec::default() },
         );
         assert_eq!(vad_caps, vec![Capability::AudioVad]);
 
