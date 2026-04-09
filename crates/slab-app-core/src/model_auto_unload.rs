@@ -353,7 +353,7 @@ impl ModelAutoUnloadManager {
 }
 
 pub(crate) fn build_model_load_request(spec: &RuntimeBackendLoadSpec) -> rpc::pb::ModelLoadRequest {
-    convert::encode_model_load_request(&spec.to_legacy_spec())
+    convert::encode_model_load_request(spec)
 }
 
 fn load_spec_model_path(spec: &RuntimeBackendLoadSpec) -> &Path {

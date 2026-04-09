@@ -148,23 +148,31 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         let req = request.get_ref();
-        let has_diffusion_overrides = !req.diffusion_model_path.is_empty()
-            || !req.vae_path.is_empty()
-            || !req.taesd_path.is_empty()
-            || !req.lora_model_dir.is_empty()
-            || !req.clip_l_path.is_empty()
-            || !req.clip_g_path.is_empty()
-            || !req.t5xxl_path.is_empty()
-            || !req.vae_device.is_empty()
-            || !req.clip_device.is_empty()
-            || req.flash_attn
-            || req.offload_params_to_cpu;
+        let model_path =
+            req.common.as_ref().map(|common| common.model_path.as_str()).unwrap_or_default();
+        let has_diffusion_overrides = match req.backend_params.as_ref() {
+            Some(pb::model_load_request::BackendParams::GgmlDiffusion(params)) => {
+                params.diffusion_model_path.is_some()
+                    || params.vae_path.is_some()
+                    || params.taesd_path.is_some()
+                    || params.clip_l_path.is_some()
+                    || params.clip_g_path.is_some()
+                    || params.t5xxl_path.is_some()
+                    || params.clip_vision_path.is_some()
+                    || params.control_net_path.is_some()
+                    || params.vae_device.is_some()
+                    || params.clip_device.is_some()
+                    || params.flash_attn
+                    || params.offload_params_to_cpu
+                    || params.enable_mmap
+                    || params.n_threads.is_some()
+            }
+            _ => false,
+        };
 
         debug!(
             request_id = %request_id,
-            model_path = %req.model_path,
-            num_workers = req.num_workers,
-            context_length = req.context_length,
+            model_path = %model_path,
             has_diffusion_overrides,
             "diffusion load_model request received"
         );

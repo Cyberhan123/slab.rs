@@ -97,6 +97,16 @@ fn build_model_spec(backend: BackendKind, load_spec: &RuntimeBackendLoadSpec) ->
                 insert_opt_path_option(&mut spec, "clip_l_path", load_config.clip_l_path.as_ref());
                 insert_opt_path_option(&mut spec, "clip_g_path", load_config.clip_g_path.as_ref());
                 insert_opt_path_option(&mut spec, "t5xxl_path", load_config.t5xxl_path.as_ref());
+                insert_opt_path_option(
+                    &mut spec,
+                    "clip_vision_path",
+                    load_config.clip_vision_path.as_ref(),
+                );
+                insert_opt_path_option(
+                    &mut spec,
+                    "control_net_path",
+                    load_config.control_net_path.as_ref(),
+                );
                 spec.load_options
                     .insert("flash_attn".to_owned(), serde_json::json!(load_config.flash_attn));
                 spec.load_options
@@ -107,6 +117,11 @@ fn build_model_spec(backend: BackendKind, load_spec: &RuntimeBackendLoadSpec) ->
                     "offload_params_to_cpu".to_owned(),
                     serde_json::json!(load_config.offload_params_to_cpu),
                 );
+                spec.load_options
+                    .insert("enable_mmap".to_owned(), serde_json::json!(load_config.enable_mmap));
+                if let Some(n_threads) = load_config.n_threads {
+                    spec.load_options.insert("n_threads".to_owned(), serde_json::json!(n_threads));
+                }
             }
         }
         BackendKind::Whisper => {}

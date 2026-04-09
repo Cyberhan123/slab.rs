@@ -17,7 +17,12 @@ use slab_types::inference::{
     TextGenerationUsage, TextPromptTokensDetails,
 };
 use slab_types::media::{GeneratedFrame, GeneratedImage, RawImageInput};
-use slab_types::runtime::{DiffusionLoadOptions, RuntimeModelLoadSpec, RuntimeModelStatus};
+use slab_types::runtime::RuntimeModelStatus;
+use slab_types::{
+    CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
+    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
+    RuntimeBackendLoadSpec,
+};
 use thiserror::Error;
 
 use crate::slab::ipc::v1 as pb;
@@ -49,8 +54,12 @@ fn insert_reasoning_content_metadata(
 pub enum ProtoConversionError {
     #[error("{field} must not be empty")]
     EmptyField { field: &'static str },
+    #[error("{field} is missing")]
+    MissingField { field: &'static str },
     #[error("{field} must be at least {minimum}")]
     BelowMinimum { field: &'static str, minimum: i64 },
+    #[error("{field} exceeds supported range")]
+    OutOfRange { field: &'static str },
     #[error("unknown runtime backend id: {0}")]
     UnknownBackend(String),
     #[error("failed to parse {field} JSON: {source}")]
@@ -73,42 +82,149 @@ pub enum ProtoConversionError {
     },
 }
 
-pub fn encode_model_load_request(spec: &RuntimeModelLoadSpec) -> pb::ModelLoadRequest {
-    let diffusion = spec.diffusion.as_ref().cloned().unwrap_or_default();
+pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> pb::ModelLoadRequest {
+    use pb::model_load_request::BackendParams;
 
-    pb::ModelLoadRequest {
-        model_path: path_to_string(&spec.model_path),
-        num_workers: spec.num_workers.max(1),
-        context_length: spec.context_length.unwrap_or(0),
-        chat_template: spec.chat_template.clone().unwrap_or_default(),
-        diffusion_model_path: opt_path_to_string(diffusion.diffusion_model_path),
-        vae_path: opt_path_to_string(diffusion.vae_path),
-        taesd_path: opt_path_to_string(diffusion.taesd_path),
-        lora_model_dir: opt_path_to_string(diffusion.lora_model_dir),
-        clip_l_path: opt_path_to_string(diffusion.clip_l_path),
-        clip_g_path: opt_path_to_string(diffusion.clip_g_path),
-        t5xxl_path: opt_path_to_string(diffusion.t5xxl_path),
-        flash_attn: diffusion.flash_attn,
-        vae_device: diffusion.vae_device.clone(),
-        clip_device: diffusion.clip_device.clone(),
-        offload_params_to_cpu: diffusion.offload_params_to_cpu,
-    }
+    let common =
+        pb::ModelLoadCommon { model_path: path_to_string(model_path_from_backend_load_spec(spec)) };
+
+    let backend_params = match spec {
+        RuntimeBackendLoadSpec::GgmlLlama(config) => {
+            Some(BackendParams::GgmlLlama(pb::GgmlLlamaLoadParams {
+                num_workers: usize_to_u32(config.num_workers),
+                context_length: config.context_length.filter(|value| *value != 0),
+                chat_template: non_empty_string(config.chat_template.as_deref()),
+            }))
+        }
+        RuntimeBackendLoadSpec::GgmlWhisper(_) => {
+            Some(BackendParams::GgmlWhisper(pb::GgmlWhisperLoadParams {}))
+        }
+        RuntimeBackendLoadSpec::GgmlDiffusion(config) => {
+            Some(BackendParams::GgmlDiffusion(pb::GgmlDiffusionLoadParams {
+                diffusion_model_path: opt_path_to_string(config.diffusion_model_path.as_deref()),
+                vae_path: opt_path_to_string(config.vae_path.as_deref()),
+                taesd_path: opt_path_to_string(config.taesd_path.as_deref()),
+                clip_l_path: opt_path_to_string(config.clip_l_path.as_deref()),
+                clip_g_path: opt_path_to_string(config.clip_g_path.as_deref()),
+                t5xxl_path: opt_path_to_string(config.t5xxl_path.as_deref()),
+                clip_vision_path: opt_path_to_string(config.clip_vision_path.as_deref()),
+                control_net_path: opt_path_to_string(config.control_net_path.as_deref()),
+                flash_attn: config.flash_attn,
+                vae_device: non_empty_string(config.vae_device.as_deref()),
+                clip_device: non_empty_string(config.clip_device.as_deref()),
+                offload_params_to_cpu: config.offload_params_to_cpu,
+                enable_mmap: config.enable_mmap,
+                n_threads: config.n_threads.filter(|value| *value != 0),
+            }))
+        }
+        RuntimeBackendLoadSpec::CandleLlama(config) => {
+            Some(BackendParams::CandleLlama(pb::CandleLlamaLoadParams {
+                tokenizer_path: opt_path_to_string(config.tokenizer_path.as_deref()),
+                seed: config.seed,
+            }))
+        }
+        RuntimeBackendLoadSpec::CandleWhisper(config) => {
+            Some(BackendParams::CandleWhisper(pb::CandleWhisperLoadParams {
+                tokenizer_path: opt_path_to_string(config.tokenizer_path.as_deref()),
+            }))
+        }
+        RuntimeBackendLoadSpec::CandleDiffusion(config) => {
+            Some(BackendParams::CandleDiffusion(pb::CandleDiffusionLoadParams {
+                vae_path: opt_path_to_string(config.vae_path.as_deref()),
+                sd_version: config.sd_version.clone(),
+            }))
+        }
+        RuntimeBackendLoadSpec::Onnx(config) => Some(BackendParams::Onnx(pb::OnnxLoadParams {
+            execution_providers: config.execution_providers.clone(),
+            intra_op_num_threads: config.intra_op_num_threads.map(usize_to_u32),
+            inter_op_num_threads: config.inter_op_num_threads.map(usize_to_u32),
+        })),
+    };
+
+    pb::ModelLoadRequest { common: Some(common), backend_params }
 }
 
 pub fn decode_model_load_request(
     request: &pb::ModelLoadRequest,
-) -> Result<RuntimeModelLoadSpec, ProtoConversionError> {
-    ensure_non_empty(&request.model_path, "model_path")?;
-    ensure_u32_at_least(request.num_workers, 1, "num_workers")?;
+) -> Result<RuntimeBackendLoadSpec, ProtoConversionError> {
+    use pb::model_load_request::BackendParams;
 
-    Ok(RuntimeModelLoadSpec {
-        model_path: PathBuf::from(&request.model_path),
-        num_workers: request.num_workers.max(1),
-        context_length: (request.context_length > 0).then_some(request.context_length),
-        chat_template: (!request.chat_template.trim().is_empty())
-            .then_some(request.chat_template.clone()),
-        diffusion: diffusion_load_options_from_model_load_request(request),
-    })
+    let model_path = model_path_from_model_load_request(request)?;
+    let backend_params = request
+        .backend_params
+        .as_ref()
+        .ok_or(ProtoConversionError::MissingField { field: "backend_params" })?;
+
+    match backend_params {
+        BackendParams::GgmlLlama(config) => {
+            ensure_u32_at_least(config.num_workers, 1, "ggml_llama.num_workers")?;
+
+            Ok(RuntimeBackendLoadSpec::GgmlLlama(GgmlLlamaLoadConfig {
+                model_path,
+                num_workers: u32_to_usize(config.num_workers, "ggml_llama.num_workers")?,
+                context_length: config.context_length.filter(|value| *value != 0),
+                chat_template: non_empty_string(config.chat_template.as_deref()),
+            }))
+        }
+        BackendParams::GgmlWhisper(_) => {
+            Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path }))
+        }
+        BackendParams::GgmlDiffusion(config) => {
+            Ok(RuntimeBackendLoadSpec::GgmlDiffusion(GgmlDiffusionLoadConfig {
+                model_path,
+                diffusion_model_path: non_empty_path(config.diffusion_model_path.as_deref()),
+                vae_path: non_empty_path(config.vae_path.as_deref()),
+                taesd_path: non_empty_path(config.taesd_path.as_deref()),
+                clip_l_path: non_empty_path(config.clip_l_path.as_deref()),
+                clip_g_path: non_empty_path(config.clip_g_path.as_deref()),
+                t5xxl_path: non_empty_path(config.t5xxl_path.as_deref()),
+                clip_vision_path: non_empty_path(config.clip_vision_path.as_deref()),
+                control_net_path: non_empty_path(config.control_net_path.as_deref()),
+                flash_attn: config.flash_attn,
+                vae_device: non_empty_string(config.vae_device.as_deref()),
+                clip_device: non_empty_string(config.clip_device.as_deref()),
+                offload_params_to_cpu: config.offload_params_to_cpu,
+                enable_mmap: config.enable_mmap,
+                n_threads: config.n_threads.filter(|value| *value != 0),
+            }))
+        }
+        BackendParams::CandleLlama(config) => {
+            Ok(RuntimeBackendLoadSpec::CandleLlama(CandleLlamaLoadConfig {
+                model_path,
+                tokenizer_path: non_empty_path(config.tokenizer_path.as_deref()),
+                seed: config.seed,
+            }))
+        }
+        BackendParams::CandleWhisper(config) => {
+            Ok(RuntimeBackendLoadSpec::CandleWhisper(CandleWhisperLoadConfig {
+                model_path,
+                tokenizer_path: non_empty_path(config.tokenizer_path.as_deref()),
+            }))
+        }
+        BackendParams::CandleDiffusion(config) => {
+            ensure_non_empty(&config.sd_version, "candle_diffusion.sd_version")?;
+
+            Ok(RuntimeBackendLoadSpec::CandleDiffusion(CandleDiffusionLoadConfig {
+                model_path,
+                vae_path: non_empty_path(config.vae_path.as_deref()),
+                sd_version: config.sd_version.clone(),
+            }))
+        }
+        BackendParams::Onnx(config) => Ok(RuntimeBackendLoadSpec::Onnx(OnnxLoadConfig {
+            model_path,
+            execution_providers: config.execution_providers.clone(),
+            intra_op_num_threads: config
+                .intra_op_num_threads
+                .filter(|value| *value != 0)
+                .map(|value| u32_to_usize(value, "onnx.intra_op_num_threads"))
+                .transpose()?,
+            inter_op_num_threads: config
+                .inter_op_num_threads
+                .filter(|value| *value != 0)
+                .map(|value| u32_to_usize(value, "onnx.inter_op_num_threads"))
+                .transpose()?,
+        })),
+    }
 }
 
 pub fn encode_model_status_response(status: &RuntimeModelStatus) -> pb::ModelStatusResponse {
@@ -687,38 +803,6 @@ pub fn decode_diffusion_video_response(
     Ok(DiffusionVideoResponse { frames, metadata: Default::default() })
 }
 
-fn diffusion_load_options_from_model_load_request(
-    request: &pb::ModelLoadRequest,
-) -> Option<DiffusionLoadOptions> {
-    let options = DiffusionLoadOptions {
-        diffusion_model_path: non_empty_path(&request.diffusion_model_path),
-        vae_path: non_empty_path(&request.vae_path),
-        taesd_path: non_empty_path(&request.taesd_path),
-        lora_model_dir: non_empty_path(&request.lora_model_dir),
-        clip_l_path: non_empty_path(&request.clip_l_path),
-        clip_g_path: non_empty_path(&request.clip_g_path),
-        t5xxl_path: non_empty_path(&request.t5xxl_path),
-        flash_attn: request.flash_attn,
-        vae_device: request.vae_device.clone(),
-        clip_device: request.clip_device.clone(),
-        offload_params_to_cpu: request.offload_params_to_cpu,
-    };
-
-    let has_any_value = options.diffusion_model_path.is_some()
-        || options.vae_path.is_some()
-        || options.taesd_path.is_some()
-        || options.lora_model_dir.is_some()
-        || options.clip_l_path.is_some()
-        || options.clip_g_path.is_some()
-        || options.t5xxl_path.is_some()
-        || options.flash_attn
-        || !options.vae_device.is_empty()
-        || !options.clip_device.is_empty()
-        || options.offload_params_to_cpu;
-
-    has_any_value.then_some(options)
-}
-
 fn raw_image_input_from_proto_parts(
     data: &[u8],
     width: u32,
@@ -783,16 +867,49 @@ fn ensure_i32_at_least(
     Ok(())
 }
 
-fn non_empty_path(value: &str) -> Option<PathBuf> {
-    (!value.trim().is_empty()).then(|| PathBuf::from(value))
+fn model_path_from_model_load_request(
+    request: &pb::ModelLoadRequest,
+) -> Result<PathBuf, ProtoConversionError> {
+    let common =
+        request.common.as_ref().ok_or(ProtoConversionError::MissingField { field: "common" })?;
+    ensure_non_empty(&common.model_path, "common.model_path")?;
+    Ok(PathBuf::from(&common.model_path))
+}
+
+fn model_path_from_backend_load_spec(spec: &RuntimeBackendLoadSpec) -> &Path {
+    match spec {
+        RuntimeBackendLoadSpec::GgmlLlama(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::GgmlWhisper(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::GgmlDiffusion(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::CandleLlama(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::CandleWhisper(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::CandleDiffusion(config) => config.model_path.as_path(),
+        RuntimeBackendLoadSpec::Onnx(config) => config.model_path.as_path(),
+    }
+}
+
+fn non_empty_string(value: Option<&str>) -> Option<String> {
+    value.filter(|value| !value.trim().is_empty()).map(ToOwned::to_owned)
+}
+
+fn non_empty_path(value: Option<&str>) -> Option<PathBuf> {
+    value.filter(|value| !value.trim().is_empty()).map(PathBuf::from)
 }
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
-fn opt_path_to_string(path: Option<PathBuf>) -> String {
-    path.map(|value| value.to_string_lossy().into_owned()).unwrap_or_default()
+fn opt_path_to_string(path: Option<&Path>) -> Option<String> {
+    path.map(path_to_string)
+}
+
+fn usize_to_u32(value: usize) -> u32 {
+    u32::try_from(value).unwrap_or(u32::MAX)
+}
+
+fn u32_to_usize(value: u32, field: &'static str) -> Result<usize, ProtoConversionError> {
+    usize::try_from(value).map_err(|_| ProtoConversionError::OutOfRange { field })
 }
 
 fn normalize_channels(channels: u32) -> u8 {
@@ -842,33 +959,96 @@ mod tests {
     use std::io::Cursor;
 
     #[test]
-    fn model_load_spec_round_trips_diffusion_fields() {
-        let spec = RuntimeModelLoadSpec {
+    fn model_load_spec_round_trips_diffusion_backend_fields() {
+        let spec = RuntimeBackendLoadSpec::GgmlDiffusion(GgmlDiffusionLoadConfig {
+            model_path: PathBuf::from("C:/models/model.gguf"),
+            diffusion_model_path: Some(PathBuf::from("C:/models/diffusion.safetensors")),
+            vae_path: Some(PathBuf::from("C:/models/vae.safetensors")),
+            taesd_path: None,
+            clip_l_path: None,
+            clip_g_path: Some(PathBuf::from("C:/models/clip-g.safetensors")),
+            t5xxl_path: None,
+            clip_vision_path: Some(PathBuf::from("C:/models/clip-vision.safetensors")),
+            control_net_path: Some(PathBuf::from("C:/models/controlnet.safetensors")),
+            flash_attn: true,
+            vae_device: Some(String::from("cpu")),
+            clip_device: None,
+            offload_params_to_cpu: true,
+            enable_mmap: true,
+            n_threads: Some(8),
+        });
+
+        let request = encode_model_load_request(&spec);
+        let roundtrip = decode_model_load_request(&request).unwrap();
+
+        assert_eq!(roundtrip, spec);
+    }
+
+    #[test]
+    fn model_load_spec_round_trips_ggml_llama_fields() {
+        let spec = RuntimeBackendLoadSpec::GgmlLlama(GgmlLlamaLoadConfig {
             model_path: PathBuf::from("C:/models/model.gguf"),
             num_workers: 2,
             context_length: Some(8192),
             chat_template: Some(
                 "{% for message in messages %}{{ message['content'] }}{% endfor %}".to_owned(),
             ),
-            diffusion: Some(DiffusionLoadOptions {
-                diffusion_model_path: Some(PathBuf::from("C:/models/diffusion.safetensors")),
-                vae_path: Some(PathBuf::from("C:/models/vae.safetensors")),
-                taesd_path: None,
-                lora_model_dir: Some(PathBuf::from("C:/models/lora")),
-                clip_l_path: None,
-                clip_g_path: None,
-                t5xxl_path: None,
-                flash_attn: true,
-                vae_device: String::from("cpu"),
-                clip_device: String::new(),
-                offload_params_to_cpu: true,
-            }),
-        };
+        });
 
         let request = encode_model_load_request(&spec);
         let roundtrip = decode_model_load_request(&request).unwrap();
 
         assert_eq!(roundtrip, spec);
+    }
+
+    #[test]
+    fn model_load_spec_round_trips_onnx_fields() {
+        let spec = RuntimeBackendLoadSpec::Onnx(OnnxLoadConfig {
+            model_path: PathBuf::from("C:/models/encoder.onnx"),
+            execution_providers: vec!["CPU".to_owned(), "CUDA".to_owned()],
+            intra_op_num_threads: Some(4),
+            inter_op_num_threads: Some(2),
+        });
+
+        let request = encode_model_load_request(&spec);
+        let roundtrip = decode_model_load_request(&request).unwrap();
+
+        assert_eq!(roundtrip, spec);
+    }
+
+    #[test]
+    fn model_load_request_rejects_missing_common_model_path() {
+        let request = pb::ModelLoadRequest {
+            common: Some(pb::ModelLoadCommon { model_path: String::new() }),
+            backend_params: Some(pb::model_load_request::BackendParams::GgmlDiffusion(
+                pb::GgmlDiffusionLoadParams {
+                    diffusion_model_path: Some(
+                        PathBuf::from("C:/models/diffusion.safetensors")
+                            .to_string_lossy()
+                            .into_owned(),
+                    ),
+                    vae_path: Some(
+                        PathBuf::from("C:/models/vae.safetensors").to_string_lossy().into_owned(),
+                    ),
+                    taesd_path: None,
+                    clip_l_path: None,
+                    clip_g_path: None,
+                    t5xxl_path: None,
+                    clip_vision_path: None,
+                    control_net_path: None,
+                    flash_attn: false,
+                    vae_device: None,
+                    clip_device: None,
+                    offload_params_to_cpu: false,
+                    enable_mmap: false,
+                    n_threads: None,
+                },
+            )),
+        };
+
+        let error = decode_model_load_request(&request).unwrap_err();
+
+        assert!(matches!(error, ProtoConversionError::EmptyField { field: "common.model_path" }));
     }
 
     #[test]
