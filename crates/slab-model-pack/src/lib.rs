@@ -13,8 +13,8 @@ pub use error::ModelPackError;
 pub use manifest::{
     AdapterDocument, BackendConfigDocument, BackendConfigScope, ComponentDocument, ConfigEntryRef,
     DynamicFootprint, ModelPackManifest, PackDocument, PackDocumentKind, PackModelStatus,
-    PackPricing, PackRuntimePresets, PackSource, PackSourceFile, PresetDocument, ResourceFootprint,
-    VariantDocument,
+    PackPricing, PackRuntimePresets, PackSource, PackSourceFile, PresetDocument, PresetEntryRef,
+    ResourceFootprint, VariantDocument,
 };
 pub use pack::{MANIFEST_FILE_NAME, ModelPack, PACK_EXTENSION};
 pub use refs::ConfigRef;

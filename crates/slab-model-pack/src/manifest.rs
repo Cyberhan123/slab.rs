@@ -36,7 +36,7 @@ pub struct ModelPackManifest {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub adapters: Vec<ConfigEntryRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub presets: Vec<ConfigEntryRef>,
+    pub presets: Vec<PresetEntryRef>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub default_preset: Option<String>,
     #[serde(default)]
@@ -83,6 +83,18 @@ pub struct ConfigEntryRef {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(rename = "$config")]
+    pub config_ref: ConfigRef,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PresetEntryRef {
+    pub id: String,
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", alias = "variant")]
+    pub variant_id: Option<String>,
     #[serde(rename = "$config")]
     pub config_ref: ConfigRef,
 }

@@ -67,6 +67,7 @@ export function useHubModelCatalog() {
   const [createFile, setCreateFile] = useState<File | null>(null);
   const [createModelPending, setCreateModelPending] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
+  const [modelToEnhance, setModelToEnhance] = useState<ModelItem | null>(null);
   const [activeDownloadTasks, setActiveDownloadTasks] = useState<Record<string, string>>({});
 
   const {
@@ -321,6 +322,8 @@ export function useHubModelCatalog() {
     setCreateFile: updateCreateFile,
     modelToDelete,
     setModelToDelete,
+    modelToEnhance,
+    setModelToEnhance,
     models,
     filteredModels,
     visibleModels,

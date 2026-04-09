@@ -1,4 +1,4 @@
-import { Bot, Boxes, Code2, HardDriveDownload, ImageIcon, Loader2, Mic, Trash2 } from 'lucide-react';
+import { Bot, Boxes, Code2, HardDriveDownload, ImageIcon, Loader2, Mic, Settings2, Trash2 } from 'lucide-react';
 
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
@@ -11,6 +11,7 @@ type HubCatalogTableProps = {
   models: ModelItem[];
   deletePending: boolean;
   onDownloadClick: (model: ModelItem) => void;
+  onEnhanceClick: (model: ModelItem) => void;
   onDeleteClick: (model: ModelItem) => void;
 };
 
@@ -18,6 +19,7 @@ export function HubCatalogTable({
   models,
   deletePending,
   onDownloadClick,
+  onEnhanceClick,
   onDeleteClick,
 }: HubCatalogTableProps) {
   if (models.length === 0) {
@@ -39,6 +41,7 @@ export function HubCatalogTable({
           model={model}
           deletePending={deletePending}
           onDownloadClick={onDownloadClick}
+          onEnhanceClick={onEnhanceClick}
           onDeleteClick={onDeleteClick}
         />
       ))}
@@ -50,11 +53,13 @@ function HubModelCard({
   model,
   deletePending,
   onDownloadClick,
+  onEnhanceClick,
   onDeleteClick,
 }: {
   model: ModelItem;
   deletePending: boolean;
   onDownloadClick: (model: ModelItem) => void;
+  onEnhanceClick: (model: ModelItem) => void;
   onDeleteClick: (model: ModelItem) => void;
 }) {
   const Icon = getModelIcon(model);
@@ -86,16 +91,28 @@ function HubModelCard({
               <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{describeModel(model)}</p>
             </div>
 
-            <Button
-              variant="quiet"
-              size="icon-sm"
-              className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80 text-destructive hover:bg-[var(--shell-card)] hover:text-destructive"
-              onClick={() => onDeleteClick(model)}
-              disabled={deletePending || model.pending}
-              aria-label={`Delete ${model.display_name}`}
-            >
-              <Trash2 className="size-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="quiet"
+                size="icon-sm"
+                className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80"
+                onClick={() => onEnhanceClick(model)}
+                disabled={model.pending}
+                aria-label={`Enhance ${model.display_name} config`}
+              >
+                <Settings2 className="size-4" />
+              </Button>
+              <Button
+                variant="quiet"
+                size="icon-sm"
+                className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80 text-destructive hover:bg-[var(--shell-card)] hover:text-destructive"
+                onClick={() => onDeleteClick(model)}
+                disabled={deletePending || model.pending}
+                aria-label={`Delete ${model.display_name}`}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">

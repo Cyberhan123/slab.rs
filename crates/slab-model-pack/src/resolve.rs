@@ -117,7 +117,7 @@ impl ModelPack {
             let resolved_components =
                 resolve_named_components(components, &document.component_ids)?;
             let effective_source =
-                document.source.clone().or_else(|| self.manifest().source.clone());
+                resolve_variant_effective_source(self.manifest().source.as_ref(), &document);
             let load_config = document
                 .load_config
                 .as_ref()
@@ -155,7 +155,10 @@ impl ModelPack {
     ) -> Result<BTreeMap<String, ResolvedPreset>, ModelPackError> {
         let mut resolved = BTreeMap::new();
         for entry in &self.manifest().presets {
-            let document = self.resolve_preset(&entry.config_ref)?.clone();
+            let mut document = self.resolve_preset(&entry.config_ref)?.clone();
+            if document.variant_id.is_none() {
+                document.variant_id = entry.variant_id.clone();
+            }
             let variant = resolve_preset_variant(self, components, variants, &document)?;
 
             let mut resolved_adapters = BTreeMap::new();
@@ -209,6 +212,38 @@ impl ModelPack {
             1 => Ok(presets.keys().next().cloned()),
             _ => Err(ModelPackError::MissingDefaultPresetDeclaration),
         }
+    }
+}
+
+fn resolve_variant_effective_source(
+    manifest_source: Option<&PackSource>,
+    document: &VariantDocument,
+) -> Option<PackSource> {
+    document
+        .source
+        .clone()
+        .or_else(|| manifest_source.map(|source| select_variant_source(source, &document.id)))
+}
+
+fn select_variant_source(source: &PackSource, variant_id: &str) -> PackSource {
+    match source {
+        PackSource::LocalFiles { files } => files
+            .iter()
+            .find(|file| file.id == variant_id)
+            .cloned()
+            .map(|file| PackSource::LocalFiles { files: vec![file] })
+            .unwrap_or_else(|| source.clone()),
+        PackSource::HuggingFace { repo_id, revision, files } => files
+            .iter()
+            .find(|file| file.id == variant_id)
+            .cloned()
+            .map(|file| PackSource::HuggingFace {
+                repo_id: repo_id.clone(),
+                revision: revision.clone(),
+                files: vec![file],
+            })
+            .unwrap_or_else(|| source.clone()),
+        PackSource::LocalPath { .. } | PackSource::Cloud { .. } => source.clone(),
     }
 }
 
@@ -532,6 +567,150 @@ mod tests {
                 .and_then(|config| config.payload.get("context_length"))
                 .and_then(|value| value.as_u64()),
             Some(4096)
+        );
+    }
+
+    #[test]
+    fn resolves_variant_id_to_matching_manifest_source_file() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "qwen2.5-0.5b-instruct",
+                    "label": "Qwen2.5 0.5B Instruct",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+                        "files": [
+                            { "id": "model", "path": "Qwen2.5-0.5B-Instruct-f16.gguf" },
+                            { "id": "Q4_K_M", "path": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf" },
+                            { "id": "Q8_0", "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf" }
+                        ]
+                    },
+                    "variants": [
+                        { "id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json" }
+                    ],
+                    "presets": [
+                        { "id": "default", "label": "Default", "$config": "ref://models/presets/default.json" }
+                    ],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q8_0.json",
+                json!({
+                    "kind": "variant",
+                    "id": "Q8_0",
+                    "label": "Q8_0"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "variant_id": "Q8_0"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
+        let resolved = pack.resolve().expect("pack should resolve");
+        let preset = resolved.default_preset().expect("default preset");
+
+        assert_eq!(
+            preset.variant.effective_source,
+            Some(PackSource::HuggingFace {
+                repo_id: "bartowski/Qwen2.5-0.5B-Instruct-GGUF".to_owned(),
+                revision: None,
+                files: vec![crate::manifest::PackSourceFile {
+                    id: "Q8_0".to_owned(),
+                    label: None,
+                    description: None,
+                    path: "Qwen2.5-0.5B-Instruct-Q8_0.gguf".to_owned(),
+                }],
+            })
+        );
+    }
+
+    #[test]
+    fn resolves_manifest_preset_variant_override_to_matching_source_file() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "qwen2.5-0.5b-instruct",
+                    "label": "Qwen2.5 0.5B Instruct",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+                        "files": [
+                            { "id": "model", "path": "Qwen2.5-0.5B-Instruct-f16.gguf" },
+                            { "id": "Q8_0", "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf" }
+                        ]
+                    },
+                    "variants": [
+                        { "id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json" }
+                    ],
+                    "presets": [
+                        {
+                            "id": "default",
+                            "label": "Default",
+                            "variant_id": "Q8_0",
+                            "$config": "ref://models/presets/default.json"
+                        }
+                    ],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q8_0.json",
+                json!({
+                    "kind": "variant",
+                    "id": "Q8_0",
+                    "label": "Q8_0"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
+        let resolved = pack.resolve().expect("pack should resolve");
+        let preset = resolved.default_preset().expect("default preset");
+
+        assert_eq!(preset.document.variant_id.as_deref(), Some("Q8_0"));
+        assert_eq!(
+            preset.variant.effective_source,
+            Some(PackSource::HuggingFace {
+                repo_id: "bartowski/Qwen2.5-0.5B-Instruct-GGUF".to_owned(),
+                revision: None,
+                files: vec![crate::manifest::PackSourceFile {
+                    id: "Q8_0".to_owned(),
+                    label: None,
+                    description: None,
+                    path: "Qwen2.5-0.5B-Instruct-Q8_0.gguf".to_owned(),
+                }],
+            })
         );
     }
 

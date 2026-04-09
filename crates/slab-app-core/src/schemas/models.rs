@@ -10,10 +10,13 @@ use crate::domain::models::{
     CreateModelCommand as DomainCreateModelCommand,
     DownloadModelCommand as DomainDownloadModelCommand, ListModelsFilter as DomainListModelsFilter,
     ManagedModelBackendId as DomainManagedModelBackendId,
-    ModelLoadCommand as DomainModelLoadCommand, ModelSpec as DomainModelSpec,
-    ModelStatus as DomainModelStatus, Pricing as DomainPricing,
+    ModelEnhancementPresetOption as DomainModelEnhancementPresetOption,
+    ModelEnhancementVariantOption as DomainModelEnhancementVariantOption,
+    ModelEnhancementView as DomainModelEnhancementView, ModelLoadCommand as DomainModelLoadCommand,
+    ModelSpec as DomainModelSpec, ModelStatus as DomainModelStatus, Pricing as DomainPricing,
     RuntimePresets as DomainRuntimePresets, UnifiedModel as DomainUnifiedModel,
     UnifiedModelKind as DomainUnifiedModelKind, UpdateModelCommand as DomainUpdateModelCommand,
+    UpdateModelEnhancementCommand as DomainUpdateModelEnhancementCommand,
 };
 use crate::schemas::chat::ChatModelCapabilities;
 
@@ -142,6 +145,26 @@ pub struct UpdateModelRequest {
     pub capabilities: Option<Vec<ModelCapability>>,
     pub status: Option<String>,
     pub spec: Option<ModelSpecRequest>,
+    pub runtime_presets: Option<RuntimePresetsRequest>,
+}
+
+/// Request body for `PUT /v1/models/{id}/enhancement`.
+#[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+pub struct UpdateModelEnhancementRequest {
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_non_blank",
+        message = "display_name must not be empty"
+    ))]
+    pub display_name: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub selected_preset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub selected_variant_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub context_window: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub chat_template: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub runtime_presets: Option<RuntimePresetsRequest>,
 }
 
@@ -280,6 +303,46 @@ pub struct RuntimePresetsResponse {
     pub top_p: Option<f32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelEnhancementPresetOptionResponse {
+    pub id: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub variant_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelEnhancementVariantOptionResponse {
+    pub id: String,
+    pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repo_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub local_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct ModelEnhancementResponse {
+    pub model: UnifiedModelResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_preset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_preset_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub selected_variant_id: Option<String>,
+    pub presets: Vec<ModelEnhancementPresetOptionResponse>,
+    pub variants: Vec<ModelEnhancementVariantOptionResponse>,
+    pub resolved_spec: ModelSpecResponse,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub resolved_runtime_presets: Option<RuntimePresetsResponse>,
+}
+
 /// Unified model response returned by `/v1/models`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct UnifiedModelResponse {
@@ -330,6 +393,45 @@ impl From<DomainModelSpec> for ModelSpecResponse {
 impl From<DomainRuntimePresets> for RuntimePresetsResponse {
     fn from(presets: DomainRuntimePresets) -> Self {
         Self { temperature: presets.temperature, top_p: presets.top_p }
+    }
+}
+
+impl From<DomainModelEnhancementPresetOption> for ModelEnhancementPresetOptionResponse {
+    fn from(option: DomainModelEnhancementPresetOption) -> Self {
+        Self {
+            id: option.id,
+            label: option.label,
+            description: option.description,
+            variant_id: option.variant_id,
+        }
+    }
+}
+
+impl From<DomainModelEnhancementVariantOption> for ModelEnhancementVariantOptionResponse {
+    fn from(option: DomainModelEnhancementVariantOption) -> Self {
+        Self {
+            id: option.id,
+            label: option.label,
+            description: option.description,
+            repo_id: option.repo_id,
+            filename: option.filename,
+            local_path: option.local_path,
+        }
+    }
+}
+
+impl From<DomainModelEnhancementView> for ModelEnhancementResponse {
+    fn from(view: DomainModelEnhancementView) -> Self {
+        Self {
+            model: view.model.into(),
+            default_preset_id: view.default_preset_id,
+            selected_preset_id: view.selected_preset_id,
+            selected_variant_id: view.selected_variant_id,
+            presets: view.presets.into_iter().map(Into::into).collect(),
+            variants: view.variants.into_iter().map(Into::into).collect(),
+            resolved_spec: view.resolved_spec.into(),
+            resolved_runtime_presets: view.resolved_runtime_presets.map(Into::into),
+        }
     }
 }
 
@@ -464,6 +566,19 @@ impl From<UpdateModelRequest> for DomainUpdateModelCommand {
                 .map(|capabilities| capabilities.into_iter().map(Into::into).collect()),
             status: req.status.and_then(|status| status.parse().ok()),
             spec: req.spec.map(Into::into),
+            runtime_presets: req.runtime_presets.map(Into::into),
+        }
+    }
+}
+
+impl From<UpdateModelEnhancementRequest> for DomainUpdateModelEnhancementCommand {
+    fn from(req: UpdateModelEnhancementRequest) -> Self {
+        Self {
+            display_name: req.display_name,
+            selected_preset_id: req.selected_preset_id,
+            selected_variant_id: req.selected_variant_id,
+            context_window: req.context_window,
+            chat_template: req.chat_template,
             runtime_presets: req.runtime_presets.map(Into::into),
         }
     }

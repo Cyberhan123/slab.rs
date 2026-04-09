@@ -18,8 +18,10 @@ use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView,
     CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
     ChatModelCapabilities, ChatModelOption, ChatModelSource, CreateModelCommand, DeletedModelView,
-    DownloadModelCommand, ListModelsFilter, ManagedModelBackendId, ModelLoadCommand, ModelSpec,
-    ModelStatus, UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
+    DownloadModelCommand, ListModelsFilter, ManagedModelBackendId, ModelEnhancementPresetOption,
+    ModelEnhancementVariantOption, ModelEnhancementView, ModelLoadCommand, ModelPackSelection,
+    ModelSpec, ModelStatus, RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind,
+    UnifiedModelStatus, UpdateModelCommand, UpdateModelEnhancementCommand,
     normalize_model_capabilities,
 };
 use crate::error::AppCoreError;
@@ -113,6 +115,68 @@ impl ModelService {
         record.try_into().map_err(|e: String| AppCoreError::Internal(e))
     }
 
+    pub async fn get_model_enhancement(
+        &self,
+        id: &str,
+    ) -> Result<ModelEnhancementView, AppCoreError> {
+        let model = self.get_model(id).await?;
+        resolve_local_backend_from_model(&model)?;
+        let (_, resolved, persisted) = self.load_model_pack_context(id)?;
+        let selection = persisted
+            .and_then(|config| config.pack_selection)
+            .unwrap_or_else(|| default_model_pack_selection(&resolved));
+        let selected_preset = resolve_selected_model_pack_preset(&resolved, &selection)?;
+        let resolved_command = build_local_model_command_from_pack_preset(
+            &resolved.manifest,
+            &resolved,
+            &selected_preset,
+        )?;
+
+        let presets = resolved
+            .presets
+            .values()
+            .map(|preset| ModelEnhancementPresetOption {
+                id: preset.document.id.clone(),
+                label: preset.document.label.clone(),
+                description: preset.document.description.clone(),
+                variant_id: preset
+                    .document
+                    .variant_id
+                    .clone()
+                    .or_else(|| non_empty_variant_id(&preset.variant.document.id)),
+            })
+            .collect();
+        let variants = resolved
+            .variants
+            .values()
+            .map(|variant| {
+                let (repo_id, filename, local_path) =
+                    source_preview_from_pack_source(variant.effective_source.as_ref());
+                ModelEnhancementVariantOption {
+                    id: variant.document.id.clone(),
+                    label: variant.document.label.clone(),
+                    description: variant.document.description.clone(),
+                    repo_id,
+                    filename,
+                    local_path,
+                }
+            })
+            .collect();
+
+        Ok(ModelEnhancementView {
+            model,
+            default_preset_id: resolved.default_preset_id.clone(),
+            selected_preset_id: selection.preset_id,
+            selected_variant_id: selection
+                .variant_id
+                .or_else(|| non_empty_variant_id(&selected_preset.variant.document.id)),
+            presets,
+            variants,
+            resolved_spec: resolved_command.spec,
+            resolved_runtime_presets: resolved_command.runtime_presets,
+        })
+    }
+
     pub async fn update_model(
         &self,
         id: &str,
@@ -140,6 +204,56 @@ impl ModelService {
         };
 
         self.persist_model_definition(next).await
+    }
+
+    pub async fn update_model_enhancement(
+        &self,
+        id: &str,
+        req: UpdateModelEnhancementCommand,
+    ) -> Result<UnifiedModel, AppCoreError> {
+        let current_model = self.get_model(id).await?;
+        resolve_local_backend_from_model(&current_model)?;
+
+        let (_, resolved, _) = self.load_model_pack_context(id)?;
+        let selection = normalize_model_pack_selection(ModelPackSelection {
+            preset_id: Some(req.selected_preset_id.unwrap_or_default()),
+            variant_id: Some(req.selected_variant_id.unwrap_or_default()),
+        });
+        let selected_preset = resolve_selected_model_pack_preset(&resolved, &selection)?;
+        let mut command = build_local_model_command_from_pack_preset(
+            &resolved.manifest,
+            &resolved,
+            &selected_preset,
+        )?;
+
+        command.id = Some(current_model.id.clone());
+        command.display_name = req.display_name;
+        command.spec.context_window = req.context_window;
+        command.spec.chat_template = req.chat_template;
+        command.runtime_presets = req.runtime_presets;
+
+        if same_model_download_source(&current_model.spec, &command.spec) {
+            command.spec.local_path = current_model.spec.local_path.clone();
+            command.status = Some(current_model.status.clone());
+        } else if command.spec.repo_id.is_some() {
+            command.spec.local_path = None;
+            command.status = Some(UnifiedModelStatus::NotDownloaded);
+        }
+
+        let next_model = self.build_model_definition(command).await?;
+        let mut persisted_config: StoredModelConfig = next_model.clone().into();
+        persisted_config.pack_selection = Some(ModelPackSelection {
+            preset_id: selection.preset_id.or_else(|| resolved.default_preset_id.clone()),
+            variant_id: selection
+                .variant_id
+                .or_else(|| non_empty_variant_id(&selected_preset.variant.document.id)),
+        });
+        model_packs::write_persisted_model_pack_from_config(
+            self.model_config_dir(),
+            &persisted_config,
+        )?;
+
+        self.store_model_definition(next_model).await
     }
 
     pub async fn delete_model(&self, id: &str) -> Result<DeletedModelView, AppCoreError> {
@@ -470,6 +584,32 @@ impl ModelService {
 
     fn model_config_dir(&self) -> &std::path::Path {
         self.model_state.config().model_config_dir.as_path()
+    }
+
+    fn load_model_pack_context(
+        &self,
+        id: &str,
+    ) -> Result<
+        (std::path::PathBuf, slab_model_pack::ResolvedModelPack, Option<StoredModelConfig>),
+        AppCoreError,
+    > {
+        let pack_path = model_packs::model_pack_file_path(self.model_config_dir(), id);
+        if !pack_path.exists() {
+            return Err(AppCoreError::NotFound(format!(
+                "model pack for '{id}' was not found on disk"
+            )));
+        }
+
+        let pack = model_packs::open_model_pack(&pack_path)?;
+        let resolved = pack.resolve().map_err(|error| {
+            AppCoreError::BadRequest(format!(
+                "failed to resolve model pack '{}': {error}",
+                pack_path.display()
+            ))
+        })?;
+        let persisted = model_packs::read_persisted_model_config_from_pack(&pack_path)?;
+
+        Ok((pack_path, resolved, persisted))
     }
 
     async fn persist_model_definition(
@@ -838,6 +978,223 @@ fn sync_model_pack_record(
         record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
     model_packs::write_persisted_model_pack(config_dir, &model)?;
     Ok(())
+}
+
+fn default_model_pack_selection(
+    resolved: &slab_model_pack::ResolvedModelPack,
+) -> ModelPackSelection {
+    let default_preset = resolved.default_preset();
+
+    ModelPackSelection {
+        preset_id: resolved.default_preset_id.clone(),
+        variant_id: default_preset
+            .and_then(|preset| non_empty_variant_id(&preset.variant.document.id)),
+    }
+}
+
+fn non_empty_variant_id(value: &str) -> Option<String> {
+    let trimmed = value.trim();
+    (!trimmed.is_empty()).then(|| trimmed.to_owned())
+}
+
+fn normalize_model_pack_selection(selection: ModelPackSelection) -> ModelPackSelection {
+    ModelPackSelection {
+        preset_id: normalize_optional_text(selection.preset_id),
+        variant_id: normalize_optional_text(selection.variant_id),
+    }
+}
+
+fn resolve_selected_model_pack_preset(
+    resolved: &slab_model_pack::ResolvedModelPack,
+    selection: &ModelPackSelection,
+) -> Result<slab_model_pack::ResolvedPreset, AppCoreError> {
+    let base_preset = if let Some(preset_id) = selection.preset_id.as_deref() {
+        resolved.presets.get(preset_id).cloned().ok_or_else(|| {
+            AppCoreError::BadRequest(format!("model pack preset '{preset_id}' was not found"))
+        })?
+    } else {
+        resolved.default_preset().cloned().ok_or_else(|| {
+            AppCoreError::BadRequest(
+                "model pack has no configurable preset; enhancement is unavailable".into(),
+            )
+        })?
+    };
+
+    let Some(variant_id) = selection.variant_id.as_deref() else {
+        return Ok(base_preset);
+    };
+
+    let selected_variant = resolved.variants.get(variant_id).cloned().ok_or_else(|| {
+        AppCoreError::BadRequest(format!("model pack variant '{variant_id}' was not found"))
+    })?;
+
+    let mut document = base_preset.document.clone();
+    document.variant_id = Some(variant_id.to_owned());
+
+    let effective_load_config = if base_preset.document.load_config.is_some() {
+        base_preset.effective_load_config.clone()
+    } else {
+        selected_variant.load_config.clone()
+    };
+    let effective_inference_config = if base_preset.document.inference_config.is_some() {
+        base_preset.effective_inference_config.clone()
+    } else {
+        selected_variant.inference_config.clone()
+    };
+
+    Ok(slab_model_pack::ResolvedPreset {
+        document,
+        variant: selected_variant,
+        adapters: base_preset.adapters.clone(),
+        effective_load_config,
+        effective_inference_config,
+    })
+}
+
+fn build_local_model_command_from_pack_preset(
+    manifest: &slab_model_pack::ModelPackManifest,
+    resolved: &slab_model_pack::ResolvedModelPack,
+    preset: &slab_model_pack::ResolvedPreset,
+) -> Result<CreateModelCommand, AppCoreError> {
+    let bridge = resolved.compile_runtime_bridge(preset).map_err(|error| {
+        AppCoreError::BadRequest(format!("failed to compile selected pack preset: {error}"))
+    })?;
+    let backend_id = ManagedModelBackendId::try_from(bridge.backend).map_err(|error| {
+        AppCoreError::BadRequest(format!(
+            "model pack backend '{}' is not supported by managed local models: {}",
+            bridge.backend, error
+        ))
+    })?;
+    let status = manifest
+        .status
+        .map(|status| match status {
+            slab_model_pack::PackModelStatus::Ready => UnifiedModelStatus::Ready,
+            slab_model_pack::PackModelStatus::NotDownloaded => UnifiedModelStatus::NotDownloaded,
+            slab_model_pack::PackModelStatus::Downloading => UnifiedModelStatus::Downloading,
+            slab_model_pack::PackModelStatus::Error => UnifiedModelStatus::Error,
+        })
+        .unwrap_or_else(|| match bridge.model_spec.source {
+            slab_types::ModelSource::HuggingFace { .. } => UnifiedModelStatus::NotDownloaded,
+            _ => UnifiedModelStatus::Ready,
+        });
+    let runtime_presets = manifest
+        .runtime_presets
+        .as_ref()
+        .and_then(|presets| {
+            (presets.temperature.is_some() || presets.top_p.is_some()).then_some(RuntimePresets {
+                temperature: presets.temperature,
+                top_p: presets.top_p,
+            })
+        })
+        .or_else(|| {
+            let temperature = bridge
+                .inference_defaults
+                .get("temperature")
+                .and_then(|value| value.as_f64().map(|value| value as f32));
+            let top_p = bridge
+                .inference_defaults
+                .get("top_p")
+                .and_then(|value| value.as_f64().map(|value| value as f32));
+            (temperature.is_some() || top_p.is_some())
+                .then_some(RuntimePresets { temperature, top_p })
+        });
+    let (repo_id, filename, local_path) =
+        source_preview_from_model_source(&bridge.model_spec.source);
+    let allow_local_path_fallback = repo_id.is_none();
+
+    Ok(CreateModelCommand {
+        id: Some(manifest.id.clone()),
+        display_name: manifest.label.clone(),
+        kind: UnifiedModelKind::Local,
+        backend_id: Some(backend_id),
+        capabilities: Some(manifest.capabilities.clone()),
+        status: Some(status),
+        spec: ModelSpec {
+            pricing: manifest.pricing.as_ref().map(|pricing| crate::domain::models::Pricing {
+                input: pricing.input,
+                output: pricing.output,
+            }),
+            repo_id,
+            filename,
+            local_path: local_path.or_else(|| {
+                allow_local_path_fallback
+                    .then(|| {
+                        bridge
+                            .model_spec
+                            .source
+                            .primary_path()
+                            .map(|value| value.to_string_lossy().into_owned())
+                    })
+                    .flatten()
+            }),
+            context_window: manifest.context_window.or(bridge.load_defaults.context_length),
+            chat_template: bridge.load_defaults.chat_template.clone(),
+            ..Default::default()
+        },
+        runtime_presets,
+    })
+}
+
+fn source_preview_from_pack_source(
+    source: Option<&slab_model_pack::PackSource>,
+) -> (Option<String>, Option<String>, Option<String>) {
+    match source {
+        Some(slab_model_pack::PackSource::HuggingFace { repo_id, files, .. }) => (
+            Some(repo_id.clone()),
+            files
+                .iter()
+                .find(|file| file.id == "model")
+                .or_else(|| files.first())
+                .map(|file| file.path.clone()),
+            None,
+        ),
+        Some(slab_model_pack::PackSource::LocalPath { path }) => (None, None, Some(path.clone())),
+        Some(slab_model_pack::PackSource::LocalFiles { files }) => (
+            None,
+            None,
+            files
+                .iter()
+                .find(|file| file.id == "model")
+                .or_else(|| files.first())
+                .map(|file| file.path.clone()),
+        ),
+        Some(slab_model_pack::PackSource::Cloud { .. }) | None => (None, None, None),
+    }
+}
+
+fn source_preview_from_model_source(
+    source: &slab_types::ModelSource,
+) -> (Option<String>, Option<String>, Option<String>) {
+    match source {
+        slab_types::ModelSource::HuggingFace { repo_id, files, .. } => (
+            Some(repo_id.clone()),
+            files
+                .get("model")
+                .or_else(|| files.values().next())
+                .map(|path| path.to_string_lossy().into_owned()),
+            None,
+        ),
+        slab_types::ModelSource::LocalPath { path } => {
+            (None, None, Some(path.to_string_lossy().into_owned()))
+        }
+        slab_types::ModelSource::LocalArtifacts { files } => (
+            None,
+            None,
+            files
+                .get("model")
+                .or_else(|| files.values().next())
+                .map(|path| path.to_string_lossy().into_owned()),
+        ),
+        _ => (None, None, None),
+    }
+}
+
+fn same_model_download_source(current: &ModelSpec, next: &ModelSpec) -> bool {
+    match (current.repo_id.as_deref(), next.repo_id.as_deref()) {
+        (Some(_), Some(_)) => current.repo_id == next.repo_id && current.filename == next.filename,
+        (None, None) => current.local_path == next.local_path,
+        _ => false,
+    }
 }
 
 fn validate_path(label: &str, path: &str) -> Result<(), AppCoreError> {

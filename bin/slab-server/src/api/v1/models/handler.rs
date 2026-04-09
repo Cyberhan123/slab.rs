@@ -10,8 +10,8 @@ use validator::Validate;
 
 use crate::api::v1::models::schema::{
     CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
-    LoadModelRequest, ModelStatusResponse, SwitchModelRequest, UnifiedModelResponse,
-    UnloadModelRequest, UpdateModelRequest,
+    LoadModelRequest, ModelEnhancementResponse, ModelStatusResponse, SwitchModelRequest,
+    UnifiedModelResponse, UnloadModelRequest, UpdateModelEnhancementRequest, UpdateModelRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::{ValidatedJson, ValidatedQuery, validate};
@@ -33,7 +33,9 @@ struct ImportModelPackMultipartRequest {
         create_model,
         import_model_pack,
         get_model,
+        get_model_enhancement,
         update_model,
+        update_model_enhancement,
         delete_model,
         load_model,
         unload_model,
@@ -45,6 +47,7 @@ struct ImportModelPackMultipartRequest {
         CreateModelRequest,
         ImportModelPackMultipartRequest,
         UpdateModelRequest,
+        UpdateModelEnhancementRequest,
         LoadModelRequest,
         UnloadModelRequest,
         ModelStatusResponse,
@@ -53,6 +56,7 @@ struct ImportModelPackMultipartRequest {
         ListAvailableQuery,
         ListModelsQuery,
         UnifiedModelResponse,
+        ModelEnhancementResponse,
         OperationAcceptedResponse
     ))
 )]
@@ -63,6 +67,7 @@ pub fn router() -> Router<Arc<AppState>> {
         .route("/models", get(list_models).post(create_model))
         .route("/models/import-pack", post(import_model_pack))
         .route("/models/{id}", get(get_model).put(update_model).delete(delete_model))
+        .route("/models/{id}/enhancement", get(get_model_enhancement).put(update_model_enhancement))
         .route("/models/available", get(list_available_models))
         .route("/models/load", post(load_model))
         .route("/models/unload", post(unload_model))
@@ -157,6 +162,27 @@ async fn get_model(
 }
 
 #[utoipa::path(
+    get,
+    path = "/v1/models/{id}/enhancement",
+    tag = "models",
+    params(
+        ("id" = String, Path, description = "Model ID")
+    ),
+    responses(
+        (status = 200, description = "Model enhancement configuration", body = ModelEnhancementResponse),
+        (status = 404, description = "Model not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn get_model_enhancement(
+    State(service): State<ModelService>,
+    Path(params): Path<ModelIdPath>,
+) -> Result<Json<ModelEnhancementResponse>, ServerError> {
+    let params = validate(params)?;
+    Ok(Json(service.get_model_enhancement(&params.id).await?.into()))
+}
+
+#[utoipa::path(
     put,
     path = "/v1/models/{id}",
     tag = "models",
@@ -178,6 +204,30 @@ async fn update_model(
 ) -> Result<Json<UnifiedModelResponse>, ServerError> {
     let params = validate(params)?;
     Ok(Json(service.update_model(&params.id, req.into()).await?.into()))
+}
+
+#[utoipa::path(
+    put,
+    path = "/v1/models/{id}/enhancement",
+    tag = "models",
+    request_body = UpdateModelEnhancementRequest,
+    params(
+        ("id" = String, Path, description = "Model ID")
+    ),
+    responses(
+        (status = 200, description = "Model enhancement updated", body = UnifiedModelResponse),
+        (status = 400, description = "Bad request"),
+        (status = 404, description = "Model not found"),
+        (status = 500, description = "Backend error"),
+    )
+)]
+async fn update_model_enhancement(
+    State(service): State<ModelService>,
+    Path(params): Path<ModelIdPath>,
+    ValidatedJson(req): ValidatedJson<UpdateModelEnhancementRequest>,
+) -> Result<Json<UnifiedModelResponse>, ServerError> {
+    let params = validate(params)?;
+    Ok(Json(service.update_model_enhancement(&params.id, req.into()).await?.into()))
 }
 
 #[utoipa::path(

@@ -208,9 +208,21 @@ const TAURI_ROUTE_DEFINITIONS: readonly TauriRouteDefinition[] = [
     buildArgs: ({ pathParams }) => ({ id: pathParams.id }),
   },
   {
+    method: 'GET',
+    pattern: '/v1/models/{id}/enhancement',
+    command: 'get_model_enhancement',
+    buildArgs: ({ pathParams }) => ({ id: pathParams.id }),
+  },
+  {
     method: 'PUT',
     pattern: '/v1/models/{id}',
     command: 'update_model',
+    buildArgs: ({ body, pathParams }) => ({ id: pathParams.id, req: body }),
+  },
+  {
+    method: 'PUT',
+    pattern: '/v1/models/{id}/enhancement',
+    command: 'update_model_enhancement',
     buildArgs: ({ body, pathParams }) => ({ id: pathParams.id, req: body }),
   },
   {

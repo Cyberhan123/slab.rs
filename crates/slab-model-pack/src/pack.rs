@@ -8,8 +8,8 @@ use zip::ZipArchive;
 
 use crate::error::ModelPackError;
 use crate::manifest::{
-    BackendConfigDocument, BackendConfigScope, ComponentDocument, ConfigEntryRef,
-    ModelPackManifest, PackDocument, PresetDocument, VariantDocument,
+    BackendConfigDocument, BackendConfigScope, ComponentDocument, ModelPackManifest, PackDocument,
+    PresetDocument, VariantDocument,
 };
 use crate::refs::ConfigRef;
 
@@ -175,16 +175,16 @@ impl ModelPack {
 
     fn validate_manifest_references(&self) -> Result<(), ModelPackError> {
         for reference in &self.manifest.components {
-            self.validate_entry_ref(reference, "component")?;
+            self.validate_entry_ref(&reference.id, &reference.config_ref, "component")?;
         }
         for reference in &self.manifest.variants {
-            self.validate_entry_ref(reference, "variant")?;
+            self.validate_entry_ref(&reference.id, &reference.config_ref, "variant")?;
         }
         for reference in &self.manifest.adapters {
-            self.validate_entry_ref(reference, "adapter")?;
+            self.validate_entry_ref(&reference.id, &reference.config_ref, "adapter")?;
         }
         for reference in &self.manifest.presets {
-            self.validate_entry_ref(reference, "preset")?;
+            self.validate_entry_ref(&reference.id, &reference.config_ref, "preset")?;
         }
 
         let component_ids = self.collect_ids("component");
@@ -238,28 +238,28 @@ impl ModelPack {
 
     fn validate_entry_ref(
         &self,
-        reference: &ConfigEntryRef,
+        id: &str,
+        config_ref: &ConfigRef,
         expected_kind: &'static str,
     ) -> Result<(), ModelPackError> {
-        let document = self.document(&reference.config_ref).map_err(|_| {
-            ModelPackError::MissingReferencedDocument {
-                from: reference.id.clone(),
-                path: reference.config_ref.path().into(),
-            }
-        })?;
+        let document =
+            self.document(config_ref).map_err(|_| ModelPackError::MissingReferencedDocument {
+                from: id.to_owned(),
+                path: config_ref.path().into(),
+            })?;
 
         if document.kind() != expected_kind {
             return Err(ModelPackError::UnexpectedDocumentKind {
-                path: reference.config_ref.path().into(),
+                path: config_ref.path().into(),
                 expected: expected_kind,
                 found: document.kind(),
             });
         }
 
-        if document.id() != reference.id {
+        if document.id() != id {
             return Err(ModelPackError::DocumentIdMismatch {
-                path: reference.config_ref.path().into(),
-                expected: reference.id.clone(),
+                path: config_ref.path().into(),
+                expected: id.to_owned(),
                 found: document.id().to_owned(),
             });
         }
