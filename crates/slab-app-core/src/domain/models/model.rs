@@ -1,5 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use slab_types::{Capability, RuntimeBackendId};
 use std::fmt;
 use std::str::FromStr;
@@ -193,7 +194,7 @@ pub struct RuntimePresets {
     pub top_p: Option<f32>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
 pub struct ModelPackSelection {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub preset_id: Option<String>,
@@ -372,6 +373,125 @@ pub struct UpdateModelEnhancementCommand {
     pub context_window: Option<u32>,
     pub chat_template: Option<String>,
     pub runtime_presets: Option<RuntimePresets>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelConfigPresetOption {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub variant_id: Option<String>,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelConfigVariantOption {
+    pub id: String,
+    pub label: String,
+    pub description: Option<String>,
+    pub repo_id: Option<String>,
+    pub filename: Option<String>,
+    pub local_path: Option<String>,
+    pub is_default: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelConfigSelectionView {
+    pub default_preset_id: Option<String>,
+    pub default_variant_id: Option<String>,
+    pub selected_preset_id: Option<String>,
+    pub selected_variant_id: Option<String>,
+    pub effective_preset_id: Option<String>,
+    pub effective_variant_id: Option<String>,
+    pub presets: Vec<ModelConfigPresetOption>,
+    pub variants: Vec<ModelConfigVariantOption>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelConfigSourceArtifact {
+    pub id: String,
+    pub label: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelConfigSourceSummary {
+    pub source_kind: String,
+    pub repo_id: Option<String>,
+    pub filename: Option<String>,
+    pub local_path: Option<String>,
+    pub artifacts: Vec<ModelConfigSourceArtifact>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelConfigFieldScope {
+    Summary,
+    Source,
+    Load,
+    Inference,
+    Advanced,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelConfigValueType {
+    String,
+    Integer,
+    Number,
+    Boolean,
+    Path,
+    Json,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelConfigOrigin {
+    PackManifest,
+    SelectedPreset,
+    SelectedVariant,
+    SelectedBackendConfig,
+    PmidFallback,
+    Derived,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelConfigFieldView {
+    pub path: String,
+    pub scope: ModelConfigFieldScope,
+    pub label: String,
+    pub description_md: Option<String>,
+    pub value_type: ModelConfigValueType,
+    pub effective_value: Value,
+    pub origin: ModelConfigOrigin,
+    pub editable: bool,
+    pub locked: bool,
+    pub json_schema: Option<Value>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelConfigSectionView {
+    pub id: String,
+    pub label: String,
+    pub description_md: Option<String>,
+    pub fields: Vec<ModelConfigFieldView>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ModelConfigDocument {
+    pub model_summary: UnifiedModel,
+    pub selection: ModelConfigSelectionView,
+    pub sections: Vec<ModelConfigSectionView>,
+    pub source_summary: ModelConfigSourceSummary,
+    pub resolved_load_spec: Value,
+    pub resolved_inference_spec: Value,
+    pub warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct UpdateModelConfigSelectionCommand {
+    pub selected_preset_id: Option<String>,
+    pub selected_variant_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use hf_hub::api::sync::{Api, ApiBuilder};
+use serde_json::{Map, Value};
 use slab_proto::convert;
 use slab_types::load_config::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
 };
 use slab_types::runtime::DiffusionLoadOptions;
-use slab_types::{Capability, RuntimeBackendId, RuntimeBackendLoadSpec};
+use slab_types::{Capability, ModelSource, RuntimeBackendId, RuntimeBackendLoadSpec};
 use tonic::transport::Channel;
 use tracing::{info, warn};
 
@@ -18,14 +19,18 @@ use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView,
     CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
     ChatModelCapabilities, ChatModelOption, ChatModelSource, CreateModelCommand, DeletedModelView,
-    DownloadModelCommand, ListModelsFilter, ManagedModelBackendId, ModelEnhancementPresetOption,
-    ModelEnhancementVariantOption, ModelEnhancementView, ModelLoadCommand, ModelPackSelection,
-    ModelSpec, ModelStatus, RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelKind,
-    UnifiedModelStatus, UpdateModelCommand, UpdateModelEnhancementCommand,
+    DownloadModelCommand, ListModelsFilter, ManagedModelBackendId, ModelConfigDocument,
+    ModelConfigFieldScope, ModelConfigFieldView, ModelConfigOrigin, ModelConfigPresetOption,
+    ModelConfigSectionView, ModelConfigSelectionView, ModelConfigSourceArtifact,
+    ModelConfigSourceSummary, ModelConfigValueType, ModelConfigVariantOption, ModelLoadCommand,
+    ModelPackSelection, ModelSpec, ModelStatus, RuntimePresets, StoredModelConfig, UnifiedModel,
+    UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
     normalize_model_capabilities,
 };
 use crate::error::AppCoreError;
-use crate::infra::db::{ModelStore, UnifiedModelRecord};
+use crate::infra::db::{
+    ModelConfigStateRecord, ModelConfigStateStore, ModelStore, UnifiedModelRecord,
+};
 use crate::infra::model_packs;
 use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::{ModelReplayPlan, build_model_load_request};
@@ -63,6 +68,22 @@ struct ResolvedModelLoadTarget {
     pack_load_defaults: Option<slab_model_pack::ModelPackLoadDefaults>,
 }
 
+#[derive(Debug, Clone)]
+struct ModelPackContext {
+    path: std::path::PathBuf,
+    resolved: slab_model_pack::ResolvedModelPack,
+    persisted: Option<StoredModelConfig>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedModelPackSelectionView {
+    explicit_selection: ModelPackSelection,
+    effective_selection: ModelPackSelection,
+    selected_preset: slab_model_pack::ResolvedPreset,
+    warnings: Vec<String>,
+    legacy_selection_to_import: Option<ModelPackSelection>,
+}
+
 #[derive(Clone)]
 pub struct ModelService {
     model_state: ModelState,
@@ -87,14 +108,29 @@ impl ModelService {
     ) -> Result<UnifiedModel, AppCoreError> {
         let summary = model_packs::read_model_pack_summary_from_bytes(bytes)?;
         let pack_path = model_packs::model_pack_file_path(self.model_config_dir(), &summary.id);
-        let command = model_packs::build_model_command_from_pack_bytes(&pack_path, bytes)?;
         let pack_existed = pack_path.exists();
+        model_packs::write_model_pack(self.model_config_dir(), &summary.id, bytes)?;
+
+        let (command, legacy_selection) =
+            match self.build_selected_model_pack_command(&summary.id, false).await {
+                Ok(result) => result,
+                Err(error) => {
+                    if !pack_existed {
+                        let _ = model_packs::delete_model_pack_at_path(&pack_path);
+                    }
+                    return Err(error);
+                }
+            };
 
         let model = self.build_model_definition(command).await?;
-        model_packs::write_imported_model_pack(self.model_config_dir(), &model, bytes)?;
 
         match self.store_model_definition(model).await {
-            Ok(model) => Ok(model),
+            Ok(model) => {
+                if let Some(record) = legacy_selection {
+                    self.model_state.store().upsert_model_config_state(record).await?;
+                }
+                Ok(model)
+            }
             Err(error) => {
                 if !pack_existed {
                     let _ = model_packs::delete_model_pack_at_path(&pack_path);
@@ -115,65 +151,62 @@ impl ModelService {
         record.try_into().map_err(|e: String| AppCoreError::Internal(e))
     }
 
-    pub async fn get_model_enhancement(
+    pub async fn get_model_config_document(
         &self,
         id: &str,
-    ) -> Result<ModelEnhancementView, AppCoreError> {
+    ) -> Result<ModelConfigDocument, AppCoreError> {
         let model = self.get_model(id).await?;
         resolve_local_backend_from_model(&model)?;
-        let (_, resolved, persisted) = self.load_model_pack_context(id)?;
-        let selection = persisted
-            .and_then(|config| config.pack_selection)
-            .unwrap_or_else(|| default_model_pack_selection(&resolved));
-        let selected_preset = resolve_selected_model_pack_preset(&resolved, &selection)?;
-        let resolved_command = build_local_model_command_from_pack_preset(
-            &resolved.manifest,
-            &resolved,
-            &selected_preset,
+
+        let context = self.load_model_pack_context(id)?;
+        let selection = self
+            .resolve_model_pack_selection(id, &context.resolved, context.persisted.as_ref(), true)
+            .await?;
+        let command = build_model_command_from_pack_context(&context, &selection.selected_preset)?;
+        let bridge = context
+            .resolved
+            .compile_runtime_bridge(&selection.selected_preset)
+            .map_err(|error| {
+                AppCoreError::BadRequest(format!(
+                    "failed to compile selected pack preset for config document: {error}"
+                ))
+            })?;
+        let source_summary = build_model_config_source_summary(&bridge.model_spec.source);
+        let selection_view = build_model_config_selection_view(
+            &context.resolved,
+            &selection.explicit_selection,
+            &selection.effective_selection,
+        );
+        let resolved_load_spec = self
+            .build_model_config_load_json(
+                bridge.backend,
+                &command,
+                &bridge,
+                selection.selected_preset.effective_load_config.as_ref(),
+            )
+            .await?;
+        let resolved_inference_spec = Value::Object(
+            bridge.inference_defaults.clone().into_iter().collect::<Map<String, Value>>(),
+        );
+        let sections = self.build_model_config_sections(
+            &model,
+            &command,
+            &context.resolved,
+            &selection.selected_preset,
+            &bridge,
+            &source_summary,
+            &resolved_load_spec,
+            &resolved_inference_spec,
         )?;
 
-        let presets = resolved
-            .presets
-            .values()
-            .map(|preset| ModelEnhancementPresetOption {
-                id: preset.document.id.clone(),
-                label: preset.document.label.clone(),
-                description: preset.document.description.clone(),
-                variant_id: preset
-                    .document
-                    .variant_id
-                    .clone()
-                    .or_else(|| non_empty_variant_id(&preset.variant.document.id)),
-            })
-            .collect();
-        let variants = resolved
-            .variants
-            .values()
-            .map(|variant| {
-                let (repo_id, filename, local_path) =
-                    source_preview_from_pack_source(variant.effective_source.as_ref());
-                ModelEnhancementVariantOption {
-                    id: variant.document.id.clone(),
-                    label: variant.document.label.clone(),
-                    description: variant.document.description.clone(),
-                    repo_id,
-                    filename,
-                    local_path,
-                }
-            })
-            .collect();
-
-        Ok(ModelEnhancementView {
-            model,
-            default_preset_id: resolved.default_preset_id.clone(),
-            selected_preset_id: selection.preset_id,
-            selected_variant_id: selection
-                .variant_id
-                .or_else(|| non_empty_variant_id(&selected_preset.variant.document.id)),
-            presets,
-            variants,
-            resolved_spec: resolved_command.spec,
-            resolved_runtime_presets: resolved_command.runtime_presets,
+        Ok(ModelConfigDocument {
+            model_summary: model,
+            selection: selection_view,
+            sections,
+            source_summary,
+            resolved_load_spec,
+            resolved_inference_spec,
+            warnings: selection.warnings,
         })
     }
 
@@ -206,31 +239,28 @@ impl ModelService {
         self.persist_model_definition(next).await
     }
 
-    pub async fn update_model_enhancement(
+    pub async fn update_model_config_selection(
         &self,
         id: &str,
-        req: UpdateModelEnhancementCommand,
+        req: UpdateModelConfigSelectionCommand,
     ) -> Result<UnifiedModel, AppCoreError> {
         let current_model = self.get_model(id).await?;
         resolve_local_backend_from_model(&current_model)?;
 
-        let (_, resolved, _) = self.load_model_pack_context(id)?;
-        let selection = normalize_model_pack_selection(ModelPackSelection {
-            preset_id: Some(req.selected_preset_id.unwrap_or_default()),
-            variant_id: Some(req.selected_variant_id.unwrap_or_default()),
+        let context = self.load_model_pack_context(id)?;
+        let explicit_selection = normalize_model_pack_selection(ModelPackSelection {
+            preset_id: req.selected_preset_id,
+            variant_id: req.selected_variant_id,
         });
-        let selected_preset = resolve_selected_model_pack_preset(&resolved, &selection)?;
-        let mut command = build_local_model_command_from_pack_preset(
-            &resolved.manifest,
-            &resolved,
+        let selected_preset =
+            resolve_selected_model_pack_preset(&context.resolved, &explicit_selection)?;
+        let effective_selection = effective_model_pack_selection(
+            &context.resolved,
+            &explicit_selection,
             &selected_preset,
-        )?;
-
+        );
+        let mut command = build_model_command_from_pack_context(&context, &selected_preset)?;
         command.id = Some(current_model.id.clone());
-        command.display_name = req.display_name;
-        command.spec.context_window = req.context_window;
-        command.spec.chat_template = req.chat_template;
-        command.runtime_presets = req.runtime_presets;
 
         if same_model_download_source(&current_model.spec, &command.spec) {
             command.spec.local_path = current_model.spec.local_path.clone();
@@ -241,19 +271,20 @@ impl ModelService {
         }
 
         let next_model = self.build_model_definition(command).await?;
-        let mut persisted_config: StoredModelConfig = next_model.clone().into();
-        persisted_config.pack_selection = Some(ModelPackSelection {
-            preset_id: selection.preset_id.or_else(|| resolved.default_preset_id.clone()),
-            variant_id: selection
-                .variant_id
-                .or_else(|| non_empty_variant_id(&selected_preset.variant.document.id)),
-        });
-        model_packs::write_persisted_model_pack_from_config(
-            self.model_config_dir(),
-            &persisted_config,
-        )?;
+        let stored_selection = selection_state_record_for_storage(
+            id,
+            &context.resolved,
+            &explicit_selection,
+            &effective_selection,
+        );
+        let stored_model = self.store_model_definition(next_model).await?;
 
-        self.store_model_definition(next_model).await
+        match stored_selection {
+            Some(record) => self.model_state.store().upsert_model_config_state(record).await?,
+            None => self.model_state.store().delete_model_config_state(id).await?,
+        }
+
+        Ok(stored_model)
     }
 
     pub async fn delete_model(&self, id: &str) -> Result<DeletedModelView, AppCoreError> {
@@ -276,6 +307,7 @@ impl ModelService {
             }
         }
 
+        let _ = self.model_state.store().delete_model_config_state(id).await;
         self.model_state.store().delete_model(id).await?;
         self.model_state
             .auto_unload()
@@ -352,16 +384,36 @@ impl ModelService {
         let mut imported = 0usize;
 
         for path in pack_paths {
-            let command = match model_packs::build_model_command_from_pack(&path) {
-                Ok(command) => command,
-                Err(error) => {
-                    warn!(path = %path.display(), error = %error, "skipping invalid model pack file");
-                    continue;
-                }
+            let Some(model_id) = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+            else {
+                warn!(path = %path.display(), "skipping model pack without a valid file stem");
+                continue;
             };
+
+            let (command, legacy_selection) =
+                match self.build_selected_model_pack_command(&model_id, false).await {
+                    Ok(command) => command,
+                    Err(error) => {
+                        warn!(
+                            path = %path.display(),
+                            model_id = %model_id,
+                            error = %error,
+                            "skipping invalid model pack file"
+                        );
+                        continue;
+                    }
+                };
 
             match self.persist_model_definition_with_options(command, false).await {
                 Ok(model) => {
+                    if let Some(record) = legacy_selection {
+                        self.model_state.store().upsert_model_config_state(record).await?;
+                    }
                     imported += 1;
                     info!(model_id = %model.id, path = %path.display(), "initialized model from .slab pack");
                 }
@@ -589,10 +641,7 @@ impl ModelService {
     fn load_model_pack_context(
         &self,
         id: &str,
-    ) -> Result<
-        (std::path::PathBuf, slab_model_pack::ResolvedModelPack, Option<StoredModelConfig>),
-        AppCoreError,
-    > {
+    ) -> Result<ModelPackContext, AppCoreError> {
         let pack_path = model_packs::model_pack_file_path(self.model_config_dir(), id);
         if !pack_path.exists() {
             return Err(AppCoreError::NotFound(format!(
@@ -609,7 +658,499 @@ impl ModelService {
         })?;
         let persisted = model_packs::read_persisted_model_config_from_pack(&pack_path)?;
 
-        Ok((pack_path, resolved, persisted))
+        Ok(ModelPackContext { path: pack_path, resolved, persisted })
+    }
+
+    async fn build_selected_model_pack_command(
+        &self,
+        id: &str,
+        persist_legacy_selection: bool,
+    ) -> Result<(CreateModelCommand, Option<ModelConfigStateRecord>), AppCoreError> {
+        let context = self.load_model_pack_context(id)?;
+        if matches!(
+            context.resolved.manifest.source.as_ref(),
+            Some(slab_model_pack::PackSource::Cloud { .. })
+        ) {
+            let command = model_packs::build_model_command_from_pack(&context.path)?;
+            return Ok((command, None));
+        }
+
+        let selection = self
+            .resolve_model_pack_selection(
+                id,
+                &context.resolved,
+                context.persisted.as_ref(),
+                persist_legacy_selection,
+            )
+            .await?;
+        let command = build_model_command_from_pack_context(&context, &selection.selected_preset)?;
+        let state_record = selection.legacy_selection_to_import.map(|selection| {
+            model_config_state_record(id, selection.preset_id, selection.variant_id)
+        });
+
+        Ok((command, state_record))
+    }
+
+    async fn resolve_model_pack_selection(
+        &self,
+        model_id: &str,
+        resolved: &slab_model_pack::ResolvedModelPack,
+        persisted: Option<&StoredModelConfig>,
+        persist_legacy_selection: bool,
+    ) -> Result<ResolvedModelPackSelectionView, AppCoreError> {
+        let state_record = self.model_state.store().get_model_config_state(model_id).await?;
+        let legacy_selection = persisted
+            .and_then(|config| config.pack_selection.clone())
+            .map(normalize_model_pack_selection);
+
+        let explicit_selection = if let Some(record) = state_record.as_ref() {
+            ModelPackSelection {
+                preset_id: normalize_optional_text(record.selected_preset_id.clone()),
+                variant_id: normalize_optional_text(record.selected_variant_id.clone()),
+            }
+        } else {
+            legacy_selection.clone().unwrap_or_default()
+        };
+
+        let (effective_selection, selected_preset, warnings) =
+            resolve_effective_model_pack_selection(resolved, &explicit_selection)?;
+
+        let legacy_selection_to_import = if state_record.is_none() {
+            legacy_selection
+                .as_ref()
+                .filter(|selection| {
+                    effective_model_pack_selection(
+                        resolved,
+                        selection,
+                        &selected_preset,
+                    ) != default_model_pack_selection(resolved)
+                })
+                .cloned()
+        } else {
+            None
+        };
+
+        if persist_legacy_selection && state_record.is_none() {
+            if let Some(selection) = legacy_selection_to_import.as_ref() {
+                self.model_state
+                    .store()
+                    .upsert_model_config_state(model_config_state_record(
+                        model_id,
+                        selection.preset_id.clone(),
+                        selection.variant_id.clone(),
+                    ))
+                    .await?;
+            }
+        }
+
+        Ok(ResolvedModelPackSelectionView {
+            explicit_selection,
+            effective_selection,
+            selected_preset,
+            warnings,
+            legacy_selection_to_import: if persist_legacy_selection {
+                None
+            } else {
+                legacy_selection_to_import
+            },
+        })
+    }
+
+    async fn build_model_config_load_json(
+        &self,
+        backend_id: RuntimeBackendId,
+        command: &CreateModelCommand,
+        bridge: &slab_model_pack::ModelPackRuntimeBridge,
+        load_config: Option<&slab_model_pack::BackendConfigDocument>,
+    ) -> Result<Value, AppCoreError> {
+        let mut payload = load_config
+            .map(|config| config.payload.clone())
+            .unwrap_or_else(|| Value::Object(Map::new()));
+        let object = ensure_json_object(&mut payload);
+        let display_model_path = command
+            .spec
+            .local_path
+            .clone()
+            .or_else(|| command.spec.filename.clone())
+            .or_else(|| {
+                bridge
+                    .model_spec
+                    .source
+                    .primary_path()
+                    .map(|path| path.to_string_lossy().into_owned())
+            });
+
+        if let Some(model_path) = display_model_path {
+            object.insert("model_path".into(), Value::String(model_path));
+        }
+
+        let (workers, _) = if let Some(workers) = bridge.load_defaults.num_workers {
+            validate_and_normalize_model_workers(backend_id, workers, "model_pack")?
+        } else {
+            resolve_model_workers(&self.model_state, backend_id, None).await?
+        };
+        object.insert("num_workers".into(), Value::from(workers));
+
+        if backend_id == RuntimeBackendId::GgmlLlama {
+            if let Some(context_length) = bridge.load_defaults.context_length {
+                object.insert("context_length".into(), Value::from(context_length));
+            } else {
+                let (context_length, source) =
+                    resolve_llama_context_length(&self.model_state, backend_id).await?;
+                if context_length > 0 || source == "settings" {
+                    object.insert("context_length".into(), Value::from(context_length));
+                }
+            }
+            if let Some(chat_template) = bridge.load_defaults.chat_template.as_ref() {
+                object.insert("chat_template".into(), Value::String(chat_template.clone()));
+            }
+        }
+
+        if backend_id == RuntimeBackendId::GgmlDiffusion {
+            let diffusion = model_packs::merge_diffusion_load_defaults(
+                bridge.load_defaults.diffusion.clone(),
+                resolve_diffusion_context_params(&self.model_state, backend_id).await?,
+            )
+            .unwrap_or_default();
+
+            insert_optional_path(
+                object,
+                "diffusion_model_path",
+                diffusion.diffusion_model_path.as_ref(),
+            );
+            insert_optional_path(object, "vae_path", diffusion.vae_path.as_ref());
+            insert_optional_path(object, "taesd_path", diffusion.taesd_path.as_ref());
+            insert_optional_path(object, "clip_l_path", diffusion.clip_l_path.as_ref());
+            insert_optional_path(object, "clip_g_path", diffusion.clip_g_path.as_ref());
+            insert_optional_path(object, "t5xxl_path", diffusion.t5xxl_path.as_ref());
+            object.insert("flash_attn".into(), Value::Bool(diffusion.flash_attn));
+            if !diffusion.vae_device.is_empty() {
+                object.insert("vae_device".into(), Value::String(diffusion.vae_device));
+            }
+            if !diffusion.clip_device.is_empty() {
+                object.insert("clip_device".into(), Value::String(diffusion.clip_device));
+            }
+            object.insert(
+                "offload_params_to_cpu".into(),
+                Value::Bool(diffusion.offload_params_to_cpu),
+            );
+        }
+
+        Ok(payload)
+    }
+
+    fn build_model_config_sections(
+        &self,
+        model: &UnifiedModel,
+        command: &CreateModelCommand,
+        resolved: &slab_model_pack::ResolvedModelPack,
+        selected_preset: &slab_model_pack::ResolvedPreset,
+        bridge: &slab_model_pack::ModelPackRuntimeBridge,
+        source_summary: &ModelConfigSourceSummary,
+        resolved_load_spec: &Value,
+        resolved_inference_spec: &Value,
+    ) -> Result<Vec<ModelConfigSectionView>, AppCoreError> {
+        let source_origin = model_source_origin(selected_preset);
+        let summary_fields = vec![
+            build_model_config_field(
+                "model.id",
+                ModelConfigFieldScope::Summary,
+                "Model ID",
+                Some("Catalog identifier projected from the pack manifest.".into()),
+                ModelConfigValueType::String,
+                Value::String(model.id.clone()),
+                ModelConfigOrigin::PackManifest,
+            ),
+            build_model_config_field(
+                "model.display_name",
+                ModelConfigFieldScope::Summary,
+                "Display Name",
+                Some("Read-only label from the pack manifest.".into()),
+                ModelConfigValueType::String,
+                Value::String(command.display_name.clone()),
+                ModelConfigOrigin::PackManifest,
+            ),
+            build_model_config_field(
+                "model.backend",
+                ModelConfigFieldScope::Summary,
+                "Backend",
+                Some("Managed runtime backend selected for this pack.".into()),
+                ModelConfigValueType::String,
+                Value::String(bridge.backend.canonical_id().to_owned()),
+                ModelConfigOrigin::Derived,
+            ),
+            build_model_config_field(
+                "model.status",
+                ModelConfigFieldScope::Summary,
+                "Catalog Status",
+                Some("Current projected status in the models table.".into()),
+                ModelConfigValueType::String,
+                Value::String(model.status.as_str().to_owned()),
+                ModelConfigOrigin::Derived,
+            ),
+            build_model_config_field(
+                "model.capabilities",
+                ModelConfigFieldScope::Summary,
+                "Capabilities",
+                Some("Capabilities declared by the pack and projected into the catalog.".into()),
+                ModelConfigValueType::Json,
+                serde_json::to_value(&model.capabilities).map_err(|error| {
+                    AppCoreError::Internal(format!(
+                        "failed to serialize model capabilities for config document: {error}"
+                    ))
+                })?,
+                ModelConfigOrigin::PackManifest,
+            ),
+        ];
+
+        let mut source_fields = vec![build_model_config_field(
+            "source.kind",
+            ModelConfigFieldScope::Source,
+            "Source Kind",
+            Some("Where the selected preset resolves its artifacts from.".into()),
+            ModelConfigValueType::String,
+            Value::String(source_summary.source_kind.clone()),
+            source_origin,
+        )];
+        if let Some(repo_id) = source_summary.repo_id.as_ref() {
+            source_fields.push(build_model_config_field(
+                "source.repo_id",
+                ModelConfigFieldScope::Source,
+                "Repo ID",
+                Some("Resolved Hugging Face repository for the selected model source.".into()),
+                ModelConfigValueType::String,
+                Value::String(repo_id.clone()),
+                source_origin,
+            ));
+        }
+        if let Some(filename) = source_summary.filename.as_ref() {
+            source_fields.push(build_model_config_field(
+                "source.filename",
+                ModelConfigFieldScope::Source,
+                "Primary Artifact",
+                Some("Primary artifact path selected for this preset/variant.".into()),
+                ModelConfigValueType::Path,
+                Value::String(filename.clone()),
+                source_origin,
+            ));
+        }
+        if let Some(local_path) = source_summary.local_path.as_ref() {
+            source_fields.push(build_model_config_field(
+                "source.local_path",
+                ModelConfigFieldScope::Source,
+                "Local Path",
+                Some("Projected local path currently associated with the selected source.".into()),
+                ModelConfigValueType::Path,
+                Value::String(local_path.clone()),
+                source_origin,
+            ));
+        }
+        for artifact in &source_summary.artifacts {
+            source_fields.push(build_model_config_field(
+                format!("source.artifacts.{}", artifact.id),
+                ModelConfigFieldScope::Source,
+                artifact.label.clone(),
+                Some("Resolved artifact path for the selected source.".into()),
+                ModelConfigValueType::Path,
+                Value::String(artifact.value.clone()),
+                source_origin,
+            ));
+        }
+
+        let mut load_fields = vec![build_model_config_field(
+            "load.num_workers",
+            ModelConfigFieldScope::Load,
+            "Workers",
+            Some("Effective worker count used when loading the runtime model.".into()),
+            ModelConfigValueType::Integer,
+            json_property_or_null(resolved_load_spec, "num_workers"),
+            if bridge.load_defaults.num_workers.is_some() {
+                ModelConfigOrigin::SelectedBackendConfig
+            } else {
+                ModelConfigOrigin::PmidFallback
+            },
+        )];
+        match bridge.backend {
+            RuntimeBackendId::GgmlLlama => {
+                load_fields.push(build_model_config_field(
+                    "load.context_length",
+                    ModelConfigFieldScope::Load,
+                    "Context Length",
+                    Some("Effective llama context window length in tokens.".into()),
+                    ModelConfigValueType::Integer,
+                    json_property_or_null(resolved_load_spec, "context_length"),
+                    if resolved.manifest.context_window.is_some() {
+                        ModelConfigOrigin::PackManifest
+                    } else if bridge.load_defaults.context_length.is_some() {
+                        ModelConfigOrigin::SelectedBackendConfig
+                    } else {
+                        ModelConfigOrigin::PmidFallback
+                    },
+                ));
+                load_fields.push(build_model_config_field(
+                    "load.chat_template",
+                    ModelConfigFieldScope::Load,
+                    "Chat Template",
+                    Some("Effective chat template resolved for llama chat formatting.".into()),
+                    ModelConfigValueType::String,
+                    json_property_or_null(resolved_load_spec, "chat_template"),
+                    if bridge.load_defaults.chat_template.is_some() {
+                        ModelConfigOrigin::SelectedBackendConfig
+                    } else {
+                        ModelConfigOrigin::Derived
+                    },
+                ));
+            }
+            RuntimeBackendId::GgmlDiffusion => {
+                for (path, label) in [
+                    ("diffusion_model_path", "Diffusion Model"),
+                    ("vae_path", "VAE"),
+                    ("taesd_path", "TAESD"),
+                    ("clip_l_path", "CLIP L"),
+                    ("clip_g_path", "CLIP G"),
+                    ("t5xxl_path", "T5 XXL"),
+                ] {
+                    load_fields.push(build_model_config_field(
+                        format!("load.{path}"),
+                        ModelConfigFieldScope::Load,
+                        label,
+                        Some("Resolved diffusion artifact path.".into()),
+                        ModelConfigValueType::Path,
+                        json_property_or_null(resolved_load_spec, path),
+                        diffusion_load_origin(bridge, path),
+                    ));
+                }
+                load_fields.push(build_model_config_field(
+                    "load.flash_attn",
+                    ModelConfigFieldScope::Load,
+                    "Flash Attention",
+                    Some("Effective flash attention toggle for diffusion loads.".into()),
+                    ModelConfigValueType::Boolean,
+                    json_property_or_null(resolved_load_spec, "flash_attn"),
+                    diffusion_load_origin(bridge, "flash_attn"),
+                ));
+                load_fields.push(build_model_config_field(
+                    "load.vae_device",
+                    ModelConfigFieldScope::Load,
+                    "VAE Device",
+                    Some("Device override for VAE execution.".into()),
+                    ModelConfigValueType::String,
+                    json_property_or_null(resolved_load_spec, "vae_device"),
+                    diffusion_load_origin(bridge, "vae_device"),
+                ));
+                load_fields.push(build_model_config_field(
+                    "load.clip_device",
+                    ModelConfigFieldScope::Load,
+                    "CLIP Device",
+                    Some("Device override for CLIP execution.".into()),
+                    ModelConfigValueType::String,
+                    json_property_or_null(resolved_load_spec, "clip_device"),
+                    diffusion_load_origin(bridge, "clip_device"),
+                ));
+                load_fields.push(build_model_config_field(
+                    "load.offload_params_to_cpu",
+                    ModelConfigFieldScope::Load,
+                    "Offload Params To CPU",
+                    Some("Whether diffusion parameters are offloaded to CPU.".into()),
+                    ModelConfigValueType::Boolean,
+                    json_property_or_null(resolved_load_spec, "offload_params_to_cpu"),
+                    diffusion_load_origin(bridge, "offload_params_to_cpu"),
+                ));
+            }
+            RuntimeBackendId::GgmlWhisper => {}
+            _ => {}
+        }
+
+        let mut inference_fields = Vec::new();
+        if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.temperature).is_some()
+            || value_is_present(resolved_inference_spec, "temperature")
+        {
+            inference_fields.push(build_model_config_field(
+                "inference.temperature",
+                ModelConfigFieldScope::Inference,
+                "Temperature",
+                Some("Resolved sampling temperature exposed by the pack.".into()),
+                ModelConfigValueType::Number,
+                json_property_or_null(resolved_inference_spec, "temperature"),
+                if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.temperature).is_some()
+                {
+                    ModelConfigOrigin::PackManifest
+                } else {
+                    ModelConfigOrigin::SelectedBackendConfig
+                },
+            ));
+        }
+        if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.top_p).is_some()
+            || value_is_present(resolved_inference_spec, "top_p")
+        {
+            inference_fields.push(build_model_config_field(
+                "inference.top_p",
+                ModelConfigFieldScope::Inference,
+                "Top P",
+                Some("Resolved nucleus sampling value exposed by the pack.".into()),
+                ModelConfigValueType::Number,
+                json_property_or_null(resolved_inference_spec, "top_p"),
+                if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.top_p).is_some() {
+                    ModelConfigOrigin::PackManifest
+                } else {
+                    ModelConfigOrigin::SelectedBackendConfig
+                },
+            ));
+        }
+
+        let advanced_fields = vec![
+            build_model_config_field(
+                "advanced.resolved_load_spec",
+                ModelConfigFieldScope::Advanced,
+                "Resolved Load JSON",
+                Some("Full resolved load document after pack selection and PMID fallback.".into()),
+                ModelConfigValueType::Json,
+                resolved_load_spec.clone(),
+                ModelConfigOrigin::Derived,
+            ),
+            build_model_config_field(
+                "advanced.resolved_inference_spec",
+                ModelConfigFieldScope::Advanced,
+                "Resolved Inference JSON",
+                Some("Full resolved inference document after pack selection.".into()),
+                ModelConfigValueType::Json,
+                resolved_inference_spec.clone(),
+                ModelConfigOrigin::Derived,
+            ),
+        ];
+
+        Ok(vec![
+            ModelConfigSectionView {
+                id: "summary".into(),
+                label: "Summary".into(),
+                description_md: Some("Pack-backed catalog summary for the selected model.".into()),
+                fields: summary_fields,
+            },
+            ModelConfigSectionView {
+                id: "source".into(),
+                label: "Source / Artifacts".into(),
+                description_md: Some("Resolved source and artifacts for the active selection.".into()),
+                fields: source_fields,
+            },
+            ModelConfigSectionView {
+                id: "load".into(),
+                label: "Load".into(),
+                description_md: Some("Effective runtime load parameters.".into()),
+                fields: load_fields,
+            },
+            ModelConfigSectionView {
+                id: "inference".into(),
+                label: "Inference".into(),
+                description_md: Some("Resolved inference defaults from the pack.".into()),
+                fields: inference_fields,
+            },
+            ModelConfigSectionView {
+                id: "advanced".into(),
+                label: "Advanced".into(),
+                description_md: Some("Fallback JSON for fields not yet promoted into the canonical catalog.".into()),
+                fields: advanced_fields,
+            },
+        ])
     }
 
     async fn persist_model_definition(
@@ -1197,6 +1738,333 @@ fn same_model_download_source(current: &ModelSpec, next: &ModelSpec) -> bool {
     }
 }
 
+fn build_model_command_from_pack_context(
+    context: &ModelPackContext,
+    preset: &slab_model_pack::ResolvedPreset,
+) -> Result<CreateModelCommand, AppCoreError> {
+    let mut command =
+        build_local_model_command_from_pack_preset(&context.resolved.manifest, &context.resolved, preset)?;
+    if let Some(persisted) = context.persisted.as_ref() {
+        apply_persisted_projection_state(&mut command, persisted);
+    }
+    Ok(command)
+}
+
+fn apply_persisted_projection_state(command: &mut CreateModelCommand, persisted: &StoredModelConfig) {
+    if same_model_download_source(&persisted.spec, &command.spec) {
+        command.spec.local_path = persisted.spec.local_path.clone();
+        if let Some(status) = persisted.status.clone() {
+            command.status = Some(status);
+        }
+    }
+}
+
+fn resolve_effective_model_pack_selection(
+    resolved: &slab_model_pack::ResolvedModelPack,
+    explicit_selection: &ModelPackSelection,
+) -> Result<(ModelPackSelection, slab_model_pack::ResolvedPreset, Vec<String>), AppCoreError> {
+    let default_selection = default_model_pack_selection(resolved);
+    let mut warnings = Vec::new();
+
+    let preset_id = match explicit_selection.preset_id.as_deref() {
+        Some(preset_id) if resolved.presets.contains_key(preset_id) => Some(preset_id.to_owned()),
+        Some(preset_id) => {
+            warnings.push(format!(
+                "Preset '{preset_id}' is no longer available. Selection was reset to pack default."
+            ));
+            default_selection.preset_id.clone()
+        }
+        None => default_selection.preset_id.clone(),
+    };
+
+    let base_selection = ModelPackSelection { preset_id: preset_id.clone(), variant_id: None };
+    let base_preset = resolve_selected_model_pack_preset(resolved, &base_selection)?;
+    let default_variant_id = non_empty_variant_id(&base_preset.variant.document.id);
+
+    let variant_id = match explicit_selection.variant_id.as_deref() {
+        Some(variant_id) if resolved.variants.contains_key(variant_id) => {
+            Some(variant_id.to_owned())
+        }
+        Some(variant_id) => {
+            warnings.push(format!(
+                "Variant '{variant_id}' is no longer available. Selection was reset to pack default."
+            ));
+            default_variant_id.clone()
+        }
+        None => default_variant_id.clone(),
+    };
+
+    let effective_selection = ModelPackSelection { preset_id, variant_id };
+    let selected_preset = resolve_selected_model_pack_preset(resolved, &effective_selection)?;
+
+    Ok((effective_selection, selected_preset, warnings))
+}
+
+fn effective_model_pack_selection(
+    resolved: &slab_model_pack::ResolvedModelPack,
+    explicit_selection: &ModelPackSelection,
+    selected_preset: &slab_model_pack::ResolvedPreset,
+) -> ModelPackSelection {
+    ModelPackSelection {
+        preset_id: explicit_selection
+            .preset_id
+            .clone()
+            .or_else(|| resolved.default_preset_id.clone()),
+        variant_id: explicit_selection
+            .variant_id
+            .clone()
+            .or_else(|| non_empty_variant_id(&selected_preset.variant.document.id)),
+    }
+}
+
+fn selection_state_record_for_storage(
+    model_id: &str,
+    resolved: &slab_model_pack::ResolvedModelPack,
+    explicit_selection: &ModelPackSelection,
+    effective_selection: &ModelPackSelection,
+) -> Option<ModelConfigStateRecord> {
+    (effective_selection != &default_model_pack_selection(resolved)).then(|| {
+        model_config_state_record(
+            model_id,
+            explicit_selection.preset_id.clone(),
+            explicit_selection.variant_id.clone(),
+        )
+    })
+}
+
+fn model_config_state_record(
+    model_id: &str,
+    selected_preset_id: Option<String>,
+    selected_variant_id: Option<String>,
+) -> ModelConfigStateRecord {
+    ModelConfigStateRecord {
+        model_id: model_id.to_owned(),
+        selected_preset_id,
+        selected_variant_id,
+        updated_at: Utc::now(),
+    }
+}
+
+fn build_model_config_selection_view(
+    resolved: &slab_model_pack::ResolvedModelPack,
+    explicit_selection: &ModelPackSelection,
+    effective_selection: &ModelPackSelection,
+) -> ModelConfigSelectionView {
+    let default_selection = default_model_pack_selection(resolved);
+    let presets = resolved
+        .presets
+        .values()
+        .map(|preset| ModelConfigPresetOption {
+            id: preset.document.id.clone(),
+            label: preset.document.label.clone(),
+            description: preset.document.description.clone(),
+            variant_id: preset
+                .document
+                .variant_id
+                .clone()
+                .or_else(|| non_empty_variant_id(&preset.variant.document.id)),
+            is_default: resolved.default_preset_id.as_deref() == Some(preset.document.id.as_str()),
+        })
+        .collect();
+    let variants = resolved
+        .variants
+        .values()
+        .map(|variant| {
+            let (repo_id, filename, local_path) =
+                source_preview_from_pack_source(variant.effective_source.as_ref());
+            ModelConfigVariantOption {
+                id: variant.document.id.clone(),
+                label: variant.document.label.clone(),
+                description: variant.document.description.clone(),
+                repo_id,
+                filename,
+                local_path,
+                is_default: default_selection.variant_id.as_deref()
+                    == Some(variant.document.id.as_str()),
+            }
+        })
+        .collect();
+
+    ModelConfigSelectionView {
+        default_preset_id: default_selection.preset_id.clone(),
+        default_variant_id: default_selection.variant_id.clone(),
+        selected_preset_id: explicit_selection.preset_id.clone(),
+        selected_variant_id: explicit_selection.variant_id.clone(),
+        effective_preset_id: effective_selection.preset_id.clone(),
+        effective_variant_id: effective_selection.variant_id.clone(),
+        presets,
+        variants,
+    }
+}
+
+fn build_model_config_source_summary(source: &ModelSource) -> ModelConfigSourceSummary {
+    match source {
+        ModelSource::HuggingFace { repo_id, files, .. } => ModelConfigSourceSummary {
+            source_kind: "hugging_face".into(),
+            repo_id: Some(repo_id.clone()),
+            filename: files
+                .get("model")
+                .or_else(|| files.values().next())
+                .map(|path| path.to_string_lossy().into_owned()),
+            local_path: None,
+            artifacts: source
+                .files()
+                .into_iter()
+                .map(|(id, path)| ModelConfigSourceArtifact {
+                    label: humanize_artifact_label(&id),
+                    id,
+                    value: path.to_string_lossy().into_owned(),
+                })
+                .collect(),
+        },
+        ModelSource::LocalPath { path } => ModelConfigSourceSummary {
+            source_kind: "local_path".into(),
+            repo_id: None,
+            filename: None,
+            local_path: Some(path.to_string_lossy().into_owned()),
+            artifacts: vec![ModelConfigSourceArtifact {
+                id: "model".into(),
+                label: "Model".into(),
+                value: path.to_string_lossy().into_owned(),
+            }],
+        },
+        ModelSource::LocalArtifacts { .. } => ModelConfigSourceSummary {
+            source_kind: "local_artifacts".into(),
+            repo_id: None,
+            filename: None,
+            local_path: source
+                .primary_path()
+                .map(|path| path.to_string_lossy().into_owned()),
+            artifacts: source
+                .files()
+                .into_iter()
+                .map(|(id, path)| ModelConfigSourceArtifact {
+                    label: humanize_artifact_label(&id),
+                    id,
+                    value: path.to_string_lossy().into_owned(),
+                })
+                .collect(),
+        },
+        _ => ModelConfigSourceSummary {
+            source_kind: "unknown".into(),
+            repo_id: None,
+            filename: None,
+            local_path: None,
+            artifacts: Vec::new(),
+        },
+    }
+}
+
+fn build_model_config_field(
+    path: impl Into<String>,
+    scope: ModelConfigFieldScope,
+    label: impl Into<String>,
+    description_md: Option<String>,
+    value_type: ModelConfigValueType,
+    effective_value: Value,
+    origin: ModelConfigOrigin,
+) -> ModelConfigFieldView {
+    ModelConfigFieldView {
+        path: path.into(),
+        scope,
+        label: label.into(),
+        description_md,
+        value_type,
+        effective_value,
+        origin,
+        editable: false,
+        locked: true,
+        json_schema: None,
+    }
+}
+
+fn model_source_origin(selected_preset: &slab_model_pack::ResolvedPreset) -> ModelConfigOrigin {
+    if selected_preset.variant.document.source.is_some() || !selected_preset.variant.components.is_empty()
+    {
+        ModelConfigOrigin::SelectedVariant
+    } else {
+        ModelConfigOrigin::PackManifest
+    }
+}
+
+fn diffusion_load_origin(
+    bridge: &slab_model_pack::ModelPackRuntimeBridge,
+    field: &str,
+) -> ModelConfigOrigin {
+    let Some(diffusion) = bridge.load_defaults.diffusion.as_ref() else {
+        return ModelConfigOrigin::PmidFallback;
+    };
+
+    let from_pack = match field {
+        "diffusion_model_path" => diffusion.diffusion_model_path.is_some(),
+        "vae_path" => diffusion.vae_path.is_some(),
+        "taesd_path" => diffusion.taesd_path.is_some(),
+        "clip_l_path" => diffusion.clip_l_path.is_some(),
+        "clip_g_path" => diffusion.clip_g_path.is_some(),
+        "t5xxl_path" => diffusion.t5xxl_path.is_some(),
+        "flash_attn" => diffusion.flash_attn,
+        "vae_device" => !diffusion.vae_device.is_empty(),
+        "clip_device" => !diffusion.clip_device.is_empty(),
+        "offload_params_to_cpu" => diffusion.offload_params_to_cpu,
+        _ => false,
+    };
+
+    if from_pack {
+        ModelConfigOrigin::SelectedBackendConfig
+    } else {
+        ModelConfigOrigin::PmidFallback
+    }
+}
+
+fn ensure_json_object(value: &mut Value) -> &mut Map<String, Value> {
+    if !value.is_object() {
+        *value = Value::Object(Map::new());
+    }
+
+    match value {
+        Value::Object(map) => map,
+        _ => unreachable!("json payload should have been normalized to an object"),
+    }
+}
+
+fn insert_optional_path(
+    object: &mut Map<String, Value>,
+    key: &str,
+    value: Option<&PathBuf>,
+) {
+    if let Some(value) = value {
+        object.insert(key.to_owned(), Value::String(value.to_string_lossy().into_owned()));
+    }
+}
+
+fn json_property_or_null(value: &Value, key: &str) -> Value {
+    value
+        .as_object()
+        .and_then(|map| map.get(key))
+        .cloned()
+        .unwrap_or(Value::Null)
+}
+
+fn value_is_present(value: &Value, key: &str) -> bool {
+    value
+        .as_object()
+        .and_then(|map| map.get(key))
+        .is_some_and(|value| !value.is_null())
+}
+
+fn humanize_artifact_label(id: &str) -> String {
+    match id {
+        "model" => "Model".into(),
+        "diffusion_model" => "Diffusion Model".into(),
+        "vae" => "VAE".into(),
+        "taesd" => "TAESD".into(),
+        "clip_l" => "CLIP L".into(),
+        "clip_g" => "CLIP G".into(),
+        "t5xxl" => "T5 XXL".into(),
+        other => other.replace('_', " "),
+    }
+}
+
 fn validate_path(label: &str, path: &str) -> Result<(), AppCoreError> {
     if path.is_empty() {
         return Err(AppCoreError::BadRequest(format!("{label} must not be empty")));
@@ -1485,7 +2353,8 @@ async fn resolve_model_load_target(
         let model_path = resolve_local_model_path(&model)?;
         if model_packs::is_model_pack_path(&model_path) {
             let pack_target =
-                model_packs::build_model_pack_load_target(std::path::Path::new(&model_path))?;
+                build_selected_model_pack_load_target(state, &model.id, std::path::Path::new(&model_path))
+                    .await?;
             if pack_target.backend_id != backend_id {
                 return Err(AppCoreError::BadRequest(format!(
                     "model '{}' pack backend '{}' does not match catalog backend '{}'",
@@ -1547,6 +2416,75 @@ async fn resolve_model_load_target(
     }
 
     Ok(ResolvedModelLoadTarget { backend_id, model_path, model_id: None, pack_load_defaults: None })
+}
+
+async fn build_selected_model_pack_load_target(
+    state: &ModelState,
+    model_id: &str,
+    pack_path: &std::path::Path,
+) -> Result<model_packs::ModelPackLoadTarget, AppCoreError> {
+    let pack = model_packs::open_model_pack(pack_path)?;
+    let resolved = pack.resolve().map_err(|error| {
+        AppCoreError::BadRequest(format!(
+            "failed to resolve model pack '{}': {error}",
+            pack_path.display()
+        ))
+    })?;
+    let persisted = model_packs::read_persisted_model_config_from_pack(pack_path)?;
+    let state_record = state.store().get_model_config_state(model_id).await?;
+    let legacy_selection = persisted
+        .as_ref()
+        .and_then(|config| config.pack_selection.clone())
+        .map(normalize_model_pack_selection);
+    let explicit_selection = if let Some(record) = state_record.as_ref() {
+        ModelPackSelection {
+            preset_id: normalize_optional_text(record.selected_preset_id.clone()),
+            variant_id: normalize_optional_text(record.selected_variant_id.clone()),
+        }
+    } else {
+        legacy_selection.clone().unwrap_or_default()
+    };
+    let (effective_selection, selected_preset, _) =
+        resolve_effective_model_pack_selection(&resolved, &explicit_selection)?;
+
+    if state_record.is_none() {
+        if let Some(record) = selection_state_record_for_storage(
+            model_id,
+            &resolved,
+            &legacy_selection.unwrap_or_default(),
+            &effective_selection,
+        ) {
+            let _ = state.store().upsert_model_config_state(record).await;
+        }
+    }
+
+    let bridge = resolved.compile_runtime_bridge(&selected_preset).map_err(|error| {
+        AppCoreError::BadRequest(format!(
+            "failed to compile selected pack preset for load target: {error}"
+        ))
+    })?;
+    let preset_id = effective_selection
+        .preset_id
+        .clone()
+        .unwrap_or_else(|| selected_preset.document.id.clone());
+    let load_spec = bridge.runtime_load_spec(&preset_id).map_err(|error| match error {
+        slab_model_pack::ModelPackError::NonMaterializedSource { .. } => AppCoreError::BadRequest(
+            format!(
+                "model pack '{}' points to a remote source and must be downloaded from the model catalog before loading",
+                pack_path.display()
+            ),
+        ),
+        other => AppCoreError::BadRequest(format!(
+            "failed to build selected model pack load target '{}': {other}",
+            pack_path.display()
+        )),
+    })?;
+
+    Ok(model_packs::ModelPackLoadTarget {
+        backend_id: bridge.backend,
+        model_path: load_spec.model_path.to_string_lossy().into_owned(),
+        load_defaults: bridge.load_defaults,
+    })
 }
 
 async fn resolve_unload_backend(

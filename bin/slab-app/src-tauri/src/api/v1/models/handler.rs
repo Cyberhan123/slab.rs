@@ -3,8 +3,9 @@ use std::sync::Arc;
 use slab_app_core::context::AppState;
 use slab_app_core::schemas::models::{
     CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
-    LoadModelRequest, ModelEnhancementResponse, ModelStatusResponse, SwitchModelRequest,
-    UnifiedModelResponse, UnloadModelRequest, UpdateModelEnhancementRequest, UpdateModelRequest,
+    LoadModelRequest, ModelConfigDocumentResponse, ModelStatusResponse, SwitchModelRequest,
+    UnifiedModelResponse, UnloadModelRequest, UpdateModelConfigSelectionRequest,
+    UpdateModelRequest,
 };
 use slab_app_core::schemas::tasks::OperationAcceptedResponse;
 
@@ -61,12 +62,12 @@ pub async fn get_model(
 }
 
 #[tauri::command(async)]
-pub async fn get_model_enhancement(
+pub async fn get_model_config_document(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
-) -> Result<ModelEnhancementResponse, String> {
+) -> Result<ModelConfigDocumentResponse, String> {
     validate_id(&id)?;
-    Ok(state.services.model.get_model_enhancement(&id).await.map_err(map_err)?.into())
+    Ok(state.services.model.get_model_config_document(&id).await.map_err(map_err)?.into())
 }
 
 #[tauri::command(async)]
@@ -80,17 +81,17 @@ pub async fn update_model(
 }
 
 #[tauri::command(async)]
-pub async fn update_model_enhancement(
+pub async fn update_model_config_selection(
     state: tauri::State<'_, Arc<AppState>>,
     id: String,
-    req: UpdateModelEnhancementRequest,
+    req: UpdateModelConfigSelectionRequest,
 ) -> Result<UnifiedModelResponse, String> {
     validate_id(&id)?;
     let req = validate(req)?;
     Ok(state
         .services
         .model
-        .update_model_enhancement(&id, req.into())
+        .update_model_config_selection(&id, req.into())
         .await
         .map_err(map_err)?
         .into())

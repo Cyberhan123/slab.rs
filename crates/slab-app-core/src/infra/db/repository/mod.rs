@@ -2,11 +2,13 @@ pub mod agent;
 pub mod chat;
 pub mod config;
 pub mod model;
+pub mod model_config_state;
 pub mod session;
 pub mod task;
 
 pub use chat::ChatStore;
 pub use model::ModelStore;
+pub use model_config_state::ModelConfigStateStore;
 pub use session::SessionStore;
 pub use task::TaskStore;
 

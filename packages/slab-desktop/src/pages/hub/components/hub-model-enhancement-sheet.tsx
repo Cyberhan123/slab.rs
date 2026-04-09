@@ -1,17 +1,10 @@
-import {
-  Loader2,
-  Save,
-  Settings2,
-  Sparkles,
-  TriangleAlert,
-} from 'lucide-react';
-import { useEffect, useMemo, useState, type PropsWithChildren } from 'react';
+import { Loader2, LockKeyhole, Save, Settings2, TriangleAlert } from 'lucide-react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
 
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
-import { Input } from '@slab/components/input';
 import { Label } from '@slab/components/label';
 import {
   Select,
@@ -30,9 +23,10 @@ import {
 
 import type { ModelItem } from '../hooks/use-hub-model-catalog';
 import {
-  fetchModelEnhancement,
-  type ModelEnhancementResponse,
-  updateModelEnhancement,
+  fetchModelConfigDocument,
+  type ModelConfigDocumentResponse,
+  type ModelConfigFieldResponse,
+  updateModelConfigSelection,
 } from '../lib/model-enhancement';
 
 type HubModelEnhancementSheetProps = {
@@ -40,26 +34,6 @@ type HubModelEnhancementSheetProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
-};
-
-type EnhancementFormState = {
-  displayName: string;
-  selectedPresetId: string;
-  selectedVariantId: string;
-  contextWindow: string;
-  chatTemplate: string;
-  temperature: string;
-  topP: string;
-};
-
-const EMPTY_FORM: EnhancementFormState = {
-  displayName: '',
-  selectedPresetId: '',
-  selectedVariantId: '',
-  contextWindow: '',
-  chatTemplate: '',
-  temperature: '',
-  topP: '',
 };
 
 export function HubModelEnhancementSheet({
@@ -70,9 +44,10 @@ export function HubModelEnhancementSheet({
 }: HubModelEnhancementSheetProps) {
   const [isLoading, setIsLoading] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [data, setData] = useState<ModelEnhancementResponse | null>(null);
+  const [data, setData] = useState<ModelConfigDocumentResponse | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [form, setForm] = useState<EnhancementFormState>(EMPTY_FORM);
+  const [selectedPresetId, setSelectedPresetId] = useState('');
+  const [selectedVariantId, setSelectedVariantId] = useState('');
 
   useEffect(() => {
     if (!open || !model) {
@@ -83,34 +58,25 @@ export function HubModelEnhancementSheet({
     setIsLoading(true);
     setLoadError(null);
 
-    void fetchModelEnhancement(model.id)
+    void fetchModelConfigDocument(model.id)
       .then((response) => {
         if (disposed) {
           return;
         }
 
         setData(response);
-        setForm({
-          displayName: response.model.display_name,
-          selectedPresetId: response.selected_preset_id ?? '',
-          selectedVariantId: response.selected_variant_id ?? '',
-          contextWindow:
-            response.model.spec.context_window !== undefined &&
-            response.model.spec.context_window !== null
-              ? String(response.model.spec.context_window)
-              : '',
-          chatTemplate: response.model.spec.chat_template ?? '',
-          temperature:
-            response.model.runtime_presets?.temperature !== undefined &&
-            response.model.runtime_presets?.temperature !== null
-              ? String(response.model.runtime_presets.temperature)
-              : '',
-          topP:
-            response.model.runtime_presets?.top_p !== undefined &&
-            response.model.runtime_presets?.top_p !== null
-              ? String(response.model.runtime_presets.top_p)
-              : '',
-        });
+        setSelectedPresetId(
+          response.selection.effective_preset_id ??
+            response.selection.selected_preset_id ??
+            response.selection.default_preset_id ??
+            '',
+        );
+        setSelectedVariantId(
+          response.selection.effective_variant_id ??
+            response.selection.selected_variant_id ??
+            response.selection.default_variant_id ??
+            '',
+        );
       })
       .catch((error) => {
         if (disposed) {
@@ -131,67 +97,41 @@ export function HubModelEnhancementSheet({
     };
   }, [model, open]);
 
-  const selectedPreset = useMemo(
-    () => data?.presets.find((preset) => preset.id === form.selectedPresetId) ?? null,
-    [data?.presets, form.selectedPresetId],
-  );
-  const selectedVariant = useMemo(
-    () => data?.variants.find((variant) => variant.id === form.selectedVariantId) ?? null,
-    [data?.variants, form.selectedVariantId],
-  );
-  const previewRepoId = selectedVariant?.repo_id ?? data?.resolved_spec.repo_id ?? '';
-  const previewFilename = selectedVariant?.filename ?? data?.resolved_spec.filename ?? '';
-  const previewLocalPath = selectedVariant?.local_path ?? data?.resolved_spec.local_path ?? '';
-  const sourceWillChange = Boolean(
-    data &&
-      data.model.spec.local_path &&
-      (normalizeText(data.model.spec.repo_id) !== normalizeText(previewRepoId) ||
-        normalizeText(data.model.spec.filename) !== normalizeText(previewFilename)),
+  const savePayload = useMemo(
+    () => buildSelectionPayload(data, selectedPresetId, selectedVariantId),
+    [data, selectedPresetId, selectedVariantId],
   );
 
   const canSave =
+    Boolean(data) &&
     !isLoading &&
     !isSaving &&
-    Boolean(data) &&
-    form.displayName.trim().length > 0;
+    Boolean(savePayload) &&
+    (savePayload?.selected_preset_id !== (data?.selection.selected_preset_id ?? null) ||
+      savePayload?.selected_variant_id !== (data?.selection.selected_variant_id ?? null));
 
   const handlePresetChange = (value: string) => {
-    const presetId = value === '__none__' ? '' : value;
-    const preset = data?.presets.find((item) => item.id === presetId);
-
-    setForm((current) => ({
-      ...current,
-      selectedPresetId: presetId,
-      selectedVariantId: preset?.variant_id ?? current.selectedVariantId,
-    }));
+    const nextPreset =
+      data?.selection.presets.find((preset) => preset.id === value) ?? null;
+    setSelectedPresetId(value);
+    setSelectedVariantId(nextPreset?.variant_id ?? data?.selection.default_variant_id ?? '');
   };
 
   const handleSave = async () => {
-    if (!model || !data || !canSave) {
+    if (!model || !savePayload) {
       return;
     }
 
     setIsSaving(true);
     try {
-      await updateModelEnhancement(model.id, {
-        display_name: form.displayName.trim(),
-        selected_preset_id: emptyToNull(form.selectedPresetId),
-        selected_variant_id: emptyToNull(form.selectedVariantId),
-        context_window: parseOptionalInteger(form.contextWindow),
-        chat_template: emptyToNull(form.chatTemplate),
-        runtime_presets: {
-          temperature: parseOptionalFloat(form.temperature),
-          top_p: parseOptionalFloat(form.topP),
-        },
-      });
-
-      toast.success('Model config updated.', {
-        description: form.displayName.trim(),
+      await updateModelConfigSelection(model.id, savePayload);
+      toast.success('Model selection updated.', {
+        description: data?.model_summary.display_name ?? model.display_name,
       });
       onSaved();
       onOpenChange(false);
     } catch (error) {
-      toast.error('Failed to update model config.', {
+      toast.error('Failed to update model selection.', {
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
@@ -203,7 +143,7 @@ export function HubModelEnhancementSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className="flex w-full max-w-[760px] flex-col gap-0 overflow-hidden border-l border-border/60 bg-[color:color-mix(in_oklab,var(--background)_92%,var(--surface-1))] p-0"
+        className="flex w-full max-w-[780px] flex-col gap-0 overflow-hidden border-l border-border/60 bg-[color:color-mix(in_oklab,var(--background)_92%,var(--surface-1))] p-0"
       >
         <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
           <div className="flex items-start gap-3">
@@ -211,10 +151,10 @@ export function HubModelEnhancementSheet({
               <Settings2 className="size-5" />
             </div>
             <div className="space-y-1">
-              <SheetTitle className="text-xl">Enhance model config</SheetTitle>
+              <SheetTitle className="text-xl">Model config document</SheetTitle>
               <SheetDescription>
-                Treat the imported pack as the source of truth, then choose the preset, variant,
-                and runtime overrides you want to project into the catalog.
+                Pack declarations stay as the source of truth. You can only switch preset and
+                variant here; backend fields remain locked and read-only.
               </SheetDescription>
             </div>
           </div>
@@ -224,7 +164,7 @@ export function HubModelEnhancementSheet({
           {isLoading ? (
             <div className="flex min-h-[260px] items-center justify-center text-muted-foreground">
               <Loader2 className="mr-2 size-4 animate-spin" />
-              Loading model enhancement config...
+              Loading model config document...
             </div>
           ) : loadError ? (
             <Alert variant="destructive">
@@ -234,24 +174,27 @@ export function HubModelEnhancementSheet({
             </Alert>
           ) : data ? (
             <div className="space-y-6">
+              {data.warnings.length > 0 ? (
+                <Alert>
+                  <TriangleAlert className="size-4" />
+                  <AlertTitle>Selection warning</AlertTitle>
+                  <AlertDescription>{data.warnings.join(' ')}</AlertDescription>
+                </Alert>
+              ) : null}
+
               <section className="grid gap-4 rounded-[28px] border border-border/60 bg-[var(--shell-card)]/55 p-5 md:grid-cols-2">
-                <FieldBlock label="Display name">
-                  <Input
-                    value={form.displayName}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, displayName: event.target.value }))
-                    }
-                    placeholder="Qwen2.5-0.5B-Instruct"
-                  />
-                </FieldBlock>
-                <FieldBlock label="Default preset">
-                  <Select value={form.selectedPresetId || '__none__'} onValueChange={handlePresetChange}>
+                <ReadOnlyBlock label="Display name" value={data.model_summary.display_name} />
+                <ReadOnlyBlock
+                  label="Backend"
+                  value={data.model_summary.backend_id ?? data.model_summary.kind}
+                />
+                <FieldBlock label="Preset">
+                  <Select value={selectedPresetId} onValueChange={handlePresetChange}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Use pack default preset" />
+                      <SelectValue placeholder="Select a preset" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">Use pack default preset</SelectItem>
-                      {data.presets.map((preset) => (
+                      {data.selection.presets.map((preset) => (
                         <SelectItem key={preset.id} value={preset.id}>
                           {preset.label}
                         </SelectItem>
@@ -259,22 +202,13 @@ export function HubModelEnhancementSheet({
                     </SelectContent>
                   </Select>
                 </FieldBlock>
-                <FieldBlock label="Variant override">
-                  <Select
-                    value={form.selectedVariantId || '__none__'}
-                    onValueChange={(value) =>
-                      setForm((current) => ({
-                        ...current,
-                        selectedVariantId: value === '__none__' ? '' : value,
-                      }))
-                    }
-                  >
+                <FieldBlock label="Variant">
+                  <Select value={selectedVariantId} onValueChange={setSelectedVariantId}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Follow preset/default variant" />
+                      <SelectValue placeholder="Select a variant" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="__none__">Follow preset/default variant</SelectItem>
-                      {data.variants.map((variant) => (
+                      {data.selection.variants.map((variant) => (
                         <SelectItem key={variant.id} value={variant.id}>
                           {variant.label}
                         </SelectItem>
@@ -282,142 +216,72 @@ export function HubModelEnhancementSheet({
                     </SelectContent>
                   </Select>
                 </FieldBlock>
-                <FieldBlock label="Context window">
-                  <Input
-                    inputMode="numeric"
-                    value={form.contextWindow}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, contextWindow: event.target.value }))
-                    }
-                    placeholder="e.g. 32768"
-                  />
-                </FieldBlock>
-                <FieldBlock label="Chat template" className="md:col-span-2">
-                  <Input
-                    value={form.chatTemplate}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, chatTemplate: event.target.value }))
-                    }
-                    placeholder="chatml"
-                  />
-                </FieldBlock>
-                <FieldBlock label="Temperature">
-                  <Input
-                    inputMode="decimal"
-                    value={form.temperature}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, temperature: event.target.value }))
-                    }
-                    placeholder="e.g. 0.7"
-                  />
-                </FieldBlock>
-                <FieldBlock label="Top P">
-                  <Input
-                    inputMode="decimal"
-                    value={form.topP}
-                    onChange={(event) =>
-                      setForm((current) => ({ ...current, topP: event.target.value }))
-                    }
-                    placeholder="e.g. 0.95"
-                  />
-                </FieldBlock>
               </section>
 
-              <section className="space-y-3 rounded-[28px] border border-border/60 bg-[color:color-mix(in_oklab,var(--surface-1)_94%,var(--background))] p-5">
-                <div className="flex items-center gap-2">
-                  <Sparkles className="size-4 text-[var(--brand-gold)]" />
-                  <h3 className="text-sm font-semibold tracking-[0.02em] text-foreground">
-                    Resolved download target
-                  </h3>
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  {selectedPreset ? (
-                    <Badge variant="chip" className="bg-[var(--surface-soft)]">
-                      Preset: {selectedPreset.label}
-                    </Badge>
-                  ) : null}
-                  {selectedVariant ? (
-                    <Badge variant="chip" className="bg-[var(--surface-soft)]">
-                      Variant: {selectedVariant.label}
-                    </Badge>
-                  ) : null}
-                  {data.default_preset_id ? (
-                    <Badge variant="chip" className="bg-[var(--surface-soft)]">
-                      Pack default: {data.default_preset_id}
-                    </Badge>
-                  ) : null}
-                </div>
-                <PreviewRow label="Repo" value={previewRepoId || 'No remote repo for this source'} />
-                <PreviewRow
-                  label="File"
-                  value={previewFilename || previewLocalPath || 'The selected pack source does not expose a single primary artifact'}
-                />
-                <PreviewRow
-                  label="Runtime"
-                  value={[
-                    form.contextWindow.trim() ? `ctx=${form.contextWindow.trim()}` : null,
-                    form.chatTemplate.trim() ? `template=${form.chatTemplate.trim()}` : null,
-                    form.temperature.trim() ? `temp=${form.temperature.trim()}` : null,
-                    form.topP.trim() ? `top_p=${form.topP.trim()}` : null,
-                  ]
-                    .filter(Boolean)
-                    .join('  |  ') || 'Using pack/runtime defaults'}
-                />
-              </section>
+              {data.sections.map((section) => (
+                <section
+                  key={section.id}
+                  className="space-y-4 rounded-[28px] border border-border/60 bg-[var(--shell-card)]/55 p-5"
+                >
+                  <div className="space-y-1">
+                    <h3 className="text-base font-semibold tracking-[-0.02em] text-foreground">
+                      {section.label}
+                    </h3>
+                    {section.description_md ? (
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        {section.description_md}
+                      </p>
+                    ) : null}
+                  </div>
 
-              {sourceWillChange ? (
-                <Alert>
-                  <TriangleAlert className="size-4" />
-                  <AlertTitle>Saving will detach the current local download</AlertTitle>
-                  <AlertDescription>
-                    The selected source no longer matches the file currently attached to this
-                    catalog entry. After saving, the model will need to be downloaded again before
-                    local loading.
-                  </AlertDescription>
-                </Alert>
-              ) : null}
+                  <div className="space-y-3">
+                    {section.fields.map((field) => (
+                      <ReadonlyFieldCard key={field.path} field={field} />
+                    ))}
+                  </div>
+                </section>
+              ))}
             </div>
           ) : null}
         </div>
 
-        <div className="shrink-0 border-t border-border/60 px-6 py-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-xs leading-5 text-muted-foreground">
-              Save writes the selected pack projection back into the catalog and preserves it in
-              the `.slab` state for future startup syncs.
-            </p>
-            <div className="flex items-center gap-2">
-              <Button
-                variant="pill"
-                onClick={() => onOpenChange(false)}
-                disabled={isSaving}
-              >
-                Close
-              </Button>
-              <Button variant="cta" onClick={() => void handleSave()} disabled={!canSave}>
-                {isSaving ? (
-                  <Loader2 className="size-4 animate-spin" />
-                ) : (
-                  <Save className="size-4" />
-                )}
-                Save config
-              </Button>
-            </div>
-          </div>
+        <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border/60 px-6 py-4">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+          <Button onClick={handleSave} disabled={!canSave}>
+            {isSaving ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
+            Save selection
+          </Button>
         </div>
       </SheetContent>
     </Sheet>
   );
 }
 
+function ReadOnlyBlock({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="space-y-2">
+      <Label className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+        {label}
+      </Label>
+      <div className="rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3 text-sm font-medium text-foreground">
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function FieldBlock({
   label,
-  className,
   children,
-}: PropsWithChildren<{ label: string; className?: string }>) {
+}: {
+  label: string;
+  children: ReactNode;
+}) {
   return (
-    <div className={cn('space-y-2', className)}>
-      <Label className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+    <div className="space-y-2">
+      <Label className="text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         {label}
       </Label>
       {children}
@@ -425,48 +289,107 @@ function FieldBlock({
   );
 }
 
-function PreviewRow({ label, value }: { label: string; value: string }) {
+function ReadonlyFieldCard({ field }: { field: ModelConfigFieldResponse }) {
   return (
-    <div className="space-y-1">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-        {label}
-      </p>
-      <p className="break-all rounded-2xl border border-border/50 bg-[var(--shell-card)]/60 px-3 py-2 font-mono text-xs text-muted-foreground">
-        {value}
-      </p>
+    <div className="rounded-[20px] border border-border/60 bg-background/70 p-4 shadow-[0_1px_2px_color-mix(in_oklab,var(--foreground)_8%,transparent)]">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h4 className="text-sm font-semibold tracking-[-0.02em] text-foreground">
+              {field.label}
+            </h4>
+            <Badge variant="secondary" className="rounded-full">
+              {formatOrigin(field.origin)}
+            </Badge>
+            {field.locked ? (
+              <Badge variant="outline" className="rounded-full">
+                <LockKeyhole className="mr-1 size-3" />
+                Pack locked
+              </Badge>
+            ) : null}
+          </div>
+          {field.description_md ? (
+            <p className="text-xs leading-5 text-muted-foreground">{field.description_md}</p>
+          ) : null}
+          <p className="text-[11px] uppercase tracking-[0.08em] text-muted-foreground">
+            {field.path}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4">{renderFieldValue(field)}</div>
     </div>
   );
 }
 
-function emptyToNull(value: string) {
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
+function renderFieldValue(field: ModelConfigFieldResponse) {
+  if (field.effective_value === null || field.effective_value === undefined) {
+    return (
+      <div className="rounded-[14px] border border-dashed border-border/70 px-4 py-3 text-sm text-muted-foreground">
+        Not set
+      </div>
+    );
+  }
+
+  if (field.value_type === 'boolean') {
+    return (
+      <div className="rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3 text-sm font-medium text-foreground">
+        {field.effective_value ? 'Enabled' : 'Disabled'}
+      </div>
+    );
+  }
+
+  if (field.value_type === 'json' || typeof field.effective_value === 'object') {
+    return (
+      <pre className="overflow-x-auto rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3 text-xs leading-6 text-foreground">
+        {JSON.stringify(field.effective_value, null, 2)}
+      </pre>
+    );
+  }
+
+  return (
+    <div className="rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3 text-sm font-medium text-foreground">
+      {String(field.effective_value)}
+    </div>
+  );
 }
 
-function normalizeText(value?: string | null) {
-  return value?.trim() ?? '';
+function formatOrigin(origin: ModelConfigFieldResponse['origin']) {
+  switch (origin) {
+    case 'pack_manifest':
+      return 'Pack manifest';
+    case 'selected_preset':
+      return 'Preset';
+    case 'selected_variant':
+      return 'Variant';
+    case 'selected_backend_config':
+      return 'Backend config';
+    case 'pmid_fallback':
+      return 'PMID fallback';
+    case 'derived':
+      return 'Derived';
+    default:
+      return origin;
+  }
 }
 
-function parseOptionalInteger(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) {
+function buildSelectionPayload(
+  data: ModelConfigDocumentResponse | null,
+  presetId: string,
+  variantId: string,
+) {
+  if (!data) {
     return null;
   }
 
-  const parsed = Number.parseInt(trimmed, 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
+  const preset =
+    data.selection.presets.find((candidate) => candidate.id === presetId) ?? null;
+  const defaultVariantId = preset?.variant_id ?? data.selection.default_variant_id ?? null;
 
-function parseOptionalFloat(value: string) {
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const parsed = Number.parseFloat(trimmed);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function cn(...values: Array<string | undefined>) {
-  return values.filter(Boolean).join(' ');
+  return {
+    selected_preset_id:
+      presetId && presetId !== data.selection.default_preset_id ? presetId : null,
+    selected_variant_id:
+      variantId && variantId !== defaultVariantId ? variantId : null,
+  };
 }
