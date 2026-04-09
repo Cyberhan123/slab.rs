@@ -17,6 +17,9 @@ use slab_llama::{
 };
 use slab_runtime_core::backend::StreamChunk;
 use slab_runtime_core::{CoreError, Payload};
+use slab_types::diffusion::{
+    DiffusionImageBackend, DiffusionRequestCommon, GgmlDiffusionImageParams,
+};
 use slab_types::{
     AudioTranscriptionOpOptions, AudioTranscriptionRequest, AudioTranscriptionResponse,
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
@@ -720,38 +723,43 @@ fn optional_nonzero_u32_option(spec: &ModelSpec, key: &str) -> Result<Option<u32
 pub(crate) fn diffusion_image_request_to_params(
     request: &DiffusionImageRequest,
 ) -> Result<DiffusionImgParams, CoreError> {
-    let sample_method = request
+    let common = &request.common;
+    let ggml = request.backend.as_ggml();
+
+    let sample_method = ggml
         .sample_method
         .as_deref()
         .map(DiffusionSampleMethod::from_str)
         .transpose()
         .map_err(|message| diffusion_param_error("image_generation", message))?;
-    let scheduler = request
+    let scheduler = ggml
         .scheduler
         .as_deref()
         .map(DiffusionScheduler::from_str)
         .transpose()
         .map_err(|message| diffusion_param_error("image_generation", message))?;
 
-    if request.count < 1 {
+    if let Some(count) = ggml.count
+        && count < 1
+    {
         return Err(diffusion_param_error("image_generation", "count must be >= 1"));
     }
-    if request.width < 1 {
+    if common.width < 1 {
         return Err(diffusion_param_error("image_generation", "width must be >= 1"));
     }
-    if request.height < 1 {
+    if common.height < 1 {
         return Err(diffusion_param_error("image_generation", "height must be >= 1"));
     }
-    if let Some(steps) = request.steps
+    if let Some(steps) = ggml.steps
         && steps < 1
     {
         return Err(diffusion_param_error("image_generation", "steps must be >= 1"));
     }
 
     let mut sample_params = DiffusionSampleParams::default();
-    if request.cfg_scale.is_some() || request.guidance.is_some() {
-        let cfg_scale = request.cfg_scale.or(request.guidance).unwrap_or_default();
-        let distilled_guidance = request.guidance.or(request.cfg_scale).unwrap_or_default();
+    if ggml.cfg_scale.is_some() || ggml.guidance.is_some() {
+        let cfg_scale = ggml.cfg_scale.or(ggml.guidance).unwrap_or_default();
+        let distilled_guidance = ggml.guidance.or(ggml.cfg_scale).unwrap_or_default();
         sample_params.guidance = Some(DiffusionGuidanceParams {
             txt_cfg: cfg_scale,
             img_cfg: cfg_scale,
@@ -761,24 +769,24 @@ pub(crate) fn diffusion_image_request_to_params(
     }
     sample_params.scheduler = scheduler;
     sample_params.sample_method = sample_method;
-    sample_params.sample_steps = request.steps;
-    sample_params.eta = request.eta;
+    sample_params.sample_steps = ggml.steps;
+    sample_params.eta = ggml.eta;
 
     Ok(DiffusionImgParams {
-        prompt: Some(request.prompt.clone()),
-        negative_prompt: request.negative_prompt.clone(),
-        clip_skip: request.clip_skip,
-        init_image: request
+        prompt: Some(common.prompt.clone()),
+        negative_prompt: common.negative_prompt.clone(),
+        clip_skip: ggml.clip_skip,
+        init_image: common
             .init_image
             .as_ref()
             .map(raw_image_input_to_diffusion_image)
             .transpose()?,
-        width: Some(request.width),
-        height: Some(request.height),
+        width: Some(common.width),
+        height: Some(common.height),
         sample_params: (sample_params != DiffusionSampleParams::default()).then_some(sample_params),
-        strength: request.strength,
-        seed: request.seed,
-        batch_count: Some(request.count),
+        strength: ggml.strength,
+        seed: ggml.seed,
+        batch_count: Some(ggml.count.unwrap_or(1)),
         ..Default::default()
     })
 }
@@ -787,22 +795,26 @@ fn build_diffusion_img_params(
     request: &ImageGenerationRequest,
 ) -> Result<DiffusionImgParams, CoreError> {
     diffusion_image_request_to_params(&DiffusionImageRequest {
-        prompt: request.prompt.clone(),
-        negative_prompt: request.negative_prompt.clone(),
-        count: request.count,
-        width: request.width,
-        height: request.height,
-        cfg_scale: request.cfg_scale,
-        guidance: request.guidance,
-        steps: request.steps,
-        seed: request.seed,
-        sample_method: request.sample_method.clone(),
-        scheduler: request.scheduler.clone(),
-        clip_skip: request.clip_skip,
-        strength: request.strength,
-        eta: request.eta,
-        init_image: request.init_image.clone(),
-        options: request.options.clone(),
+        common: DiffusionRequestCommon {
+            prompt: request.prompt.clone(),
+            negative_prompt: request.negative_prompt.clone(),
+            width: request.width,
+            height: request.height,
+            init_image: request.init_image.clone(),
+            options: request.options.clone(),
+        },
+        backend: DiffusionImageBackend::Ggml(GgmlDiffusionImageParams {
+            count: Some(request.count),
+            cfg_scale: request.cfg_scale,
+            guidance: request.guidance,
+            steps: request.steps,
+            seed: request.seed,
+            sample_method: request.sample_method.clone(),
+            scheduler: request.scheduler.clone(),
+            clip_skip: request.clip_skip,
+            strength: request.strength,
+            eta: request.eta,
+        }),
     })
 }
 

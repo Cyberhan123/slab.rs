@@ -10,7 +10,9 @@ use slab_types::chat::{
     ConversationToolFunction,
 };
 use slab_types::diffusion::{
-    DiffusionImageRequest, DiffusionImageResponse, DiffusionVideoRequest, DiffusionVideoResponse,
+    DiffusionImageBackend, DiffusionImageRequest, DiffusionImageResponse, DiffusionRequestCommon,
+    DiffusionVideoBackend, DiffusionVideoRequest, DiffusionVideoResponse, GgmlDiffusionImageParams,
+    GgmlDiffusionVideoParams,
 };
 use slab_types::inference::{
     ImageGenerationResponse, TextGenerationChunk, TextGenerationRequest, TextGenerationResponse,
@@ -518,32 +520,40 @@ fn parse_json_or_null(raw: &str) -> serde_json::Value {
 pub fn decode_diffusion_image_request(
     request: &pb::ImageRequest,
 ) -> Result<DiffusionImageRequest, ProtoConversionError> {
-    ensure_non_empty(&request.prompt, "prompt")?;
-    ensure_i32_at_least(request.sample_steps, 0, "sample_steps")?;
+    use pb::image_request::BackendParams;
+
+    let common =
+        request.common.as_ref().ok_or(ProtoConversionError::MissingField { field: "common" })?;
+    let backend = request
+        .backend_params
+        .as_ref()
+        .ok_or(ProtoConversionError::MissingField { field: "backend_params" })?;
 
     Ok(DiffusionImageRequest {
-        prompt: request.prompt.clone(),
-        negative_prompt: (!request.negative_prompt.is_empty())
-            .then_some(request.negative_prompt.clone()),
-        count: request.n.max(1),
-        width: request.width.max(1),
-        height: request.height.max(1),
-        cfg_scale: Some(request.cfg_scale),
-        guidance: Some(request.guidance),
-        steps: Some(request.sample_steps.max(1)),
-        seed: Some(request.seed),
-        sample_method: (!request.sample_method.is_empty()).then_some(request.sample_method.clone()),
-        scheduler: (!request.scheduler.is_empty()).then_some(request.scheduler.clone()),
-        clip_skip: (request.clip_skip > 0).then_some(request.clip_skip),
-        strength: Some(request.strength),
-        eta: Some(request.eta),
-        init_image: raw_image_input_from_proto_parts(
-            &request.init_image_data,
-            request.init_image_width,
-            request.init_image_height,
-            request.init_image_channels,
-        ),
-        options: Default::default(),
+        common: decode_diffusion_request_common(common)?,
+        backend: match backend {
+            BackendParams::Ggml(params) => {
+                ensure_optional_u32_at_least(params.n, 1, "backend_params.ggml.n")?;
+                ensure_optional_i32_at_least(
+                    params.sample_steps,
+                    1,
+                    "backend_params.ggml.sample_steps",
+                )?;
+
+                DiffusionImageBackend::Ggml(GgmlDiffusionImageParams {
+                    count: params.n,
+                    cfg_scale: params.cfg_scale,
+                    guidance: params.guidance,
+                    steps: params.sample_steps,
+                    seed: params.seed,
+                    sample_method: optional_non_empty_owned(params.sample_method.as_ref()),
+                    scheduler: optional_non_empty_owned(params.scheduler.as_ref()),
+                    clip_skip: params.clip_skip,
+                    strength: params.strength,
+                    eta: params.eta,
+                })
+            }
+        },
     })
 }
 
@@ -551,60 +561,72 @@ pub fn encode_diffusion_image_request(
     model: impl Into<String>,
     request: &DiffusionImageRequest,
 ) -> pb::ImageRequest {
-    let (init_image_data, init_image_width, init_image_height, init_image_channels) =
-        raw_image_input_to_proto_parts(request.init_image.as_ref());
+    use pb::image_request::BackendParams;
+
+    let backend_params = match &request.backend {
+        DiffusionImageBackend::Ggml(params) => {
+            Some(BackendParams::Ggml(pb::GgmlDiffusionImageParams {
+                n: params.count,
+                cfg_scale: params.cfg_scale,
+                guidance: params.guidance,
+                sample_steps: params.steps,
+                seed: params.seed,
+                sample_method: non_empty_string(params.sample_method.as_deref()),
+                scheduler: non_empty_string(params.scheduler.as_deref()),
+                clip_skip: params.clip_skip,
+                strength: params.strength,
+                eta: params.eta,
+            }))
+        }
+    };
 
     pb::ImageRequest {
         model: model.into(),
-        prompt: request.prompt.clone(),
-        negative_prompt: request.negative_prompt.clone().unwrap_or_default(),
-        n: request.count.max(1),
-        width: request.width,
-        height: request.height,
-        cfg_scale: request.cfg_scale.unwrap_or(7.0),
-        guidance: request.guidance.unwrap_or(3.5),
-        sample_steps: request.steps.unwrap_or(20),
-        seed: request.seed.unwrap_or(42),
-        sample_method: request.sample_method.clone().unwrap_or_default(),
-        scheduler: request.scheduler.clone().unwrap_or_default(),
-        clip_skip: request.clip_skip.unwrap_or(-1),
-        strength: request.strength.unwrap_or(0.75),
-        eta: request.eta.unwrap_or_default(),
-        init_image_data,
-        init_image_width,
-        init_image_height,
-        init_image_channels,
+        common: Some(encode_diffusion_request_common(&request.common)),
+        backend_params,
     }
 }
 
 pub fn decode_diffusion_video_request(
     request: &pb::VideoRequest,
 ) -> Result<DiffusionVideoRequest, ProtoConversionError> {
-    ensure_non_empty(&request.prompt, "prompt")?;
-    ensure_i32_at_least(request.sample_steps, 0, "sample_steps")?;
+    use pb::video_request::BackendParams;
+
+    let common =
+        request.common.as_ref().ok_or(ProtoConversionError::MissingField { field: "common" })?;
+    let backend = request
+        .backend_params
+        .as_ref()
+        .ok_or(ProtoConversionError::MissingField { field: "backend_params" })?;
 
     Ok(DiffusionVideoRequest {
-        prompt: request.prompt.clone(),
-        negative_prompt: (!request.negative_prompt.is_empty())
-            .then_some(request.negative_prompt.clone()),
-        width: request.width.max(1),
-        height: request.height.max(1),
-        video_frames: request.video_frames.max(1),
-        fps: request.fps,
-        cfg_scale: Some(request.cfg_scale),
-        guidance: Some(request.guidance),
-        steps: Some(request.sample_steps.max(1)),
-        seed: Some(request.seed),
-        sample_method: (!request.sample_method.is_empty()).then_some(request.sample_method.clone()),
-        scheduler: (!request.scheduler.is_empty()).then_some(request.scheduler.clone()),
-        strength: Some(request.strength),
-        init_image: raw_image_input_from_proto_parts(
-            &request.init_image_data,
-            request.init_image_width,
-            request.init_image_height,
-            request.init_image_channels,
-        ),
-        options: Default::default(),
+        common: decode_diffusion_request_common(common)?,
+        backend: match backend {
+            BackendParams::Ggml(params) => {
+                ensure_optional_i32_at_least(
+                    params.video_frames,
+                    1,
+                    "backend_params.ggml.video_frames",
+                )?;
+                ensure_optional_i32_at_least(
+                    params.sample_steps,
+                    1,
+                    "backend_params.ggml.sample_steps",
+                )?;
+
+                DiffusionVideoBackend::Ggml(GgmlDiffusionVideoParams {
+                    video_frames: params.video_frames,
+                    fps: params.fps,
+                    cfg_scale: params.cfg_scale,
+                    guidance: params.guidance,
+                    steps: params.sample_steps,
+                    seed: params.seed,
+                    sample_method: optional_non_empty_owned(params.sample_method.as_ref()),
+                    scheduler: optional_non_empty_owned(params.scheduler.as_ref()),
+                    strength: params.strength,
+                })
+            }
+        },
     })
 }
 
@@ -612,28 +634,28 @@ pub fn encode_diffusion_video_request(
     model: impl Into<String>,
     request: &DiffusionVideoRequest,
 ) -> pb::VideoRequest {
-    let (init_image_data, init_image_width, init_image_height, init_image_channels) =
-        raw_image_input_to_proto_parts(request.init_image.as_ref());
+    use pb::video_request::BackendParams;
+
+    let backend_params = match &request.backend {
+        DiffusionVideoBackend::Ggml(params) => {
+            Some(BackendParams::Ggml(pb::GgmlDiffusionVideoParams {
+                video_frames: params.video_frames,
+                fps: params.fps,
+                cfg_scale: params.cfg_scale,
+                guidance: params.guidance,
+                sample_steps: params.steps,
+                seed: params.seed,
+                sample_method: non_empty_string(params.sample_method.as_deref()),
+                scheduler: non_empty_string(params.scheduler.as_deref()),
+                strength: params.strength,
+            }))
+        }
+    };
 
     pb::VideoRequest {
         model: model.into(),
-        prompt: request.prompt.clone(),
-        negative_prompt: request.negative_prompt.clone().unwrap_or_default(),
-        width: request.width,
-        height: request.height,
-        cfg_scale: request.cfg_scale.unwrap_or(7.0),
-        guidance: request.guidance.unwrap_or(3.5),
-        sample_steps: request.steps.unwrap_or(20),
-        seed: request.seed.unwrap_or(42),
-        sample_method: request.sample_method.clone().unwrap_or_default(),
-        scheduler: request.scheduler.clone().unwrap_or_default(),
-        video_frames: request.video_frames,
-        fps: request.fps,
-        strength: request.strength.unwrap_or(0.75),
-        init_image_data,
-        init_image_width,
-        init_image_height,
-        init_image_channels,
+        common: Some(encode_diffusion_request_common(&request.common)),
+        backend_params,
     }
 }
 
@@ -803,31 +825,57 @@ pub fn decode_diffusion_video_response(
     Ok(DiffusionVideoResponse { frames, metadata: Default::default() })
 }
 
-fn raw_image_input_from_proto_parts(
-    data: &[u8],
-    width: u32,
-    height: u32,
-    channels: u32,
-) -> Option<RawImageInput> {
-    if data.is_empty() {
-        return None;
-    }
+fn decode_diffusion_request_common(
+    common: &pb::DiffusionRequestCommon,
+) -> Result<DiffusionRequestCommon, ProtoConversionError> {
+    ensure_non_empty(&common.prompt, "common.prompt")?;
+    ensure_u32_at_least(common.width, 1, "common.width")?;
+    ensure_u32_at_least(common.height, 1, "common.height")?;
 
-    Some(RawImageInput {
-        data: data.to_vec(),
-        width,
-        height,
-        channels: normalize_channels(channels),
+    Ok(DiffusionRequestCommon {
+        prompt: common.prompt.clone(),
+        negative_prompt: optional_non_empty_owned(common.negative_prompt.as_ref()),
+        width: common.width,
+        height: common.height,
+        init_image: raw_image_input_from_proto(common.init_image.as_ref())?,
+        options: Default::default(),
     })
 }
 
-fn raw_image_input_to_proto_parts(init_image: Option<&RawImageInput>) -> (Vec<u8>, u32, u32, u32) {
-    match init_image {
-        Some(image) => {
-            (image.data.clone(), image.width, image.height, u32::from(image.channels.max(1)))
-        }
-        None => (Vec::new(), 0, 0, 3),
+fn encode_diffusion_request_common(common: &DiffusionRequestCommon) -> pb::DiffusionRequestCommon {
+    pb::DiffusionRequestCommon {
+        prompt: common.prompt.clone(),
+        negative_prompt: non_empty_string(common.negative_prompt.as_deref()),
+        width: common.width,
+        height: common.height,
+        init_image: raw_image_input_to_proto(common.init_image.as_ref()),
     }
+}
+
+fn raw_image_input_from_proto(
+    init_image: Option<&pb::RawImageInput>,
+) -> Result<Option<RawImageInput>, ProtoConversionError> {
+    let Some(image) = init_image else {
+        return Ok(None);
+    };
+
+    Ok(Some(RawImageInput {
+        data: image.data.clone(),
+        width: image.width,
+        height: image.height,
+        channels: u8::try_from(image.channels).map_err(|_| ProtoConversionError::OutOfRange {
+            field: "common.init_image.channels",
+        })?,
+    }))
+}
+
+fn raw_image_input_to_proto(init_image: Option<&RawImageInput>) -> Option<pb::RawImageInput> {
+    init_image.map(|image| pb::RawImageInput {
+        data: image.data.clone(),
+        width: image.width,
+        height: image.height,
+        channels: u32::from(image.channels),
+    })
 }
 
 fn image_metadata_from_bytes(bytes: &[u8]) -> Result<ImageMetadata, ProtoConversionError> {
@@ -867,6 +915,28 @@ fn ensure_i32_at_least(
     Ok(())
 }
 
+fn ensure_optional_u32_at_least(
+    value: Option<u32>,
+    minimum: u32,
+    field: &'static str,
+) -> Result<(), ProtoConversionError> {
+    if let Some(value) = value {
+        ensure_u32_at_least(value, minimum, field)?;
+    }
+    Ok(())
+}
+
+fn ensure_optional_i32_at_least(
+    value: Option<i32>,
+    minimum: i32,
+    field: &'static str,
+) -> Result<(), ProtoConversionError> {
+    if let Some(value) = value {
+        ensure_i32_at_least(value, minimum, field)?;
+    }
+    Ok(())
+}
+
 fn model_path_from_model_load_request(
     request: &pb::ModelLoadRequest,
 ) -> Result<PathBuf, ProtoConversionError> {
@@ -892,6 +962,10 @@ fn non_empty_string(value: Option<&str>) -> Option<String> {
     value.filter(|value| !value.trim().is_empty()).map(ToOwned::to_owned)
 }
 
+fn optional_non_empty_owned(value: Option<&String>) -> Option<String> {
+    value.and_then(|value| non_empty_string(Some(value.as_str())))
+}
+
 fn non_empty_path(value: Option<&str>) -> Option<PathBuf> {
     value.filter(|value| !value.trim().is_empty()).map(PathBuf::from)
 }
@@ -910,10 +984,6 @@ fn usize_to_u32(value: usize) -> u32 {
 
 fn u32_to_usize(value: u32, field: &'static str) -> Result<usize, ProtoConversionError> {
     usize::try_from(value).map_err(|_| ProtoConversionError::OutOfRange { field })
-}
-
-fn normalize_channels(channels: u32) -> u8 {
-    channels.clamp(1, u8::MAX as u32) as u8
 }
 
 fn max_channels(lhs: u8, rhs: u8) -> u8 {
@@ -1054,27 +1124,31 @@ mod tests {
     #[test]
     fn diffusion_image_request_round_trips_init_image() {
         let request = DiffusionImageRequest {
-            prompt: "test".to_owned(),
-            negative_prompt: Some("bad".to_owned()),
-            count: 2,
-            width: 640,
-            height: 480,
-            cfg_scale: Some(6.5),
-            guidance: Some(3.0),
-            steps: Some(30),
-            seed: Some(7),
-            sample_method: Some("euler".to_owned()),
-            scheduler: Some("normal".to_owned()),
-            clip_skip: Some(1),
-            strength: Some(0.8),
-            eta: Some(0.2),
-            init_image: Some(RawImageInput {
-                data: vec![1, 2, 3, 4, 5, 6],
-                width: 1,
-                height: 2,
-                channels: 3,
+            common: DiffusionRequestCommon {
+                prompt: "test".to_owned(),
+                negative_prompt: Some("bad".to_owned()),
+                width: 640,
+                height: 480,
+                init_image: Some(RawImageInput {
+                    data: vec![1, 2, 3, 4, 5, 6],
+                    width: 1,
+                    height: 2,
+                    channels: 3,
+                }),
+                options: Default::default(),
+            },
+            backend: DiffusionImageBackend::Ggml(GgmlDiffusionImageParams {
+                count: Some(2),
+                cfg_scale: Some(6.5),
+                guidance: Some(3.0),
+                steps: Some(30),
+                seed: Some(7),
+                sample_method: Some("euler".to_owned()),
+                scheduler: Some("normal".to_owned()),
+                clip_skip: Some(1),
+                strength: Some(0.8),
+                eta: Some(0.2),
             }),
-            options: Default::default(),
         };
 
         let proto = encode_diffusion_image_request("demo-model", &request);
@@ -1086,18 +1160,62 @@ mod tests {
     #[test]
     fn diffusion_image_request_preserves_unset_clip_skip_as_none() {
         let request = DiffusionImageRequest {
-            prompt: "test".to_owned(),
-            width: 512,
-            height: 512,
-            clip_skip: None,
+            common: DiffusionRequestCommon {
+                prompt: "test".to_owned(),
+                width: 512,
+                height: 512,
+                ..Default::default()
+            },
+            backend: DiffusionImageBackend::Ggml(GgmlDiffusionImageParams {
+                clip_skip: None,
+                ..Default::default()
+            }),
             ..Default::default()
         };
 
         let proto = encode_diffusion_image_request("demo-model", &request);
-        assert_eq!(proto.clip_skip, -1);
+        assert!(matches!(
+            proto.backend_params.as_ref(),
+            Some(pb::image_request::BackendParams::Ggml(params)) if params.clip_skip.is_none()
+        ));
 
         let roundtrip = decode_diffusion_image_request(&proto).unwrap();
-        assert_eq!(roundtrip.clip_skip, None);
+        assert_eq!(roundtrip.backend.as_ggml().clip_skip, None);
+    }
+
+    #[test]
+    fn diffusion_video_request_round_trips_backend_params() {
+        let request = DiffusionVideoRequest {
+            common: DiffusionRequestCommon {
+                prompt: "animate".to_owned(),
+                negative_prompt: Some("artifact".to_owned()),
+                width: 512,
+                height: 512,
+                init_image: Some(RawImageInput {
+                    data: vec![7, 8, 9, 10, 11, 12],
+                    width: 1,
+                    height: 2,
+                    channels: 3,
+                }),
+                options: Default::default(),
+            },
+            backend: DiffusionVideoBackend::Ggml(GgmlDiffusionVideoParams {
+                video_frames: Some(24),
+                fps: Some(12.0),
+                cfg_scale: Some(7.5),
+                guidance: Some(4.0),
+                steps: Some(32),
+                seed: Some(99),
+                sample_method: Some("euler".to_owned()),
+                scheduler: Some("normal".to_owned()),
+                strength: Some(0.65),
+            }),
+        };
+
+        let proto = encode_diffusion_video_request("demo-model", &request);
+        let roundtrip = decode_diffusion_video_request(&proto).unwrap();
+
+        assert_eq!(roundtrip, request);
     }
 
     #[test]

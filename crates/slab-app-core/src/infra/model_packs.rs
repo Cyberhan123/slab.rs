@@ -395,7 +395,10 @@ fn attach_persisted_state_to_pack_bytes(
     build_pack_bytes(entries)
 }
 
-fn apply_persisted_projection_state(command: &mut CreateModelCommand, persisted: &StoredModelConfig) {
+fn apply_persisted_projection_state(
+    command: &mut CreateModelCommand,
+    persisted: &StoredModelConfig,
+) {
     if same_download_source(&persisted.spec, &command.spec) {
         command.spec.local_path = persisted.spec.local_path.clone();
         if let Some(status) = persisted.status.clone() {
@@ -835,8 +838,8 @@ mod tests {
     };
     use crate::domain::models::{
         CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
-        ManagedModelBackendId, ModelPackSelection, ModelSpec, RuntimePresets,
-        StoredModelConfig, UnifiedModelKind, UnifiedModelStatus,
+        ManagedModelBackendId, ModelPackSelection, ModelSpec, RuntimePresets, StoredModelConfig,
+        UnifiedModelKind, UnifiedModelStatus,
     };
     use crate::error::AppCoreError;
 
@@ -1531,11 +1534,11 @@ mod tests {
                 variant_id: Some("q8_0".to_owned()),
             }),
         };
-        let bytes =
-            attach_persisted_state_to_pack_bytes(&bytes, &persisted).expect("attach persisted state");
+        let bytes = attach_persisted_state_to_pack_bytes(&bytes, &persisted)
+            .expect("attach persisted state");
 
-        let command =
-            build_model_command_from_pack_bytes(Path::new("local-qwen.slab"), &bytes).expect("command");
+        let command = build_model_command_from_pack_bytes(Path::new("local-qwen.slab"), &bytes)
+            .expect("command");
 
         assert_eq!(command.display_name, "Local Qwen");
         assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf"));

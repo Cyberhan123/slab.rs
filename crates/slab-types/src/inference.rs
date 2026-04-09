@@ -186,9 +186,8 @@ pub struct AudioTranscriptionResponse {
 }
 
 /// High-level image generation request. This is the transport-layer counterpart to
-/// [`crate::diffusion::DiffusionImageRequest`]; prefer `DiffusionImageRequest` for
-/// richer diffusion-specific options. The numeric types here (`steps: Option<i32>`,
-/// `guidance: Option<f32>`) are intentionally aligned with those of `DiffusionImageRequest`.
+/// [`crate::diffusion::DiffusionImageRequest`]; prefer `DiffusionImageRequest` when
+/// you need the shared/common diffusion envelope plus backend-specific parameter groups.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct ImageGenerationRequest {
     pub prompt: String,
