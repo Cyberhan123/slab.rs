@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
+use slab_types::{Capability, ModelFamily};
 use zip::ZipArchive;
 
 use crate::error::ModelPackError;
@@ -42,7 +43,7 @@ impl ModelPack {
         let mut archive =
             ZipArchive::new(cursor).map_err(|source| ModelPackError::OpenArchive { source })?;
 
-        let mut manifest = None;
+        let mut manifest: Option<ModelPackManifest> = None;
         let mut documents = BTreeMap::new();
 
         for index in 0..archive.len() {
@@ -80,7 +81,10 @@ impl ModelPack {
             }
         }
 
-        let pack = Self { manifest: manifest.ok_or(ModelPackError::MissingManifest)?, documents };
+        let mut manifest = manifest.ok_or(ModelPackError::MissingManifest)?;
+        manifest.capabilities = normalized_manifest_capabilities(&manifest);
+
+        let pack = Self { manifest, documents };
 
         pack.validate_manifest_references()?;
         Ok(pack)
@@ -310,11 +314,46 @@ fn parse_json_document<T: serde::de::DeserializeOwned>(
         .map_err(|source| ModelPackError::InvalidJsonDocument { path: path.to_owned(), source })
 }
 
+fn normalized_manifest_capabilities(manifest: &ModelPackManifest) -> Vec<Capability> {
+    let mut capabilities = if manifest.capabilities.is_empty() {
+        default_manifest_capabilities(manifest.family)
+    } else {
+        manifest.capabilities.clone()
+    };
+
+    if capabilities.contains(&Capability::ChatGeneration)
+        && !capabilities.contains(&Capability::TextGeneration)
+    {
+        capabilities.insert(0, Capability::TextGeneration);
+    }
+
+    let mut deduped = Vec::with_capacity(capabilities.len());
+    for capability in capabilities {
+        if !deduped.contains(&capability) {
+            deduped.push(capability);
+        }
+    }
+
+    deduped
+}
+
+fn default_manifest_capabilities(family: ModelFamily) -> Vec<Capability> {
+    match family {
+        ModelFamily::Whisper => vec![Capability::AudioTranscription],
+        ModelFamily::Diffusion => vec![Capability::ImageGeneration, Capability::VideoGeneration],
+        ModelFamily::Llama | ModelFamily::Onnx => {
+            vec![Capability::TextGeneration, Capability::ChatGeneration]
+        }
+        _ => vec![Capability::TextGeneration, Capability::ChatGeneration],
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
 
     use serde_json::json;
+    use slab_types::Capability;
     use zip::CompressionMethod;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
@@ -395,7 +434,6 @@ mod tests {
                     "kind": "backend_config",
                     "id": "load-default",
                     "label": "Default load",
-                    // "backend": "ggml_llama", 我们不需要这个字段，因为主文件已经提供了backend_hints
                     "scope": "load",
                     "payload": {
                         "context_length": 8192,
@@ -426,7 +464,6 @@ mod tests {
                     "kind": "variant",
                     "id": "q4_k_m",
                     "label": "Q4_K_M",
-                    // "backend": "ggml_llama", 我们不需要这个字段，因为主文件已经提供了backend_hints
                     "component_ids": ["model"],
                     "$load_config": "ref://models/configs/load.json",
                     "$inference_config": "ref://models/configs/inference.json"
@@ -577,6 +614,59 @@ mod tests {
 
         let error = ModelPack::from_bytes(&bytes).unwrap_err();
         assert!(error.to_string().contains("manifest.json"));
+    }
+
+    #[test]
+    fn normalizes_chat_only_capabilities_to_include_text_generation() {
+        let bytes = build_pack(vec![(
+            MANIFEST_FILE_NAME,
+            json!({
+                "version": 2,
+                "id": "qwen2.5-0.5b-instruct",
+                "label": "Qwen2.5 0.5B Instruct",
+                "family": "llama",
+                "capabilities": ["chat_generation"],
+                "backend_hints": {
+                    "prefer_drivers": ["ggml.llama"],
+                    "avoid_drivers": [],
+                    "require_streaming": true
+                }
+            })
+            .to_string(),
+        )]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
+
+        assert_eq!(
+            pack.manifest().capabilities,
+            vec![Capability::TextGeneration, Capability::ChatGeneration]
+        );
+    }
+
+    #[test]
+    fn infers_default_llama_capabilities_when_manifest_omits_them() {
+        let bytes = build_pack(vec![(
+            MANIFEST_FILE_NAME,
+            json!({
+                "version": 2,
+                "id": "qwen2.5-0.5b-instruct",
+                "label": "Qwen2.5 0.5B Instruct",
+                "family": "llama",
+                "backend_hints": {
+                    "prefer_drivers": ["ggml.llama"],
+                    "avoid_drivers": [],
+                    "require_streaming": true
+                }
+            })
+            .to_string(),
+        )]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
+
+        assert_eq!(
+            pack.manifest().capabilities,
+            vec![Capability::TextGeneration, Capability::ChatGeneration]
+        );
     }
 
     fn build_pack(entries: Vec<(&str, String)>) -> Vec<u8> {

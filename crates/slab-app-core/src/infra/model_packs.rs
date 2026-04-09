@@ -979,6 +979,74 @@ mod tests {
     }
 
     #[test]
+    fn builds_diffusion_model_command_from_hugging_face_pack_without_local_paths() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "sdxl-turbo",
+                    "label": "SDXL Turbo",
+                    "family": "diffusion",
+                    "capabilities": ["image_generation"],
+                    "backend_hints": {
+                        "prefer_drivers": ["ggml.diffusion"],
+                        "avoid_drivers": [],
+                        "require_streaming": false
+                    },
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "stabilityai/sdxl-turbo",
+                        "files": [
+                            {
+                                "id": "model",
+                                "path": "sdxl_turbo.safetensors"
+                            }
+                        ]
+                    },
+                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "load",
+                    "label": "Load",
+                    "scope": "load",
+                    "payload": {
+                        "flash_attn": true,
+                        "vae_device": "cpu"
+                    }
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "$load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let command = build_model_command_from_pack_bytes(Path::new("sdxl-turbo.slab"), &bytes)
+            .expect("diffusion command");
+
+        assert_eq!(command.kind, UnifiedModelKind::Local);
+        assert_eq!(command.backend_id, Some(ManagedModelBackendId::GgmlDiffusion));
+        assert_eq!(command.status, Some(UnifiedModelStatus::NotDownloaded));
+        assert_eq!(command.spec.repo_id.as_deref(), Some("stabilityai/sdxl-turbo"));
+        assert_eq!(command.spec.filename.as_deref(), Some("sdxl_turbo.safetensors"));
+        assert_eq!(command.spec.local_path, None);
+    }
+
+    #[test]
     fn uses_persisted_state_when_manifest_matches() {
         let base_bytes = build_pack(vec![(
             "manifest.json",

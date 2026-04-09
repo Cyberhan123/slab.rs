@@ -306,26 +306,25 @@ fn build_load_defaults(
 }
 
 fn build_diffusion_load_defaults(
-    preset_id: &str,
+    _preset_id: &str,
     source: &ModelSource,
     options: &JsonOptions,
 ) -> Result<DiffusionLoadOptions, ModelPackError> {
-    if matches!(source, ModelSource::HuggingFace { .. }) {
-        return Err(ModelPackError::NonMaterializedSource {
-            preset_id: preset_id.to_owned(),
-            source_kind: "hugging_face".into(),
-        });
-    }
+    let materialized_source = match source {
+        ModelSource::HuggingFace { .. } => None,
+        other => Some(other),
+    };
 
     Ok(DiffusionLoadOptions {
-        diffusion_model_path: artifact_path(source, "diffusion_model")
-            .or_else(|| artifact_path(source, "model")),
-        vae_path: artifact_path(source, "vae"),
-        taesd_path: artifact_path(source, "taesd"),
+        diffusion_model_path: materialized_source.and_then(|source| {
+            artifact_path(source, "diffusion_model").or_else(|| artifact_path(source, "model"))
+        }),
+        vae_path: materialized_source.and_then(|source| artifact_path(source, "vae")),
+        taesd_path: materialized_source.and_then(|source| artifact_path(source, "taesd")),
         lora_model_dir: options.get("lora_model_dir").and_then(as_string).map(PathBuf::from),
-        clip_l_path: artifact_path(source, "clip_l"),
-        clip_g_path: artifact_path(source, "clip_g"),
-        t5xxl_path: artifact_path(source, "t5xxl"),
+        clip_l_path: materialized_source.and_then(|source| artifact_path(source, "clip_l")),
+        clip_g_path: materialized_source.and_then(|source| artifact_path(source, "clip_g")),
+        t5xxl_path: materialized_source.and_then(|source| artifact_path(source, "t5xxl")),
         flash_attn: options.get("flash_attn").and_then(Value::as_bool).unwrap_or(false),
         vae_device: options.get("vae_device").and_then(as_string).unwrap_or_default(),
         clip_device: options.get("clip_device").and_then(as_string).unwrap_or_default(),
@@ -491,5 +490,73 @@ mod tests {
             .expect_err("cloud source must not compile runtime bridge");
 
         assert!(error.to_string().contains("source kind 'cloud'"));
+    }
+
+    #[test]
+    fn compiles_diffusion_bridge_for_hugging_face_source_without_materialized_paths() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "sdxl-turbo",
+                    "label": "SDXL Turbo",
+                    "family": "diffusion",
+                    "capabilities": ["image_generation"],
+                    "backend_hints": {"prefer_drivers": ["ggml.diffusion"], "avoid_drivers": [], "require_streaming": false},
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "stabilityai/sdxl-turbo",
+                        "files": [
+                            {"id": "diffusion_model", "path": "sdxl_turbo.safetensors"},
+                            {"id": "vae", "path": "vae.safetensors"}
+                        ]
+                    },
+                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "load",
+                    "label": "Load",
+                    "scope": "load",
+                    "payload": {
+                        "flash_attn": true,
+                        "vae_device": "cpu"
+                    }
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "$load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
+        let diffusion =
+            bridge.load_defaults.diffusion.as_ref().expect("diffusion defaults should exist");
+        let load_error =
+            bridge.runtime_load_spec("default").expect_err("load spec should require download");
+
+        assert_eq!(bridge.backend.canonical_id(), "ggml.diffusion");
+        assert!(diffusion.diffusion_model_path.is_none());
+        assert!(diffusion.vae_path.is_none());
+        assert!(diffusion.clip_l_path.is_none());
+        assert!(diffusion.flash_attn);
+        assert_eq!(diffusion.vae_device, "cpu");
+        assert!(load_error.to_string().contains("hugging_face"));
     }
 }
