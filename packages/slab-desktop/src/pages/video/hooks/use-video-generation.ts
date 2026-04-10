@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
+import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api from '@/lib/api';
 import { toCatalogModelList } from '@/lib/api/models';
-import { usePageHeader, usePageHeaderModelPicker } from '@/hooks/use-global-header-meta';
+import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
+import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import {
   API_BASE_URL,
@@ -23,7 +25,6 @@ async function fileToDataUri(file: File): Promise<string> {
 
 export function useVideoGeneration() {
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
-  const [selectedModelId, setSelectedModelId] = useState('');
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
   const [widthStr, setWidthStr] = useState('512');
@@ -63,6 +64,14 @@ export function useVideoGeneration() {
       },
     },
   );
+  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
+    key: HEADER_SELECT_KEYS.videoModel,
+    options: modelOptions.map((model) => ({
+      id: model.id,
+      disabled: !model.downloaded,
+    })),
+    isLoading: catalogLoading,
+  });
 
   useEffect(() => {
     const diffusionModels = toCatalogModelList(catalogModels)
@@ -75,17 +84,7 @@ export function useVideoGeneration() {
       }));
 
     setModelOptions(diffusionModels);
-    if (diffusionModels.length === 0) {
-      setSelectedModelId('');
-      return;
-    }
-
-    const exists = diffusionModels.some((model) => model.id === selectedModelId);
-    if (!selectedModelId || !exists) {
-      const downloaded = diffusionModels.find((model) => model.downloaded);
-      setSelectedModelId(downloaded?.id ?? '');
-    }
-  }, [catalogModels, selectedModelId]);
+  }, [catalogModels]);
 
   const selectedModel = useMemo(
     () => modelOptions.find((model) => model.id === selectedModelId),
@@ -94,6 +93,7 @@ export function useVideoGeneration() {
   const isGenerating = isSubmitting || isPolling;
   const headerModelPicker = useMemo(
     () => ({
+      type: 'select' as const,
       value: selectedModelId,
       options: modelOptions.map((model) => ({
         id: model.id,
@@ -110,7 +110,7 @@ export function useVideoGeneration() {
     [catalogLoading, isGenerating, modelOptions, selectedModelId, setSelectedModelId],
   );
 
-  usePageHeaderModelPicker(headerModelPicker);
+  usePageHeaderControl(headerModelPicker);
 
   const loadInitImageFile = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {

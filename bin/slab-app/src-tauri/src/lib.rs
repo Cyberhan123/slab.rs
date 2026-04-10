@@ -120,6 +120,10 @@ pub fn run() {
             api::v1::settings::handler::list_settings,
             api::v1::settings::handler::get_setting,
             api::v1::settings::handler::update_setting,
+            // ui state
+            api::v1::ui_state::handler::get_ui_state,
+            api::v1::ui_state::handler::update_ui_state,
+            api::v1::ui_state::handler::delete_ui_state,
             // images
             api::v1::images::handler::generate_images,
             // video

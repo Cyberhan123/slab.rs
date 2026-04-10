@@ -11,41 +11,25 @@ import {
   type HeaderMeta,
   type HeaderMetaOverride,
 } from "@/layouts/header-meta";
+import type { HeaderControl } from "@/layouts/header-controls";
 
 type HeaderMetaEntry = {
   id: string;
   meta: HeaderMetaOverride;
 };
 
-export type HeaderModelPickerOption = {
+type HeaderControlEntry = {
   id: string;
-  label: string;
-  disabled?: boolean;
-};
-
-export type HeaderModelPicker = {
-  value: string;
-  options: HeaderModelPickerOption[];
-  onValueChange: (value: string) => void;
-  groupLabel?: string;
-  placeholder?: string;
-  loading?: boolean;
-  disabled?: boolean;
-  emptyLabel?: string;
-};
-
-type HeaderModelPickerEntry = {
-  id: string;
-  picker: HeaderModelPicker;
+  control: HeaderControl;
 };
 
 export type GlobalHeaderContextValue = {
   meta: HeaderMeta;
-  modelPicker: HeaderModelPicker | null;
+  control: HeaderControl | null;
   setMeta: (id: string, meta: HeaderMetaOverride) => void;
   clearMeta: (id: string) => void;
-  setModelPicker: (id: string, picker: HeaderModelPicker) => void;
-  clearModelPicker: (id: string) => void;
+  setControl: (id: string, control: HeaderControl) => void;
+  clearControl: (id: string) => void;
 };
 
 export const GlobalHeaderContext = createContext<GlobalHeaderContextValue | null>(null);
@@ -67,7 +51,7 @@ export function GlobalHeaderProvider({
   defaultMeta = DEFAULT_HEADER_META,
 }: GlobalHeaderProviderProps) {
   const [entries, setEntries] = useState<HeaderMetaEntry[]>([]);
-  const [modelPickerEntries, setModelPickerEntries] = useState<HeaderModelPickerEntry[]>([]);
+  const [controlEntries, setControlEntries] = useState<HeaderControlEntry[]>([]);
 
   const setMeta = useCallback((id: string, meta: HeaderMetaOverride) => {
     setEntries((current) => {
@@ -87,35 +71,35 @@ export function GlobalHeaderProvider({
     setEntries((current) => current.filter((entry) => entry.id !== id));
   }, []);
 
-  const setModelPicker = useCallback((id: string, picker: HeaderModelPicker) => {
-    setModelPickerEntries((current) => {
+  const setControl = useCallback((id: string, control: HeaderControl) => {
+    setControlEntries((current) => {
       const index = current.findIndex((entry) => entry.id === id);
 
       if (index === -1) {
-        return [...current, { id, picker }];
+        return [...current, { id, control }];
       }
 
       return current.map((entry, entryIndex) =>
-        entryIndex === index ? { ...entry, picker } : entry,
+        entryIndex === index ? { ...entry, control } : entry,
       );
     });
   }, []);
 
-  const clearModelPicker = useCallback((id: string) => {
-    setModelPickerEntries((current) => current.filter((entry) => entry.id !== id));
+  const clearControl = useCallback((id: string) => {
+    setControlEntries((current) => current.filter((entry) => entry.id !== id));
   }, []);
 
   const meta = useMemo(
     () => entries.reduce((current, entry) => mergeHeaderMeta(current, entry.meta), defaultMeta),
     [defaultMeta, entries],
   );
-  const modelPicker = useMemo(() => {
-    if (modelPickerEntries.length === 0) {
+  const control = useMemo(() => {
+    if (controlEntries.length === 0) {
       return null;
     }
 
-    return modelPickerEntries[modelPickerEntries.length - 1]?.picker ?? null;
-  }, [modelPickerEntries]);
+    return controlEntries[controlEntries.length - 1]?.control ?? null;
+  }, [controlEntries]);
 
   useEffect(() => {
     document.title = `${meta.title} | Slab`;
@@ -124,13 +108,13 @@ export function GlobalHeaderProvider({
   const value = useMemo(
     () => ({
       meta,
-      modelPicker,
+      control,
       setMeta,
       clearMeta,
-      setModelPicker,
-      clearModelPicker,
+      setControl,
+      clearControl,
     }),
-    [clearMeta, clearModelPicker, meta, modelPicker, setMeta, setModelPicker],
+    [clearControl, clearMeta, control, meta, setControl, setMeta],
   );
 
   return <GlobalHeaderContext.Provider value={value}>{children}</GlobalHeaderContext.Provider>;

@@ -70,6 +70,9 @@ fn main() {
             "list_settings",
             "get_setting",
             "update_setting",
+            "get_ui_state",
+            "update_ui_state",
+            "delete_ui_state",
         ]));
 
     tauri_build::try_build(attributes).expect("failed to run tauri build script");

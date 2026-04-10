@@ -10,4 +10,5 @@ pub mod settings;
 pub mod setup;
 pub mod system;
 pub mod tasks;
+pub mod ui_state;
 pub mod video;

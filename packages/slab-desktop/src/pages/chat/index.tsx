@@ -1,5 +1,6 @@
 import { XProvider } from "@ant-design/x"
 import { useXConversations, type ConversationData } from "@ant-design/x-sdk"
+import { Loader2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -7,6 +8,15 @@ import { toast } from "sonner"
 import "@ant-design/x-markdown/themes/dark.css"
 import "@ant-design/x-markdown/themes/light.css"
 
+import { Button } from "@slab/components/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@slab/components/dialog"
 import { ScrollArea } from "@slab/components/scroll-area"
 import type { components } from "@/lib/api/v1.d.ts"
 import { ChatComposer } from "@/pages/chat/components/chat-composer"
@@ -19,7 +29,10 @@ import {
 import api from "@/lib/api"
 import { toCatalogModelList, type CatalogModel } from "@/lib/api/models"
 import { PAGE_HEADER_META } from "@/layouts/header-meta"
-import { usePageHeader, usePageHeaderModelPicker } from "@/hooks/use-global-header-meta"
+import { usePageHeader, usePageHeaderControl } from "@/hooks/use-global-header-meta"
+import { usePersistedHeaderSelect } from "@/hooks/use-persisted-header-select"
+import { HEADER_SELECT_KEYS } from "@/layouts/header-controls"
+import { useChatUiStore } from "@/store/useChatUiStore"
 
 import {
   ChatContext,
@@ -58,10 +71,6 @@ type ConversationItem = ConversationData & {
 }
 
 type SessionRecord = components["schemas"]["SessionResponse"]
-type SessionLabelMap = Record<string, string>
-
-const CHAT_CURRENT_SESSION_STORAGE_KEY = "slab.chat.currentSessionId"
-const CHAT_SESSION_LABELS_STORAGE_KEY = "slab.chat.sessionLabels"
 
 function createConversationLabel(value: string) {
   const trimmed = value.trim()
@@ -127,106 +136,11 @@ function getErrorDescription(error: unknown) {
   return "Unknown error"
 }
 
-function readStoredCurrentSessionId() {
-  if (typeof window === "undefined") {
-    return ""
-  }
-
-  try {
-    return window.localStorage.getItem(CHAT_CURRENT_SESSION_STORAGE_KEY)?.trim() ?? ""
-  } catch {
-    return ""
-  }
-}
-
-function writeStoredCurrentSessionId(sessionId: string) {
-  if (typeof window === "undefined") {
-    return
-  }
-
-  try {
-    const trimmed = sessionId.trim()
-    if (!trimmed) {
-      window.localStorage.removeItem(CHAT_CURRENT_SESSION_STORAGE_KEY)
-      return
-    }
-
-    window.localStorage.setItem(CHAT_CURRENT_SESSION_STORAGE_KEY, trimmed)
-  } catch {
-    // Ignore storage failures and keep the session in memory.
-  }
-}
-
-function readStoredSessionLabels(): SessionLabelMap {
-  if (typeof window === "undefined") {
-    return {}
-  }
-
-  try {
-    const raw = window.localStorage.getItem(CHAT_SESSION_LABELS_STORAGE_KEY)
-    if (!raw) {
-      return {}
-    }
-
-    const parsed = JSON.parse(raw) as unknown
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return {}
-    }
-
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        ([key, value]) => typeof key === "string" && typeof value === "string" && value.trim()
-      )
-    )
-  } catch {
-    return {}
-  }
-}
-
-function writeStoredSessionLabels(labels: SessionLabelMap) {
-  if (typeof window === "undefined") {
-    return
-  }
-
-  try {
-    window.localStorage.setItem(CHAT_SESSION_LABELS_STORAGE_KEY, JSON.stringify(labels))
-  } catch {
-    // Ignore storage failures and keep the labels in memory.
-  }
-}
-
-function getStoredSessionLabel(sessionId: string) {
-  const value = readStoredSessionLabels()[sessionId]?.trim()
-  return value ? value : null
-}
-
-function setStoredSessionLabel(sessionId: string, label: string) {
-  const trimmedSessionId = sessionId.trim()
-  const trimmedLabel = label.trim()
-
-  if (!trimmedSessionId || !trimmedLabel) {
-    return
-  }
-
-  writeStoredSessionLabels({
-    ...readStoredSessionLabels(),
-    [trimmedSessionId]: trimmedLabel,
-  })
-}
-
-function removeStoredSessionLabel(sessionId: string) {
-  const trimmedSessionId = sessionId.trim()
-  if (!trimmedSessionId) {
-    return
-  }
-
-  const nextLabels = readStoredSessionLabels()
-  delete nextLabels[trimmedSessionId]
-  writeStoredSessionLabels(nextLabels)
-}
-
-function toConversationItem(session: SessionRecord): ConversationItem {
-  const storedLabel = getStoredSessionLabel(session.id)
+function toConversationItem(
+  session: SessionRecord,
+  sessionLabels: Record<string, string>
+): ConversationItem {
+  const storedLabel = sessionLabels[session.id]?.trim() || null
   const backendLabel = session.name.trim()
 
   return {
@@ -239,15 +153,20 @@ function toConversationItem(session: SessionRecord): ConversationItem {
 function Chat() {
   const navigate = useNavigate()
   const [markdownThemeClassName] = useMarkdownTheme()
-  const [deepThink, setDeepThink] = useState(true)
   const [draft, setDraft] = useState("")
   const [isSessionSheetOpen, setIsSessionSheetOpen] = useState(false)
-  const [curConversation, setCurConversation] = useState<string>(() => readStoredCurrentSessionId())
-
-  const [selectedModelId, setSelectedModelId] = useState("")
+  const [pendingModelSwitchId, setPendingModelSwitchId] = useState<string | null>(null)
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const hasBootstrappedSessions = useRef(false)
+  const hasHydrated = useChatUiStore((state) => state.hasHydrated)
+  const deepThink = useChatUiStore((state) => state.deepThink)
+  const setDeepThink = useChatUiStore((state) => state.setDeepThink)
+  const curConversation = useChatUiStore((state) => state.currentSessionId)
+  const setCurConversation = useChatUiStore((state) => state.setCurrentSessionId)
+  const sessionLabels = useChatUiStore((state) => state.sessionLabels)
+  const setSessionLabel = useChatUiStore((state) => state.setSessionLabel)
+  const removeSessionLabel = useChatUiStore((state) => state.removeSessionLabel)
 
   const { conversations, addConversation, setConversations } = useXConversations({
     defaultConversations: [],
@@ -314,26 +233,23 @@ function Chat() {
       }),
     [parsedCatalogModels]
   )
+  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
+    key: HEADER_SELECT_KEYS.chatModel,
+    options: modelOptions,
+    isLoading: catalogModelsLoading,
+  })
   const selectedModel = useMemo(
     () => modelOptions.find((item) => item.id === selectedModelId),
     [modelOptions, selectedModelId]
   )
+  const pendingModelSwitch = useMemo(
+    () => modelOptions.find((item) => item.id === pendingModelSwitchId) ?? null,
+    [modelOptions, pendingModelSwitchId]
+  )
 
   useEffect(() => {
-    if (modelOptions.length === 0) {
-      setSelectedModelId("")
-      return
-    }
-
-    const exists = modelOptions.some((model) => model.id === selectedModelId)
-    if (!selectedModelId || !exists) {
-      setSelectedModelId(modelOptions[0].id)
-    }
-  }, [modelOptions, selectedModelId])
-
-  useEffect(() => {
-    setConversations(sessionRecords.map(toConversationItem))
-  }, [sessionRecords, setConversations])
+    setConversations(sessionRecords.map((session) => toConversationItem(session, sessionLabels)))
+  }, [sessionLabels, sessionRecords, setConversations])
 
   const createEmptySession = useCallback(
     async (options?: { openSheet?: boolean; quiet?: boolean; select?: boolean }) => {
@@ -342,7 +258,7 @@ function Chat() {
           body: {},
         })
 
-        addConversation(toConversationItem(session), "prepend")
+        addConversation(toConversationItem(session, sessionLabels), "prepend")
         if (options?.select ?? true) {
           setCurConversation(session.id)
         }
@@ -361,7 +277,7 @@ function Chat() {
         return null
       }
     },
-    [addConversation, createSessionMutation, refetchSessions]
+    [addConversation, createSessionMutation, refetchSessions, sessionLabels, setCurConversation]
   )
 
   useEffect(() => {
@@ -383,6 +299,10 @@ function Chat() {
   }, [createEmptySession, sessionRecords.length, sessionsLoading])
 
   useEffect(() => {
+    if (!hasHydrated) {
+      return
+    }
+
     if (conversationList.length === 0) {
       if (curConversation) {
         setCurConversation("")
@@ -394,20 +314,12 @@ function Chat() {
       return
     }
 
-    const storedConversationId = readStoredCurrentSessionId()
-    const nextConversationKey =
-      conversationList.find((item) => item.key === storedConversationId)?.key ??
-      conversationList[0]?.key ??
-      ""
+    const nextConversationKey = conversationList[0]?.key ?? ""
 
     if (nextConversationKey && nextConversationKey !== curConversation) {
       setCurConversation(nextConversationKey)
     }
-  }, [conversationList, curConversation])
-
-  useEffect(() => {
-    writeStoredCurrentSessionId(curConversation)
-  }, [curConversation])
+  }, [conversationList, curConversation, hasHydrated, setCurConversation])
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -622,6 +534,8 @@ function Chat() {
     .slice()
     .reverse()
     .find((item) => item.message.role === "user")
+  const currentConversationLabel =
+    conversationList.find((item) => item.key === curConversation)?.label?.trim() || "Current session"
   const selectedModelStatusLabel = useMemo(() => {
     if (isSessionBootstrapping || !curConversation) {
       return "Preparing session"
@@ -674,30 +588,95 @@ function Chat() {
     modelLoading,
     selectedModel,
   ])
+
+  const closePendingModelSwitch = useCallback(() => {
+    if (createSessionMutation.isPending) {
+      return
+    }
+
+    setPendingModelSwitchId(null)
+  }, [createSessionMutation.isPending])
+
+  const handleModelPickerChange = useCallback(
+    (nextModelId: string) => {
+      if (!nextModelId || nextModelId === selectedModelId) {
+        return
+      }
+
+      if (isSessionBusy || isSessionBootstrapping) {
+        toast.info("Wait for the current response or session sync to finish before switching models.")
+        return
+      }
+
+      if (!curConversation || safeMessages.length === 0) {
+        setSelectedModelId(nextModelId)
+        return
+      }
+
+      setPendingModelSwitchId(nextModelId)
+    },
+    [curConversation, isSessionBootstrapping, isSessionBusy, safeMessages.length, selectedModelId]
+  )
+
+  const handleKeepSessionOnModelSwitch = useCallback(() => {
+    if (!pendingModelSwitchId) {
+      return
+    }
+
+    setSelectedModelId(pendingModelSwitchId)
+    setPendingModelSwitchId(null)
+  }, [pendingModelSwitchId])
+
+  const handleCreateSessionOnModelSwitch = useCallback(async () => {
+    if (!pendingModelSwitchId) {
+      return
+    }
+
+    const nextModelId = pendingModelSwitchId
+    const session = await createEmptySession({ select: true })
+
+    if (!session) {
+      return
+    }
+
+    setSelectedModelId(nextModelId)
+    setPendingModelSwitchId(null)
+  }, [createEmptySession, pendingModelSwitchId])
+
   const headerModelPicker = useMemo(
     () => ({
+      type: "select" as const,
       value: selectedModelId,
       options: modelOptions.map((model) => ({
         id: model.id,
         label: model.label,
       })),
-      onValueChange: setSelectedModelId,
+      onValueChange: handleModelPickerChange,
       groupLabel: "Chat Models",
       placeholder: "Select model",
       loading: modelLoading,
       disabled:
         modelLoading ||
-        isPreparingModel ||
-        isRequesting ||
+        isSessionBusy ||
+        isSessionBootstrapping ||
+        Boolean(pendingModelSwitchId) ||
         modelOptions.length === 0,
       emptyLabel: "No chat models",
     }),
-    [isPreparingModel, isRequesting, modelLoading, modelOptions, selectedModelId]
+    [
+      handleModelPickerChange,
+      isSessionBootstrapping,
+      isSessionBusy,
+      modelLoading,
+      modelOptions,
+      pendingModelSwitchId,
+      selectedModelId,
+    ]
   )
   const latestUserPrompt = getChatMessageTextContent(latestUserMessage?.message).trim()
 
   usePageHeader(PAGE_HEADER_META.chat)
-  usePageHeaderModelPicker(headerModelPicker)
+  usePageHeaderControl(headerModelPicker)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({
@@ -751,12 +730,12 @@ function Chat() {
       })
 
       if (didUpdateLabel && nextLabel) {
-        setStoredSessionLabel(conversationKey, nextLabel)
+        setSessionLabel(conversationKey, nextLabel)
       }
 
       setConversations(nextList)
     },
-    [conversationList, setConversations]
+    [conversationList, setConversations, setSessionLabel]
   )
 
   const handleCreateConversation = useCallback(async () => {
@@ -796,7 +775,7 @@ function Chat() {
         return
       }
 
-      removeStoredSessionLabel(conversationKey)
+      removeSessionLabel(conversationKey)
       clearConversationCache(conversationKey)
 
       const nextList = conversationList.filter((item) => item.key !== conversationKey)
@@ -821,6 +800,7 @@ function Chat() {
       deleteSessionMutation,
       isSessionBusy,
       refetchSessions,
+      removeSessionLabel,
       setConversations,
     ]
   )
@@ -972,6 +952,79 @@ function Chat() {
             }}
             onDelete={handleDeleteConversation}
           />
+
+          <Dialog
+            open={Boolean(pendingModelSwitchId)}
+            onOpenChange={(open) => {
+              if (!open) {
+                closePendingModelSwitch()
+              }
+            }}
+          >
+            <DialogContent className="max-w-xl" showCloseButton={!createSessionMutation.isPending}>
+              <DialogHeader className="space-y-3 text-left">
+                <DialogTitle>Switch model for this conversation?</DialogTitle>
+                <DialogDescription>
+                  Choose whether the new model should keep using this session history or start from
+                  a clean session.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-2 text-sm leading-6 text-muted-foreground">
+                <p>
+                  You are switching from <strong>{selectedModel?.label ?? "the current model"}</strong> to{" "}
+                  <strong>{pendingModelSwitch?.label ?? pendingModelSwitchId ?? "the selected model"}</strong>.
+                </p>
+                <p>
+                  <strong>{currentConversationLabel}</strong> already has {safeMessages.length}{" "}
+                  {safeMessages.length === 1 ? "message" : "messages"}.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
+                  <p className="text-sm font-medium text-foreground">Keep current session</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    The new model will continue from this conversation and see the existing message
+                    history.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
+                  <p className="text-sm font-medium text-foreground">Create new session</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    Start with a clean session and keep the previous conversation attached to the old
+                    model.
+                  </p>
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button
+                  variant="outline"
+                  onClick={closePendingModelSwitch}
+                  disabled={createSessionMutation.isPending}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handleKeepSessionOnModelSwitch}
+                  disabled={createSessionMutation.isPending}
+                >
+                  Keep current session
+                </Button>
+                <Button
+                  onClick={() => void handleCreateSessionOnModelSwitch()}
+                  disabled={createSessionMutation.isPending}
+                >
+                  {createSessionMutation.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : null}
+                  Create new session
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </ChatContext.Provider>
     </XProvider>

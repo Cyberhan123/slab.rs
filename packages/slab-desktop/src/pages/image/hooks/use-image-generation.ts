@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
 
-import { usePageHeader, usePageHeaderModelPicker } from '@/hooks/use-global-header-meta';
+import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api from '@/lib/api';
 import type { components } from '@/lib/api/v1.d.ts';
@@ -156,6 +156,7 @@ export function useImageGeneration() {
   const isBusy = isGenerating || isPreparingModel;
   const headerModelPicker = useMemo(
     () => ({
+      type: 'select' as const,
       value: selectedModelId,
       options: modelOptions.map((model) => ({
         id: model.id,
@@ -177,7 +178,7 @@ export function useImageGeneration() {
       (preset) => preset.width === parsedWidth && preset.height === parsedHeight,
     )?.label ?? null;
 
-  usePageHeaderModelPicker(headerModelPicker);
+  usePageHeaderControl(headerModelPicker);
 
   const clearGenerationTask = useCallback(() => {
     pollAttempts.current = 0;
