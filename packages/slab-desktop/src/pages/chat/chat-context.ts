@@ -78,10 +78,16 @@ export type ChatUiMessage = XModelMessage & {
 export type ChatMessageRecord = MessageInfo<ChatUiMessage>;
 export type ChatRequestParams = XModelParams & {
     continue_generation?: boolean;
+    temperature?: number | null;
     thinking?: {
         type: 'enabled' | 'disabled';
     };
+    top_p?: number | null;
     userAction?: string;
+};
+export type ChatRuntimePresets = {
+    temperature?: number | null;
+    top_p?: number | null;
 };
 
 export type ChatRequestErrorInfo = {

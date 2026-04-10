@@ -61,6 +61,7 @@ type ModelOption = {
   source: ModelOptionSource
   capabilities: ChatModelCapabilities
   contextWindow?: number | null
+  runtimePresets?: CatalogModel["runtime_presets"]
 }
 
 function createConversationLabel(value: string) {
@@ -172,6 +173,7 @@ function Chat() {
           source: model.kind,
           capabilities: resolveChatModelCapabilities(model),
           contextWindow: model.spec.context_window ?? null,
+          runtimePresets: model.runtime_presets ?? null,
         }
       }),
     [parsedCatalogModels]
@@ -369,6 +371,7 @@ function Chat() {
     selectedModelId || "slab-llama",
     deepThink,
     selectedModel?.capabilities.reasoning_controls ?? false,
+    selectedModel?.runtimePresets ?? null,
     ensureChatModelReady
   )
 
