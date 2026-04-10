@@ -86,7 +86,7 @@ ffmpeg-sidecar = { version = "2", features = ["download_ffmpeg"] }
 ort = { version = "2.0.0-rc.12", features = ["load-dynamic"] }
 candle-core = "0.10.2"
 candle-nn = "0.10.2"
-candle-transformers = "0.9.2"
+candle-transformers = "0.10.2"
 tokenizers = "0.22.2"
 schemars = { version = "1.2", features = ["uuid1", "chrono04"] }
 sha2 = "0.11.0"
