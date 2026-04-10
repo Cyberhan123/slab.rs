@@ -7,12 +7,12 @@ import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api from '@/lib/api';
 import type { components } from '@/lib/api/v1.d.ts';
 import {
-  DIMENSION_PRESETS,
   MAX_POLL_ATTEMPTS,
   POLL_INTERVAL_MS,
   type GeneratedImage,
   type ImageRouteState,
 } from '../const';
+import { useImageGenerationControls } from './use-image-generation-controls';
 import { useImageModelPreparation } from './use-image-model-preparation';
 
 type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
@@ -32,22 +32,8 @@ async function fileToDataUri(file: File): Promise<string> {
 
 export function useImageGeneration() {
   const location = useLocation();
-  const [mode, setMode] = useState<'txt2img' | 'img2img'>('txt2img');
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
-  const [widthStr, setWidthStr] = useState('512');
-  const [heightStr, setHeightStr] = useState('512');
-  const [numImages, setNumImages] = useState(1);
-  const [advancedOpen, setAdvancedOpen] = useState(false);
-  const [cfgScale, setCfgScale] = useState(7.0);
-  const [guidance, setGuidance] = useState(3.5);
-  const [steps, setSteps] = useState(20);
-  const [seed, setSeed] = useState(-1);
-  const [sampleMethod, setSampleMethod] = useState('auto');
-  const [scheduler, setScheduler] = useState('auto');
-  const [clipSkip, setClipSkip] = useState(0);
-  const [eta, setEta] = useState(0);
-  const [strength, setStrength] = useState(0.75);
   const [initImageDataUri, setInitImageDataUri] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
   const [generationPhase, setGenerationPhase] = useState<GenerationPhase>('idle');
@@ -66,6 +52,41 @@ export function useImageGeneration() {
     selectedModelId,
     setSelectedModelId,
   } = useImageModelPreparation();
+  const {
+    activeDimensionPreset,
+    advancedOpen,
+    cfgScale,
+    clipSkip,
+    eta,
+    guidance,
+    handleDimensionPreset,
+    heightStr,
+    isResolvingModelState,
+    mode,
+    numImages,
+    parsedHeight,
+    parsedWidth,
+    sampleMethod,
+    scheduler,
+    seed,
+    setAdvancedOpen,
+    setCfgScale,
+    setClipSkip,
+    setEta,
+    setGuidance,
+    setHeightStr,
+    setMode,
+    setNumImages,
+    setSampleMethod,
+    setScheduler,
+    setSeed,
+    setSteps,
+    setStrength,
+    setWidthStr,
+    steps,
+    strength,
+    widthStr,
+  } = useImageGenerationControls(selectedModelId);
 
   const generateImagesMutation = api.useMutation('post', '/v1/images/generations') as unknown as {
     mutateAsync: (options: { body: ImageGenerationRequest }) => Promise<OperationAcceptedResponse>;
@@ -153,7 +174,7 @@ export function useImageGeneration() {
   });
 
   const isGenerating = isSubmitting || generationPhase !== 'idle';
-  const isBusy = isGenerating || isPreparingModel;
+  const isBusy = isGenerating || isPreparingModel || isResolvingModelState;
   const headerModelPicker = useMemo(
     () => ({
       type: 'select' as const,
@@ -171,12 +192,6 @@ export function useImageGeneration() {
     }),
     [catalogLoading, isBusy, modelOptions, selectedModelId, setSelectedModelId],
   );
-  const parsedWidth = Number.parseInt(widthStr, 10) || 512;
-  const parsedHeight = Number.parseInt(heightStr, 10) || 512;
-  const activeDimensionPreset =
-    DIMENSION_PRESETS.find(
-      (preset) => preset.width === parsedWidth && preset.height === parsedHeight,
-    )?.label ?? null;
 
   usePageHeaderControl(headerModelPicker);
 
@@ -184,11 +199,6 @@ export function useImageGeneration() {
     pollAttempts.current = 0;
     setGenerationPhase('idle');
     setTaskId(null);
-  }, []);
-
-  const handleDimensionPreset = useCallback((width: number, height: number) => {
-    setWidthStr(String(width));
-    setHeightStr(String(height));
   }, []);
 
   const handleInitImageChange = useCallback(
@@ -208,6 +218,11 @@ export function useImageGeneration() {
   );
 
   const handleSubmit = useCallback(async () => {
+    if (isResolvingModelState) {
+      toast.error('Model preset is still loading');
+      return;
+    }
+
     if (!prompt.trim()) {
       toast.error('Please enter a prompt');
       return;
@@ -262,9 +277,11 @@ export function useImageGeneration() {
     clearGenerationTask,
     clipSkip,
     eta,
+    generateImagesMutation,
     guidance,
     heightStr,
     initImageDataUri,
+    isResolvingModelState,
     mode,
     negativePrompt,
     numImages,
@@ -276,7 +293,6 @@ export function useImageGeneration() {
     steps,
     strength,
     widthStr,
-    generateImagesMutation,
   ]);
 
   useEffect(() => {
@@ -406,6 +422,7 @@ export function useImageGeneration() {
     isBusy,
     isGenerating,
     isPreparingModel,
+    isResolvingModelState,
     mode,
     negativePrompt,
     numImages,

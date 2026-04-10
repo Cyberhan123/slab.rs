@@ -27,7 +27,7 @@ import {
   type ModelConfigDocumentResponse,
   type ModelConfigFieldResponse,
   updateModelConfigSelection,
-} from '../lib/model-enhancement';
+} from '@/lib/model-config';
 
 type HubModelEnhancementSheetProps = {
   model: ModelItem | null;
