@@ -3,16 +3,22 @@ import { toast } from 'sonner';
 
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api from '@/lib/api';
+import type { components } from '@/lib/api/v1.d.ts';
 import { toCatalogModelList } from '@/lib/api/models';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import {
-  API_BASE_URL,
   MAX_POLL_ATTEMPTS,
   POLL_INTERVAL_MS,
   type ModelOption,
 } from '../const';
+
+type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
+type OperationAcceptedResponse = components['schemas']['OperationAcceptedResponse'];
+type TaskResponse = components['schemas']['TaskResponse'];
+type TaskResultPayload = components['schemas']['TaskResultPayload'];
+type VideoGenerationRequest = components['schemas']['VideoGenerationRequest'];
 
 async function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -41,15 +47,13 @@ export function useVideoGeneration() {
   const [strength, setStrength] = useState(0.75);
   const [initImageDataUri, setInitImageDataUri] = useState<string | null>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
+  const [generationPhase, setGenerationPhase] = useState<GenerationPhase>('idle');
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isPolling, setIsPolling] = useState(false);
   const [videoPath, setVideoPath] = useState<string | null>(null);
   const [immersivePreview, setImmersivePreview] = useState(false);
 
   const initImageInputRef = useRef<HTMLInputElement>(null);
   const pollAttempts = useRef(0);
-  const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const abortRef = useRef(false);
 
   usePageHeader(PAGE_HEADER_META.video);
 
@@ -90,7 +94,61 @@ export function useVideoGeneration() {
     () => modelOptions.find((model) => model.id === selectedModelId),
     [modelOptions, selectedModelId],
   );
-  const isGenerating = isSubmitting || isPolling;
+  const generateVideoMutation = api.useMutation('post', '/v1/video/generations') as unknown as {
+    mutateAsync: (options: { body: VideoGenerationRequest }) => Promise<OperationAcceptedResponse>;
+  };
+  const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
+  const isPolling = generationPhase === 'polling';
+  const isFetchingResult = generationPhase === 'fetchingResult';
+  const {
+    data: taskStatus,
+    error: taskStatusError,
+    dataUpdatedAt: taskStatusUpdatedAt,
+  } = api.useQuery(
+    'get',
+    '/v1/tasks/{id}',
+    {
+      params: {
+        path: {
+          id: taskId ?? '',
+        },
+      },
+    },
+    {
+      enabled: isPolling && Boolean(taskId),
+      refetchInterval: isPolling && taskId ? POLL_INTERVAL_MS : false,
+      refetchIntervalInBackground: true,
+      retry: false,
+    },
+  ) as {
+    data: TaskResponse | undefined;
+    error: unknown;
+    dataUpdatedAt: number;
+  };
+  const {
+    data: taskResult,
+    error: taskResultError,
+    dataUpdatedAt: taskResultUpdatedAt,
+  } = api.useQuery(
+    'get',
+    '/v1/tasks/{id}/result',
+    {
+      params: {
+        path: {
+          id: taskId ?? '',
+        },
+      },
+    },
+    {
+      enabled: isFetchingResult && Boolean(taskId),
+      retry: false,
+    },
+  ) as {
+    data: TaskResultPayload | undefined;
+    error: unknown;
+    dataUpdatedAt: number;
+  };
+  const isGenerating = isSubmitting || generationPhase !== 'idle';
   const headerModelPicker = useMemo(
     () => ({
       type: 'select' as const,
@@ -111,6 +169,12 @@ export function useVideoGeneration() {
   );
 
   usePageHeaderControl(headerModelPicker);
+
+  const clearGenerationTask = useCallback(() => {
+    pollAttempts.current = 0;
+    setGenerationPhase('idle');
+    setTaskId(null);
+  }, []);
 
   const loadInitImageFile = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
@@ -162,16 +226,13 @@ export function useVideoGeneration() {
     }
 
     setIsSubmitting(true);
-    abortRef.current = false;
     setVideoPath(null);
 
     try {
       const width = Number.parseInt(widthStr, 10) || 512;
       const height = Number.parseInt(heightStr, 10) || 512;
-      const response = await fetch(`${API_BASE_URL}/v1/video/generations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
+      const { operation_id } = await generateVideoMutation.mutateAsync({
+        body: {
           model: selectedModel.local_path,
           prompt,
           negative_prompt: negativePrompt || undefined,
@@ -187,17 +248,10 @@ export function useVideoGeneration() {
           scheduler: scheduler === 'auto' ? undefined : scheduler,
           strength: initImageDataUri ? strength : undefined,
           init_image: initImageDataUri ?? undefined,
-        }),
+        },
       });
-
-      if (!response.ok) {
-        const detail = await response.text();
-        throw new Error(`HTTP ${response.status}: ${detail || 'generation failed'}`);
-      }
-
-      const { operation_id } = (await response.json()) as { operation_id: string };
       setTaskId(operation_id);
-      setIsPolling(true);
+      setGenerationPhase('polling');
       pollAttempts.current = 0;
       toast.info(`Video generation started (${frames} frames at ${fps} fps)...`);
     } catch (error) {
@@ -222,88 +276,90 @@ export function useVideoGeneration() {
     steps,
     strength,
     widthStr,
+    generateVideoMutation,
   ]);
 
   useEffect(() => {
-    if (!isPolling || !taskId) {
+    if (!isPolling || !taskId || taskStatusUpdatedAt === 0) {
       return;
     }
 
-    const poll = async () => {
-      if (abortRef.current) {
-        setIsPolling(false);
-        return;
-      }
+    pollAttempts.current += 1;
+    if (pollAttempts.current > MAX_POLL_ATTEMPTS) {
+      toast.error('Video generation timed out');
+      clearGenerationTask();
+      return;
+    }
 
-      pollAttempts.current += 1;
-      if (pollAttempts.current > MAX_POLL_ATTEMPTS) {
-        toast.error('Video generation timed out');
-        setIsPolling(false);
-        setTaskId(null);
-        return;
-      }
+    if (!taskStatus) {
+      return;
+    }
 
-      try {
-        const statusRes = await fetch(`${API_BASE_URL}/v1/tasks/${taskId}`);
-        if (!statusRes.ok) {
-          throw new Error(`status ${statusRes.status}`);
-        }
-        const status = (await statusRes.json()) as { status: string };
+    if (
+      taskStatus.status === 'failed' ||
+      taskStatus.status === 'cancelled' ||
+      taskStatus.status === 'interrupted'
+    ) {
+      toast.error(taskStatus.error_msg ?? 'Video generation failed');
+      clearGenerationTask();
+      return;
+    }
 
-        if (status.status === 'failed') {
-          toast.error('Video generation failed');
-          setIsPolling(false);
-          setTaskId(null);
-          return;
-        }
+    if (taskStatus.status === 'succeeded') {
+      setGenerationPhase('fetchingResult');
+    }
+  }, [clearGenerationTask, isPolling, taskId, taskStatus, taskStatusUpdatedAt]);
 
-        if (status.status === 'succeeded') {
-          const resultRes = await fetch(`${API_BASE_URL}/v1/tasks/${taskId}/result`);
-          if (!resultRes.ok) {
-            throw new Error(`result ${resultRes.status}`);
-          }
-          const result = (await resultRes.json()) as { video_path?: string };
-          if (result.video_path) {
-            setVideoPath(result.video_path);
-            toast.success('Video generated!');
-          }
-          setIsPolling(false);
-          setTaskId(null);
-          return;
-        }
+  useEffect(() => {
+    if (!isPolling || !taskId || !taskStatusError) {
+      return;
+    }
 
-        pollTimer.current = setTimeout(poll, POLL_INTERVAL_MS);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        toast.error(`Polling error: ${message}`);
-        setIsPolling(false);
-        setTaskId(null);
-      }
-    };
+    const message = taskStatusError instanceof Error ? taskStatusError.message : String(taskStatusError);
+    toast.error(`Polling error: ${message}`);
+    clearGenerationTask();
+  }, [clearGenerationTask, isPolling, taskId, taskStatusError]);
 
-    pollTimer.current = setTimeout(poll, POLL_INTERVAL_MS);
-    return () => {
-      if (pollTimer.current) {
-        clearTimeout(pollTimer.current);
-      }
-    };
-  }, [isPolling, taskId]);
+  useEffect(() => {
+    if (!isFetchingResult || !taskId || taskResultUpdatedAt === 0 || !taskResult) {
+      return;
+    }
+
+    if (taskResult.video_path) {
+      setVideoPath(taskResult.video_path);
+      toast.success('Video generated!');
+    } else {
+      toast.error('Video generation completed without a video path');
+    }
+
+    clearGenerationTask();
+  }, [clearGenerationTask, isFetchingResult, taskId, taskResult, taskResultUpdatedAt]);
+
+  useEffect(() => {
+    if (!isFetchingResult || !taskId || !taskResultError) {
+      return;
+    }
+
+    const message = taskResultError instanceof Error ? taskResultError.message : String(taskResultError);
+    toast.error(`Failed to fetch video result: ${message}`);
+    clearGenerationTask();
+  }, [clearGenerationTask, isFetchingResult, taskId, taskResultError]);
 
   const handleCancel = useCallback(async () => {
-    abortRef.current = true;
-    if (pollTimer.current) {
-      clearTimeout(pollTimer.current);
-    }
     if (taskId) {
       try {
-        await fetch(`${API_BASE_URL}/v1/tasks/${taskId}/cancel`, { method: 'POST' });
+        await cancelTaskMutation.mutateAsync({
+          params: {
+            path: { id: taskId },
+          },
+        });
       } catch (error) {
         console.error('Failed to cancel task', error);
       }
     }
-    setIsPolling(false);
-    setTaskId(null);
-  }, [taskId]);
+
+    clearGenerationTask();
+  }, [cancelTaskMutation, clearGenerationTask, taskId]);
 
   const handleDownload = useCallback(() => {
     if (!videoPath) {

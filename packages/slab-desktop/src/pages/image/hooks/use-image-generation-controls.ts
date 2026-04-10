@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { fetchModelConfigDocument } from '@/lib/model-config';
+import { useModelConfigDocumentQuery } from '@/lib/model-config';
 import { useImageUiStore } from '@/store/useImageUiStore';
 import { DIMENSION_PRESETS } from '../const';
 import {
@@ -24,6 +24,16 @@ export function useImageGenerationControls(selectedModelId: string) {
 
   const persistedControls = selectedModelId ? modelControls[selectedModelId] : undefined;
   const isResolvingModelState = Boolean(selectedModelId) && (!hasHydrated || resolvedModelId !== selectedModelId);
+  const {
+    data: modelConfigDocument,
+    error: modelConfigError,
+  } = useModelConfigDocumentQuery(selectedModelId || null, {
+    enabled:
+      hasHydrated &&
+      Boolean(selectedModelId) &&
+      !persistedControls &&
+      resolvedModelId !== selectedModelId,
+  });
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -47,32 +57,26 @@ export function useImageGenerationControls(selectedModelId: string) {
     }
 
     setControls(createDefaultImageGenerationControls());
-
-    let disposed = false;
-
-    void fetchModelConfigDocument(selectedModelId)
-      .then((document) => {
-        if (disposed) {
-          return;
-        }
-
-        setControls(buildImageGenerationControlsFromModelConfig(document));
-        setResolvedModelId(selectedModelId);
-      })
-      .catch((error) => {
-        if (disposed) {
-          return;
-        }
-
-        console.warn(`Failed to load image preset defaults for model '${selectedModelId}'.`, error);
-        setControls(createDefaultImageGenerationControls());
-        setResolvedModelId(selectedModelId);
-      });
-
-    return () => {
-      disposed = true;
-    };
   }, [hasHydrated, persistedControls, resolvedModelId, selectedModelId]);
+
+  useEffect(() => {
+    if (!selectedModelId || resolvedModelId === selectedModelId || !modelConfigDocument) {
+      return;
+    }
+
+    setControls(buildImageGenerationControlsFromModelConfig(modelConfigDocument));
+    setResolvedModelId(selectedModelId);
+  }, [modelConfigDocument, resolvedModelId, selectedModelId]);
+
+  useEffect(() => {
+    if (!selectedModelId || resolvedModelId === selectedModelId || !modelConfigError) {
+      return;
+    }
+
+    console.warn(`Failed to load image preset defaults for model '${selectedModelId}'.`, modelConfigError);
+    setControls(createDefaultImageGenerationControls());
+    setResolvedModelId(selectedModelId);
+  }, [modelConfigError, resolvedModelId, selectedModelId]);
 
   useEffect(() => {
     if (!hasHydrated || !selectedModelId || resolvedModelId !== selectedModelId) {
