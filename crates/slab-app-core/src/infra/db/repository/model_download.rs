@@ -318,12 +318,18 @@ mod tests {
         let store = new_store().await;
 
         store
-            .insert_model_download_operation(new_task_record("task-1"), new_download_record("task-1"))
+            .insert_model_download_operation(
+                new_task_record("task-1"),
+                new_download_record("task-1"),
+            )
             .await
             .expect("insert first download");
 
         let error = store
-            .insert_model_download_operation(new_task_record("task-2"), new_download_record("task-2"))
+            .insert_model_download_operation(
+                new_task_record("task-2"),
+                new_download_record("task-2"),
+            )
             .await
             .expect_err("second active download should conflict");
 
@@ -343,7 +349,10 @@ mod tests {
         let store = new_store().await;
 
         store
-            .insert_model_download_operation(new_task_record("task-1"), new_download_record("task-1"))
+            .insert_model_download_operation(
+                new_task_record("task-1"),
+                new_download_record("task-1"),
+            )
             .await
             .expect("insert download");
 

@@ -11,19 +11,18 @@ import AppRoutes from "@/routes";
 
 /**
  * Checks whether the one-time setup wizard has been completed on every
- * navigation to a non-setup route. Redirects to /setup when either:
- *   - the server reports `initialized: false`, or
- *   - the server is unreachable.
+ * navigation to a non-setup route. Redirects to /setup only when the server
+ * responds and reports `initialized: false`.
  *
- * The guard uses the shared API query client so Tauri route mapping and
- * polling behaviour stay aligned with the rest of the app.
+ * The desktop host now spawns `slab-server` asynchronously, so transient
+ * transport errors during boot should not be treated as a setup signal.
  */
 function SetupGuard() {
   const navigate = useNavigate();
   const location = useLocation();
   const isSetupRoute = location.pathname === "/setup";
 
-  const { data: setupStatus, error: setupStatusError } = api.useQuery(
+  const { data: setupStatus } = api.useQuery(
     "get",
     "/v1/setup/status",
     undefined,
@@ -40,10 +39,10 @@ function SetupGuard() {
       return;
     }
 
-    if (setupStatusError || setupStatus?.initialized === false) {
+    if (setupStatus?.initialized === false) {
       navigate("/setup", { replace: true });
     }
-  }, [isSetupRoute, navigate, setupStatus?.initialized, setupStatusError]);
+  }, [isSetupRoute, navigate, setupStatus?.initialized]);
 
   return null;
 }
