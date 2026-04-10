@@ -59,9 +59,9 @@ dependencies = [
 
 [[package]]
 name = "all-smi"
-version = "0.17.3"
+version = "0.17.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2a243abfbcb88b1187f11daae0451f0b7513e97b74da2ad5732792fb3dadaa90"
+checksum = "0fc629637bce68a14d1e23cf8a446585ba31a907cc61546e0bc913d64ef2fe08"
 dependencies = [
  "all-smi-luwen-core",
  "all-smi-luwen-if",
@@ -75,8 +75,6 @@ dependencies = [
  "core-foundation 0.10.1",
  "crossterm",
  "futures-util",
- "hyper",
- "hyper-util",
  "libamdgpu_top",
  "libc",
  "libloading 0.9.0",
@@ -86,7 +84,6 @@ dependencies = [
  "openssl",
  "prost 0.14.3",
  "prost-types 0.14.3",
- "rand 0.10.0",
  "regex",
  "reqwest 0.13.2",
  "serde",
@@ -3748,7 +3745,6 @@ dependencies = [
  "socket2",
  "system-configuration",
  "tokio",
- "tower-layer",
  "tower-service",
  "tracing",
  "windows-registry",
@@ -5074,9 +5070,9 @@ checksum = "830b246a0e5f20af87141b25c173cd1b609bd7779a4617d6ec582abaf90870f3"
 
 [[package]]
 name = "nvml-wrapper"
-version = "0.11.0"
+version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d5c6c0ef9702176a570f06ad94f3198bc29c524c8b498f1b9346e1b1bdcbb3a"
+checksum = "f049ae562349fefb8e837eb15443da1e7c6dcbd8a11f52a228f92220c2e5c85e"
 dependencies = [
  "bitflags 2.11.0",
  "libloading 0.8.9",
@@ -5088,9 +5084,9 @@ dependencies = [
 
 [[package]]
 name = "nvml-wrapper-sys"
-version = "0.9.0"
+version = "0.9.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd23dbe2eb8d8335d2bce0299e0a07d6a63c089243d626ca75b770a962ff49e6"
+checksum = "6b4d594420fcda43b1c2c4bd44d48974aa3c7a9ab2cbf10dc18e35265767bf0b"
 dependencies = [
  "libloading 0.8.9",
 ]
@@ -6217,7 +6213,7 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -6237,7 +6233,7 @@ version = "0.14.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "343d3bd7056eda839b03204e68deff7d1b13aba7af2b2fd16890697274262ee7"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
