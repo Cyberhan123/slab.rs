@@ -15,7 +15,7 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
 - `shadcn-ui`
   Use for shared UI primitives, forms, dialogs, tables, and Tailwind-based component work in `packages/slab-components/`.
 - `tauri-v2`
-  Use for `bin/slab-app/src-tauri`, `bin/slab-app/src-tauri/src/api/**`, sidecar startup, capabilities, permissions, Tauri commands, plugin webview runtime, and IPC details.
+  Use for `bin/slab-app/src-tauri`, sidecar startup, capabilities, permissions, Tauri commands, plugin webview runtime, and desktop host integration details.
 
 ## No Local Skill Needed
 

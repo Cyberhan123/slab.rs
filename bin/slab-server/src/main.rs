@@ -126,6 +126,9 @@ impl SupervisorArgs {
         if let Some(log_file) = &self.log_file {
             cfg.log_file = Some(log_file.clone());
         }
+        if let Some(lib_dir) = &self.lib_dir {
+            cfg.lib_dir = Some(lib_dir.clone());
+        }
         if !self.log_json && cfg.log_json {
             self.log_json = true;
         }
@@ -143,6 +146,9 @@ impl SupervisorArgs {
         }
         if self.model_config_dir.is_none() {
             self.model_config_dir = Some(cfg.model_config_dir.clone());
+        }
+        if self.lib_dir.is_none() {
+            self.lib_dir = cfg.lib_dir.clone();
         }
     }
 
@@ -176,10 +182,6 @@ impl SupervisorArgs {
         if self.backend_capacity.is_some() {
             rejected.push("--backend-capacity");
         }
-        if self.lib_dir.is_some() {
-            rejected.push("--lib-dir");
-        }
-
         if rejected.is_empty() {
             return Ok(());
         }
@@ -707,6 +709,7 @@ mod tests {
         let args = SupervisorArgs {
             database_url: Some("sqlite:///tmp/slab.db?mode=rwc".to_owned()),
             settings_path: Some(PathBuf::from("C:/Slab/settings.json")),
+            lib_dir: Some(PathBuf::from("C:/Slab/resources/libs")),
             ..SupervisorArgs::default()
         };
 
@@ -750,6 +753,22 @@ mod tests {
 
         assert_eq!(cfg.settings_path, PathBuf::from("D:/Slab/api-settings.json"));
         assert_eq!(cfg.model_config_dir, PathBuf::from("E:/custom-models"));
+    }
+
+    #[test]
+    fn bootstrap_args_apply_cli_lib_dir_override_to_runtime_config() {
+        let mut args = SupervisorArgs {
+            lib_dir: Some(PathBuf::from("C:/Slab/resources/libs")),
+            ..SupervisorArgs::default()
+        };
+        let mut cfg = Config::from_env();
+
+        cfg.lib_dir = Some(PathBuf::from("D:/legacy/libs"));
+
+        args.apply_bootstrap_config(&mut cfg);
+
+        assert_eq!(cfg.lib_dir, Some(PathBuf::from("C:/Slab/resources/libs")));
+        assert_eq!(args.lib_dir, Some(PathBuf::from("C:/Slab/resources/libs")));
     }
 
     #[test]

@@ -7780,11 +7780,9 @@ dependencies = [
 name = "slab-app"
 version = "0.0.1"
 dependencies = [
- "async-trait",
  "base64 0.22.1",
  "dirs-next",
  "extism",
- "futures",
  "hex",
  "log",
  "mime_guess",
@@ -7793,7 +7791,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2 0.11.0",
- "slab-app-core",
  "slab-build-utils",
  "tauri",
  "tauri-build",

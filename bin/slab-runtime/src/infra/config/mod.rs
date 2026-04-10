@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use clap::Parser;
 
 #[derive(Parser, Debug, Clone)]
@@ -48,8 +49,12 @@ pub struct RuntimeConfig {
 impl Cli {
     pub fn into_runtime_config(self) -> anyhow::Result<RuntimeConfig> {
         let enabled_backends = parse_enabled_backends(self.enabled_backends.as_deref())?;
-        let base_lib_path =
-            self.lib_dir.unwrap_or_else(|| Path::new("./resources/libs").to_path_buf());
+        let current_dir =
+            std::env::current_dir().context("failed to resolve slab-runtime current directory")?;
+        let base_lib_path = resolve_base_lib_path(
+            self.lib_dir.unwrap_or_else(|| Path::new("./resources/libs").to_path_buf()),
+            &current_dir,
+        );
         let llama_lib_dir = enabled_backends.llama.then(|| base_lib_path.clone());
         let whisper_lib_dir = enabled_backends.whisper.then(|| base_lib_path.clone());
         let diffusion_lib_dir = enabled_backends.diffusion.then(|| base_lib_path.clone());
@@ -137,4 +142,33 @@ pub fn parse_enabled_backends(raw: Option<&str>) -> anyhow::Result<EnabledBacken
     }
 
     Ok(enabled)
+}
+
+fn resolve_base_lib_path(path: PathBuf, current_dir: &Path) -> PathBuf {
+    let absolute = if path.is_absolute() { path } else { current_dir.join(path) };
+    absolute.canonicalize().unwrap_or(absolute)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_base_lib_path;
+    use std::path::{Path, PathBuf};
+
+    #[test]
+    fn resolve_base_lib_path_makes_relative_paths_absolute() {
+        let cwd = Path::new("C:/slab/bin/slab-app/src-tauri");
+        let resolved = resolve_base_lib_path(PathBuf::from("./resources/libs"), cwd);
+
+        assert!(resolved.is_absolute());
+        assert_eq!(resolved, cwd.join("resources").join("libs"));
+    }
+
+    #[test]
+    fn resolve_base_lib_path_keeps_absolute_paths_stable() {
+        let cwd = Path::new("C:/slab/bin/slab-app/src-tauri");
+        let input = PathBuf::from("C:/slab/vendor/runtime/libs");
+        let resolved = resolve_base_lib_path(input.clone(), cwd);
+
+        assert_eq!(resolved, input);
+    }
 }

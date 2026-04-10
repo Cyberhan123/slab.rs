@@ -129,9 +129,8 @@ impl Config {
             whisper_grpc_endpoint: std::env::var("SLAB_WHISPER_GRPC_ENDPOINT").ok(),
             diffusion_grpc_endpoint: std::env::var("SLAB_DIFFUSION_GRPC_ENDPOINT").ok(),
             lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(PathBuf::from),
-            session_state_dir: std::env::var("SLAB_SESSION_STATE_DIR").unwrap_or_else(|_| {
-                default_session_state_dir().to_string_lossy().into_owned()
-            }),
+            session_state_dir: std::env::var("SLAB_SESSION_STATE_DIR")
+                .unwrap_or_else(|_| default_session_state_dir().to_string_lossy().into_owned()),
             settings_path,
             model_config_dir,
         }
