@@ -63,3 +63,4 @@ tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 parity-tokio-ipc = { workspace = true }
 winapi = { workspace = true }
+ffmpeg-sidecar = { workspace = true }

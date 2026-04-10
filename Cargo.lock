@@ -7992,6 +7992,7 @@ dependencies = [
  "candle-nn",
  "candle-transformers",
  "clap",
+ "ffmpeg-sidecar",
  "futures",
  "image",
  "libloading 0.8.9",

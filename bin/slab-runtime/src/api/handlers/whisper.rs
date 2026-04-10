@@ -152,14 +152,16 @@ fn build_whisper_inference_options(
 }
 
 fn convert_file_to_pcm_f32le(path: &str) -> Result<Arc<[f32]>, String> {
-    debug!(audio_path = %path, "running ffmpeg PCM conversion");
+    let ffmpeg_bin = ffmpeg_sidecar::paths::ffmpeg_path();
 
-    let output = std::process::Command::new("ffmpeg")
+    debug!(audio_path = %path, ffmpeg_bin = %ffmpeg_bin.display(), "running ffmpeg PCM conversion");
+
+    let output = std::process::Command::new(&ffmpeg_bin)
         .arg("-i")
         .arg(path)
         .args(["-vn", "-f", "f32le", "-acodec", "pcm_f32le", "-ar", "16000", "-ac", "1", "-"])
         .output()
-        .map_err(|error| format!("ffmpeg start failed: {error}"))?;
+        .map_err(|error| format!("ffmpeg start failed ({}): {error}", ffmpeg_bin.display()))?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -168,7 +170,7 @@ fn convert_file_to_pcm_f32le(path: &str) -> Result<Arc<[f32]>, String> {
             output.status.code().unwrap_or(-1),
             stderr.trim()
         );
-        warn!(audio_path = %path, "{message}");
+        warn!(audio_path = %path, ffmpeg_bin = %ffmpeg_bin.display(), "{message}");
         return Err(message);
     }
 

@@ -194,7 +194,8 @@ impl VideoService {
                     let output_path =
                         std::env::temp_dir().join(format!("slab-video-{operation_id}.mp4"));
                     let frame_pattern = frame_dir.join("frame_%05d.png");
-                    let ffmpeg_result = tokio::process::Command::new("ffmpeg")
+                    let ffmpeg_bin = ffmpeg_sidecar::paths::ffmpeg_path();
+                    let ffmpeg_result = tokio::process::Command::new(&ffmpeg_bin)
                         .arg("-y")
                         .arg("-framerate")
                         .arg(fps.to_string())
@@ -227,13 +228,13 @@ impl VideoService {
                         }
                         Ok(output) => {
                             let error = String::from_utf8_lossy(&output.stderr).to_string();
-                            warn!(task_id = %operation_id, error = %error, "ffmpeg failed");
+                            warn!(task_id = %operation_id, ffmpeg_bin = %ffmpeg_bin.display(), error = %error, "ffmpeg failed");
                             if let Err(db_error) = operation.mark_failed(&error).await {
                                 warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg failure");
                             }
                         }
                         Err(error) => {
-                            warn!(task_id = %operation_id, error = %error, "ffmpeg spawn failed");
+                            warn!(task_id = %operation_id, ffmpeg_bin = %ffmpeg_bin.display(), error = %error, "ffmpeg spawn failed");
                             if let Err(db_error) = operation.mark_failed(&error.to_string()).await {
                                 warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg spawn failure");
                             }
