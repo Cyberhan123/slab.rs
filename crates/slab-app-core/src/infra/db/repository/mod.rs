@@ -5,12 +5,14 @@ pub mod model;
 pub mod model_config_state;
 pub mod session;
 pub mod task;
+pub mod ui_state;
 
 pub use chat::ChatStore;
 pub use model::ModelStore;
 pub use model_config_state::ModelConfigStateStore;
 pub use session::SessionStore;
 pub use task::TaskStore;
+pub use ui_state::UiStateStore;
 
 use std::str::FromStr;
 

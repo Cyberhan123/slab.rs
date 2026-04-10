@@ -272,6 +272,24 @@ const TAURI_ROUTE_DEFINITIONS: readonly TauriRouteDefinition[] = [
     buildArgs: ({ body, pathParams }) => ({ pmid: pathParams.pmid, body }),
   },
   {
+    method: 'GET',
+    pattern: '/v1/ui-state/{key}',
+    command: 'get_ui_state',
+    buildArgs: ({ pathParams }) => ({ key: pathParams.key }),
+  },
+  {
+    method: 'PUT',
+    pattern: '/v1/ui-state/{key}',
+    command: 'update_ui_state',
+    buildArgs: ({ body, pathParams }) => ({ key: pathParams.key, body }),
+  },
+  {
+    method: 'DELETE',
+    pattern: '/v1/ui-state/{key}',
+    command: 'delete_ui_state',
+    buildArgs: ({ pathParams }) => ({ key: pathParams.key }),
+  },
+  {
     method: 'POST',
     pattern: '/v1/setup/complete',
     command: 'complete_setup',

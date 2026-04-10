@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
+import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api from '@/lib/api';
 import { toCatalogModelList } from '@/lib/api/models';
+import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
 const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
@@ -28,7 +30,6 @@ const extractTaskId = (payload: unknown): string | null => {
 };
 
 export function useImageModelPreparation() {
-  const [selectedModelId, setSelectedModelId] = useState('');
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
 
   const {
@@ -68,19 +69,12 @@ export function useImageModelPreparation() {
       })),
     [diffusionModels],
   );
-
-  useEffect(() => {
-    if (modelOptions.length === 0) {
-      setSelectedModelId('');
-      return;
-    }
-
-    const exists = modelOptions.some((model) => model.id === selectedModelId);
-    if (!selectedModelId || !exists) {
-      const downloaded = modelOptions.find((model) => model.downloaded);
-      setSelectedModelId(downloaded?.id ?? modelOptions[0].id);
-    }
-  }, [modelOptions, selectedModelId]);
+  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
+    key: HEADER_SELECT_KEYS.imageModel,
+    options: modelOptions,
+    isLoading: catalogLoading,
+    getDefaultValue: (options) => options.find((option) => option.downloaded)?.id,
+  });
 
   const waitForTaskToFinish = async (taskId: string) => {
     const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;

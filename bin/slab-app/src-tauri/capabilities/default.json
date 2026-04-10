@@ -72,6 +72,9 @@
     "allow-list-settings",
     "allow-get-setting",
     "allow-update-setting",
+    "allow-get-ui-state",
+    "allow-update-ui-state",
+    "allow-delete-ui-state",
     "window-state:default",
     "decorum:allow-show-snap-overlay",
     {

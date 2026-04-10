@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-delete-ui-state"
+description = "Enables the delete_ui_state command without any pre-configured scope."
+commands.allow = ["delete_ui_state"]
+
+[[permission]]
+identifier = "deny-delete-ui-state"
+description = "Denies the delete_ui_state command without any pre-configured scope."
+commands.deny = ["delete_ui_state"]

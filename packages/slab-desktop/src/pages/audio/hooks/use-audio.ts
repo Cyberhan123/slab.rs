@@ -5,9 +5,11 @@ import { toast } from 'sonner';
 
 import useFile, { type SelectedFile } from '@/hooks/use-file';
 import useIsTauri from '@/hooks/use-tauri';
+import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api from '@/lib/api';
 import { modelSupportsCapability, toCatalogModelList, type CatalogModel } from '@/lib/api/models';
-import { usePageHeader, usePageHeaderModelPicker } from '@/hooks/use-global-header-meta';
+import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
+import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } from './use-transcribe';
 import {
@@ -22,7 +24,6 @@ export function useAudio() {
   usePageHeader(PAGE_HEADER_META.audio);
 
   const [file, setFile] = useState<SelectedFile | null>(null);
-  const [selectedModelId, setSelectedModelId] = useState('');
   const [enableVad, setEnableVad] = useState(false);
   const [selectedVadModelId, setSelectedVadModelId] = useState('');
   const [vadThreshold, setVadThreshold] = useState('');
@@ -101,6 +102,13 @@ export function useAudio() {
     });
     return Array.from(merged.values());
   }, [whisperTranscribeModels, whisperVadModels]);
+  const catalogModelsLoading = transcriptionModelsLoading || vadModelsLoading;
+  const catalogModelsError = transcriptionModelsError ?? vadModelsError;
+  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
+    key: HEADER_SELECT_KEYS.audioModel,
+    options: whisperTranscribeModels,
+    isLoading: catalogModelsLoading,
+  });
 
   const selectedModel = useMemo(
     () => whisperTranscribeModels.find((model) => model.id === selectedModelId),
@@ -111,8 +119,6 @@ export function useAudio() {
     () => whisperVadModels.find((model) => model.id === selectedVadModelId),
     [whisperVadModels, selectedVadModelId],
   );
-  const catalogModelsLoading = transcriptionModelsLoading || vadModelsLoading;
-  const catalogModelsError = transcriptionModelsError ?? vadModelsError;
 
   const isBusy =
     Boolean(preparingStage) ||
@@ -121,6 +127,7 @@ export function useAudio() {
     downloadModelMutation.isPending;
   const headerModelPicker = useMemo(
     () => ({
+      type: 'select' as const,
       value: selectedModelId,
       options: whisperTranscribeModels.map((model) => ({
         id: model.id,
@@ -137,19 +144,7 @@ export function useAudio() {
   );
   const webFileInputRef = useRef<HTMLInputElement>(null);
 
-  usePageHeaderModelPicker(headerModelPicker);
-
-  useEffect(() => {
-    if (whisperTranscribeModels.length === 0) {
-      setSelectedModelId('');
-      return;
-    }
-
-    const exists = whisperTranscribeModels.some((model) => model.id === selectedModelId);
-    if (!selectedModelId || !exists) {
-      setSelectedModelId(whisperTranscribeModels[0].id);
-    }
-  }, [whisperTranscribeModels, selectedModelId]);
+  usePageHeaderControl(headerModelPicker);
 
   useEffect(() => {
     if (!enableVad) {

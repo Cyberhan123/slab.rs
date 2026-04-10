@@ -11,6 +11,7 @@ mod settings_jsonschema;
 mod setup;
 mod system;
 mod task;
+mod ui_state;
 mod video;
 
 pub use audio::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
@@ -52,4 +53,5 @@ pub use settings::{
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
 pub use task::{AcceptedOperation, TaskPayloadEnvelope, TaskResult, TaskStatus, TaskView};
+pub use ui_state::{DeleteUiStateView, UiStateValueView, UpdateUiStateCommand};
 pub use video::{DecodedVideoInitImage, VideoGenerationCommand};
