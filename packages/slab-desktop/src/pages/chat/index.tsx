@@ -1,5 +1,4 @@
 import { XProvider } from "@ant-design/x"
-import { useXConversations, type ConversationData } from "@ant-design/x-sdk"
 import { Loader2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
@@ -18,7 +17,6 @@ import {
   DialogTitle,
 } from "@slab/components/dialog"
 import { ScrollArea } from "@slab/components/scroll-area"
-import type { components } from "@/lib/api/v1.d.ts"
 import { ChatComposer } from "@/pages/chat/components/chat-composer"
 import { ChatMessageBubble } from "@/pages/chat/components/chat-message-bubble"
 import { ChatSessionSheet } from "@/pages/chat/components/chat-session-sheet"
@@ -36,11 +34,11 @@ import { useChatUiStore } from "@/store/useChatUiStore"
 
 import {
   ChatContext,
-  clearConversationCache,
   getChatMessageTextContent,
   type ChatMessageRecord,
 } from "./chat-context"
 import { useChat } from "./hooks/use-chat"
+import { useChatSessions } from "./hooks/use-chat-sessions"
 import { useMarkdownTheme } from "./hooks/use-markdowm-theme"
 import locale from "./local"
 
@@ -64,13 +62,6 @@ type ModelOption = {
   capabilities: ChatModelCapabilities
   contextWindow?: number | null
 }
-
-type ConversationItem = ConversationData & {
-  label?: string
-  group?: string
-}
-
-type SessionRecord = components["schemas"]["SessionResponse"]
 
 function createConversationLabel(value: string) {
   const trimmed = value.trim()
@@ -116,40 +107,6 @@ function getGreeting(date: Date) {
   return "Good evening"
 }
 
-function getErrorDescription(error: unknown) {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-
-  if (typeof error === "object" && error !== null) {
-    const message = (error as { error?: unknown; message?: unknown }).message
-    if (typeof message === "string" && message.trim()) {
-      return message
-    }
-
-    const rawError = (error as { error?: unknown }).error
-    if (typeof rawError === "string" && rawError.trim()) {
-      return rawError
-    }
-  }
-
-  return "Unknown error"
-}
-
-function toConversationItem(
-  session: SessionRecord,
-  sessionLabels: Record<string, string>
-): ConversationItem {
-  const storedLabel = sessionLabels[session.id]?.trim() || null
-  const backendLabel = session.name.trim()
-
-  return {
-    key: session.id,
-    label: storedLabel ?? (backendLabel || "New chat"),
-    group: "Workspace",
-  }
-}
-
 function Chat() {
   const navigate = useNavigate()
   const [markdownThemeClassName] = useMarkdownTheme()
@@ -158,20 +115,20 @@ function Chat() {
   const [pendingModelSwitchId, setPendingModelSwitchId] = useState<string | null>(null)
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
-  const hasBootstrappedSessions = useRef(false)
-  const hasHydrated = useChatUiStore((state) => state.hasHydrated)
   const deepThink = useChatUiStore((state) => state.deepThink)
   const setDeepThink = useChatUiStore((state) => state.setDeepThink)
-  const curConversation = useChatUiStore((state) => state.currentSessionId)
-  const setCurConversation = useChatUiStore((state) => state.setCurrentSessionId)
-  const sessionLabels = useChatUiStore((state) => state.sessionLabels)
-  const setSessionLabel = useChatUiStore((state) => state.setSessionLabel)
-  const removeSessionLabel = useChatUiStore((state) => state.removeSessionLabel)
-
-  const { conversations, addConversation, setConversations } = useXConversations({
-    defaultConversations: [],
-  })
-  const conversationList = conversations as ConversationItem[]
+  const {
+    conversationList,
+    createSession: createEmptySession,
+    currentSessionId: curConversation,
+    deleteSession: deleteConversationSession,
+    isCreatingSession,
+    isDeletingSession,
+    isSessionMutating,
+    isSessionsLoading: sessionsLoading,
+    setCurrentSessionId: setCurConversation,
+    setSessionLabel,
+  } = useChatSessions()
 
   const {
     data: catalogModels,
@@ -189,24 +146,10 @@ function Chat() {
   const loadModelMutation = api.useMutation("post", "/v1/models/load")
   const switchModelMutation = api.useMutation("post", "/v1/models/switch")
   const getTaskMutation = api.useMutation("get", "/v1/tasks/{id}")
-  const { data: sessionData, isLoading: sessionsLoading, refetch: refetchSessions } = api.useQuery(
-    "get",
-    "/v1/sessions"
-  )
-  const createSessionMutation = api.useMutation("post", "/v1/sessions")
-  // Generated types currently drop the DELETE path param for this endpoint.
-  const deleteSessionMutation = api.useMutation("delete", "/v1/sessions/{id}") as unknown as {
-    isPending: boolean
-    mutateAsync: (options: { params: { path: { id: string } } }) => Promise<unknown>
-  }
 
   const parsedCatalogModels = useMemo(
     () => toCatalogModelList(catalogModels),
     [catalogModels]
-  )
-  const sessionRecords = useMemo<SessionRecord[]>(
-    () => (Array.isArray(sessionData) ? sessionData : []),
-    [sessionData]
   )
 
   const localChatModels = useMemo(
@@ -246,80 +189,6 @@ function Chat() {
     () => modelOptions.find((item) => item.id === pendingModelSwitchId) ?? null,
     [modelOptions, pendingModelSwitchId]
   )
-
-  useEffect(() => {
-    setConversations(sessionRecords.map((session) => toConversationItem(session, sessionLabels)))
-  }, [sessionLabels, sessionRecords, setConversations])
-
-  const createEmptySession = useCallback(
-    async (options?: { openSheet?: boolean; quiet?: boolean; select?: boolean }) => {
-      try {
-        const session = await createSessionMutation.mutateAsync({
-          body: {},
-        })
-
-        addConversation(toConversationItem(session, sessionLabels), "prepend")
-        if (options?.select ?? true) {
-          setCurConversation(session.id)
-        }
-        if (options?.openSheet) {
-          setIsSessionSheetOpen(true)
-        }
-
-        void refetchSessions()
-        return session
-      } catch (error) {
-        if (!options?.quiet) {
-          toast.error("Failed to create chat session.", {
-            description: getErrorDescription(error),
-          })
-        }
-        return null
-      }
-    },
-    [addConversation, createSessionMutation, refetchSessions, sessionLabels, setCurConversation]
-  )
-
-  useEffect(() => {
-    if (sessionsLoading) {
-      return
-    }
-
-    if (sessionRecords.length > 0) {
-      hasBootstrappedSessions.current = true
-      return
-    }
-
-    if (hasBootstrappedSessions.current) {
-      return
-    }
-
-    hasBootstrappedSessions.current = true
-    void createEmptySession({ quiet: true, select: true })
-  }, [createEmptySession, sessionRecords.length, sessionsLoading])
-
-  useEffect(() => {
-    if (!hasHydrated) {
-      return
-    }
-
-    if (conversationList.length === 0) {
-      if (curConversation) {
-        setCurConversation("")
-      }
-      return
-    }
-
-    if (conversationList.some((item) => item.key === curConversation)) {
-      return
-    }
-
-    const nextConversationKey = conversationList[0]?.key ?? ""
-
-    if (nextConversationKey && nextConversationKey !== curConversation) {
-      setCurConversation(nextConversationKey)
-    }
-  }, [conversationList, curConversation, hasHydrated, setCurConversation])
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -508,10 +377,8 @@ function Chat() {
     loadModelMutation.isPending ||
     switchModelMutation.isPending ||
     downloadModelMutation.isPending
-  const isSessionMutating = createSessionMutation.isPending || deleteSessionMutation.isPending
   const isSessionBusy = isRequesting || isPreparingModel || isHistoryLoading || isSessionMutating
-  const isSessionBootstrapping =
-    (sessionsLoading || createSessionMutation.isPending) && conversationList.length === 0
+  const isSessionBootstrapping = (sessionsLoading || isCreatingSession) && conversationList.length === 0
 
   const safeMessages: ChatMessageRecord[] = messages ?? []
   const latestMessage = safeMessages[safeMessages.length - 1]
@@ -545,11 +412,11 @@ function Chat() {
       return "Loading session history"
     }
 
-    if (createSessionMutation.isPending) {
+    if (isCreatingSession) {
       return "Creating session"
     }
 
-    if (deleteSessionMutation.isPending) {
+    if (isDeletingSession) {
       return "Deleting session"
     }
 
@@ -579,9 +446,9 @@ function Chat() {
 
     return parts.join(" / ")
   }, [
-    createSessionMutation.isPending,
     curConversation,
-    deleteSessionMutation.isPending,
+    isCreatingSession,
+    isDeletingSession,
     isHistoryLoading,
     isPreparingModel,
     isSessionBootstrapping,
@@ -590,12 +457,12 @@ function Chat() {
   ])
 
   const closePendingModelSwitch = useCallback(() => {
-    if (createSessionMutation.isPending) {
+    if (isCreatingSession) {
       return
     }
 
     setPendingModelSwitchId(null)
-  }, [createSessionMutation.isPending])
+  }, [isCreatingSession])
 
   const handleModelPickerChange = useCallback(
     (nextModelId: string) => {
@@ -708,34 +575,19 @@ function Chat() {
 
   const setConversationLabelIfNeeded = useCallback(
     (conversationKey: string, prompt: string) => {
-      let nextLabel = ""
-      let didUpdateLabel = false
-      const nextList = conversationList.map((item) => {
-        const label = item.label ?? "New chat"
+      const conversation = conversationList.find((item) => item.key === conversationKey)
+      const label = conversation?.label ?? "New chat"
 
-        if (item.key !== conversationKey) {
-          return item
-        }
-
-        if (label !== "New chat" && label !== "New Conversation") {
-          return item
-        }
-
-        nextLabel = createConversationLabel(prompt)
-        didUpdateLabel = true
-        return {
-          ...item,
-          label: nextLabel,
-        }
-      })
-
-      if (didUpdateLabel && nextLabel) {
-        setSessionLabel(conversationKey, nextLabel)
+      if (label !== "New chat" && label !== "New Conversation") {
+        return
       }
 
-      setConversations(nextList)
+      const nextLabel = createConversationLabel(prompt)
+      if (nextLabel) {
+        setSessionLabel(conversationKey, nextLabel)
+      }
     },
-    [conversationList, setConversations, setSessionLabel]
+    [conversationList, setSessionLabel]
   )
 
   const handleCreateConversation = useCallback(async () => {
@@ -762,47 +614,9 @@ function Chat() {
         return
       }
 
-      try {
-        await deleteSessionMutation.mutateAsync({
-          params: {
-            path: { id: conversationKey },
-          },
-        })
-      } catch (error) {
-        toast.error("Failed to delete chat session.", {
-          description: getErrorDescription(error),
-        })
-        return
-      }
-
-      removeSessionLabel(conversationKey)
-      clearConversationCache(conversationKey)
-
-      const nextList = conversationList.filter((item) => item.key !== conversationKey)
-      setConversations(nextList)
-
-      if (nextList.length === 0) {
-        setCurConversation("")
-        await createEmptySession({ select: true })
-        return
-      }
-
-      if (conversationKey === curConversation) {
-        setCurConversation(nextList[0]?.key ?? "")
-      }
-
-      void refetchSessions()
+      await deleteConversationSession(conversationKey)
     },
-    [
-      conversationList,
-      createEmptySession,
-      curConversation,
-      deleteSessionMutation,
-      isSessionBusy,
-      refetchSessions,
-      removeSessionLabel,
-      setConversations,
-    ]
+    [deleteConversationSession, isSessionBusy]
   )
 
   const handleGenerateImage = useCallback(() => {
@@ -961,7 +775,7 @@ function Chat() {
               }
             }}
           >
-            <DialogContent className="max-w-xl" showCloseButton={!createSessionMutation.isPending}>
+            <DialogContent className="max-w-xl" showCloseButton={!isCreatingSession}>
               <DialogHeader className="space-y-3 text-left">
                 <DialogTitle>Switch model for this conversation?</DialogTitle>
                 <DialogDescription>
@@ -1002,22 +816,22 @@ function Chat() {
                 <Button
                   variant="outline"
                   onClick={closePendingModelSwitch}
-                  disabled={createSessionMutation.isPending}
+                  disabled={isCreatingSession}
                 >
                   Cancel
                 </Button>
                 <Button
                   variant="secondary"
                   onClick={handleKeepSessionOnModelSwitch}
-                  disabled={createSessionMutation.isPending}
+                  disabled={isCreatingSession}
                 >
                   Keep current session
                 </Button>
                 <Button
                   onClick={() => void handleCreateSessionOnModelSwitch()}
-                  disabled={createSessionMutation.isPending}
+                  disabled={isCreatingSession}
                 >
-                  {createSessionMutation.isPending ? (
+                  {isCreatingSession ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : null}
                   Create new session
