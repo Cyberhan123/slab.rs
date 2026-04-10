@@ -4,7 +4,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use log::{error, info, warn};
-use slab_app_core::config::Config;
+use slab_app_core::config::{Config, default_app_dir, default_runtime_ipc_dir, default_runtime_log_dir};
 use slab_app_core::domain::services::PmidService;
 use slab_app_core::launch::{LaunchHostPaths, LaunchProfile};
 use slab_app_core::runtime_supervisor::{
@@ -49,10 +49,12 @@ pub fn run_runtime_sidecar(
     let cfg = Config::from_env();
     let app_handle = app.handle().clone();
     let lib_path = app.path().resolve("resources/libs", BaseDirectory::Resource)?;
-    let app_log_dir = app.path().app_log_dir()?;
-    std::fs::create_dir_all(&app_log_dir)?;
-    let runtime_log_dir_fallback = app_log_dir.join("runtime");
-    let runtime_ipc_dir_fallback = app_log_dir.join("ipc");
+    let tauri_log_dir = app.path().app_log_dir()?;
+    let app_data_dir = default_app_dir();
+    std::fs::create_dir_all(&tauri_log_dir)?;
+    std::fs::create_dir_all(&app_data_dir)?;
+    let runtime_log_dir_fallback = default_runtime_log_dir();
+    let runtime_ipc_dir_fallback = default_runtime_ipc_dir();
     let log_level = Some(cfg.log_level.clone());
     let log_json = cfg.log_json;
     let app_handle_for_spawn = app_handle.clone();
@@ -91,8 +93,9 @@ pub fn run_runtime_sidecar(
     let _ = app.manage(RuntimeSidecarState::new(Arc::clone(&supervisor)));
 
     info!(
-        "tauri log persistence enabled: log_dir={} runtime_log_dir={}",
-        app_log_dir.display(),
+        "tauri log persistence enabled: tauri_log_dir={} app_data_dir={} runtime_log_dir={}",
+        tauri_log_dir.display(),
+        app_data_dir.display(),
         supervisor.launch_spec().runtime_log_dir.display()
     );
     info!(
