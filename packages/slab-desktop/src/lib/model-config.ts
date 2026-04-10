@@ -130,6 +130,27 @@ export async function updateModelConfigSelection(
   return JSON.parse(raw) as UnifiedModelResponse;
 }
 
+export function getModelConfigField(
+  document: ModelConfigDocumentResponse,
+  path: string,
+): ModelConfigFieldResponse | null {
+  for (const section of document.sections) {
+    const field = section.fields.find((candidate) => candidate.path === path);
+    if (field) {
+      return field;
+    }
+  }
+
+  return null;
+}
+
+export function getModelConfigFieldValue<T = unknown>(
+  document: ModelConfigDocumentResponse,
+  path: string,
+): T | undefined {
+  return getModelConfigField(document, path)?.effective_value as T | undefined;
+}
+
 function parseApiError(raw: string, status: number) {
   if (!raw.trim()) {
     return `HTTP ${status}`;

@@ -64,6 +64,7 @@ type ImageWorkbenchProps = {
   isBusy: boolean;
   isGenerating: boolean;
   isPreparingModel: boolean;
+  isResolvingModelState: boolean;
   mode: 'txt2img' | 'img2img';
   negativePrompt: string;
   numImages: number;
@@ -117,6 +118,7 @@ export function ImageWorkbench({
   isBusy,
   isGenerating,
   isPreparingModel,
+  isResolvingModelState,
   mode,
   negativePrompt,
   numImages,
@@ -506,7 +508,12 @@ export function ImageWorkbench({
                       onClick={handleSubmit}
                       disabled={isBusy || !prompt.trim() || !selectedModelId}
                     >
-                      {isPreparingModel ? (
+                      {isResolvingModelState ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Loading preset...
+                        </>
+                      ) : isPreparingModel ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
                           Preparing model...
