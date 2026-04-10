@@ -12,12 +12,11 @@ pub struct Config {
     /// TCP address to bind (default: `"0.0.0.0:3000"`).
     pub bind_address: String,
 
-    /// SQLite (or other) database URL (default: `"sqlite://slab.db"`).
+    /// SQLite (or other) database URL.
     ///
-    /// The path in a `sqlite://` URL is relative to the **current working
-    /// directory** of the server process at startup.  For predictable
-    /// behaviour in production, use an absolute path, e.g.
-    /// `SLAB_DATABASE_URL=sqlite:///var/lib/slab/slab.db`.
+    /// By default this resolves to an absolute SQLite file in the user's Slab
+    /// config directory (for example `%AppData%\Slab\slab.db` on Windows).
+    /// Override it with `SLAB_DATABASE_URL` to point elsewhere.
     ///
     /// Supports any sqlx-compatible connection string – swap the scheme to
     /// migrate to Postgres (`postgres://…`) or MySQL (`mysql://…`).
@@ -108,7 +107,8 @@ impl Config {
 
         Self {
             bind_address: env_or("SLAB_BIND", "localhost:3000"),
-            database_url: env_or("SLAB_DATABASE_URL", "sqlite://slab.db?mode=rwc"),
+            database_url: std::env::var("SLAB_DATABASE_URL")
+                .unwrap_or_else(|_| default_database_url()),
             log_level: env_or("SLAB_LOG", "info"),
             log_json: std::env::var("SLAB_LOG_JSON")
                 .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
@@ -129,7 +129,9 @@ impl Config {
             whisper_grpc_endpoint: std::env::var("SLAB_WHISPER_GRPC_ENDPOINT").ok(),
             diffusion_grpc_endpoint: std::env::var("SLAB_DIFFUSION_GRPC_ENDPOINT").ok(),
             lib_dir: std::env::var("SLAB_LIB_DIR").ok().map(PathBuf::from),
-            session_state_dir: env_or("SLAB_SESSION_STATE_DIR", "./tmp/slab-sessions"),
+            session_state_dir: std::env::var("SLAB_SESSION_STATE_DIR").unwrap_or_else(|_| {
+                default_session_state_dir().to_string_lossy().into_owned()
+            }),
             settings_path,
             model_config_dir,
         }
@@ -146,13 +148,36 @@ fn parse_env<T: std::str::FromStr>(key: &str, default: T) -> T {
     std::env::var(key).ok().and_then(|v| v.parse().ok()).unwrap_or(default)
 }
 
+pub fn default_app_dir() -> PathBuf {
+    config_dir().unwrap_or_else(|| PathBuf::from(".")).join("Slab")
+}
+
 pub fn default_settings_path() -> PathBuf {
-    let base_dir = config_dir().unwrap_or_else(|| PathBuf::from("."));
-    base_dir.join("Slab").join("settings.json")
+    default_app_dir().join("settings.json")
 }
 
 pub fn default_model_config_dir() -> PathBuf {
     default_model_config_dir_for_settings_path(&default_settings_path())
+}
+
+pub fn default_database_path() -> PathBuf {
+    default_app_dir().join("slab.db")
+}
+
+pub fn default_database_url() -> String {
+    sqlite_url_for_path(&default_database_path())
+}
+
+pub fn default_session_state_dir() -> PathBuf {
+    default_app_dir().join("sessions")
+}
+
+pub fn default_runtime_log_dir() -> PathBuf {
+    default_app_dir().join("logs").join("runtime")
+}
+
+pub fn default_runtime_ipc_dir() -> PathBuf {
+    default_app_dir().join("ipc")
 }
 
 pub fn default_model_config_dir_for_settings_path(settings_path: &Path) -> PathBuf {
@@ -161,4 +186,10 @@ pub fn default_model_config_dir_for_settings_path(settings_path: &Path) -> PathB
         .map(Path::to_path_buf)
         .unwrap_or_else(|| PathBuf::from("."))
         .join("models")
+}
+
+pub fn sqlite_url_for_path(path: &Path) -> String {
+    let normalized = path.to_string_lossy().replace('\\', "/");
+    let prefix = if normalized.starts_with('/') { "sqlite://" } else { "sqlite:///" };
+    format!("{prefix}{normalized}?mode=rwc")
 }

@@ -164,37 +164,51 @@ fn init_tracing(
 
     if let Some(path) = log_file {
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).with_context(|| {
-                format!("failed to create slab-runtime log directory '{}'", parent.display())
-            })?;
+            if let Err(error) = std::fs::create_dir_all(parent) {
+                eprintln!(
+                    "WARN: failed to create slab-runtime log directory '{}': {error}; continuing without file logging",
+                    parent.display()
+                );
+                registry.init();
+                return Ok(guards);
+            }
         }
 
-        let file = OpenOptions::new().create(true).append(true).open(path).with_context(|| {
-            format!("failed to open slab-runtime log file '{}'", path.display())
-        })?;
-        let (file_writer, guard) = tracing_appender::non_blocking(file);
-        guards.push(guard);
+        match OpenOptions::new().create(true).append(true).open(path) {
+            Ok(file) => {
+                let (file_writer, guard) = tracing_appender::non_blocking(file);
+                guards.push(guard);
 
-        let file_layer: Box<dyn Layer<_> + Send + Sync> = if log_json {
-            Box::new(
-                tracing_subscriber::fmt::layer()
-                    .json()
-                    .with_ansi(false)
-                    .with_target(true)
-                    .with_thread_ids(true)
-                    .with_writer(file_writer),
-            )
-        } else {
-            Box::new(
-                tracing_subscriber::fmt::layer()
-                    .with_ansi(false)
-                    .with_target(true)
-                    .with_thread_ids(true)
-                    .with_writer(file_writer),
-            )
-        };
+                let file_layer: Box<dyn Layer<_> + Send + Sync> = if log_json {
+                    Box::new(
+                        tracing_subscriber::fmt::layer()
+                            .json()
+                            .with_ansi(false)
+                            .with_target(true)
+                            .with_thread_ids(true)
+                            .with_writer(file_writer),
+                    )
+                } else {
+                    Box::new(
+                        tracing_subscriber::fmt::layer()
+                            .with_ansi(false)
+                            .with_target(true)
+                            .with_thread_ids(true)
+                            .with_writer(file_writer),
+                    )
+                };
 
-        registry.with(file_layer).init();
+                registry.with(file_layer).init();
+            }
+            Err(error) => {
+                eprintln!(
+                    "WARN: failed to open slab-runtime log file '{}': {error}; continuing without file logging",
+                    path.display()
+                );
+                registry.init();
+                return Ok(guards);
+            }
+        }
     } else {
         registry.init();
     }

@@ -1,3 +1,7 @@
+// Prevents an extra console window when the runtime is launched as a Tauri
+// sidecar from the packaged desktop app on Windows release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 use clap::Parser;
 
 use slab_runtime::infra::config::Cli;
