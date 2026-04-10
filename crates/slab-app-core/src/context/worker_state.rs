@@ -213,10 +213,18 @@ impl WorkerState {
             })
             .await?;
 
+        self.spawn_existing_operation(operation_id.clone(), task);
+        Ok(operation_id)
+    }
+
+    pub fn spawn_existing_operation<F, Fut>(&self, operation_id: String, task: F)
+    where
+        F: FnOnce(OperationContext) -> Fut + Send + 'static,
+        Fut: Future<Output = ()> + Send + 'static,
+    {
         let context =
             OperationContext { operation_id: operation_id.clone(), store: Arc::clone(&self.store) };
-        self.spawn_tracked(operation_id.clone(), task(context));
-        Ok(operation_id)
+        self.spawn_tracked(operation_id, task(context));
     }
 
     pub fn spawn_tracked<F>(&self, operation_id: String, task: F)

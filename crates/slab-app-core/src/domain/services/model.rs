@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -13,8 +13,9 @@ use slab_types::runtime::DiffusionLoadOptions;
 use slab_types::{Capability, ModelSource, RuntimeBackendId, RuntimeBackendLoadSpec};
 use tonic::transport::Channel;
 use tracing::{info, warn};
+use uuid::Uuid;
 
-use crate::context::{ModelState, SubmitOperation, WorkerState};
+use crate::context::{ModelState, WorkerState};
 use crate::domain::models::{
     AcceptedOperation, AvailableModelsQuery, AvailableModelsView,
     CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION,
@@ -23,13 +24,14 @@ use crate::domain::models::{
     ModelConfigFieldScope, ModelConfigFieldView, ModelConfigOrigin, ModelConfigPresetOption,
     ModelConfigSectionView, ModelConfigSelectionView, ModelConfigSourceArtifact,
     ModelConfigSourceSummary, ModelConfigValueType, ModelConfigVariantOption, ModelLoadCommand,
-    ModelPackSelection, ModelSpec, ModelStatus, RuntimePresets, StoredModelConfig, UnifiedModel,
-    UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
-    normalize_model_capabilities,
+    ModelPackSelection, ModelSpec, ModelStatus, RuntimePresets, StoredModelConfig, TaskStatus,
+    UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
+    UpdateModelConfigSelectionCommand, normalize_model_capabilities,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{
-    ModelConfigStateRecord, ModelConfigStateStore, ModelStore, UnifiedModelRecord,
+    ModelConfigStateRecord, ModelConfigStateStore, ModelDownloadRecord, ModelDownloadStore,
+    ModelStore, TaskRecord, UnifiedModelRecord,
 };
 use crate::infra::model_packs;
 use crate::infra::rpc::{self, pb};
@@ -82,6 +84,13 @@ struct ResolvedModelPackSelectionView {
     selected_preset: slab_model_pack::ResolvedPreset,
     warnings: Vec<String>,
     legacy_selection_to_import: Option<ModelPackSelection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct ModelDownloadSourceKey {
+    model_id: String,
+    repo_id: String,
+    filename: String,
 }
 
 #[derive(Clone)]
@@ -465,6 +474,32 @@ impl ModelService {
                 "model {model_id} spec is missing filename required for download"
             ))
         })?;
+        let download_key = model_download_source_key_from_parts(&model_id, &repo_id, &filename)
+            .ok_or_else(|| {
+                AppCoreError::BadRequest(format!(
+                    "model {model_id} spec is missing repo_id or filename required for download"
+                ))
+            })?;
+
+        self.model_state.store().reconcile_model_downloads().await?;
+        if let Some(existing) = self
+            .model_state
+            .store()
+            .get_active_model_download_for_source(
+                &download_key.model_id,
+                &download_key.repo_id,
+                &download_key.filename,
+            )
+            .await?
+        {
+            info!(
+                task_id = %existing.task_id,
+                backend_id = %backend_id,
+                model_id = %model_id,
+                "reusing existing model download task"
+            );
+            return Ok(AcceptedOperation { operation_id: existing.task_id });
+        }
 
         let input_data = serde_json::json!({
             "model_id": model.id,
@@ -478,150 +513,221 @@ impl ModelService {
         let store = Arc::clone(self.model_state.store());
         let model_config_dir = self.model_config_dir().to_path_buf();
         let auto_unload = Arc::clone(self.model_state.auto_unload());
-        let operation_id = self
-            .worker_state
-            .submit_operation(
-                SubmitOperation::pending(
-                    "model_download",
-                    Some(model_id.clone()),
-                    Some(input_data.clone()),
-                ),
-                move |operation| async move {
-                    let operation_id = operation.id().to_owned();
-                    if let Err(error) = operation.mark_running().await {
-                        warn!(task_id = %operation_id, error = %error, "failed to mark model download running");
-                        return;
-                    }
+        let operation_id = Uuid::new_v4().to_string();
+        let now = Utc::now();
 
-                    let input: serde_json::Value = match serde_json::from_str(&input_data) {
-                        Ok(value) => value,
-                        Err(error) => {
-                            warn!(task_id = %operation_id, error = %error, "invalid stored input_data for model_download task");
-                            let message = format!("invalid stored input_data: {error}");
-                            if let Err(db_error) = operation.mark_failed(&message).await {
-                                warn!(task_id = %operation_id, error = %db_error, "failed to persist model download parse error");
-                            }
-                            return;
-                        }
-                    };
-
-                    let model_id = input["model_id"].as_str().unwrap_or("").to_owned();
-                    let repo_id = input["repo_id"].as_str().unwrap_or("").to_owned();
-                    let filename = input["filename"].as_str().unwrap_or("").to_owned();
-                    let model_cache_dir = input["model_cache_dir"]
-                        .as_str()
-                        .map(str::trim)
-                        .filter(|value| !value.is_empty())
-                        .map(str::to_owned);
-
-                    if model_id.is_empty() || repo_id.is_empty() || filename.is_empty() {
-                        warn!(task_id = %operation_id, "model_download task is missing model_id, repo_id, or filename");
-                        if let Err(db_error) = operation
-                            .mark_failed("missing model_id, repo_id, or filename in stored input_data")
-                            .await
-                        {
-                            warn!(task_id = %operation_id, error = %db_error, "failed to persist model download validation error");
-                        }
-                        return;
-                    }
-
-                    let result = tokio::task::spawn_blocking(move || {
-                        let api = if let Some(dir) = model_cache_dir {
-                            ApiBuilder::new()
-                                .with_cache_dir(std::path::PathBuf::from(dir))
-                                .build()
-                                .map_err(|error| format!("hf-hub build failed: {error}"))?
-                        } else {
-                            Api::new().map_err(|error| format!("hf-hub init failed: {error}"))?
-                        };
-                        let path = api
-                            .model(repo_id)
-                            .get(&filename)
-                            .map_err(|error| format!("hf-hub download failed: {error}"))?;
-                        Ok::<String, String>(path.to_string_lossy().into_owned())
-                    })
-                    .await;
-
-                    match result {
-                        Ok(Ok(local_path)) => {
-                            if let Err(error) = store
-                                .update_model_local_path(&model_id, &local_path, "ready")
-                                .await
-                            {
-                                warn!(task_id = %operation_id, error = %error, "failed to persist downloaded model path");
-                                let message =
-                                    format!("downloaded file but failed to persist path: {error}");
-                                if let Err(db_error) = operation.mark_failed(&message).await {
-                                    warn!(task_id = %operation_id, error = %db_error, "failed to persist post-download failure");
-                                }
-                                return;
-                            }
-
-                            let updated_record = match store.get_model(&model_id).await {
-                                Ok(Some(record)) => record,
-                                Ok(None) => {
-                                    let message = format!(
-                                        "downloaded file but model {model_id} no longer exists after update"
-                                    );
-                                    if let Err(db_error) = operation.mark_failed(&message).await {
-                                        warn!(task_id = %operation_id, error = %db_error, "failed to persist missing model after download");
-                                    }
-                                    return;
-                                }
-                                Err(error) => {
-                                    let message = format!(
-                                        "downloaded file but failed to reload model {model_id}: {error}"
-                                    );
-                                    if let Err(db_error) = operation.mark_failed(&message).await {
-                                        warn!(task_id = %operation_id, error = %db_error, "failed to persist model reload error after download");
-                                    }
-                                    return;
-                                }
-                            };
-
-                            if let Err(error) =
-                                sync_model_pack_record(&model_config_dir, updated_record)
-                            {
-                                warn!(task_id = %operation_id, error = %error, "failed to sync downloaded model pack");
-                                let message = format!(
-                                    "downloaded file but failed to sync model pack: {error}"
-                                );
-                                if let Err(db_error) = operation.mark_failed(&message).await {
-                                    warn!(task_id = %operation_id, error = %db_error, "failed to persist config sync failure after download");
-                                }
-                                return;
-                            }
-
-                            auto_unload
-                                .invalidate_model_replay(
-                                    &model_id,
-                                    "model download updated catalog local_path",
-                                )
-                                .await;
-
-                            let result_json =
-                                serde_json::json!({ "local_path": local_path }).to_string();
-                            if let Err(db_error) = operation.mark_succeeded(&result_json).await {
-                                warn!(task_id = %operation_id, error = %db_error, "failed to persist model download success");
-                            }
-                            info!(task_id = %operation_id, local_path = %local_path, "model download succeeded");
-                        }
-                        Ok(Err(error)) => {
-                            warn!(task_id = %operation_id, error = %error, "model download failed");
-                            if let Err(db_error) = operation.mark_failed(&error).await {
-                                warn!(task_id = %operation_id, error = %db_error, "failed to persist model download failure");
-                            }
-                        }
-                        Err(error) => {
-                            warn!(task_id = %operation_id, error = %error, "model download task panicked");
-                            if let Err(db_error) = operation.mark_failed(&error.to_string()).await {
-                                warn!(task_id = %operation_id, error = %db_error, "failed to persist model download panic");
-                            }
-                        }
-                    }
+        let insert_result = self
+            .model_state
+            .store()
+            .insert_model_download_operation(
+                TaskRecord {
+                    id: operation_id.clone(),
+                    task_type: "model_download".to_owned(),
+                    status: TaskStatus::Pending,
+                    model_id: Some(model_id.clone()),
+                    input_data: Some(input_data.clone()),
+                    result_data: None,
+                    error_msg: None,
+                    core_task_id: None,
+                    created_at: now,
+                    updated_at: now,
+                },
+                ModelDownloadRecord {
+                    task_id: operation_id.clone(),
+                    model_id: model_id.clone(),
+                    repo_id: download_key.repo_id.clone(),
+                    filename: download_key.filename.clone(),
+                    status: TaskStatus::Pending,
+                    error_msg: None,
+                    created_at: now,
+                    updated_at: now,
                 },
             )
-            .await?;
+            .await;
+
+        match insert_result {
+            Ok(()) => {}
+            Err(error) if is_model_download_conflict(&error) => {
+                if let Some(existing) = self
+                    .model_state
+                    .store()
+                    .get_active_model_download_for_source(
+                        &download_key.model_id,
+                        &download_key.repo_id,
+                        &download_key.filename,
+                    )
+                    .await?
+                {
+                    info!(
+                        task_id = %existing.task_id,
+                        backend_id = %backend_id,
+                        model_id = %model_id,
+                        "reusing concurrently created model download task"
+                    );
+                    return Ok(AcceptedOperation { operation_id: existing.task_id });
+                }
+
+                return Err(error.into());
+            }
+            Err(error) => return Err(error.into()),
+        }
+
+        self.worker_state
+            .spawn_existing_operation(operation_id.clone(), move |operation| async move {
+                let operation_id = operation.id().to_owned();
+                if let Err(error) = operation.mark_running().await {
+                    warn!(task_id = %operation_id, error = %error, "failed to mark model download running");
+                    let _ = persist_model_download_status(
+                        &store,
+                        &operation_id,
+                        TaskStatus::Failed,
+                        Some(&error.to_string()),
+                    )
+                    .await;
+                    return;
+                }
+
+                if let Err(error) =
+                    persist_model_download_status(&store, &operation_id, TaskStatus::Running, None)
+                        .await
+                {
+                    warn!(task_id = %operation_id, error = %error, "failed to persist model download running status");
+                }
+
+                let input: serde_json::Value = match serde_json::from_str(&input_data) {
+                    Ok(value) => value,
+                    Err(error) => {
+                        warn!(task_id = %operation_id, error = %error, "invalid stored input_data for model_download task");
+                        let message = format!("invalid stored input_data: {error}");
+                        mark_model_download_failed(&operation, &store, &operation_id, &message).await;
+                        return;
+                    }
+                };
+
+                let model_id = input["model_id"].as_str().unwrap_or("").to_owned();
+                let repo_id = input["repo_id"].as_str().unwrap_or("").to_owned();
+                let filename = input["filename"].as_str().unwrap_or("").to_owned();
+                let model_cache_dir = input["model_cache_dir"]
+                    .as_str()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned);
+
+                if model_id.is_empty() || repo_id.is_empty() || filename.is_empty() {
+                    warn!(task_id = %operation_id, "model_download task is missing model_id, repo_id, or filename");
+                    mark_model_download_failed(
+                        &operation,
+                        &store,
+                        &operation_id,
+                        "missing model_id, repo_id, or filename in stored input_data",
+                    )
+                    .await;
+                    return;
+                }
+
+                let result = tokio::task::spawn_blocking(move || {
+                    let api = if let Some(dir) = model_cache_dir {
+                        ApiBuilder::new()
+                            .with_cache_dir(std::path::PathBuf::from(dir))
+                            .build()
+                            .map_err(|error| format!("hf-hub build failed: {error}"))?
+                    } else {
+                        Api::new().map_err(|error| format!("hf-hub init failed: {error}"))?
+                    };
+                    let path = api
+                        .model(repo_id)
+                        .get(&filename)
+                        .map_err(|error| format!("hf-hub download failed: {error}"))?;
+                    Ok::<String, String>(path.to_string_lossy().into_owned())
+                })
+                .await;
+
+                match result {
+                    Ok(Ok(local_path)) => {
+                        if let Err(error) = store
+                            .update_model_local_path(&model_id, &local_path, "ready")
+                            .await
+                        {
+                            warn!(task_id = %operation_id, error = %error, "failed to persist downloaded model path");
+                            let message =
+                                format!("downloaded file but failed to persist path: {error}");
+                            mark_model_download_failed(&operation, &store, &operation_id, &message)
+                                .await;
+                            return;
+                        }
+
+                        let updated_record = match store.get_model(&model_id).await {
+                            Ok(Some(record)) => record,
+                            Ok(None) => {
+                                let message = format!(
+                                    "downloaded file but model {model_id} no longer exists after update"
+                                );
+                                mark_model_download_failed(
+                                    &operation,
+                                    &store,
+                                    &operation_id,
+                                    &message,
+                                )
+                                .await;
+                                return;
+                            }
+                            Err(error) => {
+                                let message = format!(
+                                    "downloaded file but failed to reload model {model_id}: {error}"
+                                );
+                                mark_model_download_failed(
+                                    &operation,
+                                    &store,
+                                    &operation_id,
+                                    &message,
+                                )
+                                .await;
+                                return;
+                            }
+                        };
+
+                        if let Err(error) = sync_model_pack_record(&model_config_dir, updated_record)
+                        {
+                            warn!(task_id = %operation_id, error = %error, "failed to sync downloaded model pack");
+                            let message =
+                                format!("downloaded file but failed to sync model pack: {error}");
+                            mark_model_download_failed(&operation, &store, &operation_id, &message)
+                                .await;
+                            return;
+                        }
+
+                        auto_unload
+                            .invalidate_model_replay(
+                                &model_id,
+                                "model download updated catalog local_path",
+                            )
+                            .await;
+
+                        let result_json =
+                            serde_json::json!({ "local_path": local_path }).to_string();
+                        if let Err(db_error) = operation.mark_succeeded(&result_json).await {
+                            warn!(task_id = %operation_id, error = %db_error, "failed to persist model download success");
+                        }
+                        if let Err(error) =
+                            persist_model_download_status(&store, &operation_id, TaskStatus::Succeeded, None)
+                                .await
+                        {
+                            warn!(task_id = %operation_id, error = %error, "failed to persist model download success status");
+                        }
+                        info!(task_id = %operation_id, local_path = %local_path, "model download succeeded");
+                    }
+                    Ok(Err(error)) => {
+                        warn!(task_id = %operation_id, error = %error, "model download failed");
+                        mark_model_download_failed(&operation, &store, &operation_id, &error).await;
+                    }
+                    Err(error) => {
+                        let message = error.to_string();
+                        warn!(task_id = %operation_id, error = %message, "model download task panicked");
+                        mark_model_download_failed(&operation, &store, &operation_id, &message)
+                            .await;
+                    }
+                }
+            });
 
         info!(
             task_id = %operation_id,
@@ -1281,13 +1387,20 @@ async fn load_models_from_state(
     state: &ModelState,
     query: ListModelsFilter,
 ) -> Result<Vec<UnifiedModel>, AppCoreError> {
+    state.store().reconcile_model_downloads().await?;
+
     let records = state.store().list_models().await?;
+    let latest_downloads = load_latest_model_downloads_by_source(state).await?;
     let requested_capability = query.capability;
     let models = records
         .into_iter()
         .filter_map(|record| {
             record
                 .try_into()
+                .map(|mut model: UnifiedModel| {
+                    model.status = effective_model_status(&model, &latest_downloads);
+                    model
+                })
                 .map_err(|error: String| {
                     warn!(error = %error, "failed to deserialize model record; skipping");
                 })
@@ -1298,6 +1411,120 @@ async fn load_models_from_state(
         })
         .collect();
     Ok(models)
+}
+
+async fn load_latest_model_downloads_by_source(
+    state: &ModelState,
+) -> Result<HashMap<ModelDownloadSourceKey, ModelDownloadRecord>, AppCoreError> {
+    let mut latest = HashMap::new();
+
+    for download in state.store().list_model_downloads().await? {
+        let Some(key) = model_download_source_key_from_parts(
+            &download.model_id,
+            &download.repo_id,
+            &download.filename,
+        ) else {
+            continue;
+        };
+
+        latest.entry(key).or_insert(download);
+    }
+
+    Ok(latest)
+}
+
+fn effective_model_status(
+    model: &UnifiedModel,
+    latest_downloads: &HashMap<ModelDownloadSourceKey, ModelDownloadRecord>,
+) -> UnifiedModelStatus {
+    if model.kind != UnifiedModelKind::Local {
+        return model.status.clone();
+    }
+
+    let base_status = normalized_local_model_status(model);
+    let Some(source_key) = model_download_source_key(model) else {
+        return base_status;
+    };
+
+    let Some(download) = latest_downloads.get(&source_key) else {
+        return base_status;
+    };
+
+    match download.status {
+        TaskStatus::Pending | TaskStatus::Running => UnifiedModelStatus::Downloading,
+        TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Interrupted => {
+            UnifiedModelStatus::Error
+        }
+        TaskStatus::Succeeded => base_status,
+    }
+}
+
+fn normalized_local_model_status(model: &UnifiedModel) -> UnifiedModelStatus {
+    if model.spec.local_path.as_deref().map(str::trim).is_some_and(|value| !value.is_empty()) {
+        return UnifiedModelStatus::Ready;
+    }
+
+    match &model.status {
+        UnifiedModelStatus::Error => UnifiedModelStatus::Error,
+        _ => UnifiedModelStatus::NotDownloaded,
+    }
+}
+
+fn model_download_source_key(model: &UnifiedModel) -> Option<ModelDownloadSourceKey> {
+    model_download_source_key_from_parts(
+        &model.id,
+        model.spec.repo_id.as_deref().unwrap_or_default(),
+        model.spec.filename.as_deref().unwrap_or_default(),
+    )
+}
+
+fn model_download_source_key_from_parts(
+    model_id: &str,
+    repo_id: &str,
+    filename: &str,
+) -> Option<ModelDownloadSourceKey> {
+    let model_id = model_id.trim();
+    let repo_id = repo_id.trim();
+    let filename = filename.trim();
+    if model_id.is_empty() || repo_id.is_empty() || filename.is_empty() {
+        return None;
+    }
+
+    Some(ModelDownloadSourceKey {
+        model_id: model_id.to_owned(),
+        repo_id: repo_id.to_owned(),
+        filename: filename.to_owned(),
+    })
+}
+
+fn is_model_download_conflict(error: &sqlx::Error) -> bool {
+    matches!(error, sqlx::Error::Database(db_error) if db_error.message().contains("UNIQUE constraint failed"))
+}
+
+async fn persist_model_download_status(
+    store: &Arc<crate::infra::db::AnyStore>,
+    task_id: &str,
+    status: TaskStatus,
+    error_msg: Option<&str>,
+) -> Result<(), AppCoreError> {
+    store.update_model_download_status(task_id, status, error_msg).await?;
+    Ok(())
+}
+
+async fn mark_model_download_failed(
+    operation: &crate::context::worker_state::OperationContext,
+    store: &Arc<crate::infra::db::AnyStore>,
+    task_id: &str,
+    message: &str,
+) {
+    if let Err(db_error) = operation.mark_failed(message).await {
+        warn!(task_id = %task_id, error = %db_error, "failed to persist model download failure");
+    }
+    if let Err(error) =
+        persist_model_download_status(store, task_id, TaskStatus::Failed, Some(message)).await
+    {
+        warn!(task_id = %task_id, error = %error, "failed to persist model download error status");
+    }
 }
 
 async fn load_cloud_provider_map_for_chat(

@@ -68,7 +68,6 @@ export function useHubModelCatalog() {
   const [createModelPending, setCreateModelPending] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
   const [modelToEnhance, setModelToEnhance] = useState<ModelItem | null>(null);
-  const [activeDownloadTasks, setActiveDownloadTasks] = useState<Record<string, string>>({});
 
   const {
     data,
@@ -83,26 +82,21 @@ export function useHubModelCatalog() {
 
   const models = useMemo<ModelItem[]>(
     () =>
-      toCatalogModelList(data)
-        .map((model) => {
-          const pending = model.pending || Boolean(activeDownloadTasks[model.id]);
-
-          return {
-            id: model.id,
-            display_name: model.display_name,
-            kind: model.kind,
-            repo_id: model.repo_id,
-            filename: model.filename,
-            capabilities: model.capabilities,
-            backend_ids: model.backend_ids,
-            is_vad_model: modelSupportsCapability(model, 'audio_vad'),
-            status: pending ? 'downloading' : model.status,
-            local_path: model.local_path,
-            pending,
-            updated_at: model.updated_at,
-          };
-        }),
-    [activeDownloadTasks, data],
+      toCatalogModelList(data).map((model) => ({
+        id: model.id,
+        display_name: model.display_name,
+        kind: model.kind,
+        repo_id: model.repo_id,
+        filename: model.filename,
+        capabilities: model.capabilities,
+        backend_ids: model.backend_ids,
+        is_vad_model: modelSupportsCapability(model, 'audio_vad'),
+        status: model.status,
+        local_path: model.local_path,
+        pending: model.pending,
+        updated_at: model.updated_at,
+      })),
+    [data],
   );
   const filteredModels = useMemo(
     () =>
@@ -244,21 +238,12 @@ export function useHubModelCatalog() {
         description: getErrorMessage(downloadError),
       });
     } finally {
-      setActiveDownloadTasks((current) => {
-        if (!current[model.id]) {
-          return current;
-        }
-
-        const next = { ...current };
-        delete next[model.id];
-        return next;
-      });
       void refetch();
     }
   }
 
   async function downloadModel(model: ModelItem) {
-    if (!canDownloadModel(model) || activeDownloadTasks[model.id]) {
+    if (!canDownloadModel(model)) {
       return;
     }
 
@@ -274,13 +259,10 @@ export function useHubModelCatalog() {
         throw new Error('Failed to start model download task');
       }
 
-      setActiveDownloadTasks((current) => ({
-        ...current,
-        [model.id]: taskId,
-      }));
       toast.success('Download started.', {
         description: model.display_name,
       });
+      void refetch();
       void trackModelDownload(model, taskId);
     } catch (downloadError) {
       toast.error('Failed to start download.', {
