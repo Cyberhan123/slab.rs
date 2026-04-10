@@ -1,34 +1,74 @@
 import type { StateStorage } from 'zustand/middleware';
 
-import { tauriAwareFetch } from '@/lib/api/tauri-transport';
-import { SERVER_BASE_URL } from '@/lib/config';
-
-type UiStateValueResponse = {
-  key: string;
-  value: string;
-  updated_at: string;
-};
+import { apiClient } from '@/lib/api';
 
 type ErrorPayload = {
+  error?: unknown;
   message?: unknown;
 };
 
-function buildUiStateUrl(key: string) {
-  return new URL(`/v1/ui-state/${encodeURIComponent(key)}`, `${SERVER_BASE_URL}/`);
-}
+type UiStateApiClient = {
+  DELETE: (
+    path: '/v1/ui-state/{key}',
+    init: {
+      params: {
+        path: {
+          key: string;
+        };
+      };
+    },
+  ) => Promise<{
+    error?: ErrorPayload;
+    response: Response;
+  }>;
+  GET: (
+    path: '/v1/ui-state/{key}',
+    init: {
+      params: {
+        path: {
+          key: string;
+        };
+      };
+    },
+  ) => Promise<{
+    data?: { value?: string };
+    error?: ErrorPayload;
+    response: Response;
+  }>;
+  PUT: (
+    path: '/v1/ui-state/{key}',
+    init: {
+      body: {
+        value: string;
+      };
+      params: {
+        path: {
+          key: string;
+        };
+      };
+    },
+  ) => Promise<{
+    error?: ErrorPayload;
+    response: Response;
+  }>;
+};
+
+const uiStateApiClient = apiClient as unknown as UiStateApiClient;
 
 function toUiStateKey(name: string, namespace: string) {
   return `${namespace}:${name}`;
 }
 
-async function readErrorMessage(response: Response) {
-  try {
-    const payload = (await response.json()) as ErrorPayload;
+function readErrorMessage(error: unknown, response: Response) {
+  if (typeof error === 'object' && error !== null) {
+    const payload = error as ErrorPayload;
     if (typeof payload.message === 'string' && payload.message.trim()) {
       return payload.message;
     }
-  } catch {
-    // Ignore invalid error payloads and fall back to the HTTP status.
+
+    if (typeof payload.error === 'string' && payload.error.trim()) {
+      return payload.error;
+    }
   }
 
   const fallback = `${response.status} ${response.statusText}`.trim();
@@ -43,8 +83,10 @@ export function createUiStateStorage(options?: { namespace?: string }): StateSto
       const key = toUiStateKey(name, namespace);
 
       try {
-        const response = await tauriAwareFetch(buildUiStateUrl(key), {
-          method: 'GET',
+        const { data, error, response } = await uiStateApiClient.GET('/v1/ui-state/{key}', {
+          params: {
+            path: { key },
+          },
         });
 
         if (response.status === 404) {
@@ -52,11 +94,10 @@ export function createUiStateStorage(options?: { namespace?: string }): StateSto
         }
 
         if (!response.ok) {
-          throw new Error(await readErrorMessage(response));
+          throw new Error(readErrorMessage(error, response));
         }
 
-        const payload = (await response.json()) as UiStateValueResponse;
-        return typeof payload.value === 'string' ? payload.value : null;
+        return typeof data?.value === 'string' ? data.value : null;
       } catch (error) {
         console.warn(`Failed to load UI state '${key}'.`, error);
         return null;
@@ -66,16 +107,15 @@ export function createUiStateStorage(options?: { namespace?: string }): StateSto
       const key = toUiStateKey(name, namespace);
 
       try {
-        const response = await tauriAwareFetch(buildUiStateUrl(key), {
-          method: 'PUT',
-          headers: {
-            'content-type': 'application/json',
+        const { error, response } = await uiStateApiClient.PUT('/v1/ui-state/{key}', {
+          params: {
+            path: { key },
           },
-          body: JSON.stringify({ value }),
+          body: { value },
         });
 
         if (!response.ok) {
-          throw new Error(await readErrorMessage(response));
+          throw new Error(readErrorMessage(error, response));
         }
       } catch (error) {
         console.warn(`Failed to persist UI state '${key}'.`, error);
@@ -85,8 +125,10 @@ export function createUiStateStorage(options?: { namespace?: string }): StateSto
       const key = toUiStateKey(name, namespace);
 
       try {
-        const response = await tauriAwareFetch(buildUiStateUrl(key), {
-          method: 'DELETE',
+        const { error, response } = await uiStateApiClient.DELETE('/v1/ui-state/{key}', {
+          params: {
+            path: { key },
+          },
         });
 
         if (response.status === 404) {
@@ -94,7 +136,7 @@ export function createUiStateStorage(options?: { namespace?: string }): StateSto
         }
 
         if (!response.ok) {
-          throw new Error(await readErrorMessage(response));
+          throw new Error(readErrorMessage(error, response));
         }
       } catch (error) {
         console.warn(`Failed to remove UI state '${key}'.`, error);

@@ -5,6 +5,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { apiClient } from '@/lib/api';
 import { isTauri } from '@/hooks/use-tauri';
 import {
   SERVER_BASE_URL,
@@ -33,7 +34,7 @@ export async function getApiUrl(): Promise<string> {
 export async function checkBackendStatus(): Promise<boolean> {
   if (!isTauri()) {
     try {
-      const response = await fetch(`${SERVER_BASE_URL}/health`);
+      const { response } = await apiClient.GET('/health');
       return response.ok;
     } catch {
       return false;

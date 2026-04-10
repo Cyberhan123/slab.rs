@@ -23,10 +23,10 @@ import {
 
 import type { ModelItem } from '../hooks/use-hub-model-catalog';
 import {
-  fetchModelConfigDocument,
   type ModelConfigDocumentResponse,
   type ModelConfigFieldResponse,
-  updateModelConfigSelection,
+  useModelConfigDocumentQuery,
+  useUpdateModelConfigSelectionMutation,
 } from '@/lib/model-config';
 
 type HubModelEnhancementSheetProps = {
@@ -42,63 +42,47 @@ export function HubModelEnhancementSheet({
   onOpenChange,
   onSaved,
 }: HubModelEnhancementSheetProps) {
-  const [isLoading, setIsLoading] = useState(false);
-  const [isSaving, setIsSaving] = useState(false);
-  const [data, setData] = useState<ModelConfigDocumentResponse | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [selectedPresetId, setSelectedPresetId] = useState('');
   const [selectedVariantId, setSelectedVariantId] = useState('');
+  const {
+    data,
+    error,
+    isLoading,
+  } = useModelConfigDocumentQuery(open && model ? model.id : null, {
+    enabled: open && Boolean(model),
+  });
+  const updateModelConfigSelectionMutation = useUpdateModelConfigSelectionMutation();
+  const loadError = error instanceof Error ? error.message : error ? String(error) : null;
+  const isSaving = updateModelConfigSelectionMutation.isPending;
 
   useEffect(() => {
-    if (!open || !model) {
+    if (!open || !model || !data) {
       return;
     }
 
-    let disposed = false;
-    setIsLoading(true);
-    setLoadError(null);
+    setSelectedPresetId(
+      data.selection.effective_preset_id ??
+        data.selection.selected_preset_id ??
+        data.selection.default_preset_id ??
+        '',
+    );
+    setSelectedVariantId(
+      data.selection.effective_variant_id ??
+        data.selection.selected_variant_id ??
+        data.selection.default_variant_id ??
+        '',
+    );
+  }, [data, model, open]);
 
-    void fetchModelConfigDocument(model.id)
-      .then((response) => {
-        if (disposed) {
-          return;
-        }
-
-        setData(response);
-        setSelectedPresetId(
-          response.selection.effective_preset_id ??
-            response.selection.selected_preset_id ??
-            response.selection.default_preset_id ??
-            '',
-        );
-        setSelectedVariantId(
-          response.selection.effective_variant_id ??
-            response.selection.selected_variant_id ??
-            response.selection.default_variant_id ??
-            '',
-        );
-      })
-      .catch((error) => {
-        if (disposed) {
-          return;
-        }
-
-        setLoadError(error instanceof Error ? error.message : String(error));
-        setData(null);
-      })
-      .finally(() => {
-        if (!disposed) {
-          setIsLoading(false);
-        }
-      });
-
-    return () => {
-      disposed = true;
-    };
+  useEffect(() => {
+    if (!open || !model) {
+      setSelectedPresetId('');
+      setSelectedVariantId('');
+    }
   }, [model, open]);
 
   const savePayload = useMemo(
-    () => buildSelectionPayload(data, selectedPresetId, selectedVariantId),
+    () => buildSelectionPayload(data ?? null, selectedPresetId, selectedVariantId),
     [data, selectedPresetId, selectedVariantId],
   );
 
@@ -122,9 +106,13 @@ export function HubModelEnhancementSheet({
       return;
     }
 
-    setIsSaving(true);
     try {
-      await updateModelConfigSelection(model.id, savePayload);
+      await updateModelConfigSelectionMutation.mutateAsync({
+        params: {
+          path: { id: model.id },
+        },
+        body: savePayload,
+      });
       toast.success('Model selection updated.', {
         description: data?.model_summary.display_name ?? model.display_name,
       });
@@ -134,8 +122,6 @@ export function HubModelEnhancementSheet({
       toast.error('Failed to update model selection.', {
         description: error instanceof Error ? error.message : String(error),
       });
-    } finally {
-      setIsSaving(false);
     }
   };
 

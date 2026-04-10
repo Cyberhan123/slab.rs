@@ -12,6 +12,7 @@ import {
 } from '@ant-design/x-sdk';
 import { chatMessagesStoreHelper } from '@ant-design/x-sdk/es/x-chat/store';
 
+import { apiClient } from '@/lib/api';
 import type { components } from '@/lib/api/v1.d.ts';
 import { SERVER_BASE_URL } from '@/lib/config';
 import { isTauri } from '@/hooks/use-tauri';
@@ -40,6 +41,23 @@ type ProviderTransformMessageInfo = Parameters<
         Partial<Record<SSEFields, XModelResponse>>
     >['transformMessage']
 >[0];
+
+type SessionMessagesApiClient = {
+    GET: (
+        path: '/v1/sessions/{id}/messages',
+        init: {
+            params: {
+                path: {
+                    id: string;
+                };
+            };
+        },
+    ) => Promise<{
+        data?: SessionMessageResponse[];
+        error?: { message?: string };
+        response: Response;
+    }>;
+};
 
 export type ChatRequestErrorType = ChatApiError['type'];
 
@@ -453,21 +471,28 @@ const fetchSessionMessages = async (conversationKey?: string): Promise<SessionMe
     }
 
     try {
-        const response = await fetch(
-            `${SERVER_BASE_URL}/v1/sessions/${encodeURIComponent(conversationKey ?? '')}/messages`,
-        );
+        const { data, error, response } = await (apiClient as unknown as SessionMessagesApiClient).GET('/v1/sessions/{id}/messages', {
+            params: {
+                path: {
+                    id: conversationKey ?? '',
+                },
+            },
+        });
 
         if (response.status === 404) {
             return [];
         }
 
         if (!response.ok) {
-            throw new Error(`failed to load session messages: ${response.status}`);
+            const detail = typeof error === 'object' && error !== null && 'message' in error
+                && typeof (error as { message?: unknown }).message === 'string'
+                ? (error as { message: string }).message
+                : `${response.status} ${response.statusText}`.trim();
+            throw new Error(`failed to load session messages: ${detail}`);
         }
 
-        const payload = await response.json().catch(() => []);
-        return Array.isArray(payload)
-            ? payload.filter((item): item is SessionMessageResponse => isSessionMessageResponse(item))
+        return Array.isArray(data)
+            ? data.filter((item): item is SessionMessageResponse => isSessionMessageResponse(item))
             : [];
     } catch (error) {
         console.warn('failed to load session messages', { conversationKey, error });

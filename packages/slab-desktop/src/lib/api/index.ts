@@ -15,10 +15,14 @@ import { QueryClient } from '@tanstack/react-query'
 // Get API configuration from environment
 import { SERVER_BASE_URL } from '../config';
 
-const fetchClient = createFetchClient<paths>({
+const clientConfig = {
   baseUrl: `${SERVER_BASE_URL}/`,
   fetch: tauriAwareFetch,
-});
+} as const;
+
+export const apiClient = createFetchClient<paths>(clientConfig);
+
+const fetchClient = createFetchClient<paths>(clientConfig);
 
 // Register error middleware
 fetchClient.use(errorMiddleware);

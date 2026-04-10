@@ -2,14 +2,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import api, { getErrorMessage } from '@/lib/api';
-import { tauriAwareFetch } from '@/lib/api/tauri-transport';
+import type { components } from '@/lib/api/v1.d.ts';
 import {
   modelSupportsCapability,
   toCatalogModelList,
   type CatalogModelStatus,
   type ModelCapability,
 } from '@/lib/api/models';
-import { SERVER_BASE_URL } from '@/lib/config';
 
 const DEFAULT_VISIBLE_COUNT = 10;
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
@@ -48,9 +47,7 @@ export type ModelItem = {
   updated_at: string;
 };
 
-type ImportedModelResponse = {
-  display_name?: string;
-};
+type ImportedModelResponse = components['schemas']['UnifiedModelResponse'];
 
 type TaskStatusResponse = {
   status: string;
@@ -76,6 +73,10 @@ export function useHubModelCatalog() {
     isRefetching,
     refetch,
   } = api.useQuery('get', '/v1/models');
+  const importModelPackMutation = api.useMutation('post', '/v1/models/import-pack') as unknown as {
+    isPending: boolean;
+    mutateAsync: (options: { body: FormData }) => Promise<ImportedModelResponse>;
+  };
   const downloadModelMutation = api.useMutation('post', '/v1/models/download');
   const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
@@ -123,7 +124,7 @@ export function useHubModelCatalog() {
     [filteredModels, visibleCount],
   );
   const hasMore = visibleModels.length < filteredModels.length;
-  const canCreate = Boolean(createFile && !createModelPending);
+  const canCreate = Boolean(createFile && !createModelPending && !importModelPackMutation.isPending);
 
   useEffect(() => {
     setVisibleCount(DEFAULT_VISIBLE_COUNT);
@@ -171,7 +172,9 @@ export function useHubModelCatalog() {
 
     setCreateModelPending(true);
     try {
-      const created = await importModelFile(createFile);
+      const created = await importModelPackMutation.mutateAsync({
+        body: buildImportModelPackBody(createFile),
+      });
 
       toast.success('Model imported to catalog.', {
         description:
@@ -321,7 +324,7 @@ export function useHubModelCatalog() {
     createModel,
     downloadModel,
     deleteModel,
-    createModelPending,
+    createModelPending: createModelPending || importModelPackMutation.isPending,
     deleteModelPending: deleteModelMutation.isPending,
   };
 }
@@ -391,46 +394,14 @@ function isModelPackFile(file: File): boolean {
   return file.name.trim().toLowerCase().endsWith('.slab');
 }
 
-async function importModelFile(file: File): Promise<ImportedModelResponse | null> {
+function buildImportModelPackBody(file: File) {
   if (!isModelPackFile(file)) {
     throw new Error('Only .slab model packs are supported.');
   }
 
-  return importModelPack(file);
-}
-
-async function importModelPack(file: File): Promise<ImportedModelResponse | null> {
   const body = new FormData();
   body.set('file', file, file.name);
-
-  const response = await tauriAwareFetch(new URL('/v1/models/import-pack', `${SERVER_BASE_URL}/`), {
-    method: 'POST',
-    body,
-  });
-
-  const raw = await response.text();
-  if (!response.ok) {
-    throw new Error(parseApiError(raw, response.status));
-  }
-
-  if (!raw.trim()) {
-    return null;
-  }
-
-  return parseImportedModelResponse(raw);
-}
-
-function parseImportedModelResponse(raw: string): ImportedModelResponse | null {
-  try {
-    const payload = JSON.parse(raw);
-    if (typeof payload !== 'object' || payload === null) {
-      return null;
-    }
-
-    return payload as ImportedModelResponse;
-  } catch {
-    return null;
-  }
+  return body;
 }
 
 function extractTaskId(payload: unknown): string | null {
@@ -448,21 +419,4 @@ function extractTaskId(payload: unknown): string | null {
 
   const trimmed = taskId.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function parseApiError(raw: string, status: number) {
-  if (!raw.trim()) {
-    return `HTTP ${status}`;
-  }
-
-  try {
-    const payload = JSON.parse(raw) as { message?: unknown };
-    if (typeof payload.message === 'string' && payload.message.trim()) {
-      return payload.message;
-    }
-  } catch {
-    // Ignore JSON parse failures and fall back to the raw response body.
-  }
-
-  return raw;
 }
