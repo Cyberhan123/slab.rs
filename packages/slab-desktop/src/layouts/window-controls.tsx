@@ -3,12 +3,17 @@ import { Minus, Plus, Square, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@slab/components/button"
-import useDesktopPlatform from "@/hooks/use-desktop-platform"
+import useDesktopPlatform, { type DesktopPlatform } from "@/hooks/use-desktop-platform"
 import useIsTauri from "@/hooks/use-tauri"
 import { cn } from "@/lib/utils"
 
 type WindowControlAction = "minimize" | "toggleMaximize" | "close"
-type WindowControlsPlacement = "sidebar" | "trailing"
+type WindowControlsPlacement = "sidebar" | "header"
+type WindowControlsVariant = "mac" | "desktop"
+type WindowControlsConfig = {
+  placement: WindowControlsPlacement
+  variant: WindowControlsVariant
+}
 
 const WINDOW_CONTROL_LABELS: Record<WindowControlAction, string> = {
   minimize: "Minimize window",
@@ -47,6 +52,25 @@ const MAC_CONTROLS: MacControl[] = [
   },
 ]
 
+const WINDOW_CONTROLS_CONFIG_BY_PLATFORM: Record<DesktopPlatform, WindowControlsConfig> = {
+  macos: {
+    placement: "sidebar",
+    variant: "mac",
+  },
+  windows: {
+    placement: "header",
+    variant: "desktop",
+  },
+  linux: {
+    placement: "header",
+    variant: "desktop",
+  },
+  unknown: {
+    placement: "header",
+    variant: "desktop",
+  },
+}
+
 function getWindowControlErrorMessage(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
 
@@ -79,12 +103,12 @@ async function runWindowAction(action: WindowControlAction) {
   }
 }
 
-function MacWindowControls({ inSidebar = false }: { inSidebar?: boolean }) {
+function MacWindowControls({ placement }: { placement: WindowControlsPlacement }) {
   return (
     <div
       className={cn(
         "shell-window-controls flex items-center gap-2",
-        inSidebar ? "w-full justify-center px-3" : "pr-2"
+        placement === "sidebar" ? "w-full justify-center px-3" : "pr-2"
       )}
       data-tauri-drag-region="false"
       role="toolbar"
@@ -165,21 +189,22 @@ type WindowControlsProps = {
   placement?: WindowControlsPlacement
 }
 
-export function WindowControls({ placement = "trailing" }: WindowControlsProps) {
+function getWindowControlsConfig(platform: DesktopPlatform) {
+  return WINDOW_CONTROLS_CONFIG_BY_PLATFORM[platform]
+}
+
+export function WindowControls({ placement = "header" }: WindowControlsProps) {
   const isTauri = useIsTauri()
   const platform = useDesktopPlatform()
+  const config = getWindowControlsConfig(platform)
 
-  if (!isTauri) {
+  if (!isTauri || config.placement !== placement) {
     return null
   }
 
-  if (platform === "macos") {
-    return placement === "sidebar" ? <MacWindowControls inSidebar /> : null
+  if (config.variant === "mac") {
+    return <MacWindowControls placement={placement} />
   }
 
-  if (platform === "windows") {
-    return  <DesktopWindowControls /> 
-  }
-
-  return placement === "trailing" ? <DesktopWindowControls /> : null
+  return <DesktopWindowControls />
 }
