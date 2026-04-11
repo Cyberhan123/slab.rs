@@ -45,4 +45,4 @@ validator = "0.20"
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-window-state = "2"
-tauri-plugin-decorum = "1.1.1"
+tauri-plugin-decorum = { git = "https://github.com/clearlysid/tauri-plugin-decorum.git", rev = "9f1f73636821c3cb8b940524214b940b7999ef6e" }
