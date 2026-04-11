@@ -661,7 +661,7 @@ function Chat() {
     <XProvider locale={locale}>
       <ChatContext.Provider value={{ onReload }}>
         <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--shell-card)]">
-          <div className="pointer-events-none absolute right-4 top-4 z-20 hidden xl:block">
+          <div className="pointer-events-none absolute right-4 top-4 z-20 hidden lg:block">
             <div className="pointer-events-auto">
               <ChatSessionSummaryCard
                 items={sessionSummaryItems}
@@ -672,7 +672,7 @@ function Chat() {
             </div>
           </div>
 
-          <div className="mx-auto w-full max-w-[768px] px-6 pb-6 pt-12 md:px-8 xl:px-0">
+          <div className="mx-auto w-full max-w-[768px] px-6 pb-6 pt-12 md:px-8 lg:px-0">
             <div className="space-y-2">
               <h1 className="text-[clamp(2.75rem,6vw,4rem)] font-semibold tracking-[-0.055em] text-foreground">
                 {greeting}
@@ -683,7 +683,7 @@ function Chat() {
             </div>
           </div>
 
-          <div className="mx-auto block w-full max-w-[768px] px-6 pb-6 md:px-8 xl:hidden xl:px-0">
+          <div className="mx-auto block w-full max-w-[768px] px-6 pb-6 md:px-8 lg:hidden lg:px-0">
             <ChatSessionSummaryCard
               items={sessionSummaryItems}
               onManageSessions={() => setIsSessionSheetOpen(true)}
@@ -693,7 +693,7 @@ function Chat() {
           </div>
 
           <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-24 pt-2 md:px-8 md:pb-28 xl:px-0">
+            <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-24 pt-2 md:px-8 md:pb-28 lg:px-0">
               {isSessionBootstrapping || (isHistoryLoading && safeMessages.length === 0) ? (
                 <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
                   <div className="max-w-md space-y-3">
@@ -736,7 +736,7 @@ function Chat() {
 
           <div className="relative shrink-0 bg-[var(--shell-card)]">
             <div className="pointer-events-none absolute inset-x-0 top-0 h-20 -translate-y-full bg-gradient-to-b from-transparent via-[color-mix(in_oklab,var(--shell-card)_92%,transparent)] to-[var(--shell-card)]" />
-            <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 xl:px-0">
+            <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 lg:px-0">
               <ChatComposer
                 value={draft}
                 onValueChange={setDraft}

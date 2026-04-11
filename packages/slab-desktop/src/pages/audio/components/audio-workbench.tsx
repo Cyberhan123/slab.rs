@@ -152,7 +152,7 @@ export function AudioWorkbench({
 }: AudioWorkbenchProps) {
   return (
     <div className="h-full w-full overflow-y-auto">
-      <div className="mx-auto grid w-full max-w-[1120px] gap-8 pb-8 xl:grid-cols-[minmax(0,1fr)_392px]">
+      <div className="mx-auto grid w-full max-w-[1120px] gap-8 pb-8 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_392px]">
         <div className="space-y-6">
           <SoftPanel className="space-y-5 rounded-[28px] border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
             <div>
