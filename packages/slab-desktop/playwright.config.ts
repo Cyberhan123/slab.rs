@@ -1,5 +1,6 @@
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { defineConfig } from "@playwright/test";
 
@@ -8,12 +9,14 @@ const apiPort = 3300;
 const apiBaseUrl = `http://127.0.0.1:${apiPort}`;
 const uiBaseUrl = `http://127.0.0.1:${uiPort}`;
 
-const repoRoot = path.resolve(__dirname, "../..");
-const stateRoot = path.join(__dirname, "node_modules", ".playwright-state");
+const packageRoot = path.dirname(fileURLToPath(import.meta.url));
+const repoRoot = path.resolve(packageRoot, "../..");
+const stateRoot = path.join(packageRoot, "node_modules", ".playwright-state");
 const sessionStateDir = path.join(stateRoot, "sessions");
 const modelConfigDir = path.join(stateRoot, "models");
 const settingsPath = path.join(stateRoot, "settings.json");
 const databasePath = path.join(stateRoot, "slab-e2e.db");
+const libDir = path.join(repoRoot, "bin", "slab-app", "src-tauri", "resources", "libs");
 
 for (const dir of [stateRoot, sessionStateDir, modelConfigDir]) {
   fs.mkdirSync(dir, { recursive: true });
@@ -53,10 +56,10 @@ export default defineConfig({
   },
   webServer: [
     {
-      command: "cargo run --bin slab-server",
-      cwd: repoRoot,
+      command: "bun run ./tests/e2e/start-slab-server.ts",
+      cwd: packageRoot,
       url: `${apiBaseUrl}/v1/setup/status`,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 240_000,
       env: {
         ...process.env,
@@ -65,17 +68,19 @@ export default defineConfig({
         SLAB_SETTINGS_PATH: settingsPath,
         SLAB_MODEL_CONFIG_DIR: modelConfigDir,
         SLAB_SESSION_STATE_DIR: sessionStateDir,
+        SLAB_LIB_DIR: libDir,
         SLAB_LOG: "warn",
       },
     },
     {
-      command: `bun x vite --host 127.0.0.1 --port ${uiPort}`,
-      cwd: __dirname,
+      command: "bun run ./tests/e2e/start-vite.ts",
+      cwd: packageRoot,
       url: uiBaseUrl,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer: false,
       timeout: 120_000,
       env: {
         ...process.env,
+        SLAB_E2E_UI_PORT: String(uiPort),
         VITE_API_BASE_URL: apiBaseUrl,
       },
     },
