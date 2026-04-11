@@ -26,9 +26,9 @@ pub fn setup_windows(app: &mut tauri::App) -> tauri::Result<()> {
 
         // Set window level
         // NSWindowLevel: https://developer.apple.com/documentation/appkit/nswindowlevel
-        if let Err(error) = main_window.set_window_level(25) {
-            log::warn!("Failed to set the main window level: {error}");
-        }
+        // if let Err(error) = main_window.set_window_level(25) {
+        //     log::warn!("Failed to set the main window level: {error}");
+        // }
     }
 
     Ok(())
