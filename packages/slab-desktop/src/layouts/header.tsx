@@ -112,7 +112,7 @@ export default function Header({ variant = "default" }: HeaderProps) {
             <span className="hidden h-4 w-px shrink-0 bg-[var(--shell-divider)] md:block" />
           </>
         ) : null}
-        <WindowControls />
+        <WindowControls placement="header" />
       </div>
     </header>
   )
