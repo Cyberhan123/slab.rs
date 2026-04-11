@@ -32,6 +32,18 @@ async function setSetupInitialized(
   expect(response.ok()).toBeTruthy();
 }
 
+async function expectSetupInitialized(
+  request: Parameters<typeof test>[0]["request"],
+  initialized: boolean,
+) {
+  await expect
+    .poll(async () => {
+      const status = await fetchSetupStatus(request);
+      return status.initialized;
+    })
+    .toBe(initialized);
+}
+
 function ffmpegRow(page: Parameters<typeof test>[0]["page"]) {
   return page
     .locator("div")
@@ -58,6 +70,7 @@ test("redirects incomplete users from the app shell to setup", async ({ page }) 
 
 test("renders the dependency status reported by slab-server", async ({ page, request }) => {
   const status = await fetchSetupStatus(request);
+  expect(status.backends.some((backend) => backend.installed)).toBe(true);
 
   await page.goto("/setup");
 
@@ -65,7 +78,7 @@ test("renders the dependency status reported by slab-server", async ({ page, req
   await expect(row).toBeVisible();
 
   if (status.ffmpeg.installed) {
-    await expect(row.getByText("Installed", { exact: true })).toBeVisible();
+    await expect(row.getByText("Installed", { exact: true }).first()).toBeVisible();
   } else {
     await expect(row.getByRole("button", { name: "Download" })).toBeVisible();
   }
@@ -95,8 +108,16 @@ test("redirects away from setup after the server reports initialization complete
   request,
 }) => {
   await setSetupInitialized(request, true);
+  await expectSetupInitialized(request, true);
+
+  const statusResponsePromise = page.waitForResponse((response) =>
+    response.url().endsWith("/v1/setup/status") && response.request().method() === "GET",
+  );
 
   await page.goto("/setup");
+  const statusResponse = await statusResponsePromise;
+  expect(statusResponse.ok()).toBeTruthy();
+  expect(((await statusResponse.json()) as SetupStatus).initialized).toBe(true);
   await page.waitForURL((url) => url.pathname === "/");
 
   const status = await fetchSetupStatus(request);
