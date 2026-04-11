@@ -58,7 +58,7 @@ export default function Task() {
   return (
     <div className="h-full w-full overflow-auto">
       <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-1 pb-8 pt-6">
-        <section className="grid gap-6 xl:grid-cols-3">
+        <section className="grid gap-6 lg:grid-cols-3">
           <TaskMetricCard
             label="Success Rate"
             value={formatPercent(successRate)}
@@ -142,7 +142,7 @@ export default function Task() {
           />
         ) : (
           <section className="overflow-hidden rounded-[20px] border border-border/40 bg-[var(--surface-1)] shadow-[0_12px_40px_-12px_color-mix(in_oklab,var(--foreground)_5%,transparent)]">
-            <Table className="min-w-[980px]" variant="roomy">
+            <Table className="min-w-[820px] xl:min-w-[980px]" variant="roomy">
               <TableHeader className="[&_tr]:border-b-0 [&_tr]:bg-[var(--surface-soft)]">
                 <TableRow className="hover:bg-[var(--surface-soft)]">
                   <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
