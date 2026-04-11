@@ -731,6 +731,6 @@
   }
 }
 /* Hides the Tauri titlebar we don't use tauri config decorations=false may case stuck and stopped */
-div[data-tauri-decorum-tb] {
+/* div[data-tauri-decorum-tb] {
   display: none !important;
-}
+} */
