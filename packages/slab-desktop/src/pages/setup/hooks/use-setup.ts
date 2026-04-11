@@ -59,7 +59,7 @@ export function useSetup(): SetupViewModel {
 
   useEffect(() => {
     if (status?.initialized) {
-      // navigate('/', { replace: true });
+      navigate('/', { replace: true });
     }
   }, [navigate, status?.initialized]);
 
