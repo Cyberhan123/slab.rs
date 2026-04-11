@@ -96,7 +96,7 @@ function MacWindowControls({ inSidebar = false }: { inSidebar?: boolean }) {
           type="button"
           aria-label={label}
           title={label}
-          className={`group flex size-3.5 items-center justify-center rounded-full border transition-transform hover:scale-105 ${toneClassName}`}
+          className={`group flex size-3 items-center justify-center rounded-full border transition-transform hover:scale-105 ${toneClassName}`}
           onClick={() => {
             void runWindowAction(action)
           }}
@@ -178,7 +178,7 @@ export function WindowControls({ placement = "trailing" }: WindowControlsProps) 
   }
 
   if (platform === "windows") {
-    return null
+    return  <DesktopWindowControls /> 
   }
 
   return placement === "trailing" ? <DesktopWindowControls /> : null
