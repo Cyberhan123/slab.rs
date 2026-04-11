@@ -108,7 +108,7 @@ export function SplitWorkbench({
   return (
     <div
       className={cn(
-        "grid min-h-0 gap-5 xl:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]",
+        "grid min-h-0 gap-5 lg:grid-cols-[minmax(300px,340px)_minmax(0,1fr)] xl:grid-cols-[minmax(320px,380px)_minmax(0,1fr)]",
         className
       )}
       {...props}

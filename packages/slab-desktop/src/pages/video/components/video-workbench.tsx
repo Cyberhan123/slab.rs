@@ -133,10 +133,10 @@ export function VideoWorkbench({
   widthValue,
 }: VideoWorkbenchProps) {
   return (
-    <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] xl:overflow-hidden">
-      <div className="mx-auto flex min-h-full w-full max-w-[1200px] flex-col px-4 py-4 sm:px-6 xl:h-full xl:min-h-0 xl:py-6">
-        <div className="grid min-h-0 flex-1 gap-6 xl:grid-cols-[378px_minmax(0,1fr)]">
-          <aside className="flex h-full min-h-[520px] flex-col rounded-[28px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-[0_20px_50px_-38px_color-mix(in_oklab,var(--foreground)_35%,transparent)] xl:min-h-0 xl:overflow-hidden">
+    <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
+      <div className="mx-auto flex min-h-full w-full max-w-[1200px] flex-col px-4 py-4 sm:px-6 lg:h-full lg:min-h-0 lg:py-5 xl:py-6">
+        <div className="grid min-h-0 flex-1 gap-6 lg:grid-cols-[340px_minmax(0,1fr)] xl:grid-cols-[378px_minmax(0,1fr)]">
+          <aside className="flex h-full min-h-[520px] flex-col rounded-[28px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-[0_20px_50px_-38px_color-mix(in_oklab,var(--foreground)_35%,transparent)] lg:min-h-0 lg:overflow-hidden">
             <div className="pb-6">
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
                 Configuration
@@ -449,10 +449,10 @@ export function VideoWorkbench({
             </div>
           </aside>
 
-          <section className="flex min-h-[520px] flex-col gap-6 xl:min-h-0">
+          <section className="flex min-h-[520px] flex-col gap-6 lg:min-h-0">
             <div
               className={cn(
-                'relative flex min-h-[420px] flex-1 items-center justify-center overflow-hidden rounded-[32px] border border-border/50 bg-[var(--surface-soft)] p-6 shadow-[0_32px_80px_-56px_color-mix(in_oklab,var(--foreground)_45%,transparent)] xl:min-h-0',
+                'relative flex min-h-[420px] flex-1 items-center justify-center overflow-hidden rounded-[32px] border border-border/50 bg-[var(--surface-soft)] p-6 shadow-[0_32px_80px_-56px_color-mix(in_oklab,var(--foreground)_45%,transparent)] lg:min-h-0',
               )}
               style={{
                 backgroundImage:
@@ -513,13 +513,13 @@ export function VideoWorkbench({
             </div>
 
             <div className="rounded-[22px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_95%,transparent),color-mix(in_oklab,var(--surface-1)_92%,transparent))] px-5 py-4 shadow-[0_18px_42px_-34px_color-mix(in_oklab,var(--foreground)_28%,transparent)]">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+              <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="grid gap-4 sm:grid-cols-3">
                   <StatusMetric label="Render Status" value={stageStatus} />
                   <StatusMetric label="Clip Spec" value={`${frames} frames • ${fps} fps`} />
                   <StatusMetric label="Canvas" value={`${widthValue} x ${heightValue}`} />
                 </div>
-                <p className="text-xs font-medium text-muted-foreground lg:text-right">{footerHint}</p>
+                <p className="text-xs font-medium text-muted-foreground xl:text-right">{footerHint}</p>
               </div>
             </div>
           </section>
