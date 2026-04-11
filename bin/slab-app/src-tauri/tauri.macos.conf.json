@@ -1,9 +1,24 @@
 {
     "$schema": "https://schema.tauri.app/config/2",
+    "app": {
+        "windows": [
+            {
+                "label": "main",
+                "title": "Slab",
+                "width": 1024,
+                "height": 768,
+                "resizable": true,
+                "center": true,
+                "titleBarStyle": "Overlay",
+                "hiddenTitle": true,
+                "decorations": false
+            }
+        ]
+    },
     "bundle": {
         "active": true,
         "macOS": {
-            "minimumSystemVersion": "12.0"
+            "minimumSystemVersion": "13.0"
         },
         "resources": [
             "resources/libs/**/*"
