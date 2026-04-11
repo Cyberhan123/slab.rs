@@ -8,7 +8,7 @@ use setup::ApiEndpointConfig;
 pub fn run() {
     let api_endpoint = ApiEndpointConfig::desktop();
     let mut builder = tauri::Builder::default()
-        // .plugin(tauri_plugin_decorum::init())
+        .plugin(tauri_plugin_decorum::init())
         .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(
             tauri_plugin_log::Builder::new()
@@ -43,7 +43,7 @@ pub fn run() {
             plugins::plugin_api_request,
         ])
         .setup(move |app| {
-            // setup::setup_windows(app)?;
+            setup::setup_windows(app)?;
             setup::run_server_sidecar(app)?;
             plugins::init(app, api_endpoint.clone()).map_err(std::io::Error::other)?;
 
