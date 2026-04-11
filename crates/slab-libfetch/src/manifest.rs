@@ -134,19 +134,23 @@ impl ArtifactSpec {
         variant: &Variant,
     ) -> Result<ResolvedArtifact, FetchError> {
         let os_str = platform.os.to_string();
-        let arch_str = platform.arch.to_string();
+        let requested_arch = platform.arch.to_string();
         let resolved_target =
-            self.resolve_variant_for_target(&os_str, &arch_str, &variant.to_string())?;
+            self.resolve_variant_for_target(&os_str, &requested_arch, &variant.to_string())?;
         let asset_name = render_asset_name(
             &self.asset_pattern,
             &self.version,
             &os_str,
-            &arch_str,
+            &resolved_target.arch,
             resolved_target.variant.as_deref(),
             resolved_target.extension,
         );
         let checksum = resolved_target.checksum.map(str::to_string).or_else(|| {
-            self.lookup_checksum(&os_str, &arch_str, resolved_target.variant.as_deref())
+            self.lookup_checksum(
+                &os_str,
+                checksum_arch_candidates(&requested_arch, &resolved_target.arch),
+                resolved_target.variant.as_deref(),
+            )
         });
 
         Ok(ResolvedArtifact {
@@ -170,7 +174,7 @@ impl ArtifactSpec {
                     os_str, self.lib_name
                 ))
             })?;
-            let target = os_targets.get(arch_str).ok_or_else(|| {
+            let (resolved_arch, target) = find_declared_target(os_targets, arch_str).ok_or_else(|| {
                 FetchError::ManifestError(format!(
                     "arch '{}' is not declared for OS '{}' in artifact '{}'",
                     arch_str, os_str, self.lib_name
@@ -179,6 +183,7 @@ impl ArtifactSpec {
 
             if target.variants.is_empty() {
                 return Ok(ResolvedTarget {
+                    arch: resolved_arch.to_string(),
                     variant: None,
                     extension: target.extension.as_deref(),
                     checksum: target.checksum.as_deref(),
@@ -187,6 +192,7 @@ impl ArtifactSpec {
 
             if target.variants.iter().any(|declared| declared == variant_key) {
                 return Ok(ResolvedTarget {
+                    arch: resolved_arch.to_string(),
                     variant: Some(variant_key.to_string()),
                     extension: target.extension.as_deref(),
                     checksum: target.checksum.as_deref(),
@@ -212,14 +218,15 @@ impl ArtifactSpec {
                 variant_key, os_str
             )));
         }
-        if !matrix.arch.iter().any(|arch| arch == arch_str) {
-            return Err(FetchError::ManifestError(format!(
+        let resolved_arch = find_declared_arch(&matrix.arch, arch_str).ok_or_else(|| {
+            FetchError::ManifestError(format!(
                 "variant '{}' is not available for arch '{}'",
                 variant_key, arch_str
-            )));
-        }
+            ))
+        })?;
 
         Ok(ResolvedTarget {
+            arch: resolved_arch.to_string(),
             variant: Some(variant_key.to_string()),
             extension: None,
             checksum: None,
@@ -229,23 +236,77 @@ impl ArtifactSpec {
     fn lookup_checksum(
         &self,
         os_str: &str,
-        arch_str: &str,
+        arch_candidates: Vec<&str>,
         variant: Option<&str>,
     ) -> Option<String> {
         let mut keys = Vec::new();
         if let Some(variant) = variant {
-            keys.push(format!("{}-{}-{}", os_str, variant, arch_str));
+            for arch in &arch_candidates {
+                keys.push(format!("{}-{}-{}", os_str, variant, arch));
+            }
         }
-        keys.push(format!("{}-{}", os_str, arch_str));
+        for arch in arch_candidates {
+            keys.push(format!("{}-{}", os_str, arch));
+        }
 
         keys.into_iter().find_map(|key| self.checksums.get(&key).cloned())
     }
 }
 
 struct ResolvedTarget<'a> {
+    arch: String,
     variant: Option<String>,
     extension: Option<&'a str>,
     checksum: Option<&'a str>,
+}
+
+fn checksum_arch_candidates<'a>(requested_arch: &'a str, resolved_arch: &'a str) -> Vec<&'a str> {
+    let mut candidates = Vec::new();
+    push_unique_arch_candidates(&mut candidates, resolved_arch);
+    push_unique_arch_candidates(&mut candidates, requested_arch);
+    candidates
+}
+
+fn push_unique_arch_candidates<'a>(out: &mut Vec<&'a str>, arch: &'a str) {
+    for candidate in arch_aliases(arch) {
+        if !out.contains(&candidate) {
+            out.push(candidate);
+        }
+    }
+}
+
+fn arch_aliases(arch: &str) -> Vec<&str> {
+    match arch {
+        "aarch64" => vec!["aarch64", "arm64"],
+        "arm64" => vec!["arm64", "aarch64"],
+        _ => vec![arch],
+    }
+}
+
+fn find_declared_target<'a>(
+    os_targets: &'a HashMap<String, ArtifactTarget>,
+    arch_str: &str,
+) -> Option<(&'a str, &'a ArtifactTarget)> {
+    for candidate in arch_aliases(arch_str) {
+        if let Some((declared_arch, target)) = os_targets.get_key_value(candidate) {
+            return Some((declared_arch.as_str(), target));
+        }
+    }
+
+    None
+}
+
+fn find_declared_arch<'a>(declared_arches: &'a [String], arch_str: &str) -> Option<&'a str> {
+    for candidate in arch_aliases(arch_str) {
+        if let Some(declared_arch) = declared_arches
+            .iter()
+            .find(|declared_arch| declared_arch.as_str() == candidate)
+        {
+            return Some(declared_arch.as_str());
+        }
+    }
+
+    None
 }
 
 fn render_asset_name(
@@ -371,6 +432,38 @@ vulkan = { os = ["windows", "linux"],          arch = ["x86_64"] }
 metal  = { os = ["macos"],                     arch = ["aarch64"] }
 "#;
 
+    const SAMPLE_TOML_TARGET_ARCH_ALIAS: &str = r#"
+[metadata]
+schema_version = "1"
+
+[artifacts.whisper]
+repo = "ggml-org/whisper.cpp"
+version = "v1.8.4"
+lib_name = "whisper"
+asset_pattern = "whisper-sdk-{os}-{arch}.{extension}"
+
+[artifacts.whisper.targets.macos.arm64]
+variants = []
+extension = "tar.gz"
+
+[artifacts.whisper.checksums]
+"macos-arm64" = "sha256:decafbad"
+"#;
+
+    const SAMPLE_TOML_LEGACY_ARCH_ALIAS: &str = r#"
+[metadata]
+schema_version = "1"
+
+[artifacts.llama]
+repo = "ggml-org/llama.cpp"
+version = "b8069"
+lib_name = "llama"
+asset_pattern = "llama-{version}-bin-{os}-{variant}-{arch}.zip"
+
+[artifacts.llama.variants]
+metal = { os = ["macos"], arch = ["arm64"] }
+"#;
+
     fn make_platform(os: Os, arch: Arch) -> Platform {
         Platform { os, arch }
     }
@@ -461,6 +554,25 @@ metal  = { os = ["macos"],                     arch = ["aarch64"] }
         let resolved = spec.resolve(&platform, &Variant::Cpu).unwrap();
         assert_eq!(resolved.asset_name, "llama-b8069-bin-linux-cpu-x86_64.tar.gz");
         assert_eq!(resolved.checksum, Some("sha256:deadbeef".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_target_arch_alias_uses_manifest_arch_name() {
+        let m = Manifest::parse(SAMPLE_TOML_TARGET_ARCH_ALIAS).unwrap();
+        let spec = m.artifact("whisper").unwrap();
+        let platform = make_platform(Os::MacOS, Arch::Aarch64);
+        let resolved = spec.resolve(&platform, &Variant::Metal).unwrap();
+        assert_eq!(resolved.asset_name, "whisper-sdk-macos-arm64.tar.gz");
+        assert_eq!(resolved.checksum, Some("sha256:decafbad".to_string()));
+    }
+
+    #[test]
+    fn test_resolve_legacy_arch_alias_uses_manifest_arch_name() {
+        let m = Manifest::parse(SAMPLE_TOML_LEGACY_ARCH_ALIAS).unwrap();
+        let spec = m.artifact("llama").unwrap();
+        let platform = make_platform(Os::MacOS, Arch::Aarch64);
+        let resolved = spec.resolve(&platform, &Variant::Metal).unwrap();
+        assert_eq!(resolved.asset_name, "llama-b8069-bin-macos-metal-arm64.zip");
     }
 
     #[test]

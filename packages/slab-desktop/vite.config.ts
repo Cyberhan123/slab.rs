@@ -9,6 +9,14 @@ const host = process.env.TAURI_DEV_HOST;
 export default defineConfig(async () => ({
   plugins: [react(), tailwindcss()],
 
+  build: {
+    // Tauri on macOS uses the system WebKit. Our minimum supported macOS
+    // version is 13.0, so keep the frontend output within the Safari 16
+    // feature set instead of following Vite's moving default baseline.
+    target: "safari16",
+    cssTarget: "safari16",
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent Vite from obscuring rust errors

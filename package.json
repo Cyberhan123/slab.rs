@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.1.0",
   "packageManager": "bun@1.3.11",
+  "engines": {
+    "node": ">=24",
+    "bun": ">=1.3.11"
+  },
   "scripts": {
     "build:desktop": "bun run --filter @slab/desktop build",
     "dev:desktop": "bun run --filter @slab/desktop dev",
