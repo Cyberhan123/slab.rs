@@ -162,6 +162,7 @@
           "$ref": "#/$defs/LlamaRuntimeLeafConfig",
           "default": {
             "capacity": {},
+            "context_length": 2048,
             "enabled": true,
             "endpoint": {
               "http": {},
@@ -205,6 +206,7 @@
             },
             "llama": {
               "capacity": {},
+              "context_length": 2048,
               "enabled": true,
               "endpoint": {
                 "http": {},
@@ -536,6 +538,7 @@
               },
               "llama": {
                 "capacity": {},
+                "context_length": 2048,
                 "enabled": true,
                 "endpoint": {
                   "http": {},
@@ -849,6 +852,7 @@
             },
             "llama": {
               "capacity": {},
+              "context_length": 2048,
               "enabled": true,
               "endpoint": {
                 "http": {},

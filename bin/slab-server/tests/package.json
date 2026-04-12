@@ -1,0 +1,16 @@
+{
+  "name": "@slab/slab-server-tests",
+  "private": true,
+  "version": "0.0.1",
+  "type": "module",
+  "scripts": {
+    "test:unit": "vitest run --config vitest.config.ts unit/**/*.unit.test.ts",
+    "test:unit:watch": "vitest --config vitest.config.ts unit/**/*.unit.test.ts",
+    "test:integration": "vitest run --config vitest.config.ts integration/**/*.integration.test.ts",
+    "test:integration:watch": "vitest --config vitest.config.ts integration/**/*.integration.test.ts",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.4"
+  }
+}
