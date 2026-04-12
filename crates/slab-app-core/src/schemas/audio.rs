@@ -7,13 +7,22 @@ use crate::domain::models::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
-pub struct CompletionRequest {
+pub struct AudioTranscriptionRequest {
     /// The audio file path to transcribe.
     #[validate(custom(
         function = "crate::schemas::validation::validate_absolute_path",
         message = "path must be an absolute path without '..'"
     ))]
     pub path: String,
+    /// Optional language override passed to whisper inference.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub language: Option<String>,
+    /// Optional initial prompt passed to whisper inference.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub prompt: Option<String>,
+    /// Enable whisper language auto-detection when no explicit language is set.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub detect_language: Option<bool>,
     /// Optional VAD (Voice Activity Detection) settings.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     #[validate(nested)]
@@ -177,12 +186,22 @@ impl From<TranscribeDecodeRequest> for TranscribeDecodeOptions {
     }
 }
 
-impl From<CompletionRequest> for AudioTranscriptionCommand {
-    fn from(request: CompletionRequest) -> Self {
+impl From<AudioTranscriptionRequest> for AudioTranscriptionCommand {
+    fn from(request: AudioTranscriptionRequest) -> Self {
         Self {
             path: request.path,
+            language: normalize_optional_text(request.language),
+            prompt: normalize_optional_text(request.prompt),
+            detect_language: request.detect_language,
             vad: request.vad.map(Into::into),
             decode: request.decode.map(Into::into),
         }
     }
+}
+
+fn normalize_optional_text(value: Option<String>) -> Option<String> {
+    value.and_then(|value| {
+        let trimmed = value.trim();
+        (!trimmed.is_empty()).then(|| trimmed.to_owned())
+    })
 }

@@ -13,6 +13,9 @@ export type TranscribeVadSettings = {
 };
 
 export type TranscribeOptions = {
+    language?: string;
+    prompt?: string;
+    detect_language?: boolean;
     vad?: TranscribeVadSettings;
     decode?: {
         offset_ms?: number;
@@ -44,6 +47,9 @@ const useTranscribe = () => {
         mutateAsync: (options: {
             body: {
                 path: string;
+                language?: string;
+                prompt?: string;
+                detect_language?: boolean;
                 vad?: TranscribeVadSettings;
                 decode?: TranscribeOptions["decode"];
             };
@@ -63,10 +69,22 @@ const useTranscribe = () => {
 
         const body: {
             path: string;
+            language?: string;
+            prompt?: string;
+            detect_language?: boolean;
             vad?: TranscribeVadSettings;
             decode?: TranscribeOptions["decode"];
         } = { path: value };
 
+        if (typeof options?.language === 'string' && options.language.trim()) {
+            body.language = options.language.trim();
+        }
+        if (typeof options?.prompt === 'string' && options.prompt.trim()) {
+            body.prompt = options.prompt.trim();
+        }
+        if (options?.detect_language) {
+            body.detect_language = true;
+        }
         if (options?.vad) {
             body.vad = options.vad;
         }

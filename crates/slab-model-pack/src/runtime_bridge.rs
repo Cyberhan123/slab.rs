@@ -36,6 +36,13 @@ impl ResolvedModelPack {
         self.compile_runtime_bridge(preset)
     }
 
+    pub fn compile_model_source(
+        &self,
+        preset: &ResolvedPreset,
+    ) -> Result<ModelSource, ModelPackError> {
+        build_model_source(preset)
+    }
+
     pub fn compile_runtime_bridge(
         &self,
         preset: &ResolvedPreset,

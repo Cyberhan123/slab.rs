@@ -28,9 +28,11 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
             return Err(Status::invalid_argument("audio file path is empty"));
         }
 
-        let (vad, decode) = build_whisper_inference_options(&req);
+        let (language, prompt, detect_language, vad, decode) =
+            build_whisper_inference_options(&req);
         let vad_enabled = vad.as_ref().is_some_and(|value| value.enabled);
-        let decode_configured = decode.is_some();
+        let decode_configured =
+            decode.is_some() || language.is_some() || prompt.is_some() || detect_language == Some(true);
 
         debug!(
             audio_path = %req.path,
@@ -50,8 +52,9 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
             .run_audio_transcription(AudioTranscriptionRequest {
                 audio_path: PathBuf::from(req.path),
                 pcm_samples: Some(pcm_samples),
-                language: None,
-                prompt: None,
+                language,
+                prompt,
+                detect_language,
                 vad,
                 decode,
                 options: Default::default(),
@@ -97,7 +100,26 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
 
 fn build_whisper_inference_options(
     req: &pb::TranscribeRequest,
-) -> (Option<WhisperVadOptions>, Option<WhisperDecodeOptions>) {
+) -> (
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+    Option<WhisperVadOptions>,
+    Option<WhisperDecodeOptions>,
+) {
+    let language = req
+        .language
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let prompt = req
+        .prompt
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    let detect_language = req.detect_language.filter(|value| *value);
     let vad = if let Some(vad) = req.vad.as_ref() {
         if !vad.enabled {
             None
@@ -148,7 +170,7 @@ fn build_whisper_inference_options(
         None
     };
 
-    (vad, decode)
+    (language, prompt, detect_language, vad, decode)
 }
 
 fn convert_file_to_pcm_f32le(path: &str) -> Result<Arc<[f32]>, String> {

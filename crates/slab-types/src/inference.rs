@@ -156,6 +156,8 @@ pub struct AudioTranscriptionRequest {
     #[serde(default)]
     pub prompt: Option<String>,
     #[serde(default)]
+    pub detect_language: Option<bool>,
+    #[serde(default)]
     pub vad: Option<WhisperVadOptions>,
     #[serde(default)]
     pub decode: Option<WhisperDecodeOptions>,
@@ -170,6 +172,8 @@ pub struct AudioTranscriptionOpOptions {
     pub language: Option<String>,
     #[serde(default)]
     pub prompt: Option<String>,
+    #[serde(default)]
+    pub detect_language: Option<bool>,
     #[serde(default)]
     pub vad: Option<WhisperVadOptions>,
     #[serde(default)]

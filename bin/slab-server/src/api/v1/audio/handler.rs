@@ -7,7 +7,7 @@ use axum::{Json, Router};
 use utoipa::OpenApi;
 
 use crate::api::v1::audio::schema::{
-    CompletionRequest, TranscribeDecodeRequest, TranscribeVadRequest,
+    AudioTranscriptionRequest, TranscribeDecodeRequest, TranscribeVadRequest,
 };
 use crate::api::v1::tasks::schema::OperationAcceptedResponse;
 use crate::api::validation::ValidatedJson;
@@ -19,7 +19,7 @@ use slab_app_core::domain::services::AudioService;
 #[openapi(
     paths(transcribe),
     components(schemas(
-        CompletionRequest,
+        AudioTranscriptionRequest,
         TranscribeVadRequest,
         TranscribeDecodeRequest,
         OperationAcceptedResponse
@@ -35,7 +35,7 @@ pub fn router() -> Router<Arc<AppState>> {
     post,
     path = "/v1/audio/transcriptions",
     tag = "audio",
-    request_body(content = CompletionRequest, description = "Audio transcription request"),
+    request_body(content = AudioTranscriptionRequest, description = "Audio transcription request"),
     responses(
         (status = 202, description = "Task accepted", body = OperationAcceptedResponse),
         (status = 400, description = "Bad request"),
@@ -44,7 +44,7 @@ pub fn router() -> Router<Arc<AppState>> {
 )]
 async fn transcribe(
     State(service): State<AudioService>,
-    ValidatedJson(req): ValidatedJson<CompletionRequest>,
+    ValidatedJson(req): ValidatedJson<AudioTranscriptionRequest>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
     let response = service.transcribe(req.into()).await?;
     Ok((StatusCode::ACCEPTED, Json(response.into())))

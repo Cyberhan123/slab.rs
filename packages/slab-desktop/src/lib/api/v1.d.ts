@@ -701,6 +701,18 @@ export interface components {
          * @enum {string}
          */
         AgentStatusValue: "pending" | "running" | "completed" | "errored" | "shutdown";
+        AudioTranscriptionRequest: {
+            decode?: null | components["schemas"]["TranscribeDecodeRequest"];
+            /** @description Enable whisper language auto-detection when no explicit language is set. */
+            detect_language?: boolean | null;
+            /** @description Optional language override passed to whisper inference. */
+            language?: string | null;
+            /** @description The audio file path to transcribe. */
+            path: string;
+            /** @description Optional initial prompt passed to whisper inference. */
+            prompt?: string | null;
+            vad?: null | components["schemas"]["TranscribeVadRequest"];
+        };
         /** @description Response body for list backends endpoint. */
         BackendListResponse: {
             backends: components["schemas"]["BackendStatusResponse"][];
@@ -1927,7 +1939,7 @@ export interface operations {
         /** @description Audio transcription request */
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CompletionRequest"];
+                "application/json": components["schemas"]["AudioTranscriptionRequest"];
             };
         };
         responses: {

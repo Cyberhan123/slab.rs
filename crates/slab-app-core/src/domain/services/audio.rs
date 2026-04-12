@@ -39,7 +39,14 @@ impl AudioService {
             AppCoreError::BackendNotReady("whisper gRPC endpoint is not configured".into())
         })?;
 
-        let grpc_req = pb::TranscribeRequest { path: req.path.clone(), vad, decode };
+        let grpc_req = pb::TranscribeRequest {
+            path: req.path.clone(),
+            language: req.language.clone(),
+            prompt: req.prompt.clone(),
+            detect_language: req.detect_language,
+            vad,
+            decode,
+        };
 
         let model_auto_unload = Arc::clone(self.state.auto_unload());
         let transcribe_channel_for_spawn = transcribe_channel;
