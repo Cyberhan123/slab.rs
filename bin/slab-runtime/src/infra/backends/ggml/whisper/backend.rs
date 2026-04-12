@@ -72,7 +72,13 @@ fn parse_inference_options(raw: &Payload) -> Result<WhisperFullParams, String> {
 
     let opts: AudioTranscriptionOpOptions =
         raw.to_typed().map_err(|e| format!("invalid whisper inference options: {e}"))?;
-    build_ggml_whisper_full_params_from_legacy(opts.language, opts.prompt, opts.vad, opts.decode)
+    build_ggml_whisper_full_params_from_legacy(
+        opts.language,
+        opts.prompt,
+        opts.detect_language,
+        opts.vad,
+        opts.decode,
+    )
         .map_err(|error| error.to_string())
 }
 

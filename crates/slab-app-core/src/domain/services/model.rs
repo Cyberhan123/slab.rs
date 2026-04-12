@@ -88,6 +88,58 @@ fn primary_artifact_key<T>(files: &BTreeMap<String, T>) -> Option<String> {
     files.keys().next().cloned()
 }
 
+fn pack_has_runtime_execution_capability(manifest: &slab_model_pack::ModelPackManifest) -> bool {
+    manifest.capabilities.iter().any(|capability| capability.is_runtime_execution())
+}
+
+fn default_managed_backend_for_pack_family(
+    family: slab_types::ModelFamily,
+) -> Option<ManagedModelBackendId> {
+    match family {
+        slab_types::ModelFamily::Llama => Some(ManagedModelBackendId::GgmlLlama),
+        slab_types::ModelFamily::Whisper => Some(ManagedModelBackendId::GgmlWhisper),
+        slab_types::ModelFamily::Diffusion => Some(ManagedModelBackendId::GgmlDiffusion),
+        slab_types::ModelFamily::Onnx => None,
+        _ => None,
+    }
+}
+
+fn resolve_projection_backend_for_pack(
+    manifest: &slab_model_pack::ModelPackManifest,
+) -> Result<ManagedModelBackendId, AppCoreError> {
+    manifest
+        .backend_hints
+        .prefer_drivers
+        .iter()
+        .find_map(|driver| driver.parse::<ManagedModelBackendId>().ok())
+        .or_else(|| default_managed_backend_for_pack_family(manifest.family))
+        .ok_or_else(|| {
+            AppCoreError::BadRequest(format!(
+                "pack '{}' declares only non-runtime capabilities; add a managed backend hint such as ggml.whisper",
+                manifest.id
+            ))
+        })
+}
+
+fn resolve_pack_model_source(
+    resolved: &slab_model_pack::ResolvedModelPack,
+    preset: &slab_model_pack::ResolvedPreset,
+    error_context: &str,
+) -> Result<ModelSource, AppCoreError> {
+    resolved
+        .compile_model_source(preset)
+        .map_err(|error| AppCoreError::BadRequest(format!("{error_context}: {error}")))
+}
+
+fn runtime_presets_from_manifest(
+    manifest: &slab_model_pack::ModelPackManifest,
+) -> Option<RuntimePresets> {
+    manifest.runtime_presets.as_ref().and_then(|presets| {
+        (presets.temperature.is_some() || presets.top_p.is_some())
+            .then_some(RuntimePresets { temperature: presets.temperature, top_p: presets.top_p })
+    })
+}
+
 fn primary_materialized_artifact_path(config: &StoredModelConfig) -> Option<String> {
     primary_artifact_key(&config.materialized_artifacts)
         .and_then(|key| config.materialized_artifacts.get(&key).cloned())
@@ -203,41 +255,76 @@ impl ModelService {
             .resolve_model_pack_selection(id, &context.resolved, context.persisted.as_ref(), true)
             .await?;
         let command = build_model_command_from_pack_context(&context, &selection.selected_preset)?;
-        let mut bridge = context.resolved.compile_runtime_bridge(&selection.selected_preset).map_err(
-            |error| {
-                AppCoreError::BadRequest(format!(
-                    "failed to compile selected pack preset for config document: {error}"
-                ))
-            },
-        )?;
-        apply_materialized_source_to_bridge(&mut bridge, context.persisted.as_ref());
-        let source_summary = build_model_config_source_summary(&bridge.model_spec.source);
         let selection_view = build_model_config_selection_view(
             &context.resolved,
             &selection.explicit_selection,
             &selection.effective_selection,
         );
-        let resolved_load_spec = self
-            .build_model_config_load_json(
-                bridge.backend,
-                &command,
-                &bridge,
-                selection.selected_preset.effective_load_config.as_ref(),
-            )
-            .await?;
-        let resolved_inference_spec = Value::Object(
-            bridge.inference_defaults.clone().into_iter().collect::<Map<String, Value>>(),
-        );
-        let sections = self.build_model_config_sections(
-            &model,
-            &command,
-            &context.resolved,
-            &selection.selected_preset,
-            &bridge,
-            &source_summary,
-            &resolved_load_spec,
-            &resolved_inference_spec,
-        )?;
+        let (sections, source_summary, resolved_load_spec, resolved_inference_spec) = match context
+            .resolved
+            .compile_runtime_bridge(&selection.selected_preset)
+        {
+            Ok(mut bridge) => {
+                apply_materialized_source_to_bridge(&mut bridge, context.persisted.as_ref());
+                let source_summary = build_model_config_source_summary(&bridge.model_spec.source);
+                let resolved_load_spec = self
+                    .build_model_config_load_json(
+                        bridge.backend,
+                        &command,
+                        &bridge,
+                        selection.selected_preset.effective_load_config.as_ref(),
+                    )
+                    .await?;
+                let resolved_inference_spec = Value::Object(
+                    bridge.inference_defaults.clone().into_iter().collect::<Map<String, Value>>(),
+                );
+                let sections = self.build_model_config_sections(
+                    &model,
+                    &command,
+                    &context.resolved,
+                    &selection.selected_preset,
+                    &bridge,
+                    &source_summary,
+                    &resolved_load_spec,
+                    &resolved_inference_spec,
+                )?;
+                (sections, source_summary, resolved_load_spec, resolved_inference_spec)
+            }
+            Err(slab_model_pack::ModelPackError::MissingRuntimeCapability)
+                if !pack_has_runtime_execution_capability(&context.resolved.manifest) =>
+            {
+                let source = materialized_model_source(
+                    &resolve_pack_model_source(
+                        &context.resolved,
+                        &selection.selected_preset,
+                        "failed to resolve selected pack preset source for config document",
+                    )?,
+                    context.persisted.as_ref(),
+                );
+                let source_summary = build_model_config_source_summary(&source);
+                let resolved_inference_spec = selection
+                    .selected_preset
+                    .effective_inference_config
+                    .as_ref()
+                    .map(|config| config.payload.clone())
+                    .unwrap_or_else(|| Value::Object(Map::new()));
+                let resolved_load_spec = Value::Object(Map::new());
+                let sections = self.build_product_model_config_sections(
+                    &model,
+                    &command,
+                    &context.resolved,
+                    &selection.selected_preset,
+                    &source_summary,
+                    &resolved_inference_spec,
+                )?;
+                (sections, source_summary, resolved_load_spec, resolved_inference_spec)
+            }
+            Err(error) => {
+                return Err(AppCoreError::BadRequest(format!(
+                    "failed to compile selected pack preset for config document: {error}"
+                )));
+            }
+        };
 
         Ok(ModelConfigDocument {
             model_summary: model,
@@ -545,7 +632,9 @@ impl ModelService {
             primary_artifact_id: primary_artifact_id.clone(),
         })
         .map_err(|error| {
-            AppCoreError::Internal(format!("failed to serialize model download task input: {error}"))
+            AppCoreError::Internal(format!(
+                "failed to serialize model download task input: {error}"
+            ))
         })?;
 
         let store = Arc::clone(self.model_state.store());
@@ -831,18 +920,33 @@ impl ModelService {
 
         let context = self.load_model_pack_context(&model.id)?;
         let selection = self
-            .resolve_model_pack_selection(&model.id, &context.resolved, context.persisted.as_ref(), true)
+            .resolve_model_pack_selection(
+                &model.id,
+                &context.resolved,
+                context.persisted.as_ref(),
+                true,
+            )
             .await?;
-        let bridge = context.resolved.compile_runtime_bridge(&selection.selected_preset).map_err(
-            |error| {
-                AppCoreError::BadRequest(format!(
+        let source = match context.resolved.compile_runtime_bridge(&selection.selected_preset) {
+            Ok(bridge) => bridge.model_spec.source,
+            Err(slab_model_pack::ModelPackError::MissingRuntimeCapability)
+                if !pack_has_runtime_execution_capability(&context.resolved.manifest) =>
+            {
+                resolve_pack_model_source(
+                    &context.resolved,
+                    &selection.selected_preset,
+                    "failed to resolve selected pack preset source for download plan",
+                )?
+            }
+            Err(error) => {
+                return Err(AppCoreError::BadRequest(format!(
                     "failed to compile selected pack preset for download plan: {error}"
-                ))
-            },
-        )?;
+                )));
+            }
+        };
+        let source = materialized_model_source(&source, context.persisted.as_ref());
 
-        let ModelSource::HuggingFace { repo_id: source_repo_id, files, .. } = bridge.model_spec.source
-        else {
+        let ModelSource::HuggingFace { repo_id: source_repo_id, files, .. } = source else {
             let mut artifacts = BTreeMap::new();
             artifacts.insert("model".to_owned(), filename);
             return Ok((repo_id, artifacts, Some("model".to_owned())));
@@ -1383,6 +1487,245 @@ impl ModelService {
         ])
     }
 
+    fn build_product_model_config_sections(
+        &self,
+        model: &UnifiedModel,
+        command: &CreateModelCommand,
+        resolved: &slab_model_pack::ResolvedModelPack,
+        selected_preset: &slab_model_pack::ResolvedPreset,
+        source_summary: &ModelConfigSourceSummary,
+        resolved_inference_spec: &Value,
+    ) -> Result<Vec<ModelConfigSectionView>, AppCoreError> {
+        let source_origin = model_source_origin(selected_preset);
+        let backend_label = command
+            .backend_id
+            .map(|backend_id| backend_id.to_string())
+            .unwrap_or_else(|| "unknown".to_owned());
+        let summary_fields = vec![
+            build_model_config_field(
+                "model.id",
+                ModelConfigFieldScope::Summary,
+                "Model ID",
+                Some("Catalog identifier projected from the pack manifest.".into()),
+                ModelConfigValueType::String,
+                Value::String(model.id.clone()),
+                ModelConfigOrigin::PackManifest,
+            ),
+            build_model_config_field(
+                "model.display_name",
+                ModelConfigFieldScope::Summary,
+                "Display Name",
+                Some("Read-only label from the pack manifest.".into()),
+                ModelConfigValueType::String,
+                Value::String(command.display_name.clone()),
+                ModelConfigOrigin::PackManifest,
+            ),
+            build_model_config_field(
+                "model.backend",
+                ModelConfigFieldScope::Summary,
+                "Backend",
+                Some("Managed backend used for catalog projection and downloads.".into()),
+                ModelConfigValueType::String,
+                Value::String(backend_label),
+                ModelConfigOrigin::Derived,
+            ),
+            build_model_config_field(
+                "model.status",
+                ModelConfigFieldScope::Summary,
+                "Catalog Status",
+                Some("Current projected status in the models table.".into()),
+                ModelConfigValueType::String,
+                Value::String(model.status.as_str().to_owned()),
+                ModelConfigOrigin::Derived,
+            ),
+            build_model_config_field(
+                "model.capabilities",
+                ModelConfigFieldScope::Summary,
+                "Capabilities",
+                Some("Capabilities declared by the pack and projected into the catalog.".into()),
+                ModelConfigValueType::Json,
+                serde_json::to_value(&model.capabilities).map_err(|error| {
+                    AppCoreError::Internal(format!(
+                        "failed to serialize model capabilities for config document: {error}"
+                    ))
+                })?,
+                ModelConfigOrigin::PackManifest,
+            ),
+        ];
+
+        let mut source_fields = vec![build_model_config_field(
+            "source.kind",
+            ModelConfigFieldScope::Source,
+            "Source Kind",
+            Some("Where the selected preset resolves its artifacts from.".into()),
+            ModelConfigValueType::String,
+            Value::String(source_summary.source_kind.clone()),
+            source_origin,
+        )];
+        if let Some(repo_id) = source_summary.repo_id.as_ref() {
+            source_fields.push(build_model_config_field(
+                "source.repo_id",
+                ModelConfigFieldScope::Source,
+                "Repo ID",
+                Some("Resolved Hugging Face repository for the selected model source.".into()),
+                ModelConfigValueType::String,
+                Value::String(repo_id.clone()),
+                source_origin,
+            ));
+        }
+        if let Some(filename) = source_summary.filename.as_ref() {
+            source_fields.push(build_model_config_field(
+                "source.filename",
+                ModelConfigFieldScope::Source,
+                "Primary Artifact",
+                Some("Primary artifact path selected for this preset/variant.".into()),
+                ModelConfigValueType::Path,
+                Value::String(filename.clone()),
+                source_origin,
+            ));
+        }
+        if let Some(local_path) = source_summary.local_path.as_ref() {
+            source_fields.push(build_model_config_field(
+                "source.local_path",
+                ModelConfigFieldScope::Source,
+                "Local Path",
+                Some("Projected local path currently associated with the selected source.".into()),
+                ModelConfigValueType::Path,
+                Value::String(local_path.clone()),
+                source_origin,
+            ));
+        }
+        for artifact in &source_summary.artifacts {
+            source_fields.push(build_model_config_field(
+                format!("source.artifacts.{}", artifact.id),
+                ModelConfigFieldScope::Source,
+                artifact.label.clone(),
+                Some("Resolved artifact path for the selected source.".into()),
+                ModelConfigValueType::Path,
+                Value::String(artifact.value.clone()),
+                source_origin,
+            ));
+        }
+
+        let load_fields = vec![build_model_config_field(
+            "load.runtime_load_supported",
+            ModelConfigFieldScope::Load,
+            "Runtime Load Supported",
+            Some("Whether this pack resolves to a runtime-loadable model target.".into()),
+            ModelConfigValueType::Boolean,
+            Value::Bool(false),
+            ModelConfigOrigin::Derived,
+        )];
+
+        let mut inference_fields = Vec::new();
+        if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.temperature).is_some()
+            || value_is_present(resolved_inference_spec, "temperature")
+        {
+            inference_fields.push(build_model_config_field(
+                "inference.temperature",
+                ModelConfigFieldScope::Inference,
+                "Temperature",
+                Some("Resolved sampling temperature exposed by the pack.".into()),
+                ModelConfigValueType::Number,
+                json_property_or_null(resolved_inference_spec, "temperature"),
+                if resolved
+                    .manifest
+                    .runtime_presets
+                    .as_ref()
+                    .and_then(|value| value.temperature)
+                    .is_some()
+                {
+                    ModelConfigOrigin::PackManifest
+                } else {
+                    ModelConfigOrigin::SelectedBackendConfig
+                },
+            ));
+        }
+        if resolved.manifest.runtime_presets.as_ref().and_then(|value| value.top_p).is_some()
+            || value_is_present(resolved_inference_spec, "top_p")
+        {
+            inference_fields.push(build_model_config_field(
+                "inference.top_p",
+                ModelConfigFieldScope::Inference,
+                "Top P",
+                Some("Resolved nucleus sampling value exposed by the pack.".into()),
+                ModelConfigValueType::Number,
+                json_property_or_null(resolved_inference_spec, "top_p"),
+                if resolved
+                    .manifest
+                    .runtime_presets
+                    .as_ref()
+                    .and_then(|value| value.top_p)
+                    .is_some()
+                {
+                    ModelConfigOrigin::PackManifest
+                } else {
+                    ModelConfigOrigin::SelectedBackendConfig
+                },
+            ));
+        }
+
+        let advanced_fields = vec![
+            build_model_config_field(
+                "advanced.non_runtime_projection",
+                ModelConfigFieldScope::Advanced,
+                "Non-Runtime Projection",
+                Some(
+                    "This pack is cataloged for download and product usage only, without a runtime bridge."
+                        .into(),
+                ),
+                ModelConfigValueType::Boolean,
+                Value::Bool(true),
+                ModelConfigOrigin::Derived,
+            ),
+            build_model_config_field(
+                "advanced.resolved_inference_spec",
+                ModelConfigFieldScope::Advanced,
+                "Resolved Inference JSON",
+                Some("Resolved inference defaults from the selected pack preset.".into()),
+                ModelConfigValueType::Json,
+                resolved_inference_spec.clone(),
+                ModelConfigOrigin::Derived,
+            ),
+        ];
+
+        Ok(vec![
+            ModelConfigSectionView {
+                id: "summary".into(),
+                label: "Summary".into(),
+                description_md: Some("Pack-backed catalog summary for the selected model.".into()),
+                fields: summary_fields,
+            },
+            ModelConfigSectionView {
+                id: "source".into(),
+                label: "Source / Artifacts".into(),
+                description_md: Some("Resolved source and artifacts for the active selection.".into()),
+                fields: source_fields,
+            },
+            ModelConfigSectionView {
+                id: "load".into(),
+                label: "Load".into(),
+                description_md: Some(
+                    "This pack does not expose a runtime-execution capability, so runtime load settings are unavailable."
+                        .into(),
+                ),
+                fields: load_fields,
+            },
+            ModelConfigSectionView {
+                id: "inference".into(),
+                label: "Inference".into(),
+                description_md: Some("Resolved inference defaults from the pack.".into()),
+                fields: inference_fields,
+            },
+            ModelConfigSectionView {
+                id: "advanced".into(),
+                label: "Advanced".into(),
+                description_md: Some("Additional metadata for the selected non-runtime pack.".into()),
+                fields: advanced_fields,
+            },
+        ])
+    }
+
     async fn persist_model_definition(
         &self,
         req: CreateModelCommand,
@@ -1878,7 +2221,8 @@ fn sync_model_pack_record(
     } else {
         let existing_path = model_packs::model_pack_file_path(config_dir, &config.id);
         if existing_path.exists()
-            && let Some(existing) = model_packs::read_persisted_model_config_from_pack(&existing_path)?
+            && let Some(existing) =
+                model_packs::read_persisted_model_config_from_pack(&existing_path)?
         {
             config.materialized_artifacts = existing.materialized_artifacts;
         }
@@ -1964,83 +2308,148 @@ fn build_local_model_command_from_pack_preset(
     resolved: &slab_model_pack::ResolvedModelPack,
     preset: &slab_model_pack::ResolvedPreset,
 ) -> Result<CreateModelCommand, AppCoreError> {
-    let bridge = resolved.compile_runtime_bridge(preset).map_err(|error| {
-        AppCoreError::BadRequest(format!("failed to compile selected pack preset: {error}"))
-    })?;
-    let backend_id = ManagedModelBackendId::try_from(bridge.backend).map_err(|error| {
-        AppCoreError::BadRequest(format!(
-            "model pack backend '{}' is not supported by managed local models: {}",
-            bridge.backend, error
-        ))
-    })?;
-    let status = manifest
-        .status
-        .map(|status| match status {
-            slab_model_pack::PackModelStatus::Ready => UnifiedModelStatus::Ready,
-            slab_model_pack::PackModelStatus::NotDownloaded => UnifiedModelStatus::NotDownloaded,
-            slab_model_pack::PackModelStatus::Downloading => UnifiedModelStatus::Downloading,
-            slab_model_pack::PackModelStatus::Error => UnifiedModelStatus::Error,
-        })
-        .unwrap_or_else(|| match bridge.model_spec.source {
-            slab_types::ModelSource::HuggingFace { .. } => UnifiedModelStatus::NotDownloaded,
-            _ => UnifiedModelStatus::Ready,
-        });
-    let runtime_presets = manifest
-        .runtime_presets
-        .as_ref()
-        .and_then(|presets| {
-            (presets.temperature.is_some() || presets.top_p.is_some()).then_some(RuntimePresets {
-                temperature: presets.temperature,
-                top_p: presets.top_p,
-            })
-        })
-        .or_else(|| {
-            let temperature = bridge
-                .inference_defaults
-                .get("temperature")
-                .and_then(|value| value.as_f64().map(|value| value as f32));
-            let top_p = bridge
-                .inference_defaults
-                .get("top_p")
-                .and_then(|value| value.as_f64().map(|value| value as f32));
-            (temperature.is_some() || top_p.is_some())
-                .then_some(RuntimePresets { temperature, top_p })
-        });
-    let (repo_id, filename, local_path) =
-        source_preview_from_model_source(&bridge.model_spec.source);
-    let allow_local_path_fallback = repo_id.is_none();
+    match resolved.compile_runtime_bridge(preset) {
+        Ok(bridge) => {
+            let backend_id = ManagedModelBackendId::try_from(bridge.backend).map_err(|error| {
+                AppCoreError::BadRequest(format!(
+                    "model pack backend '{}' is not supported by managed local models: {}",
+                    bridge.backend, error
+                ))
+            })?;
+            let status = manifest
+                .status
+                .map(|status| match status {
+                    slab_model_pack::PackModelStatus::Ready => UnifiedModelStatus::Ready,
+                    slab_model_pack::PackModelStatus::NotDownloaded => {
+                        UnifiedModelStatus::NotDownloaded
+                    }
+                    slab_model_pack::PackModelStatus::Downloading => {
+                        UnifiedModelStatus::Downloading
+                    }
+                    slab_model_pack::PackModelStatus::Error => UnifiedModelStatus::Error,
+                })
+                .unwrap_or_else(|| match &bridge.model_spec.source {
+                    slab_types::ModelSource::HuggingFace { .. } => {
+                        UnifiedModelStatus::NotDownloaded
+                    }
+                    _ => UnifiedModelStatus::Ready,
+                });
+            let runtime_presets = runtime_presets_from_manifest(manifest).or_else(|| {
+                let temperature = bridge
+                    .inference_defaults
+                    .get("temperature")
+                    .and_then(|value| value.as_f64().map(|value| value as f32));
+                let top_p = bridge
+                    .inference_defaults
+                    .get("top_p")
+                    .and_then(|value| value.as_f64().map(|value| value as f32));
+                (temperature.is_some() || top_p.is_some())
+                    .then_some(RuntimePresets { temperature, top_p })
+            });
+            let (repo_id, filename, local_path) =
+                source_preview_from_model_source(&bridge.model_spec.source);
+            let allow_local_path_fallback = repo_id.is_none();
 
-    Ok(CreateModelCommand {
-        id: Some(manifest.id.clone()),
-        display_name: manifest.label.clone(),
-        kind: UnifiedModelKind::Local,
-        backend_id: Some(backend_id),
-        capabilities: Some(manifest.capabilities.clone()),
-        status: Some(status),
-        spec: ModelSpec {
-            pricing: manifest.pricing.as_ref().map(|pricing| crate::domain::models::Pricing {
-                input: pricing.input,
-                output: pricing.output,
-            }),
-            repo_id,
-            filename,
-            local_path: local_path.or_else(|| {
-                allow_local_path_fallback
-                    .then(|| {
-                        bridge
-                            .model_spec
-                            .source
-                            .primary_path()
-                            .map(|value| value.to_string_lossy().into_owned())
-                    })
-                    .flatten()
-            }),
-            context_window: manifest.context_window.or(bridge.load_defaults.context_length),
-            chat_template: bridge.load_defaults.chat_template.clone(),
-            ..Default::default()
-        },
-        runtime_presets,
-    })
+            Ok(CreateModelCommand {
+                id: Some(manifest.id.clone()),
+                display_name: manifest.label.clone(),
+                kind: UnifiedModelKind::Local,
+                backend_id: Some(backend_id),
+                capabilities: Some(manifest.capabilities.clone()),
+                status: Some(status),
+                spec: ModelSpec {
+                    pricing: manifest.pricing.as_ref().map(|pricing| {
+                        crate::domain::models::Pricing {
+                            input: pricing.input,
+                            output: pricing.output,
+                        }
+                    }),
+                    repo_id,
+                    filename,
+                    local_path: local_path.or_else(|| {
+                        allow_local_path_fallback
+                            .then(|| {
+                                bridge
+                                    .model_spec
+                                    .source
+                                    .primary_path()
+                                    .map(|value| value.to_string_lossy().into_owned())
+                            })
+                            .flatten()
+                    }),
+                    context_window: manifest.context_window.or(bridge.load_defaults.context_length),
+                    chat_template: bridge.load_defaults.chat_template.clone(),
+                    ..Default::default()
+                },
+                runtime_presets,
+            })
+        }
+        Err(slab_model_pack::ModelPackError::MissingRuntimeCapability)
+            if !pack_has_runtime_execution_capability(manifest) =>
+        {
+            let source = resolve_pack_model_source(
+                resolved,
+                preset,
+                "failed to resolve selected pack preset source",
+            )?;
+            let backend_id = resolve_projection_backend_for_pack(manifest)?;
+            let status = manifest
+                .status
+                .map(|status| match status {
+                    slab_model_pack::PackModelStatus::Ready => UnifiedModelStatus::Ready,
+                    slab_model_pack::PackModelStatus::NotDownloaded => {
+                        UnifiedModelStatus::NotDownloaded
+                    }
+                    slab_model_pack::PackModelStatus::Downloading => {
+                        UnifiedModelStatus::Downloading
+                    }
+                    slab_model_pack::PackModelStatus::Error => UnifiedModelStatus::Error,
+                })
+                .unwrap_or_else(|| match &source {
+                    slab_types::ModelSource::HuggingFace { .. } => {
+                        UnifiedModelStatus::NotDownloaded
+                    }
+                    _ => UnifiedModelStatus::Ready,
+                });
+            let (repo_id, filename, local_path) = source_preview_from_model_source(&source);
+            let allow_local_path_fallback = repo_id.is_none();
+
+            Ok(CreateModelCommand {
+                id: Some(manifest.id.clone()),
+                display_name: manifest.label.clone(),
+                kind: UnifiedModelKind::Local,
+                backend_id: Some(backend_id),
+                capabilities: Some(manifest.capabilities.clone()),
+                status: Some(status),
+                spec: ModelSpec {
+                    pricing: manifest.pricing.as_ref().map(|pricing| {
+                        crate::domain::models::Pricing {
+                            input: pricing.input,
+                            output: pricing.output,
+                        }
+                    }),
+                    repo_id,
+                    filename,
+                    local_path: local_path.or_else(|| {
+                        allow_local_path_fallback
+                            .then(|| {
+                                source
+                                    .primary_path()
+                                    .map(|value| value.to_string_lossy().into_owned())
+                            })
+                            .flatten()
+                    }),
+                    context_window: manifest.context_window,
+                    chat_template: None,
+                    ..Default::default()
+                },
+                runtime_presets: runtime_presets_from_manifest(manifest),
+            })
+        }
+        Err(error) => Err(AppCoreError::BadRequest(format!(
+            "failed to compile selected pack preset: {error}"
+        ))),
+    }
 }
 
 fn source_preview_from_pack_source(
@@ -2105,12 +2514,7 @@ fn materialized_model_source(
         return source.clone();
     };
     let (repo_id, filename, local_path) = source_preview_from_model_source(source);
-    let projected_spec = ModelSpec {
-        repo_id,
-        filename,
-        local_path,
-        ..Default::default()
-    };
+    let projected_spec = ModelSpec { repo_id, filename, local_path, ..Default::default() };
     if !same_model_download_source(&persisted.spec, &projected_spec) {
         return source.clone();
     }
@@ -2125,12 +2529,8 @@ fn materialized_model_source(
         };
     }
 
-    let Some(local_path) = persisted
-        .spec
-        .local_path
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
+    let Some(local_path) =
+        persisted.spec.local_path.as_deref().map(str::trim).filter(|value| !value.is_empty())
     else {
         return source.clone();
     };
@@ -2180,8 +2580,11 @@ fn apply_persisted_projection_state(
     persisted: &StoredModelConfig,
 ) {
     if same_model_download_source(&persisted.spec, &command.spec) {
-        command.spec.local_path =
-            persisted.spec.local_path.clone().or_else(|| primary_materialized_artifact_path(persisted));
+        command.spec.local_path = persisted
+            .spec
+            .local_path
+            .clone()
+            .or_else(|| primary_materialized_artifact_path(persisted));
         if let Some(status) = persisted.status.clone() {
             command.status = Some(status);
         }
@@ -2984,8 +3387,9 @@ fn resolve_local_model_path(model: &UnifiedModel) -> Result<String, AppCoreError
 mod tests {
     use super::{
         CloudProviderConfig, build_cloud_chat_model_option, build_local_chat_model_option,
-        canonicalize_model_spec, canonicalize_runtime_presets, map_grpc_model_error,
-        normalize_required_text, validate_and_normalize_model_workers,
+        build_local_model_command_from_pack_preset, canonicalize_model_spec,
+        canonicalize_runtime_presets, map_grpc_model_error, normalize_required_text,
+        validate_and_normalize_model_workers,
     };
     use crate::domain::models::{
         ChatModelSource, ManagedModelBackendId, ModelSpec, RuntimePresets, UnifiedModel,
@@ -2993,7 +3397,7 @@ mod tests {
     };
     use crate::error::AppCoreError;
     use chrono::Utc;
-    use slab_types::RuntimeBackendId;
+    use slab_types::{Capability, DriverHints, ModelFamily, RuntimeBackendId};
     use std::collections::BTreeMap;
 
     #[test]
@@ -3200,6 +3604,103 @@ mod tests {
 
         assert_eq!(workers, 3);
         assert_eq!(source, "request");
+    }
+
+    #[test]
+    fn product_only_vad_pack_projects_into_local_catalog_model() {
+        let manifest = slab_model_pack::ModelPackManifest {
+            version: 2,
+            id: "whisper-vad".into(),
+            label: "whisper-vad".into(),
+            status: None,
+            family: ModelFamily::Whisper,
+            capabilities: vec![Capability::AudioVad],
+            backend_hints: DriverHints {
+                prefer_drivers: vec!["ggml.whisper".into()],
+                avoid_drivers: Vec::new(),
+                require_streaming: false,
+            },
+            context_window: None,
+            pricing: None,
+            runtime_presets: None,
+            metadata: BTreeMap::new(),
+            source: Some(slab_model_pack::PackSource::HuggingFace {
+                repo_id: "ggml-org/whisper-vad".into(),
+                revision: None,
+                files: vec![slab_model_pack::PackSourceFile {
+                    id: "model".into(),
+                    label: None,
+                    description: None,
+                    path: "ggml-silero-v6.2.0.bin".into(),
+                }],
+            }),
+            components: Vec::new(),
+            variants: Vec::new(),
+            adapters: Vec::new(),
+            presets: Vec::new(),
+            default_preset: Some("default".into()),
+            footprint: Default::default(),
+        };
+        let preset = slab_model_pack::ResolvedPreset {
+            document: slab_model_pack::PresetDocument {
+                id: "default".into(),
+                label: "Default".into(),
+                variant_id: None,
+                description: None,
+                adapter_ids: Vec::new(),
+                load_config: None,
+                inference_config: None,
+                footprint: Default::default(),
+                metadata: BTreeMap::new(),
+            },
+            variant: slab_model_pack::ResolvedVariant {
+                document: slab_model_pack::VariantDocument {
+                    id: String::new(),
+                    label: "Original Model".into(),
+                    description: None,
+                    source: None,
+                    component_ids: Vec::new(),
+                    load_config: None,
+                    inference_config: None,
+                    metadata: BTreeMap::new(),
+                },
+                effective_source: manifest.source.clone(),
+                components: BTreeMap::new(),
+                load_config: None,
+                inference_config: None,
+            },
+            adapters: BTreeMap::new(),
+            effective_load_config: None,
+            effective_inference_config: None,
+        };
+        let mut presets = BTreeMap::new();
+        presets.insert("default".into(), preset.clone());
+        let resolved = slab_model_pack::ResolvedModelPack {
+            manifest: manifest.clone(),
+            components: BTreeMap::new(),
+            adapters: BTreeMap::new(),
+            variants: BTreeMap::new(),
+            presets,
+            default_preset_id: Some("default".into()),
+        };
+
+        assert!(
+            matches!(
+                resolved.compile_runtime_bridge(&preset),
+                Err(slab_model_pack::ModelPackError::MissingRuntimeCapability)
+            ),
+            "pure VAD packs should still skip runtime bridge compilation"
+        );
+
+        let command = build_local_model_command_from_pack_preset(&manifest, &resolved, &preset)
+            .expect("project vad pack into local catalog model");
+
+        assert_eq!(command.backend_id, Some(ManagedModelBackendId::GgmlWhisper));
+        assert_eq!(command.capabilities, Some(vec![Capability::AudioVad]));
+        assert_eq!(command.status, Some(UnifiedModelStatus::NotDownloaded));
+        assert_eq!(command.spec.repo_id.as_deref(), Some("ggml-org/whisper-vad"));
+        assert_eq!(command.spec.filename.as_deref(), Some("ggml-silero-v6.2.0.bin"));
+        assert!(command.spec.local_path.is_none());
     }
 
     #[test]

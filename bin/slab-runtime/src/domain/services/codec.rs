@@ -293,6 +293,7 @@ pub(crate) fn encode_audio_transcription_options(
         _ => Ok(Payload::typed(AudioTranscriptionOpOptions {
             language: request.language.clone(),
             prompt: request.prompt.clone(),
+            detect_language: request.detect_language,
             vad: request.vad.clone(),
             decode: request.decode.clone(),
         })),
@@ -317,6 +318,7 @@ pub(crate) fn build_ggml_whisper_full_params(
     build_ggml_whisper_full_params_from_legacy(
         request.language.clone(),
         request.prompt.clone(),
+        request.detect_language,
         request.vad.clone(),
         request.decode.clone(),
     )
@@ -325,13 +327,16 @@ pub(crate) fn build_ggml_whisper_full_params(
 pub(crate) fn build_ggml_whisper_full_params_from_legacy(
     language: Option<String>,
     prompt: Option<String>,
+    detect_language: Option<bool>,
     vad: Option<slab_types::WhisperVadOptions>,
     decode: Option<slab_types::WhisperDecodeOptions>,
 ) -> Result<WhisperFullParams, CoreError> {
+    let language = language.filter(|value| !value.trim().is_empty());
     let mut params = WhisperFullParams {
         strategy: WhisperSamplingStrategy::BeamSearch { beam_size: 5, patience: -1.0 },
-        language: language.filter(|value| !value.trim().is_empty()),
+        language: language.clone(),
         initial_prompt: prompt.filter(|value| !value.trim().is_empty()),
+        detect_language: language.is_none().then(|| detect_language).flatten().filter(|value| *value),
         ..Default::default()
     };
 
