@@ -1,0 +1,37 @@
+{
+  "$schema": "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json",
+  "version": 2,
+  "id": "miniSD-ckpt",
+  "label": "miniSD Checkpoint",
+  "status": "ready",
+  "family": "diffusion",
+  "metadata": {
+    "author": "justinpinkney"
+  },
+  "capabilities": [
+    "image_generation"
+  ],
+  "backend_hints": {
+    "prefer_drivers": [
+      "ggml.diffusion"
+    ]
+  },
+  "source": {
+    "kind": "hugging_face",
+    "repo_id": "justinpinkney/miniSD",
+    "files": [
+      {
+        "id": "model",
+        "path": "miniSD.ckpt"
+      }
+    ]
+  },
+  "presets": [
+    {
+      "id": "default",
+      "label": "Default",
+      "description": "Default preset for miniSD Checkpoint.",
+      "$config": "ref://presets/default.json"
+    }
+  ]
+}

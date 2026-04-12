@@ -1,0 +1,37 @@
+{
+  "$schema": "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json",
+  "version": 2,
+  "id": "whisper-vad",
+  "label": "whisper-vad",
+  "family": "whisper",
+  "metadata": {
+    "author": "openai"
+  },
+  "capabilities": [
+    "audio_vad"
+  ],
+  "backend_hints": {
+    "prefer_drivers": [
+      "ggml.whisper"
+    ]
+  },
+  "source": {
+    "kind": "hugging_face",
+    "repo_id": "ggml-org/whisper-vad",
+    "files": [
+      {
+        "id": "model",
+        "path": "ggml-silero-v6.2.0.bin"
+      }
+    ]
+  },
+  "presets": [
+    {
+      "id": "default",
+      "label": "Default",
+      "description": "Default preset for whisper-vad.",
+      "$config": "ref://presets/default.json"
+    }
+  ],
+  "default_preset": "default"
+}

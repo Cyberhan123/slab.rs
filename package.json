@@ -21,6 +21,7 @@
     "packages/slab-components",
     "packages/slab-i18n",
     "bin/slab-app",
+    "slab-models",
     "docs"
   ],
   "devDependencies": {
