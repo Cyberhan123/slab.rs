@@ -24,6 +24,10 @@
       "name": "@slab/docs",
       "version": "0.1.0",
     },
+    "models": {
+      "name": "@slab/models",
+      "version": "0.1.0",
+    },
     "packages/slab-components": {
       "name": "@slab/components",
       "version": "0.1.0",
@@ -614,6 +618,8 @@
     "@slab/docs": ["@slab/docs@workspace:docs"],
 
     "@slab/i18n": ["@slab/i18n@workspace:packages/slab-i18n"],
+
+    "@slab/models": ["@slab/models@workspace:models"],
 
     "@standard-schema/spec": ["@standard-schema/spec@1.1.0", "", {}, "sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w=="],
 
