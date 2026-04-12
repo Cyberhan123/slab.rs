@@ -15,6 +15,7 @@ pub mod session;
 pub mod setup;
 pub mod system;
 pub mod tasks;
+pub mod ui_state;
 pub mod validation;
 pub mod video;
 

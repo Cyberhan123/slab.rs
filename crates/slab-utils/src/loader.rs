@@ -16,9 +16,10 @@ pub trait RuntimeLibrary: Sized {
 
 impl RuntimeLibrary for slab_ggml_sys::GGmlLib {
     unsafe fn load_from_dir(lib_dir: &Path, path: &Path) -> Result<Self, LibraryLoadError> {
+        let ggml_base_path = library_path(lib_dir, "ggml-base");
+
         #[cfg(windows)]
         {
-            let ggml_base_path = library_path(lib_dir, "ggml-base");
             let ggml_base_lib = open_native_library(ggml_base_path.as_path())?;
             let ggml_lib = open_native_library(path)?;
             Ok(unsafe { Self::from_library(ggml_base_lib, ggml_lib)? })
@@ -26,7 +27,7 @@ impl RuntimeLibrary for slab_ggml_sys::GGmlLib {
 
         #[cfg(not(windows))]
         {
-            Self::new(path)
+            unsafe { Self::new(ggml_base_path.as_path(), path) }
         }
     }
 }
@@ -40,7 +41,7 @@ impl RuntimeLibrary for slab_llama_sys::LlamaLib {
 
         #[cfg(not(windows))]
         {
-            Self::new(path)
+            unsafe { Self::new(path) }
         }
     }
 }
@@ -60,7 +61,7 @@ impl RuntimeLibrary for slab_diffusion_sys::DiffusionLib {
 
         #[cfg(not(windows))]
         {
-            Self::new(path)
+            unsafe { Self::new(path) }
         }
     }
 }

@@ -3,12 +3,13 @@ use std::fs;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
+use slab_types::{Capability, ModelFamily};
 use zip::ZipArchive;
 
 use crate::error::ModelPackError;
 use crate::manifest::{
-    BackendConfigDocument, BackendConfigScope, ComponentDocument, ConfigEntryRef,
-    ModelPackManifest, PackDocument, PresetDocument, VariantDocument,
+    BackendConfigDocument, BackendConfigScope, ComponentDocument, ModelPackManifest, PackDocument,
+    PresetDocument, VariantDocument,
 };
 use crate::refs::ConfigRef;
 
@@ -26,9 +27,7 @@ impl ModelPack {
         let path = path.as_ref();
         let extension = path.extension().and_then(|value| value.to_str()).unwrap_or_default();
         if !extension.eq_ignore_ascii_case(PACK_EXTENSION) {
-            return Err(ModelPackError::InvalidPackExtension {
-                path: path.display().to_string(),
-            });
+            return Err(ModelPackError::InvalidPackExtension { path: path.display().to_string() });
         }
 
         let bytes = fs::read(path).map_err(|source| ModelPackError::ReadPack {
@@ -41,10 +40,10 @@ impl ModelPack {
 
     pub fn from_bytes(bytes: &[u8]) -> Result<Self, ModelPackError> {
         let cursor = Cursor::new(bytes);
-        let mut archive = ZipArchive::new(cursor)
-            .map_err(|source| ModelPackError::OpenArchive { source })?;
+        let mut archive =
+            ZipArchive::new(cursor).map_err(|source| ModelPackError::OpenArchive { source })?;
 
-        let mut manifest = None;
+        let mut manifest: Option<ModelPackManifest> = None;
         let mut documents = BTreeMap::new();
 
         for index in 0..archive.len() {
@@ -82,10 +81,10 @@ impl ModelPack {
             }
         }
 
-        let pack = Self {
-            manifest: manifest.ok_or(ModelPackError::MissingManifest)?,
-            documents,
-        };
+        let mut manifest = manifest.ok_or(ModelPackError::MissingManifest)?;
+        manifest.capabilities = normalized_manifest_capabilities(&manifest);
+
+        let pack = Self { manifest, documents };
 
         pack.validate_manifest_references()?;
         Ok(pack)
@@ -100,15 +99,18 @@ impl ModelPack {
     }
 
     pub fn document(&self, config_ref: &ConfigRef) -> Result<&PackDocument, ModelPackError> {
-        self.documents
-            .get(config_ref.path())
-            .ok_or_else(|| ModelPackError::MissingReferencedDocument {
+        self.documents.get(config_ref.path()).ok_or_else(|| {
+            ModelPackError::MissingReferencedDocument {
                 from: MANIFEST_FILE_NAME.into(),
                 path: config_ref.path().into(),
-            })
+            }
+        })
     }
 
-    pub fn resolve_variant(&self, config_ref: &ConfigRef) -> Result<&VariantDocument, ModelPackError> {
+    pub fn resolve_variant(
+        &self,
+        config_ref: &ConfigRef,
+    ) -> Result<&VariantDocument, ModelPackError> {
         match self.document(config_ref)? {
             PackDocument::Variant(document) => Ok(document),
             other => Err(ModelPackError::UnexpectedDocumentKind {
@@ -133,7 +135,10 @@ impl ModelPack {
         }
     }
 
-    pub fn resolve_preset(&self, config_ref: &ConfigRef) -> Result<&PresetDocument, ModelPackError> {
+    pub fn resolve_preset(
+        &self,
+        config_ref: &ConfigRef,
+    ) -> Result<&PresetDocument, ModelPackError> {
         match self.document(config_ref)? {
             PackDocument::Preset(document) => Ok(document),
             other => Err(ModelPackError::UnexpectedDocumentKind {
@@ -170,16 +175,16 @@ impl ModelPack {
 
     fn validate_manifest_references(&self) -> Result<(), ModelPackError> {
         for reference in &self.manifest.components {
-            self.validate_entry_ref(reference, "component")?;
+            self.validate_entry_ref(&reference.id, &reference.config_ref, "component")?;
         }
         for reference in &self.manifest.variants {
-            self.validate_entry_ref(reference, "variant")?;
+            self.validate_entry_ref(&reference.id, &reference.config_ref, "variant")?;
         }
         for reference in &self.manifest.adapters {
-            self.validate_entry_ref(reference, "adapter")?;
+            self.validate_entry_ref(&reference.id, &reference.config_ref, "adapter")?;
         }
         for reference in &self.manifest.presets {
-            self.validate_entry_ref(reference, "preset")?;
+            self.validate_entry_ref(&reference.id, &reference.config_ref, "preset")?;
         }
 
         let component_ids = self.collect_ids("component");
@@ -201,10 +206,12 @@ impl ModelPack {
                     self.validate_component_ids(&adapter.component_ids, &component_ids)?;
                 }
                 PackDocument::Preset(preset) => {
-                    if !variant_ids.contains(&preset.variant_id) {
+                    if let Some(variant_id) = &preset.variant_id
+                        && !variant_ids.contains(variant_id)
+                    {
                         return Err(ModelPackError::MissingNamedDocument {
                             kind: "variant",
-                            id: preset.variant_id.clone(),
+                            id: variant_id.clone(),
                         });
                     }
                     for adapter_id in &preset.adapter_ids {
@@ -231,28 +238,28 @@ impl ModelPack {
 
     fn validate_entry_ref(
         &self,
-        reference: &ConfigEntryRef,
+        id: &str,
+        config_ref: &ConfigRef,
         expected_kind: &'static str,
     ) -> Result<(), ModelPackError> {
-        let document = self.document(&reference.config_ref).map_err(|_| {
-            ModelPackError::MissingReferencedDocument {
-                from: reference.id.clone(),
-                path: reference.config_ref.path().into(),
-            }
-        })?;
+        let document =
+            self.document(config_ref).map_err(|_| ModelPackError::MissingReferencedDocument {
+                from: id.to_owned(),
+                path: config_ref.path().into(),
+            })?;
 
         if document.kind() != expected_kind {
             return Err(ModelPackError::UnexpectedDocumentKind {
-                path: reference.config_ref.path().into(),
+                path: config_ref.path().into(),
                 expected: expected_kind,
                 found: document.kind(),
             });
         }
 
-        if document.id() != reference.id {
+        if document.id() != id {
             return Err(ModelPackError::DocumentIdMismatch {
-                path: reference.config_ref.path().into(),
-                expected: reference.id.clone(),
+                path: config_ref.path().into(),
+                expected: id.to_owned(),
                 found: document.id().to_owned(),
             });
         }
@@ -293,9 +300,7 @@ fn normalize_archive_path(path: &str) -> Result<String, ModelPackError> {
         || trimmed.contains('\\')
         || trimmed.split('/').any(|segment| segment.is_empty() || segment == "." || segment == "..")
     {
-        return Err(ModelPackError::InvalidArchivePath {
-            path: path.to_owned(),
-        });
+        return Err(ModelPackError::InvalidArchivePath { path: path.to_owned() });
     }
 
     Ok(trimmed.to_owned())
@@ -305,10 +310,42 @@ fn parse_json_document<T: serde::de::DeserializeOwned>(
     path: &str,
     raw: &str,
 ) -> Result<T, ModelPackError> {
-    serde_json::from_str(raw).map_err(|source| ModelPackError::InvalidJsonDocument {
-        path: path.to_owned(),
-        source,
-    })
+    serde_json::from_str(raw)
+        .map_err(|source| ModelPackError::InvalidJsonDocument { path: path.to_owned(), source })
+}
+
+fn normalized_manifest_capabilities(manifest: &ModelPackManifest) -> Vec<Capability> {
+    let mut capabilities = if manifest.capabilities.is_empty() {
+        default_manifest_capabilities(manifest.family)
+    } else {
+        manifest.capabilities.clone()
+    };
+
+    if capabilities.contains(&Capability::ChatGeneration)
+        && !capabilities.contains(&Capability::TextGeneration)
+    {
+        capabilities.insert(0, Capability::TextGeneration);
+    }
+
+    let mut deduped = Vec::with_capacity(capabilities.len());
+    for capability in capabilities {
+        if !deduped.contains(&capability) {
+            deduped.push(capability);
+        }
+    }
+
+    deduped
+}
+
+fn default_manifest_capabilities(family: ModelFamily) -> Vec<Capability> {
+    match family {
+        ModelFamily::Whisper => vec![Capability::AudioTranscription],
+        ModelFamily::Diffusion => vec![Capability::ImageGeneration, Capability::VideoGeneration],
+        ModelFamily::Llama | ModelFamily::Onnx => {
+            vec![Capability::TextGeneration, Capability::ChatGeneration]
+        }
+        _ => vec![Capability::TextGeneration, Capability::ChatGeneration],
+    }
 }
 
 #[cfg(test)]
@@ -316,6 +353,7 @@ mod tests {
     use std::io::Write;
 
     use serde_json::json;
+    use slab_types::Capability;
     use zip::CompressionMethod;
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
@@ -396,7 +434,6 @@ mod tests {
                     "kind": "backend_config",
                     "id": "load-default",
                     "label": "Default load",
-                    "backend": "ggml_llama",
                     "scope": "load",
                     "payload": {
                         "context_length": 8192,
@@ -411,7 +448,7 @@ mod tests {
                     "kind": "backend_config",
                     "id": "inference-default",
                     "label": "Default inference",
-                    "backend": "ggml_llama",
+                    // "backend": "ggml_llama",
                     "scope": "inference",
                     "payload": {
                         "temperature": 0.7,
@@ -427,10 +464,9 @@ mod tests {
                     "kind": "variant",
                     "id": "q4_k_m",
                     "label": "Q4_K_M",
-                    "backend": "ggml_llama",
                     "component_ids": ["model"],
-                    "load_config": "ref://models/configs/load.json",
-                    "inference_config": "ref://models/configs/inference.json"
+                    "$load_config": "ref://models/configs/load.json",
+                    "$inference_config": "ref://models/configs/inference.json"
                 })
                 .to_string(),
             ),
@@ -440,9 +476,8 @@ mod tests {
                     "kind": "preset",
                     "id": "default",
                     "label": "Default",
-                    "variant_id": "q4_k_m",
-                    "load_config": "ref://models/configs/load.json",
-                    "inference_config": "ref://models/configs/inference.json"
+                    "$load_config": "ref://models/configs/load.json",
+                    "$inference_config": "ref://models/configs/inference.json"
                 })
                 .to_string(),
             ),
@@ -462,8 +497,107 @@ mod tests {
             pack.resolve_preset(&pack.manifest().presets[0].config_ref)
                 .expect("preset should resolve")
                 .variant_id,
-            "q4_k_m"
+            None
         );
+    }
+
+    #[test]
+    fn rejects_legacy_ref_field_names_without_dollar_prefix() {
+        let bytes = build_pack(vec![
+            (
+                MANIFEST_FILE_NAME,
+                json!({
+                    "version": 2,
+                    "id": "demo",
+                    "label": "Demo",
+                    "family": "llama",
+                    "variants": [
+                        {
+                            "id": "q4_k_m",
+                            "label": "Q4_K_M",
+                            "$config": "ref://models/variants/q4_k_m.json"
+                        }
+                    ]
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q4_k_m.json",
+                json!({
+                    "kind": "variant",
+                    "id": "q4_k_m",
+                    "label": "Q4_K_M",
+                    "load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "load-default",
+                    "label": "Default load",
+                    "scope": "load",
+                    "payload": {
+                        "context_length": 8192
+                    }
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let error = ModelPack::from_bytes(&bytes).unwrap_err();
+        assert!(error.to_string().contains("unknown field `load_config`"));
+    }
+
+    #[test]
+    fn rejects_removed_backend_field_in_sub_configs() {
+        let bytes = build_pack(vec![
+            (
+                MANIFEST_FILE_NAME,
+                json!({
+                    "version": 2,
+                    "id": "demo",
+                    "label": "Demo",
+                    "family": "llama",
+                    "variants": [
+                        {
+                            "id": "q4_k_m",
+                            "label": "Q4_K_M",
+                            "$config": "ref://models/variants/q4_k_m.json"
+                        }
+                    ]
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q4_k_m.json",
+                json!({
+                    "kind": "variant",
+                    "id": "q4_k_m",
+                    "label": "Q4_K_M",
+                    "$load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "load-default",
+                    "label": "Default load",
+                    "backend": "ggml_llama",
+                    "scope": "load",
+                    "payload": {
+                        "context_length": 8192
+                    }
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let error = ModelPack::from_bytes(&bytes).unwrap_err();
+        assert!(error.to_string().contains("unknown field `backend`"));
     }
 
     #[test]
@@ -480,6 +614,59 @@ mod tests {
 
         let error = ModelPack::from_bytes(&bytes).unwrap_err();
         assert!(error.to_string().contains("manifest.json"));
+    }
+
+    #[test]
+    fn normalizes_chat_only_capabilities_to_include_text_generation() {
+        let bytes = build_pack(vec![(
+            MANIFEST_FILE_NAME,
+            json!({
+                "version": 2,
+                "id": "qwen2.5-0.5b-instruct",
+                "label": "Qwen2.5 0.5B Instruct",
+                "family": "llama",
+                "capabilities": ["chat_generation"],
+                "backend_hints": {
+                    "prefer_drivers": ["ggml.llama"],
+                    "avoid_drivers": [],
+                    "require_streaming": true
+                }
+            })
+            .to_string(),
+        )]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
+
+        assert_eq!(
+            pack.manifest().capabilities,
+            vec![Capability::TextGeneration, Capability::ChatGeneration]
+        );
+    }
+
+    #[test]
+    fn infers_default_llama_capabilities_when_manifest_omits_them() {
+        let bytes = build_pack(vec![(
+            MANIFEST_FILE_NAME,
+            json!({
+                "version": 2,
+                "id": "qwen2.5-0.5b-instruct",
+                "label": "Qwen2.5 0.5B Instruct",
+                "family": "llama",
+                "backend_hints": {
+                    "prefer_drivers": ["ggml.llama"],
+                    "avoid_drivers": [],
+                    "require_streaming": true
+                }
+            })
+            .to_string(),
+        )]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
+
+        assert_eq!(
+            pack.manifest().capabilities,
+            vec![Capability::TextGeneration, Capability::ChatGeneration]
+        );
     }
 
     fn build_pack(entries: Vec<(&str, String)>) -> Vec<u8> {

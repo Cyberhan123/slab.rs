@@ -79,6 +79,7 @@ mod tests {
         let manifest_dir = env!("CARGO_MANIFEST_DIR");
         let manifest_path = std::path::Path::new(manifest_dir)
             .parent()
+            .and_then(|path| path.parent())
             .expect("workspace root")
             .join("vendor")
             .join("slab-artifacts.toml");
@@ -112,6 +113,9 @@ mod tests {
                 expected_extension,
                 resolved.asset_name
             );
+            if *name == "whisper" {
+                assert_eq!(resolved.asset_name, "whisper-sdk-macos-arm64.tar.gz");
+            }
         }
     }
 }

@@ -176,6 +176,10 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
+        /**
+         * Deprecated chat model listing compatibility route
+         * @description Compatibility wrapper over GET /v1/models filtered by capability=chat_generation.
+         */
         get: operations["list_chat_models"];
         put?: never;
         post?: never;
@@ -356,6 +360,38 @@ export interface paths {
         put: operations["update_model"];
         post?: never;
         delete: operations["delete_model"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models/{id}/config-document": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_model_config_document"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/models/{id}/config-selection": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put: operations["update_model_config_selection"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -591,6 +627,22 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ui-state/{key}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: operations["get_ui_state"];
+        put: operations["update_ui_state"];
+        post?: never;
+        delete: operations["delete_ui_state"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/video/generations": {
         parameters: {
             query?: never;
@@ -649,6 +701,18 @@ export interface components {
          * @enum {string}
          */
         AgentStatusValue: "pending" | "running" | "completed" | "errored" | "shutdown";
+        AudioTranscriptionRequest: {
+            decode?: null | components["schemas"]["TranscribeDecodeRequest"];
+            /** @description Enable whisper language auto-detection when no explicit language is set. */
+            detect_language?: boolean | null;
+            /** @description Optional language override passed to whisper inference. */
+            language?: string | null;
+            /** @description The audio file path to transcribe. */
+            path: string;
+            /** @description Optional initial prompt passed to whisper inference. */
+            prompt?: string | null;
+            vad?: null | components["schemas"]["TranscribeVadRequest"];
+        };
         /** @description Response body for list backends endpoint. */
         BackendListResponse: {
             backends: components["schemas"]["BackendStatusResponse"][];
@@ -696,7 +760,7 @@ export interface components {
             messages: components["schemas"]["ChatMessage"][];
             /**
              * @description Unified model identifier from `/v1/models`.
-             *     `GET /v1/chat/models` returns picker options that reuse the same ids.
+             *     `GET /v1/chat/models` remains a compatibility wrapper that reuses the same ids.
              */
             model?: string;
             /**
@@ -802,7 +866,7 @@ export interface components {
             reasoning_controls: boolean;
             structured_output: boolean;
         };
-        /** @description A selectable chat model option from `GET /v1/chat/models`. */
+        /** @description A selectable chat model option from the compatibility route `GET /v1/chat/models`. */
         ChatModelOption: {
             /** @description Backend id when `source = local`, e.g. `"ggml.llama"`. */
             backend_id?: string | null;
@@ -971,13 +1035,17 @@ export interface components {
         };
         /** @description Request body for `POST /v1/models`. */
         CreateModelRequest: {
+            /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
+            backend_id?: string | null;
+            capabilities?: components["schemas"]["ModelCapability"][] | null;
             display_name: string;
-            provider: string;
+            /** @description Whether this model is backed by the local runtime or a cloud provider. */
+            kind: components["schemas"]["ModelKind"];
             runtime_presets?: null | components["schemas"]["RuntimePresetsRequest"];
             spec?: null | components["schemas"]["ModelSpecRequest"];
             /**
-             * @description Initial status. If omitted, defaults to `"ready"` for cloud providers and
-             *     `"not_downloaded"` for local providers.
+             * @description Initial status. If omitted, defaults to `"ready"` for cloud models and
+             *     `"not_downloaded"` for local models.
              */
             status?: string | null;
         };
@@ -1135,7 +1203,9 @@ export interface components {
             repo_id: string;
         };
         /** @description Query parameters for `GET /v1/models`. */
-        ListModelsQuery: Record<string, never>;
+        ListModelsQuery: {
+            capability?: null | components["schemas"]["ModelCapability"];
+        };
         /** @description Request body for `POST /v1/models/load`. */
         LoadModelRequest: {
             /** @description Legacy backend identifier, e.g. `"ggml.llama"`. */
@@ -1163,6 +1233,81 @@ export interface components {
             role: string;
             session_id: string;
         };
+        /** @enum {string} */
+        ModelCapability: "text_generation" | "audio_transcription" | "image_generation" | "image_embedding" | "chat_generation" | "audio_vad" | "video_generation";
+        ModelConfigDocumentResponse: {
+            model_summary: components["schemas"]["UnifiedModelResponse"];
+            resolved_inference_spec: unknown;
+            resolved_load_spec: unknown;
+            sections: components["schemas"]["ModelConfigSectionResponse"][];
+            selection: components["schemas"]["ModelConfigSelectionResponse"];
+            source_summary: components["schemas"]["ModelConfigSourceSummaryResponse"];
+            warnings: string[];
+        };
+        ModelConfigFieldResponse: {
+            description_md?: string | null;
+            editable: boolean;
+            effective_value: unknown;
+            json_schema?: unknown;
+            label: string;
+            locked: boolean;
+            origin: components["schemas"]["ModelConfigOriginResponse"];
+            path: string;
+            scope: components["schemas"]["ModelConfigFieldScopeResponse"];
+            value_type: components["schemas"]["ModelConfigValueTypeResponse"];
+        };
+        /** @enum {string} */
+        ModelConfigFieldScopeResponse: "summary" | "source" | "load" | "inference" | "advanced";
+        /** @enum {string} */
+        ModelConfigOriginResponse: "pack_manifest" | "selected_preset" | "selected_variant" | "selected_backend_config" | "pmid_fallback" | "derived";
+        ModelConfigPresetOptionResponse: {
+            description?: string | null;
+            id: string;
+            is_default: boolean;
+            label: string;
+            variant_id?: string | null;
+        };
+        ModelConfigSectionResponse: {
+            description_md?: string | null;
+            fields: components["schemas"]["ModelConfigFieldResponse"][];
+            id: string;
+            label: string;
+        };
+        ModelConfigSelectionResponse: {
+            default_preset_id?: string | null;
+            default_variant_id?: string | null;
+            effective_preset_id?: string | null;
+            effective_variant_id?: string | null;
+            presets: components["schemas"]["ModelConfigPresetOptionResponse"][];
+            selected_preset_id?: string | null;
+            selected_variant_id?: string | null;
+            variants: components["schemas"]["ModelConfigVariantOptionResponse"][];
+        };
+        ModelConfigSourceArtifactResponse: {
+            id: string;
+            label: string;
+            value: string;
+        };
+        ModelConfigSourceSummaryResponse: {
+            artifacts: components["schemas"]["ModelConfigSourceArtifactResponse"][];
+            filename?: string | null;
+            local_path?: string | null;
+            repo_id?: string | null;
+            source_kind: string;
+        };
+        /** @enum {string} */
+        ModelConfigValueTypeResponse: "string" | "integer" | "number" | "boolean" | "path" | "json";
+        ModelConfigVariantOptionResponse: {
+            description?: string | null;
+            filename?: string | null;
+            id: string;
+            is_default: boolean;
+            label: string;
+            local_path?: string | null;
+            repo_id?: string | null;
+        };
+        /** @enum {string} */
+        ModelKind: "local" | "cloud";
         /** @description Provider-specific model configuration (request). */
         ModelSpecRequest: {
             /** @description Optional prompt template name used for local chat rendering. */
@@ -1177,7 +1322,10 @@ export interface components {
             /** @description Absolute path to the downloaded model file (populated after download). */
             local_path?: string | null;
             pricing?: null | components["schemas"]["PricingRequest"];
-            /** @description Cloud provider settings id from `chat.providers` (e.g. `"openai-main"`). */
+            /**
+             * @description Cloud provider id from the settings document `providers.registry` list
+             *     (e.g. `"openai-main"`).
+             */
             provider_id?: string | null;
             /** @description Remote model identifier for cloud providers (e.g. `"gpt-4o"`). */
             remote_model_id?: string | null;
@@ -1487,13 +1635,29 @@ export interface components {
              */
             threshold?: number | null;
         };
+        UiStateDeleteResponse: {
+            deleted: boolean;
+            key: string;
+        };
+        UiStateKeyPath: {
+            key: string;
+        };
+        UiStateValueResponse: {
+            key: string;
+            updated_at: string;
+            value: string;
+        };
         /** @description Unified model response returned by `/v1/models`. */
         UnifiedModelResponse: {
+            /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
+            backend_id?: string | null;
+            capabilities: components["schemas"]["ModelCapability"][];
+            chat_capabilities?: null | components["schemas"]["ChatModelCapabilities"];
             created_at: string;
             display_name: string;
             id: string;
-            /** @description Provider identifier, e.g. `"cloud.openai"`, `"local.ggml.llama"`. */
-            provider: string;
+            /** @description Whether this model is backed by the local runtime or a cloud provider. */
+            kind: components["schemas"]["ModelKind"];
             runtime_presets?: null | components["schemas"]["RuntimePresetsResponse"];
             spec: components["schemas"]["ModelSpecResponse"];
             /** @description Status: `"ready"`, `"not_downloaded"`, `"downloading"`, `"error"`. */
@@ -1507,10 +1671,18 @@ export interface components {
             /** @description Catalog model id from `/v1/models`. Preferred for local lifecycle operations. */
             model_id?: string | null;
         };
+        /** @description Request body for `PUT /v1/models/{id}/config-selection`. */
+        UpdateModelConfigSelectionRequest: {
+            selected_preset_id?: string | null;
+            selected_variant_id?: string | null;
+        };
         /** @description Request body for `PUT /v1/models/{id}`. */
         UpdateModelRequest: {
+            /** @description Runtime backend identifier for local models, e.g. `"ggml.llama"`. */
+            backend_id?: string | null;
+            capabilities?: components["schemas"]["ModelCapability"][] | null;
             display_name?: string | null;
-            provider?: string | null;
+            kind?: null | components["schemas"]["ModelKind"];
             runtime_presets?: null | components["schemas"]["RuntimePresetsRequest"];
             spec?: null | components["schemas"]["ModelSpecRequest"];
             status?: string | null;
@@ -1521,6 +1693,9 @@ export interface components {
         };
         /** @enum {string} */
         UpdateSettingOperation: "set" | "unset";
+        UpdateUiStateRequest: {
+            value: string;
+        };
         /** @description Request body for `POST /v1/video/generations`. */
         VideoGenerationRequest: {
             /**
@@ -1764,7 +1939,7 @@ export interface operations {
         /** @description Audio transcription request */
         requestBody: {
             content: {
-                "application/json": components["schemas"]["CompletionRequest"];
+                "application/json": components["schemas"]["AudioTranscriptionRequest"];
             };
         };
         responses: {
@@ -2084,7 +2259,9 @@ export interface operations {
     };
     list_models: {
         parameters: {
-            query?: never;
+            query?: {
+                capability?: null | components["schemas"]["ModelCapability"];
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -2493,6 +2670,91 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+            /** @description Model not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_model_config_document: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Model ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Model config document */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ModelConfigDocumentResponse"];
+                };
+            };
+            /** @description Model not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Backend error */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_model_config_selection: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Model ID */
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateModelConfigSelectionRequest"];
+            };
+        };
+        responses: {
+            /** @description Model config selection updated */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UnifiedModelResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Model not found */
             404: {
@@ -3075,6 +3337,97 @@ export interface operations {
             };
             /** @description Backend error */
             500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    get_ui_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description UI state value */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiStateValueResponse"];
+                };
+            };
+            /** @description UI state not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    update_ui_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateUiStateRequest"];
+            };
+        };
+        responses: {
+            /** @description Updated UI state value */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiStateValueResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    delete_ui_state: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted UI state value */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UiStateDeleteResponse"];
+                };
+            };
+            /** @description Bad request */
+            400: {
                 headers: {
                     [name: string]: unknown;
                 };

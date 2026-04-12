@@ -12,6 +12,7 @@ import {
 import { Link, useLocation } from "react-router-dom"
 
 import { cn } from "@/lib/utils"
+import { WindowControls } from "@/layouts/window-controls"
 
 type SidebarItem = {
   to: string
@@ -89,6 +90,7 @@ export function AppSidebar({ variant = "default" }: AppSidebarProps) {
     >
       <div className="flex flex-1 flex-col items-center justify-between">
         <div className="flex flex-col items-center gap-6">
+          <WindowControls placement="sidebar" />
           <div className="flex h-[54px] w-[59px] items-center justify-center rounded-[16px] bg-[var(--shell-card)] shadow-[var(--shell-elevation)]">
             <span className="text-[20px] font-bold tracking-[-0.045em] text-[var(--brand-teal)]">
               Slab

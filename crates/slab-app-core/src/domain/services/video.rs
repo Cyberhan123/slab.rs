@@ -2,7 +2,9 @@ use std::sync::Arc;
 
 use slab_proto::convert;
 use slab_types::RuntimeBackendId;
-use slab_types::diffusion::DiffusionVideoRequest;
+use slab_types::diffusion::{
+    DiffusionRequestCommon, DiffusionVideoBackend, DiffusionVideoRequest, GgmlDiffusionVideoParams,
+};
 use slab_types::media::RawImageInput;
 use tracing::{debug, info, warn};
 
@@ -50,26 +52,30 @@ impl VideoService {
         .to_string();
 
         let grpc_request = DiffusionVideoRequest {
-            prompt: req.prompt.clone(),
-            negative_prompt: req.negative_prompt.clone(),
-            width: req.width,
-            height: req.height,
-            video_frames: req.video_frames,
-            fps: req.fps,
-            cfg_scale: req.cfg_scale,
-            guidance: req.guidance,
-            steps: req.steps,
-            seed: req.seed,
-            sample_method: req.sample_method.clone(),
-            scheduler: req.scheduler.clone(),
-            strength: req.strength,
-            init_image: req.init_image.map(|image| RawImageInput {
-                data: image.data,
-                width: image.width,
-                height: image.height,
-                channels: image.channels.clamp(1, u8::MAX as u32) as u8,
+            common: DiffusionRequestCommon {
+                prompt: req.prompt.clone(),
+                negative_prompt: req.negative_prompt.clone(),
+                width: req.width,
+                height: req.height,
+                init_image: req.init_image.map(|image| RawImageInput {
+                    data: image.data,
+                    width: image.width,
+                    height: image.height,
+                    channels: image.channels.clamp(1, u8::MAX as u32) as u8,
+                }),
+                options: Default::default(),
+            },
+            backend: DiffusionVideoBackend::Ggml(GgmlDiffusionVideoParams {
+                video_frames: Some(req.video_frames),
+                fps: Some(req.fps),
+                cfg_scale: req.cfg_scale,
+                guidance: req.guidance,
+                steps: req.steps,
+                seed: req.seed,
+                sample_method: req.sample_method.clone(),
+                scheduler: req.scheduler.clone(),
+                strength: req.strength,
             }),
-            options: Default::default(),
         };
         let grpc_req = convert::encode_diffusion_video_request(req.model.clone(), &grpc_request);
 
@@ -188,7 +194,8 @@ impl VideoService {
                     let output_path =
                         std::env::temp_dir().join(format!("slab-video-{operation_id}.mp4"));
                     let frame_pattern = frame_dir.join("frame_%05d.png");
-                    let ffmpeg_result = tokio::process::Command::new("ffmpeg")
+                    let ffmpeg_bin = ffmpeg_sidecar::paths::ffmpeg_path();
+                    let ffmpeg_result = tokio::process::Command::new(&ffmpeg_bin)
                         .arg("-y")
                         .arg("-framerate")
                         .arg(fps.to_string())
@@ -221,13 +228,13 @@ impl VideoService {
                         }
                         Ok(output) => {
                             let error = String::from_utf8_lossy(&output.stderr).to_string();
-                            warn!(task_id = %operation_id, error = %error, "ffmpeg failed");
+                            warn!(task_id = %operation_id, ffmpeg_bin = %ffmpeg_bin.display(), error = %error, "ffmpeg failed");
                             if let Err(db_error) = operation.mark_failed(&error).await {
                                 warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg failure");
                             }
                         }
                         Err(error) => {
-                            warn!(task_id = %operation_id, error = %error, "ffmpeg spawn failed");
+                            warn!(task_id = %operation_id, ffmpeg_bin = %ffmpeg_bin.display(), error = %error, "ffmpeg spawn failed");
                             if let Err(db_error) = operation.mark_failed(&error.to_string()).await {
                                 warn!(task_id = %operation_id, error = %db_error, "failed to persist ffmpeg spawn failure");
                             }

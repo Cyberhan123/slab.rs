@@ -1,10 +1,11 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::str::FromStr;
 
 use serde_json::Value;
 use slab_types::{
     Capability, DiffusionLoadOptions, DriverHints, JsonOptions, ModelSource, ModelSpec,
-    RuntimeBackendId, RuntimeModelLoadSpec,
+    RuntimeBackendId, RuntimeBackendLoadSpec, RuntimeModelLoadCommand, RuntimeModelLoadSpec,
 };
 
 use crate::error::ModelPackError;
@@ -30,26 +31,45 @@ pub struct ModelPackRuntimeBridge {
 
 impl ResolvedModelPack {
     pub fn compile_default_runtime_bridge(&self) -> Result<ModelPackRuntimeBridge, ModelPackError> {
-        let preset = self.default_preset().ok_or_else(|| ModelPackError::MissingDefaultPresetDeclaration)?;
+        let preset =
+            self.default_preset().ok_or_else(|| ModelPackError::MissingDefaultPresetDeclaration)?;
         self.compile_runtime_bridge(preset)
+    }
+
+    pub fn compile_model_source(
+        &self,
+        preset: &ResolvedPreset,
+    ) -> Result<ModelSource, ModelPackError> {
+        build_model_source(preset)
     }
 
     pub fn compile_runtime_bridge(
         &self,
         preset: &ResolvedPreset,
     ) -> Result<ModelPackRuntimeBridge, ModelPackError> {
-        let capability = self.manifest.capabilities.first().copied().ok_or(ModelPackError::MissingCapability)?;
-        let backend = resolve_runtime_backend(preset)?;
+        let capability = self
+            .manifest
+            .capabilities
+            .iter()
+            .copied()
+            .find(|capability| capability.is_runtime_execution())
+            .ok_or(ModelPackError::MissingRuntimeCapability)?;
+        let backend = resolve_runtime_backend(&self.manifest.backend_hints, &preset.document.id)?;
         let source = build_model_source(preset)?;
         let load_options = config_payload_as_options(preset.effective_load_config.as_ref())?;
-        let inference_defaults = config_payload_as_options(preset.effective_inference_config.as_ref())?;
-        let load_defaults = build_load_defaults(&preset.document.id, backend, &source, preset.effective_load_config.as_ref())?;
+        let inference_defaults =
+            config_payload_as_options(preset.effective_inference_config.as_ref())?;
+        let load_defaults = build_load_defaults(
+            &preset.document.id,
+            backend,
+            &source,
+            preset.effective_load_config.as_ref(),
+        )?;
         let metadata = merged_metadata(self, preset);
-        let driver_hints = merged_driver_hints(&self.manifest.backend_hints, backend);
 
         let mut model_spec = ModelSpec::new(self.manifest.family, capability, source)
             .named(self.manifest.id.clone())
-            .with_driver_hints(driver_hints);
+            .with_driver_hints(self.manifest.backend_hints.clone());
         model_spec.load_options = load_options;
         model_spec.metadata = metadata;
 
@@ -64,7 +84,25 @@ impl ResolvedModelPack {
 }
 
 impl ModelPackRuntimeBridge {
-    pub fn runtime_load_spec(&self, preset_id: &str) -> Result<RuntimeModelLoadSpec, ModelPackError> {
+    pub fn runtime_load_command(
+        &self,
+        preset_id: &str,
+    ) -> Result<RuntimeModelLoadCommand, ModelPackError> {
+        let legacy = self.runtime_load_spec(preset_id)?;
+        let spec = RuntimeBackendLoadSpec::from_legacy(self.backend, legacy).map_err(|error| {
+            ModelPackError::InvalidRuntimeLoadCommand {
+                preset_id: preset_id.to_owned(),
+                message: error.to_string(),
+            }
+        })?;
+
+        Ok(RuntimeModelLoadCommand { backend: self.backend, spec })
+    }
+
+    pub fn runtime_load_spec(
+        &self,
+        preset_id: &str,
+    ) -> Result<RuntimeModelLoadSpec, ModelPackError> {
         let model_path = match &self.model_spec.source {
             ModelSource::LocalPath { path } => path.clone(),
             ModelSource::LocalArtifacts { files } => files
@@ -72,18 +110,20 @@ impl ModelPackRuntimeBridge {
                 .or_else(|| files.get("diffusion_model"))
                 .or_else(|| files.values().next())
                 .cloned()
-                .ok_or_else(|| ModelPackError::MissingPrimaryArtifact { preset_id: preset_id.to_owned() })?,
+                .ok_or_else(|| ModelPackError::MissingPrimaryArtifact {
+                    preset_id: preset_id.to_owned(),
+                })?,
             ModelSource::HuggingFace { .. } => {
                 return Err(ModelPackError::NonMaterializedSource {
                     preset_id: preset_id.to_owned(),
                     source_kind: "hugging_face".into(),
-                })
+                });
             }
             _ => {
                 return Err(ModelPackError::NonMaterializedSource {
                     preset_id: preset_id.to_owned(),
                     source_kind: "unknown".into(),
-                })
+                });
             }
         };
 
@@ -97,32 +137,27 @@ impl ModelPackRuntimeBridge {
     }
 }
 
-fn resolve_runtime_backend(preset: &ResolvedPreset) -> Result<RuntimeBackendId, ModelPackError> {
-    let mut candidates = Vec::new();
-    if let Some(backend) = preset.variant.document.backend {
-        candidates.push(backend);
+pub(crate) fn preferred_runtime_backends_from_hints(hints: &DriverHints) -> Vec<RuntimeBackendId> {
+    let mut backends = Vec::new();
+    for driver in &hints.prefer_drivers {
+        let Ok(backend) = RuntimeBackendId::from_str(driver) else {
+            continue;
+        };
+        if !backends.contains(&backend) {
+            backends.push(backend);
+        }
     }
-    if let Some(config) = &preset.variant.load_config {
-        candidates.push(config.backend);
-    }
-    if let Some(config) = &preset.variant.inference_config {
-        candidates.push(config.backend);
-    }
-    if let Some(config) = &preset.effective_load_config {
-        candidates.push(config.backend);
-    }
-    if let Some(config) = &preset.effective_inference_config {
-        candidates.push(config.backend);
-    }
+    backends
+}
 
-    candidates.sort_by_key(|backend| backend.canonical_id());
-    candidates.dedup();
-
-    match candidates.as_slice() {
-        [backend] => Ok(*backend),
-        [] => Err(ModelPackError::MissingRuntimeBackend { preset_id: preset.document.id.clone() }),
-        _ => Err(ModelPackError::ConflictingRuntimeBackend { preset_id: preset.document.id.clone() }),
-    }
+fn resolve_runtime_backend(
+    hints: &DriverHints,
+    preset_id: &str,
+) -> Result<RuntimeBackendId, ModelPackError> {
+    preferred_runtime_backends_from_hints(hints)
+        .into_iter()
+        .next()
+        .ok_or_else(|| ModelPackError::MissingRuntimeBackend { preset_id: preset_id.to_owned() })
 }
 
 fn build_model_source(preset: &ResolvedPreset) -> Result<ModelSource, ModelPackError> {
@@ -131,13 +166,17 @@ fn build_model_source(preset: &ResolvedPreset) -> Result<ModelSource, ModelPackE
     }
 
     let Some(source) = preset.variant.effective_source.clone() else {
-        return Err(ModelPackError::MissingPrimaryArtifact { preset_id: preset.document.id.clone() });
+        return Err(ModelPackError::MissingPrimaryArtifact {
+            preset_id: preset.document.id.clone(),
+        });
     };
 
     pack_source_to_model_source(source)
 }
 
-fn build_model_source_from_components(preset: &ResolvedPreset) -> Result<ModelSource, ModelPackError> {
+fn build_model_source_from_components(
+    preset: &ResolvedPreset,
+) -> Result<ModelSource, ModelPackError> {
     let mut local_files = BTreeMap::new();
     let mut hf_repo_id: Option<String> = None;
     let mut hf_revision: Option<String> = None;
@@ -175,7 +214,7 @@ fn build_model_source_from_components(preset: &ResolvedPreset) -> Result<ModelSo
             PackSource::Cloud { .. } => {
                 return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
                     source_kind: "cloud".into(),
-                })
+                });
             }
         }
     }
@@ -206,18 +245,16 @@ fn build_model_source_from_components(preset: &ResolvedPreset) -> Result<ModelSo
 fn pack_source_to_model_source(source: PackSource) -> Result<ModelSource, ModelPackError> {
     Ok(match source {
         PackSource::LocalPath { path } => ModelSource::LocalPath { path: PathBuf::from(path) },
-        PackSource::LocalFiles { files } => ModelSource::LocalArtifacts {
-            files: source_file_map(None, &files),
-        },
-        PackSource::HuggingFace { repo_id, revision, files } => ModelSource::HuggingFace {
-            repo_id,
-            revision,
-            files: source_file_map(None, &files),
-        },
+        PackSource::LocalFiles { files } => {
+            ModelSource::LocalArtifacts { files: source_file_map(None, &files) }
+        }
+        PackSource::HuggingFace { repo_id, revision, files } => {
+            ModelSource::HuggingFace { repo_id, revision, files: source_file_map(None, &files) }
+        }
         PackSource::Cloud { .. } => {
             return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
                 source_kind: "cloud".into(),
-            })
+            });
         }
     })
 }
@@ -231,9 +268,14 @@ fn component_files_to_entries(
     files: &[PackSourceFile],
 ) -> BTreeMap<String, PathBuf> {
     let use_component_id = files.len() == 1;
-    files.iter()
+    files
+        .iter()
         .map(|file| {
-            let key = if use_component_id { component_id.to_owned() } else { format!("{component_id}/{}", file.id) };
+            let key = if use_component_id {
+                component_id.to_owned()
+            } else {
+                format!("{component_id}/{}", file.id)
+            };
             (key, PathBuf::from(&file.path))
         })
         .collect()
@@ -271,25 +313,25 @@ fn build_load_defaults(
 }
 
 fn build_diffusion_load_defaults(
-    preset_id: &str,
+    _preset_id: &str,
     source: &ModelSource,
     options: &JsonOptions,
 ) -> Result<DiffusionLoadOptions, ModelPackError> {
-    if matches!(source, ModelSource::HuggingFace { .. }) {
-        return Err(ModelPackError::NonMaterializedSource {
-            preset_id: preset_id.to_owned(),
-            source_kind: "hugging_face".into(),
-        });
-    }
+    let materialized_source = match source {
+        ModelSource::HuggingFace { .. } => None,
+        other => Some(other),
+    };
 
     Ok(DiffusionLoadOptions {
-        diffusion_model_path: artifact_path(source, "diffusion_model").or_else(|| artifact_path(source, "model")),
-        vae_path: artifact_path(source, "vae"),
-        taesd_path: artifact_path(source, "taesd"),
+        diffusion_model_path: materialized_source.and_then(|source| {
+            artifact_path(source, "diffusion_model").or_else(|| artifact_path(source, "model"))
+        }),
+        vae_path: materialized_source.and_then(|source| artifact_path(source, "vae")),
+        taesd_path: materialized_source.and_then(|source| artifact_path(source, "taesd")),
         lora_model_dir: options.get("lora_model_dir").and_then(as_string).map(PathBuf::from),
-        clip_l_path: artifact_path(source, "clip_l"),
-        clip_g_path: artifact_path(source, "clip_g"),
-        t5xxl_path: artifact_path(source, "t5xxl"),
+        clip_l_path: materialized_source.and_then(|source| artifact_path(source, "clip_l")),
+        clip_g_path: materialized_source.and_then(|source| artifact_path(source, "clip_g")),
+        t5xxl_path: materialized_source.and_then(|source| artifact_path(source, "t5xxl")),
         flash_attn: options.get("flash_attn").and_then(Value::as_bool).unwrap_or(false),
         vae_device: options.get("vae_device").and_then(as_string).unwrap_or_default(),
         clip_device: options.get("clip_device").and_then(as_string).unwrap_or_default(),
@@ -302,15 +344,6 @@ fn build_diffusion_load_defaults(
 
 fn artifact_path(source: &ModelSource, key: &str) -> Option<PathBuf> {
     source.artifact(key).map(PathBuf::from)
-}
-
-fn merged_driver_hints(hints: &DriverHints, backend: RuntimeBackendId) -> DriverHints {
-    let mut merged = hints.clone();
-    let preferred = backend.canonical_id().to_owned();
-    if !merged.prefer_drivers.iter().any(|value| value == &preferred) {
-        merged.prefer_drivers.insert(0, preferred);
-    }
-    merged
 }
 
 fn merged_metadata(pack: &ResolvedModelPack, preset: &ResolvedPreset) -> BTreeMap<String, String> {
@@ -367,7 +400,7 @@ mod tests {
                 "label": "Qwen2.5 7B Instruct",
                 "family": "llama",
                 "capabilities": ["text_generation"],
-                "backend_hints": {"prefer_drivers": [], "avoid_drivers": [], "require_streaming": true},
+                "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": true},
                 "components": [{"id": "model", "label": "Model", "$config": "ref://models/components/model.json"}],
                 "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$config": "ref://models/variants/q4.json"}],
                 "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
@@ -378,19 +411,19 @@ mod tests {
                 "source": {"kind": "local_path", "path": "C:/models/qwen.gguf"}
             }).to_string()),
             ("models/configs/load.json", json!({
-                "kind": "backend_config", "id": "load", "label": "Load", "backend": "ggml_llama", "scope": "load",
+                "kind": "backend_config", "id": "load", "label": "Load", "scope": "load",
                 "payload": {"context_length": 8192, "chat_template": "chatml", "num_workers": 2}
             }).to_string()),
             ("models/configs/inference.json", json!({
-                "kind": "backend_config", "id": "inference", "label": "Inference", "backend": "ggml_llama", "scope": "inference",
+                "kind": "backend_config", "id": "inference", "label": "Inference", "scope": "inference",
                 "payload": {"temperature": 0.7, "top_p": 0.95}
             }).to_string()),
             ("models/variants/q4.json", json!({
-                "kind": "variant", "id": "q4_k_m", "label": "Q4", "backend": "ggml_llama", "component_ids": ["model"],
-                "load_config": "ref://models/configs/load.json", "inference_config": "ref://models/configs/inference.json"
+                "kind": "variant", "id": "q4_k_m", "label": "Q4", "component_ids": ["model"]
             }).to_string()),
             ("models/presets/default.json", json!({
-                "kind": "preset", "id": "default", "label": "Default", "variant_id": "q4_k_m"
+                "kind": "preset", "id": "default", "label": "Default",
+                "$load_config": "ref://models/configs/load.json", "$inference_config": "ref://models/configs/inference.json"
             }).to_string()),
         ]);
 
@@ -400,7 +433,15 @@ mod tests {
         let load_spec = bridge.runtime_load_spec("default").expect("load spec");
 
         assert_eq!(bridge.backend.canonical_id(), "ggml.llama");
-        assert_eq!(bridge.model_spec.source.primary_path().map(|path| path.to_string_lossy().to_string()).as_deref(), Some("C:/models/qwen.gguf"));
+        assert_eq!(
+            bridge
+                .model_spec
+                .source
+                .primary_path()
+                .map(|path| path.to_string_lossy().to_string())
+                .as_deref(),
+            Some("C:/models/qwen.gguf")
+        );
         assert_eq!(load_spec.context_length, Some(8192));
         assert_eq!(bridge.inference_defaults.get("temperature").and_then(Value::as_f64), Some(0.7));
     }
@@ -414,9 +455,9 @@ mod tests {
                     "version": 2,
                     "id": "gpt-4.1-mini",
                     "label": "GPT-4.1 mini",
-                    "provider": "cloud.openai",
                     "family": "llama",
                     "capabilities": ["text_generation"],
+                    "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": true},
                     "source": {
                         "kind": "cloud",
                         "provider_id": "openai-main",
@@ -433,8 +474,7 @@ mod tests {
                 json!({
                     "kind": "variant",
                     "id": "default-variant",
-                    "label": "Default Variant",
-                    "backend": "ggml_llama"
+                    "label": "Default Variant"
                 })
                 .to_string(),
             ),
@@ -452,8 +492,149 @@ mod tests {
 
         let pack = ModelPack::from_bytes(&bytes).expect("load pack");
         let resolved = pack.resolve().expect("resolve pack");
-        let error = resolved.compile_default_runtime_bridge().expect_err("cloud source must not compile runtime bridge");
+        let error = resolved
+            .compile_default_runtime_bridge()
+            .expect_err("cloud source must not compile runtime bridge");
 
         assert!(error.to_string().contains("source kind 'cloud'"));
+    }
+
+    #[test]
+    fn compiles_diffusion_bridge_for_hugging_face_source_without_materialized_paths() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "sdxl-turbo",
+                    "label": "SDXL Turbo",
+                    "family": "diffusion",
+                    "capabilities": ["image_generation"],
+                    "backend_hints": {"prefer_drivers": ["ggml.diffusion"], "avoid_drivers": [], "require_streaming": false},
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "stabilityai/sdxl-turbo",
+                        "files": [
+                            {"id": "diffusion_model", "path": "sdxl_turbo.safetensors"},
+                            {"id": "vae", "path": "vae.safetensors"}
+                        ]
+                    },
+                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "load",
+                    "label": "Load",
+                    "scope": "load",
+                    "payload": {
+                        "flash_attn": true,
+                        "vae_device": "cpu"
+                    }
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "$load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
+        let diffusion =
+            bridge.load_defaults.diffusion.as_ref().expect("diffusion defaults should exist");
+        let load_error =
+            bridge.runtime_load_spec("default").expect_err("load spec should require download");
+
+        assert_eq!(bridge.backend.canonical_id(), "ggml.diffusion");
+        assert!(diffusion.diffusion_model_path.is_none());
+        assert!(diffusion.vae_path.is_none());
+        assert!(diffusion.clip_l_path.is_none());
+        assert!(diffusion.flash_attn);
+        assert_eq!(diffusion.vae_device, "cpu");
+        assert!(load_error.to_string().contains("hugging_face"));
+    }
+
+    #[test]
+    fn compiles_hugging_face_bridge_using_selected_variant_file() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "qwen2.5-0.5b-instruct",
+                    "label": "Qwen2.5 0.5B Instruct",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": false},
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+                        "files": [
+                            {"id": "model", "path": "Qwen2.5-0.5B-Instruct-f16.gguf"},
+                            {"id": "Q8_0", "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf"}
+                        ]
+                    },
+                    "variants": [{"id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json"}],
+                    "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q8_0.json",
+                json!({
+                    "kind": "variant",
+                    "id": "Q8_0",
+                    "label": "Q8_0"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "variant_id": "Q8_0"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let bridge = resolved.compile_default_runtime_bridge().expect("compile bridge");
+
+        assert_eq!(
+            bridge
+                .model_spec
+                .source
+                .artifact("model")
+                .map(|path| path.to_string_lossy().to_string())
+                .as_deref(),
+            Some("Qwen2.5-0.5B-Instruct-Q8_0.gguf")
+        );
+        assert_eq!(
+            bridge
+                .model_spec
+                .source
+                .primary_path()
+                .map(|path| path.to_string_lossy().to_string())
+                .as_deref(),
+            Some("Qwen2.5-0.5B-Instruct-Q8_0.gguf")
+        );
     }
 }

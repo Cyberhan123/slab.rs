@@ -7,7 +7,7 @@
     "beforeDevCommand": "bun run --filter @slab/desktop dev",
     "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "bun run --filter @slab/desktop build",
-    "frontendDist": "../../packages/slab-desktop/dist"
+    "frontendDist": "../../../packages/slab-desktop/dist"
   },
   "app": {
     "withGlobalTauri": true,
@@ -43,6 +43,7 @@
       "resources/libs/**/*"
     ],
     "externalBin": [
+      "binaries/slab-server",
       "binaries/slab-runtime"
     ],
     "copyright": "Copyright (c) 2026 CyberHan",

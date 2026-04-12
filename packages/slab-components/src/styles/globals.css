@@ -4,7 +4,8 @@
 @custom-variant dark (&:is(.dark *));
 
 
-:root {
+@layer base {
+  :root {
   /* Figma ref: #F7F9FB
    Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
   */
@@ -145,11 +146,6 @@
   */
   --chart-5: oklch(65.59% 0.2118 354.31);
 
-  --status-success-bg: color-mix(in oklab, var(--success) 40%, var(--background));
-  --status-info-bg: color-mix(in oklab, var(--brand-teal) 16%, var(--background));
-  --status-danger-bg: color-mix(in oklab, var(--destructive) 15%, var(--background));
-  --status-neutral-bg: color-mix(in oklab, var(--foreground) 6%, var(--background));
-
   --radius: 0.95rem;
   --shell-rail-width: 5rem;
   --shell-topbar-height: 3.5rem;
@@ -262,9 +258,16 @@
    Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
   */
   --media-canvas: oklch(0% 0 0);
-}
+  }
 
-.dark {
+  :root {
+    --status-success-bg: color-mix(in oklab, var(--success) 40%, var(--background));
+    --status-info-bg: color-mix(in oklab, var(--brand-teal) 16%, var(--background));
+    --status-danger-bg: color-mix(in oklab, var(--destructive) 15%, var(--background));
+    --status-neutral-bg: color-mix(in oklab, var(--foreground) 6%, var(--background));
+  }
+
+  .dark {
   /* Figma ref: #0F1518
    Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
   */
@@ -455,10 +458,6 @@
    Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
   */
   --media-canvas: oklch(0% 0 0);
-  --status-success-bg: color-mix(in oklab, var(--success) 24%, var(--surface-2));
-  --status-info-bg: color-mix(in oklab, var(--brand-teal) 18%, var(--surface-2));
-  --status-danger-bg: color-mix(in oklab, var(--destructive) 20%, var(--surface-2));
-  --status-neutral-bg: color-mix(in oklab, var(--foreground) 10%, var(--surface-2));
   --shell-card: var(--surface-1);
   --shell-title: var(--foreground);
   --shell-subtitle: var(--brand-teal);
@@ -504,6 +503,14 @@
    Reason: Figma does not currently provide OKLCH in our workflow, so code stores the token in OKLCH for theme compatibility.
   */
   --shell-line: oklch(97.31% 0.0043 197.09 / 0.08);
+  }
+
+  .dark {
+    --status-success-bg: color-mix(in oklab, var(--success) 24%, var(--surface-2));
+    --status-info-bg: color-mix(in oklab, var(--brand-teal) 18%, var(--surface-2));
+    --status-danger-bg: color-mix(in oklab, var(--destructive) 20%, var(--surface-2));
+    --status-neutral-bg: color-mix(in oklab, var(--foreground) 10%, var(--surface-2));
+  }
 }
 
 @theme inline {

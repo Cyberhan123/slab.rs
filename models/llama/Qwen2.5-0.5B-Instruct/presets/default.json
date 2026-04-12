@@ -1,0 +1,8 @@
+{
+    "kind": "preset",
+    "id": "default",
+    "label": "Default",
+    "variant_id": "Q8_0",
+    "$load_config": "ref://configs/load.json",
+    "$inference_config": "ref://configs/inference.json"
+}

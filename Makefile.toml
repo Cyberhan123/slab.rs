@@ -48,8 +48,27 @@ cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 
 [tasks.build-tauri-release]
 workspace = false
+script_runner = "@duckscript"
+script = '''
+windows = is_windows
+
+if ${windows}
+    cm_run_task build-tauri-release-windows
+else
+    cm_run_task build-tauri-release-default
+end
+'''
+
+[tasks.build-tauri-release-default]
+workspace = false
 command = "bun"
 args = ["run", "tauri", "build"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
+
+[tasks.build-tauri-release-windows]
+workspace = false
+command = "bun"
+args = ["run", "tauri", "build", "--bundles", "msi"]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 
 [tasks.build-tauri-debug]

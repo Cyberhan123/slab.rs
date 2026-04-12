@@ -18,9 +18,9 @@ Slab is a local-first machine learning desktop application built with Rust and T
 ```
 bin/slab-app        Tauri desktop host; launches the server sidecar and mounts plugin webviews
 bin/slab-server     HTTP gateway (axum); exposes /v1 routes and delegates to slab-app-core
-bin/slab-runtime    gRPC worker process; runs llama, whisper, and diffusion backends
+bin/slab-runtime    gRPC worker process; composes GGML, Candle, and ONNX backends
 crates/slab-app-core    HTTP-free business logic (domain, infra, context, config)
-crates/slab-core        Runtime orchestration, scheduler, and engine adapters
+crates/slab-runtime-core Runtime orchestration, scheduler, and dispatch contracts
 crates/slab-types       Shared semantic types and contract definitions
 crates/slab-proto       Protobuf definitions for server/runtime IPC
 ```

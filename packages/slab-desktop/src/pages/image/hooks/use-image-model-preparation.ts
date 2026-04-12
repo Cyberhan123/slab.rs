@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
+import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api from '@/lib/api';
 import { toCatalogModelList } from '@/lib/api/models';
+import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 
-const DIFFUSION_BACKEND_ID = 'ggml.diffusion';
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
 const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
 
@@ -29,14 +30,19 @@ const extractTaskId = (payload: unknown): string | null => {
 };
 
 export function useImageModelPreparation() {
-  const [selectedModelId, setSelectedModelId] = useState('');
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
 
   const {
     data: catalogModels,
     isLoading: catalogLoading,
     refetch: refetchCatalogModels,
-  } = api.useQuery('get', '/v1/models');
+  } = api.useQuery('get', '/v1/models', {
+    params: {
+      query: {
+        capability: 'image_generation',
+      },
+    },
+  });
   const downloadModelMutation = api.useMutation('post', '/v1/models/download');
   const loadModelMutation = api.useMutation('post', '/v1/models/load');
   const switchModelMutation = api.useMutation('post', '/v1/models/switch');
@@ -48,8 +54,7 @@ export function useImageModelPreparation() {
   );
 
   const diffusionModels = useMemo(
-    () =>
-      normalizedCatalogModels.filter((model) => model.backend_id === DIFFUSION_BACKEND_ID),
+    () => normalizedCatalogModels.filter((model) => model.kind === 'local'),
     [normalizedCatalogModels],
   );
 
@@ -64,19 +69,12 @@ export function useImageModelPreparation() {
       })),
     [diffusionModels],
   );
-
-  useEffect(() => {
-    if (modelOptions.length === 0) {
-      setSelectedModelId('');
-      return;
-    }
-
-    const exists = modelOptions.some((model) => model.id === selectedModelId);
-    if (!selectedModelId || !exists) {
-      const downloaded = modelOptions.find((model) => model.downloaded);
-      setSelectedModelId(downloaded?.id ?? modelOptions[0].id);
-    }
-  }, [modelOptions, selectedModelId]);
+  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
+    key: HEADER_SELECT_KEYS.imageModel,
+    options: modelOptions,
+    isLoading: catalogLoading,
+    getDefaultValue: (options) => options.find((option) => option.downloaded)?.id,
+  });
 
   const waitForTaskToFinish = async (taskId: string) => {
     const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
@@ -119,8 +117,8 @@ export function useImageModelPreparation() {
       throw new Error('Selected model does not exist in catalog');
     }
 
-    if (model.backend_id !== DIFFUSION_BACKEND_ID) {
-      throw new Error(`Selected model does not support ${DIFFUSION_BACKEND_ID}`);
+    if (model.kind !== 'local') {
+      throw new Error('Selected model is not a local image model');
     }
 
     if (model.local_path && !forceDownload) {

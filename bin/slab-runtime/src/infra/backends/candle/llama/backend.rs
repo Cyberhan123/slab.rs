@@ -1,0 +1,383 @@
+//! Backend worker adapter for `candle.llama`.
+//!
+//! Unlike the GGML backend, the Candle backend does **not** load a dynamic
+//! library at runtime – Candle is a statically-linked Rust crate.
+//!
+//! # Supported ops
+//!
+//! | Op string            | Event variant     | Description                                     |
+//! |----------------------|-------------------|-------------------------------------------------|
+//! | `"model.load"`       | `LoadModel`       | Load GGUF model weights from disk.              |
+//! | `"model.unload"`     | `UnloadModel`     | Drop model weights from memory.                 |
+//! | `"inference"`        | `Inference`       | Unary text generation; input is UTF-8 prompt.   |
+//! | `"inference.stream"` | `InferenceStream` | Streaming text generation.                      |
+//!
+//! ### `model.load` input payload
+//! Uses a typed [`slab_types::CandleLlamaLoadConfig`] payload inside `slab-core`.
+
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use slab_types::{CandleLlamaLoadConfig, TextGenerationOpOptions};
+use tokio::sync::mpsc;
+
+use crate::infra::backends::candle::llama::adapter::CandleLlamaEngine;
+use crate::infra::backends::candle::llama::errors::SessionId;
+use slab_runtime_core::Payload;
+use slab_runtime_core::backend::{
+    BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
+};
+use slab_runtime_core::backend::{SharedIngressRx, spawn_runtime_worker};
+use slab_runtime_macros::backend_handler;
+use tokio::sync::broadcast;
+
+// ── Worker ────────────────────────────────────────────────────────────────────
+
+struct CandleLlamaWorker {
+    /// Shared engine handle; `None` until `model.load` succeeds.
+    engine: Option<Arc<CandleLlamaEngine>>,
+    /// Map from caller-supplied `session_key` strings to engine session IDs.
+    sessions: HashMap<String, SessionId>,
+}
+
+#[backend_handler]
+impl CandleLlamaWorker {
+    fn new(engine: Option<Arc<CandleLlamaEngine>>) -> Self {
+        Self { engine, sessions: HashMap::new() }
+    }
+
+    // ── Event handlers ────────────────────────────────────────────────────────
+
+    #[on_event(LoadModel)]
+    async fn on_load_model(&mut self, req: BackendRequest) {
+        let BackendRequest { input, reply_tx, .. } = req;
+        self.handle_load_model(input, reply_tx).await;
+    }
+
+    #[on_event(UnloadModel)]
+    async fn on_unload_model(&mut self, req: BackendRequest) {
+        let BackendRequest { reply_tx, .. } = req;
+        self.handle_unload_model(reply_tx).await;
+    }
+
+    #[on_event(Inference)]
+    async fn on_inference(&mut self, req: BackendRequest) {
+        let invocation = match req.invocation() {
+            Ok(invocation) => invocation,
+            Err(error) => {
+                let _ = req.reply_tx.send(BackendReply::Error(error));
+                return;
+            }
+        };
+        let BackendRequest { input, reply_tx, .. } = req;
+        let opts: TextGenerationOpOptions = match invocation.options.to_typed() {
+            Ok(options) => options,
+            Err(error) => {
+                let _ = reply_tx
+                    .send(BackendReply::Error(format!("invalid text-generation options: {error}")));
+                return;
+            }
+        };
+        let max_tokens =
+            opts.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
+        let session_key = opts.session_key;
+        self.handle_inference(input, max_tokens, session_key, reply_tx).await;
+    }
+
+    #[on_event(InferenceStream)]
+    async fn on_inference_stream(&mut self, req: BackendRequest) {
+        let invocation = match req.invocation() {
+            Ok(invocation) => invocation,
+            Err(error) => {
+                let _ = req.reply_tx.send(BackendReply::Error(error));
+                return;
+            }
+        };
+        let BackendRequest { input, reply_tx, .. } = req;
+        let opts: TextGenerationOpOptions = match invocation.options.to_typed() {
+            Ok(options) => options,
+            Err(error) => {
+                let _ = reply_tx
+                    .send(BackendReply::Error(format!("invalid text-generation options: {error}")));
+                return;
+            }
+        };
+        let max_tokens =
+            opts.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
+        let session_key = opts.session_key;
+        self.handle_inference_stream(input, max_tokens, session_key, reply_tx).await;
+    }
+
+    fn cleanup_runtime_state(&mut self) {
+        if let Some(engine) = self.engine.as_ref() {
+            let _ = engine.unload();
+        }
+        self.sessions.clear();
+    }
+
+    // ── Runtime / peer control ────────────────────────────────────────────────
+
+    #[on_runtime_control(GlobalUnload)]
+    #[on_runtime_control(GlobalLoad)]
+    async fn apply_runtime_control(&mut self, signal: RuntimeControlSignal) {
+        match signal {
+            RuntimeControlSignal::GlobalUnload { op_id } => {
+                tracing::debug!(op_id, "candle.llama runtime global unload");
+                self.cleanup_runtime_state();
+            }
+            RuntimeControlSignal::GlobalLoad { op_id, payload } => {
+                let _ = payload;
+                tracing::debug!(op_id, "candle.llama runtime global load pre-cleanup");
+                self.cleanup_runtime_state();
+            }
+        }
+    }
+
+    #[on_control_lagged]
+    async fn on_control_lagged_cleanup(&mut self) {
+        self.cleanup_runtime_state();
+    }
+
+    // ── Handler helpers ───────────────────────────────────────────────────────
+
+    async fn handle_load_model(
+        &mut self,
+        input: Payload,
+        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+    ) {
+        let config: CandleLlamaLoadConfig = match input.to_typed() {
+            Ok(c) => c,
+            Err(e) => {
+                let _ =
+                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
+                return;
+            }
+        };
+
+        let engine = Arc::new(CandleLlamaEngine::new(config.seed));
+
+        let tokenizer_path = config.tokenizer_path;
+        let model_path = config.model_path;
+        let seed = config.seed;
+        let engine_clone = Arc::clone(&engine);
+
+        let result = tokio::task::block_in_place(move || {
+            engine_clone.load_model(&model_path, tokenizer_path.as_deref(), seed)
+        });
+
+        match result {
+            Ok(()) => {
+                // Clear stale sessions from any previously loaded model.
+                self.sessions.clear();
+                self.engine = Some(engine);
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+            }
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+            }
+        }
+    }
+
+    async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
+        match self.engine.as_ref() {
+            Some(engine) => {
+                let _ = engine.unload();
+                self.engine = None;
+                self.sessions.clear();
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+            }
+            None => {
+                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
+            }
+        }
+    }
+
+    async fn handle_inference(
+        &mut self,
+        input: Payload,
+        max_tokens: usize,
+        session_key: Option<String>,
+        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+    ) {
+        let engine = match self.engine.as_ref() {
+            Some(e) => Arc::clone(e),
+            None => {
+                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
+                return;
+            }
+        };
+
+        let prompt = match input.to_str() {
+            Ok(s) => s.to_owned(),
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("prompt not str: {e}")));
+                return;
+            }
+        };
+
+        // Resolve or create a session for KV-cache reuse.
+        let session_id = if let Some(ref key) = session_key {
+            match self.sessions.get(key) {
+                Some(&sid) => Some(sid),
+                None => match engine.create_session().await {
+                    Ok(sid) => {
+                        self.sessions.insert(key.clone(), sid);
+                        Some(sid)
+                    }
+                    Err(e) => {
+                        let _ = reply_tx
+                            .send(BackendReply::Error(format!("failed to create session: {e}")));
+                        return;
+                    }
+                },
+            }
+        } else {
+            None
+        };
+
+        match engine.inference(&prompt, max_tokens, session_id).await {
+            Ok(text) => {
+                let _ =
+                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(text.as_bytes()))));
+            }
+            Err(e) => {
+                // Drop the session on error so the next request starts fresh.
+                if let Some(key) = session_key {
+                    self.sessions.remove(&key);
+                }
+                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+            }
+        }
+    }
+
+    async fn handle_inference_stream(
+        &mut self,
+        input: Payload,
+        max_tokens: usize,
+        session_key: Option<String>,
+        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+    ) {
+        let engine = match self.engine.as_ref() {
+            Some(e) => Arc::clone(e),
+            None => {
+                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
+                return;
+            }
+        };
+
+        let prompt = match input.to_str() {
+            Ok(s) => s.to_owned(),
+            Err(e) => {
+                let _ = reply_tx.send(BackendReply::Error(format!("prompt not str: {e}")));
+                return;
+            }
+        };
+
+        // Resolve or create a session for KV-cache reuse.
+        let existing_session_id = if let Some(ref key) = session_key {
+            match self.sessions.get(key).copied() {
+                Some(sid) => Some(sid),
+                None => match engine.create_session().await {
+                    Ok(sid) => {
+                        self.sessions.insert(key.clone(), sid);
+                        Some(sid)
+                    }
+                    Err(e) => {
+                        let _ = reply_tx
+                            .send(BackendReply::Error(format!("failed to create session: {e}")));
+                        return;
+                    }
+                },
+            }
+        } else {
+            None
+        };
+
+        let (proto_tx, proto_rx) = mpsc::channel::<StreamChunk>(64);
+        let _ = reply_tx.send(BackendReply::Stream(proto_rx));
+
+        tokio::spawn(async move {
+            use crate::infra::backends::candle::llama::errors::StreamChunk as CandleChunk;
+            match engine.inference_stream(&prompt, max_tokens, existing_session_id).await {
+                Ok((mut llama_rx, sid)) => {
+                    while let Some(chunk) = llama_rx.recv().await {
+                        let mapped = match chunk {
+                            CandleChunk::Token(t) => StreamChunk::Token(t),
+                            CandleChunk::Done => StreamChunk::Done,
+                            CandleChunk::Error(e) => StreamChunk::Error(e),
+                        };
+                        let done = matches!(mapped, StreamChunk::Done | StreamChunk::Error(_));
+                        if proto_tx.send(mapped).await.is_err() {
+                            break;
+                        }
+                        if done {
+                            break;
+                        }
+                    }
+                    // Only end the engine session when no session_key was provided
+                    // (i.e., the session is ephemeral).  Keyed sessions persist for
+                    // the lifetime of the worker so they can be reused on subsequent
+                    // requests.
+                    if existing_session_id.is_none() {
+                        let _ = engine.end_session(sid).await;
+                    }
+                }
+                Err(e) => {
+                    // If inference_stream fails after a session was created/resolved,
+                    // the session entry remains in `self.sessions` (this closure
+                    // cannot mutate the worker map).  On the next request the same
+                    // session_key will reuse the existing engine session; the engine
+                    // tolerates this and will start fresh if the session is empty.
+                    let _ = proto_tx.send(StreamChunk::Error(e.to_string())).await;
+                }
+            }
+        });
+    }
+}
+
+// ── Public entry point ────────────────────────────────────────────────────────
+
+/// Spawn a Candle LLaMA backend worker.
+///
+/// `engine` may be `None`; the worker will wait for a `model.load` request
+/// before processing inference ops.
+pub fn spawn_backend_with_engine(
+    shared_ingress_rx: SharedIngressRx,
+    control_tx: broadcast::Sender<WorkerCommand>,
+    engine: Option<Arc<CandleLlamaEngine>>,
+) {
+    let worker = CandleLlamaWorker::new(engine);
+    spawn_runtime_worker(shared_ingress_rx, control_tx.subscribe(), 0, worker);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CandleLlamaWorker;
+    use slab_runtime_core::backend::RuntimeControlSignal;
+
+    #[tokio::test]
+    async fn runtime_global_unload_clears_engine() {
+        let mut worker = CandleLlamaWorker::new(None);
+        worker.apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 }).await;
+        assert!(worker.engine.is_none(), "global unload should leave engine cleared");
+    }
+
+    #[tokio::test]
+    async fn runtime_global_load_runs_pre_cleanup() {
+        let mut worker = CandleLlamaWorker::new(None);
+        use slab_runtime_core::Payload;
+        worker
+            .apply_runtime_control(RuntimeControlSignal::GlobalLoad {
+                op_id: 2,
+                payload: Payload::Json(serde_json::json!({
+                    "model_path": "/tmp/model.gguf",
+                    "num_workers": 1
+                })),
+            })
+            .await;
+        // Engine stays None (no model was actually loaded).
+        assert!(worker.engine.is_none());
+    }
+}

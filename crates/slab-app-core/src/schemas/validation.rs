@@ -7,6 +7,8 @@ use slab_types::RuntimeBackendId;
 use std::str::FromStr;
 use validator::ValidationError;
 
+use crate::domain::models::ManagedModelBackendId;
+
 const ALLOWED_FFMPEG_OUTPUT_FORMATS: &[&str] = &[
     "mp3", "mp4", "wav", "flac", "ogg", "opus", "webm", "avi", "mkv", "mov", "aac", "m4a", "m4v",
     "f32le", "pcm",
@@ -47,6 +49,22 @@ pub fn validate_positive_u32(value: u32) -> Result<(), ValidationError> {
 pub fn validate_backend_id(value: &str) -> Result<(), ValidationError> {
     validate_non_blank(value)?;
     RuntimeBackendId::from_str(value).map(|_| ()).map_err(|_| ValidationError::new("backend_id"))
+}
+
+pub fn validate_managed_model_backend_id(value: &str) -> Result<(), ValidationError> {
+    validate_non_blank(value)?;
+    ManagedModelBackendId::from_str(value)
+        .map(|_| ())
+        .map_err(|_| ValidationError::new("backend_id"))
+}
+
+pub fn validate_optional_managed_model_backend_id(
+    value: &Option<String>,
+) -> Result<(), ValidationError> {
+    match value.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+        Some(value) => validate_managed_model_backend_id(value),
+        None => Ok(()),
+    }
 }
 
 pub fn validate_chat_role(value: &str) -> Result<(), ValidationError> {

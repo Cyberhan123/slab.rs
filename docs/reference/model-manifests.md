@@ -17,7 +17,6 @@ Slab model packs use a manifest document at the root of the pack. The canonical 
   "version": 1,
   "id": "openrouter-llama-3_1-8b-instruct",
   "label": "Llama 3.1 8B Instruct (OpenRouter)",
-  "provider": "cloud.openrouter",
   "status": "ready",
   "family": "llama",
   "capabilities": ["text_generation"],

@@ -30,6 +30,7 @@ bytes   = { workspace = true }
 # gRPC / IPC
 tonic            = { workspace = true }
 parity-tokio-ipc = { workspace = true }
+winapi           = { workspace = true }
 tower            = { workspace = true }
 hyper-util       = { workspace = true }
 

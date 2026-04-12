@@ -12,10 +12,9 @@ import {
 } from '@ant-design/x-sdk';
 import { chatMessagesStoreHelper } from '@ant-design/x-sdk/es/x-chat/store';
 
+import { apiClient } from '@/lib/api';
 import type { components } from '@/lib/api/v1.d.ts';
 import { SERVER_BASE_URL } from '@/lib/config';
-import { isTauri } from '@/hooks/use-tauri';
-import { tauriStreamingFetch } from '@/lib/api/tauri-transport';
 
 export const ChatContext = createContext<{
     onReload?: ReturnType<typeof useXChat>['onReload'];
@@ -40,6 +39,23 @@ type ProviderTransformMessageInfo = Parameters<
         Partial<Record<SSEFields, XModelResponse>>
     >['transformMessage']
 >[0];
+
+type SessionMessagesApiClient = {
+    GET: (
+        path: '/v1/sessions/{id}/messages',
+        init: {
+            params: {
+                path: {
+                    id: string;
+                };
+            };
+        },
+    ) => Promise<{
+        data?: SessionMessageResponse[];
+        error?: { message?: string };
+        response: Response;
+    }>;
+};
 
 export type ChatRequestErrorType = ChatApiError['type'];
 
@@ -78,10 +94,16 @@ export type ChatUiMessage = XModelMessage & {
 export type ChatMessageRecord = MessageInfo<ChatUiMessage>;
 export type ChatRequestParams = XModelParams & {
     continue_generation?: boolean;
+    temperature?: number | null;
     thinking?: {
         type: 'enabled' | 'disabled';
     };
+    top_p?: number | null;
     userAction?: string;
+};
+export type ChatRuntimePresets = {
+    temperature?: number | null;
+    top_p?: number | null;
 };
 
 export type ChatRequestErrorInfo = {
@@ -182,10 +204,14 @@ export const getChatMessageTextContent = (
     return '';
 };
 
+const hasMeaningfulChatRequestContent = (
+    message?: Pick<XModelMessage, 'content'> | null,
+): boolean => getChatMessageTextContent(message).trim().length > 0;
+
 export const toChatRequestMessage = (
     message?: Pick<XModelMessage, 'role' | 'content'> | null,
 ): XModelMessage | null => {
-    if (!message) {
+    if (!message || !hasMeaningfulChatRequestContent(message)) {
         return null;
     }
 
@@ -247,10 +273,38 @@ const mergeContinuationContent = (prefix: string, generated: string): string => 
     return `${prefix}${generated}`;
 };
 
-const getResponseRequestId = (response: Response): string | null => {
-    const requestId = response.headers.get('x-request-id') ?? response.headers.get('x-requestid');
+const getResponseRequestId = (source?: Response | Headers | null): string | null => {
+    const headers = source instanceof Response ? source.headers : source;
+    const requestId = headers?.get('x-request-id')
+        ?? headers?.get('x-requestid')
+        ?? headers?.get('x-trace-id');
     const trimmed = requestId?.trim();
     return trimmed ? trimmed : null;
+};
+
+const extractStreamChunkError = (
+    chunk: Partial<Record<SSEFields, XModelResponse>> | undefined,
+): ChatApiError | null => {
+    const chunkData = (chunk as { data?: unknown } | undefined)?.data;
+    if (isChatApiErrorResponse(chunkData)) {
+        return chunkData.error;
+    }
+
+    if (isChatApiErrorResponse(chunk)) {
+        return chunk.error;
+    }
+
+    const rawData = typeof chunkData === 'string' ? chunkData.trim() : '';
+    if (!rawData || rawData === '[DONE]') {
+        return null;
+    }
+
+    try {
+        const payload = JSON.parse(rawData) as unknown;
+        return isChatApiErrorResponse(payload) ? payload.error : null;
+    } catch {
+        return null;
+    }
 };
 
 const buildChatTransportError = async (response: Response): Promise<ChatTransportError> => {
@@ -443,21 +497,28 @@ const fetchSessionMessages = async (conversationKey?: string): Promise<SessionMe
     }
 
     try {
-        const response = await fetch(
-            `${SERVER_BASE_URL}/v1/sessions/${encodeURIComponent(conversationKey ?? '')}/messages`,
-        );
+        const { data, error, response } = await (apiClient as unknown as SessionMessagesApiClient).GET('/v1/sessions/{id}/messages', {
+            params: {
+                path: {
+                    id: conversationKey ?? '',
+                },
+            },
+        });
 
         if (response.status === 404) {
             return [];
         }
 
         if (!response.ok) {
-            throw new Error(`failed to load session messages: ${response.status}`);
+            const detail = typeof error === 'object' && error !== null && 'message' in error
+                && typeof (error as { message?: unknown }).message === 'string'
+                ? (error as { message: string }).message
+                : `${response.status} ${response.statusText}`.trim();
+            throw new Error(`failed to load session messages: ${detail}`);
         }
 
-        const payload = await response.json().catch(() => []);
-        return Array.isArray(payload)
-            ? payload.filter((item): item is SessionMessageResponse => isSessionMessageResponse(item))
+        return Array.isArray(data)
+            ? data.filter((item): item is SessionMessageResponse => isSessionMessageResponse(item))
             : [];
     } catch (error) {
         console.warn('failed to load session messages', { conversationKey, error });
@@ -542,7 +603,27 @@ export const providerFactory = (conversationKey: string, model: string) => {
                     `${API_BASE_URL}/v1/chat/completions`,
                     {
                         manual: true,
-                        ...(isTauri() ? { fetch: tauriStreamingFetch } : {}),
+                        callbacks: {
+                            onUpdate: (chunk, responseHeaders) => {
+                                // Local runtime errors can arrive as in-band SSE chunks with no `choices`.
+                                const error = extractStreamChunkError(chunk);
+                                if (!error) {
+                                    return;
+                                }
+
+                                const request_id = getResponseRequestId(responseHeaders);
+                                throw new ChatTransportError({
+                                    message: error.message,
+                                    transport_status: 200,
+                                    code: error.code ?? undefined,
+                                    param: error.param ?? undefined,
+                                    request_id,
+                                    error_type: error.type,
+                                });
+                            },
+                            onSuccess: () => { },
+                            onError: () => { },
+                        },
                         middlewares: {
                             onResponse: adaptChatTransportResponse,
                         },

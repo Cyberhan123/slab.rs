@@ -3,7 +3,9 @@ use std::sync::Arc;
 use base64::Engine as _;
 use slab_proto::convert;
 use slab_types::RuntimeBackendId;
-use slab_types::diffusion::DiffusionImageRequest;
+use slab_types::diffusion::{
+    DiffusionImageBackend, DiffusionImageRequest, DiffusionRequestCommon, GgmlDiffusionImageParams,
+};
 use slab_types::media::RawImageInput;
 use tracing::{debug, warn};
 
@@ -70,27 +72,31 @@ impl ImageService {
         .to_string();
 
         let shared_request = DiffusionImageRequest {
-            prompt: req.prompt.clone(),
-            negative_prompt: req.negative_prompt.clone(),
-            count: req.n,
-            width: req.width,
-            height: req.height,
-            cfg_scale: req.cfg_scale,
-            guidance: req.guidance,
-            steps: req.steps,
-            seed: req.seed,
-            sample_method: req.sample_method.clone(),
-            scheduler: req.scheduler.clone(),
-            clip_skip: req.clip_skip,
-            strength: effective_strength,
-            eta: req.eta,
-            init_image: effective_init_image.map(|image| RawImageInput {
-                data: image.data,
-                width: image.width,
-                height: image.height,
-                channels: image.channels.clamp(1, u8::MAX as u32) as u8,
+            common: DiffusionRequestCommon {
+                prompt: req.prompt.clone(),
+                negative_prompt: req.negative_prompt.clone(),
+                width: req.width,
+                height: req.height,
+                init_image: effective_init_image.map(|image| RawImageInput {
+                    data: image.data,
+                    width: image.width,
+                    height: image.height,
+                    channels: image.channels.clamp(1, u8::MAX as u32) as u8,
+                }),
+                options: Default::default(),
+            },
+            backend: DiffusionImageBackend::Ggml(GgmlDiffusionImageParams {
+                count: Some(req.n),
+                cfg_scale: req.cfg_scale,
+                guidance: req.guidance,
+                steps: req.steps,
+                seed: req.seed,
+                sample_method: req.sample_method.clone(),
+                scheduler: req.scheduler.clone(),
+                clip_skip: req.clip_skip,
+                strength: effective_strength,
+                eta: req.eta,
             }),
-            options: Default::default(),
         };
         let grpc_req = convert::encode_diffusion_image_request(req.model.clone(), &shared_request);
 

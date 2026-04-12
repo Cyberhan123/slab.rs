@@ -6,31 +6,31 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { Toaster } from "@slab/components/sonner";
 import { TooltipProvider } from "@slab/components/tooltip";
 import api, { queryClient } from "@/lib/api";
-import { TASK_POLL_INTERVAL_MS } from "@/pages/setup/const";
 import AppRoutes from "@/routes";
 
 /**
- * Checks whether the one-time setup wizard has been completed on every
- * navigation to a non-setup route. Redirects to /setup when either:
- *   - the server reports `initialized: false`, or
- *   - the server is unreachable.
+ * Checks whether the one-time setup wizard has been completed the first time
+ * the shell needs it. Redirects to /setup only when the server responds and
+ * reports `initialized: false`.
  *
- * The guard uses the shared API query client so Tauri route mapping and
- * polling behaviour stay aligned with the rest of the app.
+ * The desktop host now spawns `slab-server` asynchronously, so transient
+ * transport errors during boot should not be treated as a setup signal.
  */
 function SetupGuard() {
   const navigate = useNavigate();
   const location = useLocation();
   const isSetupRoute = location.pathname === "/setup";
 
-  const { data: setupStatus, error: setupStatusError } = api.useQuery(
+  const { data: setupStatus } = api.useQuery(
     "get",
     "/v1/setup/status",
     undefined,
     {
       enabled: !isSetupRoute,
-      refetchInterval: isSetupRoute ? false : TASK_POLL_INTERVAL_MS,
-      refetchIntervalInBackground: true,
+      staleTime: Number.POSITIVE_INFINITY,
+      refetchOnMount: false,
+      refetchOnReconnect: false,
+      refetchOnWindowFocus: false,
       retry: false,
     }
   );
@@ -40,10 +40,10 @@ function SetupGuard() {
       return;
     }
 
-    if (setupStatusError || setupStatus?.initialized === false) {
+    if (setupStatus?.initialized === false) {
       navigate("/setup", { replace: true });
     }
-  }, [isSetupRoute, navigate, setupStatus?.initialized, setupStatusError]);
+  }, [isSetupRoute, navigate, setupStatus?.initialized]);
 
   return null;
 }

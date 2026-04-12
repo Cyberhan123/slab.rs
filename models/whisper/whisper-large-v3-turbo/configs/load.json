@@ -1,0 +1,7 @@
+{
+    "kind": "backend_config",
+    "id": "load",
+    "label": "Load",
+    "scope": "load",
+    "payload": {}
+}

@@ -1,0 +1,9 @@
+{
+    "id": "inference-default",
+    "kind": "backend_config",
+    "label": "Default inference",
+    "scope": "inference",
+    "payload": {
+        "detect_language": true
+    }
+}

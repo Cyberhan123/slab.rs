@@ -26,7 +26,7 @@ variants = []
 extension = "tar.gz"
 # checksums= "sha256:abcdef..."
 
-[artifacts.ggml.targets.macos.aarch64]
+[artifacts.ggml.targets.macos.arm64]
 variants = []
 extension = "tar.gz"
 # checksums= "sha256:abcdef..."
@@ -48,7 +48,7 @@ variants = []
 extension = "tar.gz"
 # checksums= "sha256:abcdef..."
 
-[artifacts.llama.targets.macos.aarch64]
+[artifacts.llama.targets.macos.arm64]
 variants = []
 extension = "tar.gz"
 # checksums= "sha256:abcdef..."
@@ -69,7 +69,7 @@ variants = []
 extension = "tar.gz"
 # checksums = "sha256:abcdef..."
 
-[artifacts.whisper.targets.macos.aarch64]
+[artifacts.whisper.targets.macos.arm64]
 variants = []
 extension = "tar.gz"
 # checksums = "sha256:abcdef..."
@@ -91,7 +91,7 @@ variants = []
 extension = "tar.gz"
 # checksums = "sha256:abcdef..."
 
-[artifacts.diffusion.targets.macos.aarch64]
+[artifacts.diffusion.targets.macos.arm64]
 variants = []
 extension = "tar.gz"
 # checksums = "sha256:abcdef..."

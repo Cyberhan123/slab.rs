@@ -1,6 +1,6 @@
-# slab-core 重构指南 / slab-core Refactoring Guide
+# slab-runtime-core 重构指南 / slab-runtime-core Refactoring Guide
 
-本文档记录了 `slab-core` 和 `slab-core-macros` 的重构历程、设计决策以及后续阶段指引。
+本文档记录了 `slab-runtime-core` 和 `slab-runtime-macros` 的重构历程、设计决策以及后续阶段指引。
 
 ---
 
@@ -97,7 +97,7 @@
 | `api/pipeline.rs` | 高层 Pipeline API：加载、推理、任务提交 |
 | `api/task.rs` | `TaskHandle<R,C>` — 已提交任务的句柄，含状态查询与结果获取 |
 | `api/codec.rs` | Payload 编解码：请求序列化、响应反序列化 |
-| `api/runtime/registry.rs` | `Runtime` — 持有 `Orchestrator`、`DriverResolver`、`DriversConfig` |
+| `api/runtime/registry.rs` | `Runtime` — 持有 `Orchestrator`、`DriverResolver`，并通过 `RuntimeBuilder` 注入已解析的 backend registrations |
 | `internal/dispatch/plan.rs` | `InvocationPlan`、`ResolvedDriver`、`op_name_for(Capability, streaming)` |
 | `internal/dispatch/planner.rs` | `DriverResolver::resolve(spec, capability, streaming)` |
 | `internal/scheduler/orchestrator.rs` | 调度核心：提交、执行、等待、取消、结果提取 |
@@ -165,8 +165,8 @@ cargo check -p slab-core
 # 运行 slab-core 所有测试
 cargo test -p slab-core
 
-# 检查 slab-core-macros
-cargo check -p slab-core-macros
+# 检查 slab-runtime-macros
+cargo check -p slab-runtime-macros
 ```
 
 测试覆盖：40 个单元测试（scheduler + pipeline + dispatch + codec），全部通过。

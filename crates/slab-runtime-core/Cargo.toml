@@ -1,0 +1,23 @@
+[package]
+name = "slab-runtime-core"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[dependencies]
+slab-types = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+serde_json = { workspace = true }
+serde = { workspace = true }
+tracing = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+
+[dev-dependencies]
+trybuild = "1.0"
+tracing-test = { workspace = true }

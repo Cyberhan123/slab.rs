@@ -5,7 +5,9 @@ use crate::error::ModelPackError;
 
 const REF_SCHEME: &str = "ref://";
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize, JsonSchema,
+)]
 #[serde(try_from = "String", into = "String")]
 pub struct ConfigRef(String);
 
@@ -34,8 +36,7 @@ impl ConfigRef {
                 reason: "reference path must be relative and use '/' separators".into(),
             });
         }
-        if path.split('/').any(|segment| segment.is_empty() || segment == "." || segment == "..")
-        {
+        if path.split('/').any(|segment| segment.is_empty() || segment == "." || segment == "..") {
             return Err(ModelPackError::InvalidConfigRef {
                 value,
                 reason: "reference path must not contain empty, '.' or '..' segments".into(),

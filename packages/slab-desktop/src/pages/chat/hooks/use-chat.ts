@@ -11,6 +11,7 @@ import {
   providerFactory,
   toChatRequestMessages,
   type ChatRequestParams,
+  type ChatRuntimePresets,
   type ChatUiMessage,
 } from '../chat-context'
 
@@ -19,6 +20,7 @@ export const useChat = (
   model: string,
   deepThink: boolean,
   supportsReasoningControls: boolean,
+  runtimePresets?: ChatRuntimePresets | null,
   beforeRequest?: () => Promise<void> | void
 ) => {
   const [activeConversation, setActiveConversation] = useState<string>()
@@ -85,12 +87,24 @@ export const useChat = (
         }
       : {}
 
+  const buildRuntimePresetParams = (): Partial<
+    Pick<ChatRequestParams, 'temperature' | 'top_p'>
+  > => ({
+    ...(typeof runtimePresets?.temperature === 'number'
+      ? { temperature: runtimePresets.temperature }
+      : {}),
+    ...(typeof runtimePresets?.top_p === 'number'
+      ? { top_p: runtimePresets.top_p }
+      : {}),
+  })
+
   const withRequestDefaults = (
     requestParams?: Partial<ChatRequestParams>
   ): Partial<ChatRequestParams> => ({
     ...(requestParams ?? {}),
     model,
     ...buildThinkingParams(),
+    ...buildRuntimePresetParams(),
   })
 
   const runWithPreparedModel = (callback: () => void) => {
@@ -111,6 +125,7 @@ export const useChat = (
         model,
         messages: [{ role: 'user', content: val }],
         ...buildThinkingParams(),
+        ...buildRuntimePresetParams(),
       })
       setActiveConversation(resolvedConversationKey)
     } catch (_e) {

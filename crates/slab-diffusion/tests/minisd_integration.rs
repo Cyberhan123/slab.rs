@@ -36,11 +36,8 @@ fn app_runtime_dir() -> PathBuf {
 
 fn diffusion_runtime_dir() -> PathBuf {
     let app_dir = app_runtime_dir();
-    let stable_diffusion_name = if cfg!(windows) {
-        "stable-diffusion.dll"
-    } else {
-        "libstable-diffusion.so"
-    };
+    let stable_diffusion_name =
+        if cfg!(windows) { "stable-diffusion.dll" } else { "libstable-diffusion.so" };
 
     if app_dir.join(stable_diffusion_name).is_file() {
         app_dir
@@ -133,9 +130,9 @@ fn minisd_generates_small_image_twice_from_same_context() {
     };
 
     for run in 0..2 {
-        let images = ctx
-            .generate_image(image_params.clone())
-            .unwrap_or_else(|error| panic!("failed to generate miniSD test image on run {run}: {error}"));
+        let images = ctx.generate_image(image_params.clone()).unwrap_or_else(|error| {
+            panic!("failed to generate miniSD test image on run {run}: {error}")
+        });
 
         assert_eq!(images.len(), 1);
         assert_eq!(images[0].width, 256);

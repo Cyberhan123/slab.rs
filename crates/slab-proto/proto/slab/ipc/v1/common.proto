@@ -2,24 +2,67 @@ syntax = "proto3";
 
 package slab.ipc.v1;
 
-message ModelLoadRequest {
+message ModelLoadCommon {
   string model_path = 1;
-  uint32 num_workers = 2;
-  uint32 context_length = 3;
-  string chat_template = 4;
+}
 
-  // Diffusion-specific context params (ignored by non-diffusion backends).
-  string diffusion_model_path = 10;
-  string vae_path = 11;
-  string taesd_path = 12;
-  string lora_model_dir = 13;
-  string clip_l_path = 14;
-  string clip_g_path = 15;
-  string t5xxl_path = 16;
-  bool flash_attn = 17;
-  string vae_device = 18;
-  string clip_device = 19;
-  bool offload_params_to_cpu = 20;
+message GgmlLlamaLoadParams {
+  uint32 num_workers = 1;
+  optional uint32 context_length = 2;
+  optional string chat_template = 3;
+}
+
+message GgmlWhisperLoadParams {}
+
+message GgmlDiffusionLoadParams {
+  optional string diffusion_model_path = 1;
+  optional string vae_path = 2;
+  optional string taesd_path = 3;
+  optional string clip_l_path = 4;
+  optional string clip_g_path = 5;
+  optional string t5xxl_path = 6;
+  optional string clip_vision_path = 7;
+  optional string control_net_path = 8;
+  bool flash_attn = 9;
+  optional string vae_device = 10;
+  optional string clip_device = 11;
+  bool offload_params_to_cpu = 12;
+  bool enable_mmap = 13;
+  optional int32 n_threads = 14;
+}
+
+message CandleLlamaLoadParams {
+  optional string tokenizer_path = 1;
+  uint64 seed = 2;
+}
+
+message CandleWhisperLoadParams {
+  optional string tokenizer_path = 1;
+}
+
+message CandleDiffusionLoadParams {
+  optional string vae_path = 1;
+  string sd_version = 2;
+}
+
+message OnnxLoadParams {
+  repeated string execution_providers = 1;
+  optional uint32 intra_op_num_threads = 2;
+  optional uint32 inter_op_num_threads = 3;
+}
+
+message ModelLoadRequest {
+  ModelLoadCommon common = 1;
+
+  oneof backend_params {
+    GgmlLlamaLoadParams ggml_llama = 10;
+    GgmlWhisperLoadParams ggml_whisper = 11;
+    GgmlDiffusionLoadParams ggml_diffusion = 12;
+    CandleLlamaLoadParams candle_llama = 13;
+    CandleWhisperLoadParams candle_whisper = 14;
+    CandleDiffusionLoadParams candle_diffusion = 15;
+    OnnxLoadParams onnx = 16;
+  }
 }
 
 message ModelUnloadRequest {}

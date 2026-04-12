@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import api from '@/lib/api';
+import api, { queryClient } from '@/lib/api';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
@@ -50,7 +50,13 @@ export function useSetup(): SetupViewModel {
     error: setupStatusError,
     isLoading: setupStatusLoading,
     refetch: refetchSetupStatus,
-  } = api.useQuery('get', '/v1/setup/status');
+  } = api.useQuery('get', '/v1/setup/status', undefined, {
+    staleTime: Number.POSITIVE_INFINITY,
+    refetchOnMount: false,
+    refetchOnReconnect: false,
+    refetchOnWindowFocus: false,
+    retry: false,
+  });
   const downloadFfmpegMutation = api.useMutation('post', '/v1/setup/ffmpeg/download');
   const completeSetupMutation = api.useMutation('post', '/v1/setup/complete');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
@@ -157,6 +163,21 @@ export function useSetup(): SetupViewModel {
       await completeSetupMutation.mutateAsync({
         body: { initialized: true },
       });
+      queryClient.setQueriesData(
+        {
+          predicate: (query) => JSON.stringify(query.queryKey).includes('/v1/setup/status'),
+        },
+        (current) => {
+          if (!current || typeof current !== 'object') {
+            return current;
+          }
+
+          return {
+            ...current,
+            initialized: true,
+          };
+        },
+      );
       navigate('/', { replace: true });
     } catch (error) {
       setSaveError(toErrorMessage(error));

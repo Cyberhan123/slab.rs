@@ -64,6 +64,7 @@ type ImageWorkbenchProps = {
   isBusy: boolean;
   isGenerating: boolean;
   isPreparingModel: boolean;
+  isResolvingModelState: boolean;
   mode: 'txt2img' | 'img2img';
   negativePrompt: string;
   numImages: number;
@@ -117,6 +118,7 @@ export function ImageWorkbench({
   isBusy,
   isGenerating,
   isPreparingModel,
+  isResolvingModelState,
   mode,
   negativePrompt,
   numImages,
@@ -151,16 +153,16 @@ export function ImageWorkbench({
   zoomedImage,
 }: ImageWorkbenchProps) {
   return (
-    <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] xl:overflow-hidden">
-      <div className="mx-auto flex min-h-full max-w-[1248px] flex-col px-4 py-4 sm:px-6 xl:h-full xl:min-h-0">
+    <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
+      <div className="mx-auto flex min-h-full max-w-[1248px] flex-col px-4 py-4 sm:px-6 lg:h-full lg:min-h-0">
         <SplitWorkbench
-          className="h-full min-h-0 gap-6 xl:grid-cols-[320px_minmax(0,1fr)] xl:gap-0"
+          className="h-full min-h-0 gap-6 lg:grid-cols-[300px_minmax(0,1fr)] lg:gap-0 xl:grid-cols-[320px_minmax(0,1fr)]"
           sidebarClassName="space-y-0"
-          mainClassName="min-h-full xl:min-h-0"
+          mainClassName="min-h-full lg:min-h-0"
           sidebar={
-            <aside className="flex h-full min-h-[520px] flex-col rounded-[28px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-[0_20px_50px_-38px_color-mix(in_oklab,var(--foreground)_35%,transparent)] xl:min-h-0 xl:overflow-hidden">
+            <aside className="flex h-full min-h-[520px] flex-col rounded-[28px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-[0_20px_50px_-38px_color-mix(in_oklab,var(--foreground)_35%,transparent)] lg:min-h-0 lg:overflow-hidden">
               <div className="flex h-full min-h-0 flex-col">
-                <div className="space-y-6 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-2">
+                <div className="space-y-6 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-2">
                   <div className="space-y-4">
                     <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
                       Generation Parameters
@@ -500,13 +502,18 @@ export function ImageWorkbench({
                     </CollapsibleContent>
                   </Collapsible>
 
-                  <div className="mt-auto shrink-0 pt-8 xl:pt-6">
+                  <div className="mt-auto shrink-0 pt-8 lg:pt-6">
                     <Button
                       className="h-14 w-full rounded-xl bg-[linear-gradient(135deg,var(--brand-teal)_0%,color-mix(in_oklab,var(--brand-teal)_85%,var(--shell-card))_100%)] text-base font-semibold text-[var(--brand-teal-foreground)] shadow-[0_10px_15px_-3px_color-mix(in_oklab,var(--brand-teal)_20%,transparent),0_4px_6px_-4px_color-mix(in_oklab,var(--brand-teal)_20%,transparent)] hover:brightness-[1.03]"
                       onClick={handleSubmit}
                       disabled={isBusy || !prompt.trim() || !selectedModelId}
                     >
-                      {isPreparingModel ? (
+                      {isResolvingModelState ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          Loading preset...
+                        </>
+                      ) : isPreparingModel ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
                           Preparing model...
@@ -538,7 +545,7 @@ export function ImageWorkbench({
             </aside>
           }
           main={
-            <section className="h-full min-h-[520px] rounded-[28px] border border-border/60 bg-[var(--shell-card)] xl:min-h-0 xl:overflow-hidden xl:rounded-none xl:border-0">
+            <section className="h-full min-h-[520px] rounded-[28px] border border-border/60 bg-[var(--shell-card)] lg:min-h-0 lg:overflow-hidden lg:rounded-none lg:border-0">
               {images.length === 0 ? (
                 <div className="flex h-full min-h-[520px] items-center justify-center px-6 py-12 xl:min-h-[780px]">
                   <div className="flex max-w-[448px] flex-col items-center gap-6 text-center">

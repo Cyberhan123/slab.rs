@@ -1,7 +1,3 @@
-import { SERVER_BASE_URL } from '@/lib/config';
-
-export const API_BASE_URL = SERVER_BASE_URL;
-
 export const SAMPLE_METHODS = [
   { value: 'auto', label: 'Auto' },
   { value: 'euler', label: 'Euler' },
@@ -47,11 +43,6 @@ export type GeneratedImage = {
   width: number;
   height: number;
   mode: 'txt2img' | 'img2img';
-};
-
-export type TaskResult = {
-  image?: string;
-  images?: string[];
 };
 
 export type ImageRouteState = {

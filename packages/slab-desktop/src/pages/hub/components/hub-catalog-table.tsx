@@ -1,19 +1,27 @@
-import { Bot, Boxes, Code2, ImageIcon, Mic, Trash2 } from 'lucide-react';
+import { Bot, Boxes, Code2, HardDriveDownload, ImageIcon, Loader2, Mic, Settings2, Trash2 } from 'lucide-react';
 
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
 import { StageEmptyState } from '@slab/components/workspace';
 
-import type { ModelItem } from '../hooks/use-hub-model-catalog';
+import { canDownloadModel, type ModelItem } from '../hooks/use-hub-model-catalog';
 import { StatusBadge } from './status-badge';
 
 type HubCatalogTableProps = {
   models: ModelItem[];
   deletePending: boolean;
+  onDownloadClick: (model: ModelItem) => void;
+  onEnhanceClick: (model: ModelItem) => void;
   onDeleteClick: (model: ModelItem) => void;
 };
 
-export function HubCatalogTable({ models, deletePending, onDeleteClick }: HubCatalogTableProps) {
+export function HubCatalogTable({
+  models,
+  deletePending,
+  onDownloadClick,
+  onEnhanceClick,
+  onDeleteClick,
+}: HubCatalogTableProps) {
   if (models.length === 0) {
     return (
       <StageEmptyState
@@ -32,6 +40,8 @@ export function HubCatalogTable({ models, deletePending, onDeleteClick }: HubCat
           key={model.id}
           model={model}
           deletePending={deletePending}
+          onDownloadClick={onDownloadClick}
+          onEnhanceClick={onEnhanceClick}
           onDeleteClick={onDeleteClick}
         />
       ))}
@@ -42,14 +52,19 @@ export function HubCatalogTable({ models, deletePending, onDeleteClick }: HubCat
 function HubModelCard({
   model,
   deletePending,
+  onDownloadClick,
+  onEnhanceClick,
   onDeleteClick,
 }: {
   model: ModelItem;
   deletePending: boolean;
+  onDownloadClick: (model: ModelItem) => void;
+  onEnhanceClick: (model: ModelItem) => void;
   onDeleteClick: (model: ModelItem) => void;
 }) {
   const Icon = getModelIcon(model);
   const backendLabel = model.backend_ids[0] ? formatBackend(model.backend_ids[0]) : 'Runtime';
+  const showDownloadAction = model.pending || canDownloadModel(model);
   const sourceLabel = model.local_path ?? model.repo_id ?? model.id;
 
   return (
@@ -76,16 +91,28 @@ function HubModelCard({
               <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{describeModel(model)}</p>
             </div>
 
-            <Button
-              variant="quiet"
-              size="icon-sm"
-              className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80 text-destructive hover:bg-[var(--shell-card)] hover:text-destructive"
-              onClick={() => onDeleteClick(model)}
-              disabled={deletePending}
-              aria-label={`Delete ${model.display_name}`}
-            >
-              <Trash2 className="size-4" />
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button
+                variant="quiet"
+                size="icon-sm"
+                className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80"
+                onClick={() => onEnhanceClick(model)}
+                disabled={model.pending}
+                aria-label={`Enhance ${model.display_name} config`}
+              >
+                <Settings2 className="size-4" />
+              </Button>
+              <Button
+                variant="quiet"
+                size="icon-sm"
+                className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80 text-destructive hover:bg-[var(--shell-card)] hover:text-destructive"
+                onClick={() => onDeleteClick(model)}
+                disabled={deletePending || model.pending}
+                aria-label={`Delete ${model.display_name}`}
+              >
+                <Trash2 className="size-4" />
+              </Button>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -93,7 +120,7 @@ function HubModelCard({
               {backendLabel}
             </Badge>
             <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
-              {formatProvider(model.provider)}
+              {formatKind(model.kind)}
             </Badge>
             {model.is_vad_model ? (
               <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
@@ -111,6 +138,29 @@ function HubModelCard({
           </div>
 
           <div className="mt-auto flex flex-col gap-2 pt-1">
+            {showDownloadAction ? (
+              <div className="flex flex-wrap items-center gap-3 rounded-2xl border border-border/60 bg-[var(--shell-card)]/65 px-3 py-3">
+                <Button
+                  variant={model.pending ? 'pill' : 'cta'}
+                  size="sm"
+                  onClick={() => onDownloadClick(model)}
+                  disabled={model.pending}
+                >
+                  {model.pending ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <HardDriveDownload className="size-4" />
+                  )}
+                  {model.pending ? 'Downloading...' : 'Download'}
+                </Button>
+                <p className="flex-1 text-xs leading-5 text-muted-foreground">
+                  {model.pending
+                    ? 'Fetching model files into local storage. The card will refresh when the runtime path is ready.'
+                    : 'Import only adds this pack to the catalog. Download it when you want a local runtime copy.'}
+                </p>
+              </div>
+            ) : null}
+
             <div className="space-y-1">
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
                 Source
@@ -145,7 +195,7 @@ function describeModel(model: ModelItem) {
     return `Local ${backendLabel} model ready for inference. The manifest is already connected to a runtime path and can be used without leaving this workspace.`;
   }
 
-  return `Imported ${backendLabel} manifest from ${model.repo_id || 'the configured repository'}. Review the catalog entry, backend mapping, and file before pulling it into local storage.`;
+  return `Imported ${backendLabel} manifest from ${model.repo_id || 'the configured repository'}. It is listed in the catalog now, and you can download the actual model files from this card when you need a local runtime copy.`;
 }
 
 function formatBackend(id: string) {
@@ -161,11 +211,8 @@ function formatBackend(id: string) {
   }
 }
 
-function formatProvider(provider: string) {
-  return provider
-    .replace(/^local\./, '')
-    .replace(/[._-]+/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+function formatKind(kind: 'local' | 'cloud') {
+  return kind === 'cloud' ? 'Cloud' : 'Local';
 }
 
 function shortFileName(filename: string) {
@@ -176,7 +223,8 @@ function getModelIcon(model: ModelItem) {
   const haystack = `${model.display_name} ${model.repo_id} ${model.filename}`.toLowerCase();
 
   if (
-    model.backend_ids.includes('ggml.diffusion') ||
+    model.capabilities.includes('video_generation') ||
+    model.capabilities.includes('image_generation') ||
     haystack.includes('image') ||
     haystack.includes('diffusion')
   ) {
@@ -184,7 +232,8 @@ function getModelIcon(model: ModelItem) {
   }
 
   if (
-    model.backend_ids.includes('ggml.whisper') ||
+    model.capabilities.includes('audio_transcription') ||
+    model.capabilities.includes('audio_vad') ||
     haystack.includes('audio') ||
     haystack.includes('whisper')
   ) {

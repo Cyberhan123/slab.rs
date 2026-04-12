@@ -12,8 +12,11 @@ service WhisperService {
 
 message TranscribeRequest {
   string path = 1;
-  TranscribeVadOptions vad = 2;
-  TranscribeDecodeOptions decode = 3;
+  optional string language = 2;
+  optional string prompt = 3;
+  optional bool detect_language = 4;
+  TranscribeVadOptions vad = 5;
+  TranscribeDecodeOptions decode = 6;
 }
 
 message TranscribeVadOptions {

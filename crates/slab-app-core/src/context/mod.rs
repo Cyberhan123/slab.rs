@@ -113,7 +113,7 @@ mod axum_extractors {
     use crate::domain::services::{
         AgentService, AudioService, BackendService, ChatService, FfmpegService, ImageService,
         ModelService, PmidService, SessionService, SettingsService, SetupService, SystemService,
-        TaskApplicationService, VideoService,
+        TaskApplicationService, UiStateService, VideoService,
     };
     use axum::extract::FromRef;
     use std::sync::Arc;
@@ -199,6 +199,12 @@ mod axum_extractors {
     impl FromRef<Arc<AppState>> for TaskApplicationService {
         fn from_ref(input: &Arc<AppState>) -> Self {
             input.services.task_application.clone()
+        }
+    }
+
+    impl FromRef<Arc<AppState>> for UiStateService {
+        fn from_ref(input: &Arc<AppState>) -> Self {
+            input.services.ui_state.clone()
         }
     }
 

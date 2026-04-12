@@ -11,7 +11,7 @@ use thiserror::Error;
 pub enum AppCoreError {
     /// Propagated from slab-runtime-core's AI runtime.
     #[error("runtime error: {0}")]
-    Runtime(#[from] slab_runtime_core::api::CoreError),
+    Runtime(#[from] slab_runtime_core::CoreError),
 
     /// Propagated from the SQLite (or other) store.
     #[error("database error: {0}")]

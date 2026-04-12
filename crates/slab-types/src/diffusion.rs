@@ -4,16 +4,38 @@ use serde::{Deserialize, Serialize};
 use crate::inference::JsonOptions;
 use crate::media::{GeneratedFrame, GeneratedImage, RawImageInput};
 
-/// Normalized diffusion image request independent of HTTP and protobuf DTOs.
+/// Shared diffusion request fields carried across image/video backends.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct DiffusionImageRequest {
+pub struct DiffusionRequestCommon {
     pub prompt: String,
     #[serde(default)]
     pub negative_prompt: Option<String>,
-    #[serde(default = "default_count")]
-    pub count: u32,
     pub width: u32,
     pub height: u32,
+    #[serde(default)]
+    pub init_image: Option<RawImageInput>,
+    #[serde(default)]
+    pub options: JsonOptions,
+}
+
+impl Default for DiffusionRequestCommon {
+    fn default() -> Self {
+        Self {
+            prompt: String::new(),
+            negative_prompt: None,
+            width: 512,
+            height: 512,
+            init_image: None,
+            options: JsonOptions::default(),
+        }
+    }
+}
+
+/// GGML diffusion image-generation parameters.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct GgmlDiffusionImageParams {
+    #[serde(default)]
+    pub count: Option<u32>,
     #[serde(default)]
     pub cfg_scale: Option<f32>,
     #[serde(default)]
@@ -32,31 +54,42 @@ pub struct DiffusionImageRequest {
     pub strength: Option<f32>,
     #[serde(default)]
     pub eta: Option<f32>,
+}
+
+/// Backend-specific image-generation parameters kept distinct from shared diffusion fields.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(tag = "backend", content = "params", rename_all = "snake_case")]
+pub enum DiffusionImageBackend {
+    Ggml(GgmlDiffusionImageParams),
+}
+
+impl Default for DiffusionImageBackend {
+    fn default() -> Self {
+        Self::Ggml(GgmlDiffusionImageParams::default())
+    }
+}
+
+impl DiffusionImageBackend {
+    pub fn as_ggml(&self) -> &GgmlDiffusionImageParams {
+        match self {
+            Self::Ggml(params) => params,
+        }
+    }
+}
+
+/// Normalized diffusion image request independent of HTTP and protobuf DTOs.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct DiffusionImageRequest {
+    pub common: DiffusionRequestCommon,
     #[serde(default)]
-    pub init_image: Option<RawImageInput>,
-    #[serde(default)]
-    pub options: JsonOptions,
+    pub backend: DiffusionImageBackend,
 }
 
 impl Default for DiffusionImageRequest {
     fn default() -> Self {
         Self {
-            prompt: String::new(),
-            negative_prompt: None,
-            count: default_count(),
-            width: 512,
-            height: 512,
-            cfg_scale: None,
-            guidance: None,
-            steps: None,
-            seed: None,
-            sample_method: None,
-            scheduler: None,
-            clip_skip: None,
-            strength: None,
-            eta: None,
-            init_image: None,
-            options: JsonOptions::default(),
+            common: DiffusionRequestCommon::default(),
+            backend: DiffusionImageBackend::default(),
         }
     }
 }
@@ -70,18 +103,13 @@ pub struct DiffusionImageResponse {
     pub metadata: JsonOptions,
 }
 
-/// Normalized diffusion video request independent of HTTP and protobuf DTOs.
+/// GGML diffusion video-generation parameters.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct DiffusionVideoRequest {
-    pub prompt: String,
+pub struct GgmlDiffusionVideoParams {
     #[serde(default)]
-    pub negative_prompt: Option<String>,
-    pub width: u32,
-    pub height: u32,
-    #[serde(default = "default_video_frames")]
-    pub video_frames: i32,
-    #[serde(default = "default_fps")]
-    pub fps: f32,
+    pub video_frames: Option<i32>,
+    #[serde(default)]
+    pub fps: Option<f32>,
     #[serde(default)]
     pub cfg_scale: Option<f32>,
     #[serde(default)]
@@ -96,21 +124,13 @@ pub struct DiffusionVideoRequest {
     pub scheduler: Option<String>,
     #[serde(default)]
     pub strength: Option<f32>,
-    #[serde(default)]
-    pub init_image: Option<RawImageInput>,
-    #[serde(default)]
-    pub options: JsonOptions,
 }
 
-impl Default for DiffusionVideoRequest {
+impl Default for GgmlDiffusionVideoParams {
     fn default() -> Self {
         Self {
-            prompt: String::new(),
-            negative_prompt: None,
-            width: 512,
-            height: 512,
-            video_frames: default_video_frames(),
-            fps: default_fps(),
+            video_frames: None,
+            fps: None,
             cfg_scale: None,
             guidance: None,
             steps: None,
@@ -118,8 +138,44 @@ impl Default for DiffusionVideoRequest {
             sample_method: None,
             scheduler: None,
             strength: None,
-            init_image: None,
-            options: JsonOptions::default(),
+        }
+    }
+}
+
+/// Backend-specific video-generation parameters kept distinct from shared diffusion fields.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[serde(tag = "backend", content = "params", rename_all = "snake_case")]
+pub enum DiffusionVideoBackend {
+    Ggml(GgmlDiffusionVideoParams),
+}
+
+impl Default for DiffusionVideoBackend {
+    fn default() -> Self {
+        Self::Ggml(GgmlDiffusionVideoParams::default())
+    }
+}
+
+impl DiffusionVideoBackend {
+    pub fn as_ggml(&self) -> &GgmlDiffusionVideoParams {
+        match self {
+            Self::Ggml(params) => params,
+        }
+    }
+}
+
+/// Normalized diffusion video request independent of HTTP and protobuf DTOs.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct DiffusionVideoRequest {
+    pub common: DiffusionRequestCommon,
+    #[serde(default)]
+    pub backend: DiffusionVideoBackend,
+}
+
+impl Default for DiffusionVideoRequest {
+    fn default() -> Self {
+        Self {
+            common: DiffusionRequestCommon::default(),
+            backend: DiffusionVideoBackend::default(),
         }
     }
 }
@@ -131,16 +187,4 @@ pub struct DiffusionVideoResponse {
     pub frames: Vec<GeneratedFrame>,
     #[serde(default)]
     pub metadata: JsonOptions,
-}
-
-const fn default_count() -> u32 {
-    1
-}
-
-const fn default_video_frames() -> i32 {
-    16
-}
-
-const fn default_fps() -> f32 {
-    8.0
 }
