@@ -1,0 +1,53 @@
+{
+  "$schema": "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json",
+  "version": 2,
+  "id": "whisper-large-v3",
+  "label": "whisper-large-v3",
+  "family": "whisper",
+  "metadata": {
+    "author": "openai"
+  },
+  "capabilities": [
+    "audio_transcription"
+  ],
+  "backend_hints": {
+    "prefer_drivers": [
+      "ggml.whisper"
+    ]
+  },
+  "source": {
+    "kind": "hugging_face",
+    "repo_id": "ggerganov/whisper.cpp",
+    "files": [
+      {
+        "id": "model",
+        "path": "ggml-large-v3.bin"
+      },
+      {
+        "id": "Q5_0",
+        "path": "ggml-large-v3-q5_0.bin"
+      }
+    ]
+  },
+  "variants": [
+    {
+      "id": "model",
+      "label": "whisper-large-v3",
+      "$config": "ref://variants/model.json"
+    },
+    {
+      "id": "Q5_0",
+      "label": "whisper-large-v3-Q5_0",
+      "$config": "ref://variants/Q5_0.json"
+    }
+  ],
+  "presets": [
+    {
+      "id": "default",
+      "label": "Default",
+      "description": "Default preset for whisper-large-v3.",
+      "$config": "ref://presets/default.json"
+    }
+  ],
+  "default_preset": "default"
+}

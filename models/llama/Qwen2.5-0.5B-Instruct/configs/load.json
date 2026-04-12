@@ -1,0 +1,11 @@
+{
+    "kind": "backend_config",
+    "id": "load",
+    "label": "Load",
+    "scope": "load",
+    "payload": {
+        "context_length": 4096,
+        "chat_template": "chatml",
+        "num_workers": 4
+    }
+}

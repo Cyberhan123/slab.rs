@@ -1,0 +1,6 @@
+{
+    "kind": "preset",
+    "id": "default",
+    "label": "Default",
+    "$inference_config": "ref://configs/inference.json"
+}

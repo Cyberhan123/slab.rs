@@ -1,0 +1,77 @@
+{
+  "$schema": "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json",
+  "version": 2,
+  "id": "Qwen2.5-0.5B-Instruct",
+  "label": "Qwen2.5-0.5B-Instruct",
+  "family": "llama",
+  "metadata": {
+    "author": "bartowski"
+  },
+  "capabilities": [
+    "chat_generation",
+    "text_generation"
+  ],
+  "backend_hints": {
+    "prefer_drivers": [
+      "ggml.llama"
+    ]
+  },
+  "source": {
+    "kind": "hugging_face",
+    "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+    "files": [
+      {
+        "id": "model",
+        "path": "Qwen2.5-0.5B-Instruct-f16.gguf"
+      },
+      {
+        "id": "Q4_K_M",
+        "path": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+      },
+      {
+        "id": "Q5_K_M",
+        "path": "Qwen2.5-0.5B-Instruct-Q5_K_M.gguf"
+      },
+      {
+        "id": "Q8_0",
+        "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf"
+      }
+    ]
+  },
+  "variants": [
+    {
+      "id": "model",
+      "label": "Qwen2.5-0.5B-Instruct",
+      "$config": "ref://variants/model.json"
+    },
+    {
+      "id": "Q4_K_M",
+      "label": "Qwen2.5-0.5B-Instruct-Q4_K_M",
+      "$config": "ref://variants/Q4_K_M.json"
+    },
+    {
+      "id": "Q4_K_M",
+      "label": "Qwen2.5-0.5B-Instruct-Q4_K_M",
+      "$config": "ref://variants/Q4_K_M.json"
+    },
+    {
+      "id": "Q5_K_M",
+      "label": "Qwen2.5-0.5B-Instruct-Q5_K_M",
+      "$config": "ref://variants/Q5_K_M.json"
+    },
+    {
+      "id": "Q8_0",
+      "label": "Qwen2.5-0.5B-Instruct-Q8_0",
+      "$config": "ref://variants/Q8_0.json"
+    }
+  ],
+  "presets": [
+    {
+      "id": "default",
+      "label": "Default",
+      "description": "Default preset for Qwen2.5-0.5B-Instruct.",
+      "$config": "ref://presets/default.json"
+    }
+  ],
+  "default_preset": "default"
+}

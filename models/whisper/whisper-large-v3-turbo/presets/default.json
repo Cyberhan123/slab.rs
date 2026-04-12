@@ -1,0 +1,7 @@
+{
+    "kind": "preset",
+    "id": "default",
+    "label": "Default",
+    "variant_id": "model",
+    "$inference_config": "ref://configs/inference.json"
+}
