@@ -1,5 +1,7 @@
 use chrono::{DateTime, Utc};
 
+use std::collections::BTreeMap;
+
 use crate::domain::models::{
     ManagedModelBackendId, ModelSpec, RuntimePresets, StoredModelConfig, UnifiedModel,
     UnifiedModelKind, UnifiedModelStatus, upgrade_stored_model_config,
@@ -153,6 +155,7 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             status: Some(status),
             spec,
             runtime_presets,
+            materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
         })?;
 

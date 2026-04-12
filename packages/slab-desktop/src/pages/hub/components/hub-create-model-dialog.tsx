@@ -22,30 +22,6 @@ type HubCreateModelDialogProps = {
   onCreate: () => void;
 };
 
-const MODEL_PACK_MANIFEST_EXAMPLE = `{
-  "$schema": "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json",
-  "version": 1,
-  "id": "openrouter-llama-3_1-8b-instruct",
-  "label": "Llama 3.1 8B Instruct (OpenRouter)",
-  "status": "ready",
-  "family": "llama",
-  "capabilities": ["text_generation", "chat_generation"],
-  "context_window": 131072,
-  "pricing": {
-    "input": 0.00018,
-    "output": 0.00018
-  },
-  "runtime_presets": {
-    "temperature": 0.7,
-    "top_p": 0.95
-  },
-  "source": {
-    "kind": "cloud",
-    "provider_id": "openrouter-main",
-    "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
-  }
-}`;
-
 export function HubCreateModelDialog({
   open,
   onOpenChange,

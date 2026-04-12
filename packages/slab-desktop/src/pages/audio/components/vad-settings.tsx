@@ -4,11 +4,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Switch } from '@slab/components/switch';
 import type { CatalogModel } from '@/lib/api/models';
 
+const BUNDLED_VAD_MODEL_ID = '__bundled_vad__';
+
 export type VadSettingsProps = {
+  bundledVadLabel: string;
   enableVad: boolean;
+  hasBundledVad: boolean;
   setEnableVad: (value: boolean) => void;
   isTauri: boolean;
   isBusy: boolean;
+  isUsingBundledVad: boolean;
   selectedVadModelId: string;
   setSelectedVadModelId: (value: string) => void;
   catalogModelsLoading: boolean;
@@ -29,10 +34,13 @@ export type VadSettingsProps = {
 };
 
 export function VadSettings({
+  bundledVadLabel,
   enableVad,
+  hasBundledVad,
   setEnableVad,
   isTauri,
   isBusy,
+  isUsingBundledVad,
   selectedVadModelId,
   setSelectedVadModelId,
   catalogModelsLoading,
@@ -75,7 +83,7 @@ export function VadSettings({
             <Select
               value={selectedVadModelId}
               onValueChange={setSelectedVadModelId}
-              disabled={!isTauri || isBusy || whisperVadModels.length === 0}
+              disabled={!isTauri || isBusy || (!hasBundledVad && whisperVadModels.length === 0)}
             >
               <SelectTrigger
                 variant="soft"
@@ -83,11 +91,20 @@ export function VadSettings({
                 className="w-full justify-between border-border/70 bg-[var(--shell-card)] shadow-none"
               >
                 <SelectValue
-                  placeholder={catalogModelsLoading ? 'Loading models...' : 'Select VAD model'}
+                  placeholder={
+                    catalogModelsLoading
+                      ? 'Loading models...'
+                      : hasBundledVad
+                        ? 'Use bundled VAD'
+                        : 'Select VAD model'
+                  }
                 />
               </SelectTrigger>
               <SelectContent variant="soft">
-                {whisperVadModels.length === 0 ? (
+                {hasBundledVad && (
+                  <SelectItem value={BUNDLED_VAD_MODEL_ID}>{bundledVadLabel}</SelectItem>
+                )}
+                {!hasBundledVad && whisperVadModels.length === 0 ? (
                   <div className="px-2 py-1.5 text-sm text-muted-foreground">
                     No dedicated Whisper VAD models in catalog
                   </div>
@@ -101,11 +118,15 @@ export function VadSettings({
               </SelectContent>
             </Select>
             <p className="text-xs leading-5 text-muted-foreground">
-              {selectedVadModel
+              {isUsingBundledVad
+                ? 'Using the bundled VAD artifact from the current Whisper model pack.'
+                : selectedVadModel
                 ? selectedVadModel.local_path
                   ? 'Downloaded locally and ready for runtime use.'
                   : 'The selected VAD model will be downloaded automatically before transcription.'
-                : 'Choose a dedicated VAD model, such as a whisper VAD or silero variant.'}
+                : hasBundledVad
+                  ? 'Use the bundled VAD or override it with a dedicated VAD model.'
+                  : 'Choose a dedicated VAD model, such as a whisper VAD or silero variant.'}
             </p>
           </div>
 

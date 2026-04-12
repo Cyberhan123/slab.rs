@@ -170,7 +170,13 @@ pub fn write_persisted_model_pack(
     dir: &Path,
     model: &UnifiedModel,
 ) -> Result<PathBuf, AppCoreError> {
-    let config: StoredModelConfig = model.clone().into();
+    let mut config: StoredModelConfig = model.clone().into();
+    let path = model_pack_file_path(dir, &config.id);
+    if path.exists()
+        && let Some(existing) = read_persisted_model_config_from_pack(&path)?
+    {
+        config.materialized_artifacts = existing.materialized_artifacts;
+    }
     write_persisted_model_pack_from_config(dir, &config)
 }
 
@@ -1254,6 +1260,7 @@ mod tests {
                 ..Default::default()
             },
             runtime_presets: Some(RuntimePresets { temperature: Some(0.2), top_p: Some(0.8) }),
+            materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
         };
 
@@ -1299,6 +1306,7 @@ mod tests {
                 ..Default::default()
             },
             runtime_presets: None,
+            materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
         };
 
@@ -1347,6 +1355,7 @@ mod tests {
                 ..Default::default()
             },
             runtime_presets: Some(RuntimePresets { temperature: Some(0.6), top_p: Some(0.9) }),
+            materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
         };
 
@@ -1529,6 +1538,7 @@ mod tests {
                 ..Default::default()
             },
             runtime_presets: Some(RuntimePresets { temperature: Some(0.7), top_p: Some(0.95) }),
+            materialized_artifacts: BTreeMap::new(),
             pack_selection: Some(ModelPackSelection {
                 preset_id: Some("default".to_owned()),
                 variant_id: Some("q8_0".to_owned()),
