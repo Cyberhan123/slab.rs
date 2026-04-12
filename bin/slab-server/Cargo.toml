@@ -75,6 +75,6 @@ clap = { workspace = true }
 all-smi = "0.17"
 image     = { workspace = true }
 dirs-next = "2.0.0"
-jsonschema = { version = "0.45.0", default-features = false }
+jsonschema = { version = "0.46.0", default-features = false }
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 ffmpeg-sidecar = { workspace = true, features = ["download_ffmpeg"] }
