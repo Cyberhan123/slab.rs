@@ -7927,7 +7927,7 @@ checksum = "0c790de23124f9ab44544d7ac05d60440adc586479ce501c1d6d7da3cd8c9cf5"
 
 [[package]]
 name = "slab-agent"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "chrono",
@@ -7944,7 +7944,7 @@ dependencies = [
 
 [[package]]
 name = "slab-app"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "dirs-next",
@@ -7973,7 +7973,7 @@ dependencies = [
 
 [[package]]
 name = "slab-app-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "all-smi",
  "anyhow",
@@ -8019,7 +8019,7 @@ dependencies = [
 
 [[package]]
 name = "slab-build-utils"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "cargo_metadata 0.23.1",
@@ -8030,7 +8030,7 @@ dependencies = [
 
 [[package]]
 name = "slab-diffusion"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bindgen",
  "hf-hub",
@@ -8046,7 +8046,7 @@ dependencies = [
 
 [[package]]
 name = "slab-diffusion-sys"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bindgen",
  "libloading 0.8.9",
@@ -8055,7 +8055,7 @@ dependencies = [
 
 [[package]]
 name = "slab-ggml"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bindgen",
  "libc",
@@ -8069,7 +8069,7 @@ dependencies = [
 
 [[package]]
 name = "slab-ggml-sys"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bindgen",
  "libloading 0.8.9",
@@ -8078,7 +8078,7 @@ dependencies = [
 
 [[package]]
 name = "slab-libfetch"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "flate2",
@@ -8096,7 +8096,7 @@ dependencies = [
 
 [[package]]
 name = "slab-llama"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "libloading 0.8.9",
@@ -8110,7 +8110,7 @@ dependencies = [
 
 [[package]]
 name = "slab-llama-sys"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bindgen",
  "libloading 0.8.9",
@@ -8119,7 +8119,7 @@ dependencies = [
 
 [[package]]
 name = "slab-model-pack"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "schemars 1.2.1",
  "serde",
@@ -8131,7 +8131,7 @@ dependencies = [
 
 [[package]]
 name = "slab-proto"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "image",
@@ -8148,7 +8148,7 @@ dependencies = [
 
 [[package]]
 name = "slab-runtime"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8189,7 +8189,7 @@ dependencies = [
 
 [[package]]
 name = "slab-runtime-core"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "bytes",
@@ -8205,7 +8205,7 @@ dependencies = [
 
 [[package]]
 name = "slab-runtime-macros"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "async-trait",
  "proc-macro2",
@@ -8216,7 +8216,7 @@ dependencies = [
 
 [[package]]
 name = "slab-server"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "all-smi",
  "anyhow",
@@ -8268,7 +8268,7 @@ dependencies = [
 
 [[package]]
 name = "slab-subtitle"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chardet",
  "combine",
@@ -8279,7 +8279,7 @@ dependencies = [
 
 [[package]]
 name = "slab-types"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "chrono",
  "schemars 1.2.1",
@@ -8291,7 +8291,7 @@ dependencies = [
 
 [[package]]
 name = "slab-utils"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "libloading 0.8.9",
  "slab-diffusion-sys",
@@ -8302,7 +8302,7 @@ dependencies = [
 
 [[package]]
 name = "slab-whisper"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "libloading 0.8.9",
  "log",
@@ -8317,7 +8317,7 @@ dependencies = [
 
 [[package]]
 name = "slab-whisper-sys"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "bindgen",
  "libloading 0.8.9",
