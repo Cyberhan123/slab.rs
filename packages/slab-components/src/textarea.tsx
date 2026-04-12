@@ -3,6 +3,9 @@ import { cva, type VariantProps } from "class-variance-authority"
 
 import { cn } from "./lib/utils"
 
+const supportsFieldSizingContent = () =>
+  typeof CSS !== "undefined" && CSS.supports("field-sizing", "content")
+
 const textareaVariants = cva(
   "placeholder:text-muted-foreground flex field-sizing-content min-h-16 w-full border px-3 py-2 text-base transition-[color,box-shadow,background-color,border-color] outline-none disabled:cursor-not-allowed disabled:opacity-50 md:text-sm",
   {
@@ -25,10 +28,37 @@ const textareaVariants = cva(
 function Textarea({
   className,
   variant = "default",
+  autoResize = false,
+  onInput,
+  value,
   ...props
-}: React.ComponentProps<"textarea"> & VariantProps<typeof textareaVariants>) {
+}: React.ComponentProps<"textarea"> &
+  VariantProps<typeof textareaVariants> & {
+    autoResize?: boolean
+  }) {
+  const textareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+
+  const syncAutoResize = React.useCallback(() => {
+    const element = textareaRef.current
+    if (!autoResize || !element || supportsFieldSizingContent()) {
+      return
+    }
+
+    element.style.height = "0px"
+    element.style.height = `${element.scrollHeight}px`
+
+    const maxHeight = Number.parseFloat(window.getComputedStyle(element).maxHeight)
+    element.style.overflowY =
+      Number.isFinite(maxHeight) && element.scrollHeight > maxHeight ? "auto" : "hidden"
+  }, [autoResize])
+
+  React.useLayoutEffect(() => {
+    syncAutoResize()
+  }, [syncAutoResize, value])
+
   return (
     <textarea
+      ref={textareaRef}
       data-slot="textarea"
       data-variant={variant}
       className={cn(
@@ -36,6 +66,11 @@ function Textarea({
         "aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive",
         className
       )}
+      value={value}
+      onInput={(event) => {
+        syncAutoResize()
+        onInput?.(event)
+      }}
       {...props}
     />
   )

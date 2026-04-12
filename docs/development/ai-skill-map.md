@@ -15,14 +15,14 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
 - `shadcn-ui`
   Use for shared UI primitives, forms, dialogs, tables, and Tailwind-based component work in `packages/slab-components/`.
 - `tauri-v2`
-  Use for `bin/slab-app/src-tauri`, `bin/slab-app/src-tauri/src/api/**`, sidecar startup, capabilities, permissions, Tauri commands, plugin webview runtime, and IPC details.
+  Use for `bin/slab-app/src-tauri`, sidecar startup, capabilities, permissions, Tauri commands, plugin webview runtime, and desktop host integration details.
 
 ## No Local Skill Needed
 
 - Agent control-plane work
   Start in `crates/slab-agent/**`, `slab-server/src/api/v1/agent/**`, and `slab-server/src/infra/agent_adapter.rs`.
 - Runtime and engine work
-  Start in `slab-runtime/**`, `crates/slab-core/**`, `crates/slab-llama/**`, `crates/slab-whisper/**`, `crates/slab-diffusion/**`, and `crates/slab-ggml/**`.
+  Start in `bin/slab-runtime/**`, especially `bin/slab-runtime/src/{config,context,domain,infra}/**` and `bin/slab-runtime/src/infra/backends/**`, plus `crates/slab-runtime-core/**`, `crates/slab-llama/**`, `crates/slab-whisper/**`, `crates/slab-diffusion/**`, and `crates/slab-ggml/**`.
 - Plugin package and bridge work
   Start in `plugins/**`, `packages/slab-desktop/src/pages/plugins/**`, `packages/slab-desktop/src/lib/plugin-sdk.ts`, and `bin/slab-app/src-tauri/src/plugins/**`.
 - Shared contracts, settings, and manifests

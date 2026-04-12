@@ -58,7 +58,7 @@ impl ModelPack {
         let components = self.resolve_components()?;
         let adapters = self.resolve_adapters(&components)?;
         let variants = self.resolve_variants(&components)?;
-        let presets = self.resolve_presets(&variants, &adapters)?;
+        let presets = self.resolve_presets(&components, &variants, &adapters)?;
         let default_preset_id = self.resolve_default_preset_id(&presets)?;
 
         Ok(ResolvedModelPack {
@@ -97,8 +97,12 @@ impl ModelPack {
                 }
             };
 
-            let resolved_components = resolve_named_components(components, &document.component_ids)?;
-            resolved.insert(entry.id.clone(), ResolvedAdapter { document, components: resolved_components });
+            let resolved_components =
+                resolve_named_components(components, &document.component_ids)?;
+            resolved.insert(
+                entry.id.clone(),
+                ResolvedAdapter { document, components: resolved_components },
+            );
         }
         Ok(resolved)
     }
@@ -110,12 +114,16 @@ impl ModelPack {
         let mut resolved = BTreeMap::new();
         for entry in &self.manifest().variants {
             let document = self.resolve_variant(&entry.config_ref)?.clone();
-            let resolved_components = resolve_named_components(components, &document.component_ids)?;
-            let effective_source = document.source.clone().or_else(|| self.manifest().source.clone());
+            let resolved_components =
+                resolve_named_components(components, &document.component_ids)?;
+            let effective_source =
+                resolve_variant_effective_source(self.manifest().source.as_ref(), &document);
             let load_config = document
                 .load_config
                 .as_ref()
-                .map(|config_ref| self.resolve_backend_config(config_ref, BackendConfigScope::Load).cloned())
+                .map(|config_ref| {
+                    self.resolve_backend_config(config_ref, BackendConfigScope::Load).cloned()
+                })
                 .transpose()?;
             let inference_config = document
                 .inference_config
@@ -141,26 +149,22 @@ impl ModelPack {
 
     fn resolve_presets(
         &self,
+        components: &BTreeMap<String, ResolvedComponent>,
         variants: &BTreeMap<String, ResolvedVariant>,
         adapters: &BTreeMap<String, ResolvedAdapter>,
     ) -> Result<BTreeMap<String, ResolvedPreset>, ModelPackError> {
         let mut resolved = BTreeMap::new();
         for entry in &self.manifest().presets {
-            let document = self.resolve_preset(&entry.config_ref)?.clone();
-            let variant = variants.get(&document.variant_id).cloned().ok_or_else(|| {
-                ModelPackError::MissingNamedDocument {
-                    kind: "variant",
-                    id: document.variant_id.clone(),
-                }
-            })?;
+            let mut document = self.resolve_preset(&entry.config_ref)?.clone();
+            if document.variant_id.is_none() {
+                document.variant_id = entry.variant_id.clone();
+            }
+            let variant = resolve_preset_variant(self, components, variants, &document)?;
 
             let mut resolved_adapters = BTreeMap::new();
             for adapter_id in &document.adapter_ids {
                 let adapter = adapters.get(adapter_id).cloned().ok_or_else(|| {
-                    ModelPackError::MissingNamedDocument {
-                        kind: "adapter",
-                        id: adapter_id.clone(),
-                    }
+                    ModelPackError::MissingNamedDocument { kind: "adapter", id: adapter_id.clone() }
                 })?;
                 resolved_adapters.insert(adapter_id.clone(), adapter);
             }
@@ -200,9 +204,7 @@ impl ModelPack {
             if presets.contains_key(default_preset_id) {
                 return Ok(Some(default_preset_id.clone()));
             }
-            return Err(ModelPackError::MissingDefaultPreset {
-                id: default_preset_id.clone(),
-            });
+            return Err(ModelPackError::MissingDefaultPreset { id: default_preset_id.clone() });
         }
 
         match presets.len() {
@@ -213,6 +215,38 @@ impl ModelPack {
     }
 }
 
+fn resolve_variant_effective_source(
+    manifest_source: Option<&PackSource>,
+    document: &VariantDocument,
+) -> Option<PackSource> {
+    document
+        .source
+        .clone()
+        .or_else(|| manifest_source.map(|source| select_variant_source(source, &document.id)))
+}
+
+fn select_variant_source(source: &PackSource, variant_id: &str) -> PackSource {
+    match source {
+        PackSource::LocalFiles { files } => files
+            .iter()
+            .find(|file| file.id == variant_id)
+            .cloned()
+            .map(|file| PackSource::LocalFiles { files: vec![file] })
+            .unwrap_or_else(|| source.clone()),
+        PackSource::HuggingFace { repo_id, revision, files } => files
+            .iter()
+            .find(|file| file.id == variant_id)
+            .cloned()
+            .map(|file| PackSource::HuggingFace {
+                repo_id: repo_id.clone(),
+                revision: revision.clone(),
+                files: vec![file],
+            })
+            .unwrap_or_else(|| source.clone()),
+        PackSource::LocalPath { .. } | PackSource::Cloud { .. } => source.clone(),
+    }
+}
+
 fn resolve_named_components(
     components: &BTreeMap<String, ResolvedComponent>,
     component_ids: &[String],
@@ -220,14 +254,56 @@ fn resolve_named_components(
     let mut resolved = BTreeMap::new();
     for component_id in component_ids {
         let component = components.get(component_id).cloned().ok_or_else(|| {
-            ModelPackError::MissingNamedDocument {
-                kind: "component",
-                id: component_id.clone(),
-            }
+            ModelPackError::MissingNamedDocument { kind: "component", id: component_id.clone() }
         })?;
         resolved.insert(component_id.clone(), component);
     }
     Ok(resolved)
+}
+
+fn resolve_preset_variant(
+    pack: &ModelPack,
+    components: &BTreeMap<String, ResolvedComponent>,
+    variants: &BTreeMap<String, ResolvedVariant>,
+    preset: &PresetDocument,
+) -> Result<ResolvedVariant, ModelPackError> {
+    let Some(variant_id) = preset.variant_id.as_deref() else {
+        return Ok(resolve_manifest_default_variant(pack, components));
+    };
+
+    variants.get(variant_id).cloned().ok_or_else(|| ModelPackError::MissingNamedDocument {
+        kind: "variant",
+        id: variant_id.to_owned(),
+    })
+}
+
+fn resolve_manifest_default_variant(
+    pack: &ModelPack,
+    components: &BTreeMap<String, ResolvedComponent>,
+) -> ResolvedVariant {
+    let (component_ids, resolved_components, effective_source) = if pack.manifest().source.is_some()
+    {
+        (Vec::new(), BTreeMap::new(), pack.manifest().source.clone())
+    } else {
+        (components.keys().cloned().collect(), components.clone(), None)
+    };
+
+    ResolvedVariant {
+        document: VariantDocument {
+            id: String::new(),
+            label: "Original Model".to_owned(),
+            description: Some("Resolved from manifest without an explicit variant".to_owned()),
+            source: None,
+            component_ids,
+            load_config: None,
+            inference_config: None,
+            metadata: BTreeMap::new(),
+        },
+        effective_source,
+        components: resolved_components,
+        load_config: None,
+        inference_config: None,
+    }
 }
 
 fn resolve_effective_backend_config(
@@ -252,6 +328,7 @@ mod tests {
     use zip::ZipWriter;
     use zip::write::SimpleFileOptions;
 
+    use crate::manifest::PackSource;
     use crate::pack::ModelPack;
 
     fn build_pack(entries: Vec<(&str, String)>) -> Vec<u8> {
@@ -333,7 +410,6 @@ mod tests {
                     "kind": "backend_config",
                     "id": "load-default",
                     "label": "Load Default",
-                    "backend": "ggml_llama",
                     "scope": "load",
                     "payload": {
                         "context_length": 8192
@@ -347,7 +423,6 @@ mod tests {
                     "kind": "backend_config",
                     "id": "load-long",
                     "label": "Load Long",
-                    "backend": "ggml_llama",
                     "scope": "load",
                     "payload": {
                         "context_length": 32768
@@ -361,7 +436,6 @@ mod tests {
                     "kind": "backend_config",
                     "id": "inference-default",
                     "label": "Inference Default",
-                    "backend": "ggml_llama",
                     "scope": "inference",
                     "payload": {
                         "temperature": 0.7
@@ -376,8 +450,8 @@ mod tests {
                     "id": "q4_k_m",
                     "label": "Q4_K_M",
                     "component_ids": ["model"],
-                    "load_config": "ref://models/configs/load-default.json",
-                    "inference_config": "ref://models/configs/inference-default.json"
+                    "$load_config": "ref://models/configs/load-default.json",
+                    "$inference_config": "ref://models/configs/inference-default.json"
                 })
                 .to_string(),
             ),
@@ -398,7 +472,7 @@ mod tests {
                     "id": "long-context",
                     "label": "Long Context",
                     "variant_id": "q4_k_m",
-                    "load_config": "ref://models/configs/load-long.json"
+                    "$load_config": "ref://models/configs/load-long.json"
                 })
                 .to_string(),
             ),
@@ -424,6 +498,219 @@ mod tests {
                 .and_then(|config| config.payload.get("context_length"))
                 .and_then(|value| value.as_u64()),
             Some(32768)
+        );
+    }
+
+    #[test]
+    fn resolves_preset_without_variant_id_to_manifest_source() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "demo",
+                    "label": "Demo",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "source": {
+                        "kind": "local_path",
+                        "path": "C:/models/base.gguf"
+                    },
+                    "presets": [
+                        {
+                            "id": "default",
+                            "label": "Default",
+                            "$config": "ref://models/presets/default.json"
+                        }
+                    ],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/configs/load.json",
+                json!({
+                    "kind": "backend_config",
+                    "id": "load-default",
+                    "label": "Load Default",
+                    "scope": "load",
+                    "payload": {
+                        "context_length": 4096
+                    }
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "$load_config": "ref://models/configs/load.json"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
+        let resolved = pack.resolve().expect("pack should resolve");
+        let preset = resolved.default_preset().expect("default preset");
+
+        assert_eq!(
+            preset.variant.effective_source,
+            Some(PackSource::LocalPath { path: "C:/models/base.gguf".to_owned() })
+        );
+        assert_eq!(
+            preset
+                .effective_load_config
+                .as_ref()
+                .and_then(|config| config.payload.get("context_length"))
+                .and_then(|value| value.as_u64()),
+            Some(4096)
+        );
+    }
+
+    #[test]
+    fn resolves_variant_id_to_matching_manifest_source_file() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "qwen2.5-0.5b-instruct",
+                    "label": "Qwen2.5 0.5B Instruct",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+                        "files": [
+                            { "id": "model", "path": "Qwen2.5-0.5B-Instruct-f16.gguf" },
+                            { "id": "Q4_K_M", "path": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf" },
+                            { "id": "Q8_0", "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf" }
+                        ]
+                    },
+                    "variants": [
+                        { "id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json" }
+                    ],
+                    "presets": [
+                        { "id": "default", "label": "Default", "$config": "ref://models/presets/default.json" }
+                    ],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q8_0.json",
+                json!({
+                    "kind": "variant",
+                    "id": "Q8_0",
+                    "label": "Q8_0"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default",
+                    "variant_id": "Q8_0"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
+        let resolved = pack.resolve().expect("pack should resolve");
+        let preset = resolved.default_preset().expect("default preset");
+
+        assert_eq!(
+            preset.variant.effective_source,
+            Some(PackSource::HuggingFace {
+                repo_id: "bartowski/Qwen2.5-0.5B-Instruct-GGUF".to_owned(),
+                revision: None,
+                files: vec![crate::manifest::PackSourceFile {
+                    id: "Q8_0".to_owned(),
+                    label: None,
+                    description: None,
+                    path: "Qwen2.5-0.5B-Instruct-Q8_0.gguf".to_owned(),
+                }],
+            })
+        );
+    }
+
+    #[test]
+    fn resolves_manifest_preset_variant_override_to_matching_source_file() {
+        let bytes = build_pack(vec![
+            (
+                "manifest.json",
+                json!({
+                    "version": 2,
+                    "id": "qwen2.5-0.5b-instruct",
+                    "label": "Qwen2.5 0.5B Instruct",
+                    "family": "llama",
+                    "capabilities": ["text_generation"],
+                    "source": {
+                        "kind": "hugging_face",
+                        "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+                        "files": [
+                            { "id": "model", "path": "Qwen2.5-0.5B-Instruct-f16.gguf" },
+                            { "id": "Q8_0", "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf" }
+                        ]
+                    },
+                    "variants": [
+                        { "id": "Q8_0", "label": "Q8_0", "$config": "ref://models/variants/q8_0.json" }
+                    ],
+                    "presets": [
+                        {
+                            "id": "default",
+                            "label": "Default",
+                            "variant_id": "Q8_0",
+                            "$config": "ref://models/presets/default.json"
+                        }
+                    ],
+                    "default_preset": "default"
+                })
+                .to_string(),
+            ),
+            (
+                "models/variants/q8_0.json",
+                json!({
+                    "kind": "variant",
+                    "id": "Q8_0",
+                    "label": "Q8_0"
+                })
+                .to_string(),
+            ),
+            (
+                "models/presets/default.json",
+                json!({
+                    "kind": "preset",
+                    "id": "default",
+                    "label": "Default"
+                })
+                .to_string(),
+            ),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("pack should load");
+        let resolved = pack.resolve().expect("pack should resolve");
+        let preset = resolved.default_preset().expect("default preset");
+
+        assert_eq!(preset.document.variant_id.as_deref(), Some("Q8_0"));
+        assert_eq!(
+            preset.variant.effective_source,
+            Some(PackSource::HuggingFace {
+                repo_id: "bartowski/Qwen2.5-0.5B-Instruct-GGUF".to_owned(),
+                revision: None,
+                files: vec![crate::manifest::PackSourceFile {
+                    id: "Q8_0".to_owned(),
+                    label: None,
+                    description: None,
+                    path: "Qwen2.5-0.5B-Instruct-Q8_0.gguf".to_owned(),
+                }],
+            })
         );
     }
 

@@ -1,21 +1,70 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
 
 import useFile, { type SelectedFile } from '@/hooks/use-file';
+import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
+import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import useIsTauri from '@/hooks/use-tauri';
 import api from '@/lib/api';
-import { inferWhisperVadModel, toCatalogModelList } from '@/lib/api/models';
-import { usePageHeader, usePageHeaderModelPicker } from '@/hooks/use-global-header-meta';
-import { PAGE_HEADER_META } from '@/layouts/header-meta';
-import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } from './use-transcribe';
+import { modelSupportsCapability, toCatalogModelList, type CatalogModel } from '@/lib/api/models';
 import {
-  WHISPER_BACKEND_ID,
+  useModelConfigDocumentQuery,
+  type ModelConfigDocumentResponse,
+} from '@/lib/model-config';
+import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
+import { PAGE_HEADER_META } from '@/layouts/header-meta';
+import { useAudioUiStore } from '@/store/useAudioUiStore';
+import {
   MODEL_DOWNLOAD_POLL_INTERVAL_MS,
   MODEL_DOWNLOAD_TIMEOUT_MS,
   type PreparingStage,
 } from '../const';
+import {
+  areAudioTranscriptionControlValuesEqual,
+  buildAudioTranscriptionControlsFromModelConfig,
+  createDefaultAudioTranscriptionControls,
+  normalizeAudioTranscriptionControls,
+  type AudioTranscriptionControls,
+} from '../lib/audio-transcription-controls';
+import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } from './use-transcribe';
+
+const BUNDLED_VAD_MODEL_ID = '__bundled_vad__';
+
+type BundledVadArtifact = {
+  id: string;
+  label: string;
+  value: string;
+};
+
+function findBundledVadArtifact(
+  document: ModelConfigDocumentResponse | undefined,
+): BundledVadArtifact | null {
+  const artifacts = document?.source_summary?.artifacts;
+  if (!Array.isArray(artifacts) || artifacts.length === 0) {
+    return null;
+  }
+
+  const exactMatch = artifacts.find((artifact) => {
+    const normalizedId = artifact.id.trim().toLowerCase();
+    return normalizedId === 'vad' || normalizedId === 'audio_vad';
+  });
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const fuzzyMatch = artifacts.find((artifact) => {
+    const normalizedId = artifact.id.trim().toLowerCase();
+    return (
+      normalizedId.endsWith('/vad') ||
+      normalizedId.endsWith('_vad') ||
+      normalizedId.includes('vad')
+    );
+  });
+
+  return fuzzyMatch ?? null;
+}
 
 export function useAudio() {
   const navigate = useNavigate();
@@ -23,75 +72,169 @@ export function useAudio() {
   usePageHeader(PAGE_HEADER_META.audio);
 
   const [file, setFile] = useState<SelectedFile | null>(null);
-  const [selectedModelId, setSelectedModelId] = useState('');
-  const [enableVad, setEnableVad] = useState(false);
-  const [selectedVadModelId, setSelectedVadModelId] = useState('');
-  const [vadThreshold, setVadThreshold] = useState('');
-  const [vadMinSpeechDurationMs, setVadMinSpeechDurationMs] = useState('');
-  const [vadMinSilenceDurationMs, setVadMinSilenceDurationMs] = useState('');
-  const [vadMaxSpeechDurationS, setVadMaxSpeechDurationS] = useState('');
-  const [vadSpeechPadMs, setVadSpeechPadMs] = useState('');
-  const [vadSamplesOverlap, setVadSamplesOverlap] = useState('');
-  const [showDecodeOptions, setShowDecodeOptions] = useState(false);
-  const [decodeOffsetMs, setDecodeOffsetMs] = useState('');
-  const [decodeDurationMs, setDecodeDurationMs] = useState('');
-  const [decodeWordThold, setDecodeWordThold] = useState('');
-  const [decodeMaxLen, setDecodeMaxLen] = useState('');
-  const [decodeMaxTokens, setDecodeMaxTokens] = useState('');
-  const [decodeTemperature, setDecodeTemperature] = useState('');
-  const [decodeTemperatureInc, setDecodeTemperatureInc] = useState('');
-  const [decodeEntropyThold, setDecodeEntropyThold] = useState('');
-  const [decodeLogprobThold, setDecodeLogprobThold] = useState('');
-  const [decodeNoSpeechThold, setDecodeNoSpeechThold] = useState('');
-  const [decodeNoContext, setDecodeNoContext] = useState(false);
-  const [decodeNoTimestamps, setDecodeNoTimestamps] = useState(false);
-  const [decodeTokenTimestamps, setDecodeTokenTimestamps] = useState(false);
-  const [decodeSplitOnWord, setDecodeSplitOnWord] = useState(false);
-  const [decodeSuppressNst, setDecodeSuppressNst] = useState(false);
-  const [decodeTdrzEnable, setDecodeTdrzEnable] = useState(false);
   const [preparingStage, setPreparingStage] = useState<PreparingStage>(null);
   const [taskId, setTaskId] = useState<string | null>(null);
 
   const { handleFile } = useFile();
   const transcribe = useTranscribe();
+  const hasHydrated = useAudioUiStore((state) => state.hasHydrated);
+  const modelControlOverrides = useAudioUiStore((state) => state.modelControlOverrides);
+  const setModelControlOverrides = useAudioUiStore((state) => state.setModelControlOverrides);
+  const clearModelControlOverrides = useAudioUiStore((state) => state.clearModelControlOverrides);
   const {
-    data: catalogModels,
-    isLoading: catalogModelsLoading,
-    error: catalogModelsError,
-    refetch: refetchCatalogModels,
-  } = api.useQuery('get', '/v1/models');
+    data: transcriptionCatalogModels,
+    isLoading: transcriptionModelsLoading,
+    error: transcriptionModelsError,
+    refetch: refetchTranscriptionModels,
+  } = api.useQuery('get', '/v1/models', {
+    params: {
+      query: {
+        capability: 'audio_transcription',
+      },
+    },
+  });
+  const {
+    data: vadCatalogModels,
+    isLoading: vadModelsLoading,
+    error: vadModelsError,
+    refetch: refetchVadModels,
+  } = api.useQuery('get', '/v1/models', {
+    params: {
+      query: {
+        capability: 'audio_vad',
+      },
+    },
+  });
   const downloadModelMutation = api.useMutation('post', '/v1/models/download');
   const loadModelMutation = api.useMutation('post', '/v1/models/load');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
-  const normalizedCatalogModels = useMemo(
-    () => toCatalogModelList(catalogModels),
-    [catalogModels],
-  );
-
-  const whisperModels = useMemo(
-    () => normalizedCatalogModels.filter((model) => model.backend_id === WHISPER_BACKEND_ID),
-    [normalizedCatalogModels],
-  );
-
   const whisperTranscribeModels = useMemo(
-    () => whisperModels.filter((model) => !inferWhisperVadModel(model)),
-    [whisperModels],
+    () => toCatalogModelList(transcriptionCatalogModels).filter((model) => model.kind === 'local'),
+    [transcriptionCatalogModels],
   );
 
   const whisperVadModels = useMemo(
-    () => whisperModels.filter((model) => inferWhisperVadModel(model)),
-    [whisperModels],
+    () => toCatalogModelList(vadCatalogModels).filter((model) => model.kind === 'local'),
+    [vadCatalogModels],
   );
+
+  const audioModels = useMemo(() => {
+    const merged = new Map<string, CatalogModel>();
+    whisperTranscribeModels.forEach((model) => {
+      merged.set(model.id, model);
+    });
+    whisperVadModels.forEach((model) => {
+      merged.set(model.id, model);
+    });
+    return Array.from(merged.values());
+  }, [whisperTranscribeModels, whisperVadModels]);
+  const catalogModelsLoading = transcriptionModelsLoading || vadModelsLoading;
+  const catalogModelsError = transcriptionModelsError ?? vadModelsError;
+  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
+    key: HEADER_SELECT_KEYS.audioModel,
+    options: whisperTranscribeModels,
+    isLoading: catalogModelsLoading,
+  });
 
   const selectedModel = useMemo(
     () => whisperTranscribeModels.find((model) => model.id === selectedModelId),
     [whisperTranscribeModels, selectedModelId],
   );
+  const {
+    data: selectedModelConfigDocument,
+    error: selectedModelConfigError,
+    refetch: refetchSelectedModelConfigDocument,
+  } = useModelConfigDocumentQuery(selectedModelId || null, {
+    enabled: isTauri && hasHydrated && Boolean(selectedModelId),
+  });
+  const selectedModelPresetControls = useMemo(() => {
+    if (!selectedModelId || !selectedModelConfigDocument) {
+      return createDefaultAudioTranscriptionControls();
+    }
 
+    return buildAudioTranscriptionControlsFromModelConfig(selectedModelConfigDocument);
+  }, [selectedModelConfigDocument, selectedModelId]);
+  const controlOverrides =
+    selectedModelId && hasHydrated ? modelControlOverrides[selectedModelId] : undefined;
+  const controls = useMemo(
+    () =>
+      normalizeAudioTranscriptionControls({
+        ...selectedModelPresetControls,
+        ...(controlOverrides ?? {}),
+      }),
+    [controlOverrides, selectedModelPresetControls],
+  );
+  const {
+    enableVad,
+    selectedVadModelId: overriddenVadModelId,
+    vadThreshold,
+    vadMinSpeechDurationMs,
+    vadMinSilenceDurationMs,
+    vadMaxSpeechDurationS,
+    vadSpeechPadMs,
+    vadSamplesOverlap,
+    showDecodeOptions,
+    decodeOffsetMs,
+    decodeDurationMs,
+    decodeWordThold,
+    decodeMaxLen,
+    decodeMaxTokens,
+    decodeTemperature,
+    decodeTemperatureInc,
+    decodeEntropyThold,
+    decodeLogprobThold,
+    decodeNoSpeechThold,
+    decodeNoContext,
+    decodeNoTimestamps,
+    decodeTokenTimestamps,
+    decodeSplitOnWord,
+    decodeSuppressNst,
+    decodeTdrzEnable,
+    language,
+    prompt,
+    detectLanguage,
+  } = controls;
+
+  const bundledVadArtifact = useMemo(
+    () => findBundledVadArtifact(selectedModelConfigDocument),
+    [selectedModelConfigDocument],
+  );
+  const hasBundledVad = Boolean(bundledVadArtifact?.value);
+  const selectedVadModelId = useMemo(() => {
+    if (!enableVad) {
+      return overriddenVadModelId;
+    }
+
+    if (
+      overriddenVadModelId === BUNDLED_VAD_MODEL_ID &&
+      hasBundledVad
+    ) {
+      return overriddenVadModelId;
+    }
+
+    if (
+      overriddenVadModelId &&
+      overriddenVadModelId !== BUNDLED_VAD_MODEL_ID &&
+      whisperVadModels.some((model) => model.id === overriddenVadModelId)
+    ) {
+      return overriddenVadModelId;
+    }
+
+    if (hasBundledVad) {
+      return BUNDLED_VAD_MODEL_ID;
+    }
+
+    return whisperVadModels[0]?.id ?? '';
+  }, [enableVad, hasBundledVad, overriddenVadModelId, whisperVadModels]);
+  const isUsingBundledVad =
+    enableVad && selectedVadModelId === BUNDLED_VAD_MODEL_ID && hasBundledVad;
   const selectedVadModel = useMemo(
-    () => whisperVadModels.find((model) => model.id === selectedVadModelId),
-    [whisperVadModels, selectedVadModelId],
+    () =>
+      selectedVadModelId === BUNDLED_VAD_MODEL_ID
+        ? undefined
+        : whisperVadModels.find((model) => model.id === selectedVadModelId),
+    [selectedVadModelId, whisperVadModels],
   );
 
   const isBusy =
@@ -101,6 +244,7 @@ export function useAudio() {
     downloadModelMutation.isPending;
   const headerModelPicker = useMemo(
     () => ({
+      type: 'select' as const,
       value: selectedModelId,
       options: whisperTranscribeModels.map((model) => ({
         id: model.id,
@@ -117,35 +261,61 @@ export function useAudio() {
   );
   const webFileInputRef = useRef<HTMLInputElement>(null);
 
-  usePageHeaderModelPicker(headerModelPicker);
+  usePageHeaderControl(headerModelPicker);
 
   useEffect(() => {
-    if (whisperTranscribeModels.length === 0) {
-      setSelectedModelId('');
+    if (!selectedModelId || !selectedModelConfigError) {
       return;
     }
 
-    const exists = whisperTranscribeModels.some((model) => model.id === selectedModelId);
-    if (!selectedModelId || !exists) {
-      setSelectedModelId(whisperTranscribeModels[0].id);
-    }
-  }, [whisperTranscribeModels, selectedModelId]);
+    console.warn(
+      `Failed to load audio preset defaults for model '${selectedModelId}'.`,
+      selectedModelConfigError,
+    );
+  }, [selectedModelConfigError, selectedModelId]);
 
-  useEffect(() => {
-    if (!enableVad) {
-      return;
-    }
+  const updateControl = useCallback(
+    <K extends keyof AudioTranscriptionControls>(
+      key: K,
+      value: AudioTranscriptionControls[K],
+    ) => {
+      const normalizedValue = normalizeAudioTranscriptionControls({
+        ...controls,
+        [key]: value,
+      })[key];
 
-    if (whisperVadModels.length === 0) {
-      setSelectedVadModelId('');
-      return;
-    }
+      if (!selectedModelId) {
+        return;
+      }
 
-    const exists = whisperVadModels.some((model) => model.id === selectedVadModelId);
-    if (!selectedVadModelId || !exists) {
-      setSelectedVadModelId(whisperVadModels[0].id);
-    }
-  }, [enableVad, whisperVadModels, selectedVadModelId]);
+      const nextOverrides = { ...(controlOverrides ?? {}) };
+      if (
+        areAudioTranscriptionControlValuesEqual(
+          normalizedValue,
+          selectedModelPresetControls[key],
+        )
+      ) {
+        delete nextOverrides[key];
+      } else {
+        nextOverrides[key] = normalizedValue;
+      }
+
+      if (Object.keys(nextOverrides).length === 0) {
+        clearModelControlOverrides(selectedModelId);
+        return;
+      }
+
+      setModelControlOverrides(selectedModelId, nextOverrides);
+    },
+    [
+      clearModelControlOverrides,
+      controlOverrides,
+      controls,
+      selectedModelId,
+      selectedModelPresetControls,
+      setModelControlOverrides,
+    ],
+  );
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -184,8 +354,14 @@ export function useAudio() {
   };
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
-    const refreshed = await refetchCatalogModels();
-    const models = toCatalogModelList(refreshed.data);
+    const [transcriptionRefresh, vadRefresh] = await Promise.all([
+      refetchTranscriptionModels(),
+      refetchVadModels(),
+    ]);
+    const models = [
+      ...toCatalogModelList(transcriptionRefresh.data),
+      ...toCatalogModelList(vadRefresh.data),
+    ];
     return models.find((model) => model.id === modelId);
   };
 
@@ -230,7 +406,7 @@ export function useAudio() {
   const ensureDownloadedModelPath = async (
     modelId: string,
   ): Promise<{ modelPath: string; downloadedNow: boolean }> => {
-    let model = whisperModels.find((item) => item.id === modelId);
+    let model = audioModels.find((item) => item.id === modelId);
     if (!model) {
       model = await refreshCatalogAndFindModel(modelId);
     }
@@ -239,8 +415,8 @@ export function useAudio() {
       throw new Error('Selected model does not exist in catalog');
     }
 
-    if (model.backend_id !== WHISPER_BACKEND_ID) {
-      throw new Error(`Selected model does not support ${WHISPER_BACKEND_ID}`);
+    if (model.kind !== 'local') {
+      throw new Error('Selected model is not a local audio model.');
     }
 
     if (model.local_path) {
@@ -293,30 +469,52 @@ export function useAudio() {
     return model.display_name;
   };
 
-  const prepareVadSettings = async (): Promise<{ settings: TranscribeVadSettings; modelName: string }> => {
-    if (!selectedVadModelId) {
-      throw new Error('Please select a dedicated VAD model.');
+  const prepareVadSettings = async (
+    modelConfigDocument: ModelConfigDocumentResponse | undefined,
+  ): Promise<{ settings: TranscribeVadSettings; modelName: string }> => {
+    const bundledArtifact = findBundledVadArtifact(modelConfigDocument);
+
+    let modelPath: string | null = null;
+    let modelName = 'Bundled VAD';
+
+    if (selectedVadModelId === BUNDLED_VAD_MODEL_ID) {
+      modelPath = bundledArtifact?.value?.trim() ?? null;
+      modelName = bundledArtifact?.label?.trim() || 'Bundled VAD';
+      if (!modelPath) {
+        throw new Error('The current Whisper model does not expose a bundled VAD file.');
+      }
+    } else {
+      if (!selectedVadModelId) {
+        throw new Error('Please select a dedicated VAD model.');
+      }
+
+      let model = whisperVadModels.find((item) => item.id === selectedVadModelId);
+      if (!model) {
+        model = await refreshCatalogAndFindModel(selectedVadModelId);
+      }
+      if (!model) {
+        throw new Error('Selected VAD model no longer exists in catalog.');
+      }
+      if (!modelSupportsCapability(model, 'audio_vad')) {
+        throw new Error('Selected model is not a dedicated VAD model.');
+      }
+
+      const preparedModel = await ensureDownloadedModelPath(selectedVadModelId);
+      modelPath = preparedModel.modelPath;
+      modelName = model.display_name;
+      if (preparedModel.downloadedNow) {
+        toast.success(`Downloaded VAD model ${model.display_name}`);
+      }
     }
 
-    let model = whisperVadModels.find((item) => item.id === selectedVadModelId);
-    if (!model) {
-      model = await refreshCatalogAndFindModel(selectedVadModelId);
-    }
-    if (!model) {
-      throw new Error('Selected VAD model no longer exists in catalog.');
-    }
-    if (!inferWhisperVadModel(model)) {
-      throw new Error('Selected model is not a dedicated VAD model.');
-    }
-
-    const { modelPath, downloadedNow } = await ensureDownloadedModelPath(selectedVadModelId);
-    if (downloadedNow) {
-      toast.success(`Downloaded VAD model ${model.display_name}`);
+    const resolvedModelPath = modelPath?.trim();
+    if (!resolvedModelPath) {
+      throw new Error('Unable to resolve a local VAD model path for transcription.');
     }
 
     const settings: TranscribeVadSettings = {
       enabled: true,
-      model_path: modelPath,
+      model_path: resolvedModelPath,
     };
 
     const threshold = parseOptionalFloat(vadThreshold, 'VAD threshold', { min: 0, max: 1 });
@@ -342,8 +540,25 @@ export function useAudio() {
     if (maxSpeechDurationS !== undefined) settings.max_speech_duration_s = maxSpeechDurationS;
     if (speechPadMs !== undefined) settings.speech_pad_ms = speechPadMs;
     if (samplesOverlap !== undefined) settings.samples_overlap = samplesOverlap;
+    return { settings, modelName };
+  };
 
-    return { settings, modelName: model.display_name };
+  const prepareInferenceOptions = (): Omit<TranscribeOptions, 'decode' | 'vad'> | undefined => {
+    const next: Omit<TranscribeOptions, 'decode' | 'vad'> = {};
+    const trimmedLanguage = language.trim();
+    const trimmedPrompt = prompt.trim();
+
+    if (trimmedLanguage) {
+      next.language = trimmedLanguage;
+    }
+    if (trimmedPrompt) {
+      next.prompt = trimmedPrompt;
+    }
+    if (!trimmedLanguage && detectLanguage) {
+      next.detect_language = true;
+    }
+
+    return Object.keys(next).length > 0 ? next : undefined;
   };
 
   const prepareDecodeOptions = (): TranscribeOptions['decode'] | undefined => {
@@ -420,13 +635,21 @@ export function useAudio() {
       setTaskId(null);
       setPreparingStage('prepare');
       const modelName = await prepareSelectedModel();
+      const refreshedModelConfigDocument = selectedModelId
+        ? (await refetchSelectedModelConfigDocument()).data ?? selectedModelConfigDocument
+        : selectedModelConfigDocument;
       let vadDescription = 'VAD: off';
       let decodeDescription = 'Decode: default';
       let transcribeOptions: TranscribeOptions | undefined;
 
+      const inferenceOptions = prepareInferenceOptions();
+      if (inferenceOptions) {
+        transcribeOptions = inferenceOptions;
+      }
+
       if (enableVad) {
-        const preparedVad = await prepareVadSettings();
-        transcribeOptions = { vad: preparedVad.settings };
+        const preparedVad = await prepareVadSettings(refreshedModelConfigDocument);
+        transcribeOptions = { ...(transcribeOptions ?? {}), vad: preparedVad.settings };
         vadDescription = `VAD: on (${preparedVad.modelName})`;
       }
 
@@ -462,14 +685,20 @@ export function useAudio() {
     Boolean(file) &&
     Boolean(selectedModelId) &&
     !isBusy &&
-    (!enableVad || Boolean(selectedVadModelId));
+    (!enableVad || hasBundledVad || Boolean(selectedVadModelId));
 
   const previewRows = [
     { label: 'Model', value: selectedModel?.display_name ?? 'Not selected', accent: Boolean(selectedModel), chip: true },
     { label: 'Source', value: file?.name ?? 'Awaiting upload', accent: Boolean(file), chip: false },
     {
       label: 'VAD Mode',
-      value: enableVad ? (selectedVadModel?.display_name ? `Active (${selectedVadModel.display_name})` : 'Active') : 'Inactive',
+      value: enableVad
+        ? isUsingBundledVad
+          ? `Active (${bundledVadArtifact?.label ?? 'Bundled VAD'})`
+          : selectedVadModel?.display_name
+            ? `Active (${selectedVadModel.display_name})`
+            : 'Active'
+        : 'Inactive',
       accent: enableVad,
       chip: false,
     },
@@ -477,6 +706,7 @@ export function useAudio() {
   ];
 
   return {
+    bundledVadLabel: bundledVadArtifact?.label ?? 'Bundled VAD',
     canStartTranscription,
     catalogModelsError,
     catalogModelsLoading,
@@ -501,38 +731,42 @@ export function useAudio() {
     handleFileChange,
     handleTauriFileSelect,
     handleTranscribe,
+    hasBundledVad,
     isBusy,
     isTauri,
+    isUsingBundledVad,
     navigate,
     preparingStage,
     previewRows,
     selectedVadModel,
     selectedVadModelId,
-    setDecodeEntropyThold,
-    setDecodeDurationMs,
-    setDecodeLogprobThold,
-    setDecodeMaxLen,
-    setDecodeMaxTokens,
-    setDecodeNoContext,
-    setDecodeNoSpeechThold,
-    setDecodeNoTimestamps,
-    setDecodeOffsetMs,
-    setDecodeSplitOnWord,
-    setDecodeSuppressNst,
-    setDecodeTdrzEnable,
-    setDecodeTemperature,
-    setDecodeTemperatureInc,
-    setDecodeTokenTimestamps,
-    setDecodeWordThold,
-    setEnableVad,
-    setSelectedVadModelId,
-    setShowDecodeOptions,
-    setVadMaxSpeechDurationS,
-    setVadMinSilenceDurationMs,
-    setVadMinSpeechDurationMs,
-    setVadSamplesOverlap,
-    setVadSpeechPadMs,
-    setVadThreshold,
+    setDecodeEntropyThold: (value: string) => updateControl('decodeEntropyThold', value),
+    setDecodeDurationMs: (value: string) => updateControl('decodeDurationMs', value),
+    setDecodeLogprobThold: (value: string) => updateControl('decodeLogprobThold', value),
+    setDecodeMaxLen: (value: string) => updateControl('decodeMaxLen', value),
+    setDecodeMaxTokens: (value: string) => updateControl('decodeMaxTokens', value),
+    setDecodeNoContext: (value: boolean) => updateControl('decodeNoContext', value),
+    setDecodeNoSpeechThold: (value: string) => updateControl('decodeNoSpeechThold', value),
+    setDecodeNoTimestamps: (value: boolean) => updateControl('decodeNoTimestamps', value),
+    setDecodeOffsetMs: (value: string) => updateControl('decodeOffsetMs', value),
+    setDecodeSplitOnWord: (value: boolean) => updateControl('decodeSplitOnWord', value),
+    setDecodeSuppressNst: (value: boolean) => updateControl('decodeSuppressNst', value),
+    setDecodeTdrzEnable: (value: boolean) => updateControl('decodeTdrzEnable', value),
+    setDecodeTemperature: (value: string) => updateControl('decodeTemperature', value),
+    setDecodeTemperatureInc: (value: string) => updateControl('decodeTemperatureInc', value),
+    setDecodeTokenTimestamps: (value: boolean) => updateControl('decodeTokenTimestamps', value),
+    setDecodeWordThold: (value: string) => updateControl('decodeWordThold', value),
+    setEnableVad: (value: boolean) => updateControl('enableVad', value),
+    setSelectedVadModelId: (value: string) => updateControl('selectedVadModelId', value),
+    setShowDecodeOptions: (value: boolean) => updateControl('showDecodeOptions', value),
+    setVadMaxSpeechDurationS: (value: string) => updateControl('vadMaxSpeechDurationS', value),
+    setVadMinSilenceDurationMs: (value: string) =>
+      updateControl('vadMinSilenceDurationMs', value),
+    setVadMinSpeechDurationMs: (value: string) =>
+      updateControl('vadMinSpeechDurationMs', value),
+    setVadSamplesOverlap: (value: string) => updateControl('vadSamplesOverlap', value),
+    setVadSpeechPadMs: (value: string) => updateControl('vadSpeechPadMs', value),
+    setVadThreshold: (value: string) => updateControl('vadThreshold', value),
     showDecodeOptions,
     taskId,
     transcribe,

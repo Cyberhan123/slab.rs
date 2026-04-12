@@ -6,8 +6,7 @@ use slab_diffusion_sys::{sd_image_t, sd_img_gen_params_t, sd_lora_t};
 
 use crate::Diffusion;
 use crate::params::support::{
-    empty_image, image_view, new_c_string, sync_image_views,
-    sync_lora_views,
+    empty_image, image_view, new_c_string, sync_image_views, sync_lora_views,
 };
 use crate::params::{
     CacheParams, InnerCacheParams, InnerPmParams, InnerSampleParams, Lora, PmParams, SampleParams,
@@ -58,12 +57,7 @@ impl From<InnerImage> for Image {
 }
 
 pub(crate) fn owned_image_from_raw(raw: sd_image_t) -> Image {
-    Image {
-        width: raw.width,
-        height: raw.height,
-        channel: raw.channel,
-        data: copy_image_data(raw),
-    }
+    Image { width: raw.width, height: raw.height, channel: raw.channel, data: copy_image_data(raw) }
 }
 
 fn copy_image_data(raw: sd_image_t) -> Vec<u8> {
@@ -252,7 +246,7 @@ impl InnerImgParams {
             );
         }
         if let Some(sample_params) = value.sample_params.as_ref() {
-            inner.set_sample_params(InnerSampleParams::from_canonical(lib,  sample_params)?);
+            inner.set_sample_params(InnerSampleParams::from_canonical(lib, sample_params)?);
         }
         if let Some(strength) = value.strength {
             inner.set_strength(strength);

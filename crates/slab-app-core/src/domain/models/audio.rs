@@ -1,6 +1,9 @@
 #[derive(Debug, Clone)]
 pub struct AudioTranscriptionCommand {
     pub path: String,
+    pub language: Option<String>,
+    pub prompt: Option<String>,
+    pub detect_language: Option<bool>,
     pub vad: Option<TranscribeVadOptions>,
     pub decode: Option<TranscribeDecodeOptions>,
 }

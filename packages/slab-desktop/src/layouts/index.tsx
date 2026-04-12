@@ -12,7 +12,7 @@ export default function Layout() {
   const isChatShell = pathname === "/"
 
   return (
-    <div className="workspace-shell h-screen overflow-hidden flex-col">
+    <div className="workspace-shell flex h-screen min-h-0 w-full flex-col overflow-hidden">
       <GlobalHeaderProvider>
         <div className="flex min-h-0 w-full flex-1">
           <AppSidebar variant={isChatShell ? "chat" : "default"} />

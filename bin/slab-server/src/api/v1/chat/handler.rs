@@ -23,7 +23,7 @@ use crate::api::validation::ValidatedJson;
 use crate::error::ServerError;
 use slab_app_core::context::AppState;
 use slab_app_core::domain::models::{ChatCompletionOutput, ChatStreamChunk, TextCompletionOutput};
-use slab_app_core::domain::services::ChatService;
+use slab_app_core::domain::services::{ChatService, ModelService};
 
 #[derive(OpenApi)]
 #[openapi(
@@ -70,13 +70,15 @@ pub fn router() -> Router<Arc<AppState>> {
     get,
     path = "/v1/chat/models",
     tag = "chat",
+    summary = "Deprecated chat model listing compatibility route",
+    description = "Compatibility wrapper over GET /v1/models filtered by capability=chat_generation.",
     responses(
         (status = 200, description = "Selectable chat model options", body = [ChatModelOption]),
         (status = 500, description = "Backend error"),
     )
 )]
 async fn list_chat_models(
-    State(service): State<ChatService>,
+    State(service): State<ModelService>,
 ) -> Result<Json<Vec<ChatModelOption>>, ServerError> {
     let items = service.list_chat_models().await?.into_iter().map(Into::into).collect();
     Ok(Json(items))

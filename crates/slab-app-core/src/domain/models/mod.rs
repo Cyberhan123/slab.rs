@@ -11,6 +11,7 @@ mod settings_jsonschema;
 mod setup;
 mod system;
 mod task;
+mod ui_state;
 mod video;
 
 pub use audio::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
@@ -29,9 +30,17 @@ pub use chat::{
 pub use ffmpeg::FfmpegConvertCommand;
 pub use image::{DecodedImageInput, ImageGenerationCommand, ImageGenerationMode};
 pub use model::{
-    AvailableModelsQuery, AvailableModelsView, CreateModelCommand, DeletedModelView,
-    DownloadModelCommand, ListModelsFilter, ModelLoadCommand, ModelSpec, ModelStatus, Pricing,
-    RuntimePresets, StoredModelConfig, UnifiedModel, UnifiedModelStatus, UpdateModelCommand,
+    AvailableModelsQuery, AvailableModelsView, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION,
+    CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION, CreateModelCommand, DeletedModelView,
+    DownloadModelCommand, ListModelsFilter, ManagedModelBackendId, ModelConfigDocument,
+    ModelConfigFieldScope, ModelConfigFieldView, ModelConfigOrigin, ModelConfigPresetOption,
+    ModelConfigSectionView, ModelConfigSelectionView, ModelConfigSourceArtifact,
+    ModelConfigSourceSummary, ModelConfigValueType, ModelConfigVariantOption,
+    ModelEnhancementPresetOption, ModelEnhancementVariantOption, ModelEnhancementView,
+    ModelLoadCommand, ModelPackSelection, ModelSpec, ModelStatus, Pricing, RuntimePresets,
+    StoredModelConfig, UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
+    UpdateModelConfigSelectionCommand, UpdateModelEnhancementCommand, default_model_capabilities,
+    normalize_model_capabilities, upgrade_stored_model_config,
 };
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
@@ -44,4 +53,5 @@ pub use settings::{
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
 pub use task::{AcceptedOperation, TaskPayloadEnvelope, TaskResult, TaskStatus, TaskView};
+pub use ui_state::{DeleteUiStateView, UiStateValueView, UpdateUiStateCommand};
 pub use video::{DecodedVideoInitImage, VideoGenerationCommand};

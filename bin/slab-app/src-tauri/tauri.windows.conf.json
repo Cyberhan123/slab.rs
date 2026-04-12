@@ -10,7 +10,9 @@
                 "center": true,
                 "decorations": true,
                 "titleBarStyle": "Visible",
-                "hiddenTitle": true
+                "hiddenTitle": true,
+                "minHeight": 600,
+                "minWidth": 800
             }
         ]
     }

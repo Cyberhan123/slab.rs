@@ -8,21 +8,51 @@ keywords.workspace = true
 categories.workspace = true
 license.workspace = true
 
+[lib]
+name = "slab_runtime"
+path = "src/lib.rs"
+
 [[bin]]
 name = "slab-runtime"
 path = "src/main.rs"
 
+[features]
+default = ["ggml", "candle", "onnx"]
+ggml = ["dep:slab-utils", "dep:slab-subtitle", "dep:libloading"]
+candle = [
+    "dep:candle-core",
+    "dep:candle-nn",
+    "dep:candle-transformers",
+    "dep:tokenizers",
+]
+onnx = ["dep:ort"]
+
 [dependencies]
 slab-runtime-core = { workspace = true }
+slab-runtime-macros = { workspace = true }
 slab-proto = { workspace = true }
 slab-types = { workspace = true }
+slab-model-pack = { workspace = true }
 slab-diffusion = { workspace = true }
+slab-llama = { workspace = true }
+slab-whisper = { workspace = true }
+slab-utils = { workspace = true, optional = true }
+slab-subtitle = { workspace = true, optional = true }
 tokio = { workspace = true }
 futures = { workspace = true }
+serde = { workspace = true }
 serde_json = { workspace = true }
 anyhow = { workspace = true }
 base64 = { workspace = true }
 image = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+libloading = { workspace = true, optional = true }
+candle-core = { workspace = true, optional = true }
+candle-nn = { workspace = true, optional = true }
+candle-transformers = { workspace = true, optional = true }
+tokenizers = { workspace = true, optional = true }
+ort = { workspace = true, optional = true }
 
 tonic = { workspace = true }
 tokio-stream = { workspace = true }
@@ -32,3 +62,5 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 tracing-appender = { workspace = true }
 parity-tokio-ipc = { workspace = true }
+winapi = { workspace = true }
+ffmpeg-sidecar = { workspace = true }

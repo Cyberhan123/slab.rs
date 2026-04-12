@@ -13,3 +13,6 @@ anyhow = { workspace = true }
 cargo_metadata = { workspace = true }
 slab-libfetch = { workspace = true }
 tokio = { workspace = true }
+
+[build-dependencies]
+slab-model-pack = { workspace = true }

@@ -1,30 +1,23 @@
 import type { components } from './v1.d.ts';
 
-const LOCAL_PROVIDER_PREFIX = 'local.';
-
 type UnknownRecord = Record<string, unknown>;
 
 export type UnifiedModelResponse = components['schemas']['UnifiedModelResponse'];
+export type ModelCapability = components['schemas']['ModelCapability'];
+export type ChatModelCapabilities = components['schemas']['ChatModelCapabilities'];
 export type CatalogModelStatus = 'ready' | 'not_downloaded' | 'downloading' | 'error';
 
 export type CatalogModel = Omit<UnifiedModelResponse, 'status'> & {
   status: CatalogModelStatus;
   backend_id: string | null;
   backend_ids: string[];
+  capabilities: ModelCapability[];
+  chat_capabilities: ChatModelCapabilities | null;
   repo_id: string;
   filename: string;
   local_path: string | null;
   pending: boolean;
 };
-
-export function getLocalBackendId(provider: string): string | null {
-  if (!provider.startsWith(LOCAL_PROVIDER_PREFIX)) {
-    return null;
-  }
-
-  const backendId = provider.slice(LOCAL_PROVIDER_PREFIX.length).trim();
-  return backendId.length > 0 ? backendId : null;
-}
 
 export function normalizeModelStatus(status: string): CatalogModelStatus {
   switch (status) {
@@ -39,15 +32,21 @@ export function normalizeModelStatus(status: string): CatalogModelStatus {
 }
 
 export function normalizeCatalogModel(model: UnifiedModelResponse): CatalogModel {
-  const backendId = getLocalBackendId(model.provider);
+  const backendId = model.backend_id ?? null;
   const status = normalizeModelStatus(model.status);
   const localPath = model.spec.local_path ?? null;
+  const chatCapabilities =
+    model.chat_capabilities && isChatModelCapabilities(model.chat_capabilities)
+      ? model.chat_capabilities
+      : null;
 
   return {
     ...model,
     status,
     backend_id: backendId,
     backend_ids: backendId ? [backendId] : [],
+    capabilities: model.capabilities,
+    chat_capabilities: chatCapabilities,
     repo_id: model.spec.repo_id ?? '',
     filename: model.spec.filename ?? '',
     local_path: localPath,
@@ -55,23 +54,15 @@ export function normalizeCatalogModel(model: UnifiedModelResponse): CatalogModel
   };
 }
 
-export function toCatalogModelList(payload: unknown): CatalogModel[] {
-  return toUnifiedModelList(payload).map(normalizeCatalogModel);
+export function modelSupportsCapability(
+  model: Pick<CatalogModel, 'capabilities'>,
+  capability: ModelCapability,
+): boolean {
+  return model.capabilities.includes(capability);
 }
 
-export function inferWhisperVadModel(
-  model: Pick<CatalogModel, 'display_name' | 'repo_id' | 'filename'>,
-): boolean {
-  const haystack = `${model.display_name} ${model.repo_id} ${model.filename}`.toLowerCase();
-  return (
-    haystack.includes(' silero') ||
-    haystack.includes('silero ') ||
-    haystack.includes('-vad') ||
-    haystack.includes('_vad') ||
-    haystack.includes(' vad') ||
-    haystack.includes('vad ') ||
-    haystack.endsWith('vad')
-  );
+export function toCatalogModelList(payload: unknown): CatalogModel[] {
+  return toUnifiedModelList(payload).map(normalizeCatalogModel);
 }
 
 export function toUnifiedModelList(payload: unknown): UnifiedModelResponse[] {
@@ -89,7 +80,7 @@ function isUnifiedModelResponse(value: unknown): value is UnifiedModelResponse {
   if (
     typeof model.id !== 'string' ||
     typeof model.display_name !== 'string' ||
-    typeof model.provider !== 'string' ||
+    (model.kind !== 'local' && model.kind !== 'cloud') ||
     typeof model.status !== 'string' ||
     typeof model.created_at !== 'string' ||
     typeof model.updated_at !== 'string'
@@ -103,11 +94,50 @@ function isUnifiedModelResponse(value: unknown): value is UnifiedModelResponse {
 
   const spec = model.spec as UnknownRecord;
   return (
+    isOptionalString(model.backend_id) &&
+    isCapabilityList(model.capabilities) &&
+    isOptionalChatModelCapabilities(model.chat_capabilities) &&
     isOptionalString(spec.provider_id) &&
     isOptionalString(spec.remote_model_id) &&
     isOptionalString(spec.repo_id) &&
     isOptionalString(spec.filename) &&
     isOptionalString(spec.local_path)
+  );
+}
+
+function isCapabilityList(value: unknown): value is ModelCapability[] {
+  return Array.isArray(value) && value.every((capability) => isModelCapability(capability));
+}
+
+function isModelCapability(value: unknown): value is ModelCapability {
+  switch (value) {
+    case 'text_generation':
+    case 'audio_transcription':
+    case 'image_generation':
+    case 'image_embedding':
+    case 'chat_generation':
+    case 'audio_vad':
+    case 'video_generation':
+      return true;
+    default:
+      return false;
+  }
+}
+
+function isOptionalChatModelCapabilities(
+  value: unknown,
+): value is ChatModelCapabilities | null | undefined {
+  return value === undefined || value === null || isChatModelCapabilities(value);
+}
+
+function isChatModelCapabilities(value: unknown): value is ChatModelCapabilities {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as UnknownRecord).raw_grammar === 'boolean' &&
+    typeof (value as UnknownRecord).structured_output === 'boolean' &&
+    typeof (value as UnknownRecord).reasoning_controls === 'boolean'
   );
 }
 

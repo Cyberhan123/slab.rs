@@ -2,11 +2,17 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 
 import api, { getErrorMessage } from '@/lib/api';
-import { tauriAwareFetch } from '@/lib/api/tauri-transport';
-import { inferWhisperVadModel, toCatalogModelList, type CatalogModelStatus } from '@/lib/api/models';
-import { SERVER_BASE_URL } from '@/lib/config';
+import type { components } from '@/lib/api/v1.d.ts';
+import {
+  modelSupportsCapability,
+  toCatalogModelList,
+  type CatalogModelStatus,
+  type ModelCapability,
+} from '@/lib/api/models';
 
 const DEFAULT_VISIBLE_COUNT = 10;
+const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
+const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
 export const CATEGORY_OPTIONS = [
   { value: 'all', label: 'All models' },
   { value: 'language', label: 'Large language' },
@@ -29,9 +35,10 @@ export type ModelStatus = CatalogModelStatus;
 export type ModelItem = {
   id: string;
   display_name: string;
-  provider: string;
+  kind: 'local' | 'cloud';
   repo_id: string;
   filename: string;
+  capabilities: ModelCapability[];
   backend_ids: string[];
   is_vad_model: boolean;
   status: ModelStatus;
@@ -40,9 +47,14 @@ export type ModelItem = {
   updated_at: string;
 };
 
-type ImportedModelResponse = {
-  display_name?: string;
+type ImportedModelResponse = components['schemas']['UnifiedModelResponse'];
+
+type TaskStatusResponse = {
+  status: string;
+  error_msg?: string | null;
 };
+
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export function useHubModelCatalog() {
   const [category, setCategory] = useState<ModelCategory>('all');
@@ -52,6 +64,7 @@ export function useHubModelCatalog() {
   const [createFile, setCreateFile] = useState<File | null>(null);
   const [createModelPending, setCreateModelPending] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
+  const [modelToEnhance, setModelToEnhance] = useState<ModelItem | null>(null);
 
   const {
     data,
@@ -60,25 +73,30 @@ export function useHubModelCatalog() {
     isRefetching,
     refetch,
   } = api.useQuery('get', '/v1/models');
+  const importModelPackMutation = api.useMutation('post', '/v1/models/import-pack') as unknown as {
+    isPending: boolean;
+    mutateAsync: (options: { body: FormData }) => Promise<ImportedModelResponse>;
+  };
+  const downloadModelMutation = api.useMutation('post', '/v1/models/download');
   const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
+  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
   const models = useMemo<ModelItem[]>(
     () =>
-      toCatalogModelList(data)
-        .filter((model) => model.backend_id !== null)
-        .map((model) => ({
-          id: model.id,
-          display_name: model.display_name,
-          provider: model.provider,
-          repo_id: model.repo_id,
-          filename: model.filename,
-          backend_ids: model.backend_ids,
-          is_vad_model: model.backend_id === 'ggml.whisper' && inferWhisperVadModel(model),
-          status: model.status,
-          local_path: model.local_path,
-          pending: model.pending,
-          updated_at: model.updated_at,
-        })),
+      toCatalogModelList(data).map((model) => ({
+        id: model.id,
+        display_name: model.display_name,
+        kind: model.kind,
+        repo_id: model.repo_id,
+        filename: model.filename,
+        capabilities: model.capabilities,
+        backend_ids: model.backend_ids,
+        is_vad_model: modelSupportsCapability(model, 'audio_vad'),
+        status: model.status,
+        local_path: model.local_path,
+        pending: model.pending,
+        updated_at: model.updated_at,
+      })),
     [data],
   );
   const filteredModels = useMemo(
@@ -100,23 +118,20 @@ export function useHubModelCatalog() {
     () => models.filter((model) => Boolean(model.local_path)).length,
     [models],
   );
-  const pendingCount = useMemo(
-    () => models.filter((model) => model.status === 'downloading').length,
-    [models],
-  );
+  const pendingCount = useMemo(() => models.filter((model) => model.pending).length, [models]);
   const visibleModels = useMemo(
     () => filteredModels.slice(0, visibleCount),
     [filteredModels, visibleCount],
   );
   const hasMore = visibleModels.length < filteredModels.length;
-  const canCreate = Boolean(createFile && !createModelPending);
+  const canCreate = Boolean(createFile && !createModelPending && !importModelPackMutation.isPending);
 
   useEffect(() => {
     setVisibleCount(DEFAULT_VISIBLE_COUNT);
   }, [category, status]);
 
   useEffect(() => {
-    if (!models.some((model) => model.status === 'downloading')) {
+    if (!models.some((model) => model.pending)) {
       return;
     }
 
@@ -157,9 +172,11 @@ export function useHubModelCatalog() {
 
     setCreateModelPending(true);
     try {
-      const created = await importModelFile(createFile);
+      const created = await importModelPackMutation.mutateAsync({
+        body: buildImportModelPackBody(createFile),
+      });
 
-      toast.success('Model imported.', {
+      toast.success('Model imported to catalog.', {
         description:
           typeof created?.display_name === 'string' && created.display_name.trim()
             ? created.display_name
@@ -176,6 +193,84 @@ export function useHubModelCatalog() {
       });
     } finally {
       setCreateModelPending(false);
+    }
+  }
+
+  const waitForTaskToFinish = async (taskId: string) => {
+    const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
+
+    while (Date.now() < deadline) {
+      const task = (await getTaskMutation.mutateAsync({
+        params: { path: { id: taskId } },
+      })) as TaskStatusResponse;
+
+      if (task.status === 'succeeded') {
+        return;
+      }
+
+      if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted') {
+        throw new Error(task.error_msg ?? `Task ${taskId} ended with status: ${task.status}`);
+      }
+
+      await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
+    }
+
+    throw new Error('Model download timed out');
+  };
+
+  const refreshCatalogAndFindModel = async (modelId: string) => {
+    const refreshed = await refetch();
+    const refreshedModels = toCatalogModelList(refreshed.data);
+    return refreshedModels.find((model) => model.id === modelId);
+  };
+
+  async function trackModelDownload(model: ModelItem, taskId: string) {
+    try {
+      await waitForTaskToFinish(taskId);
+
+      const refreshedModel = await refreshCatalogAndFindModel(model.id);
+      if (!refreshedModel?.local_path) {
+        throw new Error('Model download completed, but local_path is empty');
+      }
+
+      toast.success('Model downloaded.', {
+        description: model.display_name,
+      });
+    } catch (downloadError) {
+      toast.error('Model download failed.', {
+        description: getErrorMessage(downloadError),
+      });
+    } finally {
+      void refetch();
+    }
+  }
+
+  async function downloadModel(model: ModelItem) {
+    if (!canDownloadModel(model)) {
+      return;
+    }
+
+    try {
+      const response = await downloadModelMutation.mutateAsync({
+        body: {
+          model_id: model.id,
+        },
+      });
+      const taskId = extractTaskId(response);
+
+      if (!taskId) {
+        throw new Error('Failed to start model download task');
+      }
+
+      toast.success('Download started.', {
+        description: model.display_name,
+      });
+      void refetch();
+      void trackModelDownload(model, taskId);
+    } catch (downloadError) {
+      toast.error('Failed to start download.', {
+        description: getErrorMessage(downloadError),
+      });
     }
   }
 
@@ -212,6 +307,8 @@ export function useHubModelCatalog() {
     setCreateFile: updateCreateFile,
     modelToDelete,
     setModelToDelete,
+    modelToEnhance,
+    setModelToEnhance,
     models,
     filteredModels,
     visibleModels,
@@ -225,23 +322,37 @@ export function useHubModelCatalog() {
     refetch,
     canCreate,
     createModel,
+    downloadModel,
     deleteModel,
-    createModelPending,
+    createModelPending: createModelPending || importModelPackMutation.isPending,
     deleteModelPending: deleteModelMutation.isPending,
   };
 }
 
+export function canDownloadModel(
+  model: Pick<ModelItem, 'kind' | 'local_path' | 'pending' | 'repo_id' | 'filename'>,
+) {
+  return (
+    model.kind === 'local' &&
+    !model.local_path &&
+    !model.pending &&
+    model.repo_id.trim().length > 0 &&
+    model.filename.trim().length > 0
+  );
+}
+
 function inferModelCategory(model: ModelItem): ModelCategory {
-  const haystack = `${model.display_name} ${model.provider} ${model.repo_id} ${model.filename}`
+  const haystack = `${model.display_name} ${model.kind} ${model.backend_ids.join(' ')} ${model.repo_id} ${model.filename}`
     .toLowerCase()
     .trim();
 
-  if (haystack.includes('embed')) {
+  if (model.capabilities.includes('image_embedding') || haystack.includes('embed')) {
     return 'embedding';
   }
 
   if (
-    model.backend_ids.includes('ggml.diffusion') ||
+    model.capabilities.includes('image_generation') ||
+    model.capabilities.includes('video_generation') ||
     haystack.includes('stable diffusion') ||
     haystack.includes('sdxl') ||
     haystack.includes('vision') ||
@@ -251,7 +362,8 @@ function inferModelCategory(model: ModelItem): ModelCategory {
   }
 
   if (
-    model.backend_ids.includes('ggml.whisper') ||
+    model.capabilities.includes('audio_transcription') ||
+    model.capabilities.includes('audio_vad') ||
     haystack.includes('whisper') ||
     haystack.includes('audio') ||
     haystack.includes('speech') ||
@@ -268,6 +380,13 @@ function inferModelCategory(model: ModelItem): ModelCategory {
     return 'coding';
   }
 
+  if (
+    model.capabilities.includes('chat_generation') ||
+    model.capabilities.includes('text_generation')
+  ) {
+    return 'language';
+  }
+
   return 'language';
 }
 
@@ -275,61 +394,29 @@ function isModelPackFile(file: File): boolean {
   return file.name.trim().toLowerCase().endsWith('.slab');
 }
 
-async function importModelFile(file: File): Promise<ImportedModelResponse | null> {
+function buildImportModelPackBody(file: File) {
   if (!isModelPackFile(file)) {
     throw new Error('Only .slab model packs are supported.');
   }
 
-  return importModelPack(file);
-}
-
-async function importModelPack(file: File): Promise<ImportedModelResponse | null> {
   const body = new FormData();
   body.set('file', file, file.name);
+  return body;
+}
 
-  const response = await tauriAwareFetch(new URL('/v1/models/import-pack', `${SERVER_BASE_URL}/`), {
-    method: 'POST',
-    body,
-  });
-
-  const raw = await response.text();
-  if (!response.ok) {
-    throw new Error(parseApiError(raw, response.status));
-  }
-
-  if (!raw.trim()) {
+function extractTaskId(payload: unknown): string | null {
+  if (typeof payload !== 'object' || payload === null) {
     return null;
   }
 
-  return parseImportedModelResponse(raw);
-}
+  const taskId =
+    (payload as { operation_id?: unknown }).operation_id ??
+    (payload as { task_id?: unknown }).task_id;
 
-function parseImportedModelResponse(raw: string): ImportedModelResponse | null {
-  try {
-    const payload = JSON.parse(raw);
-    if (typeof payload !== 'object' || payload === null) {
-      return null;
-    }
-
-    return payload as ImportedModelResponse;
-  } catch {
+  if (typeof taskId !== 'string') {
     return null;
   }
-}
 
-function parseApiError(raw: string, status: number) {
-  if (!raw.trim()) {
-    return `HTTP ${status}`;
-  }
-
-  try {
-    const payload = JSON.parse(raw) as { message?: unknown };
-    if (typeof payload.message === 'string' && payload.message.trim()) {
-      return payload.message;
-    }
-  } catch {
-    // Ignore JSON parse failures and fall back to the raw response body.
-  }
-
-  return raw;
+  const trimmed = taskId.trim();
+  return trimmed.length > 0 ? trimmed : null;
 }

@@ -1,7 +1,8 @@
 import { useContext, useId, useLayoutEffect } from "react";
 import { GlobalHeaderContext } from "@/layouts/global-header-provider";
 import type { HeaderMeta, HeaderMetaOverride } from "@/layouts/header-meta";
-import type { GlobalHeaderContextValue, HeaderModelPicker } from "@/layouts/global-header-provider";
+import type { GlobalHeaderContextValue } from "@/layouts/global-header-provider";
+import type { HeaderControl } from "@/layouts/header-controls";
 
 export function useGlobalHeaderMeta(): HeaderMeta {
   const context = useContext(GlobalHeaderContext);
@@ -13,7 +14,7 @@ export function useGlobalHeaderMeta(): HeaderMeta {
   return context.meta;
 }
 
-export function useGlobalHeaderState(): Pick<GlobalHeaderContextValue, "meta" | "modelPicker"> {
+export function useGlobalHeaderState(): Pick<GlobalHeaderContextValue, "meta" | "control"> {
   const context = useContext(GlobalHeaderContext);
 
   if (!context) {
@@ -22,7 +23,7 @@ export function useGlobalHeaderState(): Pick<GlobalHeaderContextValue, "meta" | 
 
   return {
     meta: context.meta,
-    modelPicker: context.modelPicker,
+    control: context.control,
   };
 }
 
@@ -53,50 +54,51 @@ export function usePageHeader(meta: HeaderMetaOverride | null | undefined): void
   }, [clearMeta, icon, id, isActive, setMeta, subtitle, title]);
 }
 
-export function usePageHeaderModelPicker(
-  modelPicker: HeaderModelPicker | null | undefined,
+export function usePageHeaderControl(
+  control: HeaderControl | null | undefined,
 ): void {
   const context = useContext(GlobalHeaderContext);
   const id = useId();
 
   if (!context) {
-    throw new Error("usePageHeaderModelPicker must be used within GlobalHeaderProvider");
+    throw new Error("usePageHeaderControl must be used within GlobalHeaderProvider");
   }
 
-  const { setModelPicker, clearModelPicker } = context;
-  const isActive = modelPicker != null;
-  const value = modelPicker?.value;
-  const options = modelPicker?.options;
-  const onValueChange = modelPicker?.onValueChange;
-  const groupLabel = modelPicker?.groupLabel;
-  const placeholder = modelPicker?.placeholder;
-  const loading = modelPicker?.loading;
-  const disabled = modelPicker?.disabled;
-  const emptyLabel = modelPicker?.emptyLabel;
+  const { setControl, clearControl } = context;
+  const isActive = control != null;
+  const type = control?.type;
+  const value = control?.type === "select" ? control.value : undefined;
+  const options = control?.type === "select" ? control.options : undefined;
+  const onValueChange = control?.type === "select" ? control.onValueChange : undefined;
+  const groupLabel = control?.type === "select" ? control.groupLabel : undefined;
+  const placeholder = control?.type === "select" ? control.placeholder : undefined;
+  const loading = control?.type === "select" ? control.loading : undefined;
+  const disabled = control?.type === "select" ? control.disabled : undefined;
+  const emptyLabel = control?.type === "select" ? control.emptyLabel : undefined;
 
   useLayoutEffect(() => {
-    if (!isActive || !modelPicker) {
+    if (!isActive || !control) {
       return undefined;
     }
 
-    setModelPicker(id, modelPicker);
+    setControl(id, control);
 
     return () => {
-      clearModelPicker(id);
+      clearControl(id);
     };
   }, [
-    clearModelPicker,
+    clearControl,
     disabled,
     emptyLabel,
     groupLabel,
     id,
     isActive,
     loading,
-    modelPicker,
     onValueChange,
     options,
     placeholder,
-    setModelPicker,
+    setControl,
+    type,
     value,
   ]);
 }

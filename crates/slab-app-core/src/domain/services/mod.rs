@@ -11,6 +11,7 @@ mod settings;
 mod setup;
 mod system;
 mod task;
+mod ui_state;
 mod video;
 
 pub use agent::AgentService;
@@ -26,6 +27,7 @@ pub use settings::SettingsService;
 pub use setup::SetupService;
 pub use system::SystemService;
 pub use task::TaskApplicationService;
+pub use ui_state::UiStateService;
 pub use video::VideoService;
 
 use crate::context::{ModelState, WorkerState};
@@ -43,6 +45,7 @@ pub struct AppServices {
     pub setup: SetupService,
     pub system: SystemService,
     pub task_application: TaskApplicationService,
+    pub ui_state: UiStateService,
     pub video: VideoService,
     pub agent: AgentService,
 }
@@ -61,6 +64,7 @@ impl AppServices {
             setup: SetupService::new(model_state.clone(), worker_state.clone()),
             system: SystemService::new(),
             task_application: TaskApplicationService::new(worker_state.clone()),
+            ui_state: UiStateService::new(model_state.clone()),
             video: VideoService::new(worker_state),
             agent,
         }

@@ -1,27 +1,24 @@
-import { useEffect, useState } from 'react';
 import { Badge } from '@slab/components/badge';
-import { checkBackendStatus } from '@/lib/tauri-api';
+import api from '@/lib/api';
 
 export function BackendStatus() {
-  const [isOnline, setIsOnline] = useState<boolean | null>(null);
-  const [isChecking, setIsChecking] = useState(true);
-
-  useEffect(() => {
-    const checkStatus = async () => {
-      setIsChecking(true);
-      const status = await checkBackendStatus();
-      setIsOnline(status);
-      setIsChecking(false);
-    };
-
-    // Check immediately
-    checkStatus();
-
-    // Check every 30 seconds
-    const interval = setInterval(checkStatus, 30000);
-
-    return () => clearInterval(interval);
-  }, []);
+  const {
+    data,
+    error,
+    isLoading,
+    isRefetching,
+  } = api.useQuery(
+    'get',
+    '/health',
+    {},
+    {
+      refetchInterval: 30000,
+      refetchIntervalInBackground: true,
+      retry: false,
+    },
+  );
+  const isChecking = isLoading || isRefetching;
+  const isOnline = isChecking ? null : Boolean(data && !error);
 
   const statusBadge = (
     label: string,

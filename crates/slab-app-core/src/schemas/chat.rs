@@ -277,7 +277,7 @@ pub struct ChatCompletionRequest {
     ))]
     pub id: Option<String>,
     /// Unified model identifier from `/v1/models`.
-    /// `GET /v1/chat/models` returns picker options that reuse the same ids.
+    /// `GET /v1/chat/models` remains a compatibility wrapper that reuses the same ids.
     #[serde(default)]
     pub model: String,
     /// Conversation history; the last user message is used as the prompt.
@@ -471,7 +471,7 @@ pub struct OpenAiErrorResponse {
     pub error: OpenAiError,
 }
 
-/// A selectable chat model option from `GET /v1/chat/models`.
+/// A selectable chat model option from the compatibility route `GET /v1/chat/models`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ChatModelOption {
     /// Stable option id used in `POST /v1/chat/completions`.
@@ -819,7 +819,7 @@ impl From<DomainChatModelOption> for ChatModelOption {
             downloaded: value.downloaded,
             pending: value.pending,
             capabilities: value.capabilities.into(),
-            backend_id: value.backend_id,
+            backend_id: value.backend_id.map(|backend_id| backend_id.to_string()),
             provider_id: value.provider_id,
             provider_name: value.provider_name,
         }

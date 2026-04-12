@@ -35,21 +35,26 @@ pub use chat::{
 };
 pub use common::{Id, Timestamp};
 pub use diffusion::{
-    DiffusionImageRequest, DiffusionImageResponse, DiffusionVideoRequest, DiffusionVideoResponse,
+    DiffusionImageBackend, DiffusionImageRequest, DiffusionImageResponse, DiffusionRequestCommon,
+    DiffusionVideoBackend, DiffusionVideoRequest, DiffusionVideoResponse, GgmlDiffusionImageParams,
+    GgmlDiffusionVideoParams,
 };
 pub use error::SlabTypeError;
 pub use inference::{
     AudioTranscriptionOpOptions, AudioTranscriptionRequest, AudioTranscriptionResponse,
-    ImageGenerationRequest, ImageGenerationResponse, JsonOptions, TextGenerationChunk,
-    TextGenerationOpOptions, TextGenerationRequest, TextGenerationResponse,
+    ImageEmbeddingRequest, ImageEmbeddingResponse, ImageGenerationRequest, ImageGenerationResponse,
+    JsonOptions, TextGenerationChunk, TextGenerationOpOptions, TextGenerationRequest,
+    TextGenerationResponse,
 };
 pub use load_config::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
+    RuntimeBackendLoadSpec,
 };
 pub use media::{GeneratedFrame, GeneratedImage, RawImageInput};
 pub use runtime::{
-    Capability, DiffusionLoadOptions, DriverHints, ModelFamily, ModelSource, ModelSpec,
-    RuntimeModelLoadCommand, RuntimeModelLoadSpec, RuntimeModelStatus,
+    Capability, DiffusionLoadOptions, DriverDescriptor, DriverHints, DriverLoadStyle, ModelFamily,
+    ModelSource, ModelSourceKind, ModelSpec, RuntimeModelLoadCommand, RuntimeModelLoadSpec,
+    RuntimeModelStatus,
 };
 pub use whisper::{WhisperDecodeOptions, WhisperVadOptions, WhisperVadParams};

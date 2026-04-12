@@ -1,0 +1,11 @@
+{
+    "id": "inference-default",
+    "kind": "backend_config",
+    "label": "Default inference",
+    "scope": "inference",
+    "payload": {
+        "width": 256,
+        "height": 256,
+        "steps": 15
+    }
+}

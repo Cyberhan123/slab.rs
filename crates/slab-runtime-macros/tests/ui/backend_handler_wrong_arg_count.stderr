@@ -1,0 +1,5 @@
+error: event handlers must take exactly one non-self argument (BackendRequest)
+  --> tests/ui/backend_handler_wrong_arg_count.rs:14:27
+   |
+14 |     async fn on_inference(&mut self, _req: BackendRequest, _extra: BackendRequest) {}
+   |                           ^

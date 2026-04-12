@@ -12,6 +12,7 @@ import { VadSettings } from './vad-settings';
 import { DecodeOptions } from './decode-options';
 
 export type AudioWorkbenchProps = {
+  bundledVadLabel: string;
   canStartTranscription: boolean;
   catalogModelsError: unknown;
   catalogModelsLoading: boolean;
@@ -36,8 +37,10 @@ export type AudioWorkbenchProps = {
   handleFileChange: (e: ChangeEvent<HTMLInputElement>) => void | Promise<void>;
   handleTauriFileSelect: () => void | Promise<void>;
   handleTranscribe: () => void | Promise<void>;
+  hasBundledVad: boolean;
   isBusy: boolean;
   isTauri: boolean;
+  isUsingBundledVad: boolean;
   navigate: NavigateFunction;
   preparingStage: PreparingStage;
   previewRows: Array<{ label: string; value: string; accent: boolean; chip: boolean }>;
@@ -82,6 +85,7 @@ export type AudioWorkbenchProps = {
 };
 
 export function AudioWorkbench({
+  bundledVadLabel,
   canStartTranscription,
   catalogModelsError,
   catalogModelsLoading,
@@ -106,8 +110,10 @@ export function AudioWorkbench({
   handleFileChange,
   handleTauriFileSelect,
   handleTranscribe,
+  hasBundledVad,
   isBusy,
   isTauri,
+  isUsingBundledVad,
   navigate,
   preparingStage,
   previewRows,
@@ -152,7 +158,7 @@ export function AudioWorkbench({
 }: AudioWorkbenchProps) {
   return (
     <div className="h-full w-full overflow-y-auto">
-      <div className="mx-auto grid w-full max-w-[1120px] gap-8 pb-8 xl:grid-cols-[minmax(0,1fr)_392px]">
+      <div className="mx-auto grid w-full max-w-[1120px] gap-8 pb-8 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_392px]">
         <div className="space-y-6">
           <SoftPanel className="space-y-5 rounded-[28px] border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
             <div>
@@ -185,10 +191,13 @@ export function AudioWorkbench({
             )}
 
             <VadSettings
+              bundledVadLabel={bundledVadLabel}
               enableVad={enableVad}
+              hasBundledVad={hasBundledVad}
               setEnableVad={setEnableVad}
               isTauri={isTauri}
               isBusy={isBusy}
+              isUsingBundledVad={isUsingBundledVad}
               selectedVadModelId={selectedVadModelId}
               setSelectedVadModelId={setSelectedVadModelId}
               catalogModelsLoading={catalogModelsLoading}

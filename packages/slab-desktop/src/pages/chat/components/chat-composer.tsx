@@ -89,6 +89,7 @@ export function ChatComposer({
           <Textarea
             value={value}
             variant="shell"
+            autoResize
             disabled={disabled}
             onChange={(event) => onValueChange(event.target.value)}
             placeholder="Type a message or drop files..."

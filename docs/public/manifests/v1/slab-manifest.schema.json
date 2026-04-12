@@ -5,7 +5,10 @@
         "text_generation",
         "audio_transcription",
         "image_generation",
-        "image_embedding"
+        "image_embedding",
+        "chat_generation",
+        "audio_vad",
+        "video_generation"
       ],
       "type": "string"
     },
@@ -227,6 +230,37 @@
       ],
       "type": "object"
     },
+    "PresetEntryRef": {
+      "properties": {
+        "$config": {
+          "$ref": "#/$defs/ConfigRef"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "variant_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "label",
+        "$config"
+      ],
+      "type": "object"
+    },
     "ResourceFootprint": {
       "properties": {
         "ram_mb": {
@@ -251,38 +285,6 @@
   },
   "$id": "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "allOf": [
-    {
-      "if": {
-        "properties": {
-          "source": {
-            "properties": {
-              "kind": {
-                "const": "cloud"
-              }
-            },
-            "required": [
-              "kind"
-            ],
-            "type": "object"
-          }
-        },
-        "required": [
-          "source"
-        ]
-      },
-      "then": {
-        "properties": {
-          "provider": {
-            "pattern": "^cloud\\."
-          }
-        },
-        "required": [
-          "provider"
-        ]
-      }
-    }
-  ],
   "description": "Schema for the manifest.json file stored at the root of a .slab model pack.",
   "properties": {
     "$schema": {
@@ -350,7 +352,7 @@
     },
     "presets": {
       "items": {
-        "$ref": "#/$defs/ConfigEntryRef"
+        "$ref": "#/$defs/PresetEntryRef"
       },
       "type": "array"
     },
@@ -362,12 +364,6 @@
         {
           "type": "null"
         }
-      ]
-    },
-    "provider": {
-      "type": [
-        "string",
-        "null"
       ]
     },
     "runtime_presets": {

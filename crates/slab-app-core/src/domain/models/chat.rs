@@ -9,6 +9,8 @@ use futures::stream::BoxStream;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::domain::models::ManagedModelBackendId;
+
 const SESSION_MESSAGE_STORAGE_VERSION: u8 = 2;
 const SESSION_MESSAGE_STORAGE_KIND: &str = "conversation_message";
 const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
@@ -35,7 +37,7 @@ pub struct ChatModelOption {
     pub downloaded: bool,
     pub pending: bool,
     pub capabilities: ChatModelCapabilities,
-    pub backend_id: Option<String>,
+    pub backend_id: Option<ManagedModelBackendId>,
     pub provider_id: Option<String>,
     pub provider_name: Option<String>,
 }

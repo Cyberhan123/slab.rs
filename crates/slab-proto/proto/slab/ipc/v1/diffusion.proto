@@ -11,34 +11,43 @@ service DiffusionService {
   rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
 }
 
-// ── Image generation ─────────────────────────────────────────────────────────
+message RawImageInput {
+  bytes data = 1;
+  uint32 width = 2;
+  uint32 height = 3;
+  uint32 channels = 4;
+}
+
+message DiffusionRequestCommon {
+  string prompt = 1;
+  optional string negative_prompt = 2;
+  uint32 width = 3;
+  uint32 height = 4;
+  RawImageInput init_image = 5;
+}
+
+// Keep backend-only controls inside a oneof so the shared request can stay
+// stable while individual backends evolve independently.
+message GgmlDiffusionImageParams {
+  optional uint32 n = 1;
+  optional float cfg_scale = 2;
+  optional float guidance = 3;
+  optional int32 sample_steps = 4;
+  optional int64 seed = 5;
+  optional string sample_method = 6;
+  optional string scheduler = 7;
+  optional int32 clip_skip = 8;
+  optional float strength = 9;
+  optional float eta = 10;
+}
 
 message ImageRequest {
   string model = 1;
-  string prompt = 2;
-  uint32 n = 3;
+  DiffusionRequestCommon common = 2;
 
-  // Dimensions
-  uint32 width = 4;
-  uint32 height = 5;
-
-  // Generation parameters
-  string negative_prompt = 6;
-  float cfg_scale = 7;
-  float guidance = 8;
-  int32 sample_steps = 9;
-  int64 seed = 10;
-  string sample_method = 11;
-  string scheduler = 12;
-  int32 clip_skip = 13;
-  float strength = 14;
-  float eta = 15;
-
-  // Init image for img2img (raw RGB pixel data)
-  bytes init_image_data = 16;
-  uint32 init_image_width = 17;
-  uint32 init_image_height = 18;
-  uint32 init_image_channels = 19;
+  oneof backend_params {
+    GgmlDiffusionImageParams ggml = 10;
+  }
 }
 
 message ImageResponse {
@@ -46,28 +55,25 @@ message ImageResponse {
   bytes images_json = 1;
 }
 
-// ── Video generation ─────────────────────────────────────────────────────────
+message GgmlDiffusionVideoParams {
+  optional int32 video_frames = 1;
+  optional float fps = 2;
+  optional float cfg_scale = 3;
+  optional float guidance = 4;
+  optional int32 sample_steps = 5;
+  optional int64 seed = 6;
+  optional string sample_method = 7;
+  optional string scheduler = 8;
+  optional float strength = 9;
+}
 
 message VideoRequest {
   string model = 1;
-  string prompt = 2;
-  uint32 width = 3;
-  uint32 height = 4;
-  string negative_prompt = 5;
-  float cfg_scale = 6;
-  float guidance = 7;
-  int32 sample_steps = 8;
-  int64 seed = 9;
-  string sample_method = 10;
-  string scheduler = 11;
-  int32 video_frames = 12;
-  float fps = 13;
-  float strength = 14;
-  // Optional init image (raw RGB pixels)
-  bytes init_image_data = 15;
-  uint32 init_image_width = 16;
-  uint32 init_image_height = 17;
-  uint32 init_image_channels = 18;
+  DiffusionRequestCommon common = 2;
+
+  oneof backend_params {
+    GgmlDiffusionVideoParams ggml = 10;
+  }
 }
 
 message VideoResponse {

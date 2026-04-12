@@ -1,5 +1,5 @@
 import { XProvider } from "@ant-design/x"
-import { useXConversations, type ConversationData } from "@ant-design/x-sdk"
+import { Loader2 } from "lucide-react"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useNavigate } from "react-router-dom"
 import { toast } from "sonner"
@@ -7,8 +7,16 @@ import { toast } from "sonner"
 import "@ant-design/x-markdown/themes/dark.css"
 import "@ant-design/x-markdown/themes/light.css"
 
+import { Button } from "@slab/components/button"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@slab/components/dialog"
 import { ScrollArea } from "@slab/components/scroll-area"
-import type { components } from "@/lib/api/v1.d.ts"
 import { ChatComposer } from "@/pages/chat/components/chat-composer"
 import { ChatMessageBubble } from "@/pages/chat/components/chat-message-bubble"
 import { ChatSessionSheet } from "@/pages/chat/components/chat-session-sheet"
@@ -17,21 +25,23 @@ import {
   type ChatSessionSummaryItem,
 } from "@/pages/chat/components/chat-session-summary-card"
 import api from "@/lib/api"
-import { toCatalogModelList } from "@/lib/api/models"
+import { toCatalogModelList, type CatalogModel } from "@/lib/api/models"
 import { PAGE_HEADER_META } from "@/layouts/header-meta"
-import { usePageHeader, usePageHeaderModelPicker } from "@/hooks/use-global-header-meta"
+import { usePageHeader, usePageHeaderControl } from "@/hooks/use-global-header-meta"
+import { usePersistedHeaderSelect } from "@/hooks/use-persisted-header-select"
+import { HEADER_SELECT_KEYS } from "@/layouts/header-controls"
+import { useChatUiStore } from "@/store/useChatUiStore"
 
 import {
   ChatContext,
-  clearConversationCache,
   getChatMessageTextContent,
   type ChatMessageRecord,
 } from "./chat-context"
 import { useChat } from "./hooks/use-chat"
+import { useChatSessions } from "./hooks/use-chat-sessions"
 import { useMarkdownTheme } from "./hooks/use-markdowm-theme"
 import locale from "./local"
 
-const LLAMA_BACKEND_ID = "ggml.llama"
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000
 const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000
 
@@ -43,16 +53,6 @@ type ChatModelCapabilities = {
   reasoning_controls: boolean
 }
 
-type ChatModelPickerOption = {
-  id: string
-  display_name: string
-  downloaded: boolean
-  pending: boolean
-  source: ModelOptionSource
-  provider_name?: string | null
-  capabilities: ChatModelCapabilities
-}
-
 type ModelOption = {
   id: string
   label: string
@@ -61,18 +61,8 @@ type ModelOption = {
   source: ModelOptionSource
   capabilities: ChatModelCapabilities
   contextWindow?: number | null
+  runtimePresets?: CatalogModel["runtime_presets"]
 }
-
-type ConversationItem = ConversationData & {
-  label?: string
-  group?: string
-}
-
-type SessionRecord = components["schemas"]["SessionResponse"]
-type SessionLabelMap = Record<string, string>
-
-const CHAT_CURRENT_SESSION_STORAGE_KEY = "slab.chat.currentSessionId"
-const CHAT_SESSION_LABELS_STORAGE_KEY = "slab.chat.sessionLabels"
 
 function createConversationLabel(value: string) {
   const trimmed = value.trim()
@@ -82,10 +72,6 @@ function createConversationLabel(value: string) {
   }
 
   return trimmed.length > 42 ? `${trimmed.slice(0, 42)}...` : trimmed
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null
 }
 
 function defaultCapabilitiesForSource(source: ModelOptionSource): ChatModelCapabilities {
@@ -102,64 +88,10 @@ function defaultCapabilitiesForSource(source: ModelOptionSource): ChatModelCapab
       }
 }
 
-function parseChatModelCapabilities(
-  value: unknown,
-  source: ModelOptionSource
+function resolveChatModelCapabilities(
+  model: Pick<CatalogModel, "chat_capabilities" | "kind">
 ): ChatModelCapabilities {
-  const defaults = defaultCapabilitiesForSource(source)
-  if (!isRecord(value)) {
-    return defaults
-  }
-
-  return {
-    raw_grammar:
-      typeof value.raw_grammar === "boolean" ? value.raw_grammar : defaults.raw_grammar,
-    structured_output:
-      typeof value.structured_output === "boolean"
-        ? value.structured_output
-        : defaults.structured_output,
-    reasoning_controls:
-      typeof value.reasoning_controls === "boolean"
-        ? value.reasoning_controls
-        : defaults.reasoning_controls,
-  }
-}
-
-function parseChatModelPickerOptions(value: unknown): ChatModelPickerOption[] {
-  if (!Array.isArray(value)) {
-    return []
-  }
-
-  return value.flatMap((item) => {
-    if (!isRecord(item)) {
-      return []
-    }
-
-    const id = typeof item.id === "string" ? item.id.trim() : ""
-    const display_name =
-      typeof item.display_name === "string" ? item.display_name.trim() : ""
-    const source =
-      item.source === "local" || item.source === "cloud" ? item.source : null
-
-    if (!id || !display_name || !source) {
-      return []
-    }
-
-    return [
-      {
-        id,
-        display_name,
-        downloaded: Boolean(item.downloaded),
-        pending: Boolean(item.pending),
-        source,
-        provider_name:
-          typeof item.provider_name === "string" && item.provider_name.trim()
-            ? item.provider_name.trim()
-            : null,
-        capabilities: parseChatModelCapabilities(item.capabilities, source),
-      },
-    ]
-  })
+  return model.chat_capabilities ?? defaultCapabilitiesForSource(model.kind)
 }
 
 function getGreeting(date: Date) {
@@ -176,310 +108,89 @@ function getGreeting(date: Date) {
   return "Good evening"
 }
 
-function getErrorDescription(error: unknown) {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message
-  }
-
-  if (typeof error === "object" && error !== null) {
-    const message = (error as { error?: unknown; message?: unknown }).message
-    if (typeof message === "string" && message.trim()) {
-      return message
-    }
-
-    const rawError = (error as { error?: unknown }).error
-    if (typeof rawError === "string" && rawError.trim()) {
-      return rawError
-    }
-  }
-
-  return "Unknown error"
-}
-
-function readStoredCurrentSessionId() {
-  if (typeof window === "undefined") {
-    return ""
-  }
-
-  try {
-    return window.localStorage.getItem(CHAT_CURRENT_SESSION_STORAGE_KEY)?.trim() ?? ""
-  } catch {
-    return ""
-  }
-}
-
-function writeStoredCurrentSessionId(sessionId: string) {
-  if (typeof window === "undefined") {
-    return
-  }
-
-  try {
-    const trimmed = sessionId.trim()
-    if (!trimmed) {
-      window.localStorage.removeItem(CHAT_CURRENT_SESSION_STORAGE_KEY)
-      return
-    }
-
-    window.localStorage.setItem(CHAT_CURRENT_SESSION_STORAGE_KEY, trimmed)
-  } catch {
-    // Ignore storage failures and keep the session in memory.
-  }
-}
-
-function readStoredSessionLabels(): SessionLabelMap {
-  if (typeof window === "undefined") {
-    return {}
-  }
-
-  try {
-    const raw = window.localStorage.getItem(CHAT_SESSION_LABELS_STORAGE_KEY)
-    if (!raw) {
-      return {}
-    }
-
-    const parsed = JSON.parse(raw) as unknown
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
-      return {}
-    }
-
-    return Object.fromEntries(
-      Object.entries(parsed).filter(
-        ([key, value]) => typeof key === "string" && typeof value === "string" && value.trim()
-      )
-    )
-  } catch {
-    return {}
-  }
-}
-
-function writeStoredSessionLabels(labels: SessionLabelMap) {
-  if (typeof window === "undefined") {
-    return
-  }
-
-  try {
-    window.localStorage.setItem(CHAT_SESSION_LABELS_STORAGE_KEY, JSON.stringify(labels))
-  } catch {
-    // Ignore storage failures and keep the labels in memory.
-  }
-}
-
-function getStoredSessionLabel(sessionId: string) {
-  const value = readStoredSessionLabels()[sessionId]?.trim()
-  return value ? value : null
-}
-
-function setStoredSessionLabel(sessionId: string, label: string) {
-  const trimmedSessionId = sessionId.trim()
-  const trimmedLabel = label.trim()
-
-  if (!trimmedSessionId || !trimmedLabel) {
-    return
-  }
-
-  writeStoredSessionLabels({
-    ...readStoredSessionLabels(),
-    [trimmedSessionId]: trimmedLabel,
-  })
-}
-
-function removeStoredSessionLabel(sessionId: string) {
-  const trimmedSessionId = sessionId.trim()
-  if (!trimmedSessionId) {
-    return
-  }
-
-  const nextLabels = readStoredSessionLabels()
-  delete nextLabels[trimmedSessionId]
-  writeStoredSessionLabels(nextLabels)
-}
-
-function toConversationItem(session: SessionRecord): ConversationItem {
-  const storedLabel = getStoredSessionLabel(session.id)
-  const backendLabel = session.name.trim()
-
-  return {
-    key: session.id,
-    label: storedLabel ?? (backendLabel || "New chat"),
-    group: "Workspace",
-  }
-}
-
 function Chat() {
   const navigate = useNavigate()
   const [markdownThemeClassName] = useMarkdownTheme()
-  const [deepThink, setDeepThink] = useState(true)
   const [draft, setDraft] = useState("")
   const [isSessionSheetOpen, setIsSessionSheetOpen] = useState(false)
-  const [curConversation, setCurConversation] = useState<string>(() => readStoredCurrentSessionId())
-
-  const [selectedModelId, setSelectedModelId] = useState("")
+  const [pendingModelSwitchId, setPendingModelSwitchId] = useState<string | null>(null)
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement | null>(null)
-  const hasBootstrappedSessions = useRef(false)
-
-  const { conversations, addConversation, setConversations } = useXConversations({
-    defaultConversations: [],
-  })
-  const conversationList = conversations as ConversationItem[]
+  const deepThink = useChatUiStore((state) => state.deepThink)
+  const setDeepThink = useChatUiStore((state) => state.setDeepThink)
+  const {
+    conversationList,
+    createSession: createEmptySession,
+    currentSessionId: curConversation,
+    deleteSession: deleteConversationSession,
+    isCreatingSession,
+    isDeletingSession,
+    isSessionMutating,
+    isSessionsLoading: sessionsLoading,
+    setCurrentSessionId: setCurConversation,
+    setSessionLabel,
+  } = useChatSessions()
 
   const {
     data: catalogModels,
     isLoading: catalogModelsLoading,
     refetch: refetchCatalogModels,
-  } = api.useQuery("get", "/v1/models")
-  const {
-    data: chatModelPickerData,
-    isLoading: chatModelOptionsLoading,
-    refetch: refetchChatModelOptions,
-  } = api.useQuery("get", "/v1/chat/models")
+  } = api.useQuery("get", "/v1/models", {
+    params: {
+      query: {
+        capability: "chat_generation",
+      },
+    },
+  })
 
   const downloadModelMutation = api.useMutation("post", "/v1/models/download")
   const loadModelMutation = api.useMutation("post", "/v1/models/load")
   const switchModelMutation = api.useMutation("post", "/v1/models/switch")
   const getTaskMutation = api.useMutation("get", "/v1/tasks/{id}")
-  const { data: sessionData, isLoading: sessionsLoading, refetch: refetchSessions } = api.useQuery(
-    "get",
-    "/v1/sessions"
-  )
-  const createSessionMutation = api.useMutation("post", "/v1/sessions")
-  // Generated types currently drop the DELETE path param for this endpoint.
-  const deleteSessionMutation = api.useMutation("delete", "/v1/sessions/{id}") as unknown as {
-    isPending: boolean
-    mutateAsync: (options: { params: { path: { id: string } } }) => Promise<unknown>
-  }
 
   const parsedCatalogModels = useMemo(
     () => toCatalogModelList(catalogModels),
     [catalogModels]
   )
-  const chatModelPickerOptions = useMemo(
-    () => parseChatModelPickerOptions(chatModelPickerData),
-    [chatModelPickerData]
-  )
-  const sessionRecords = useMemo<SessionRecord[]>(
-    () => (Array.isArray(sessionData) ? sessionData : []),
-    [sessionData]
-  )
 
-  const llamaModels = useMemo(
-    () => parsedCatalogModels.filter((model) => model.backend_id === LLAMA_BACKEND_ID),
+  const localChatModels = useMemo(
+    () => parsedCatalogModels.filter((model) => model.kind === "local"),
     [parsedCatalogModels]
   )
 
   const modelOptions = useMemo<ModelOption[]>(
     () =>
-      chatModelPickerOptions.map((model) => {
-        const catalogModel = parsedCatalogModels.find((item) => item.id === model.id)
+      parsedCatalogModels.map((model) => {
+        const downloaded =
+          model.kind === "cloud" ||
+          (model.status === "ready" && typeof model.local_path === "string" && model.local_path.length > 0)
+
         return {
           id: model.id,
-          label:
-            model.source === "cloud" && model.provider_name
-              ? `${model.provider_name} / ${model.display_name}`
-              : model.display_name,
-          downloaded: model.downloaded,
+          label: model.display_name,
+          downloaded,
           pending: model.pending,
-          source: model.source,
-          capabilities: model.capabilities,
-          contextWindow: catalogModel?.spec.context_window ?? null,
+          source: model.kind,
+          capabilities: resolveChatModelCapabilities(model),
+          contextWindow: model.spec.context_window ?? null,
+          runtimePresets: model.runtime_presets ?? null,
         }
       }),
-    [chatModelPickerOptions, parsedCatalogModels]
+    [parsedCatalogModels]
   )
+  const { value: selectedModelId, setValue: setSelectedModelId } = usePersistedHeaderSelect({
+    key: HEADER_SELECT_KEYS.chatModel,
+    options: modelOptions,
+    isLoading: catalogModelsLoading,
+  })
   const selectedModel = useMemo(
     () => modelOptions.find((item) => item.id === selectedModelId),
     [modelOptions, selectedModelId]
   )
-
-  useEffect(() => {
-    if (modelOptions.length === 0) {
-      setSelectedModelId("")
-      return
-    }
-
-    const exists = modelOptions.some((model) => model.id === selectedModelId)
-    if (!selectedModelId || !exists) {
-      setSelectedModelId(modelOptions[0].id)
-    }
-  }, [modelOptions, selectedModelId])
-
-  useEffect(() => {
-    setConversations(sessionRecords.map(toConversationItem))
-  }, [sessionRecords, setConversations])
-
-  const createEmptySession = useCallback(
-    async (options?: { openSheet?: boolean; quiet?: boolean; select?: boolean }) => {
-      try {
-        const session = await createSessionMutation.mutateAsync({
-          body: {},
-        })
-
-        addConversation(toConversationItem(session), "prepend")
-        if (options?.select ?? true) {
-          setCurConversation(session.id)
-        }
-        if (options?.openSheet) {
-          setIsSessionSheetOpen(true)
-        }
-
-        void refetchSessions()
-        return session
-      } catch (error) {
-        if (!options?.quiet) {
-          toast.error("Failed to create chat session.", {
-            description: getErrorDescription(error),
-          })
-        }
-        return null
-      }
-    },
-    [addConversation, createSessionMutation, refetchSessions]
+  const pendingModelSwitch = useMemo(
+    () => modelOptions.find((item) => item.id === pendingModelSwitchId) ?? null,
+    [modelOptions, pendingModelSwitchId]
   )
-
-  useEffect(() => {
-    if (sessionsLoading) {
-      return
-    }
-
-    if (sessionRecords.length > 0) {
-      hasBootstrappedSessions.current = true
-      return
-    }
-
-    if (hasBootstrappedSessions.current) {
-      return
-    }
-
-    hasBootstrappedSessions.current = true
-    void createEmptySession({ quiet: true, select: true })
-  }, [createEmptySession, sessionRecords.length, sessionsLoading])
-
-  useEffect(() => {
-    if (conversationList.length === 0) {
-      if (curConversation) {
-        setCurConversation("")
-      }
-      return
-    }
-
-    if (conversationList.some((item) => item.key === curConversation)) {
-      return
-    }
-
-    const storedConversationId = readStoredCurrentSessionId()
-    const nextConversationKey =
-      conversationList.find((item) => item.key === storedConversationId)?.key ??
-      conversationList[0]?.key ??
-      ""
-
-    if (nextConversationKey && nextConversationKey !== curConversation) {
-      setCurConversation(nextConversationKey)
-    }
-  }, [conversationList, curConversation])
-
-  useEffect(() => {
-    writeStoredCurrentSessionId(curConversation)
-  }, [curConversation])
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 
@@ -523,10 +234,7 @@ function Chat() {
   }
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
-    const [refreshed] = await Promise.all([
-      refetchCatalogModels(),
-      refetchChatModelOptions(),
-    ])
+    const refreshed = await refetchCatalogModels()
     const models = toCatalogModelList(refreshed.data)
     return models.find((model) => model.id === modelId)
   }
@@ -535,7 +243,7 @@ function Chat() {
     modelId: string,
     forceDownload = false
   ): Promise<{ modelPath: string; downloadedNow: boolean }> => {
-    let model = llamaModels.find((item) => item.id === modelId)
+    let model = localChatModels.find((item) => item.id === modelId)
     if (!model) {
       model = await refreshCatalogAndFindModel(modelId)
     }
@@ -544,8 +252,8 @@ function Chat() {
       throw new Error("Selected model does not exist in catalog")
     }
 
-    if (model.backend_id !== LLAMA_BACKEND_ID) {
-      throw new Error(`Selected model does not support ${LLAMA_BACKEND_ID}`)
+    if (model.kind !== "local") {
+      throw new Error("Selected model is not a local chat model")
     }
 
     if (model.local_path && !forceDownload) {
@@ -611,7 +319,7 @@ function Chat() {
       return
     }
 
-    const selectedLocal = llamaModels.find((item) => item.id === selectedModelId)
+    const selectedLocal = localChatModels.find((item) => item.id === selectedModelId)
     const { downloadedNow } = await ensureDownloadedModelPath(selectedModelId)
 
     if (downloadedNow) {
@@ -663,18 +371,17 @@ function Chat() {
     selectedModelId || "slab-llama",
     deepThink,
     selectedModel?.capabilities.reasoning_controls ?? false,
+    selectedModel?.runtimePresets ?? null,
     ensureChatModelReady
   )
 
-  const modelLoading = catalogModelsLoading || chatModelOptionsLoading
+  const modelLoading = catalogModelsLoading
   const isPreparingModel =
     loadModelMutation.isPending ||
     switchModelMutation.isPending ||
     downloadModelMutation.isPending
-  const isSessionMutating = createSessionMutation.isPending || deleteSessionMutation.isPending
   const isSessionBusy = isRequesting || isPreparingModel || isHistoryLoading || isSessionMutating
-  const isSessionBootstrapping =
-    (sessionsLoading || createSessionMutation.isPending) && conversationList.length === 0
+  const isSessionBootstrapping = (sessionsLoading || isCreatingSession) && conversationList.length === 0
 
   const safeMessages: ChatMessageRecord[] = messages ?? []
   const latestMessage = safeMessages[safeMessages.length - 1]
@@ -697,6 +404,8 @@ function Chat() {
     .slice()
     .reverse()
     .find((item) => item.message.role === "user")
+  const currentConversationLabel =
+    conversationList.find((item) => item.key === curConversation)?.label?.trim() || "Current session"
   const selectedModelStatusLabel = useMemo(() => {
     if (isSessionBootstrapping || !curConversation) {
       return "Preparing session"
@@ -706,11 +415,11 @@ function Chat() {
       return "Loading session history"
     }
 
-    if (createSessionMutation.isPending) {
+    if (isCreatingSession) {
       return "Creating session"
     }
 
-    if (deleteSessionMutation.isPending) {
+    if (isDeletingSession) {
       return "Deleting session"
     }
 
@@ -740,39 +449,104 @@ function Chat() {
 
     return parts.join(" / ")
   }, [
-    createSessionMutation.isPending,
     curConversation,
-    deleteSessionMutation.isPending,
+    isCreatingSession,
+    isDeletingSession,
     isHistoryLoading,
     isPreparingModel,
     isSessionBootstrapping,
     modelLoading,
     selectedModel,
   ])
+
+  const closePendingModelSwitch = useCallback(() => {
+    if (isCreatingSession) {
+      return
+    }
+
+    setPendingModelSwitchId(null)
+  }, [isCreatingSession])
+
+  const handleModelPickerChange = useCallback(
+    (nextModelId: string) => {
+      if (!nextModelId || nextModelId === selectedModelId) {
+        return
+      }
+
+      if (isSessionBusy || isSessionBootstrapping) {
+        toast.info("Wait for the current response or session sync to finish before switching models.")
+        return
+      }
+
+      if (!curConversation || safeMessages.length === 0) {
+        setSelectedModelId(nextModelId)
+        return
+      }
+
+      setPendingModelSwitchId(nextModelId)
+    },
+    [curConversation, isSessionBootstrapping, isSessionBusy, safeMessages.length, selectedModelId]
+  )
+
+  const handleKeepSessionOnModelSwitch = useCallback(() => {
+    if (!pendingModelSwitchId) {
+      return
+    }
+
+    setSelectedModelId(pendingModelSwitchId)
+    setPendingModelSwitchId(null)
+  }, [pendingModelSwitchId])
+
+  const handleCreateSessionOnModelSwitch = useCallback(async () => {
+    if (!pendingModelSwitchId) {
+      return
+    }
+
+    const nextModelId = pendingModelSwitchId
+    const session = await createEmptySession({ select: true })
+
+    if (!session) {
+      return
+    }
+
+    setSelectedModelId(nextModelId)
+    setPendingModelSwitchId(null)
+  }, [createEmptySession, pendingModelSwitchId])
+
   const headerModelPicker = useMemo(
     () => ({
+      type: "select" as const,
       value: selectedModelId,
       options: modelOptions.map((model) => ({
         id: model.id,
         label: model.label,
       })),
-      onValueChange: setSelectedModelId,
+      onValueChange: handleModelPickerChange,
       groupLabel: "Chat Models",
       placeholder: "Select model",
       loading: modelLoading,
       disabled:
         modelLoading ||
-        isPreparingModel ||
-        isRequesting ||
+        isSessionBusy ||
+        isSessionBootstrapping ||
+        Boolean(pendingModelSwitchId) ||
         modelOptions.length === 0,
       emptyLabel: "No chat models",
     }),
-    [isPreparingModel, isRequesting, modelLoading, modelOptions, selectedModelId]
+    [
+      handleModelPickerChange,
+      isSessionBootstrapping,
+      isSessionBusy,
+      modelLoading,
+      modelOptions,
+      pendingModelSwitchId,
+      selectedModelId,
+    ]
   )
   const latestUserPrompt = getChatMessageTextContent(latestUserMessage?.message).trim()
 
   usePageHeader(PAGE_HEADER_META.chat)
-  usePageHeaderModelPicker(headerModelPicker)
+  usePageHeaderControl(headerModelPicker)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({
@@ -804,34 +578,19 @@ function Chat() {
 
   const setConversationLabelIfNeeded = useCallback(
     (conversationKey: string, prompt: string) => {
-      let nextLabel = ""
-      let didUpdateLabel = false
-      const nextList = conversationList.map((item) => {
-        const label = item.label ?? "New chat"
+      const conversation = conversationList.find((item) => item.key === conversationKey)
+      const label = conversation?.label ?? "New chat"
 
-        if (item.key !== conversationKey) {
-          return item
-        }
-
-        if (label !== "New chat" && label !== "New Conversation") {
-          return item
-        }
-
-        nextLabel = createConversationLabel(prompt)
-        didUpdateLabel = true
-        return {
-          ...item,
-          label: nextLabel,
-        }
-      })
-
-      if (didUpdateLabel && nextLabel) {
-        setStoredSessionLabel(conversationKey, nextLabel)
+      if (label !== "New chat" && label !== "New Conversation") {
+        return
       }
 
-      setConversations(nextList)
+      const nextLabel = createConversationLabel(prompt)
+      if (nextLabel) {
+        setSessionLabel(conversationKey, nextLabel)
+      }
     },
-    [conversationList, setConversations]
+    [conversationList, setSessionLabel]
   )
 
   const handleCreateConversation = useCallback(async () => {
@@ -858,46 +617,9 @@ function Chat() {
         return
       }
 
-      try {
-        await deleteSessionMutation.mutateAsync({
-          params: {
-            path: { id: conversationKey },
-          },
-        })
-      } catch (error) {
-        toast.error("Failed to delete chat session.", {
-          description: getErrorDescription(error),
-        })
-        return
-      }
-
-      removeStoredSessionLabel(conversationKey)
-      clearConversationCache(conversationKey)
-
-      const nextList = conversationList.filter((item) => item.key !== conversationKey)
-      setConversations(nextList)
-
-      if (nextList.length === 0) {
-        setCurConversation("")
-        await createEmptySession({ select: true })
-        return
-      }
-
-      if (conversationKey === curConversation) {
-        setCurConversation(nextList[0]?.key ?? "")
-      }
-
-      void refetchSessions()
+      await deleteConversationSession(conversationKey)
     },
-    [
-      conversationList,
-      createEmptySession,
-      curConversation,
-      deleteSessionMutation,
-      isSessionBusy,
-      refetchSessions,
-      setConversations,
-    ]
+    [deleteConversationSession, isSessionBusy]
   )
 
   const handleGenerateImage = useCallback(() => {
@@ -939,7 +661,7 @@ function Chat() {
     <XProvider locale={locale}>
       <ChatContext.Provider value={{ onReload }}>
         <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--shell-card)]">
-          <div className="pointer-events-none absolute right-4 top-4 z-20 hidden xl:block">
+          <div className="pointer-events-none absolute right-4 top-4 z-20 hidden lg:block">
             <div className="pointer-events-auto">
               <ChatSessionSummaryCard
                 items={sessionSummaryItems}
@@ -950,7 +672,7 @@ function Chat() {
             </div>
           </div>
 
-          <div className="mx-auto w-full max-w-[768px] px-6 pb-6 pt-12 md:px-8 xl:px-0">
+          <div className="mx-auto w-full max-w-[768px] px-6 pb-6 pt-12 md:px-8 lg:px-0">
             <div className="space-y-2">
               <h1 className="text-[clamp(2.75rem,6vw,4rem)] font-semibold tracking-[-0.055em] text-foreground">
                 {greeting}
@@ -961,7 +683,7 @@ function Chat() {
             </div>
           </div>
 
-          <div className="mx-auto block w-full max-w-[768px] px-6 pb-6 md:px-8 xl:hidden xl:px-0">
+          <div className="mx-auto block w-full max-w-[768px] px-6 pb-6 md:px-8 lg:hidden lg:px-0">
             <ChatSessionSummaryCard
               items={sessionSummaryItems}
               onManageSessions={() => setIsSessionSheetOpen(true)}
@@ -971,7 +693,7 @@ function Chat() {
           </div>
 
           <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-24 pt-2 md:px-8 md:pb-28 xl:px-0">
+            <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-24 pt-2 md:px-8 md:pb-28 lg:px-0">
               {isSessionBootstrapping || (isHistoryLoading && safeMessages.length === 0) ? (
                 <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
                   <div className="max-w-md space-y-3">
@@ -1013,8 +735,7 @@ function Chat() {
           </ScrollArea>
 
           <div className="relative shrink-0 bg-[var(--shell-card)]">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-20 -translate-y-full bg-gradient-to-b from-transparent via-[color-mix(in_oklab,var(--shell-card)_92%,transparent)] to-[var(--shell-card)]" />
-            <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 xl:px-0">
+            <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 lg:px-0">
               <ChatComposer
                 value={draft}
                 onValueChange={setDraft}
@@ -1047,6 +768,79 @@ function Chat() {
             }}
             onDelete={handleDeleteConversation}
           />
+
+          <Dialog
+            open={Boolean(pendingModelSwitchId)}
+            onOpenChange={(open) => {
+              if (!open) {
+                closePendingModelSwitch()
+              }
+            }}
+          >
+            <DialogContent className="max-w-xl" showCloseButton={!isCreatingSession}>
+              <DialogHeader className="space-y-3 text-left">
+                <DialogTitle>Switch model for this conversation?</DialogTitle>
+                <DialogDescription>
+                  Choose whether the new model should keep using this session history or start from
+                  a clean session.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-2 text-sm leading-6 text-muted-foreground">
+                <p>
+                  You are switching from <strong>{selectedModel?.label ?? "the current model"}</strong> to{" "}
+                  <strong>{pendingModelSwitch?.label ?? pendingModelSwitchId ?? "the selected model"}</strong>.
+                </p>
+                <p>
+                  <strong>{currentConversationLabel}</strong> already has {safeMessages.length}{" "}
+                  {safeMessages.length === 1 ? "message" : "messages"}.
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
+                  <p className="text-sm font-medium text-foreground">Keep current session</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    The new model will continue from this conversation and see the existing message
+                    history.
+                  </p>
+                </div>
+                <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
+                  <p className="text-sm font-medium text-foreground">Create new session</p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    Start with a clean session and keep the previous conversation attached to the old
+                    model.
+                  </p>
+                </div>
+              </div>
+
+              <DialogFooter className="gap-2">
+                <Button
+                  variant="outline"
+                  onClick={closePendingModelSwitch}
+                  disabled={isCreatingSession}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={handleKeepSessionOnModelSwitch}
+                  disabled={isCreatingSession}
+                >
+                  Keep current session
+                </Button>
+                <Button
+                  onClick={() => void handleCreateSessionOnModelSwitch()}
+                  disabled={isCreatingSession}
+                >
+                  {isCreatingSession ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : null}
+                  Create new session
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
         </div>
       </ChatContext.Provider>
     </XProvider>
