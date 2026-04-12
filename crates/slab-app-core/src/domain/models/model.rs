@@ -1,9 +1,11 @@
 use chrono::{DateTime, Utc};
+use std::collections::BTreeMap;
+use std::fmt;
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use slab_types::{Capability, RuntimeBackendId};
-use std::fmt;
-use std::str::FromStr;
 
 // ---------------------------------------------------------------------------
 // Status enum
@@ -267,6 +269,8 @@ pub struct StoredModelConfig {
     pub spec: ModelSpec,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub runtime_presets: Option<RuntimePresets>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub materialized_artifacts: BTreeMap<String, String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub pack_selection: Option<ModelPackSelection>,
 }
@@ -563,6 +567,7 @@ impl From<UnifiedModel> for StoredModelConfig {
             status: Some(model.status),
             spec: model.spec,
             runtime_presets: model.runtime_presets,
+            materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
         }
     }
@@ -757,6 +762,7 @@ mod tests {
                 ..ModelSpec::default()
             },
             runtime_presets: None,
+            materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
         })
         .expect_err("future schema version should fail");
@@ -781,6 +787,7 @@ mod tests {
                 ..ModelSpec::default()
             },
             runtime_presets: None,
+            materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
         })
         .expect_err("future policy version should fail");

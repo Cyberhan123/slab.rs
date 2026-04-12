@@ -735,7 +735,6 @@ function Chat() {
           </ScrollArea>
 
           <div className="relative shrink-0 bg-[var(--shell-card)]">
-            <div className="pointer-events-none absolute inset-x-0 top-0 h-20 -translate-y-full bg-gradient-to-b from-transparent via-[color-mix(in_oklab,var(--shell-card)_92%,transparent)] to-[var(--shell-card)]" />
             <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 lg:px-0">
               <ChatComposer
                 value={draft}

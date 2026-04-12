@@ -273,10 +273,38 @@ const mergeContinuationContent = (prefix: string, generated: string): string => 
     return `${prefix}${generated}`;
 };
 
-const getResponseRequestId = (response: Response): string | null => {
-    const requestId = response.headers.get('x-request-id') ?? response.headers.get('x-requestid');
+const getResponseRequestId = (source?: Response | Headers | null): string | null => {
+    const headers = source instanceof Response ? source.headers : source;
+    const requestId = headers?.get('x-request-id')
+        ?? headers?.get('x-requestid')
+        ?? headers?.get('x-trace-id');
     const trimmed = requestId?.trim();
     return trimmed ? trimmed : null;
+};
+
+const extractStreamChunkError = (
+    chunk: Partial<Record<SSEFields, XModelResponse>> | undefined,
+): ChatApiError | null => {
+    const chunkData = (chunk as { data?: unknown } | undefined)?.data;
+    if (isChatApiErrorResponse(chunkData)) {
+        return chunkData.error;
+    }
+
+    if (isChatApiErrorResponse(chunk)) {
+        return chunk.error;
+    }
+
+    const rawData = typeof chunkData === 'string' ? chunkData.trim() : '';
+    if (!rawData || rawData === '[DONE]') {
+        return null;
+    }
+
+    try {
+        const payload = JSON.parse(rawData) as unknown;
+        return isChatApiErrorResponse(payload) ? payload.error : null;
+    } catch {
+        return null;
+    }
 };
 
 const buildChatTransportError = async (response: Response): Promise<ChatTransportError> => {
@@ -575,6 +603,27 @@ export const providerFactory = (conversationKey: string, model: string) => {
                     `${API_BASE_URL}/v1/chat/completions`,
                     {
                         manual: true,
+                        callbacks: {
+                            onUpdate: (chunk, responseHeaders) => {
+                                // Local runtime errors can arrive as in-band SSE chunks with no `choices`.
+                                const error = extractStreamChunkError(chunk);
+                                if (!error) {
+                                    return;
+                                }
+
+                                const request_id = getResponseRequestId(responseHeaders);
+                                throw new ChatTransportError({
+                                    message: error.message,
+                                    transport_status: 200,
+                                    code: error.code ?? undefined,
+                                    param: error.param ?? undefined,
+                                    request_id,
+                                    error_type: error.type,
+                                });
+                            },
+                            onSuccess: () => { },
+                            onError: () => { },
+                        },
                         middlewares: {
                             onResponse: adaptChatTransportResponse,
                         },

@@ -39,6 +39,7 @@ enum GeneratedChatOutput {
 struct StreamedAssistantContent {
     content: String,
     reasoning: String,
+    usage: Option<TextGenerationUsage>,
     saw_error: bool,
 }
 
@@ -290,6 +291,10 @@ fn extract_text_from_chunk_delta<'a>(value: &'a Value, field: &str) -> Option<&'
         .find(|value| !value.is_empty())
 }
 
+fn extract_usage_from_chunk(value: &Value) -> Option<TextGenerationUsage> {
+    serde_json::from_value(value.get("usage")?.clone()).ok()
+}
+
 fn capture_streamed_assistant_chunk(data: &str, assistant: &Arc<Mutex<StreamedAssistantContent>>) {
     if data.trim().is_empty() || data.trim() == "[DONE]" {
         return;
@@ -303,6 +308,9 @@ fn capture_streamed_assistant_chunk(data: &str, assistant: &Arc<Mutex<StreamedAs
     if payload.get("error").is_some() {
         assistant.saw_error = true;
         return;
+    }
+    if let Some(usage) = extract_usage_from_chunk(&payload) {
+        assistant.usage = Some(usage);
     }
     if let Some(reasoning) = extract_text_from_chunk_delta(&payload, "reasoning_content") {
         assistant.reasoning.push_str(reasoning);
@@ -358,13 +366,14 @@ fn with_stream_session_persistence(
 
     let persist_target = Arc::clone(&assistant);
     let persist = stream::once(async move {
-        let (message, saw_error, content_len, reasoning_len) = {
+        let (message, saw_error, content_len, reasoning_len, usage) = {
             let assistant = persist_target.lock().expect("assistant stream accumulator poisoned");
             (
                 build_streamed_assistant_message(&assistant),
                 assistant.saw_error,
                 assistant.content.trim().len(),
                 assistant.reasoning.trim().len(),
+                assistant.usage.clone(),
             )
         };
 
@@ -373,6 +382,10 @@ fn with_stream_session_persistence(
                 session_id = %session_id,
                 content_len,
                 reasoning_len,
+                prompt_tokens = usage.as_ref().map(|value| value.prompt_tokens).unwrap_or(0),
+                completion_tokens = usage.as_ref().map(|value| value.completion_tokens).unwrap_or(0),
+                total_tokens = usage.as_ref().map(|value| value.total_tokens).unwrap_or(0),
+                usage_estimated = usage.as_ref().map(|value| value.estimated).unwrap_or(true),
                 "chat stream completed without visible assistant output"
             );
         }
@@ -722,7 +735,10 @@ async fn create_chat_completion_with_state(
                 model = %resolved_model,
                 route = if route_to_cloud { "cloud" } else { "local" },
                 finish_reason = generated.finish_reason.as_deref().unwrap_or("unknown"),
+                prompt_tokens = generated.usage.as_ref().map(|value| value.prompt_tokens).unwrap_or(0),
                 completion_tokens = generated.tokens_used.unwrap_or(0),
+                total_tokens = generated.usage.as_ref().map(|value| value.total_tokens).unwrap_or(0),
+                usage_estimated = generated.usage.as_ref().map(|value| value.estimated).unwrap_or(true),
                 message_count = resolved_messages.len(),
                 "chat completion returned without visible assistant output"
             );

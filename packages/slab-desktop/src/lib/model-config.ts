@@ -34,6 +34,7 @@ export function useModelConfigDocumentQuery(id: string | null, options?: { enabl
     data: ModelConfigDocumentResponse | undefined;
     error: unknown;
     isLoading: boolean;
+    refetch: () => Promise<{ data: ModelConfigDocumentResponse | undefined }>;
   };
 }
 

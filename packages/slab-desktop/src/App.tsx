@@ -6,13 +6,12 @@ import { ErrorBoundary } from "@/components/error-boundary";
 import { Toaster } from "@slab/components/sonner";
 import { TooltipProvider } from "@slab/components/tooltip";
 import api, { queryClient } from "@/lib/api";
-import { TASK_POLL_INTERVAL_MS } from "@/pages/setup/const";
 import AppRoutes from "@/routes";
 
 /**
- * Checks whether the one-time setup wizard has been completed on every
- * navigation to a non-setup route. Redirects to /setup only when the server
- * responds and reports `initialized: false`.
+ * Checks whether the one-time setup wizard has been completed the first time
+ * the shell needs it. Redirects to /setup only when the server responds and
+ * reports `initialized: false`.
  *
  * The desktop host now spawns `slab-server` asynchronously, so transient
  * transport errors during boot should not be treated as a setup signal.
@@ -28,8 +27,10 @@ function SetupGuard() {
     undefined,
     {
       enabled: !isSetupRoute,
-      refetchInterval: isSetupRoute ? false : TASK_POLL_INTERVAL_MS,
-      refetchIntervalInBackground: true,
+      staleTime: Number.POSITIVE_INFINITY,
+      refetchOnMount: false,
+      refetchOnReconnect: false,
+      refetchOnWindowFocus: false,
       retry: false,
     }
   );

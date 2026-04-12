@@ -8,6 +8,10 @@ import useIsTauri from '@/hooks/use-tauri';
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api from '@/lib/api';
 import { modelSupportsCapability, toCatalogModelList, type CatalogModel } from '@/lib/api/models';
+import {
+  useModelConfigDocumentQuery,
+  type ModelConfigDocumentResponse,
+} from '@/lib/model-config';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { HEADER_SELECT_KEYS } from '@/layouts/header-controls';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
@@ -18,13 +22,49 @@ import {
   type PreparingStage,
 } from '../const';
 
+const BUNDLED_VAD_MODEL_ID = '__bundled_vad__';
+
+type BundledVadArtifact = {
+  id: string;
+  label: string;
+  value: string;
+};
+
+function findBundledVadArtifact(
+  document: ModelConfigDocumentResponse | undefined,
+): BundledVadArtifact | null {
+  const artifacts = document?.source_summary?.artifacts;
+  if (!Array.isArray(artifacts) || artifacts.length === 0) {
+    return null;
+  }
+
+  const exactMatch = artifacts.find((artifact) => {
+    const normalizedId = artifact.id.trim().toLowerCase();
+    return normalizedId === 'vad' || normalizedId === 'audio_vad';
+  });
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const fuzzyMatch = artifacts.find((artifact) => {
+    const normalizedId = artifact.id.trim().toLowerCase();
+    return (
+      normalizedId.endsWith('/vad') ||
+      normalizedId.endsWith('_vad') ||
+      normalizedId.includes('vad')
+    );
+  });
+
+  return fuzzyMatch ?? null;
+}
+
 export function useAudio() {
   const navigate = useNavigate();
   const isTauri = useIsTauri();
   usePageHeader(PAGE_HEADER_META.audio);
 
   const [file, setFile] = useState<SelectedFile | null>(null);
-  const [enableVad, setEnableVad] = useState(false);
+  const [enableVad, setEnableVad] = useState(true);
   const [selectedVadModelId, setSelectedVadModelId] = useState('');
   const [vadThreshold, setVadThreshold] = useState('');
   const [vadMinSpeechDurationMs, setVadMinSpeechDurationMs] = useState('');
@@ -114,9 +154,24 @@ export function useAudio() {
     () => whisperTranscribeModels.find((model) => model.id === selectedModelId),
     [whisperTranscribeModels, selectedModelId],
   );
+  const {
+    data: selectedModelConfigDocument,
+    refetch: refetchSelectedModelConfigDocument,
+  } = useModelConfigDocumentQuery(selectedModelId || null, {
+    enabled: isTauri && Boolean(selectedModelId),
+  });
+  const bundledVadArtifact = useMemo(
+    () => findBundledVadArtifact(selectedModelConfigDocument),
+    [selectedModelConfigDocument],
+  );
+  const hasBundledVad = Boolean(bundledVadArtifact?.value);
+  const isUsingBundledVad = enableVad && selectedVadModelId === BUNDLED_VAD_MODEL_ID && hasBundledVad;
 
   const selectedVadModel = useMemo(
-    () => whisperVadModels.find((model) => model.id === selectedVadModelId),
+    () =>
+      selectedVadModelId === BUNDLED_VAD_MODEL_ID
+        ? undefined
+        : whisperVadModels.find((model) => model.id === selectedVadModelId),
     [whisperVadModels, selectedVadModelId],
   );
 
@@ -151,6 +206,20 @@ export function useAudio() {
       return;
     }
 
+    if (hasBundledVad) {
+      if (!selectedVadModelId) {
+        setSelectedVadModelId(BUNDLED_VAD_MODEL_ID);
+        return;
+      }
+      if (
+        selectedVadModelId !== BUNDLED_VAD_MODEL_ID &&
+        !whisperVadModels.some((model) => model.id === selectedVadModelId)
+      ) {
+        setSelectedVadModelId(BUNDLED_VAD_MODEL_ID);
+      }
+      return;
+    }
+
     if (whisperVadModels.length === 0) {
       setSelectedVadModelId('');
       return;
@@ -160,7 +229,7 @@ export function useAudio() {
     if (!selectedVadModelId || !exists) {
       setSelectedVadModelId(whisperVadModels[0].id);
     }
-  }, [enableVad, whisperVadModels, selectedVadModelId]);
+  }, [enableVad, hasBundledVad, selectedVadModelId, whisperVadModels]);
 
   const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
@@ -314,30 +383,52 @@ export function useAudio() {
     return model.display_name;
   };
 
-  const prepareVadSettings = async (): Promise<{ settings: TranscribeVadSettings; modelName: string }> => {
-    if (!selectedVadModelId) {
-      throw new Error('Please select a dedicated VAD model.');
+  const prepareVadSettings = async (
+    modelConfigDocument: ModelConfigDocumentResponse | undefined,
+  ): Promise<{ settings: TranscribeVadSettings; modelName: string }> => {
+    const bundledArtifact = findBundledVadArtifact(modelConfigDocument);
+
+    let modelPath: string | null = null;
+    let modelName = 'Bundled VAD';
+
+    if (selectedVadModelId === BUNDLED_VAD_MODEL_ID) {
+      modelPath = bundledArtifact?.value?.trim() ?? null;
+      modelName = bundledArtifact?.label?.trim() || 'Bundled VAD';
+      if (!modelPath) {
+        throw new Error('The current Whisper model does not expose a bundled VAD file.');
+      }
+    } else {
+      if (!selectedVadModelId) {
+        throw new Error('Please select a dedicated VAD model.');
+      }
+
+      let model = whisperVadModels.find((item) => item.id === selectedVadModelId);
+      if (!model) {
+        model = await refreshCatalogAndFindModel(selectedVadModelId);
+      }
+      if (!model) {
+        throw new Error('Selected VAD model no longer exists in catalog.');
+      }
+      if (!modelSupportsCapability(model, 'audio_vad')) {
+        throw new Error('Selected model is not a dedicated VAD model.');
+      }
+
+      const preparedModel = await ensureDownloadedModelPath(selectedVadModelId);
+      modelPath = preparedModel.modelPath;
+      modelName = model.display_name;
+      if (preparedModel.downloadedNow) {
+        toast.success(`Downloaded VAD model ${model.display_name}`);
+      }
     }
 
-    let model = whisperVadModels.find((item) => item.id === selectedVadModelId);
-    if (!model) {
-      model = await refreshCatalogAndFindModel(selectedVadModelId);
-    }
-    if (!model) {
-      throw new Error('Selected VAD model no longer exists in catalog.');
-    }
-    if (!modelSupportsCapability(model, 'audio_vad')) {
-      throw new Error('Selected model is not a dedicated VAD model.');
-    }
-
-    const { modelPath, downloadedNow } = await ensureDownloadedModelPath(selectedVadModelId);
-    if (downloadedNow) {
-      toast.success(`Downloaded VAD model ${model.display_name}`);
+    const resolvedModelPath = modelPath?.trim();
+    if (!resolvedModelPath) {
+      throw new Error('Unable to resolve a local VAD model path for transcription.');
     }
 
     const settings: TranscribeVadSettings = {
       enabled: true,
-      model_path: modelPath,
+      model_path: resolvedModelPath,
     };
 
     const threshold = parseOptionalFloat(vadThreshold, 'VAD threshold', { min: 0, max: 1 });
@@ -363,8 +454,7 @@ export function useAudio() {
     if (maxSpeechDurationS !== undefined) settings.max_speech_duration_s = maxSpeechDurationS;
     if (speechPadMs !== undefined) settings.speech_pad_ms = speechPadMs;
     if (samplesOverlap !== undefined) settings.samples_overlap = samplesOverlap;
-
-    return { settings, modelName: model.display_name };
+    return { settings, modelName };
   };
 
   const prepareDecodeOptions = (): TranscribeOptions['decode'] | undefined => {
@@ -441,12 +531,15 @@ export function useAudio() {
       setTaskId(null);
       setPreparingStage('prepare');
       const modelName = await prepareSelectedModel();
+      const refreshedModelConfigDocument = selectedModelId
+        ? (await refetchSelectedModelConfigDocument()).data ?? selectedModelConfigDocument
+        : selectedModelConfigDocument;
       let vadDescription = 'VAD: off';
       let decodeDescription = 'Decode: default';
       let transcribeOptions: TranscribeOptions | undefined;
 
       if (enableVad) {
-        const preparedVad = await prepareVadSettings();
+        const preparedVad = await prepareVadSettings(refreshedModelConfigDocument);
         transcribeOptions = { vad: preparedVad.settings };
         vadDescription = `VAD: on (${preparedVad.modelName})`;
       }
@@ -483,14 +576,20 @@ export function useAudio() {
     Boolean(file) &&
     Boolean(selectedModelId) &&
     !isBusy &&
-    (!enableVad || Boolean(selectedVadModelId));
+    (!enableVad || hasBundledVad || Boolean(selectedVadModelId));
 
   const previewRows = [
     { label: 'Model', value: selectedModel?.display_name ?? 'Not selected', accent: Boolean(selectedModel), chip: true },
     { label: 'Source', value: file?.name ?? 'Awaiting upload', accent: Boolean(file), chip: false },
     {
       label: 'VAD Mode',
-      value: enableVad ? (selectedVadModel?.display_name ? `Active (${selectedVadModel.display_name})` : 'Active') : 'Inactive',
+      value: enableVad
+        ? isUsingBundledVad
+          ? `Active (${bundledVadArtifact?.label ?? 'Bundled VAD'})`
+          : selectedVadModel?.display_name
+            ? `Active (${selectedVadModel.display_name})`
+            : 'Active'
+        : 'Inactive',
       accent: enableVad,
       chip: false,
     },
@@ -498,6 +597,7 @@ export function useAudio() {
   ];
 
   return {
+    bundledVadLabel: bundledVadArtifact?.label ?? 'Bundled VAD',
     canStartTranscription,
     catalogModelsError,
     catalogModelsLoading,
@@ -522,8 +622,10 @@ export function useAudio() {
     handleFileChange,
     handleTauriFileSelect,
     handleTranscribe,
+    hasBundledVad,
     isBusy,
     isTauri,
+    isUsingBundledVad,
     navigate,
     preparingStage,
     previewRows,
