@@ -2653,13 +2653,8 @@ async fn load_model_with_state(
     } else {
         resolve_model_workers(&state, resolved_target.backend_id, None).await?
     };
-    let (context_length, context_source) = if let Some(context_length) =
-        resolved_target.pack_load_defaults.as_ref().and_then(|defaults| defaults.context_length)
-    {
-        (context_length, "model_pack")
-    } else {
-        resolve_llama_context_length(&state, resolved_target.backend_id).await?
-    };
+    let (context_length, context_source) =
+        resolve_llama_context_length(&state, resolved_target.backend_id).await?;
     let diffusion = if let Some(defaults) = resolved_target.pack_load_defaults.as_ref() {
         model_packs::merge_diffusion_load_defaults(
             defaults.diffusion.clone(),

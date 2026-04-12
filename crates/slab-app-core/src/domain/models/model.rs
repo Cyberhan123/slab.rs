@@ -675,6 +675,7 @@ mod tests {
     use chrono::Utc;
     use serde_json::json;
     use slab_types::Capability;
+    use std::collections::BTreeMap;
 
     #[test]
     fn legacy_stored_model_config_defaults_versions_during_deserialization() {

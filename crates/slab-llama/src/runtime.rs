@@ -529,6 +529,19 @@ impl InferenceWorkerState {
         session.last_token = None;
     }
 
+    fn describe_stream_error(&self, error: &LlamaError, batch_tokens: usize) -> String {
+        match error {
+            LlamaError::DecodeFailed(1) => {
+                let active_sessions = self.sessions.values().filter(|session| session.stream_tx.is_some()).count();
+                format!(
+                    "llama decode could not find a KV slot for the current batch (context_length={}, batch_tokens={}, active_sessions={}); this usually means the loaded context is too small or multiple sessions have exhausted the KV cache",
+                    self.context_length, batch_tokens, active_sessions
+                )
+            }
+            _ => error.to_string(),
+        }
+    }
+
     fn ensure_window_capacity(
         ctx: &mut LlamaContext,
         can_shift: bool,
@@ -837,7 +850,7 @@ impl InferenceWorkerState {
         }
 
         if let Err(error) = self.ctx.decode(&mut batch) {
-            let message = error.to_string();
+            let message = self.describe_stream_error(&error, batch.n_tokens() as usize);
             for session_id in session_ids {
                 if let Some(session) = self.sessions.get_mut(&session_id)
                     && session.stream_tx.is_some()
