@@ -21,9 +21,10 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - platform: linux
-            os: ubuntu-latest
-            artifact_suffix: linux-x86_64
+          # TODO: we need to support liunux
+          # - platform: linux
+          #   os: ubuntu-latest
+          #   artifact_suffix: linux-x86_64
           - platform: windows
             os: windows-latest
             artifact_suffix: windows-x86_64
@@ -33,6 +34,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          lfs: true
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
