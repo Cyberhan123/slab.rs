@@ -59,9 +59,9 @@ dependencies = [
 
 [[package]]
 name = "all-smi"
-version = "0.17.6"
+version = "0.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09d4684e919e8fcf2b92c79edc75b7a1d682967593b93a73723c382ad784a7c2"
+checksum = "d38fa92c7d092b5b79d935ae07f73612987b50c70a907344ebf562883af1809d"
 dependencies = [
  "all-smi-luwen-core",
  "all-smi-luwen-if",
