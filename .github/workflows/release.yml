@@ -2,13 +2,9 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - release
   workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g. v0.1.0)'
-        required: true
 
 permissions:
   contents: write
@@ -18,87 +14,8 @@ env:
   RUST_BACKTRACE: 1
 
 jobs:
-  # ── Build slab-server and slab-runtime for each platform ──────────────────
-  build-server:
-    name: Build server binaries (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-          - os: macos-latest
-            target: aarch64-apple-darwin
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust stable
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.target }}
-
-      - name: Cache Cargo
-        uses: Swatinem/rust-cache@v2
-        with:
-          key: release-${{ matrix.target }}
-
-      - name: Cache vendored native artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            vendor/ggml
-            vendor/llama
-            vendor/whisper
-            vendor/diffusion
-          key: release-${{ matrix.target }}-vendor-${{ hashFiles('vendor/slab-artifacts.toml') }}
-          restore-keys: |
-            release-${{ matrix.target }}-vendor-
-
-      - name: Install Linux system deps
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get update -y
-          sudo apt-get install -y \
-            libgtk-3-dev \
-            libwebkit2gtk-4.1-dev \
-            libayatana-appindicator3-dev \
-            librsvg2-dev \
-            libssl-dev \
-            pkg-config
-
-      - name: Build slab-server (release)
-        run: cargo build --release -p slab-server --target ${{ matrix.target }}
-
-      - name: Build slab-runtime (release)
-        run: cargo build --release -p slab-runtime --target ${{ matrix.target }}
-
-      - name: Prepare sidecar artifacts for Tauri
-        shell: pwsh
-        run: |
-          $ext = if ('${{ runner.os }}' -eq 'Windows') { '.exe' } else { '' }
-          $serverSrc = "target/${{ matrix.target }}/release/slab-server$ext"
-          $runtimeSrc = "target/${{ matrix.target }}/release/slab-runtime$ext"
-          $outDir = "dist-sidecars"
-
-          New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-          Copy-Item $serverSrc "$outDir/slab-server-${{ matrix.target }}$ext"
-          Copy-Item $runtimeSrc "$outDir/slab-runtime-${{ matrix.target }}$ext"
-
-      - name: Upload server binary
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries-${{ matrix.target }}
-          path: |
-            dist-sidecars/*
-          retention-days: 1
-
-  # ── Tauri desktop bundle ────────────────────────────────────────────────────
-  tauri-build:
-    name: Tauri bundle (${{ matrix.platform }})
-    needs: build-server
+  release:
+    name: cargo make release (${{ matrix.platform }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -106,15 +23,12 @@ jobs:
         include:
           - platform: linux
             os: ubuntu-latest
-            target: x86_64-unknown-linux-gnu
             artifact_suffix: linux-x86_64
           - platform: windows
             os: windows-latest
-            target: x86_64-pc-windows-msvc
             artifact_suffix: windows-x86_64
           - platform: macos
             os: macos-latest
-            target: aarch64-apple-darwin
             artifact_suffix: macos-aarch64
 
     steps:
@@ -122,13 +36,19 @@ jobs:
 
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
+
+      - name: Install cargo-make
+        uses: taiki-e/install-action@v2
         with:
-          targets: ${{ matrix.target }}
+          tool: cargo-make
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
 
       - name: Cache Cargo
         uses: Swatinem/rust-cache@v2
         with:
-          key: tauri-${{ matrix.target }}
+          key: release-${{ matrix.platform }}
 
       - name: Install Linux system deps
         if: runner.os == 'Linux'
@@ -142,84 +62,20 @@ jobs:
             libssl-dev \
             pkg-config
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
-
-      - name: Cache Bun install artifacts
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.bun/install/cache
-            ~/.cache/bun/install/cache
-            ~/Library/Caches/Bun/install/cache
-            slab-app/node_modules
-          key: ${{ runner.os }}-bun-${{ hashFiles('slab-app/bun.lock', 'slab-app/package.json') }}
-          restore-keys: |
-            ${{ runner.os }}-bun-
-
-      - name: Download server binaries
-        uses: actions/download-artifact@v4
-        with:
-          name: binaries-${{ matrix.target }}
-          path: slab-app/src-tauri/binaries/
-
-      - name: Verify sidecar binaries (Windows)
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $server = "slab-app/src-tauri/binaries/slab-server-${{ matrix.target }}.exe"
-          $runtime = "slab-app/src-tauri/binaries/slab-runtime-${{ matrix.target }}.exe"
-
-          if (!(Test-Path $server)) { throw "Missing sidecar: $server" }
-          if (!(Test-Path $runtime)) { throw "Missing sidecar: $runtime" }
-
-      - name: Verify sidecar binaries (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          test -f slab-app/src-tauri/binaries/slab-server-${{ matrix.target }}
-          test -f slab-app/src-tauri/binaries/slab-runtime-${{ matrix.target }}
-
-      - name: Mark binaries executable (Unix)
-        if: runner.os != 'Windows'
-        run: |
-          chmod +x slab-app/src-tauri/binaries/slab-server-${{ matrix.target }}
-          chmod +x slab-app/src-tauri/binaries/slab-runtime-${{ matrix.target }}
-
       - name: Install frontend dependencies
-        working-directory: slab-app
         run: bun install --frozen-lockfile
 
-      - name: Build Tauri app
-        working-directory: slab-app
-        run: bun run tauri build --target ${{ matrix.target }}
+      - name: Build release via cargo-make
+        run: cargo make release
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
 
-      - name: Upload Tauri bundle artifacts
+      - name: Upload release bundle artifacts
         uses: actions/upload-artifact@v4
         with:
           name: slab-${{ matrix.artifact_suffix }}
           path: |
-            slab-app/src-tauri/target/${{ matrix.target }}/release/bundle/
+            bin/slab-app/src-tauri/target/release/bundle/
           retention-days: 7
-
-  # ── Create GitHub Release ─────────────────────────────────────────────────
-  create-release:
-    name: Create GitHub Release
-    needs: tauri-build
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: release-artifacts/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release-artifacts/**/*
-          generate_release_notes: true
+          if-no-files-found: error
