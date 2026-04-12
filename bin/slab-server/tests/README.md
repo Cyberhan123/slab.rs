@@ -13,8 +13,9 @@ Vitest-based migration tests.
 
 - Unit migration tests: `unit/**/*.unit.test.ts`
 - Integration tests: `integration/**/*.integration.test.ts`
-- Default target server: `http://127.0.0.1:3000`
-- Override base URL with `SLAB_SERVER_BASE_URL`
+- Unit tests self-start an isolated `slab-server` with temp settings/db/model dirs
+- Integration tests target `http://127.0.0.1:3000` by default
+- Override integration target base URL with `SLAB_SERVER_BASE_URL`
 
 Run unit tests:
 
@@ -41,3 +42,11 @@ bun run test:unit:watch
 cd bin/slab-server/tests
 bun run test:integration:watch
 ```
+
+## Migration status
+
+- `unit/server-basics.unit.test.ts` now covers the useful legacy checks from
+  `unit/test_basic.py` and `unit/test_security.py` against the current
+  `slab-server` API surface.
+- Remaining Python files are legacy compatibility tests and should be migrated
+  selectively instead of copied 1:1 when their covered routes still matter.
