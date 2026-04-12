@@ -401,7 +401,7 @@ impl Default for LlamaRuntimeLeafConfig {
     fn default() -> Self {
         Self {
             enabled: true,
-            context_length: None,
+            context_length: Some(2048),
             source: SourceConfig::default(),
             logging: LoggingOverrideConfig::default(),
             capacity: CapacityOverrideConfig::default(),

@@ -828,6 +828,7 @@ fn map_model_pack_error(error: ModelPackError) -> AppCoreError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::io::Write;
     use std::path::Path;
 

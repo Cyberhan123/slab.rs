@@ -394,7 +394,7 @@ fn legacy_settings_schema() -> RawSettingsSchema {
                             legacy_integer_property(
                                 PMID.runtime.llama.context_length().into_string(),
                                 "Llama Context Length",
-                                Value::Null,
+                                json!(2048),
                                 Some(1),
                                 None,
                                 20,
@@ -1376,12 +1376,12 @@ mod tests {
     }
 
     #[test]
-    fn integer_default_can_be_null() {
+    fn llama_context_length_defaults_to_2048() {
         let schema = embedded_settings_schema().expect("schema");
         let definition =
             schema.property(PMID.runtime.llama.context_length().as_str()).expect("context length");
 
-        assert!(definition.default_value().is_null());
+        assert_eq!(definition.default_value(), &json!(2048));
     }
 
     #[test]
