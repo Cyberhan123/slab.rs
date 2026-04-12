@@ -2,6 +2,8 @@
 
 Slab is a local-first machine learning desktop application built with Rust and Tauri. It provides a unified interface for running language, speech, and image generation models entirely on-device, without requiring cloud connectivity.
 
+> The project is under development and stability and compatibility are not guaranteed.
+
 ## Features
 
 - Local language model inference (LLaMA-based) with chat and completion APIs
