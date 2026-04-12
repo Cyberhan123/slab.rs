@@ -68,7 +68,7 @@ zip         = { workspace = true }
 dirs-next   = "2.0.0"
 jsonschema  = { version = "0.46.0", default-features = false }
 ffmpeg-sidecar = { workspace = true, features = ["download_ffmpeg"] }
-all-smi = "0.17"
+all-smi = "0.20"
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 validator = { version = "0.20", features = ["derive"] }
 
