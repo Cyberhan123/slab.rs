@@ -19,7 +19,6 @@ env:
 jobs:
   release:
     name: cargo make release (${{ matrix.platform }})
-    if: github.ref_type == 'tag'
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
