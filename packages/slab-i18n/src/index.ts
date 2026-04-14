@@ -10,10 +10,17 @@ export const APP_LANGUAGE_STORAGE_KEY = 'slab.ui.language';
 
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 export type AppLanguagePreference = (typeof APP_LANGUAGE_PREFERENCES)[number];
+export const DEFAULT_CHAT_LABELS = [
+  enUS.pages.chat.runtime.newChat,
+  enUS.pages.chat.runtime.newConversation,
+  zhCN.pages.chat.runtime.newChat,
+  zhCN.pages.chat.runtime.newConversation,
+] as const;
 
 const DEFAULT_LANGUAGE: SupportedLanguage = 'en-US';
 const AUTO_LANGUAGE = 'auto' as const;
 const LANGUAGE_LOOKUP = new Set<string>(SUPPORTED_LANGUAGES);
+const SIMPLIFIED_CHINESE_PATTERNS = [/^zh$/i, /^zh[-_](cn|sg|hans)$/i];
 
 function isSupportedLanguage(value: string | null | undefined): value is SupportedLanguage {
   return Boolean(value && LANGUAGE_LOOKUP.has(value));
@@ -29,7 +36,9 @@ function normalizeLanguage(value: string | null | undefined): SupportedLanguage 
   }
 
   const normalized = value?.toLowerCase() ?? '';
-  return normalized.startsWith('zh') ? 'zh-CN' : DEFAULT_LANGUAGE;
+  return SIMPLIFIED_CHINESE_PATTERNS.some((pattern) => pattern.test(normalized))
+    ? 'zh-CN'
+    : DEFAULT_LANGUAGE;
 }
 
 function detectNavigatorLanguage(): SupportedLanguage {

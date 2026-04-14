@@ -8,7 +8,7 @@ import "@ant-design/x-markdown/themes/dark.css"
 import "@ant-design/x-markdown/themes/light.css"
 
 import { Button } from "@slab/components/button"
-import { Trans, getResolvedAppLanguage, useTranslation } from "@slab/i18n"
+import { DEFAULT_CHAT_LABELS, Trans, getResolvedAppLanguage, useTranslation } from "@slab/i18n"
 import {
   Dialog,
   DialogContent,
@@ -619,10 +619,7 @@ function Chat() {
       const defaultLabels = new Set([
         t("pages.chat.runtime.newChat"),
         t("pages.chat.runtime.newConversation"),
-        "New chat",
-        "New conversation",
-        "新对话",
-        "新会话",
+        ...DEFAULT_CHAT_LABELS,
       ])
 
       if (!defaultLabels.has(label)) {
