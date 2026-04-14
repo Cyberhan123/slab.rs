@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "bin/slab-app/src-tauri",
+    "bin/slab-windows-full-installer",
     "bin/slab-server",
     "bin/slab-runtime",
     "crates/slab-proto",
