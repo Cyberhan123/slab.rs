@@ -1,10 +1,5 @@
-import { useMemo } from 'react';
 import i18n from 'i18next';
-import enUSAntd from 'antd/locale/en_US';
-import zhCNAntd from 'antd/locale/zh_CN';
-import enUSX from '@ant-design/x/locale/en_US';
-import zhCNX from '@ant-design/x/locale/zh_CN';
-import { initReactI18next, useTranslation } from 'react-i18next';
+import { initReactI18next } from 'react-i18next';
 
 import { enUS } from './locales/en-US';
 import { zhCN } from './locales/zh-CN';
@@ -16,14 +11,8 @@ export const APP_LANGUAGE_STORAGE_KEY = 'slab.ui.language';
 export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
 export type AppLanguagePreference = (typeof APP_LANGUAGE_PREFERENCES)[number];
 
-type ChatRuntimeLocale = {
-  noData: string;
-  requestAborted: string;
-  requestFailed: string;
-};
-
 const DEFAULT_LANGUAGE: SupportedLanguage = 'en-US';
-const AUTO_LANGUAGE: AppLanguagePreference = 'auto';
+const AUTO_LANGUAGE = 'auto' as const;
 const LANGUAGE_LOOKUP = new Set<string>(SUPPORTED_LANGUAGES);
 
 function isSupportedLanguage(value: string | null | undefined): value is SupportedLanguage {
@@ -77,7 +66,11 @@ function persistLanguagePreference(preference: AppLanguagePreference) {
 }
 
 export function resolveAppLanguage(preference: AppLanguagePreference): SupportedLanguage {
-  return preference === AUTO_LANGUAGE ? detectNavigatorLanguage() : preference;
+  if (preference === AUTO_LANGUAGE) {
+    return detectNavigatorLanguage();
+  }
+
+  return preference;
 }
 
 export function getStoredAppLanguagePreference(): AppLanguagePreference {
@@ -117,23 +110,5 @@ i18n.use(initReactI18next).init({
   },
 });
 
-export function useChatLocale(): (typeof enUSAntd & typeof enUSX & ChatRuntimeLocale) | (typeof zhCNAntd & typeof zhCNX & ChatRuntimeLocale) {
-  const { t } = useTranslation();
-  const language = getResolvedAppLanguage();
-
-  return useMemo(() => {
-    const frameworkLocale = language === 'zh-CN'
-      ? { ...zhCNAntd, ...zhCNX }
-      : { ...enUSAntd, ...enUSX };
-
-    return {
-      ...frameworkLocale,
-      noData: t('pages.chat.runtime.noData'),
-      requestAborted: t('pages.chat.runtime.requestAborted'),
-      requestFailed: t('pages.chat.runtime.requestFailed'),
-    };
-  }, [language, t]);
-}
-
-export { useTranslation };
+export * from 'react-i18next';
 export default i18n;

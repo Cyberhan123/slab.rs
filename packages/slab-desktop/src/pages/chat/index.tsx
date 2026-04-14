@@ -8,7 +8,7 @@ import "@ant-design/x-markdown/themes/dark.css"
 import "@ant-design/x-markdown/themes/light.css"
 
 import { Button } from "@slab/components/button"
-import { Trans, getResolvedAppLanguage, useChatLocale, useTranslation } from "@slab/i18n"
+import { Trans, getResolvedAppLanguage, useTranslation } from "@slab/i18n"
 import {
   Dialog,
   DialogContent,
@@ -38,6 +38,7 @@ import {
   getChatMessageTextContent,
   type ChatMessageRecord,
 } from "./chat-context"
+import { useChatLocale } from "./chat-locale"
 import { useChat } from "./hooks/use-chat"
 import { useChatSessions } from "./hooks/use-chat-sessions"
 import { useMarkdownTheme } from "./hooks/use-markdowm-theme"

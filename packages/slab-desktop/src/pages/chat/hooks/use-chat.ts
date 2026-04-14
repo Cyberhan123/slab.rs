@@ -1,6 +1,5 @@
 import { SSEFields, useXChat, XModelResponse } from '@ant-design/x-sdk'
 import { useState } from 'react'
-import { useChatLocale } from '@slab/i18n'
 import {
   DEFAULT_CONVERSATION_KEY,
   getContinueGenerationPrefix,
@@ -14,6 +13,7 @@ import {
   type ChatRuntimePresets,
   type ChatUiMessage,
 } from '../chat-context'
+import { useChatLocale } from '../chat-locale'
 
 export const useChat = (
   conversationKey: string,
