@@ -98,10 +98,6 @@ impl HubError {
         Self { kind, provider, message: message.into() }
     }
 
-    fn network(provider: HubProvider, message: impl Into<String>) -> Self {
-        Self::new(HubErrorKind::NetworkUnavailable, Some(provider), message)
-    }
-
     fn operation(provider: HubProvider, message: impl Into<String>) -> Self {
         Self::new(HubErrorKind::OperationFailed, Some(provider), message)
     }
@@ -225,7 +221,9 @@ impl HubClient {
         filename: &str,
         progress: Option<Arc<dyn DownloadProgress>>,
     ) -> Result<PathBuf, HubError> {
-        self.run_with_provider_fallback(|provider| async move {
+        self.run_with_provider_fallback(|provider| {
+            let progress = progress.clone();
+            async move {
             match provider {
                 #[cfg(feature = "provider-hf-hub")]
                 HubProvider::HfHub => {
@@ -246,6 +244,7 @@ impl HubClient {
                     format!("hub provider '{other}' was requested but is not enabled"),
                 )),
             }
+        }
         })
         .await
     }
@@ -525,6 +524,7 @@ impl HubClient {
     }
 }
 
+#[cfg(feature = "provider-huggingface-hub-rust")]
 fn split_repo_id(repo_id: &str) -> Option<(&str, &str)> {
     let repo_id = repo_id.trim();
     if repo_id.is_empty() {
@@ -591,12 +591,20 @@ fn is_network_io_error(error: &std::io::Error) -> bool {
 fn map_reqwest_error(provider: HubProvider, context: impl Into<String>, error: reqwest::Error) -> HubError {
     let context = context.into();
     let message = format!("{context}: {error}");
-    let kind = if error.is_connect() || error.is_timeout() || (error.is_request() && !error.is_status()) {
+    let kind = if is_reqwest_network_error(&error) {
         HubErrorKind::NetworkUnavailable
     } else {
         HubErrorKind::OperationFailed
     };
     HubError::new(kind, Some(provider), message)
+}
+
+fn is_reqwest_network_error(error: &reqwest::Error) -> bool {
+    error.is_connect() || error.is_timeout() || (error.is_request() && !error.is_status())
+}
+
+fn is_networkish_error_message(message: &str) -> bool {
+    is_network_message(message)
 }
 
 #[cfg(feature = "provider-hf-hub")]
@@ -605,16 +613,19 @@ fn map_hf_hub_error(
     context: impl Into<String>,
     error: hf_hub::api::tokio::ApiError,
 ) -> HubError {
+    let context = context.into();
     let kind = match &error {
-        hf_hub::api::tokio::ApiError::RequestError(reqwest_error) => {
-            map_reqwest_error(provider, context.into(), reqwest_error.clone()).kind
+        hf_hub::api::tokio::ApiError::RequestError(reqwest_error)
+            if is_networkish_error_message(&reqwest_error.to_string()) =>
+        {
+            HubErrorKind::NetworkUnavailable
         }
         hf_hub::api::tokio::ApiError::IoError(io_error) if is_network_io_error(io_error) => {
             HubErrorKind::NetworkUnavailable
         }
         _ => HubErrorKind::OperationFailed,
     };
-    HubError::new(kind, Some(provider), format!("{}: {error}", context.into()))
+    HubError::new(kind, Some(provider), format!("{context}: {error}"))
 }
 
 #[cfg(feature = "provider-models-cat")]
@@ -623,16 +634,19 @@ fn map_models_cat_error(
     context: impl Into<String>,
     error: models_cat::OpsError,
 ) -> HubError {
+    let context = context.into();
     let kind = match &error {
-        models_cat::OpsError::RequestError(reqwest_error) => {
-            map_reqwest_error(provider, context.into(), reqwest_error.clone()).kind
+        models_cat::OpsError::RequestError(reqwest_error)
+            if is_networkish_error_message(&reqwest_error.to_string()) =>
+        {
+            HubErrorKind::NetworkUnavailable
         }
         models_cat::OpsError::IoError(io_error) if is_network_io_error(io_error) => {
             HubErrorKind::NetworkUnavailable
         }
         _ => HubErrorKind::OperationFailed,
     };
-    HubError::new(kind, Some(provider), format!("{}: {error}", context.into()))
+    HubError::new(kind, Some(provider), format!("{context}: {error}"))
 }
 
 #[cfg(feature = "provider-huggingface-hub-rust")]

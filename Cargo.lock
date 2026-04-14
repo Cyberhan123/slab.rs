@@ -4067,6 +4067,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "df3b46402a9d5adb4c86a0cf463f42e19994e3ee891101b1841f30a545cb49a9"
 
 [[package]]
+name = "huggingface-hub"
+version = "0.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f8d139c24e657e3a52a5203e74b58e2139b372d932950be3b4f8e804e84dc072"
+
+[[package]]
 name = "hybrid-array"
 version = "0.4.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5192,6 +5198,29 @@ dependencies = [
  "log",
  "wasi 0.11.1+wasi-snapshot-preview1",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "models-cat"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "88b0b873c11ee4a287b1943c6ff7c655aaaea3fb05eab306d61e42958a358072"
+dependencies = [
+ "async-trait",
+ "dirs",
+ "futures",
+ "indicatif 0.17.11",
+ "libc",
+ "log",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "thiserror 2.0.18",
+ "tokio",
+ "walkdir",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -7530,6 +7559,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",
@@ -8574,7 +8604,6 @@ dependencies = [
  "ffmpeg-sidecar",
  "futures",
  "genai",
- "hf-hub",
  "hyper-util",
  "image",
  "jsonschema",
@@ -8584,6 +8613,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "slab-agent",
+ "slab-hub",
  "slab-libfetch",
  "slab-model-pack",
  "slab-proto",
@@ -8661,6 +8691,20 @@ dependencies = [
  "bindgen",
  "libloading 0.8.9",
  "slab-build-utils",
+]
+
+[[package]]
+name = "slab-hub"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "hf-hub",
+ "huggingface-hub",
+ "models-cat",
+ "reqwest 0.13.2",
+ "thiserror 2.0.18",
+ "tokio",
+ "walkdir",
 ]
 
 [[package]]
