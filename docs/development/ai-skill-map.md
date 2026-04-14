@@ -25,6 +25,8 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
   Start in `bin/slab-runtime/**`, especially `bin/slab-runtime/src/{config,context,domain,infra}/**` and `bin/slab-runtime/src/infra/backends/**`, plus `crates/slab-runtime-core/**`, `crates/slab-llama/**`, `crates/slab-whisper/**`, `crates/slab-diffusion/**`, and `crates/slab-ggml/**`.
 - Plugin package and bridge work
   Start in `plugins/**`, `packages/slab-desktop/src/pages/plugins/**`, `packages/slab-desktop/src/lib/plugin-sdk.ts`, and `bin/slab-app/src-tauri/src/plugins/**`.
+- Windows full-installer packaging work
+  Start in `bin/slab-windows-full-installer/**`, `bin/slab-app/src-tauri/build.rs`, `bin/slab-app/src-tauri/installer-hooks/**`, and `Makefile.toml`. Add `tauri-v2` only when the change crosses into Tauri config or NSIS hook behavior.
 - Shared contracts, settings, and manifests
   Start in `crates/slab-types/**`, `crates/slab-proto/**`, and `manifests/**`.
 

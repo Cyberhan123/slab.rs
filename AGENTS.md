@@ -57,6 +57,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `bin/slab-server` is the thin HTTP gateway and headless host (axum). It depends on `crates/slab-app-core` for all domain/infra logic, adds axum `FromRef` extractors (`state_extractors.rs`) and `ServerError` → HTTP response conversion, and launches `bin/slab-runtime` through the same shared supervisor using a `tokio::process` adapter. Runtime crashes restart per backend; the HTTP host stays up unless the gateway itself fails. It exposes `/v1` plus `/api-docs/openapi.json`.
 - `crates/slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and `runtime_supervisor`. It is the shared domain/runtime layer behind `bin/slab-server`. SQLx migrations live in `crates/slab-app-core/migrations/`.
 - `bin/slab-runtime` is the standalone gRPC worker that can serve TCP or IPC transports. It is the only backend composition root: it owns driver resolution, load/inference codecs, task submission, and now keeps its DDD-style `api/`, `application/`, `domain/`, and `infra/` layers in-package, with the gRPC bootstrap in `src/api/server.rs`, application orchestration in `src/application/services/`, and flattened GGML, Candle, and ONNX backend implementations under `src/infra/backends/`.
+- `bin/slab-windows-full-installer` is the Windows-only outer bootstrap packer/runtime. It builds the self-extracting full installer EXE, embeds the resource-less Tauri NSIS `setup.exe` plus CAB payloads, expands runtime payloads into `%TEMP%`, and lets NSIS complete the actual app install/uninstall work.
 - `crates/slab-runtime-core` (package name: `slab-runtime-core`) now holds only the scheduler, backend protocol, worker runner, task state, common error surface, and generic payload types. Keep HTTP, SQL, typed inference codecs, and backend composition concerns out of this crate.
 - `crates/slab-agent` is a pure control-plane library for agent threads, tool routing, and port-based orchestration.
 - `crates/slab-proto` owns the protobuf contract between `bin/slab-server` and `bin/slab-runtime`.
@@ -67,6 +68,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 
 - `bin/slab-server`: thin HTTP gateway; exposes `/v1` routes via axum. Business logic lives in `crates/slab-app-core`.
 - `bin/slab-runtime`: gRPC server and runtime worker package. `src/main.rs` is the thin binary entrypoint; `src/api`, `src/application`, `src/domain`, and `src/infra` hold the worker logic and backend composition.
+- `bin/slab-windows-full-installer`: Windows full-installer bootstrap binary. `pack` builds the outer self-extracting installer, `run` expands CAB payloads and launches the embedded Tauri NSIS installer, and `apply` is the helper entrypoint used by NSIS hooks to copy `resources/libs`.
 - `crates/slab-app-core`: HTTP-free business logic (domain, infra, context, config) plus the shared runtime supervisor used by `slab-server`. Migrations are in `crates/slab-app-core/migrations/`.
 - `crates/slab-runtime-core`: pure scheduler/backend-protocol library only (package: `slab-runtime-core`); keep HTTP, SQL, driver resolution, typed codecs, and backend composition concerns out.
 - `bin/slab-runtime/src/infra/backends`: in-package GGML, Candle, and ONNX backend registrations, engines, adapters, and worker implementations.
@@ -111,9 +113,11 @@ cargo test --workspace
 cargo check --workspace
 cargo check -p slab-server
 cargo check -p slab-runtime
+cargo check -p slab-windows-full-installer
 cargo make check
 cargo make test
 cargo make dev
+cargo make build-windows-full-installer
 ```
 
 Frontend and Tauri:
@@ -129,6 +133,10 @@ bun run build
 # Run Tauri development mode
 cd bin/slab-app
 bun run tauri dev
+
+# Build the Windows full installer bootstrap + NSIS bundle
+cd ../..
+cargo make build-windows-full-installer
 
 # Regenerate OpenAPI types
 cd packages/slab-desktop

@@ -11,7 +11,7 @@ schema_version = "1"
 
 [artifacts.ggml]
 repo = "seasonjs/ggml.cpp-build"
-version = "v0.9.8"
+version = "v0.9.11"
 lib_name = "ggml"
 # Asset name pattern with template variables: {version}, {os}, {arch}, {variant}
 asset_pattern = "ggml-{version}-{os}-{arch}.{extension}"

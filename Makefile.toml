@@ -68,7 +68,7 @@ cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 [tasks.build-tauri-release-windows]
 workspace = false
 command = "bun"
-args = ["run", "tauri", "build", "--bundles", "msi"]
+args = ["run", "tauri", "build", "--bundles", "nsis"]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 
 [tasks.build-tauri-debug]
@@ -175,3 +175,33 @@ if ${api_failed}
 	exit ${api_result.code}
 end
 '''
+
+[tasks.build-tauri-release-windows-full-installer]
+workspace = false
+command = "bun"
+args = [
+    "run",
+    "tauri",
+    "build",
+    "--bundles",
+    "nsis",
+    "--config",
+    "src-tauri/tauri.full-installer.conf.json",
+]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
+env = { SLAB_SKIP_VENDOR_RUNTIME_SYNC = "1" }
+
+[tasks.pack-windows-full-installer]
+workspace = false
+command = "cargo"
+args = ["run", "--release", "-p", "slab-windows-full-installer", "--", "pack"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}"
+
+[tasks.build-windows-full-installer]
+workspace = false
+dependencies = [
+    "build-runtime-release",
+    "build-server-release",
+    "build-tauri-release-windows-full-installer",
+    "pack-windows-full-installer",
+]
