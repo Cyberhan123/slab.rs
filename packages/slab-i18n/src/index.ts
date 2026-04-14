@@ -1,24 +1,139 @@
+import { useMemo } from 'react';
 import i18n from 'i18next';
-import { initReactI18next } from 'react-i18next';
-import zhCN from './locales/zh-CN.json';
-import enUS from './locales/en-US.json';
+import enUSAntd from 'antd/locale/en_US';
+import zhCNAntd from 'antd/locale/zh_CN';
+import enUSX from '@ant-design/x/locale/en_US';
+import zhCNX from '@ant-design/x/locale/zh_CN';
+import { initReactI18next, useTranslation } from 'react-i18next';
 
-i18n
-  .use(initReactI18next)
-  .init({
-    resources: {
-      'zh-CN': {
-        translation: zhCN
-      },
-      'en-US': {
-        translation: enUS
-      }
+import { enUS } from './locales/en-US';
+import { zhCN } from './locales/zh-CN';
+
+export const SUPPORTED_LANGUAGES = ['en-US', 'zh-CN'] as const;
+export const APP_LANGUAGE_PREFERENCES = ['auto', ...SUPPORTED_LANGUAGES] as const;
+export const APP_LANGUAGE_STORAGE_KEY = 'slab.ui.language';
+
+export type SupportedLanguage = (typeof SUPPORTED_LANGUAGES)[number];
+export type AppLanguagePreference = (typeof APP_LANGUAGE_PREFERENCES)[number];
+
+type ChatRuntimeLocale = {
+  noData: string;
+  requestAborted: string;
+  requestFailed: string;
+};
+
+const DEFAULT_LANGUAGE: SupportedLanguage = 'en-US';
+const AUTO_LANGUAGE: AppLanguagePreference = 'auto';
+const LANGUAGE_LOOKUP = new Set<string>(SUPPORTED_LANGUAGES);
+
+function isSupportedLanguage(value: string | null | undefined): value is SupportedLanguage {
+  return Boolean(value && LANGUAGE_LOOKUP.has(value));
+}
+
+export function isAppLanguagePreference(value: string | null | undefined): value is AppLanguagePreference {
+  return value === AUTO_LANGUAGE || isSupportedLanguage(value);
+}
+
+function normalizeLanguage(value: string | null | undefined): SupportedLanguage {
+  if (isSupportedLanguage(value)) {
+    return value;
+  }
+
+  const normalized = value?.toLowerCase() ?? '';
+  return normalized.startsWith('zh') ? 'zh-CN' : DEFAULT_LANGUAGE;
+}
+
+function detectNavigatorLanguage(): SupportedLanguage {
+  if (typeof navigator === 'undefined') {
+    return DEFAULT_LANGUAGE;
+  }
+
+  return normalizeLanguage(navigator.languages?.[0] ?? navigator.language);
+}
+
+function readStoredLanguagePreference(): AppLanguagePreference {
+  if (typeof window === 'undefined') {
+    return AUTO_LANGUAGE;
+  }
+
+  try {
+    const value = window.localStorage.getItem(APP_LANGUAGE_STORAGE_KEY);
+    return isAppLanguagePreference(value) ? value : AUTO_LANGUAGE;
+  } catch {
+    return AUTO_LANGUAGE;
+  }
+}
+
+function persistLanguagePreference(preference: AppLanguagePreference) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(APP_LANGUAGE_STORAGE_KEY, preference);
+  } catch {
+    // Ignore storage failures and keep the runtime language in memory.
+  }
+}
+
+export function resolveAppLanguage(preference: AppLanguagePreference): SupportedLanguage {
+  return preference === AUTO_LANGUAGE ? detectNavigatorLanguage() : preference;
+}
+
+export function getStoredAppLanguagePreference(): AppLanguagePreference {
+  return readStoredLanguagePreference();
+}
+
+export function getResolvedAppLanguage(): SupportedLanguage {
+  return normalizeLanguage(i18n.resolvedLanguage ?? i18n.language);
+}
+
+export async function applyAppLanguagePreference(
+  preference: AppLanguagePreference,
+): Promise<SupportedLanguage> {
+  const nextLanguage = resolveAppLanguage(preference);
+  persistLanguagePreference(preference);
+  await i18n.changeLanguage(nextLanguage);
+  return nextLanguage;
+}
+
+const initialPreference = readStoredLanguagePreference();
+const initialLanguage = resolveAppLanguage(initialPreference);
+
+i18n.use(initReactI18next).init({
+  resources: {
+    'en-US': {
+      translation: enUS,
     },
-    lng: 'zh-CN',
-    fallbackLng: 'zh-CN',
-    interpolation: {
-      escapeValue: false
-    }
-  });
+    'zh-CN': {
+      translation: zhCN,
+    },
+  },
+  supportedLngs: SUPPORTED_LANGUAGES,
+  lng: initialLanguage,
+  fallbackLng: DEFAULT_LANGUAGE,
+  interpolation: {
+    escapeValue: false,
+  },
+});
 
+export function useChatLocale(): (typeof enUSAntd & typeof enUSX & ChatRuntimeLocale) | (typeof zhCNAntd & typeof zhCNX & ChatRuntimeLocale) {
+  const { t } = useTranslation();
+  const language = getResolvedAppLanguage();
+
+  return useMemo(() => {
+    const frameworkLocale = language === 'zh-CN'
+      ? { ...zhCNAntd, ...zhCNX }
+      : { ...enUSAntd, ...enUSX };
+
+    return {
+      ...frameworkLocale,
+      noData: t('pages.chat.runtime.noData'),
+      requestAborted: t('pages.chat.runtime.requestAborted'),
+      requestFailed: t('pages.chat.runtime.requestFailed'),
+    };
+  }, [language, t]);
+}
+
+export { useTranslation };
 export default i18n;

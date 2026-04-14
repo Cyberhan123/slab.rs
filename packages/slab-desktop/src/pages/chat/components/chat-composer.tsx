@@ -16,6 +16,7 @@ import {
   DropdownMenuTrigger,
 } from "@slab/components/dropdown-menu"
 import { Textarea } from "@slab/components/textarea"
+import { useTranslation } from "@slab/i18n"
 import { cn } from "@/lib/utils"
 
 type ChatComposerProps = {
@@ -45,6 +46,8 @@ export function ChatComposer({
   onGenerateImage,
   statusLabel,
 }: ChatComposerProps) {
+  const { t } = useTranslation()
+
   const handleSubmit = () => {
     if (!value.trim() || isRequesting || disabled) {
       return
@@ -72,15 +75,15 @@ export function ChatComposer({
               <DropdownMenuContent align="start" className="rounded-2xl border-border/70">
                 <DropdownMenuItem onClick={onGenerateImage}>
                   <ImagePlus className="size-4" />
-                  Generate image
+                  {t("pages.chat.composer.generateImage")}
                 </DropdownMenuItem>
                 <DropdownMenuItem disabled>
                   <Search className="size-4" />
-                  Web search
+                  {t("pages.chat.composer.webSearch")}
                 </DropdownMenuItem>
                 <DropdownMenuItem disabled>
                   <Mic className="size-4" />
-                  Voice capture
+                  {t("pages.chat.composer.voiceCapture")}
                 </DropdownMenuItem>
               </DropdownMenuContent>
             </DropdownMenu>
@@ -90,10 +93,10 @@ export function ChatComposer({
             value={value}
             variant="shell"
             autoResize
-            disabled={disabled}
-            onChange={(event) => onValueChange(event.target.value)}
-            placeholder="Type a message or drop files..."
-            className="min-h-[48px] max-h-48 resize-none border-0 bg-transparent px-3 py-3 text-base text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
+             disabled={disabled}
+             onChange={(event) => onValueChange(event.target.value)}
+             placeholder={t("pages.chat.composer.placeholder")}
+             className="min-h-[48px] max-h-48 resize-none border-0 bg-transparent px-3 py-3 text-base text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault()
@@ -130,10 +133,14 @@ export function ChatComposer({
                 }
 
                 handleSubmit()
-              }}
-              disabled={disabled || (!isRequesting && !value.trim())}
-              aria-label={isRequesting ? "Stop generating response" : "Send message"}
-            >
+               }}
+               disabled={disabled || (!isRequesting && !value.trim())}
+               aria-label={
+                 isRequesting
+                   ? t("pages.chat.composer.stopGeneratingResponse")
+                   : t("pages.chat.composer.sendMessage")
+               }
+             >
               {isRequesting ? <Square className="size-4" /> : <SendHorizontal className="size-4" />}
             </Button>
           </div>
@@ -148,7 +155,7 @@ export function ChatComposer({
             className="inline-flex items-center gap-1.5 text-[11px] font-bold text-muted-foreground transition disabled:cursor-not-allowed disabled:opacity-100"
           >
             <Search className="size-3" />
-            Web Search
+            {t("pages.chat.composer.webSearch")}
           </button>
 
           <button
@@ -170,7 +177,11 @@ export function ChatComposer({
                 reasoningSupported && deepThink && "text-[var(--brand-teal)]"
               )}
             />
-            {!reasoningSupported ? "Deep Think Unavailable" : deepThink ? "Deep Think On" : "Deep Think"}
+            {!reasoningSupported
+              ? t("pages.chat.composer.deepThinkUnavailable")
+              : deepThink
+                ? t("pages.chat.composer.deepThinkOn")
+                : t("pages.chat.composer.deepThink")}
           </button>
 
           <button
@@ -183,7 +194,7 @@ export function ChatComposer({
             )}
           >
             <ImagePlus className="size-3" />
-            Generate Image
+            {t("pages.chat.composer.generateImage")}
           </button>
         </div>
 

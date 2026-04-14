@@ -16,6 +16,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@slab/components/sheet"
+import { useTranslation } from "@slab/i18n"
 import { cn } from "@/lib/utils"
 
 type ConversationItem = {
@@ -45,20 +46,22 @@ export function ChatSessionSheet({
   onSelect,
   onDelete,
 }: ChatSessionSheetProps) {
+  const { t } = useTranslation()
+
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
         className="w-full overflow-hidden border-l border-border/60 bg-[var(--surface-1)] p-0 sm:max-w-xl"
       >
-        <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
-          <div className="space-y-1">
-            <SheetTitle className="text-xl">Manage sessions</SheetTitle>
-            <SheetDescription>
-              Switch and clean up conversations without leaving the chat stage.
-            </SheetDescription>
-          </div>
-        </SheetHeader>
+          <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
+            <div className="space-y-1">
+              <SheetTitle className="text-xl">{t("pages.chat.sessionSheet.title")}</SheetTitle>
+              <SheetDescription>
+                {t("pages.chat.sessionSheet.description")}
+              </SheetDescription>
+            </div>
+          </SheetHeader>
 
         <ScrollArea className="min-h-0 flex-1 overflow-hidden">
           <div className="space-y-3 px-6 py-5">
@@ -81,12 +84,16 @@ export function ChatSessionSheet({
                     onClick={() => onSelect(conversation.key)}
                   >
                     <div className="flex items-center gap-2">
-                      <p className="truncate font-medium">{conversation.label ?? "New chat"}</p>
-                      {isCurrent ? <Badge variant="chip">Current</Badge> : null}
-                      {isActive ? <Badge variant="chip">Live</Badge> : null}
+                      <p className="truncate font-medium">
+                        {conversation.label ?? t("pages.chat.runtime.newChat")}
+                      </p>
+                      {isCurrent ? (
+                        <Badge variant="chip">{t("pages.chat.sessionSheet.current")}</Badge>
+                      ) : null}
+                      {isActive ? <Badge variant="chip">{t("pages.chat.sessionSheet.live")}</Badge> : null}
                     </div>
                     <p className="mt-1 text-sm text-muted-foreground">
-                      {conversation.group ?? "Workspace"}
+                      {conversation.group ?? t("pages.chat.runtime.workspace")}
                     </p>
                   </button>
 
@@ -98,7 +105,7 @@ export function ChatSessionSheet({
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="rounded-2xl border-border/70">
                         <DropdownMenuItem disabled={busy} onClick={() => onSelect(conversation.key)}>
-                          Open
+                          {t("pages.chat.sessionSheet.open")}
                         </DropdownMenuItem>
                         <DropdownMenuItem
                           disabled={busy}
@@ -106,7 +113,7 @@ export function ChatSessionSheet({
                           onClick={() => onDelete(conversation.key)}
                         >
                           <Trash2 className="size-4" />
-                          Delete
+                          {t("pages.chat.sessionSheet.delete")}
                         </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>

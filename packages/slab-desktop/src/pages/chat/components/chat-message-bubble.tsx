@@ -2,6 +2,7 @@ import { BotMessageSquare, Copy, Play, RefreshCcw, UserRound } from "lucide-reac
 import XMarkdown from "@ant-design/x-markdown"
 
 import { Button } from "@slab/components/button"
+import { useTranslation } from "@slab/i18n"
 import { ChatThinkingPanel } from "@/pages/chat/components/chat-thinking-panel"
 import {
   getChatMessageTextContent,
@@ -65,6 +66,7 @@ export function ChatMessageBubble({
   onContinue,
   onRetry,
 }: ChatMessageBubbleProps) {
+  const { t } = useTranslation()
   const role = item.message.role
   const isAssistant = role === "assistant"
   const rawContent = getChatMessageTextContent(item.message)
@@ -96,7 +98,7 @@ export function ChatMessageBubble({
             )}
           </span>
           <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground">
-            {isAssistant ? "Assistant" : "User"}
+            {isAssistant ? t("pages.chat.message.assistant") : t("pages.chat.message.user")}
           </span>
         </div>
 
@@ -144,7 +146,7 @@ export function ChatMessageBubble({
               {answer}
             </XMarkdown>
           ) : isBusy ? (
-            <p className="text-sm opacity-80">Waiting for response...</p>
+            <p className="text-sm opacity-80">{t("pages.chat.message.waitingForResponse")}</p>
           ) : null}
         </div>
 
@@ -157,7 +159,7 @@ export function ChatMessageBubble({
             onClick={() => void copyMessage()}
           >
             <Copy className="size-3.5" />
-            Copy
+            {t("pages.chat.message.copy")}
           </Button>
           {isAssistant && !isBusy && isAborted && onContinue ? (
             <Button
@@ -168,7 +170,7 @@ export function ChatMessageBubble({
               onClick={() => onContinue(item.id)}
             >
               <Play className="size-3.5" />
-              Continue
+              {t("pages.chat.message.continue")}
             </Button>
           ) : null}
           {isAssistant && !isBusy && onRetry ? (
@@ -180,7 +182,7 @@ export function ChatMessageBubble({
               onClick={() => onRetry(item.id)}
             >
               <RefreshCcw className="size-3.5" />
-              Retry
+              {t("pages.chat.message.retry")}
             </Button>
           ) : null}
         </div>
