@@ -8,6 +8,7 @@ import "@ant-design/x-markdown/themes/dark.css"
 import "@ant-design/x-markdown/themes/light.css"
 
 import { Button } from "@slab/components/button"
+import { Trans, getResolvedAppLanguage, useChatLocale, useTranslation } from "@slab/i18n"
 import {
   Dialog,
   DialogContent,
@@ -40,7 +41,6 @@ import {
 import { useChat } from "./hooks/use-chat"
 import { useChatSessions } from "./hooks/use-chat-sessions"
 import { useMarkdownTheme } from "./hooks/use-markdowm-theme"
-import locale from "./local"
 
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000
 const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000
@@ -64,11 +64,11 @@ type ModelOption = {
   runtimePresets?: CatalogModel["runtime_presets"]
 }
 
-function createConversationLabel(value: string) {
+function createConversationLabel(value: string, fallback: string) {
   const trimmed = value.trim()
 
   if (!trimmed) {
-    return "New chat"
+    return fallback
   }
 
   return trimmed.length > 42 ? `${trimmed.slice(0, 42)}...` : trimmed
@@ -94,18 +94,18 @@ function resolveChatModelCapabilities(
   return model.chat_capabilities ?? defaultCapabilitiesForSource(model.kind)
 }
 
-function getGreeting(date: Date) {
+function getGreeting(date: Date, t: (key: string) => string) {
   const hour = date.getHours()
 
   if (hour < 12) {
-    return "Good morning"
+    return t("pages.chat.greeting.morning")
   }
 
   if (hour < 18) {
-    return "Good afternoon"
+    return t("pages.chat.greeting.afternoon")
   }
 
-  return "Good evening"
+  return t("pages.chat.greeting.evening")
 }
 
 function Chat() {
@@ -118,6 +118,9 @@ function Chat() {
   const bottomRef = useRef<HTMLDivElement | null>(null)
   const deepThink = useChatUiStore((state) => state.deepThink)
   const setDeepThink = useChatUiStore((state) => state.setDeepThink)
+  const { t } = useTranslation()
+  const locale = useChatLocale()
+  const resolvedLanguage = getResolvedAppLanguage()
   const {
     conversationList,
     createSession: createEmptySession,
@@ -230,7 +233,7 @@ function Chat() {
       await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS)
     }
 
-    throw new Error("Model download timed out")
+    throw new Error(t("pages.chat.error.downloadTimedOut"))
   }
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
@@ -249,11 +252,11 @@ function Chat() {
     }
 
     if (!model) {
-      throw new Error("Selected model does not exist in catalog")
+      throw new Error(t("pages.chat.error.selectedModelMissing"))
     }
 
     if (model.kind !== "local") {
-      throw new Error("Selected model is not a local chat model")
+      throw new Error(t("pages.chat.error.selectedModelNotLocal"))
     }
 
     if (model.local_path && !forceDownload) {
@@ -302,7 +305,7 @@ function Chat() {
 
   const prepareSelectedModel = async () => {
     if (!selectedModelId) {
-      throw new Error("Please select a chat model first.")
+      throw new Error(t("pages.chat.error.selectModelFirst"))
     }
 
     if (loadedModelId === selectedModelId) {
@@ -311,7 +314,7 @@ function Chat() {
 
     const selectedOption = modelOptions.find((item) => item.id === selectedModelId)
     if (!selectedOption) {
-      throw new Error("Selected model is not available")
+      throw new Error(t("pages.chat.error.selectedModelUnavailable"))
     }
 
     if (selectedOption.source === "cloud") {
@@ -323,7 +326,11 @@ function Chat() {
     const { downloadedNow } = await ensureDownloadedModelPath(selectedModelId)
 
     if (downloadedNow) {
-      toast.success(`Downloaded ${selectedLocal?.display_name ?? selectedModelId}`)
+      toast.success(
+        t("pages.chat.toast.downloaded", {
+          model: selectedLocal?.display_name ?? selectedModelId,
+        })
+      )
     }
 
     try {
@@ -333,11 +340,15 @@ function Chat() {
         throw firstLoadError
       }
 
-      toast.message("Model load failed, re-downloading and retrying once...")
+      toast.message(t("pages.chat.toast.modelLoadRetry"))
 
       const retry = await ensureDownloadedModelPath(selectedModelId, true)
       if (retry.downloadedNow) {
-        toast.success(`Downloaded ${selectedLocal?.display_name ?? selectedModelId}`)
+        toast.success(
+          t("pages.chat.toast.downloaded", {
+            model: selectedLocal?.display_name ?? selectedModelId,
+          })
+        )
       }
 
       await loadOrSwitchSelectedModel(selectedModelId)
@@ -350,8 +361,8 @@ function Chat() {
     try {
       await prepareSelectedModel()
     } catch (err: any) {
-      toast.error("Failed to prepare chat model.", {
-        description: err?.message || err?.error || "Unknown error",
+      toast.error(t("pages.chat.toast.failedToPrepareModel"), {
+        description: err?.message || err?.error || t("pages.chat.toast.unknownError"),
       })
       throw err
     }
@@ -405,46 +416,49 @@ function Chat() {
     .reverse()
     .find((item) => item.message.role === "user")
   const currentConversationLabel =
-    conversationList.find((item) => item.key === curConversation)?.label?.trim() || "Current session"
+    conversationList.find((item) => item.key === curConversation)?.label?.trim() ||
+    t("pages.chat.sessionSummary.currentSession")
   const selectedModelStatusLabel = useMemo(() => {
     if (isSessionBootstrapping || !curConversation) {
-      return "Preparing session"
+      return t("pages.chat.status.preparingSession")
     }
 
     if (isHistoryLoading) {
-      return "Loading session history"
+      return t("pages.chat.status.loadingSessionHistory")
     }
 
     if (isCreatingSession) {
-      return "Creating session"
+      return t("pages.chat.status.creatingSession")
     }
 
     if (isDeletingSession) {
-      return "Deleting session"
+      return t("pages.chat.status.deletingSession")
     }
 
     if (modelLoading) {
-      return "Loading models"
+      return t("pages.chat.status.loadingModels")
     }
 
     if (!selectedModel) {
-      return "Select model"
+      return t("pages.chat.status.selectModel")
     }
 
     const parts = [selectedModel.label]
 
     if (selectedModel.contextWindow && selectedModel.contextWindow > 0) {
       parts.push(
-        `${new Intl.NumberFormat("en-US").format(selectedModel.contextWindow)} Context`
+        t("pages.chat.status.contextWindow", {
+          formatted: new Intl.NumberFormat(resolvedLanguage).format(selectedModel.contextWindow),
+        })
       )
     } else if (selectedModel.pending) {
-      parts.push("Downloading")
+      parts.push(t("pages.chat.status.downloading"))
     } else if (selectedModel.source === "local" && !selectedModel.downloaded) {
-      parts.push("Needs download")
+      parts.push(t("pages.chat.status.needsDownload"))
     } else if (isPreparingModel) {
-      parts.push("Preparing")
+      parts.push(t("pages.chat.status.preparing"))
     } else if (selectedModel.source === "cloud") {
-      parts.push("Cloud model")
+      parts.push(t("pages.chat.status.cloudModel"))
     }
 
     return parts.join(" / ")
@@ -456,7 +470,9 @@ function Chat() {
     isPreparingModel,
     isSessionBootstrapping,
     modelLoading,
+    resolvedLanguage,
     selectedModel,
+    t,
   ])
 
   const closePendingModelSwitch = useCallback(() => {
@@ -474,7 +490,7 @@ function Chat() {
       }
 
       if (isSessionBusy || isSessionBootstrapping) {
-        toast.info("Wait for the current response or session sync to finish before switching models.")
+        toast.info(t("pages.chat.toast.waitBeforeSwitchingModels"))
         return
       }
 
@@ -485,7 +501,15 @@ function Chat() {
 
       setPendingModelSwitchId(nextModelId)
     },
-    [curConversation, isSessionBootstrapping, isSessionBusy, safeMessages.length, selectedModelId]
+    [
+      curConversation,
+      isSessionBootstrapping,
+      isSessionBusy,
+      safeMessages.length,
+      selectedModelId,
+      setSelectedModelId,
+      t,
+    ]
   )
 
   const handleKeepSessionOnModelSwitch = useCallback(() => {
@@ -522,8 +546,8 @@ function Chat() {
         label: model.label,
       })),
       onValueChange: handleModelPickerChange,
-      groupLabel: "Chat Models",
-      placeholder: "Select model",
+      groupLabel: t("pages.chat.modelPicker.groupLabel"),
+      placeholder: t("pages.chat.modelPicker.placeholder"),
       loading: modelLoading,
       disabled:
         modelLoading ||
@@ -531,7 +555,7 @@ function Chat() {
         isSessionBootstrapping ||
         Boolean(pendingModelSwitchId) ||
         modelOptions.length === 0,
-      emptyLabel: "No chat models",
+      emptyLabel: t("pages.chat.modelPicker.emptyLabel"),
     }),
     [
       handleModelPickerChange,
@@ -541,11 +565,16 @@ function Chat() {
       modelOptions,
       pendingModelSwitchId,
       selectedModelId,
+      t,
     ]
   )
   const latestUserPrompt = getChatMessageTextContent(latestUserMessage?.message).trim()
 
-  usePageHeader(PAGE_HEADER_META.chat)
+  usePageHeader({
+    ...PAGE_HEADER_META.chat,
+    title: t("pages.chat.header.title"),
+    subtitle: t("pages.chat.header.subtitle"),
+  })
   usePageHeaderControl(headerModelPicker)
 
   useEffect(() => {
@@ -563,44 +592,58 @@ function Chat() {
       ? [currentConversation, ...remainingConversations]
       : remainingConversations
   }, [conversationList, curConversation])
-  const greeting = useMemo(() => getGreeting(new Date()), [])
+  const greeting = useMemo(() => getGreeting(new Date(), t), [t])
   const sessionSummaryItems = useMemo<ChatSessionSummaryItem[]>(() => {
     return sortedConversations.slice(0, 2).map<ChatSessionSummaryItem>((conversation, index) => ({
       key: conversation.key,
-      label: conversation.label ?? (index === 0 ? "Current session" : "Next session"),
+      label:
+        conversation.label ??
+        t(
+          index === 0
+            ? "pages.chat.sessionSummary.currentSession"
+            : "pages.chat.sessionSummary.nextSession"
+        ),
       hint:
         conversation.key === curConversation
-          ? `${safeMessages.length} ${safeMessages.length === 1 ? "message" : "messages"}`
-          : conversation.group ?? "Workspace",
+          ? t("pages.chat.sessionSummary.messageCount", { count: safeMessages.length })
+          : conversation.group ?? t("pages.chat.runtime.workspace"),
       tone: index === 0 ? "warm" : "mint",
     }))
-  }, [curConversation, safeMessages.length, sortedConversations])
+  }, [curConversation, safeMessages.length, sortedConversations, t])
 
   const setConversationLabelIfNeeded = useCallback(
     (conversationKey: string, prompt: string) => {
       const conversation = conversationList.find((item) => item.key === conversationKey)
-      const label = conversation?.label ?? "New chat"
+      const label = conversation?.label ?? t("pages.chat.runtime.newChat")
+      const defaultLabels = new Set([
+        t("pages.chat.runtime.newChat"),
+        t("pages.chat.runtime.newConversation"),
+        "New chat",
+        "New conversation",
+        "新对话",
+        "新会话",
+      ])
 
-      if (label !== "New chat" && label !== "New Conversation") {
+      if (!defaultLabels.has(label)) {
         return
       }
 
-      const nextLabel = createConversationLabel(prompt)
+      const nextLabel = createConversationLabel(prompt, t("pages.chat.runtime.newChat"))
       if (nextLabel) {
         setSessionLabel(conversationKey, nextLabel)
       }
     },
-    [conversationList, setSessionLabel]
+    [conversationList, setSessionLabel, t]
   )
 
   const handleCreateConversation = useCallback(async () => {
     if (isSessionBusy) {
-      toast.info("Wait for the current response to finish before changing sessions.")
+      toast.info(t("pages.chat.toast.waitForCurrentResponse"))
       return
     }
 
     if (safeMessages.length === 0 && curConversation) {
-      toast.info("The current session is already empty.")
+      toast.info(t("pages.chat.toast.currentSessionAlreadyEmpty"))
       return
     }
 
@@ -608,18 +651,18 @@ function Chat() {
     if (session) {
       setDraft("")
     }
-  }, [createEmptySession, curConversation, isSessionBusy, safeMessages.length])
+  }, [createEmptySession, curConversation, isSessionBusy, safeMessages.length, t])
 
   const handleDeleteConversation = useCallback(
     async (conversationKey: string) => {
       if (isSessionBusy) {
-        toast.info("Wait for the current response to finish before deleting sessions.")
+        toast.info(t("pages.chat.toast.waitBeforeDeletingSessions"))
         return
       }
 
       await deleteConversationSession(conversationKey)
     },
-    [deleteConversationSession, isSessionBusy]
+    [deleteConversationSession, isSessionBusy, t]
   )
 
   const handleGenerateImage = useCallback(() => {
@@ -640,7 +683,7 @@ function Chat() {
   const submitChatMessage = useCallback(
     async (value: string) => {
       if (!curConversation || isSessionBusy || isSessionBootstrapping) {
-        toast.info("Chat session is still syncing. Please try again in a moment.")
+        toast.info(t("pages.chat.toast.sessionSyncing"))
         return
       }
 
@@ -654,6 +697,7 @@ function Chat() {
       isSessionBootstrapping,
       isSessionBusy,
       setConversationLabelIfNeeded,
+      t,
     ]
   )
 
@@ -678,7 +722,7 @@ function Chat() {
                 {greeting}
               </h1>
               <p className="text-lg leading-7 text-muted-foreground/80">
-                How can I assist your creative workflow today?
+                {t("pages.chat.hero.description")}
               </p>
             </div>
           </div>
@@ -697,9 +741,11 @@ function Chat() {
               {isSessionBootstrapping || (isHistoryLoading && safeMessages.length === 0) ? (
                 <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
                   <div className="max-w-md space-y-3">
-                    <p className="text-base font-medium text-foreground">Loading this session...</p>
+                    <p className="text-base font-medium text-foreground">
+                      {t("pages.chat.loading.title")}
+                    </p>
                     <p className="text-sm leading-6 text-muted-foreground">
-                      Restoring the saved conversation history before you continue.
+                      {t("pages.chat.loading.description")}
                     </p>
                   </div>
                 </div>
@@ -707,11 +753,10 @@ function Chat() {
                 <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
                   <div className="max-w-md space-y-3">
                     <p className="text-base font-medium text-foreground">
-                      Start a new thread and keep the stage focused.
+                      {t("pages.chat.emptyState.title")}
                     </p>
                     <p className="text-sm leading-6 text-muted-foreground">
-                      Ask for debugging help, refine a draft, or pass the current idea into image
-                      generation when it needs a visual direction.
+                      {t("pages.chat.emptyState.description")}
                     </p>
                   </div>
                 </div>
@@ -779,37 +824,54 @@ function Chat() {
           >
             <DialogContent className="max-w-xl" showCloseButton={!isCreatingSession}>
               <DialogHeader className="space-y-3 text-left">
-                <DialogTitle>Switch model for this conversation?</DialogTitle>
+                <DialogTitle>{t("pages.chat.dialog.title")}</DialogTitle>
                 <DialogDescription>
-                  Choose whether the new model should keep using this session history or start from
-                  a clean session.
+                  {t("pages.chat.dialog.description")}
                 </DialogDescription>
               </DialogHeader>
 
               <div className="space-y-2 text-sm leading-6 text-muted-foreground">
                 <p>
-                  You are switching from <strong>{selectedModel?.label ?? "the current model"}</strong> to{" "}
-                  <strong>{pendingModelSwitch?.label ?? pendingModelSwitchId ?? "the selected model"}</strong>.
+                  <Trans
+                    i18nKey="pages.chat.dialog.switchingSummary"
+                    values={{
+                      from: selectedModel?.label ?? t("pages.chat.modelPicker.placeholder"),
+                      to:
+                        pendingModelSwitch?.label ??
+                        pendingModelSwitchId ??
+                        t("pages.chat.modelPicker.placeholder"),
+                    }}
+                    components={{ strong: <strong /> }}
+                  />
                 </p>
                 <p>
-                  <strong>{currentConversationLabel}</strong> already has {safeMessages.length}{" "}
-                  {safeMessages.length === 1 ? "message" : "messages"}.
+                  <Trans
+                    i18nKey="pages.chat.dialog.sessionSummary"
+                    count={safeMessages.length}
+                    values={{
+                      label: currentConversationLabel,
+                      count: safeMessages.length,
+                    }}
+                    components={{ strong: <strong /> }}
+                  />
                 </p>
               </div>
 
               <div className="grid gap-3 sm:grid-cols-2">
                 <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
-                  <p className="text-sm font-medium text-foreground">Keep current session</p>
+                  <p className="text-sm font-medium text-foreground">
+                    {t("pages.chat.dialog.keepTitle")}
+                  </p>
                   <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    The new model will continue from this conversation and see the existing message
-                    history.
+                    {t("pages.chat.dialog.keepDescription")}
                   </p>
                 </div>
                 <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
-                  <p className="text-sm font-medium text-foreground">Create new session</p>
+                  <p className="text-sm font-medium text-foreground">
+                    {t("pages.chat.dialog.createTitle")}
+                  </p>
                   <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    Start with a clean session and keep the previous conversation attached to the old
-                    model.
+                    {t("pages.chat.dialog.createDescription")}
                   </p>
                 </div>
               </div>
@@ -820,14 +882,14 @@ function Chat() {
                   onClick={closePendingModelSwitch}
                   disabled={isCreatingSession}
                 >
-                  Cancel
+                  {t("pages.chat.dialog.cancel")}
                 </Button>
                 <Button
                   variant="secondary"
                   onClick={handleKeepSessionOnModelSwitch}
                   disabled={isCreatingSession}
                 >
-                  Keep current session
+                  {t("pages.chat.dialog.keepTitle")}
                 </Button>
                 <Button
                   onClick={() => void handleCreateSessionOnModelSwitch()}
@@ -836,7 +898,7 @@ function Chat() {
                   {isCreatingSession ? (
                     <Loader2 className="h-4 w-4 animate-spin" />
                   ) : null}
-                  Create new session
+                  {t("pages.chat.dialog.createTitle")}
                 </Button>
               </DialogFooter>
             </DialogContent>

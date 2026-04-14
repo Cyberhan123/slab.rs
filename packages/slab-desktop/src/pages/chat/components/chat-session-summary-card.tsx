@@ -1,6 +1,7 @@
 import { FolderOpen, MessageSquareDot } from "lucide-react"
 
 import { Button } from "@slab/components/button"
+import { useTranslation } from "@slab/i18n"
 import { cn } from "@/lib/utils"
 
 export type ChatSessionSummaryItem = {
@@ -23,11 +24,13 @@ export function ChatSessionSummaryCard({
   onNewSession,
   disableNewSession = false,
 }: ChatSessionSummaryCardProps) {
+  const { t } = useTranslation()
+
   return (
     <aside className="w-full max-w-[288px] rounded-[24px] border border-border/50 bg-[var(--shell-card)] p-6 shadow-[var(--shell-elevation)]">
       <div className="flex items-center justify-between gap-3">
         <p className="text-[12px] font-bold uppercase tracking-[0.18em] text-muted-foreground">
-          Latest session
+          {t("pages.chat.summaryCard.latestSession")}
         </p>
         <Button
           type="button"
@@ -38,7 +41,7 @@ export function ChatSessionSummaryCard({
           disabled={disableNewSession}
         >
           <MessageSquareDot className="size-3.5" />
-          <span className="sr-only">Create session</span>
+          <span className="sr-only">{t("pages.chat.summaryCard.createSession")}</span>
         </Button>
       </div>
 
@@ -81,7 +84,7 @@ export function ChatSessionSummaryCard({
         className="mt-5 h-[38px] w-full rounded-[12px] border-border/60 bg-[var(--shell-card)] text-foreground/70 hover:bg-[var(--surface-soft)]"
         onClick={onManageSessions}
       >
-        Manage sessions
+        {t("pages.chat.summaryCard.manageSessions")}
       </Button>
     </aside>
   )
