@@ -1,3 +1,7 @@
+// Prevents additional console window on Windows in release, DO NOT REMOVE!!
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod bootstrap_ui;
 mod bundle;
 mod cab;
 mod detect;
@@ -14,12 +18,16 @@ use anyhow::{Context, Result, anyhow, bail};
 use clap::{Args, Parser, Subcommand};
 use uuid::Uuid;
 
-use crate::bundle::{AssetInput, AssetKind, EmbeddedBundle, load_embedded_bundle, write_embedded_bundle};
-use crate::cab::{create_cab, expand_cab};
+use crate::bootstrap_ui::run_bootstrap_with_ui;
+use crate::bundle::{
+    AssetInput, AssetKind, EmbeddedBundle, load_embedded_bundle, write_embedded_bundle,
+};
+use crate::cab::{create_cab, expand_cab_with_progress};
 use crate::detect::detect_best_variant;
 use crate::fsops::{apply_selected_payload, remove_dir_if_exists, write_json};
 use crate::payload::{
-    PackagedPayloadManifest, RequestedVariant, RuntimeVariant, build_runtime_payload_plan,
+    PackagedPayloadManifest, RequestedVariant, RuntimeVariant, SelectedPayloadManifest,
+    build_runtime_payload_plan,
 };
 
 const PAYLOAD_MANIFEST_FILE_NAME: &str = "payload-manifest.json";
@@ -70,6 +78,32 @@ struct ApplyArgs {
     dest: PathBuf,
 }
 
+#[derive(Debug)]
+struct PreparedBootstrap {
+    staging_root: PathBuf,
+    setup_path: PathBuf,
+    payload_root: PathBuf,
+    helper_path: PathBuf,
+}
+
+trait BootstrapProgressSink {
+    fn set_total_bytes(&mut self, total_bytes: u64);
+    fn set_stage(&mut self, stage: impl Into<String>, detail: impl Into<String>);
+    fn advance(&mut self, bytes: u64) -> Result<()>;
+}
+
+struct NoopProgressSink;
+
+impl BootstrapProgressSink for NoopProgressSink {
+    fn set_total_bytes(&mut self, _total_bytes: u64) {}
+
+    fn set_stage(&mut self, _stage: impl Into<String>, _detail: impl Into<String>) {}
+
+    fn advance(&mut self, _bytes: u64) -> Result<()> {
+        Ok(())
+    }
+}
+
 fn main() -> ExitCode {
     match run_main() {
         Ok(()) => ExitCode::SUCCESS,
@@ -96,35 +130,34 @@ fn run_main() -> Result<()> {
         None => {
             let current_exe = env::current_exe().context("failed to locate current executable")?;
             let Some(_) = load_embedded_bundle(&current_exe)? else {
-                bail!("no subcommand was provided and '{}' is not a bundled bootstrap executable", current_exe.display());
+                bail!(
+                    "no subcommand was provided and '{}' is not a bundled bootstrap executable",
+                    current_exe.display()
+                );
             };
-            run_bootstrap(RunArgs {
-                variant: RequestedVariant::Auto,
-                keep_staging: false,
-            })
+            run_bootstrap_with_ui(RunArgs { variant: RequestedVariant::Auto, keep_staging: false })
         }
     }
 }
 
 fn run_pack(args: PackArgs) -> Result<()> {
     let workspace_root = workspace_root()?;
-    let version = args
-        .version
-        .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    let version = args.version.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
     let output_path = args.output.unwrap_or_else(|| {
         workspace_root
             .join("target")
             .join("release")
             .join("bundle")
             .join("nsis")
-            .join("SlabFullInstaller.exe")
+            .join(full_installer_output_name(&version))
     });
     let nsis_installer = resolve_nsis_installer(&workspace_root, args.nsis_installer)?;
 
     let payload_plan = build_runtime_payload_plan(&workspace_root, &version)?;
     let staging_root = env::temp_dir().join(format!("slab-full-installer-pack-{}", Uuid::new_v4()));
-    fs::create_dir_all(&staging_root)
-        .with_context(|| format!("failed to create staging directory {}", staging_root.display()))?;
+    fs::create_dir_all(&staging_root).with_context(|| {
+        format!("failed to create staging directory {}", staging_root.display())
+    })?;
 
     let result = (|| -> Result<()> {
         let mut asset_inputs = Vec::new();
@@ -170,61 +203,135 @@ fn run_pack(args: PackArgs) -> Result<()> {
 }
 
 fn run_bootstrap(args: RunArgs) -> Result<()> {
-    let current_exe = env::current_exe().context("failed to locate current executable")?;
-    let bundle = load_embedded_bundle(&current_exe)?
-        .ok_or_else(|| anyhow!("'{}' does not contain an embedded installer bundle", current_exe.display()))?;
+    let mut progress = NoopProgressSink;
+    let prepared = prepare_bootstrap(args.clone(), &mut progress)?;
+    let result = launch_prepared_bootstrap(&prepared);
+    finalize_bootstrap(prepared, args.keep_staging, result)
+}
 
+fn prepare_bootstrap(
+    args: RunArgs,
+    progress: &mut impl BootstrapProgressSink,
+) -> Result<PreparedBootstrap> {
+    let current_exe = env::current_exe().context("failed to locate current executable")?;
+    let bundle = load_embedded_bundle(&current_exe)?.ok_or_else(|| {
+        anyhow!("'{}' does not contain an embedded installer bundle", current_exe.display())
+    })?;
+
+    progress.set_stage("Detecting hardware", "Selecting the best runtime package");
     let resolved_variant = resolve_requested_variant(args.variant)?;
     let selected_packages = selected_packages(resolved_variant);
-    let staging_root = env::temp_dir()
-        .join("SlabFullInstaller")
-        .join(format!("{}-{}", bundle.version(), Uuid::new_v4()));
+    let packaged_manifest = extract_packaged_manifest(&bundle)?;
+    let selected_manifest = packaged_manifest.selected_for(&selected_packages)?;
+    progress.set_total_bytes(total_bootstrap_bytes(
+        &bundle,
+        &selected_packages,
+        &selected_manifest,
+    )?);
+    progress.set_stage(
+        "Preparing installer",
+        format!("Using '{}' runtime package", resolved_variant.as_str()),
+    );
+
+    let staging_root = env::temp_dir().join("SlabFullInstaller").join(format!(
+        "{}-{}",
+        bundle.version(),
+        Uuid::new_v4()
+    ));
+    let cleanup_root = staging_root.clone();
     let setup_path = staging_root.join(SETUP_ASSET_NAME);
     let payload_root = staging_root.join("payload");
     let helper_path = staging_root.join("slab-windows-full-installer-helper.exe");
 
-    fs::create_dir_all(&payload_root)
-        .with_context(|| format!("failed to create staging payload directory {}", payload_root.display()))?;
+    let result = (|| -> Result<PreparedBootstrap> {
+        fs::create_dir_all(&payload_root).with_context(|| {
+            format!("failed to create staging payload directory {}", payload_root.display())
+        })?;
 
-    let result = (|| -> Result<()> {
-        let packaged_manifest = extract_packaged_manifest(&bundle)?;
-        bundle.extract_asset_to_path(SETUP_ASSET_NAME, &setup_path)?;
+        progress.set_stage("Preparing installer", "Extracting the NSIS installer");
+        bundle.extract_asset_to_path_with_progress(SETUP_ASSET_NAME, &setup_path, |bytes| {
+            progress.advance(bytes)
+        })?;
 
         for package in &selected_packages {
             let cab_name = package.cab_name();
             let cab_path = staging_root.join(cab_name);
-            bundle.extract_asset_to_path(cab_name, &cab_path)?;
-            expand_cab(&cab_path, &payload_root)?;
+
+            progress.set_stage(
+                "Preparing runtime files",
+                format!("Extracting {cab_name} from the bundled installer"),
+            );
+            bundle.extract_asset_to_path_with_progress(cab_name, &cab_path, |bytes| {
+                progress.advance(bytes)
+            })?;
+
+            progress.set_stage(
+                "Preparing runtime files",
+                format!("Expanding {cab_name} into the payload staging area"),
+            );
+            expand_cab_with_progress(&cab_path, &payload_root, |bytes| progress.advance(bytes))?;
             fs::remove_file(&cab_path)
                 .with_context(|| format!("failed to remove expanded CAB {}", cab_path.display()))?;
         }
 
-        let selected_manifest = packaged_manifest.selected_for(&selected_packages)?;
         write_json(&payload_root.join(PAYLOAD_MANIFEST_FILE_NAME), &selected_manifest)?;
-        bundle.write_base_executable_to_path(&helper_path)?;
 
-        let status = ProcessCommand::new(&setup_path)
-            .env("SLAB_INSTALLER_PAYLOAD_DIR", &payload_root)
-            .env("SLAB_INSTALLER_HELPER_PATH", &helper_path)
-            .status()
-            .with_context(|| format!("failed to launch {}", setup_path.display()))?;
+        progress.set_stage("Preparing installer", "Writing the helper executable");
+        bundle.write_base_executable_to_path_with_progress(&helper_path, |bytes| {
+            progress.advance(bytes)
+        })?;
+        progress.set_stage("Launching installer", "Opening the NSIS setup wizard");
 
-        if !status.success() {
-            bail!(
-                "NSIS installer '{}' exited with status {}",
-                setup_path.display(),
-                status
-            );
-        }
-
-        Ok(())
+        Ok(PreparedBootstrap { staging_root, setup_path, payload_root, helper_path })
     })();
 
-    if args.keep_staging {
+    match result {
+        Ok(prepared) => Ok(prepared),
+        Err(error) if args.keep_staging => Err(error),
+        Err(error) => {
+            let _ = remove_dir_if_exists(&cleanup_root);
+            Err(error)
+        }
+    }
+}
+
+fn total_bootstrap_bytes(
+    bundle: &EmbeddedBundle,
+    selected_packages: &[RuntimeVariant],
+    selected_manifest: &SelectedPayloadManifest,
+) -> Result<u64> {
+    let mut total_bytes = bundle.asset_len(SETUP_ASSET_NAME)? + bundle.base_executable_len();
+    for package in selected_packages {
+        total_bytes += bundle.asset_len(package.cab_name())?;
+    }
+    total_bytes += selected_manifest.files.iter().map(|file| file.size).sum::<u64>();
+    Ok(total_bytes.max(1))
+}
+
+fn launch_prepared_bootstrap(prepared: &PreparedBootstrap) -> Result<()> {
+    let status = ProcessCommand::new(&prepared.setup_path)
+        .env("SLAB_INSTALLER_PAYLOAD_DIR", &prepared.payload_root)
+        .env("SLAB_INSTALLER_HELPER_PATH", &prepared.helper_path)
+        .status()
+        .with_context(|| format!("failed to launch {}", prepared.setup_path.display()))?;
+
+    if !status.success() {
+        bail!("NSIS installer '{}' exited with status {}", prepared.setup_path.display(), status);
+    }
+
+    Ok(())
+}
+
+fn finalize_bootstrap(
+    prepared: PreparedBootstrap,
+    keep_staging: bool,
+    result: Result<()>,
+) -> Result<()> {
+    if keep_staging {
         return result;
     }
 
-    let cleanup = remove_dir_if_exists(&staging_root);
+    let cleanup = remove_dir_if_exists(&prepared.staging_root);
     match (result, cleanup) {
         (Ok(()), Ok(())) => Ok(()),
         (Ok(()), Err(error)) => Err(error),
@@ -263,6 +370,10 @@ fn workspace_root() -> Result<PathBuf> {
         .context("failed to resolve workspace root")
 }
 
+fn full_installer_output_name(version: &str) -> String {
+    format!("Slab_{version}_x64-offline-setup.exe")
+}
+
 fn resolve_nsis_installer(workspace_root: &Path, explicit: Option<PathBuf>) -> Result<PathBuf> {
     if let Some(path) = explicit {
         if !path.is_file() {
@@ -272,12 +383,14 @@ fn resolve_nsis_installer(workspace_root: &Path, explicit: Option<PathBuf>) -> R
     }
 
     let bundle_dir = workspace_root.join("target").join("release").join("bundle").join("nsis");
-    let entries = fs::read_dir(&bundle_dir)
-        .with_context(|| format!("failed to read Tauri NSIS bundle directory {}", bundle_dir.display()))?;
+    let entries = fs::read_dir(&bundle_dir).with_context(|| {
+        format!("failed to read Tauri NSIS bundle directory {}", bundle_dir.display())
+    })?;
 
     let mut candidates = Vec::new();
     for entry in entries {
-        let entry = entry.with_context(|| format!("failed to read entry under {}", bundle_dir.display()))?;
+        let entry = entry
+            .with_context(|| format!("failed to read entry under {}", bundle_dir.display()))?;
         let path = entry.path();
         if !path.is_file() {
             continue;
@@ -289,7 +402,7 @@ fn resolve_nsis_installer(workspace_root: &Path, explicit: Option<PathBuf>) -> R
         if path.extension().and_then(|value| value.to_str()) != Some("exe") {
             continue;
         }
-        if file_name.eq_ignore_ascii_case("SlabFullInstaller.exe") {
+        if is_offline_setup_executable(file_name) {
             continue;
         }
 
@@ -308,4 +421,9 @@ fn resolve_nsis_installer(workspace_root: &Path, explicit: Option<PathBuf>) -> R
         .next()
         .map(|(_, _, path)| path)
         .ok_or_else(|| anyhow!("no NSIS setup executable was found under {}", bundle_dir.display()))
+}
+
+fn is_offline_setup_executable(file_name: &str) -> bool {
+    let lowered = file_name.to_ascii_lowercase();
+    lowered.starts_with("slab_") && lowered.ends_with("_x64-offline-setup.exe")
 }

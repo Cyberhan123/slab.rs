@@ -63,16 +63,21 @@ impl EmbeddedBundle {
         &self.manifest.version
     }
 
-    pub fn extract_asset_to_path(&self, name: &str, output_path: &Path) -> Result<()> {
+    pub fn extract_asset_to_path_with_progress<F>(
+        &self,
+        name: &str,
+        output_path: &Path,
+        on_chunk: F,
+    ) -> Result<()>
+    where
+        F: FnMut(u64) -> Result<()>,
+    {
         let asset = self.asset(name)?;
         ensure_parent_dir(output_path)?;
-        copy_region_to_path(&self.executable_path, asset.offset, asset.len, output_path)?;
+        copy_region_to_path(&self.executable_path, asset.offset, asset.len, output_path, on_chunk)?;
         let extracted_hash = crate::fsops::sha256_file(output_path)?;
         if extracted_hash != asset.sha256 {
-            bail!(
-                "embedded asset '{}' failed hash verification after extraction",
-                asset.name
-            );
+            bail!("embedded asset '{}' failed hash verification after extraction", asset.name);
         }
         Ok(())
     }
@@ -93,14 +98,30 @@ impl EmbeddedBundle {
         Ok(buffer)
     }
 
-    pub fn write_base_executable_to_path(&self, output_path: &Path) -> Result<()> {
+    pub fn write_base_executable_to_path_with_progress<F>(
+        &self,
+        output_path: &Path,
+        on_chunk: F,
+    ) -> Result<()>
+    where
+        F: FnMut(u64) -> Result<()>,
+    {
         ensure_parent_dir(output_path)?;
         copy_region_to_path(
             &self.executable_path,
             0,
             self.footer.base_executable_len,
             output_path,
+            on_chunk,
         )
+    }
+
+    pub fn asset_len(&self, name: &str) -> Result<u64> {
+        Ok(self.asset(name)?.len)
+    }
+
+    pub fn base_executable_len(&self) -> u64 {
+        self.footer.base_executable_len
     }
 
     fn asset(&self, name: &str) -> Result<&EmbeddedAssetRecord> {
@@ -120,8 +141,8 @@ pub fn write_embedded_bundle(
 ) -> Result<()> {
     let base_bytes = read_base_executable_bytes(base_executable_path)?;
     ensure_parent_dir(output_path)?;
-    let output_file =
-        File::create(output_path).with_context(|| format!("failed to create {}", output_path.display()))?;
+    let output_file = File::create(output_path)
+        .with_context(|| format!("failed to create {}", output_path.display()))?;
     let mut writer = BufWriter::new(output_file);
     writer
         .write_all(&base_bytes)
@@ -146,11 +167,12 @@ pub fn write_embedded_bundle(
         version: version.to_string(),
         assets: asset_records,
     };
-    let manifest_bytes = serde_json::to_vec_pretty(&manifest).context("failed to serialize embedded bundle manifest")?;
+    let manifest_bytes = serde_json::to_vec_pretty(&manifest)
+        .context("failed to serialize embedded bundle manifest")?;
     let manifest_offset = next_offset;
-    writer
-        .write_all(&manifest_bytes)
-        .with_context(|| format!("failed to write embedded bundle manifest to {}", output_path.display()))?;
+    writer.write_all(&manifest_bytes).with_context(|| {
+        format!("failed to write embedded bundle manifest to {}", output_path.display())
+    })?;
     next_offset += manifest_bytes.len() as u64;
 
     let footer = BundleFooter {
@@ -158,9 +180,9 @@ pub fn write_embedded_bundle(
         manifest_len: manifest_bytes.len() as u64,
         base_executable_len: base_bytes.len() as u64,
     };
-    writer
-        .write_all(&footer.to_bytes())
-        .with_context(|| format!("failed to write embedded bundle footer to {}", output_path.display()))?;
+    writer.write_all(&footer.to_bytes()).with_context(|| {
+        format!("failed to write embedded bundle footer to {}", output_path.display())
+    })?;
     next_offset += FOOTER_LEN;
     writer.flush().with_context(|| format!("failed to flush {}", output_path.display()))?;
 
@@ -206,10 +228,7 @@ pub fn load_embedded_bundle(executable_path: &Path) -> Result<Option<EmbeddedBun
     };
 
     if footer.manifest_offset + footer.manifest_len + FOOTER_LEN != file_len {
-        bail!(
-            "embedded bundle footer in '{}' is corrupt",
-            executable_path.display()
-        );
+        bail!("embedded bundle footer in '{}' is corrupt", executable_path.display());
     }
 
     reader
@@ -219,14 +238,12 @@ pub fn load_embedded_bundle(executable_path: &Path) -> Result<Option<EmbeddedBun
     reader
         .read_exact(&mut manifest_bytes)
         .with_context(|| format!("failed to read manifest in {}", executable_path.display()))?;
-    let manifest: EmbeddedBundleManifest = serde_json::from_slice(&manifest_bytes)
-        .with_context(|| format!("failed to parse embedded bundle manifest in {}", executable_path.display()))?;
+    let manifest: EmbeddedBundleManifest =
+        serde_json::from_slice(&manifest_bytes).with_context(|| {
+            format!("failed to parse embedded bundle manifest in {}", executable_path.display())
+        })?;
 
-    Ok(Some(EmbeddedBundle {
-        executable_path: executable_path.to_path_buf(),
-        manifest,
-        footer,
-    }))
+    Ok(Some(EmbeddedBundle { executable_path: executable_path.to_path_buf(), manifest, footer }))
 }
 
 pub fn read_base_executable_bytes(executable_path: &Path) -> Result<Vec<u8>> {
@@ -235,28 +252,44 @@ pub fn read_base_executable_bytes(executable_path: &Path) -> Result<Vec<u8>> {
         Some(bundle) => (bundle.executable_path, bundle.footer.base_executable_len),
         None => {
             let len = fs::metadata(&executable_path)
-                .with_context(|| format!("failed to read metadata for {}", executable_path.display()))?
+                .with_context(|| {
+                    format!("failed to read metadata for {}", executable_path.display())
+                })?
                 .len();
             (executable_path, len)
         }
     };
 
-    let mut file = File::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
+    let mut file =
+        File::open(&path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut buffer = vec![0_u8; len as usize];
     file.read_exact(&mut buffer)
         .with_context(|| format!("failed to read base executable bytes from {}", path.display()))?;
     Ok(buffer)
 }
 
-fn copy_region_to_path(source_path: &Path, offset: u64, len: u64, output_path: &Path) -> Result<()> {
-    let mut reader =
-        BufReader::new(File::open(source_path).with_context(|| format!("failed to open {}", source_path.display()))?);
+fn copy_region_to_path<F>(
+    source_path: &Path,
+    offset: u64,
+    len: u64,
+    output_path: &Path,
+    mut on_chunk: F,
+) -> Result<()>
+where
+    F: FnMut(u64) -> Result<()>,
+{
+    let mut reader = BufReader::new(
+        File::open(source_path)
+            .with_context(|| format!("failed to open {}", source_path.display()))?,
+    );
     reader
         .seek(SeekFrom::Start(offset))
         .with_context(|| format!("failed to seek {} to {}", source_path.display(), offset))?;
 
-    let mut writer =
-        BufWriter::new(File::create(output_path).with_context(|| format!("failed to create {}", output_path.display()))?);
+    let mut writer = BufWriter::new(
+        File::create(output_path)
+            .with_context(|| format!("failed to create {}", output_path.display()))?,
+    );
     let mut remaining = len;
     let mut buffer = [0_u8; 1024 * 64];
     while remaining > 0 {
@@ -268,15 +301,15 @@ fn copy_region_to_path(source_path: &Path, offset: u64, len: u64, output_path: &
             .write_all(&buffer[..to_read])
             .with_context(|| format!("failed to write {}", output_path.display()))?;
         remaining -= to_read as u64;
+        on_chunk(to_read as u64)?;
     }
-    writer
-        .flush()
-        .with_context(|| format!("failed to flush {}", output_path.display()))?;
+    writer.flush().with_context(|| format!("failed to flush {}", output_path.display()))?;
     Ok(())
 }
 
 fn copy_file_with_hash(source_path: &Path, writer: &mut impl Write) -> Result<(String, u64)> {
-    let file = File::open(source_path).with_context(|| format!("failed to open {}", source_path.display()))?;
+    let file = File::open(source_path)
+        .with_context(|| format!("failed to open {}", source_path.display()))?;
     let mut reader = BufReader::new(file);
     let mut hasher = sha2::Sha256::new();
     let mut len = 0_u64;
@@ -289,9 +322,9 @@ fn copy_file_with_hash(source_path: &Path, writer: &mut impl Write) -> Result<(S
         if read == 0 {
             break;
         }
-        writer
-            .write_all(&buffer[..read])
-            .with_context(|| format!("failed to write bundled asset from {}", source_path.display()))?;
+        writer.write_all(&buffer[..read]).with_context(|| {
+            format!("failed to write bundled asset from {}", source_path.display())
+        })?;
         sha2::Digest::update(&mut hasher, &buffer[..read]);
         len += read as u64;
     }
@@ -321,11 +354,7 @@ impl BundleFooter {
         let manifest_offset = read_u64(bytes, &mut index)?;
         let manifest_len = read_u64(bytes, &mut index)?;
         let base_executable_len = read_u64(bytes, &mut index)?;
-        Some(Self {
-            manifest_offset,
-            manifest_len,
-            base_executable_len,
-        })
+        Some(Self { manifest_offset, manifest_len, base_executable_len })
     }
 }
 
