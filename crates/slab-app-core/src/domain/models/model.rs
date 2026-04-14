@@ -168,6 +168,9 @@ pub struct ModelSpec {
     /// HuggingFace repo ID for local models.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_id: Option<String>,
+    /// Optional explicit hub provider override for local model downloads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hub_provider: Option<String>,
     /// Filename within the HF repo.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
