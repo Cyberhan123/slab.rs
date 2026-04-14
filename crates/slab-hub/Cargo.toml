@@ -1,0 +1,26 @@
+[package]
+name = "slab-hub"
+version.workspace = true
+edition.workspace = true
+description.workspace = true
+repository.workspace = true
+keywords.workspace = true
+categories.workspace = true
+license.workspace = true
+
+[features]
+default = ["provider-hf-hub", "provider-models-cat"]
+provider-hf-hub = ["dep:hf-hub"]
+provider-models-cat = ["dep:models-cat"]
+provider-huggingface-hub-rust = ["dep:huggingface-hub"]
+
+[dependencies]
+reqwest = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+walkdir = "2.5.0"
+async-trait = { workspace = true }
+
+hf-hub = { version = "0.5.0", default-features = false, features = ["tokio", "native-tls"], optional = true }
+models-cat = { version = "0.1.0", default-features = false, features = ["tokio"], optional = true }
+huggingface-hub = { version = "0.0.1", default-features = false, optional = true }

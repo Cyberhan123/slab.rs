@@ -20,7 +20,7 @@ slab-proto        = { workspace = true }
 slab-model-pack   = { workspace = true }
 slab-types        = { workspace = true }
 slab-libfetch     = { workspace = true }
-hf-hub            = { workspace = true }
+slab-hub          = { workspace = true }
 
 # Async runtime
 tokio   = { workspace = true }
@@ -74,4 +74,3 @@ validator = { version = "0.20", features = ["derive"] }
 
 # Optional: Axum state extractor integration
 axum = { workspace = true, optional = true }
-

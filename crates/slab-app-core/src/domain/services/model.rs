@@ -3,10 +3,10 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use chrono::Utc;
-use hf_hub::api::sync::{Api, ApiBuilder};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use slab_proto::convert;
+use slab_hub::{HubClient, HubProviderPreference};
 use slab_types::load_config::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
 };
@@ -47,6 +47,8 @@ struct ModelDownloadTaskInput {
     backend_id: String,
     repo_id: String,
     filename: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hub_provider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model_cache_dir: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -143,6 +145,30 @@ fn runtime_presets_from_manifest(
 fn primary_materialized_artifact_path(config: &StoredModelConfig) -> Option<String> {
     primary_artifact_key(&config.materialized_artifacts)
         .and_then(|key| config.materialized_artifacts.get(&key).cloned())
+}
+
+fn normalized_hub_provider_preference(
+    value: Option<&str>,
+) -> Result<(HubProviderPreference, Option<String>), AppCoreError> {
+    let preference = HubProviderPreference::from_optional_str(value)
+        .map_err(AppCoreError::BadRequest)?;
+    let canonical = match preference {
+        HubProviderPreference::Auto => None,
+        HubProviderPreference::Provider(provider) => Some(provider.as_config_value().to_owned()),
+    };
+    Ok((preference, canonical))
+}
+
+fn build_hub_client(
+    model_cache_dir: Option<&str>,
+    hub_provider: Option<&str>,
+) -> Result<HubClient, AppCoreError> {
+    let (provider_preference, _) = normalized_hub_provider_preference(hub_provider)?;
+    let mut client = HubClient::new().with_provider_preference(provider_preference);
+    if let Some(dir) = model_cache_dir.map(str::trim).filter(|value| !value.is_empty()) {
+        client = client.with_cache_dir(PathBuf::from(dir));
+    }
+    Ok(client)
 }
 
 #[derive(Debug, Clone)]
@@ -478,17 +504,10 @@ impl ModelService {
         &self,
         query: AvailableModelsQuery,
     ) -> Result<AvailableModelsView, AppCoreError> {
-        let repo_id = query.repo_id.clone();
-        let files: Vec<String> = tokio::task::spawn_blocking(move || {
-            let api = Api::new().map_err(|error| format!("hf-hub init failed: {error}"))?;
-            let repo = api.model(repo_id);
-            let info = repo.info().map_err(|error| format!("hf-hub info failed: {error}"))?;
-            let names = info.siblings.into_iter().map(|item| item.rfilename).collect();
-            Ok::<Vec<String>, String>(names)
-        })
-        .await
-        .map_err(|error| AppCoreError::Internal(format!("spawn_blocking panicked: {error}")))?
-        .map_err(AppCoreError::Internal)?;
+        let files = HubClient::new()
+            .list_repo_files(&query.repo_id)
+            .await
+            .map_err(|error| AppCoreError::Internal(format!("hub file listing failed: {error}")))?;
 
         Ok(AvailableModelsView { repo_id: query.repo_id, files })
     }
@@ -627,6 +646,7 @@ impl ModelService {
             backend_id: canonical_backend_id,
             repo_id: repo_id.clone(),
             filename: filename.clone(),
+            hub_provider: model.spec.hub_provider.clone(),
             model_cache_dir: configured_model_cache_dir,
             artifacts: download_artifacts.clone(),
             primary_artifact_id: primary_artifact_id.clone(),
@@ -734,6 +754,12 @@ impl ModelService {
                 let model_id = input.model_id.trim().to_owned();
                 let repo_id = input.repo_id.trim().to_owned();
                 let filename = input.filename.trim().to_owned();
+                let hub_provider = input
+                    .hub_provider
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|value| !value.is_empty())
+                    .map(str::to_owned);
                 let model_cache_dir = input
                     .model_cache_dir
                     .as_deref()
@@ -762,22 +788,17 @@ impl ModelService {
                     return;
                 }
 
-                let result = tokio::task::spawn_blocking(move || {
-                    let api = if let Some(dir) = model_cache_dir {
-                        ApiBuilder::new()
-                            .with_cache_dir(std::path::PathBuf::from(dir))
-                            .build()
-                            .map_err(|error| format!("hf-hub build failed: {error}"))?
-                    } else {
-                        Api::new().map_err(|error| format!("hf-hub init failed: {error}"))?
-                    };
-                    let repo = api.model(repo_id.clone());
+                let result = async {
+                    let client =
+                        build_hub_client(model_cache_dir.as_deref(), hub_provider.as_deref())
+                            .map_err(|error| error.to_string())?;
                     let mut materialized_artifacts = BTreeMap::new();
 
                     for (artifact_id, artifact_file) in &download_artifacts {
-                        let path = repo
-                            .get(artifact_file)
-                            .map_err(|error| format!("hf-hub download failed for {artifact_file}: {error}"))?;
+                        let path = client
+                            .download_file(&repo_id, artifact_file, None)
+                            .await
+                            .map_err(|error| format!("hub download failed for {artifact_file}: {error}"))?;
                         materialized_artifacts
                             .insert(artifact_id.clone(), path.to_string_lossy().into_owned());
                     }
@@ -787,14 +808,14 @@ impl ModelService {
                         .and_then(|artifact_id| materialized_artifacts.get(artifact_id))
                         .cloned()
                         .or_else(|| materialized_artifacts.values().next().cloned())
-                        .ok_or_else(|| "hf-hub download produced no local artifacts".to_owned())?;
+                        .ok_or_else(|| "hub download produced no local artifacts".to_owned())?;
 
                     Ok::<(String, BTreeMap<String, String>), String>((local_path, materialized_artifacts))
-                })
+                }
                 .await;
 
                 match result {
-                    Ok(Ok((local_path, materialized_artifacts))) => {
+                    Ok((local_path, materialized_artifacts)) => {
                         if let Err(error) = store
                             .update_model_local_path(&model_id, &local_path, "ready")
                             .await
@@ -871,15 +892,9 @@ impl ModelService {
                         }
                         info!(task_id = %operation_id, local_path = %local_path, "model download succeeded");
                     }
-                    Ok(Err(error)) => {
+                    Err(error) => {
                         warn!(task_id = %operation_id, error = %error, "model download failed");
                         mark_model_download_failed(&operation, &store, &operation_id, &error).await;
-                    }
-                    Err(error) => {
-                        let message = error.to_string();
-                        warn!(task_id = %operation_id, error = %message, "model download task panicked");
-                        mark_model_download_failed(&operation, &store, &operation_id, &message)
-                            .await;
                     }
                 }
             });
@@ -2096,6 +2111,9 @@ fn canonicalize_model_spec(
     spec.provider_id = normalize_optional_text(spec.provider_id);
     spec.remote_model_id = normalize_optional_text(spec.remote_model_id);
     spec.repo_id = normalize_optional_text(spec.repo_id);
+    let (_, canonical_hub_provider) =
+        normalized_hub_provider_preference(spec.hub_provider.as_deref())?;
+    spec.hub_provider = canonical_hub_provider;
     spec.filename = normalize_optional_text(spec.filename);
     spec.local_path = normalize_optional_text(spec.local_path);
     spec.chat_template = normalize_optional_text(spec.chat_template);
@@ -2103,6 +2121,7 @@ fn canonicalize_model_spec(
     match kind {
         UnifiedModelKind::Cloud => {
             spec.repo_id = None;
+            spec.hub_provider = None;
             spec.filename = None;
             spec.local_path = None;
             spec.chat_template = None;
@@ -3454,6 +3473,7 @@ mod tests {
                 provider_id: Some("openai-main".into()),
                 remote_model_id: Some("gpt-4.1-mini".into()),
                 repo_id: Some("Qwen/Qwen3-8B-GGUF".into()),
+                hub_provider: Some("hf".into()),
                 filename: Some("qwen3-8b.gguf".into()),
                 local_path: Some("C:/models/qwen3-8b.gguf".into()),
                 chat_template: Some("chatml".into()),
@@ -3463,6 +3483,7 @@ mod tests {
         .expect("cloud spec");
 
         assert!(spec.repo_id.is_none());
+        assert!(spec.hub_provider.is_none());
         assert!(spec.filename.is_none());
         assert!(spec.local_path.is_none());
         assert!(spec.chat_template.is_none());
@@ -3495,6 +3516,36 @@ mod tests {
         assert_eq!(backend_id, Some(ManagedModelBackendId::GgmlLlama));
         assert!(spec.provider_id.is_none());
         assert!(spec.remote_model_id.is_none());
+    }
+
+    #[test]
+    fn local_models_canonicalize_explicit_hub_provider() {
+        let (_, spec) = canonicalize_model_spec(
+            UnifiedModelKind::Local,
+            Some(ManagedModelBackendId::GgmlLlama),
+            ModelSpec {
+                hub_provider: Some(" hf ".into()),
+                ..ModelSpec::default()
+            },
+        )
+        .expect("local spec");
+
+        assert_eq!(spec.hub_provider.as_deref(), Some("hf_hub"));
+    }
+
+    #[test]
+    fn local_models_reject_unknown_hub_provider() {
+        let error = canonicalize_model_spec(
+            UnifiedModelKind::Local,
+            Some(ManagedModelBackendId::GgmlLlama),
+            ModelSpec {
+                hub_provider: Some("unknown".into()),
+                ..ModelSpec::default()
+            },
+        )
+        .expect_err("invalid hub provider");
+
+        assert!(error.to_string().contains("unsupported hub provider"), "unexpected error: {error}");
     }
 
     #[test]
