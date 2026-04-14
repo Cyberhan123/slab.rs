@@ -70,6 +70,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `bin/slab-runtime`: gRPC server and runtime worker package. `src/main.rs` is the thin binary entrypoint; `src/api`, `src/application`, `src/domain`, and `src/infra` hold the worker logic and backend composition.
 - `bin/slab-windows-full-installer`: Windows full-installer bootstrap binary. `pack` builds the outer self-extracting installer, `run` expands CAB payloads and launches the embedded Tauri NSIS installer, and `apply` is the helper entrypoint used by NSIS hooks to copy `resources/libs`.
 - `crates/slab-app-core`: HTTP-free business logic (domain, infra, context, config) plus the shared runtime supervisor used by `slab-server`. Migrations are in `crates/slab-app-core/migrations/`.
+- `crates/slab-hub`: unified model hub abstraction used by `slab-app-core` for feature-gated Hugging Face / ModelScope-style listing, download, and provider fallback.
 - `crates/slab-runtime-core`: pure scheduler/backend-protocol library only (package: `slab-runtime-core`); keep HTTP, SQL, driver resolution, typed codecs, and backend composition concerns out.
 - `bin/slab-runtime/src/infra/backends`: in-package GGML, Candle, and ONNX backend registrations, engines, adapters, and worker implementations.
 - `crates/slab-agent`: agent orchestration library and tool router abstractions.
