@@ -8,6 +8,7 @@ import {
   Maximize2,
   X,
 } from 'lucide-react';
+import { useTranslation } from '@slab/i18n';
 
 import { Button } from '@slab/components/button';
 import {
@@ -132,6 +133,16 @@ export function VideoWorkbench({
   widthStr,
   widthValue,
 }: VideoWorkbenchProps) {
+  const { t } = useTranslation();
+  const sampleMethodOptions = SAMPLE_METHODS.map((method) => ({
+    ...method,
+    label: t(`pages.video.options.sampleMethods.${method.value}`),
+  }));
+  const schedulerOptions = SCHEDULERS.map((schedulerItem) => ({
+    ...schedulerItem,
+    label: t(`pages.video.options.schedulers.${schedulerItem.value}`),
+  }));
+
   return (
     <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
       <div className="mx-auto flex min-h-full w-full max-w-[1200px] flex-col px-4 py-4 sm:px-6 lg:h-full lg:min-h-0 lg:py-5 xl:py-6">
@@ -139,20 +150,22 @@ export function VideoWorkbench({
           <aside className="flex h-full min-h-[520px] flex-col rounded-[28px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_96%,transparent),color-mix(in_oklab,var(--surface-1)_96%,transparent))] p-6 shadow-[0_20px_50px_-38px_color-mix(in_oklab,var(--foreground)_35%,transparent)] lg:min-h-0 lg:overflow-hidden">
             <div className="pb-6">
               <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-muted-foreground">
-                Configuration
+                {t('pages.video.workbench.configTitle')}
               </p>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                Choose the active diffusion model from the global header.
+                {t('pages.video.workbench.modelHint')}
               </p>
             </div>
 
             <div className="min-h-0 flex-1 space-y-6 overflow-y-auto pr-2">
               <div className="space-y-2.5">
-                <FieldLabel htmlFor="video-prompt">Creative Prompt</FieldLabel>
+                <FieldLabel htmlFor="video-prompt">
+                  {t('pages.video.workbench.prompt.label')}
+                </FieldLabel>
                 <Textarea
                   id="video-prompt"
                   variant="soft"
-                  placeholder="Describe the scene in cinematic detail..."
+                  placeholder={t('pages.video.workbench.prompt.placeholder')}
                   rows={4}
                   value={prompt}
                   onChange={(event) => setPrompt(event.target.value)}
@@ -161,11 +174,13 @@ export function VideoWorkbench({
               </div>
 
               <div className="space-y-2.5">
-                <FieldLabel htmlFor="video-negative">Negative Prompt</FieldLabel>
+                <FieldLabel htmlFor="video-negative">
+                  {t('pages.video.workbench.negativePrompt.label')}
+                </FieldLabel>
                 <Input
                   id="video-negative"
                   variant="soft"
-                  placeholder="Blurry, low quality, distorted..."
+                  placeholder={t('pages.video.workbench.negativePrompt.placeholder')}
                   value={negativePrompt}
                   onChange={(event) => setNegativePrompt(event.target.value)}
                   className="h-14 rounded-[18px] border-border/50 bg-[var(--shell-card)]/78 px-4 text-[15px] text-foreground shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_90%,transparent)] placeholder:text-muted-foreground/70"
@@ -174,7 +189,7 @@ export function VideoWorkbench({
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <ResolutionSliderField
-                  label="Width"
+                  label={t('pages.video.workbench.fields.width')}
                   value={widthStr}
                   min={64}
                   max={2048}
@@ -182,7 +197,7 @@ export function VideoWorkbench({
                   onChange={setWidthStr}
                 />
                 <ResolutionSliderField
-                  label="Height"
+                  label={t('pages.video.workbench.fields.height')}
                   value={heightStr}
                   min={64}
                   max={2048}
@@ -193,7 +208,7 @@ export function VideoWorkbench({
 
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2.5">
-                  <FieldLabel>Frames</FieldLabel>
+                  <FieldLabel>{t('pages.video.workbench.fields.frames')}</FieldLabel>
                   <Select value={String(frames)} onValueChange={(value) => setFrames(Number(value))}>
                     <SelectTrigger
                       variant="soft"
@@ -212,7 +227,7 @@ export function VideoWorkbench({
                 </div>
 
                 <div className="space-y-2.5">
-                  <FieldLabel>FPS</FieldLabel>
+                  <FieldLabel>{t('pages.video.workbench.fields.fps')}</FieldLabel>
                   <Select value={String(fps)} onValueChange={(value) => setFps(Number(value))}>
                     <SelectTrigger
                       variant="soft"
@@ -232,7 +247,7 @@ export function VideoWorkbench({
               </div>
 
               <div className="space-y-2.5">
-                <FieldLabel>Reference Image</FieldLabel>
+                <FieldLabel>{t('pages.video.workbench.fields.referenceImage')}</FieldLabel>
                 <button
                   type="button"
                   onClick={() => initImageInputRef.current?.click()}
@@ -244,14 +259,16 @@ export function VideoWorkbench({
                     <div className="relative w-full overflow-hidden rounded-[18px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/80 shadow-[0_18px_30px_-24px_color-mix(in_oklab,var(--foreground)_35%,transparent)]">
                       <img
                         src={initImageDataUri}
-                        alt="Reference"
+                        alt={t('pages.video.workbench.referenceImage.previewAlt')}
                         className="h-36 w-full object-cover"
                       />
                       <div className="flex items-center justify-between gap-3 px-4 py-3 text-left">
                         <div>
-                          <p className="text-sm font-semibold text-foreground">Reference frame ready</p>
+                          <p className="text-sm font-semibold text-foreground">
+                            {t('pages.video.workbench.referenceImage.readyTitle')}
+                          </p>
                           <p className="text-xs text-muted-foreground">
-                            Slab will use this image as the starting frame.
+                            {t('pages.video.workbench.referenceImage.readyDescription')}
                           </p>
                         </div>
                         <Button
@@ -263,6 +280,7 @@ export function VideoWorkbench({
                             event.stopPropagation();
                             setInitImageDataUri(null);
                           }}
+                          aria-label={t('pages.video.workbench.referenceImage.removeAria')}
                         >
                           <X className="h-3.5 w-3.5" />
                         </Button>
@@ -275,10 +293,10 @@ export function VideoWorkbench({
                       </div>
                       <div className="space-y-1">
                         <p className="text-sm font-medium text-foreground/80">
-                          Drop PNG/JPG or click to upload
+                          {t('pages.video.workbench.referenceImage.uploadTitle')}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          Optional starting frame for motion generation.
+                          {t('pages.video.workbench.referenceImage.uploadDescription')}
                         </p>
                       </div>
                     </>
@@ -299,7 +317,7 @@ export function VideoWorkbench({
                     type="button"
                     className="flex w-full items-center justify-between rounded-[18px] border border-border/50 bg-[var(--shell-card)]/72 px-4 py-3 text-sm font-semibold text-foreground/80 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_85%,transparent)] transition hover:border-border/70 hover:text-foreground"
                   >
-                    Advanced Parameters
+                    {t('pages.video.workbench.fields.advanced')}
                     {advancedOpen ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
                   </button>
                 </CollapsibleTrigger>
@@ -307,7 +325,7 @@ export function VideoWorkbench({
                 <CollapsibleContent className="space-y-5 pt-4">
                   <div className="grid gap-4 sm:grid-cols-2">
                     <SliderField
-                      label="CFG Scale"
+                      label={t('pages.video.workbench.fields.cfgScale')}
                       value={cfgScale.toFixed(1)}
                       slider={
                         <Slider
@@ -320,7 +338,7 @@ export function VideoWorkbench({
                       }
                     />
                     <SliderField
-                      label="Guidance"
+                      label={t('pages.video.workbench.fields.guidance')}
                       value={guidance.toFixed(1)}
                       slider={
                         <Slider
@@ -333,7 +351,7 @@ export function VideoWorkbench({
                       }
                     />
                     <SliderField
-                      label="Steps"
+                      label={t('pages.video.workbench.fields.steps')}
                       value={steps}
                       slider={
                         <Slider
@@ -347,7 +365,7 @@ export function VideoWorkbench({
                     />
                     {initImageDataUri ? (
                       <SliderField
-                        label="Strength"
+                        label={t('pages.video.workbench.fields.strength')}
                         value={strength.toFixed(2)}
                         slider={
                           <Slider
@@ -364,7 +382,7 @@ export function VideoWorkbench({
 
                   <div className="grid gap-4 sm:grid-cols-2">
                     <div className="space-y-2.5">
-                      <FieldLabel>Seed (-1 random)</FieldLabel>
+                      <FieldLabel>{t('pages.video.workbench.fields.seed')}</FieldLabel>
                       <Input
                         variant="soft"
                         type="number"
@@ -375,7 +393,7 @@ export function VideoWorkbench({
                     </div>
 
                     <div className="space-y-2.5">
-                      <FieldLabel>Sampler</FieldLabel>
+                      <FieldLabel>{t('pages.video.workbench.fields.sampler')}</FieldLabel>
                       <Select value={sampleMethod} onValueChange={setSampleMethod}>
                         <SelectTrigger
                           variant="soft"
@@ -384,7 +402,7 @@ export function VideoWorkbench({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent variant="soft">
-                          {SAMPLE_METHODS.map((method) => (
+                          {sampleMethodOptions.map((method) => (
                             <SelectItem key={method.value} value={method.value}>
                               {method.label}
                             </SelectItem>
@@ -394,7 +412,7 @@ export function VideoWorkbench({
                     </div>
 
                     <div className="space-y-2.5 sm:col-span-2">
-                      <FieldLabel>Scheduler</FieldLabel>
+                      <FieldLabel>{t('pages.video.workbench.fields.scheduler')}</FieldLabel>
                       <Select value={scheduler} onValueChange={setScheduler}>
                         <SelectTrigger
                           variant="soft"
@@ -403,7 +421,7 @@ export function VideoWorkbench({
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent variant="soft">
-                          {SCHEDULERS.map((schedulerItem) => (
+                          {schedulerOptions.map((schedulerItem) => (
                             <SelectItem key={schedulerItem.value} value={schedulerItem.value}>
                               {schedulerItem.label}
                             </SelectItem>
@@ -427,12 +445,12 @@ export function VideoWorkbench({
                 {isGenerating ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Generating...
+                    {t('pages.video.workbench.actions.generating')}
                   </>
                 ) : (
                   <>
                     <Film className="h-4 w-4" />
-                    Generate Video
+                    {t('pages.video.workbench.actions.generate')}
                   </>
                 )}
               </Button>
@@ -443,7 +461,7 @@ export function VideoWorkbench({
                   className="h-11 w-full rounded-[16px]"
                   onClick={handleCancel}
                 >
-                  Cancel current render
+                  {t('pages.video.workbench.actions.cancel')}
                 </Button>
               ) : null}
             </div>
@@ -498,13 +516,13 @@ export function VideoWorkbench({
                 <div className="flex items-center gap-2 rounded-[20px] border border-[var(--shell-card)]/45 bg-[var(--shell-card)]/72 px-4 py-3 backdrop-blur-xl shadow-[0_24px_50px_-34px_color-mix(in_oklab,var(--foreground)_42%,transparent)]">
                   <ToolbarIconButton
                     icon={Maximize2}
-                    label="Toggle stage scale"
+                    label={t('pages.video.workbench.stage.toggleScale')}
                     active={immersivePreview}
                     onClick={() => setImmersivePreview((current) => !current)}
                   />
                   <ToolbarIconButton
                     icon={Download}
-                    label="Download video"
+                    label={t('pages.video.workbench.stage.downloadVideo')}
                     disabled={!videoPath}
                     onClick={handleDownload}
                   />
@@ -515,9 +533,18 @@ export function VideoWorkbench({
             <div className="rounded-[22px] border border-border/50 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--surface-soft)_95%,transparent),color-mix(in_oklab,var(--surface-1)_92%,transparent))] px-5 py-4 shadow-[0_18px_42px_-34px_color-mix(in_oklab,var(--foreground)_28%,transparent)]">
               <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div className="grid gap-4 sm:grid-cols-3">
-                  <StatusMetric label="Render Status" value={stageStatus} />
-                  <StatusMetric label="Clip Spec" value={`${frames} frames • ${fps} fps`} />
-                  <StatusMetric label="Canvas" value={`${widthValue} x ${heightValue}`} />
+                  <StatusMetric
+                    label={t('pages.video.workbench.stage.renderStatus')}
+                    value={stageStatus}
+                  />
+                  <StatusMetric
+                    label={t('pages.video.workbench.stage.clipSpec')}
+                    value={t('pages.video.workbench.stage.clipSpecValue', { frames, fps })}
+                  />
+                  <StatusMetric
+                    label={t('pages.video.workbench.stage.canvas')}
+                    value={`${widthValue} x ${heightValue}`}
+                  />
                 </div>
                 <p className="text-xs font-medium text-muted-foreground xl:text-right">{footerHint}</p>
               </div>

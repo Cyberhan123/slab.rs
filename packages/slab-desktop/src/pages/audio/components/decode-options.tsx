@@ -1,6 +1,7 @@
 import { Input } from '@slab/components/input';
 import { Label } from '@slab/components/label';
 import { Switch } from '@slab/components/switch';
+import { useTranslation } from '@slab/i18n';
 
 export type DecodeOptionsProps = {
   showDecodeOptions: boolean;
@@ -79,14 +80,17 @@ export function DecodeOptions({
   decodeTdrzEnable,
   setDecodeTdrzEnable,
 }: DecodeOptionsProps) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-[22px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/60 p-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
       <div className="flex items-start justify-between gap-5">
         <div className="space-y-1">
           <Label htmlFor="show-decode-options" className="text-base font-semibold text-foreground">
-            Advanced Decode Options
+            {t('pages.audio.decode.title')}
           </Label>
-          <p className="text-sm leading-5 text-muted-foreground">Expose manual whisper.cpp knobs only when you need custom behavior.</p>
+          <p className="text-sm leading-5 text-muted-foreground">
+            {t('pages.audio.decode.description')}
+          </p>
         </div>
         <Switch
           id="show-decode-options"
@@ -101,7 +105,7 @@ export function DecodeOptions({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="decode-offset-ms" className="text-xs font-semibold text-foreground">
-                Offset (ms)
+                {t('pages.audio.decode.fields.offset')}
               </Label>
               <Input
                 id="decode-offset-ms"
@@ -111,14 +115,14 @@ export function DecodeOptions({
                 step={1}
                 value={decodeOffsetMs}
                 onChange={(e) => setDecodeOffsetMs(e.target.value)}
-                placeholder="0"
+                placeholder={t('pages.audio.decode.placeholders.offset')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="decode-duration-ms" className="text-xs font-semibold text-foreground">
-                Duration (ms)
+                {t('pages.audio.decode.fields.duration')}
               </Label>
               <Input
                 id="decode-duration-ms"
@@ -128,14 +132,14 @@ export function DecodeOptions({
                 step={1}
                 value={decodeDurationMs}
                 onChange={(e) => setDecodeDurationMs(e.target.value)}
-                placeholder="0 (full)"
+                placeholder={t('pages.audio.decode.placeholders.duration')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="decode-word-thold" className="text-xs font-semibold text-foreground">
-                Word Threshold
+                {t('pages.audio.decode.fields.wordThreshold')}
               </Label>
               <Input
                 id="decode-word-thold"
@@ -146,14 +150,14 @@ export function DecodeOptions({
                 step={0.01}
                 value={decodeWordThold}
                 onChange={(e) => setDecodeWordThold(e.target.value)}
-                placeholder="0.01"
+                placeholder={t('pages.audio.decode.placeholders.wordThreshold')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="decode-max-len" className="text-xs font-semibold text-foreground">
-                Max Segment Length
+                {t('pages.audio.decode.fields.maxSegmentLength')}
               </Label>
               <Input
                 id="decode-max-len"
@@ -163,14 +167,14 @@ export function DecodeOptions({
                 step={1}
                 value={decodeMaxLen}
                 onChange={(e) => setDecodeMaxLen(e.target.value)}
-                placeholder="0 (no limit)"
+                placeholder={t('pages.audio.decode.placeholders.maxSegmentLength')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="decode-max-tokens" className="text-xs font-semibold text-foreground">
-                Max Tokens / Segment
+                {t('pages.audio.decode.fields.maxTokensPerSegment')}
               </Label>
               <Input
                 id="decode-max-tokens"
@@ -180,14 +184,14 @@ export function DecodeOptions({
                 step={1}
                 value={decodeMaxTokens}
                 onChange={(e) => setDecodeMaxTokens(e.target.value)}
-                placeholder="0 (no limit)"
+                placeholder={t('pages.audio.decode.placeholders.maxTokensPerSegment')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="decode-temperature" className="text-xs font-semibold text-foreground">
-                Temperature
+                {t('pages.audio.decode.fields.temperature')}
               </Label>
               <Input
                 id="decode-temperature"
@@ -197,14 +201,14 @@ export function DecodeOptions({
                 step={0.01}
                 value={decodeTemperature}
                 onChange={(e) => setDecodeTemperature(e.target.value)}
-                placeholder="0.00"
+                placeholder={t('pages.audio.decode.placeholders.temperature')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="decode-temperature-inc" className="text-xs font-semibold text-foreground">
-                Temperature Increment
+                {t('pages.audio.decode.fields.temperatureIncrement')}
               </Label>
               <Input
                 id="decode-temperature-inc"
@@ -214,14 +218,14 @@ export function DecodeOptions({
                 step={0.01}
                 value={decodeTemperatureInc}
                 onChange={(e) => setDecodeTemperatureInc(e.target.value)}
-                placeholder="0.20"
+                placeholder={t('pages.audio.decode.placeholders.temperatureIncrement')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="decode-entropy-thold" className="text-xs font-semibold text-foreground">
-                Entropy Threshold
+                {t('pages.audio.decode.fields.entropyThreshold')}
               </Label>
               <Input
                 id="decode-entropy-thold"
@@ -230,14 +234,14 @@ export function DecodeOptions({
                 step={0.01}
                 value={decodeEntropyThold}
                 onChange={(e) => setDecodeEntropyThold(e.target.value)}
-                placeholder="2.40"
+                placeholder={t('pages.audio.decode.placeholders.entropyThreshold')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="decode-logprob-thold" className="text-xs font-semibold text-foreground">
-                Logprob Threshold
+                {t('pages.audio.decode.fields.logprobThreshold')}
               </Label>
               <Input
                 id="decode-logprob-thold"
@@ -246,14 +250,14 @@ export function DecodeOptions({
                 step={0.01}
                 value={decodeLogprobThold}
                 onChange={(e) => setDecodeLogprobThold(e.target.value)}
-                placeholder="-1.00"
+                placeholder={t('pages.audio.decode.placeholders.logprobThreshold')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="decode-no-speech-thold" className="text-xs font-semibold text-foreground">
-                No Speech Threshold
+                {t('pages.audio.decode.fields.noSpeechThreshold')}
               </Label>
               <Input
                 id="decode-no-speech-thold"
@@ -262,7 +266,7 @@ export function DecodeOptions({
                 step={0.01}
                 value={decodeNoSpeechThold}
                 onChange={(e) => setDecodeNoSpeechThold(e.target.value)}
-                placeholder="0.60"
+                placeholder={t('pages.audio.decode.placeholders.noSpeechThreshold')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
@@ -272,37 +276,37 @@ export function DecodeOptions({
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
               <Label htmlFor="decode-no-context" className="text-sm font-medium text-foreground">
-                No Context
+                {t('pages.audio.decode.fields.noContext')}
               </Label>
               <Switch id="decode-no-context" checked={decodeNoContext} onCheckedChange={setDecodeNoContext} disabled={isBusy} />
             </div>
             <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
               <Label htmlFor="decode-no-timestamps" className="text-sm font-medium text-foreground">
-                No Timestamps
+                {t('pages.audio.decode.fields.noTimestamps')}
               </Label>
               <Switch id="decode-no-timestamps" checked={decodeNoTimestamps} onCheckedChange={setDecodeNoTimestamps} disabled={isBusy} />
             </div>
             <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
               <Label htmlFor="decode-token-timestamps" className="text-sm font-medium text-foreground">
-                Token Timestamps
+                {t('pages.audio.decode.fields.tokenTimestamps')}
               </Label>
               <Switch id="decode-token-timestamps" checked={decodeTokenTimestamps} onCheckedChange={setDecodeTokenTimestamps} disabled={isBusy} />
             </div>
             <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
               <Label htmlFor="decode-split-on-word" className="text-sm font-medium text-foreground">
-                Split On Word
+                {t('pages.audio.decode.fields.splitOnWord')}
               </Label>
               <Switch id="decode-split-on-word" checked={decodeSplitOnWord} onCheckedChange={setDecodeSplitOnWord} disabled={isBusy} />
             </div>
             <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
               <Label htmlFor="decode-suppress-nst" className="text-sm font-medium text-foreground">
-                Suppress NST
+                {t('pages.audio.decode.fields.suppressNst')}
               </Label>
               <Switch id="decode-suppress-nst" checked={decodeSuppressNst} onCheckedChange={setDecodeSuppressNst} disabled={isBusy} />
             </div>
             <div className="flex items-center justify-between rounded-[16px] border border-border/70 bg-[var(--shell-card)] px-4 py-3">
               <Label htmlFor="decode-tdrz-enable" className="text-sm font-medium text-foreground">
-                Enable TinyDiarize
+                {t('pages.audio.decode.fields.enableTinyDiarize')}
               </Label>
               <Switch id="decode-tdrz-enable" checked={decodeTdrzEnable} onCheckedChange={setDecodeTdrzEnable} disabled={isBusy} />
             </div>

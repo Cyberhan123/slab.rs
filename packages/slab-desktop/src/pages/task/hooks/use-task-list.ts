@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { useTranslation } from '@slab/i18n';
 
 import api from '@/lib/api';
-import { usePageHeader } from '@/hooks/use-global-header-meta';
-import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import { PAGE_SIZE, type Task, type TaskResult } from '../const';
 import { getSparklineWeight, getTaskDurationMs, isSettledStatus } from '../utils';
 
 export function useTaskList() {
-  usePageHeader(PAGE_HEADER_META.task);
+  const { t } = useTranslation();
 
   const [selectedTask, setSelectedTask] = useState<Task | null>(null);
   const [taskResult, setTaskResult] = useState<TaskResult | null>(null);
@@ -103,14 +102,18 @@ export function useTaskList() {
 
   const paginationLabel = useMemo(() => {
     if (allTasks.length === 0) {
-      return 'Showing 0 to 0 of 0 entries';
+      return t('pages.task.table.pagination.empty');
     }
 
     const start = (currentPage - 1) * PAGE_SIZE + 1;
     const end = Math.min(currentPage * PAGE_SIZE, allTasks.length);
 
-    return `Showing ${start} to ${end} of ${allTasks.length} entries`;
-  }, [allTasks.length, currentPage]);
+    return t('pages.task.table.pagination.summary', {
+      start,
+      end,
+      total: allTasks.length,
+    });
+  }, [allTasks.length, currentPage, t]);
 
   const fetchTaskResult = useCallback(async (id: string) => {
     try {
@@ -122,9 +125,13 @@ export function useTaskList() {
 
       setTaskResult(data);
     } catch (err) {
-      toast.error(`Failed to fetch task result: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      toast.error(
+        t('pages.task.toast.fetchTaskResultFailed', {
+          message: err instanceof Error ? err.message : t('pages.task.toast.unknownError'),
+        }),
+      );
     }
-  }, [getTaskResultMutation]);
+  }, [getTaskResultMutation, t]);
 
   const fetchTaskDetail = useCallback(async (id: string) => {
     try {
@@ -141,9 +148,9 @@ export function useTaskList() {
         await fetchTaskResult(id);
       }
     } catch {
-      toast.error('Failed to fetch task details');
+      toast.error(t('pages.task.toast.fetchTaskDetailsFailed'));
     }
-  }, [getTaskMutation, fetchTaskResult]);
+  }, [fetchTaskResult, getTaskMutation, t]);
 
   const cancelTask = async (id: string) => {
     try {
@@ -158,7 +165,11 @@ export function useTaskList() {
         await fetchTaskDetail(id);
       }
     } catch (err) {
-      toast.error(`Failed to cancel task: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      toast.error(
+        t('pages.task.toast.cancelTaskFailed', {
+          message: err instanceof Error ? err.message : t('pages.task.toast.unknownError'),
+        }),
+      );
     }
   };
 
@@ -175,7 +186,11 @@ export function useTaskList() {
         await fetchTaskDetail(id);
       }
     } catch (err) {
-      toast.error(`Failed to restart task: ${err instanceof Error ? err.message : 'Unknown error'}`);
+      toast.error(
+        t('pages.task.toast.restartTaskFailed', {
+          message: err instanceof Error ? err.message : t('pages.task.toast.unknownError'),
+        }),
+      );
     }
   };
 

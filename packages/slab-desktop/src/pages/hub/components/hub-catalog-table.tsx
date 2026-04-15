@@ -1,4 +1,5 @@
 import { Bot, Boxes, Code2, HardDriveDownload, ImageIcon, Loader2, Mic, Settings2, Trash2 } from 'lucide-react';
+import { useTranslation } from '@slab/i18n';
 
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
@@ -22,12 +23,13 @@ export function HubCatalogTable({
   onEnhanceClick,
   onDeleteClick,
 }: HubCatalogTableProps) {
+  const { t } = useTranslation();
   if (models.length === 0) {
     return (
       <StageEmptyState
         icon={Boxes}
-        title="No cards on this page"
-        description="Try another page or relax the active filters."
+        title={t('pages.hub.catalog.emptyPageTitle')}
+        description={t('pages.hub.catalog.emptyPageDescription')}
         className="min-h-[280px]"
       />
     );
@@ -62,8 +64,11 @@ function HubModelCard({
   onEnhanceClick: (model: ModelItem) => void;
   onDeleteClick: (model: ModelItem) => void;
 }) {
+  const { t, i18n } = useTranslation();
   const Icon = getModelIcon(model);
-  const backendLabel = model.backend_ids[0] ? formatBackend(model.backend_ids[0]) : 'Runtime';
+  const backendLabel = model.backend_ids[0]
+    ? formatBackend(model.backend_ids[0], t)
+    : t('pages.hub.catalog.runtime');
   const showDownloadAction = model.pending || canDownloadModel(model);
   const sourceLabel = model.local_path ?? model.repo_id ?? model.id;
 
@@ -88,7 +93,9 @@ function HubModelCard({
               <h3 className="text-[1.9rem] font-semibold tracking-tight text-foreground">
                 {model.display_name}
               </h3>
-              <p className="max-w-2xl text-sm leading-6 text-muted-foreground">{describeModel(model)}</p>
+              <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
+                {describeModel(model, t)}
+              </p>
             </div>
 
             <div className="flex items-center gap-2">
@@ -98,7 +105,7 @@ function HubModelCard({
                 className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80"
                 onClick={() => onEnhanceClick(model)}
                 disabled={model.pending}
-                aria-label={`Enhance ${model.display_name} config`}
+                aria-label={t('pages.hub.catalog.actions.enhanceAria', { model: model.display_name })}
               >
                 <Settings2 className="size-4" />
               </Button>
@@ -108,7 +115,7 @@ function HubModelCard({
                 className="size-10 rounded-full border border-border/70 bg-[var(--shell-card)]/80 text-destructive hover:bg-[var(--shell-card)] hover:text-destructive"
                 onClick={() => onDeleteClick(model)}
                 disabled={deletePending || model.pending}
-                aria-label={`Delete ${model.display_name}`}
+                aria-label={t('pages.hub.catalog.actions.deleteAria', { model: model.display_name })}
               >
                 <Trash2 className="size-4" />
               </Button>
@@ -120,11 +127,11 @@ function HubModelCard({
               {backendLabel}
             </Badge>
             <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
-              {formatKind(model.kind)}
+              {formatKind(model.kind, t)}
             </Badge>
             {model.is_vad_model ? (
               <Badge variant="chip" className="bg-[var(--surface-1)] px-3 py-1 text-muted-foreground">
-                VAD
+                {t('pages.hub.catalog.vad')}
               </Badge>
             ) : null}
             {model.filename ? (
@@ -151,29 +158,39 @@ function HubModelCard({
                   ) : (
                     <HardDriveDownload className="size-4" />
                   )}
-                  {model.pending ? 'Downloading...' : 'Download'}
+                  {model.pending
+                    ? t('pages.hub.catalog.downloading')
+                    : t('pages.hub.catalog.download')}
                 </Button>
                 <p className="flex-1 text-xs leading-5 text-muted-foreground">
                   {model.pending
-                    ? 'Fetching model files into local storage. The card will refresh when the runtime path is ready.'
-                    : 'Import only adds this pack to the catalog. Download it when you want a local runtime copy.'}
+                    ? t('pages.hub.catalog.downloadPendingDescription')
+                    : t('pages.hub.catalog.downloadIdleDescription')}
                 </p>
               </div>
             ) : null}
 
             <div className="space-y-1">
               <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                Source
+                {t('pages.hub.catalog.source')}
               </p>
               <p className="truncate font-mono text-xs text-muted-foreground" title={sourceLabel}>
                 {sourceLabel}
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
-              <span>Updated {formatDateTime(model.updated_at)}</span>
+              <span>
+                {t('pages.hub.catalog.updatedAt', {
+                  value: formatDateTime(
+                    model.updated_at,
+                    i18n.resolvedLanguage ?? i18n.language,
+                    t('pages.hub.catalog.unknownTime'),
+                  ),
+                })}
+              </span>
               {model.pending ? (
                 <span className="font-semibold text-[var(--brand-teal)]">
-                  Download task is running
+                  {t('pages.hub.catalog.downloadRunning')}
                 </span>
               ) : null}
             </div>
@@ -184,35 +201,51 @@ function HubModelCard({
   );
 }
 
-function describeModel(model: ModelItem) {
-  const backendLabel = model.backend_ids[0] ? formatBackend(model.backend_ids[0]).toLowerCase() : 'runtime';
+function describeModel(
+  model: ModelItem,
+  t: (key: string, options?: Record<string, unknown>) => string,
+) {
+  const backendLabel = model.backend_ids[0]
+    ? formatBackend(model.backend_ids[0], t).toLowerCase()
+    : t('pages.hub.catalog.runtime').toLowerCase();
 
   if (model.pending) {
-    return `This ${backendLabel} entry is syncing into the local runtime catalog. Once the download finishes, the runtime path and readiness state will update automatically.`;
+    return t('pages.hub.catalog.descriptions.pending', { backend: backendLabel });
   }
 
   if (model.local_path) {
-    return `Local ${backendLabel} model ready for inference. The manifest is already connected to a runtime path and can be used without leaving this workspace.`;
+    return t('pages.hub.catalog.descriptions.local', { backend: backendLabel });
   }
 
-  return `Imported ${backendLabel} manifest from ${model.repo_id || 'the configured repository'}. It is listed in the catalog now, and you can download the actual model files from this card when you need a local runtime copy.`;
+  return t('pages.hub.catalog.descriptions.imported', {
+    backend: backendLabel,
+    repo: model.repo_id || t('pages.hub.catalog.configuredRepository'),
+  });
 }
 
-function formatBackend(id: string) {
+function formatBackend(
+  id: string,
+  t: (key: string, options?: Record<string, unknown>) => string,
+) {
   switch (id) {
     case 'ggml.llama':
-      return 'Llama';
+      return t('pages.hub.catalog.backend.llama');
     case 'ggml.whisper':
-      return 'Whisper';
+      return t('pages.hub.catalog.backend.whisper');
     case 'ggml.diffusion':
-      return 'Diffusion';
+      return t('pages.hub.catalog.backend.diffusion');
     default:
       return id;
   }
 }
 
-function formatKind(kind: 'local' | 'cloud') {
-  return kind === 'cloud' ? 'Cloud' : 'Local';
+function formatKind(
+  kind: 'local' | 'cloud',
+  t: (key: string, options?: Record<string, unknown>) => string,
+) {
+  return kind === 'cloud'
+    ? t('pages.hub.catalog.kind.cloud')
+    : t('pages.hub.catalog.kind.local');
 }
 
 function shortFileName(filename: string) {
@@ -247,9 +280,13 @@ function getModelIcon(model: ModelItem) {
   return Bot;
 }
 
-function formatDateTime(value?: string | null) {
+function formatDateTime(
+  value: string | null | undefined,
+  locale: string,
+  fallback: string,
+) {
   if (!value) {
-    return 'Unknown';
+    return fallback;
   }
 
   const parsed = new Date(value);
@@ -257,7 +294,7 @@ function formatDateTime(value?: string | null) {
     return value;
   }
 
-  return parsed.toLocaleString(undefined, {
+  return parsed.toLocaleString(locale, {
     year: 'numeric',
     month: 'short',
     day: '2-digit',

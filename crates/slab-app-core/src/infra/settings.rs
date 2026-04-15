@@ -724,6 +724,9 @@ pub(crate) fn settings_document_v2_to_json_value(
     serde_json::json!({
         "$schema": document.schema,
         "schema_version": document.schema_version,
+        "general": {
+            "language": document.general.language,
+        },
         "database": {
             "url": document.database.url,
         },

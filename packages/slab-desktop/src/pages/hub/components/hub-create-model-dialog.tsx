@@ -1,4 +1,5 @@
 import { Loader2, Plus, Upload } from 'lucide-react';
+import { useTranslation } from '@slab/i18n';
 
 import {
   Dialog,
@@ -31,22 +32,23 @@ export function HubCreateModelDialog({
   createPending,
   onCreate,
 }: HubCreateModelDialogProps) {
+  const { t } = useTranslation();
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-3xl gap-0 overflow-hidden p-0 sm:max-w-3xl">
         <DialogHeader className="border-b border-border/60 px-5 pt-5 pb-4">
-          <DialogTitle>Import model</DialogTitle>
+          <DialogTitle>{t('pages.hub.dialogs.create.title')}</DialogTitle>
           <DialogDescription>
-            Upload a .slab model pack. Import only adds the entry to the catalog. Provider
-            credentials stay in Settings, and supported local models can be downloaded later from
-            their catalog cards.
+            {t('pages.hub.dialogs.create.description')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-5 overflow-y-auto px-5 py-4">
           <div className="space-y-3 rounded-2xl border border-border/70 bg-muted/10 p-4">
             <div className="grid gap-2">
-              <Label htmlFor="hub-model-config-file">Model pack</Label>
+              <Label htmlFor="hub-model-config-file">
+                {t('pages.hub.dialogs.create.modelPackLabel')}
+              </Label>
               <Input
                 id="hub-model-config-file"
                 type="file"
@@ -63,14 +65,13 @@ export function HubCreateModelDialog({
                   <span className="truncate">{selectedFileName}</span>
                 </div>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  This pack will be validated, stored, and turned into a catalog entry without
-                  pulling remote model files yet.
+                  {t('pages.hub.dialogs.create.selectedDescription')}
                 </p>
               </div>
             ) : (
               <div className="rounded-xl border border-dashed border-border/70 bg-background px-4 py-6 text-center text-sm text-muted-foreground">
                 <Upload className="mx-auto mb-3 h-5 w-5" />
-                Choose a .slab pack to import a model entry.
+                {t('pages.hub.dialogs.create.emptyDescription')}
               </div>
             )}
           </div>
@@ -83,7 +84,7 @@ export function HubCreateModelDialog({
             ) : (
               <Plus className="mr-2 h-4 w-4" />
             )}
-            Import model
+            {t('pages.hub.dialogs.create.submit')}
           </Button>
         </DialogFooter>
       </DialogContent>

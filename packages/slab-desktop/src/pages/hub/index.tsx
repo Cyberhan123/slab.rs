@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useTranslation } from '@slab/i18n';
 import {
   Boxes,
   HardDriveDownload,
@@ -34,10 +35,15 @@ import {
 } from './hooks/use-hub-model-catalog';
 
 export default function Hub() {
+  const { t } = useTranslation();
   const hub = useHubModelCatalog();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const loadMoreRef = useRef<HTMLDivElement | null>(null);
-  usePageHeader(PAGE_HEADER_META.hub);
+  usePageHeader({
+    icon: PAGE_HEADER_META.hub.icon,
+    title: t('pages.hub.header.title'),
+    subtitle: t('pages.hub.header.subtitle'),
+  });
 
   const backendCount = new Set(hub.models.flatMap((model) => model.backend_ids)).size;
 
@@ -85,15 +91,15 @@ export default function Hub() {
                   variant="chip"
                   className="border-transparent bg-[var(--shell-card)]/75 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.22em] text-[var(--brand-gold)]"
                 >
-                  New release
+                  {t('pages.hub.hero.badge')}
                 </Badge>
                 <div className="space-y-4">
                   <h1 className="max-w-3xl text-4xl font-semibold tracking-[-0.05em] text-foreground md:text-6xl">
-                    Shape your local <span className="text-[var(--brand-teal)]">model catalog.</span>
+                    {t('pages.hub.hero.titleLead')}{' '}
+                    <span className="text-[var(--brand-teal)]">{t('pages.hub.hero.titleAccent')}</span>
                   </h1>
                   <p className="max-w-2xl text-sm leading-7 text-muted-foreground md:text-lg">
-                    Import JSON manifests or .slab packs into the catalog, then download the local
-                    runtimes you want from each card when you are ready to use them.
+                    {t('pages.hub.hero.description')}
                   </p>
                 </div>
               </div>
@@ -106,7 +112,7 @@ export default function Hub() {
                   onClick={() => hub.setCreateOpen(true)}
                 >
                   <Plus className="size-4" />
-                  Import model
+                  {t('pages.hub.hero.importModel')}
                 </Button>
                 <Button
                   variant="pill"
@@ -120,7 +126,7 @@ export default function Hub() {
                   ) : (
                     <RefreshCw className="size-4" />
                   )}
-                  Refresh catalog
+                  {t('pages.hub.hero.refreshCatalog')}
                 </Button>
               </div>
             </div>
@@ -130,18 +136,18 @@ export default function Hub() {
             <HubSummaryCard
               icon={Boxes}
               value={hub.models.length}
-              label="Catalog entries"
-              description={`${backendCount || 0} backend${backendCount === 1 ? '' : 's'} currently mapped`}
+              label={t('pages.hub.summary.catalogEntries')}
+              description={t('pages.hub.summary.catalogDescription', { count: backendCount || 0 })}
               tone="gold"
             />
             <HubSummaryCard
               icon={HardDriveDownload}
               value={hub.downloadedCount}
-              label="Ready locally"
+              label={t('pages.hub.summary.readyLocally')}
               description={
                 hub.pendingCount > 0
-                  ? `${hub.pendingCount} download${hub.pendingCount === 1 ? '' : 's'} currently syncing`
-                  : 'Imported packs stay in the catalog until you pull a local runtime copy'
+                  ? t('pages.hub.summary.pendingDescription', { count: hub.pendingCount })
+                  : t('pages.hub.summary.readyDescription')
               }
               tone="blue"
             />
@@ -151,17 +157,17 @@ export default function Hub() {
         <section className="space-y-4 rounded-[32px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/45 px-4 py-4 shadow-[0_20px_48px_-42px_color-mix(in_oklab,var(--foreground)_30%,transparent)] backdrop-blur">
           <div className="flex flex-wrap items-center gap-2">
             {CATEGORY_OPTIONS.map((option) => {
-              const isActive = hub.category === option.value;
+              const isActive = hub.category === option;
 
               return (
                 <Button
-                  key={option.value}
+                  key={option}
                   variant={isActive ? 'cta' : 'pill'}
                   size="pill"
                   className="h-9 px-4 text-sm"
-                  onClick={() => hub.setCategory(option.value)}
+                  onClick={() => hub.setCategory(option)}
                 >
-                  {option.label}
+                  {t(`pages.hub.filters.categories.${option}`)}
                 </Button>
               );
             })}
@@ -171,12 +177,12 @@ export default function Hub() {
               onValueChange={(value) => hub.setStatus(value as typeof hub.status)}
             >
               <SelectTrigger variant="pill" size="pill" className="h-9 min-w-[190px] bg-[var(--shell-card)]/85">
-                <SelectValue placeholder="Status" />
+                <SelectValue placeholder={t('pages.hub.filters.statusPlaceholder')} />
               </SelectTrigger>
               <SelectContent variant="pill">
                 {STATUS_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
+                  <SelectItem key={option} value={option}>
+                    {t(`pages.hub.filters.statuses.${option}`)}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -187,7 +193,7 @@ export default function Hub() {
         {hub.error ? (
           <Alert variant="destructive">
             <TriangleAlert className="h-4 w-4" />
-            <AlertTitle>Model catalog failed to load</AlertTitle>
+            <AlertTitle>{t('pages.hub.alerts.loadFailedTitle')}</AlertTitle>
             <AlertDescription>
               {String((hub.error as Error)?.message ?? hub.error)}
             </AlertDescription>
@@ -197,19 +203,19 @@ export default function Hub() {
         {hub.isLoading ? (
           <StageEmptyState
             icon={Loader2}
-            title="Loading model catalog"
-            description="Fetching model entries and runtime status."
+            title={t('pages.hub.states.loadingTitle')}
+            description={t('pages.hub.states.loadingDescription')}
             className="[&_svg]:animate-spin"
           />
         ) : hub.filteredModels.length === 0 ? (
           <StageEmptyState
             icon={Boxes}
-            title="No model entries match the current filters"
-            description="Try another category, adjust status, or import a new model manifest or pack."
+            title={t('pages.hub.states.emptyFilteredTitle')}
+            description={t('pages.hub.states.emptyFilteredDescription')}
             action={
               <Button variant="cta" size="pill" onClick={() => hub.setCreateOpen(true)}>
                 <Plus className="mr-2 h-4 w-4" />
-                Import model
+                {t('pages.hub.hero.importModel')}
               </Button>
             }
           />

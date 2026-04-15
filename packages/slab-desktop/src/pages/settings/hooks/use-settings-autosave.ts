@@ -1,7 +1,11 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
-import { useTranslation } from '@slab/i18n';
+import {
+  applyAppLanguagePreference,
+  isAppLanguagePreference,
+  useTranslation,
+} from '@slab/i18n';
 import api, { getErrorMessage } from '@/lib/api';
 
 import type {
@@ -129,6 +133,11 @@ export function useSettingsAutosave({
         body,
       });
 
+      await syncLanguagePreferenceSetting(
+        pmid,
+        body.op === 'set' ? body.value : property.schema.default_value,
+      );
+
       let draftWasConsumed = false;
       setDrafts((current) => {
         if (current[pmid] !== draftSnapshot) {
@@ -212,6 +221,8 @@ export function useSettingsAutosave({
         },
       });
 
+      await syncLanguagePreferenceSetting(property.pmid, property.schema.default_value);
+
       setDrafts((current) => {
         if (!(property.pmid in current)) {
           return current;
@@ -260,4 +271,16 @@ export function useSettingsAutosave({
     setDraftValue,
     resetSetting,
   };
+}
+
+async function syncLanguagePreferenceSetting(pmid: string, value: unknown) {
+  if (pmid !== 'general.language') {
+    return;
+  }
+
+  if (typeof value !== 'string' || !isAppLanguagePreference(value)) {
+    return;
+  }
+
+  await applyAppLanguagePreference(value);
 }

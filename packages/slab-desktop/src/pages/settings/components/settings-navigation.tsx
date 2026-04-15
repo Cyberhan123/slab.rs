@@ -28,6 +28,7 @@ const sectionIcons: Record<string, LucideIcon> = {
   cloud: Cloud,
   database: Database,
   diffusion: Sparkles,
+  general: SlidersHorizontal,
   logging: Logs,
   models: CloudCog,
   providers: Cloud,
