@@ -3,6 +3,7 @@ import { useState } from "react"
 import type { ReactNode } from "react"
 
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@slab/components/collapsible"
+import { useTranslation } from "@slab/i18n"
 import { cn } from "@/lib/utils"
 
 type ChatThinkingPanelProps = {
@@ -17,6 +18,7 @@ export function ChatThinkingPanel({
   children,
 }: ChatThinkingPanelProps) {
   const [open, setOpen] = useState(false)
+  const { t } = useTranslation()
 
   return (
     <Collapsible open={open} onOpenChange={setOpen} className="space-y-2">
@@ -27,7 +29,7 @@ export function ChatThinkingPanel({
         >
           <span className="inline-flex items-center gap-2">
             <Brain className={cn("size-4", loading && "animate-pulse")} />
-            {loading ? "Thinking..." : "Reasoning trace"}
+            {loading ? t("pages.chat.thinking.loading") : t("pages.chat.thinking.ready")}
           </span>
           <ChevronDown
             className={cn("size-4 transition-transform", open && "rotate-180")}
@@ -36,7 +38,7 @@ export function ChatThinkingPanel({
       </CollapsibleTrigger>
       <CollapsibleContent className="overflow-hidden rounded-2xl border border-border/60 bg-[var(--surface-soft)]">
         <div className="px-4 py-3 text-sm text-muted-foreground">
-          {thinking ? children : "Waiting for reasoning content..."}
+          {thinking ? children : t("pages.chat.thinking.empty")}
         </div>
       </CollapsibleContent>
     </Collapsible>

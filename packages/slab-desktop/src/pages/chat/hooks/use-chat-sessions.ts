@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react"
 import { toast } from "sonner"
 
 import type { components } from "@/lib/api/v1.d.ts"
+import { useTranslation } from "@slab/i18n"
 import api from "@/lib/api"
 import { useChatUiStore } from "@/store/useChatUiStore"
 
@@ -20,7 +21,7 @@ type CreateSessionOptions = {
   select?: boolean
 }
 
-function getErrorDescription(error: unknown) {
+function getErrorDescription(error: unknown, fallback: string) {
   if (error instanceof Error && error.message.trim()) {
     return error.message
   }
@@ -37,20 +38,24 @@ function getErrorDescription(error: unknown) {
     }
   }
 
-  return "Unknown error"
+  return fallback
 }
 
 function toConversationItem(
   session: SessionRecord,
-  sessionLabels: Record<string, string>
+  sessionLabels: Record<string, string>,
+  defaults: {
+    newChat: string
+    workspace: string
+  }
 ): ChatConversationItem {
   const storedLabel = sessionLabels[session.id]?.trim() || null
   const backendLabel = session.name.trim()
 
   return {
     key: session.id,
-    label: storedLabel ?? (backendLabel || "New chat"),
-    group: "Workspace",
+    label: storedLabel ?? (backendLabel || defaults.newChat),
+    group: defaults.workspace,
   }
 }
 
@@ -59,6 +64,7 @@ function toSessionRecords(data: SessionRecord[] | undefined): SessionRecord[] {
 }
 
 export function useChatSessions() {
+  const { t } = useTranslation()
   const hasHydrated = useChatUiStore((state) => state.hasHydrated)
   const currentSessionId = useChatUiStore((state) => state.currentSessionId)
   const setCurrentSessionId = useChatUiStore((state) => state.setCurrentSessionId)
@@ -79,9 +85,16 @@ export function useChatSessions() {
   }
 
   const sessionRecords = useMemo(() => toSessionRecords(sessionData), [sessionData])
+  const localizedDefaults = useMemo(
+    () => ({
+      newChat: t("pages.chat.runtime.newChat"),
+      workspace: t("pages.chat.runtime.workspace"),
+    }),
+    [t]
+  )
   const conversationList = useMemo(
-    () => sessionRecords.map((session) => toConversationItem(session, sessionLabels)),
-    [sessionLabels, sessionRecords]
+    () => sessionRecords.map((session) => toConversationItem(session, sessionLabels, localizedDefaults)),
+    [localizedDefaults, sessionLabels, sessionRecords]
   )
 
   const createSession = useCallback(
@@ -100,15 +113,15 @@ export function useChatSessions() {
         return session
       } catch (error) {
         if (!options?.quiet) {
-          toast.error("Failed to create chat session.", {
-            description: getErrorDescription(error),
+          toast.error(t("pages.chat.toast.failedToCreateSession"), {
+            description: getErrorDescription(error, t("pages.chat.toast.unknownError")),
           })
         }
 
         return null
       }
     },
-    [createSessionMutation, refetchSessions, setCurrentSessionId]
+    [createSessionMutation, refetchSessions, setCurrentSessionId, t]
   )
 
   const deleteSession = useCallback(
@@ -120,8 +133,8 @@ export function useChatSessions() {
           },
         })
       } catch (error) {
-        toast.error("Failed to delete chat session.", {
-          description: getErrorDescription(error),
+        toast.error(t("pages.chat.toast.failedToDeleteSession"), {
+          description: getErrorDescription(error, t("pages.chat.toast.unknownError")),
         })
         return false
       }
@@ -149,6 +162,7 @@ export function useChatSessions() {
       refetchSessions,
       removeSessionLabel,
       setCurrentSessionId,
+      t,
     ]
   )
 
