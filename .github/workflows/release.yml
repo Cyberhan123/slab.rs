@@ -149,6 +149,7 @@ jobs:
           find "$staging_dir" -maxdepth 1 -type f | sort
 
       - name: Upload release bundle artifacts
+        if: startsWith(github.ref, 'refs/tags/')
         uses: actions/upload-artifact@v4
         with:
           name: slab-${{ matrix.artifact_suffix }}
