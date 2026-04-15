@@ -1,108 +1,165 @@
-import type { LucideIcon } from 'lucide-react';
-import {
-  BrainCircuit,
-  Clapperboard,
-  Cpu,
-  Image,
-  Mic,
-  Orbit,
-  Package,
-  Sparkles,
-  Waves,
-} from 'lucide-react';
-
 import type { components } from '@/lib/api/v1.d.ts';
 
-export const TASK_POLL_INTERVAL_MS = 2_000;
-export const PROGRESS_STEP = 3;
-export const PROGRESS_MAX_SIMULATED = 90;
+export const TASK_POLL_INTERVAL_MS = 1_000;
+export const MIN_ACTIVE_PROGRESS = 6;
 export const SETUP_ACTIVE_TONE = '#00685f';
 export const SETUP_CTA_GRADIENT =
   'linear-gradient(166.52deg, #00685f 0%, #008378 100%)';
 
 export type SetupStatus = components['schemas']['SetupStatusResponse'];
-export type ComponentStatus = components['schemas']['ComponentStatusResponse'];
 export type OperationAccepted = components['schemas']['OperationAcceptedResponse'];
 export type TaskRecord = components['schemas']['TaskResponse'];
+export type TaskProgress = components['schemas']['TaskProgressResponse'];
 
-export type DownloadState = 'idle' | 'downloading' | 'done' | 'error';
-export type DependencyTone = 'success' | 'active' | 'idle' | 'error';
+export type ProvisionState =
+  | 'idle'
+  | 'starting'
+  | 'running'
+  | 'succeeded'
+  | 'failed';
 
-export interface DependencyMeta {
-  title: string;
-  subtitle: string;
-  icon: LucideIcon;
-  idleLabel: string;
+export interface NormalizedTaskProgress {
+  label: string | null;
+  current: number;
+  total: number | null;
+  step: number | null;
+  stepCount: number | null;
+  unit: string | null;
 }
 
-export const DEPENDENCY_META: Record<string, DependencyMeta> = {
-  ffmpeg: {
-    title: 'Ffmpeg',
-    subtitle: 'Core Media Engine',
-    icon: Clapperboard,
-    idleLabel: 'Ready to install',
-  },
-  'ggml.llama': {
-    title: 'Ggml.Llama',
-    subtitle: 'Large Language Model Engine',
-    icon: BrainCircuit,
-    idleLabel: 'Pending...',
-  },
-  'ggml.whisper': {
-    title: 'Ggml.Whisper',
-    subtitle: 'Speech-to-Text Model',
-    icon: Waves,
-    idleLabel: 'Pending...',
-  },
-  'ggml.diffusion': {
-    title: 'Ggml.Diffusion',
-    subtitle: 'Image Generation Engine',
-    icon: Image,
-    idleLabel: 'Pending...',
-  },
-  'candle.llama': {
-    title: 'Candle.Llama',
-    subtitle: 'Rust Inference Engine (Text)',
-    icon: Cpu,
-    idleLabel: 'Waiting...',
-  },
-  'candle.whisper': {
-    title: 'Candle.Whisper',
-    subtitle: 'Rust Inference Engine (Audio)',
-    icon: Mic,
-    idleLabel: 'Waiting...',
-  },
-  'candle.diffusion': {
-    title: 'Candle.Diffusion',
-    subtitle: 'Rust Inference Engine (Image)',
-    icon: Sparkles,
-    idleLabel: 'Queued',
-  },
-  onnx: {
-    title: 'Onnx Runtime',
-    subtitle: 'Cross-platform ML Engine',
-    icon: Orbit,
-    idleLabel: 'Queued',
-  },
-};
-
-function toTitleCaseSegment(segment: string) {
-  return segment ? `${segment[0].toUpperCase()}${segment.slice(1)}` : segment;
-}
-
-export function getDependencyMeta(name: string): DependencyMeta {
-  const meta = DEPENDENCY_META[name];
-  if (meta) {
-    return meta;
+export function normalizeTaskProgress(
+  progress: TaskProgress | null | undefined,
+): NormalizedTaskProgress | null {
+  if (!progress || typeof progress.current !== 'number' || !Number.isFinite(progress.current)) {
+    return null;
   }
 
   return {
-    title: name
-      .split('.')
-      .map((segment) => toTitleCaseSegment(segment))
-      .join('.'),
-    subtitle: 'Runtime dependency',
-    icon: Package,
-    idleLabel: 'Pending...',
+    label: typeof progress.label === 'string' ? progress.label : null,
+    current: progress.current,
+    total:
+      typeof progress.total === 'number' && Number.isFinite(progress.total) ? progress.total : null,
+    step: typeof progress.step === 'number' && Number.isFinite(progress.step) ? progress.step : null,
+    stepCount:
+      typeof progress.step_count === 'number' && Number.isFinite(progress.step_count)
+        ? progress.step_count
+        : null,
+    unit: typeof progress.unit === 'string' ? progress.unit : null,
   };
+}
+
+export function getProvisionStageLabel(
+  state: ProvisionState,
+  task: TaskRecord | null,
+) {
+  const progress = normalizeTaskProgress(task?.progress);
+  if (progress?.label?.trim()) {
+    return progress.label.trim();
+  }
+
+  switch (state) {
+    case 'failed':
+      return 'Setup failed';
+    case 'succeeded':
+      return 'Setup finished';
+    case 'starting':
+      return 'Starting online installer';
+    case 'running':
+      return 'Preparing Slab runtime';
+    default:
+      return 'Preparing environment';
+  }
+}
+
+export function getProvisionStageHint(
+  state: ProvisionState,
+  task: TaskRecord | null,
+) {
+  const progress = normalizeTaskProgress(task?.progress);
+  if (progress?.step && progress.stepCount) {
+    return `Step ${progress.step} of ${progress.stepCount}`;
+  }
+
+  switch (state) {
+    case 'failed':
+      return 'Review the error below, then retry the online installer.';
+    case 'succeeded':
+      return 'Runtime payloads are in place. Launching Slab now.';
+    case 'starting':
+      return 'Creating the setup task and connecting to the local host.';
+    case 'running':
+      return 'Downloading payloads, verifying CABs, checking FFmpeg, and restarting runtime workers.';
+    default:
+      return 'Inspecting the local desktop installation.';
+  }
+}
+
+export function getProvisionProgressValue(
+  state: ProvisionState,
+  task: TaskRecord | null,
+) {
+  if (state === 'succeeded') {
+    return 100;
+  }
+
+  const progress = normalizeTaskProgress(task?.progress);
+  if (progress?.step && progress.stepCount) {
+    const currentStep = Math.max(progress.step - 1, 0);
+    const stepFraction =
+      progress.total && progress.total > 0
+        ? clamp(progress.current / progress.total, 0, 1)
+        : 0;
+    return clamp(((currentStep + stepFraction) / progress.stepCount) * 100, 0, 99);
+  }
+
+  if (progress?.total && progress.total > 0) {
+    return clamp((progress.current / progress.total) * 100, 0, 99);
+  }
+
+  if (state === 'starting' || state === 'running') {
+    return MIN_ACTIVE_PROGRESS;
+  }
+
+  return 0;
+}
+
+export function getProvisionProgressSummary(
+  state: ProvisionState,
+  task: TaskRecord | null,
+) {
+  if (state === 'failed') {
+    return 'Provisioning stopped before setup could complete.';
+  }
+
+  if (state === 'succeeded') {
+    return '100% complete';
+  }
+
+  const progress = normalizeTaskProgress(task?.progress);
+  if (progress?.total && progress.total > 0) {
+    const percentage = Math.round((progress.current / progress.total) * 100);
+    return `${percentage}% complete`;
+  }
+
+  if (progress?.step && progress.stepCount) {
+    return `Stage ${progress.step}/${progress.stepCount}`;
+  }
+
+  if (state === 'starting') {
+    return 'Creating setup task...';
+  }
+
+  if (state === 'running') {
+    return 'Waiting for progress updates...';
+  }
+
+  return 'Waiting to begin';
+}
+
+function clamp(value: number, min: number, max: number) {
+  if (!Number.isFinite(value)) {
+    return min;
+  }
+
+  return Math.min(max, Math.max(min, value));
 }

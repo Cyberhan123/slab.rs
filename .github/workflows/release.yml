@@ -114,7 +114,13 @@ jobs:
               patterns=( '*.dmg' )
               ;;
             windows)
-              patterns=( '*.msi' )
+              patterns=(
+                'Slab_*_x64-setup.exe'
+                'Slab_*_x64-offline-setup.exe'
+                'base.cab'
+                'cuda.cab'
+                'hip.cab'
+              )
               ;;
             *)
               echo "Unsupported release platform: ${{ matrix.platform }}"

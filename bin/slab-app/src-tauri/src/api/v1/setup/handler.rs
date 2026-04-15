@@ -14,10 +14,10 @@ pub async fn setup_status(
 }
 
 #[tauri::command(async)]
-pub async fn download_ffmpeg(
+pub async fn provision_setup(
     state: tauri::State<'_, Arc<AppState>>,
 ) -> Result<OperationAcceptedResponse, String> {
-    let op = state.services.setup.download_ffmpeg().await.map_err(map_err)?;
+    let op = state.services.setup.provision().await.map_err(map_err)?;
     Ok(OperationAcceptedResponse { operation_id: op.operation_id })
 }
 

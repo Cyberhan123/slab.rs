@@ -7,7 +7,7 @@ use slab_diffusion_sys::sd_sample_params_t;
 
 use crate::Diffusion;
 use crate::params::guidance::GuidanceParams;
-use crate::params::scheduler::Scheduler;
+use crate::params::scheduler::{Scheduler, scheduler_t};
 
 #[rustfmt::skip]
 use slab_diffusion_sys::{
@@ -213,11 +213,11 @@ impl InnerSampleParams {
         }
 
         // important: must set a sample method and scheduler for the native layer to consider the params valid
-        if inner.fp.sample_method == SampleMethod::Unknown.into() {
+        if inner.fp.sample_method == sample_method_t::from(SampleMethod::Unknown) {
             inner.set_sample_method(SampleMethod::Euler);
         }
 
-        if inner.fp.scheduler == Scheduler::UNKNOWN.into() {
+        if inner.fp.scheduler == scheduler_t::from(Scheduler::UNKNOWN) {
             inner.set_scheduler(Scheduler::DISCRETE);
         }
 

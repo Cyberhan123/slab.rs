@@ -6,12 +6,6 @@ pub struct BackendStatusQuery {
 }
 
 #[derive(Debug, Clone)]
-pub struct DownloadBackendLibCommand {
-    pub backend_id: RuntimeBackendId,
-    pub target_dir: String,
-}
-
-#[derive(Debug, Clone)]
 pub struct BackendStatusView {
     pub backend: String,
     pub status: String,

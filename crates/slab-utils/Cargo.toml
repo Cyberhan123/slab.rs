@@ -9,8 +9,17 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
+clap = { workspace = true, features = ["derive"] }
 libloading = { workspace = true }
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
 slab-ggml-sys = { workspace = true }
 slab-diffusion-sys = { workspace = true }
 slab-llama-sys = { workspace = true }
 slab-whisper-sys = { workspace = true }
+uuid = { workspace = true }
+
+[target.'cfg(windows)'.dependencies]
+windows = { workspace = true }

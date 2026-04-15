@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Deserialize;
 
-use crate::fsops::normalize_relative_path;
-use crate::payload::{ResolvedPayloadFile, RuntimeVariant};
+use super::fsops::normalize_relative_path;
+use super::payload::{ResolvedPayloadFile, RuntimeVariant};
 
 const GGML_BASE_DLL: &str = "bin/ggml-base.dll";
 const GGML_VULKAN_DLL: &str = "bin/ggml-vulkan.dll";

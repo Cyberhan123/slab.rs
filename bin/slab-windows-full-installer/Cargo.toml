@@ -14,10 +14,10 @@ clap = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
 sha2 = { workspace = true }
+slab-utils = { workspace = true }
 uuid = { workspace = true }
 egui = { workspace = true }
 sysinfo = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 eframe = { workspace = true }
-windows = { workspace = true }

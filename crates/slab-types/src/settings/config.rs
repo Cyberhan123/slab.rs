@@ -61,24 +61,6 @@ pub struct SetupBackendsConfig {
     /// Directory where backend libraries are stored.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub dir: Option<String>,
-    pub ggml_llama: SetupBackendReleaseConfig,
-    pub ggml_whisper: SetupBackendReleaseConfig,
-    pub ggml_diffusion: SetupBackendReleaseConfig,
-    pub candle_llama: SetupBackendReleaseConfig,
-    pub candle_whisper: SetupBackendReleaseConfig,
-    pub candle_diffusion: SetupBackendReleaseConfig,
-    pub onnx: SetupBackendReleaseConfig,
-}
-
-/// Release tag and asset for a single backend library.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
-pub struct SetupBackendReleaseConfig {
-    /// The release tag (e.g. `"v1.2.3"`).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub tag: Option<String>,
-    /// The release asset filename.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub asset: Option<String>,
 }
 
 // ── Runtime settings ─────────────────────────────────────────────────────────

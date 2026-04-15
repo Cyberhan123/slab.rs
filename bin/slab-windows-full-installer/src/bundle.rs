@@ -6,7 +6,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 
-use crate::fsops::{bytes_to_hex, ensure_parent_dir};
+use slab_utils::cab::{bytes_to_hex, ensure_parent_dir, sha256_file};
 
 const BUNDLE_MAGIC: [u8; 16] = *b"SLAB-BUNDLE-V1\0\0";
 const FOOTER_LEN: u64 = 16 + (8 * 3);
@@ -75,7 +75,7 @@ impl EmbeddedBundle {
         let asset = self.asset(name)?;
         ensure_parent_dir(output_path)?;
         copy_region_to_path(&self.executable_path, asset.offset, asset.len, output_path, on_chunk)?;
-        let extracted_hash = crate::fsops::sha256_file(output_path)?;
+        let extracted_hash = sha256_file(output_path)?;
         if extracted_hash != asset.sha256 {
             bail!("embedded asset '{}' failed hash verification after extraction", asset.name);
         }

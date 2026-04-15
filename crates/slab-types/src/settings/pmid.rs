@@ -78,20 +78,6 @@ impl PmidCatalog {
             self.setup.ffmpeg.auto_download(),
             self.setup.ffmpeg.dir(),
             self.setup.backends.dir(),
-            self.setup.backends.ggml_llama.tag(),
-            self.setup.backends.ggml_llama.asset(),
-            self.setup.backends.ggml_whisper.tag(),
-            self.setup.backends.ggml_whisper.asset(),
-            self.setup.backends.ggml_diffusion.tag(),
-            self.setup.backends.ggml_diffusion.asset(),
-            self.setup.backends.candle_llama.tag(),
-            self.setup.backends.candle_llama.asset(),
-            self.setup.backends.candle_whisper.tag(),
-            self.setup.backends.candle_whisper.asset(),
-            self.setup.backends.candle_diffusion.tag(),
-            self.setup.backends.candle_diffusion.asset(),
-            self.setup.backends.onnx.tag(),
-            self.setup.backends.onnx.asset(),
             self.runtime.model_cache_dir(),
             self.runtime.llama.num_workers(),
             self.runtime.llama.context_length(),
@@ -178,57 +164,16 @@ impl SetupFfmpegPmids {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct SetupBackendPmids {
-    pub ggml_llama: SetupBackendReleasePmids,
-    pub ggml_whisper: SetupBackendReleasePmids,
-    pub ggml_diffusion: SetupBackendReleasePmids,
-    pub candle_llama: SetupBackendReleasePmids,
-    pub candle_whisper: SetupBackendReleasePmids,
-    pub candle_diffusion: SetupBackendReleasePmids,
-    pub onnx: SetupBackendReleasePmids,
-}
+#[derive(Debug, Clone, Copy, Default)]
+pub struct SetupBackendPmids;
 
 impl SetupBackendPmids {
     pub const fn new() -> Self {
-        Self {
-            ggml_llama: SetupBackendReleasePmids::new("ggml.llama"),
-            ggml_whisper: SetupBackendReleasePmids::new("ggml.whisper"),
-            ggml_diffusion: SetupBackendReleasePmids::new("ggml.diffusion"),
-            candle_llama: SetupBackendReleasePmids::new("candle.llama"),
-            candle_whisper: SetupBackendReleasePmids::new("candle.whisper"),
-            candle_diffusion: SetupBackendReleasePmids::new("candle.diffusion"),
-            onnx: SetupBackendReleasePmids::new("onnx"),
-        }
+        Self
     }
 
     pub fn dir(self) -> SettingPmid {
         SettingPmid::from_segments(["setup", "backends", "dir"])
-    }
-}
-
-impl Default for SetupBackendPmids {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct SetupBackendReleasePmids {
-    backend: &'static str,
-}
-
-impl SetupBackendReleasePmids {
-    pub const fn new(backend: &'static str) -> Self {
-        Self { backend }
-    }
-
-    pub fn tag(self) -> SettingPmid {
-        SettingPmid::from_segments(["setup", "backends", self.backend, "tag"])
-    }
-
-    pub fn asset(self) -> SettingPmid {
-        SettingPmid::from_segments(["setup", "backends", self.backend, "asset"])
     }
 }
 
@@ -547,7 +492,7 @@ mod tests {
 
     #[test]
     fn nested_builder_generates_expected_pmid() {
-        assert_eq!(PMID.setup.backends.ggml_llama.tag().as_str(), "setup.backends.ggml.llama.tag");
+        assert_eq!(PMID.setup.backends.dir().as_str(), "setup.backends.dir");
         assert_eq!(
             PMID.runtime.model_auto_unload.idle_minutes().as_str(),
             "runtime.model_auto_unload.idle_minutes"

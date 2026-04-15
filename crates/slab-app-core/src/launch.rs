@@ -196,15 +196,7 @@ pub fn resolve_launch_spec(
     } else {
         None
     };
-    let lib_dir = settings
-        .setup
-        .backends
-        .dir
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(PathBuf::from)
-        .or_else(|| host_paths.runtime_lib_dir_fallback.clone());
+    let lib_dir = resolve_legacy_runtime_lib_dir(settings, profile, host_paths);
 
     let queue_capacity = usize::try_from(launch.queue_capacity).map_err(|_| {
         AppCoreError::Internal("launch.queue_capacity does not fit into usize".to_owned())
@@ -299,6 +291,40 @@ pub fn resolve_launch_spec_v2(
     }
 }
 
+fn resolve_legacy_runtime_lib_dir(
+    settings: &PmidConfig,
+    profile: LaunchProfile,
+    host_paths: &LaunchHostPaths,
+) -> Option<PathBuf> {
+    match profile {
+        LaunchProfile::Desktop => host_paths.runtime_lib_dir_fallback.clone(),
+        LaunchProfile::Server => settings
+            .setup
+            .backends
+            .dir
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| host_paths.runtime_lib_dir_fallback.clone()),
+    }
+}
+
+fn resolve_v2_runtime_lib_dir(
+    settings: &SettingsDocumentV2,
+    profile: LaunchProfile,
+    host_paths: &LaunchHostPaths,
+) -> Option<PathBuf> {
+    match profile {
+        LaunchProfile::Desktop => host_paths.runtime_lib_dir_fallback.clone(),
+        LaunchProfile::Server => {
+            normalize_optional_text(settings.runtime.ggml.install_dir.as_deref())
+                .map(PathBuf::from)
+                .or_else(|| host_paths.runtime_lib_dir_fallback.clone())
+        }
+    }
+}
+
 fn resolve_managed_launch_spec_v2(
     settings: &SettingsDocumentV2,
     profile: LaunchProfile,
@@ -308,9 +334,7 @@ fn resolve_managed_launch_spec_v2(
     let runtime_log_dir = resolve_primary_runtime_log_dir_v2(settings, host_paths);
     let runtime_ipc_dir = (transport == RuntimeTransportMode::Ipc)
         .then(|| host_paths.runtime_ipc_dir_fallback.clone());
-    let lib_dir = normalize_optional_text(settings.runtime.ggml.install_dir.as_deref())
-        .map(PathBuf::from)
-        .or_else(|| host_paths.runtime_lib_dir_fallback.clone());
+    let lib_dir = resolve_v2_runtime_lib_dir(settings, profile, host_paths);
     let enabled_backends = enabled_ggml_backends_v2(settings);
 
     let mut children = Vec::new();
@@ -890,7 +914,7 @@ mod tests {
     }
 
     #[test]
-    fn planner_prefers_settings_backend_dir_over_host_fallback() {
+    fn desktop_planner_uses_host_resolved_backend_dir() {
         let mut settings = PmidConfig::default();
         settings.setup.backends.dir = Some("D:/settings/backend-libs".to_owned());
 
@@ -899,7 +923,7 @@ mod tests {
         assert!(
             spec.children
                 .iter()
-                .all(|child| child.lib_dir == Some(PathBuf::from("D:/settings/backend-libs")))
+                .all(|child| child.lib_dir == host_paths().runtime_lib_dir_fallback)
         );
     }
 
@@ -973,6 +997,21 @@ mod tests {
         assert_eq!(
             spec.gateway.as_ref().map(|gateway| gateway.bind_address.as_str()),
             Some("127.0.0.1:3000")
+        );
+    }
+
+    #[test]
+    fn v2_desktop_planner_uses_host_resolved_backend_dir() {
+        let mut settings = SettingsDocumentV2::default();
+        settings.runtime.ggml.install_dir = Some("D:/settings/backend-libs".to_owned());
+
+        let spec =
+            resolve_launch_spec_v2(&settings, LaunchProfile::Desktop, &host_paths()).unwrap();
+
+        assert!(
+            spec.children
+                .iter()
+                .all(|child| child.lib_dir == host_paths().runtime_lib_dir_fallback)
         );
     }
 

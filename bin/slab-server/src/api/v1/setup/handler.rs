@@ -14,7 +14,7 @@ use slab_app_core::domain::services::SetupService;
 
 #[derive(OpenApi)]
 #[openapi(
-    paths(setup_status, download_ffmpeg, complete_setup),
+    paths(setup_status, provision_setup, complete_setup),
     components(schemas(
         SetupStatusResponse,
         crate::api::v1::setup::schema::ComponentStatusResponse,
@@ -27,7 +27,7 @@ pub struct SetupApi;
 pub fn router() -> Router<Arc<AppState>> {
     Router::new()
         .route("/setup/status", get(setup_status))
-        .route("/setup/ffmpeg/download", post(download_ffmpeg))
+        .route("/setup/provision", post(provision_setup))
         .route("/setup/complete", post(complete_setup))
 }
 
@@ -47,21 +47,20 @@ async fn setup_status(
     Ok(Json(service.environment_status().await?.into()))
 }
 
-/// Kick off an FFmpeg download task.  Returns immediately with a task ID;
-/// poll `GET /v1/tasks/{id}` to track progress.
+/// Kick off the one-shot online setup provision task.
 #[utoipa::path(
     post,
-    path = "/v1/setup/ffmpeg/download",
+    path = "/v1/setup/provision",
     tag = "setup",
     responses(
-        (status = 202, description = "FFmpeg download task accepted", body = OperationAcceptedResponse),
+        (status = 202, description = "Provision task accepted", body = OperationAcceptedResponse),
         (status = 500, description = "Internal error"),
     )
 )]
-async fn download_ffmpeg(
+async fn provision_setup(
     State(service): State<SetupService>,
 ) -> Result<(StatusCode, Json<OperationAcceptedResponse>), ServerError> {
-    let op = service.download_ffmpeg().await?;
+    let op = service.provision().await?;
     Ok((StatusCode::ACCEPTED, Json(OperationAcceptedResponse { operation_id: op.operation_id })))
 }
 

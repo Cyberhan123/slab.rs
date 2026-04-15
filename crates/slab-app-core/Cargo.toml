@@ -12,6 +12,10 @@ license.workspace = true
 default = []
 axum = ["dep:axum"]
 
+[build-dependencies]
+serde_json = { workspace = true }
+slab-utils = { workspace = true }
+
 [dependencies]
 # Internal workspace deps
 slab-runtime-core = { workspace = true }
@@ -21,6 +25,7 @@ slab-model-pack   = { workspace = true }
 slab-types        = { workspace = true }
 slab-libfetch     = { workspace = true }
 slab-hub          = { workspace = true }
+slab-utils        = { workspace = true }
 
 # Async runtime
 tokio   = { workspace = true }

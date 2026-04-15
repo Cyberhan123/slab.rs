@@ -187,7 +187,7 @@ impl SupervisorArgs {
         }
 
         anyhow::bail!(
-            "legacy startup override(s) {} are no longer supported. Update settings.json launch.* (and setup.backends.dir for runtime libraries) instead.",
+            "legacy startup override(s) {} are no longer supported. Update settings.json launch.* instead.",
             rejected.join(", ")
         );
     }
@@ -284,6 +284,7 @@ fn init_tracing(
 async fn run_gateway<F>(
     cfg: Config,
     runtime_status: Arc<RuntimeSupervisorStatus>,
+    runtime_control: slab_app_core::runtime_supervisor::RuntimeSupervisorControlHandle,
     shutdown: F,
 ) -> anyhow::Result<()>
 where
@@ -325,6 +326,7 @@ where
         pmid,
         grpc,
         runtime_status,
+        Some(runtime_control),
         Arc::clone(&store),
         model_auto_unload,
     ));
@@ -548,8 +550,9 @@ async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow
     let (gateway_shutdown_tx, gateway_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let mut gateway_shutdown_tx = Some(gateway_shutdown_tx);
     let runtime_status = runtime_supervisor.status_registry();
+    let runtime_control = runtime_supervisor.control_handle();
     let mut gateway_join = tokio::spawn(async move {
-        run_gateway(gateway_cfg, runtime_status, async move {
+        run_gateway(gateway_cfg, runtime_status, runtime_control, async move {
             let _ = gateway_shutdown_rx.await;
         })
         .await

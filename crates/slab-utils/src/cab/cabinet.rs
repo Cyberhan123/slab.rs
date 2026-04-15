@@ -5,7 +5,7 @@ use std::process::Command;
 use anyhow::{Context, Result, anyhow, bail};
 use uuid::Uuid;
 
-use crate::payload::ResolvedPayloadFile;
+use super::payload::ResolvedPayloadFile;
 
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
@@ -36,7 +36,7 @@ pub fn create_cab(output_path: &Path, files: &[ResolvedPayloadFile]) -> Result<(
     fs::create_dir_all(output_dir)
         .with_context(|| format!("failed to create directory {}", output_dir.display()))?;
 
-    let ddf_dir = std::env::temp_dir().join(format!("slab-full-installer-ddf-{}", Uuid::new_v4()));
+    let ddf_dir = std::env::temp_dir().join(format!("slab-installer-ddf-{}", Uuid::new_v4()));
     fs::create_dir_all(&ddf_dir)
         .with_context(|| format!("failed to create DDF directory {}", ddf_dir.display()))?;
     let ddf_path = ddf_dir.join("payload.ddf");
@@ -218,13 +218,13 @@ unsafe fn on_file_in_cabinet(state: &mut ExpandCabState<'_>, param1: usize) -> u
     };
 
     let relative_path = Path::new(&relative_name);
-    if let Err(error) = crate::fsops::validate_relative_path(relative_path) {
+    if let Err(error) = super::fsops::validate_relative_path(relative_path) {
         state.error = Some(error.context(format!("invalid path inside CAB: {relative_name}")));
         return FILEOP_ABORT;
     }
 
     let target_path = state.destination_root.join(relative_path);
-    if let Err(error) = crate::fsops::ensure_parent_dir(&target_path) {
+    if let Err(error) = super::fsops::ensure_parent_dir(&target_path) {
         state.error = Some(error);
         return FILEOP_ABORT;
     }
