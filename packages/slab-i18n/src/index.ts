@@ -21,8 +21,10 @@ export const LEGACY_DEFAULT_CHAT_LABELS = ['New Conversation', '新对话'] as c
 const DEFAULT_LANGUAGE: SupportedLanguage = 'en-US';
 const AUTO_LANGUAGE = 'auto' as const;
 const LANGUAGE_LOOKUP = new Set<string>(SUPPORTED_LANGUAGES);
-const TRADITIONAL_CHINESE_PATTERN = /^zh(?:[-_][a-z0-9]+)*[-_](?:tw|hk|mo|hant)(?:[-_][a-z0-9]+)*$/i;
-const CHINESE_PATTERN = /^zh(?:[-_][a-z0-9]+)*$/i;
+// Match Traditional Chinese locales expressed either by script (`zh-Hant`) or by
+// the common Traditional Chinese regions (`zh-TW`, `zh-HK`, `zh-MO`).
+const TRADITIONAL_CHINESE_PATTERN = /^zh(?:[-_][a-z]+)*[-_](?:tw|hk|mo|hant)(?:[-_][a-z]+)*$/i;
+const CHINESE_PATTERN = /^zh(?:[-_][a-z]+)*$/i;
 
 function isSupportedLanguage(value: string | null | undefined): value is SupportedLanguage {
   return Boolean(value && LANGUAGE_LOOKUP.has(value));
