@@ -24,6 +24,7 @@ members = [
     "crates/slab-subtitle",
     "crates/slab-ggml",
     "crates/slab-ggml-sys",
+    "crates/slab-hub",
 ]
 
 exclude = [
@@ -47,6 +48,7 @@ slab-agent        = { path = "./crates/slab-agent", package = "slab-agent", vers
 slab-proto        = { path = "./crates/slab-proto", package = "slab-proto", version = "0.1.0" }
 slab-model-pack   = { path = "./crates/slab-model-pack", package = "slab-model-pack", version = "0.1.0" }
 slab-types        = { path = "./crates/slab-types", package = "slab-types", version = "0.1.0" }
+slab-hub          = { path = "./crates/slab-hub", package = "slab-hub", version = "0.1.0" }
 slab-diffusion-sys = { path = "./crates/slab-diffusion-sys", package = "slab-diffusion-sys", version = "0.1.0" }
 slab-diffusion    = { path = "./crates/slab-diffusion", package = "slab-diffusion", version = "0.1.0" }
 slab-llama        = { path = "./crates/slab-llama", package = "slab-llama", version = "0.1.0" }

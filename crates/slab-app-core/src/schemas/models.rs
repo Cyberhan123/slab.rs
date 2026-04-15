@@ -61,6 +61,9 @@ pub struct ModelSpecRequest {
     /// HuggingFace repo ID for local models.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub repo_id: Option<String>,
+    /// Optional explicit local hub provider override (`hf_hub`, `models_cat`, `huggingface_hub_rust`).
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub hub_provider: Option<String>,
     /// Filename within the HF repo.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub filename: Option<String>,
@@ -306,6 +309,8 @@ pub struct ModelSpecResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub hub_provider: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub local_path: Option<String>,
@@ -534,6 +539,7 @@ impl From<DomainModelSpec> for ModelSpecResponse {
             remote_model_id: spec.remote_model_id,
             pricing: spec.pricing.map(|p| PricingResponse { input: p.input, output: p.output }),
             repo_id: spec.repo_id,
+            hub_provider: spec.hub_provider,
             filename: spec.filename,
             local_path: spec.local_path,
             context_window: spec.context_window,
@@ -811,6 +817,7 @@ impl From<ModelSpecRequest> for DomainModelSpec {
             remote_model_id: req.remote_model_id,
             pricing: req.pricing.map(|p| DomainPricing { input: p.input, output: p.output }),
             repo_id: req.repo_id,
+            hub_provider: req.hub_provider,
             filename: req.filename,
             local_path: req.local_path,
             context_window: req.context_window,
