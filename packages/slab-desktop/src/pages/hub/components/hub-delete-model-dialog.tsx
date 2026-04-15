@@ -1,4 +1,5 @@
 import { Loader2, Trash2 } from 'lucide-react';
+import { useTranslation, Trans } from '@slab/i18n';
 
 import {
   AlertDialog,
@@ -28,24 +29,28 @@ export function HubDeleteModelDialog({
   onOpenChange,
   onConfirm,
 }: HubDeleteModelDialogProps) {
+  const { t } = useTranslation();
   return (
     <AlertDialog open={open} onOpenChange={onOpenChange}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Delete model entry?</AlertDialogTitle>
+          <AlertDialogTitle>{t('pages.hub.dialogs.delete.title')}</AlertDialogTitle>
           <AlertDialogDescription>
             {model ? (
-              <>
-                Remove <strong>{model.display_name}</strong> from the model catalog and delete its
-                stored .slab pack. This does not delete any downloaded model file on disk.
-              </>
+              <Trans
+                i18nKey="pages.hub.dialogs.delete.descriptionWithModel"
+                values={{ model: model.display_name }}
+                components={{ strong: <strong /> }}
+              />
             ) : (
-              'Remove this model entry from the catalog.'
+              t('pages.hub.dialogs.delete.descriptionFallback')
             )}
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel disabled={pending}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel disabled={pending}>
+            {t('pages.hub.dialogs.delete.cancel')}
+          </AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
             disabled={pending}
@@ -59,7 +64,7 @@ export function HubDeleteModelDialog({
             ) : (
               <Trash2 className="mr-2 h-4 w-4" />
             )}
-            Delete entry
+            {t('pages.hub.dialogs.delete.confirm')}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

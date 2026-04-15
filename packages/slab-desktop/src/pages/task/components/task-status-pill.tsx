@@ -1,7 +1,9 @@
 import { getStatusTone } from '../utils';
 
-export function renderStatusPill(status: string) {
-  const tone = getStatusTone(status);
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+export function renderStatusPill(status: string, t: Translate) {
+  const tone = getStatusTone(status, t);
 
   return (
     <span

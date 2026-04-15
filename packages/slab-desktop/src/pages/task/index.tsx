@@ -19,6 +19,9 @@ import {
 import {
   StageEmptyState,
 } from '@slab/components/workspace';
+import { useTranslation } from '@slab/i18n';
+import { usePageHeader } from '@/hooks/use-global-header-meta';
+import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 import { useTaskList } from './hooks/use-task-list';
 import { formatCompactDuration, formatDateTime, formatPercent, formatTaskId, getTaskTypeMeta } from './utils';
@@ -28,6 +31,14 @@ import { TaskDetailDialog } from './components/task-detail-dialog';
 import { renderStatusPill } from './components/task-status-pill';
 
 export default function Task() {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.resolvedLanguage ?? i18n.language;
+  usePageHeader({
+    icon: PAGE_HEADER_META.task.icon,
+    title: t('pages.task.header.title'),
+    subtitle: t('pages.task.header.subtitle'),
+  });
+
   const {
     allTasks,
     metrics,
@@ -60,9 +71,13 @@ export default function Task() {
       <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 px-1 pb-8 pt-6">
         <section className="grid gap-6 lg:grid-cols-3">
           <TaskMetricCard
-            label="Success Rate"
+            label={t('pages.task.metrics.successRate')}
             value={formatPercent(successRate)}
-            note={settledTasks.length > 0 ? `${metrics.succeeded} successful` : 'No completed tasks'}
+            note={
+              settledTasks.length > 0
+                ? t('pages.task.metrics.successful', { count: metrics.succeeded })
+                : t('pages.task.metrics.noCompletedTasks')
+            }
             noteTone="success"
             icon={PlayCircle}
           >
@@ -78,9 +93,13 @@ export default function Task() {
           </TaskMetricCard>
 
           <TaskMetricCard
-            label="Active Queue"
+            label={t('pages.task.metrics.activeQueue')}
             value={formatPercent(activeShare)}
-            note={activeTaskCount > 0 ? `${activeTaskCount} active` : 'Idle'}
+            note={
+              activeTaskCount > 0
+                ? t('pages.task.metrics.active', { count: activeTaskCount })
+                : t('pages.task.metrics.idle')
+            }
             noteTone="muted"
             icon={Timer}
             className="border border-[var(--brand-teal)]/8"
@@ -94,16 +113,24 @@ export default function Task() {
               </div>
               <div className="mt-3 flex items-center justify-between font-mono text-[10px] text-muted-foreground">
                 <span>0%</span>
-                <span>{activeTaskCount > 0 ? 'Active' : 'Idle'}</span>
+                <span>
+                  {activeTaskCount > 0
+                    ? t('pages.task.metrics.activeLabel')
+                    : t('pages.task.metrics.idle')}
+                </span>
                 <span>100%</span>
               </div>
             </div>
           </TaskMetricCard>
 
           <TaskMetricCard
-            label="Avg. Turnaround"
+            label={t('pages.task.metrics.averageTurnaround')}
             value={formatCompactDuration(averageTurnaroundMs)}
-            note={settledTasks.length > 0 ? `${settledTasks.length} settled` : 'No settled tasks'}
+            note={
+              settledTasks.length > 0
+                ? t('pages.task.metrics.settled', { count: settledTasks.length })
+                : t('pages.task.metrics.noSettledTasks')
+            }
             noteTone={metrics.failed > 0 ? 'danger' : 'muted'}
             icon={ListChecks}
           >
@@ -122,23 +149,23 @@ export default function Task() {
 
         {tasksError ? (
           <Alert variant="destructive">
-            <AlertTitle>Error</AlertTitle>
-            <AlertDescription>Failed to fetch task list</AlertDescription>
+            <AlertTitle>{t('pages.task.alerts.errorTitle')}</AlertTitle>
+            <AlertDescription>{t('pages.task.alerts.fetchFailed')}</AlertDescription>
           </Alert>
         ) : null}
 
         {tasksLoading ? (
           <StageEmptyState
             icon={Loader2}
-            title="Loading task list"
-            description="Fetching latest task status from the backend."
+            title={t('pages.task.states.loadingTitle')}
+            description={t('pages.task.states.loadingDescription')}
             className="[&_svg]:animate-spin"
           />
         ) : allTasks.length === 0 ? (
           <StageEmptyState
             icon={ListChecks}
-            title="No tasks yet"
-            description="Go to Audio, Image, or Video pages to create a task."
+            title={t('pages.task.states.emptyTitle')}
+            description={t('pages.task.states.emptyDescription')}
           />
         ) : (
           <section className="overflow-hidden rounded-[20px] border border-border/40 bg-[var(--surface-1)] shadow-[0_12px_40px_-12px_color-mix(in_oklab,var(--foreground)_5%,transparent)]">
@@ -146,26 +173,26 @@ export default function Task() {
               <TableHeader className="[&_tr]:border-b-0 [&_tr]:bg-[var(--surface-soft)]">
                 <TableRow className="hover:bg-[var(--surface-soft)]">
                   <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                    Task ID
+                    {t('pages.task.table.headers.taskId')}
                   </TableHead>
                   <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                    Type
+                    {t('pages.task.table.headers.type')}
                   </TableHead>
                   <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                    Status
+                    {t('pages.task.table.headers.status')}
                   </TableHead>
                   <TableHead className="h-[45px] px-6 text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                    Created At
+                    {t('pages.task.table.headers.createdAt')}
                   </TableHead>
                   <TableHead className="h-[45px] px-6 text-right text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                    Actions
+                    {t('pages.task.table.headers.actions')}
                   </TableHead>
                 </TableRow>
               </TableHeader>
 
               <TableBody>
                 {paginatedTasks.map((task) => {
-                  const taskMeta = getTaskTypeMeta(task.task_type);
+                  const taskMeta = getTaskTypeMeta(task.task_type, t);
 
                   return (
                     <TableRow
@@ -189,10 +216,10 @@ export default function Task() {
                         </div>
                       </TableCell>
                       <TableCell className="px-6 py-5">
-                        {renderStatusPill(task.status)}
+                        {renderStatusPill(task.status, t)}
                       </TableCell>
                       <TableCell className="px-6 py-5 text-sm text-muted-foreground">
-                        {formatDateTime(task.created_at)}
+                        {formatDateTime(task.created_at, locale)}
                       </TableCell>
                       <TableCell className="px-6 py-5 text-right">
                         <TaskDetailDialog
@@ -222,7 +249,7 @@ export default function Task() {
 
               <div className="flex items-center gap-2">
                 <PaginationButton
-                  aria-label="Previous page"
+                  aria-label={t('pages.task.table.pagination.previousPage')}
                   disabled={currentPage === 1}
                   onClick={() => setPage((value) => Math.max(1, value - 1))}
                 >
@@ -242,7 +269,7 @@ export default function Task() {
                   );
                 })}
                 <PaginationButton
-                  aria-label="Next page"
+                  aria-label={t('pages.task.table.pagination.nextPage')}
                   disabled={currentPage === totalPages}
                   onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
                 >

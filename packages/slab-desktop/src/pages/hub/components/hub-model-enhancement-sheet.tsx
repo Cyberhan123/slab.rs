@@ -1,6 +1,7 @@
 import { Loader2, LockKeyhole, Save, Settings2, TriangleAlert } from 'lucide-react';
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { toast } from 'sonner';
+import { useTranslation } from '@slab/i18n';
 
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Badge } from '@slab/components/badge';
@@ -42,6 +43,7 @@ export function HubModelEnhancementSheet({
   onOpenChange,
   onSaved,
 }: HubModelEnhancementSheetProps) {
+  const { t } = useTranslation();
   const [selectedPresetId, setSelectedPresetId] = useState('');
   const [selectedVariantId, setSelectedVariantId] = useState('');
   const {
@@ -113,13 +115,13 @@ export function HubModelEnhancementSheet({
         },
         body: savePayload,
       });
-      toast.success('Model selection updated.', {
+      toast.success(t('pages.hub.toast.selectionUpdated'), {
         description: data?.model_summary.display_name ?? model.display_name,
       });
       onSaved();
       onOpenChange(false);
     } catch (error) {
-      toast.error('Failed to update model selection.', {
+      toast.error(t('pages.hub.toast.selectionUpdateFailed'), {
         description: error instanceof Error ? error.message : String(error),
       });
     }
@@ -137,10 +139,9 @@ export function HubModelEnhancementSheet({
               <Settings2 className="size-5" />
             </div>
             <div className="space-y-1">
-              <SheetTitle className="text-xl">Model config document</SheetTitle>
+              <SheetTitle className="text-xl">{t('pages.hub.sheet.title')}</SheetTitle>
               <SheetDescription>
-                Pack declarations stay as the source of truth. You can only switch preset and
-                variant here; backend fields remain locked and read-only.
+                {t('pages.hub.sheet.description')}
               </SheetDescription>
             </div>
           </div>
@@ -150,12 +151,12 @@ export function HubModelEnhancementSheet({
           {isLoading ? (
             <div className="flex min-h-[260px] items-center justify-center text-muted-foreground">
               <Loader2 className="mr-2 size-4 animate-spin" />
-              Loading model config document...
+              {t('pages.hub.sheet.loading')}
             </div>
           ) : loadError ? (
             <Alert variant="destructive">
               <TriangleAlert className="size-4" />
-              <AlertTitle>Failed to load enhancement config</AlertTitle>
+              <AlertTitle>{t('pages.hub.sheet.failedLoadTitle')}</AlertTitle>
               <AlertDescription>{loadError}</AlertDescription>
             </Alert>
           ) : data ? (
@@ -163,21 +164,24 @@ export function HubModelEnhancementSheet({
               {data.warnings.length > 0 ? (
                 <Alert>
                   <TriangleAlert className="size-4" />
-                  <AlertTitle>Selection warning</AlertTitle>
+                  <AlertTitle>{t('pages.hub.sheet.selectionWarningTitle')}</AlertTitle>
                   <AlertDescription>{data.warnings.join(' ')}</AlertDescription>
                 </Alert>
               ) : null}
 
               <section className="grid gap-4 rounded-[28px] border border-border/60 bg-[var(--shell-card)]/55 p-5 md:grid-cols-2">
-                <ReadOnlyBlock label="Display name" value={data.model_summary.display_name} />
                 <ReadOnlyBlock
-                  label="Backend"
+                  label={t('pages.hub.sheet.blocks.displayName')}
+                  value={data.model_summary.display_name}
+                />
+                <ReadOnlyBlock
+                  label={t('pages.hub.sheet.blocks.backend')}
                   value={data.model_summary.backend_id ?? data.model_summary.kind}
                 />
-                <FieldBlock label="Preset">
+                <FieldBlock label={t('pages.hub.sheet.blocks.preset')}>
                   <Select value={selectedPresetId} onValueChange={handlePresetChange}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select a preset" />
+                      <SelectValue placeholder={t('pages.hub.sheet.blocks.presetPlaceholder')} />
                     </SelectTrigger>
                     <SelectContent>
                       {data.selection.presets.map((preset) => (
@@ -188,10 +192,10 @@ export function HubModelEnhancementSheet({
                     </SelectContent>
                   </Select>
                 </FieldBlock>
-                <FieldBlock label="Variant">
+                <FieldBlock label={t('pages.hub.sheet.blocks.variant')}>
                   <Select value={selectedVariantId} onValueChange={setSelectedVariantId}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Select a variant" />
+                      <SelectValue placeholder={t('pages.hub.sheet.blocks.variantPlaceholder')} />
                     </SelectTrigger>
                     <SelectContent>
                       {data.selection.variants.map((variant) => (
@@ -233,11 +237,11 @@ export function HubModelEnhancementSheet({
 
         <div className="flex shrink-0 items-center justify-end gap-3 border-t border-border/60 px-6 py-4">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Close
+            {t('pages.hub.sheet.blocks.close')}
           </Button>
           <Button onClick={handleSave} disabled={!canSave}>
             {isSaving ? <Loader2 className="mr-2 size-4 animate-spin" /> : <Save className="mr-2 size-4" />}
-            Save selection
+            {t('pages.hub.sheet.blocks.saveSelection')}
           </Button>
         </div>
       </SheetContent>
@@ -276,6 +280,7 @@ function FieldBlock({
 }
 
 function ReadonlyFieldCard({ field }: { field: ModelConfigFieldResponse }) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-[20px] border border-border/60 bg-background/70 p-4 shadow-[0_1px_2px_color-mix(in_oklab,var(--foreground)_8%,transparent)]">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -284,15 +289,15 @@ function ReadonlyFieldCard({ field }: { field: ModelConfigFieldResponse }) {
             <h4 className="text-sm font-semibold tracking-[-0.02em] text-foreground">
               {field.label}
             </h4>
-            <Badge variant="secondary" className="rounded-full">
-              {formatOrigin(field.origin)}
-            </Badge>
-            {field.locked ? (
-              <Badge variant="outline" className="rounded-full">
-                <LockKeyhole className="mr-1 size-3" />
-                Pack locked
+              <Badge variant="secondary" className="rounded-full">
+                {formatOrigin(field.origin, t)}
               </Badge>
-            ) : null}
+              {field.locked ? (
+                <Badge variant="outline" className="rounded-full">
+                  <LockKeyhole className="mr-1 size-3" />
+                  {t('pages.hub.sheet.blocks.packLocked')}
+                </Badge>
+              ) : null}
           </div>
           {field.description_md ? (
             <p className="text-xs leading-5 text-muted-foreground">{field.description_md}</p>
@@ -303,16 +308,19 @@ function ReadonlyFieldCard({ field }: { field: ModelConfigFieldResponse }) {
         </div>
       </div>
 
-      <div className="mt-4">{renderFieldValue(field)}</div>
+      <div className="mt-4">{renderFieldValue(field, t)}</div>
     </div>
   );
 }
 
-function renderFieldValue(field: ModelConfigFieldResponse) {
+function renderFieldValue(
+  field: ModelConfigFieldResponse,
+  t: (key: string, options?: Record<string, unknown>) => string,
+) {
   if (field.effective_value === null || field.effective_value === undefined) {
     return (
       <div className="rounded-[14px] border border-dashed border-border/70 px-4 py-3 text-sm text-muted-foreground">
-        Not set
+        {t('pages.hub.sheet.blocks.notSet')}
       </div>
     );
   }
@@ -320,7 +328,9 @@ function renderFieldValue(field: ModelConfigFieldResponse) {
   if (field.value_type === 'boolean') {
     return (
       <div className="rounded-[14px] border border-border/60 bg-[var(--surface-soft)] px-4 py-3 text-sm font-medium text-foreground">
-        {field.effective_value ? 'Enabled' : 'Disabled'}
+        {field.effective_value
+          ? t('pages.hub.sheet.blocks.enabled')
+          : t('pages.hub.sheet.blocks.disabled')}
       </div>
     );
   }
@@ -340,20 +350,23 @@ function renderFieldValue(field: ModelConfigFieldResponse) {
   );
 }
 
-function formatOrigin(origin: ModelConfigFieldResponse['origin']) {
+function formatOrigin(
+  origin: ModelConfigFieldResponse['origin'],
+  t: (key: string, options?: Record<string, unknown>) => string,
+) {
   switch (origin) {
     case 'pack_manifest':
-      return 'Pack manifest';
+      return t('pages.hub.sheet.blocks.origin.pack_manifest');
     case 'selected_preset':
-      return 'Preset';
+      return t('pages.hub.sheet.blocks.origin.selected_preset');
     case 'selected_variant':
-      return 'Variant';
+      return t('pages.hub.sheet.blocks.origin.selected_variant');
     case 'selected_backend_config':
-      return 'Backend config';
+      return t('pages.hub.sheet.blocks.origin.selected_backend_config');
     case 'pmid_fallback':
-      return 'PMID fallback';
+      return t('pages.hub.sheet.blocks.origin.pmid_fallback');
     case 'derived':
-      return 'Derived';
+      return t('pages.hub.sheet.blocks.origin.derived');
     default:
       return origin;
   }

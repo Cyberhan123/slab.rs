@@ -1,4 +1,5 @@
 import { History, Search } from "lucide-react"
+import { useTranslation } from "@slab/i18n"
 import { useGlobalHeaderState } from "@/hooks/use-global-header-meta"
 import type { HeaderSelectControl } from "@/layouts/header-controls"
 import { WindowControls } from "@/layouts/window-controls"
@@ -18,9 +19,12 @@ type HeaderProps = {
 }
 
 function HeaderSelect({ control }: { control: HeaderSelectControl }) {
+  const { t } = useTranslation()
   const selectedOption = control.options.find((option) => option.id === control.value)
   const hasSelectableOptions = control.options.some((option) => !option.disabled)
-  const placeholder = control.loading ? "Loading options..." : control.placeholder ?? "Select option"
+  const placeholder = control.loading
+    ? t("layouts.header.select.loadingOptions")
+    : control.placeholder ?? t("layouts.header.select.selectOption")
   const disabled = control.disabled || !hasSelectableOptions
 
   return (
@@ -36,10 +40,10 @@ function HeaderSelect({ control }: { control: HeaderSelectControl }) {
       </SelectTrigger>
       <SelectContent variant="pill" position="popper" align="start" className="max-h-80 min-w-[18rem]">
         <SelectGroup>
-          <SelectLabel>{control.groupLabel ?? "Options"}</SelectLabel>
+          <SelectLabel>{control.groupLabel ?? t("layouts.header.select.options")}</SelectLabel>
           {control.options.length === 0 ? (
             <SelectItem value="__no_options__" disabled>
-              {control.emptyLabel ?? "No options available"}
+              {control.emptyLabel ?? t("layouts.header.select.noOptions")}
             </SelectItem>
           ) : (
             control.options.map((option) => (
@@ -55,18 +59,21 @@ function HeaderSelect({ control }: { control: HeaderSelectControl }) {
 }
 
 export default function Header({ variant = "default" }: HeaderProps) {
+  const { t } = useTranslation()
   const {
     meta: { title, subtitle },
     control,
   } = useGlobalHeaderState()
   const isChatVariant = variant === "chat"
   const isMinimalVariant = variant === "minimal"
-  const searchPlaceholder = isChatVariant ? "Search tasks..." : "Search pages, tools, or settings..."
+  const searchPlaceholder = isChatVariant
+    ? t("layouts.header.search.chat")
+    : t("layouts.header.search.default")
   const subtitleParts = isChatVariant ? subtitle.split(" - ") : [subtitle]
   const displaySubtitle = subtitleParts[0] ?? subtitle
   const shellContextLabel = isChatVariant
-    ? subtitleParts.slice(1).join(" - ") || "Active Workspace"
-    : "Slab Desktop"
+    ? subtitleParts.slice(1).join(" - ") || t("layouts.header.context.activeWorkspace")
+    : t("layouts.header.context.desktop")
 
   return (
     <header

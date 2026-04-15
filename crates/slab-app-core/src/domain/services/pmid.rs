@@ -508,6 +508,20 @@ fn build_v2_property_view_from_values(
 fn empty_v2_sections() -> Vec<SettingsSectionView> {
     vec![
         SettingsSectionView {
+            id: "general".to_owned(),
+            title: "General".to_owned(),
+            description_md: "Desktop application preferences shared across the frontend shell."
+                .to_owned(),
+            subsections: vec![SettingsSubsectionView {
+                id: "general".to_owned(),
+                title: "General".to_owned(),
+                description_md:
+                    "Choose how the desktop app should present shared interface preferences."
+                        .to_owned(),
+                properties: Vec::new(),
+            }],
+        },
+        SettingsSectionView {
             id: "database".to_owned(),
             title: "Database".to_owned(),
             description_md: "Persistent application data storage and connection settings."
@@ -699,6 +713,7 @@ fn push_v2_property(
 
 fn v2_section_location(path: &str) -> (&'static str, &'static str) {
     match path {
+        _ if path.starts_with("general.") => ("general", "general"),
         _ if path.starts_with("database.") => ("database", "general"),
         _ if path.starts_with("logging.") => ("logging", "general"),
         _ if path.starts_with("tools.ffmpeg.") => ("tools", "ffmpeg"),
@@ -757,6 +772,11 @@ fn v2_value_type(path: &str, effective: &Value, default: &Value) -> SettingValue
 
 fn v2_enum_values(path: &str) -> Option<Vec<String>> {
     match path {
+        "general.language" => Some(vec![
+            "auto".to_owned(),
+            "en-US".to_owned(),
+            "zh-CN".to_owned(),
+        ]),
         "runtime.mode" => {
             Some(vec!["managed_children".to_owned(), "external_endpoints".to_owned()])
         }
@@ -795,6 +815,7 @@ fn v2_multiline(path: &str) -> bool {
 
 fn v2_property_label(path: &str) -> String {
     match path {
+        "general.language" => "Interface Language".to_owned(),
         "database.url" => "Database URL".to_owned(),
         "logging.level" => "Log Level".to_owned(),
         "logging.json" => "JSON Logs".to_owned(),
@@ -815,6 +836,9 @@ fn v2_property_label(path: &str) -> String {
 
 fn v2_property_description(path: &str) -> String {
     match path {
+        "general.language" => {
+            "Choose how the desktop frontend selects translation resources.".to_owned()
+        }
         "database.url" => "SQLx connection string used for the shared application database.".to_owned(),
         "logging.level" => "Default tracing filter inherited by server and runtime processes.".to_owned(),
         "logging.json" => "Emit newline-delimited JSON logs by default.".to_owned(),
@@ -988,8 +1012,8 @@ mod tests {
     use super::*;
     use crate::domain::models::{PMID, SettingsValuesFile};
     use slab_types::settings::{
-        ProviderAuthConfig, ProviderDefaultsConfig, ProviderFamily, ProviderRegistryEntry,
-        SettingsDocumentV2,
+        InterfaceLanguagePreference, ProviderAuthConfig, ProviderDefaultsConfig, ProviderFamily,
+        ProviderRegistryEntry, SettingsDocumentV2,
     };
 
     fn temp_settings_path() -> PathBuf {
@@ -1171,6 +1195,55 @@ mod tests {
 
         assert_eq!(service.config().runtime.model_cache_dir.as_deref(), Some("D:/models"));
         assert_eq!(persisted.models.cache_dir.as_deref(), Some("D:/models"));
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn v2_general_language_setting_is_grouped_and_persisted() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocumentV2::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let document = service.document().await;
+        let general_section = document
+            .sections
+            .iter()
+            .find(|section| section.id == "general")
+            .expect("general section");
+        let general_subsection = general_section
+            .subsections
+            .iter()
+            .find(|subsection| subsection.id == "general")
+            .expect("general subsection");
+
+        assert!(
+            general_subsection
+                .properties
+                .iter()
+                .any(|property| property.pmid == "general.language")
+        );
+
+        service
+            .update_setting(
+                "general.language",
+                UpdateSettingCommand {
+                    op: UpdateSettingOperation::Set,
+                    value: Some(json!("zh-CN")),
+                },
+            )
+            .await
+            .expect("update");
+
+        let persisted: SettingsDocumentV2 =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+
+        assert_eq!(persisted.general.language, InterfaceLanguagePreference::ZhCn);
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

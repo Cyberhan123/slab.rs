@@ -4,6 +4,7 @@ import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Button } from '@slab/components/button';
 import { Input } from '@slab/components/input';
 import { SoftPanel } from '@slab/components/workspace';
+import { useTranslation } from '@slab/i18n';
 import { FileAudio2, Loader2 } from 'lucide-react';
 import type { SelectedFile } from '@/hooks/use-file';
 import type { CatalogModel } from '@/lib/api/models';
@@ -156,6 +157,7 @@ export function AudioWorkbench({
   webFileInputRef,
   whisperVadModels,
 }: AudioWorkbenchProps) {
+  const { t } = useTranslation();
   return (
     <div className="h-full w-full overflow-y-auto">
       <div className="mx-auto grid w-full max-w-[1120px] gap-8 pb-8 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_392px]">
@@ -163,29 +165,29 @@ export function AudioWorkbench({
           <SoftPanel className="space-y-5 rounded-[28px] border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
             <div>
               <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                Transcription Setup
+                {t('pages.audio.workbench.setupTitle')}
               </p>
               <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                The active Whisper model comes from the global header.
+                {t('pages.audio.workbench.setupDescription')}
               </p>
             </div>
 
             {Boolean(catalogModelsError) && (
               <Alert variant="destructive">
-                <AlertTitle>Model Catalog Error</AlertTitle>
+                <AlertTitle>{t('pages.audio.alerts.catalogErrorTitle')}</AlertTitle>
                 <AlertDescription>
                   {(catalogModelsError as { message?: string })?.message ||
-                    'Failed to load model catalog. Please check server status.'}
+                    t('pages.audio.alerts.catalogErrorDescription')}
                 </AlertDescription>
               </Alert>
             )}
 
             {transcribe?.isError && (
               <Alert variant="destructive">
-                <AlertTitle>Error</AlertTitle>
+                <AlertTitle>{t('pages.audio.alerts.transcribeErrorTitle')}</AlertTitle>
                 <AlertDescription>
                   {(transcribe?.error as { error?: string })?.error ||
-                    'Failed to create transcription task. Please retry.'}
+                    t('pages.audio.alerts.transcribeErrorDescription')}
                 </AlertDescription>
               </Alert>
             )}
@@ -259,7 +261,7 @@ export function AudioWorkbench({
           <SoftPanel className="space-y-5 rounded-[28px] border border-border/60 bg-[var(--surface-soft)] px-7 py-6">
             <div>
               <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-                Source Audio
+                {t('pages.audio.workbench.sourceTitle')}
               </p>
             </div>
 
@@ -268,10 +270,10 @@ export function AudioWorkbench({
                 <FileAudio2 className="size-6" />
               </div>
               <h3 className="mt-5 text-[18px] font-semibold tracking-[-0.02em] text-foreground">
-                Drag and drop audio files
+                {t('pages.audio.workbench.sourceDropTitle')}
               </h3>
               <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                Supports FLAC, WAV, MP3, M4A, OGG, and common video containers.
+                {t('pages.audio.workbench.sourceDropDescription')}
               </p>
               <div className="mt-5 flex flex-wrap items-center justify-center gap-3">
                 <Button
@@ -289,7 +291,9 @@ export function AudioWorkbench({
                   }}
                   disabled={isBusy}
                 >
-                  {file ? 'Change File' : 'Browse Files'}
+                  {file
+                    ? t('pages.audio.workbench.changeFile')
+                    : t('pages.audio.workbench.browseFiles')}
                 </Button>
                 {file ? (
                   <span className="max-w-full rounded-full border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/80 px-4 py-2 text-xs font-medium text-muted-foreground">
@@ -313,12 +317,11 @@ export function AudioWorkbench({
             {file ? (
               <div className="rounded-[20px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/60 px-4 py-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
                 <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                  Selected File
+                  {t('pages.audio.workbench.selectedFileTitle')}
                 </p>
                 <p className="mt-2 truncate text-sm font-semibold text-foreground">{file.name}</p>
                 <p className="mt-1 text-xs leading-5 text-muted-foreground">
-                  Ready for transcription. You can swap the file at any time before creating the
-                  task.
+                  {t('pages.audio.workbench.selectedFileDescription')}
                 </p>
               </div>
             ) : null}
@@ -326,7 +329,7 @@ export function AudioWorkbench({
         </div>
         <div className="workspace-surface h-fit rounded-[30px] px-7 py-8 shadow-[0_28px_72px_-44px_color-mix(in_oklab,var(--foreground)_34%,transparent)]">
           <p className="text-[12px] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
-            Configuration Preview
+            {t('pages.audio.workbench.previewTitle')}
           </p>
 
           <div className="mt-7 space-y-4">
@@ -362,15 +365,14 @@ export function AudioWorkbench({
           >
             {isBusy ? <Loader2 className="size-4 animate-spin" /> : null}
             {preparingStage === 'prepare'
-              ? 'Preparing Model...'
+              ? t('pages.audio.workbench.startPreparing')
               : preparingStage === 'transcribe' || transcribe?.isPending
-                ? 'Processing...'
-                : 'Start Transcription'}
+                ? t('pages.audio.workbench.startProcessing')
+                : t('pages.audio.workbench.startTranscription')}
           </Button>
 
           <p className="mx-auto mt-4 max-w-[290px] text-center text-xs leading-5 text-muted-foreground">
-            By starting, the selected file is sent through the current transcription flow and can
-            be tracked in Tasks.
+            {t('pages.audio.workbench.submitDescription')}
           </p>
 
           {isBusy || taskId || file ? (
@@ -383,38 +385,45 @@ export function AudioWorkbench({
                   <div className="space-y-1">
                     <p className="text-sm font-semibold text-foreground">
                       {preparingStage === 'prepare'
-                        ? 'Preparing selected model'
-                        : 'Creating transcription task'}
+                        ? t('pages.audio.workbench.busy.preparingTitle')
+                        : t('pages.audio.workbench.busy.creatingTitle')}
                     </p>
                     <p className="text-xs leading-5 text-muted-foreground">
                       {preparingStage === 'prepare'
-                        ? 'The runtime is making sure the required model is downloaded and loaded first.'
-                        : 'The transcription request is being submitted to the existing task pipeline.'}
+                        ? t('pages.audio.workbench.busy.preparingDescription')
+                        : t('pages.audio.workbench.busy.creatingDescription')}
                     </p>
                     {taskId ? (
-                      <p className="text-xs font-medium text-[var(--brand-teal)]">Task ID: {taskId}</p>
+                      <p className="text-xs font-medium text-[var(--brand-teal)]">
+                        {t('pages.audio.workbench.taskIdLabel', { id: taskId })}
+                      </p>
                     ) : null}
                   </div>
                 </div>
               ) : taskId ? (
                 <div className="space-y-4">
                   <div className="space-y-1">
-                    <p className="text-sm font-semibold text-foreground">Transcription task created</p>
+                    <p className="text-sm font-semibold text-foreground">
+                      {t('pages.audio.workbench.taskCreated.title')}
+                    </p>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      Task ID: {taskId}. You can keep working here or jump straight to the Tasks page
-                      to monitor progress.
+                      {t('pages.audio.workbench.taskCreated.description', { id: taskId })}
                     </p>
                   </div>
                   <Button variant="pill" size="pill" onClick={() => navigate('/task')}>
-                    Open Tasks
+                    {t('pages.audio.workbench.taskCreated.openTasks')}
                   </Button>
                 </div>
               ) : (
                 <div className="space-y-1">
-                  <p className="text-sm font-semibold text-foreground">Source file ready</p>
-                  <p className="truncate text-sm text-muted-foreground">{file?.name ?? 'Source file selected'}</p>
+                  <p className="text-sm font-semibold text-foreground">
+                    {t('pages.audio.workbench.ready.title')}
+                  </p>
+                  <p className="truncate text-sm text-muted-foreground">
+                    {file?.name ?? t('pages.audio.workbench.ready.fallbackSource')}
+                  </p>
                   <p className="text-xs leading-5 text-muted-foreground">
-                    Start Transcription will create a task without changing the existing backend flow.
+                    {t('pages.audio.workbench.ready.description')}
                   </p>
                 </div>
               )}

@@ -4,21 +4,8 @@ import { Loader2, RefreshCw, TriangleAlert } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@slab/components/select';
 import { StageEmptyState, StatusPill } from '@slab/components/workspace';
-import {
-  applyAppLanguagePreference,
-  getResolvedAppLanguage,
-  getStoredAppLanguagePreference,
-  type AppLanguagePreference,
-  useTranslation,
-} from '@slab/i18n';
+import { useTranslation } from '@slab/i18n';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api, { getErrorMessage } from '@/lib/api';
@@ -37,9 +24,6 @@ import {
 export default function SettingsPage() {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
-  const [languagePreference, setLanguagePreference] = useState<AppLanguagePreference>(
-    () => getStoredAppLanguagePreference(),
-  );
   const { t } = useTranslation();
 
   const { data, error, isLoading, refetch } = api.useQuery('get', '/v1/settings');
@@ -113,13 +97,6 @@ export default function SettingsPage() {
     scrollToTarget(targetId);
   }
 
-  const resolvedLanguageLabel = t(`pages.settings.language.options.${getResolvedAppLanguage()}`);
-
-  function handleLanguageChange(value: AppLanguagePreference) {
-    setLanguagePreference(value);
-    void applyAppLanguagePreference(value);
-  }
-
   if (isLoading) {
     return (
       <StageEmptyState
@@ -176,40 +153,6 @@ export default function SettingsPage() {
               </AlertDescription>
             </Alert>
           ) : null}
-
-          <section className="rounded-[20px] border border-border/50 bg-[var(--surface-soft)]/70 p-6">
-            <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-              <div className="space-y-2">
-                <h2 className="text-lg font-semibold tracking-[-0.03em] text-foreground">
-                  {t('pages.settings.language.title')}
-                </h2>
-                <p className="max-w-2xl text-sm leading-6 text-muted-foreground">
-                  {t('pages.settings.language.description')}
-                </p>
-                <p className="text-xs text-muted-foreground/80">
-                  {t('pages.settings.language.current', {
-                    language: resolvedLanguageLabel,
-                  })}
-                </p>
-              </div>
-
-              <div className="w-full max-w-xs">
-                <Select value={languagePreference} onValueChange={handleLanguageChange}>
-                  <SelectTrigger
-                    variant="soft"
-                    className="h-[42px] rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 text-xs"
-                  >
-                    <SelectValue placeholder={t('pages.settings.language.title')} />
-                  </SelectTrigger>
-                  <SelectContent variant="soft">
-                    <SelectItem value="auto">{t('pages.settings.language.options.auto')}</SelectItem>
-                    <SelectItem value="en-US">{t('pages.settings.language.options.en-US')}</SelectItem>
-                    <SelectItem value="zh-CN">{t('pages.settings.language.options.zh-CN')}</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </section>
 
           {!activeSection ? (
             <StageEmptyState

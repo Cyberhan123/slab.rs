@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { useTranslation } from '@slab/i18n';
 
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api from '@/lib/api';
@@ -30,6 +31,7 @@ const extractTaskId = (payload: unknown): string | null => {
 };
 
 export function useImageModelPreparation() {
+  const { t } = useTranslation();
   const [loadedModelId, setLoadedModelId] = useState<string | null>(null);
 
   const {
@@ -89,13 +91,19 @@ export function useImageModelPreparation() {
       }
 
       if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted') {
-        throw new Error(task.error_msg ?? `Task ${taskId} ended with status: ${task.status}`);
+        throw new Error(
+          task.error_msg ??
+            t('pages.hub.error.taskEndedWithStatus', {
+              taskId,
+              status: task.status,
+            }),
+        );
       }
 
       await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
     }
 
-    throw new Error('Model download timed out');
+    throw new Error(t('pages.image.error.downloadTimedOut'));
   };
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
@@ -114,11 +122,11 @@ export function useImageModelPreparation() {
     }
 
     if (!model) {
-      throw new Error('Selected model does not exist in catalog');
+        throw new Error(t('pages.image.error.selectedModelMissing'));
     }
 
     if (model.kind !== 'local') {
-      throw new Error('Selected model is not a local image model');
+      throw new Error(t('pages.image.error.selectedModelNotLocal'));
     }
 
     if (model.local_path && !forceDownload) {
@@ -133,14 +141,14 @@ export function useImageModelPreparation() {
     const taskId = extractTaskId(downloadResponse);
 
     if (!taskId) {
-      throw new Error('Failed to start model download task');
+      throw new Error(t('pages.image.error.startDownloadFailed'));
     }
 
     await waitForTaskToFinish(taskId);
 
     const refreshedModel = await refreshCatalogAndFindModel(modelId);
     if (!refreshedModel?.local_path) {
-      throw new Error('Model download completed, but local_path is empty');
+      throw new Error(t('pages.image.error.missingDownloadedPath'));
     }
 
     return { modelPath: refreshedModel.local_path, downloadedNow: true };
@@ -166,17 +174,17 @@ export function useImageModelPreparation() {
 
   const prepareSelectedModel = async (): Promise<string> => {
     if (!selectedModelId) {
-      throw new Error('Please select an image model first.');
+      throw new Error(t('pages.image.error.selectModelFirst'));
     }
 
     const selectedModel = diffusionModels.find((item) => item.id === selectedModelId);
     if (!selectedModel) {
-      throw new Error('Selected model is not available');
+      throw new Error(t('pages.image.error.selectedModelUnavailable'));
     }
 
     const { modelPath, downloadedNow } = await ensureDownloadedModelPath(selectedModelId);
     if (downloadedNow) {
-      toast.success(`Downloaded ${selectedModel.display_name}`);
+      toast.success(t('pages.image.toast.downloaded', { model: selectedModel.display_name }));
     }
 
     if (loadedModelId === selectedModelId) {
@@ -190,11 +198,11 @@ export function useImageModelPreparation() {
         throw firstLoadError;
       }
 
-      toast.message('Model load failed, re-downloading and retrying once...');
+      toast.message(t('pages.image.toast.modelLoadRetry'));
 
       const retry = await ensureDownloadedModelPath(selectedModelId, true);
       if (retry.downloadedNow) {
-        toast.success(`Downloaded ${selectedModel.display_name}`);
+        toast.success(t('pages.image.toast.downloaded', { model: selectedModel.display_name }));
       }
 
       await loadOrSwitchSelectedModel(selectedModelId);

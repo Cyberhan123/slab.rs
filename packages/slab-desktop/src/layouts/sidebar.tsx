@@ -9,6 +9,7 @@ import {
   Settings,
   type LucideIcon,
 } from "lucide-react"
+import { useTranslation } from "@slab/i18n"
 import { Link, useLocation } from "react-router-dom"
 
 import { cn } from "@/lib/utils"
@@ -16,23 +17,23 @@ import { WindowControls } from "@/layouts/window-controls"
 
 type SidebarItem = {
   to: string
-  label: string
+  labelKey: string
   icon: LucideIcon
   end?: boolean
 }
 
 const primaryItems: SidebarItem[] = [
-  { to: "/", label: "Assistant", icon: BotMessageSquare, end: true },
-  { to: "/image", label: "Image", icon: ImageIcon },
-  { to: "/video", label: "Video", icon: Film },
-  { to: "/audio", label: "Audio", icon: Mic },
-  { to: "/hub", label: "Hub", icon: Package },
-  { to: "/task", label: "Tasks", icon: ClipboardList },
-  { to: "/plugins", label: "Plugins", icon: Puzzle },
+  { to: "/", labelKey: "layouts.sidebar.items.assistant", icon: BotMessageSquare, end: true },
+  { to: "/image", labelKey: "layouts.sidebar.items.image", icon: ImageIcon },
+  { to: "/video", labelKey: "layouts.sidebar.items.video", icon: Film },
+  { to: "/audio", labelKey: "layouts.sidebar.items.audio", icon: Mic },
+  { to: "/hub", labelKey: "layouts.sidebar.items.hub", icon: Package },
+  { to: "/task", labelKey: "layouts.sidebar.items.task", icon: ClipboardList },
+  { to: "/plugins", labelKey: "layouts.sidebar.items.plugins", icon: Puzzle },
 ]
 
 const footerItems: SidebarItem[] = [
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/settings", labelKey: "layouts.sidebar.items.settings", icon: Settings },
 ]
 
 const isPathActive = (pathname: string, to: string, end = false) => {
@@ -48,6 +49,7 @@ type AppSidebarProps = {
 }
 
 export function AppSidebar({ variant = "default" }: AppSidebarProps) {
+  const { t } = useTranslation()
   const { pathname } = useLocation()
   const isChatVariant = variant === "chat"
 
@@ -75,7 +77,7 @@ export function AppSidebar({ variant = "default" }: AppSidebarProps) {
             active && "text-[var(--shell-rail-active)]"
           )}
         >
-          {item.label}
+          {t(item.labelKey)}
         </span>
       </Link>
     )

@@ -1,5 +1,6 @@
 import { useEffect, useMemo } from "react"
 import { Bell } from "lucide-react"
+import { useTranslation } from "@slab/i18n"
 
 import { getErrorMessage } from "@/lib/api"
 import type { components } from "@/lib/api/v1.d.ts"
@@ -40,6 +41,7 @@ function FooterMetric({ label, value, title, className }: FooterMetricProps) {
 }
 
 export default function FooterStatusBar({ variant = "default" }: FooterStatusBarProps) {
+  const { t } = useTranslation()
   const {
     data,
     error,
@@ -81,7 +83,7 @@ export default function FooterStatusBar({ variant = "default" }: FooterStatusBar
     if (devices.length === 0) {
       return {
         available: Boolean(snapshot?.available),
-        model: "No GPU",
+        model: t("layouts.footerStatusBar.values.noGpu"),
         memory: "-- / --",
         utilization: "--",
       }
@@ -97,11 +99,10 @@ export default function FooterStatusBar({ variant = "default" }: FooterStatusBar
       memory: `${formatGiB(totalUsed)} / ${formatGiB(totalMemory)}`,
       utilization: `${first.utilization_percent.toFixed(0)}%`,
     }
-  }, [snapshot])
+  }, [snapshot, t])
 
   const isChatVariant = variant === "chat"
-  const gpuText = isLoading ? "Detecting GPU..." : summary.model
-  const telemetryLabel = snapshot?.backend ?? "all-smi"
+  const gpuText = isLoading ? t("layouts.footerStatusBar.values.detectingGpu") : summary.model
 
   return (
     <footer
@@ -109,19 +110,27 @@ export default function FooterStatusBar({ variant = "default" }: FooterStatusBar
     >
       <div className="flex min-w-0 items-center gap-4 overflow-hidden sm:gap-6">
         <FooterMetric
-          label="GPU"
+          label={t("layouts.footerStatusBar.metrics.gpu")}
           value={gpuText}
           title={summary.model}
           className={cn(isChatVariant ? "max-w-[9rem] sm:max-w-[14rem]" : "max-w-[11rem] sm:max-w-[18rem]")}
         />
-        <FooterMetric label="VRAM" value={summary.memory} className="hidden sm:flex" />
-        <FooterMetric label="LOAD" value={summary.utilization} className="hidden md:flex" />
+        <FooterMetric
+          label={t("layouts.footerStatusBar.metrics.vram")}
+          value={summary.memory}
+          className="hidden sm:flex"
+        />
+        <FooterMetric
+          label={t("layouts.footerStatusBar.metrics.load")}
+          value={summary.utilization}
+          className="hidden md:flex"
+        />
       </div>
 
       <div className="ml-4 flex shrink-0 items-center gap-3">
-        <span className="hidden text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--shell-footer-label)] lg:block">
+        {/* <span className="hidden text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--shell-footer-label)] lg:block">
           {telemetryLabel}
-        </span>
+        </span> */}
         <div
           aria-hidden="true"
           className={cn(

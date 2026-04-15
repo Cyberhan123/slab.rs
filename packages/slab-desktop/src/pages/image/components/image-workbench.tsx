@@ -11,6 +11,7 @@ import {
   X,
   ZoomIn,
 } from 'lucide-react';
+import { useTranslation } from '@slab/i18n';
 
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
@@ -152,6 +153,16 @@ export function ImageWorkbench({
   widthStr,
   zoomedImage,
 }: ImageWorkbenchProps) {
+  const { t } = useTranslation();
+  const sampleMethodOptions = SAMPLE_METHODS.map((method) => ({
+    ...method,
+    label: t(`pages.image.options.sampleMethods.${method.value}`),
+  }));
+  const schedulerOptions = SCHEDULERS.map((schedulerItem) => ({
+    ...schedulerItem,
+    label: t(`pages.image.options.schedulers.${schedulerItem.value}`),
+  }));
+
   return (
     <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
       <div className="mx-auto flex min-h-full max-w-[1248px] flex-col px-4 py-4 sm:px-6 lg:h-full lg:min-h-0">
@@ -165,10 +176,10 @@ export function ImageWorkbench({
                 <div className="space-y-6 lg:min-h-0 lg:flex-1 lg:overflow-y-auto lg:pr-2">
                   <div className="space-y-4">
                     <p className="text-[11px] font-bold uppercase tracking-[0.16em] text-muted-foreground">
-                      Generation Parameters
+                      {t('pages.image.workbench.sectionTitle')}
                     </p>
                     <p className="text-xs leading-5 text-muted-foreground">
-                      Choose the active diffusion model from the global header.
+                      {t('pages.image.workbench.modelHint')}
                     </p>
                     <Tabs
                       value={mode}
@@ -180,20 +191,22 @@ export function ImageWorkbench({
                           value="txt2img"
                           className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-[var(--shell-card)] data-[state=active]:text-foreground data-[state=active]:shadow-[var(--shell-elevation)]"
                         >
-                          Text to Image
+                          {t('pages.image.options.mode.txt2img')}
                         </TabsTrigger>
                         <TabsTrigger
                           value="img2img"
                           className="h-11 rounded-[16px] border border-transparent text-[14px] font-medium text-muted-foreground shadow-none data-[state=active]:border-border/70 data-[state=active]:bg-[var(--shell-card)] data-[state=active]:text-foreground data-[state=active]:shadow-[var(--shell-elevation)]"
                         >
-                          Image to Image
+                          {t('pages.image.options.mode.img2img')}
                         </TabsTrigger>
                       </TabsList>
                       <TabsContent value="txt2img" className="m-0" />
                       <TabsContent value="img2img" className="m-0">
                         <div className="space-y-2.5">
                           <Label className={SIDEBAR_LABEL_CLASSNAME}>
-                            {initImageDataUri ? 'Init Image' : 'Upload Init Image'}
+                            {initImageDataUri
+                              ? t('pages.image.workbench.initImage.currentLabel')
+                              : t('pages.image.workbench.initImage.uploadLabel')}
                           </Label>
                           <button
                             type="button"
@@ -204,7 +217,7 @@ export function ImageWorkbench({
                               <div className="relative w-full overflow-hidden rounded-lg">
                                 <img
                                   src={initImageDataUri}
-                                  alt="init"
+                                  alt={t('pages.image.workbench.initImage.previewAlt')}
                                   className="max-h-52 w-full rounded-lg object-cover"
                                 />
                                 <Button
@@ -216,6 +229,7 @@ export function ImageWorkbench({
                                     event.stopPropagation();
                                     setInitImageDataUri(null);
                                   }}
+                                  aria-label={t('pages.image.workbench.initImage.removeAria')}
                                 >
                                   <X className="h-3.5 w-3.5" />
                                 </Button>
@@ -227,10 +241,10 @@ export function ImageWorkbench({
                                 </div>
                                 <div className="space-y-1">
                                   <p className="text-sm font-medium text-foreground">
-                                    Click to choose an image
+                                    {t('pages.image.workbench.initImage.chooseTitle')}
                                   </p>
                                   <p className="text-xs text-muted-foreground">
-                                    PNG/JPEG for img2img mode
+                                    {t('pages.image.workbench.initImage.chooseDescription')}
                                   </p>
                                 </div>
                               </>
@@ -250,11 +264,11 @@ export function ImageWorkbench({
 
                   <div className="space-y-2.5">
                     <Label htmlFor="prompt" className={SIDEBAR_LABEL_CLASSNAME}>
-                      Prompt
+                      {t('pages.image.workbench.prompt.label')}
                     </Label>
                     <Textarea
                       id="prompt"
-                      placeholder="A cinematic portrait with moody rim light..."
+                      placeholder={t('pages.image.workbench.prompt.placeholder')}
                       rows={5}
                       value={prompt}
                       className={SIDEBAR_TEXTAREA_CLASSNAME}
@@ -264,11 +278,11 @@ export function ImageWorkbench({
 
                   <div className="space-y-2.5">
                     <Label htmlFor="negative-prompt" className={SIDEBAR_LABEL_CLASSNAME}>
-                      Negative Prompt
+                      {t('pages.image.workbench.negativePrompt.label')}
                     </Label>
                     <Textarea
                       id="negative-prompt"
-                      placeholder="blurry, low quality, distorted..."
+                      placeholder={t('pages.image.workbench.negativePrompt.placeholder')}
                       rows={3}
                       value={negativePrompt}
                       className={SIDEBAR_TEXTAREA_CLASSNAME}
@@ -278,7 +292,9 @@ export function ImageWorkbench({
 
                   <div className="space-y-3">
                     <div className="flex items-center justify-between gap-3">
-                      <Label className={SIDEBAR_LABEL_CLASSNAME}>Dimensions</Label>
+                      <Label className={SIDEBAR_LABEL_CLASSNAME}>
+                        {t('pages.image.workbench.dimensions.label')}
+                      </Label>
                       <span className="rounded-full bg-[var(--brand-teal)]/15 px-2 py-1 font-mono text-[10px] leading-none text-[var(--brand-teal)]">
                         {parsedWidth} x {parsedHeight}
                       </span>
@@ -308,7 +324,9 @@ export function ImageWorkbench({
                   </div>
 
                   <div className="space-y-2.5">
-                    <Label className={SIDEBAR_LABEL_CLASSNAME}>Number of Images</Label>
+                    <Label className={SIDEBAR_LABEL_CLASSNAME}>
+                      {t('pages.image.workbench.imageCount.label')}
+                    </Label>
                     <Select
                       value={String(numImages)}
                       onValueChange={(value) => setNumImages(Number(value))}
@@ -319,7 +337,7 @@ export function ImageWorkbench({
                       <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-[0_24px_48px_-34px_color-mix(in_oklab,var(--foreground)_32%,transparent)]">
                         {[1, 2, 4].map((count) => (
                           <SelectItem key={count} value={String(count)}>
-                            {count} {count === 1 ? 'Image' : 'Images'}
+                            {t('pages.image.workbench.imageCount.option', { count })}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -334,7 +352,7 @@ export function ImageWorkbench({
                           className="flex w-full items-center justify-between py-3 text-left"
                         >
                           <span className="text-xs font-bold text-muted-foreground">
-                            Advanced Settings
+                            {t('pages.image.workbench.advanced.title')}
                           </span>
                           {advancedOpen ? (
                             <ChevronUp className="h-4 w-4 text-muted-foreground" />
@@ -347,7 +365,9 @@ export function ImageWorkbench({
                     <CollapsibleContent className="space-y-4 pb-2">
                       <div className="grid grid-cols-2 gap-3">
                         <div className="space-y-2.5">
-                          <Label className={SIDEBAR_LABEL_CLASSNAME}>Width</Label>
+                          <Label className={SIDEBAR_LABEL_CLASSNAME}>
+                            {t('pages.image.workbench.advanced.width')}
+                          </Label>
                           <Input
                             type="number"
                             min={64}
@@ -359,7 +379,9 @@ export function ImageWorkbench({
                           />
                         </div>
                         <div className="space-y-2.5">
-                          <Label className={SIDEBAR_LABEL_CLASSNAME}>Height</Label>
+                          <Label className={SIDEBAR_LABEL_CLASSNAME}>
+                            {t('pages.image.workbench.advanced.height')}
+                          </Label>
                           <Input
                             type="number"
                             min={64}
@@ -372,7 +394,7 @@ export function ImageWorkbench({
                         </div>
                       </div>
                       <SliderField
-                        label="CFG Scale"
+                        label={t('pages.image.workbench.advanced.cfgScale')}
                         value={cfgScale.toFixed(1)}
                         slider={
                           <Slider
@@ -385,7 +407,7 @@ export function ImageWorkbench({
                         }
                       />
                       <SliderField
-                        label="Guidance"
+                        label={t('pages.image.workbench.advanced.guidance')}
                         value={guidance.toFixed(1)}
                         slider={
                           <Slider
@@ -398,7 +420,7 @@ export function ImageWorkbench({
                         }
                       />
                       <SliderField
-                        label="Steps"
+                        label={t('pages.image.workbench.advanced.steps')}
                         value={steps}
                         slider={
                           <Slider
@@ -412,7 +434,7 @@ export function ImageWorkbench({
                       />
                       {mode === 'img2img' ? (
                         <SliderField
-                          label="Strength"
+                          label={t('pages.image.workbench.advanced.strength')}
                           value={strength.toFixed(2)}
                           slider={
                             <Slider
@@ -427,7 +449,9 @@ export function ImageWorkbench({
                       ) : null}
 
                       <div className="space-y-2.5">
-                        <Label className={SIDEBAR_LABEL_CLASSNAME}>Seed (-1 random)</Label>
+                        <Label className={SIDEBAR_LABEL_CLASSNAME}>
+                          {t('pages.image.workbench.advanced.seed')}
+                        </Label>
                         <Input
                           type="number"
                           value={seed}
@@ -439,13 +463,15 @@ export function ImageWorkbench({
                       </div>
 
                       <div className="space-y-2.5">
-                        <Label className={SIDEBAR_LABEL_CLASSNAME}>Sampler</Label>
+                        <Label className={SIDEBAR_LABEL_CLASSNAME}>
+                          {t('pages.image.workbench.advanced.sampler')}
+                        </Label>
                         <Select value={sampleMethod} onValueChange={setSampleMethod}>
                           <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-[0_24px_48px_-34px_color-mix(in_oklab,var(--foreground)_32%,transparent)]">
-                            {SAMPLE_METHODS.map((method) => (
+                            {sampleMethodOptions.map((method) => (
                               <SelectItem key={method.value} value={method.value}>
                                 {method.label}
                               </SelectItem>
@@ -455,13 +481,15 @@ export function ImageWorkbench({
                       </div>
 
                       <div className="space-y-2.5">
-                        <Label className={SIDEBAR_LABEL_CLASSNAME}>Scheduler</Label>
+                        <Label className={SIDEBAR_LABEL_CLASSNAME}>
+                          {t('pages.image.workbench.advanced.scheduler')}
+                        </Label>
                         <Select value={scheduler} onValueChange={setScheduler}>
                           <SelectTrigger className={SIDEBAR_INPUT_CLASSNAME}>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent className="rounded-[16px] border-border/70 bg-[var(--shell-card)] shadow-[0_24px_48px_-34px_color-mix(in_oklab,var(--foreground)_32%,transparent)]">
-                            {SCHEDULERS.map((schedulerItem) => (
+                            {schedulerOptions.map((schedulerItem) => (
                               <SelectItem
                                 key={schedulerItem.value}
                                 value={schedulerItem.value}
@@ -474,7 +502,7 @@ export function ImageWorkbench({
                       </div>
 
                       <SliderField
-                        label="CLIP Skip"
+                        label={t('pages.image.workbench.advanced.clipSkip')}
                         value={clipSkip}
                         slider={
                           <Slider
@@ -487,7 +515,7 @@ export function ImageWorkbench({
                         }
                       />
                       <SliderField
-                        label="Eta (DDIM)"
+                        label={t('pages.image.workbench.advanced.eta')}
                         value={eta.toFixed(2)}
                         slider={
                           <Slider
@@ -511,22 +539,22 @@ export function ImageWorkbench({
                       {isResolvingModelState ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          Loading preset...
+                          {t('pages.image.workbench.actions.loadingPreset')}
                         </>
                       ) : isPreparingModel ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          Preparing model...
+                          {t('pages.image.workbench.actions.preparingModel')}
                         </>
                       ) : isGenerating ? (
                         <>
                           <Loader2 className="h-4 w-4 animate-spin" />
-                          Generating...
+                          {t('pages.image.workbench.actions.generating')}
                         </>
                       ) : (
                         <>
                           <Sparkles className="h-4 w-4" />
-                          Generate Images
+                          {t('pages.image.workbench.actions.generate')}
                         </>
                       )}
                     </Button>
@@ -536,7 +564,7 @@ export function ImageWorkbench({
                         className="mt-3 h-10 w-full rounded-xl text-muted-foreground hover:bg-[var(--shell-card)]/60 hover:text-foreground"
                         onClick={handleCancel}
                       >
-                        Cancel generation
+                        {t('pages.image.workbench.actions.cancel')}
                       </Button>
                     ) : null}
                   </div>
@@ -563,17 +591,19 @@ export function ImageWorkbench({
                     </div>
                     <div className="space-y-2">
                       <h2 className="text-[30px] font-semibold tracking-[-0.03em] text-foreground">
-                        {isGenerating ? 'Generating images...' : 'Ready to create?'}
+                        {isGenerating
+                          ? t('pages.image.workbench.emptyState.generatingTitle')
+                          : t('pages.image.workbench.emptyState.readyTitle')}
                       </h2>
                       <p className="mx-auto max-w-[320px] text-sm leading-6 text-muted-foreground">
                         {isGenerating
-                          ? 'Your task is running. Generated images will appear here automatically.'
-                          : 'Enter a prompt and adjust the parameters to see your imagination come to life.'}
+                          ? t('pages.image.workbench.emptyState.generatingDescription')
+                          : t('pages.image.workbench.emptyState.readyDescription')}
                       </p>
                     </div>
                     {isGenerating ? (
                       <div className="rounded-full bg-[var(--surface-soft)] px-3 py-1 text-sm text-muted-foreground">
-                        Task running
+                        {t('pages.image.workbench.emptyState.taskRunning')}
                       </div>
                     ) : (
                       <div className="flex flex-wrap items-center justify-center gap-4 text-sm text-muted-foreground">
@@ -582,7 +612,7 @@ export function ImageWorkbench({
                           className="inline-flex items-center gap-1.5 transition hover:text-foreground"
                         >
                           <History className="size-3.5" />
-                          View History
+                          {t('pages.image.workbench.emptyState.viewHistory')}
                         </button>
                         <span className="size-1 rounded-full bg-border/30" />
                         <button
@@ -590,7 +620,7 @@ export function ImageWorkbench({
                           className="inline-flex items-center gap-1.5 transition hover:text-foreground"
                         >
                           <Lightbulb className="size-3.5" />
-                          Get Inspired
+                          {t('pages.image.workbench.emptyState.getInspired')}
                         </button>
                       </div>
                     )}
@@ -602,14 +632,14 @@ export function ImageWorkbench({
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <div>
                         <h2 className="text-[24px] font-semibold tracking-[-0.02em] text-foreground">
-                          Generated Images
+                          {t('pages.image.workbench.gallery.title')}
                         </h2>
                         <p className="mt-1 text-sm text-muted-foreground">
-                          Review the latest renders, zoom in for detail, or download the best take.
+                          {t('pages.image.workbench.gallery.description')}
                         </p>
                       </div>
                       <span className="rounded-full bg-[var(--brand-teal)]/15 px-3 py-1 text-sm font-medium text-[var(--brand-teal)]">
-                        {images.length} {images.length === 1 ? 'image' : 'images'}
+                        {t('pages.image.workbench.gallery.count', { count: images.length })}
                       </span>
                     </div>
                   </div>
@@ -634,6 +664,7 @@ export function ImageWorkbench({
                                 size="icon-sm"
                                 className="border-[var(--shell-card)]/80 bg-[var(--shell-card)]/95 shadow-sm backdrop-blur"
                                 onClick={() => setZoomedImage(image.src)}
+                                aria-label={t('pages.image.workbench.gallery.zoomAria')}
                               >
                                 <ZoomIn className="h-4 w-4" />
                               </Button>
@@ -642,6 +673,7 @@ export function ImageWorkbench({
                                 size="icon-sm"
                                 className="border-[var(--shell-card)]/80 bg-[var(--shell-card)]/95 shadow-sm backdrop-blur"
                                 onClick={() => handleDownload(image.src, index)}
+                                aria-label={t('pages.image.workbench.gallery.downloadAria')}
                               >
                                 <Download className="h-4 w-4" />
                               </Button>
@@ -652,7 +684,9 @@ export function ImageWorkbench({
                               {image.prompt}
                             </p>
                             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                              <Badge variant="chip">{image.mode}</Badge>
+                              <Badge variant="chip">
+                                {t(`pages.image.options.mode.${image.mode}`)}
+                              </Badge>
                               <span className="rounded-full bg-[var(--surface-soft)] px-2.5 py-1">
                                 {image.width} x {image.height}
                               </span>
@@ -679,7 +713,11 @@ export function ImageWorkbench({
       >
         <DialogContent className="max-w-4xl p-2">
           {zoomedImage ? (
-            <img src={zoomedImage} alt="preview" className="w-full rounded-xl" />
+            <img
+              src={zoomedImage}
+              alt={t('pages.image.workbench.gallery.previewAlt')}
+              className="w-full rounded-xl"
+            />
           ) : null}
         </DialogContent>
       </Dialog>

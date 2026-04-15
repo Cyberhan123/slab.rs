@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
+import { useTranslation } from '@slab/i18n';
 
 import { usePersistedHeaderSelect } from '@/hooks/use-persisted-header-select';
 import api from '@/lib/api';
@@ -30,6 +31,7 @@ async function fileToDataUri(file: File): Promise<string> {
 }
 
 export function useVideoGeneration() {
+  const { t } = useTranslation();
   const [modelOptions, setModelOptions] = useState<ModelOption[]>([]);
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
@@ -55,7 +57,11 @@ export function useVideoGeneration() {
   const initImageInputRef = useRef<HTMLInputElement>(null);
   const pollAttempts = useRef(0);
 
-  usePageHeader(PAGE_HEADER_META.video);
+  usePageHeader({
+    icon: PAGE_HEADER_META.video.icon,
+    title: t('pages.video.header.title'),
+    subtitle: t('pages.video.header.subtitle'),
+  });
 
   const { data: catalogModels, isLoading: catalogLoading } = api.useQuery(
     'get',
@@ -155,17 +161,19 @@ export function useVideoGeneration() {
       value: selectedModelId,
       options: modelOptions.map((model) => ({
         id: model.id,
-        label: model.downloaded ? model.label : `${model.label} (Download in Hub)`,
+        label: model.downloaded
+          ? model.label
+          : t('pages.video.modelPicker.optionDownloadInHub', { model: model.label }),
         disabled: !model.downloaded,
       })),
       onValueChange: setSelectedModelId,
-      groupLabel: 'Video Models',
-      placeholder: 'Select model',
+      groupLabel: t('pages.video.modelPicker.groupLabel'),
+      placeholder: t('pages.video.modelPicker.placeholder'),
       loading: catalogLoading,
       disabled: catalogLoading || isGenerating || !modelOptions.some((model) => model.downloaded),
-      emptyLabel: 'No diffusion models',
+      emptyLabel: t('pages.video.modelPicker.emptyLabel'),
     }),
-    [catalogLoading, isGenerating, modelOptions, selectedModelId, setSelectedModelId],
+    [catalogLoading, isGenerating, modelOptions, selectedModelId, setSelectedModelId, t],
   );
 
   usePageHeaderControl(headerModelPicker);
@@ -178,16 +186,16 @@ export function useVideoGeneration() {
 
   const loadInitImageFile = useCallback(async (file: File) => {
     if (!file.type.startsWith('image/')) {
-      toast.error('Please choose an image file');
+      toast.error(t('pages.video.error.chooseImageFile'));
       return;
     }
     try {
       const dataUri = await fileToDataUri(file);
       setInitImageDataUri(dataUri);
     } catch {
-      toast.error('Failed to read image file');
+      toast.error(t('pages.video.error.readImageFileFailed'));
     }
-  }, []);
+  }, [t]);
 
   const handleInitImageChange = useCallback(
     async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -214,14 +222,12 @@ export function useVideoGeneration() {
 
   const handleSubmit = useCallback(async () => {
     if (!prompt.trim()) {
-      toast.error('Please enter a prompt');
+      toast.error(t('pages.video.error.enterPrompt'));
       return;
     }
 
     if (!selectedModel?.local_path) {
-      toast.error(
-        'Selected model is not downloaded. Please download it first in Settings.',
-      );
+      toast.error(t('pages.video.error.selectDownloadedModel'));
       return;
     }
 
@@ -253,7 +259,7 @@ export function useVideoGeneration() {
       setTaskId(operation_id);
       setGenerationPhase('polling');
       pollAttempts.current = 0;
-      toast.info(`Video generation started (${frames} frames at ${fps} fps)...`);
+      toast.info(t('pages.video.toast.started', { frames, fps }));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       toast.error(message);
@@ -275,6 +281,7 @@ export function useVideoGeneration() {
     selectedModel,
     steps,
     strength,
+    t,
     widthStr,
     generateVideoMutation,
   ]);
@@ -286,7 +293,7 @@ export function useVideoGeneration() {
 
     pollAttempts.current += 1;
     if (pollAttempts.current > MAX_POLL_ATTEMPTS) {
-      toast.error('Video generation timed out');
+      toast.error(t('pages.video.toast.timedOut'));
       clearGenerationTask();
       return;
     }
@@ -300,7 +307,7 @@ export function useVideoGeneration() {
       taskStatus.status === 'cancelled' ||
       taskStatus.status === 'interrupted'
     ) {
-      toast.error(taskStatus.error_msg ?? 'Video generation failed');
+      toast.error(taskStatus.error_msg ?? t('pages.video.error.generationFailed'));
       clearGenerationTask();
       return;
     }
@@ -308,7 +315,7 @@ export function useVideoGeneration() {
     if (taskStatus.status === 'succeeded') {
       setGenerationPhase('fetchingResult');
     }
-  }, [clearGenerationTask, isPolling, taskId, taskStatus, taskStatusUpdatedAt]);
+  }, [clearGenerationTask, isPolling, taskId, taskStatus, taskStatusUpdatedAt, t]);
 
   useEffect(() => {
     if (!isPolling || !taskId || !taskStatusError) {
@@ -316,9 +323,9 @@ export function useVideoGeneration() {
     }
 
     const message = taskStatusError instanceof Error ? taskStatusError.message : String(taskStatusError);
-    toast.error(`Polling error: ${message}`);
+    toast.error(t('pages.video.toast.pollingError', { message }));
     clearGenerationTask();
-  }, [clearGenerationTask, isPolling, taskId, taskStatusError]);
+  }, [clearGenerationTask, isPolling, taskId, taskStatusError, t]);
 
   useEffect(() => {
     if (!isFetchingResult || !taskId || taskResultUpdatedAt === 0 || !taskResult) {
@@ -327,13 +334,13 @@ export function useVideoGeneration() {
 
     if (taskResult.video_path) {
       setVideoPath(taskResult.video_path);
-      toast.success('Video generated!');
+      toast.success(t('pages.video.toast.generated'));
     } else {
-      toast.error('Video generation completed without a video path');
+      toast.error(t('pages.video.toast.completedWithoutPath'));
     }
 
     clearGenerationTask();
-  }, [clearGenerationTask, isFetchingResult, taskId, taskResult, taskResultUpdatedAt]);
+  }, [clearGenerationTask, isFetchingResult, taskId, taskResult, taskResultUpdatedAt, t]);
 
   useEffect(() => {
     if (!isFetchingResult || !taskId || !taskResultError) {
@@ -341,9 +348,9 @@ export function useVideoGeneration() {
     }
 
     const message = taskResultError instanceof Error ? taskResultError.message : String(taskResultError);
-    toast.error(`Failed to fetch video result: ${message}`);
+    toast.error(t('pages.video.toast.resultFetchFailed', { message }));
     clearGenerationTask();
-  }, [clearGenerationTask, isFetchingResult, taskId, taskResultError]);
+  }, [clearGenerationTask, isFetchingResult, taskId, taskResultError, t]);
 
   const handleCancel = useCallback(async () => {
     if (taskId) {
@@ -376,32 +383,34 @@ export function useVideoGeneration() {
   const clipDurationSeconds = frames / Math.max(fps, 1);
 
   const stageTitle = videoPath
-    ? 'Render Ready'
+    ? t('pages.video.stage.title.ready')
     : isGenerating
-      ? 'Rendering Preview'
-      : 'Preview Canvas';
+      ? t('pages.video.stage.title.rendering')
+      : t('pages.video.stage.title.idle');
 
   const stageDescription = videoPath
-    ? 'Your generated clip is ready to review, resize in stage, or download locally.'
+    ? t('pages.video.stage.description.ready')
     : isGenerating
-      ? `Generating ${frames} frames at ${fps} fps. Slab is polling the runtime for completion.`
-      : 'Generated video will appear here after processing. Ready for cinematic render.';
+      ? t('pages.video.stage.description.rendering', { frames, fps })
+      : t('pages.video.stage.description.idle');
 
   const stageStatus = videoPath
-    ? 'Render complete'
+    ? t('pages.video.stage.status.ready')
     : isGenerating
-      ? 'Generating'
+      ? t('pages.video.stage.status.rendering')
       : prompt.trim()
-        ? 'Ready to render'
-        : 'Awaiting prompt';
+        ? t('pages.video.stage.status.queued')
+        : t('pages.video.stage.status.awaitingPrompt');
 
   const footerHint = selectedModel?.local_path
     ? videoPath
-      ? 'Generated clip is saved locally and available for download.'
+      ? t('pages.video.stage.footerHint.ready')
       : isGenerating
-        ? `Polling every ${POLL_INTERVAL_MS / 1000} seconds until the runtime finishes.`
-        : `Estimated clip length: ${clipDurationSeconds.toFixed(1)} seconds.`
-    : 'Download a local diffusion model in Settings before starting a render.';
+        ? t('pages.video.stage.footerHint.polling', { seconds: POLL_INTERVAL_MS / 1000 })
+        : t('pages.video.stage.footerHint.estimate', {
+            seconds: clipDurationSeconds.toFixed(1),
+          })
+    : t('pages.video.stage.footerHint.downloadFirst');
 
   return {
     advancedOpen,

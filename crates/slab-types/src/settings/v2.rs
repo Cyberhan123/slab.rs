@@ -48,6 +48,18 @@ const fn default_disabled() -> bool {
     false
 }
 
+/// Frontend interface language preference stored in settings.json.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+pub enum InterfaceLanguagePreference {
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "en-US")]
+    EnUs,
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+}
+
 /// V2 user-facing settings document persisted as nested JSON.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SettingsDocumentV2 {
@@ -61,6 +73,8 @@ pub struct SettingsDocumentV2 {
     /// Settings document schema version.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
+    #[serde(default)]
+    pub general: GeneralConfigV2,
     #[serde(default)]
     pub database: DatabaseConfig,
     #[serde(default)]
@@ -82,6 +96,7 @@ impl Default for SettingsDocumentV2 {
         Self {
             schema: default_schema_ref(),
             schema_version: default_schema_version(),
+            general: GeneralConfigV2::default(),
             database: DatabaseConfig::default(),
             logging: LoggingConfig::default(),
             tools: ToolsConfig::default(),
@@ -90,6 +105,20 @@ impl Default for SettingsDocumentV2 {
             models: ModelsConfigV2::default(),
             server: ServerConfigV2::default(),
         }
+    }
+}
+
+/// General desktop-app settings.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct GeneralConfigV2 {
+    /// Preferred desktop interface language.
+    #[serde(default)]
+    pub language: InterfaceLanguagePreference,
+}
+
+impl Default for GeneralConfigV2 {
+    fn default() -> Self {
+        Self { language: InterfaceLanguagePreference::Auto }
     }
 }
 
@@ -729,6 +758,7 @@ mod tests {
 
         assert_eq!(settings.schema.as_deref(), Some(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL));
         assert_eq!(settings.schema_version, 2);
+        assert_eq!(settings.general.language, InterfaceLanguagePreference::Auto);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.server.address, "127.0.0.1:3000");
         assert!(settings.runtime.logging.level.is_none());

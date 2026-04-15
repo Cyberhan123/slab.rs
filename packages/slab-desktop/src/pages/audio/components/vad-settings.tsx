@@ -2,6 +2,7 @@ import { Input } from '@slab/components/input';
 import { Label } from '@slab/components/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@slab/components/select';
 import { Switch } from '@slab/components/switch';
+import { useTranslation } from '@slab/i18n';
 import type { CatalogModel } from '@/lib/api/models';
 
 const BUNDLED_VAD_MODEL_ID = '__bundled_vad__';
@@ -59,14 +60,17 @@ export function VadSettings({
   vadSamplesOverlap,
   setVadSamplesOverlap,
 }: VadSettingsProps) {
+  const { t } = useTranslation();
   return (
     <div className="rounded-[22px] border border-[var(--shell-card)]/70 bg-[var(--shell-card)]/60 p-4 shadow-[inset_0_1px_0_color-mix(in_oklab,var(--shell-card)_70%,transparent)]">
       <div className="flex items-start justify-between gap-5">
         <div className="space-y-1">
           <Label htmlFor="enable-vad" className="text-base font-semibold text-foreground">
-            Enable VAD
+            {t('pages.audio.vad.title')}
           </Label>
-          <p className="text-sm leading-5 text-muted-foreground">Trim silence and reduce background noise before decoding.</p>
+          <p className="text-sm leading-5 text-muted-foreground">
+            {t('pages.audio.vad.description')}
+          </p>
         </div>
         <Switch
           id="enable-vad"
@@ -79,7 +83,9 @@ export function VadSettings({
       {enableVad && (
         <div className="mt-4 space-y-4 border-t border-border/60 pt-4">
           <div className="space-y-2">
-            <Label className="text-[12px] font-semibold text-foreground">VAD Model</Label>
+            <Label className="text-[12px] font-semibold text-foreground">
+              {t('pages.audio.vad.modelLabel')}
+            </Label>
             <Select
               value={selectedVadModelId}
               onValueChange={setSelectedVadModelId}
@@ -93,10 +99,10 @@ export function VadSettings({
                 <SelectValue
                   placeholder={
                     catalogModelsLoading
-                      ? 'Loading models...'
+                      ? t('pages.audio.vad.loadingModels')
                       : hasBundledVad
-                        ? 'Use bundled VAD'
-                        : 'Select VAD model'
+                        ? t('pages.audio.vad.useBundled')
+                        : t('pages.audio.vad.selectModel')
                   }
                 />
               </SelectTrigger>
@@ -106,7 +112,7 @@ export function VadSettings({
                 )}
                 {!hasBundledVad && whisperVadModels.length === 0 ? (
                   <div className="px-2 py-1.5 text-sm text-muted-foreground">
-                    No dedicated Whisper VAD models in catalog
+                    {t('pages.audio.vad.noDedicatedModels')}
                   </div>
                 ) : (
                   whisperVadModels.map((model) => (
@@ -119,21 +125,21 @@ export function VadSettings({
             </Select>
             <p className="text-xs leading-5 text-muted-foreground">
               {isUsingBundledVad
-                ? 'Using the bundled VAD artifact from the current Whisper model pack.'
+                ? t('pages.audio.vad.usingBundledDescription')
                 : selectedVadModel
                 ? selectedVadModel.local_path
-                  ? 'Downloaded locally and ready for runtime use.'
-                  : 'The selected VAD model will be downloaded automatically before transcription.'
+                  ? t('pages.audio.vad.localReadyDescription')
+                  : t('pages.audio.vad.autoDownloadDescription')
                 : hasBundledVad
-                  ? 'Use the bundled VAD or override it with a dedicated VAD model.'
-                  : 'Choose a dedicated VAD model, such as a whisper VAD or silero variant.'}
+                  ? t('pages.audio.vad.bundledOrOverrideDescription')
+                  : t('pages.audio.vad.chooseDedicatedDescription')}
             </p>
           </div>
 
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="vad-threshold" className="text-xs font-semibold text-foreground">
-                Threshold
+                {t('pages.audio.vad.fields.threshold')}
               </Label>
               <Input
                 id="vad-threshold"
@@ -144,14 +150,14 @@ export function VadSettings({
                 step={0.01}
                 value={vadThreshold}
                 onChange={(e) => setVadThreshold(e.target.value)}
-                placeholder="0.50"
+                placeholder={t('pages.audio.vad.placeholders.threshold')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="vad-min-speech-duration" className="text-xs font-semibold text-foreground">
-                Min Speech (ms)
+                {t('pages.audio.vad.fields.minSpeech')}
               </Label>
               <Input
                 id="vad-min-speech-duration"
@@ -161,14 +167,14 @@ export function VadSettings({
                 step={1}
                 value={vadMinSpeechDurationMs}
                 onChange={(e) => setVadMinSpeechDurationMs(e.target.value)}
-                placeholder="250"
+                placeholder={t('pages.audio.vad.placeholders.minSpeech')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="vad-min-silence-duration" className="text-xs font-semibold text-foreground">
-                Min Silence (ms)
+                {t('pages.audio.vad.fields.minSilence')}
               </Label>
               <Input
                 id="vad-min-silence-duration"
@@ -178,14 +184,14 @@ export function VadSettings({
                 step={1}
                 value={vadMinSilenceDurationMs}
                 onChange={(e) => setVadMinSilenceDurationMs(e.target.value)}
-                placeholder="100"
+                placeholder={t('pages.audio.vad.placeholders.minSilence')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="vad-max-speech-duration" className="text-xs font-semibold text-foreground">
-                Max Speech (s)
+                {t('pages.audio.vad.fields.maxSpeech')}
               </Label>
               <Input
                 id="vad-max-speech-duration"
@@ -195,14 +201,14 @@ export function VadSettings({
                 step={0.1}
                 value={vadMaxSpeechDurationS}
                 onChange={(e) => setVadMaxSpeechDurationS(e.target.value)}
-                placeholder="No limit"
+                placeholder={t('pages.audio.vad.placeholders.maxSpeech')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="vad-speech-pad" className="text-xs font-semibold text-foreground">
-                Speech Pad (ms)
+                {t('pages.audio.vad.fields.speechPad')}
               </Label>
               <Input
                 id="vad-speech-pad"
@@ -212,14 +218,14 @@ export function VadSettings({
                 step={1}
                 value={vadSpeechPadMs}
                 onChange={(e) => setVadSpeechPadMs(e.target.value)}
-                placeholder="30"
+                placeholder={t('pages.audio.vad.placeholders.speechPad')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="vad-samples-overlap" className="text-xs font-semibold text-foreground">
-                Samples Overlap (s)
+                {t('pages.audio.vad.fields.samplesOverlap')}
               </Label>
               <Input
                 id="vad-samples-overlap"
@@ -229,7 +235,7 @@ export function VadSettings({
                 step={0.01}
                 value={vadSamplesOverlap}
                 onChange={(e) => setVadSamplesOverlap(e.target.value)}
-                placeholder="0.10"
+                placeholder={t('pages.audio.vad.placeholders.samplesOverlap')}
                 disabled={isBusy}
                 className="h-11 rounded-xl border-border/70 bg-[var(--shell-card)] shadow-none"
               />

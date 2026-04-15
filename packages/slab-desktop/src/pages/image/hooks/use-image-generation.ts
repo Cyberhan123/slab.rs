@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { toast } from 'sonner';
+import { useTranslation } from '@slab/i18n';
 
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
@@ -31,6 +32,7 @@ async function fileToDataUri(file: File): Promise<string> {
 }
 
 export function useImageGeneration() {
+  const { t } = useTranslation();
   const location = useLocation();
   const [prompt, setPrompt] = useState('');
   const [negativePrompt, setNegativePrompt] = useState('');
@@ -166,11 +168,12 @@ export function useImageGeneration() {
   }, [getPrefilledPrompt, location.key]);
 
   usePageHeader({
-    ...PAGE_HEADER_META.image,
+    icon: PAGE_HEADER_META.image.icon,
+    title: t('pages.image.header.title'),
     subtitle:
       mode === 'img2img'
-        ? 'Refine an input image with diffusion controls'
-        : 'Generate images from text prompts',
+        ? t('pages.image.header.subtitleImg2Img')
+        : t('pages.image.header.subtitleTxt2Img'),
   });
 
   const isGenerating = isSubmitting || generationPhase !== 'idle';
@@ -184,13 +187,13 @@ export function useImageGeneration() {
         label: model.label,
       })),
       onValueChange: setSelectedModelId,
-      groupLabel: 'Image Models',
-      placeholder: 'Select model',
+      groupLabel: t('pages.image.modelPicker.groupLabel'),
+      placeholder: t('pages.image.modelPicker.placeholder'),
       loading: catalogLoading,
       disabled: catalogLoading || isBusy || modelOptions.length === 0,
-      emptyLabel: 'No diffusion models',
+      emptyLabel: t('pages.image.modelPicker.emptyLabel'),
     }),
-    [catalogLoading, isBusy, modelOptions, selectedModelId, setSelectedModelId],
+    [catalogLoading, isBusy, modelOptions, selectedModelId, setSelectedModelId, t],
   );
 
   usePageHeaderControl(headerModelPicker);
@@ -211,25 +214,25 @@ export function useImageGeneration() {
         const dataUri = await fileToDataUri(file);
         setInitImageDataUri(dataUri);
       } catch {
-        toast.error('Failed to read image file');
+        toast.error(t('pages.image.error.readImageFileFailed'));
       }
     },
-    [],
+    [t],
   );
 
   const handleSubmit = useCallback(async () => {
     if (isResolvingModelState) {
-      toast.error('Model preset is still loading');
+      toast.error(t('pages.image.error.modelPresetLoading'));
       return;
     }
 
     if (!prompt.trim()) {
-      toast.error('Please enter a prompt');
+      toast.error(t('pages.image.error.enterPrompt'));
       return;
     }
 
     if (mode === 'img2img' && !initImageDataUri) {
-      toast.error('Please upload an init image for img2img mode');
+      toast.error(t('pages.image.error.uploadInitImage'));
       return;
     }
 
@@ -302,7 +305,7 @@ export function useImageGeneration() {
 
     pollAttempts.current += 1;
     if (pollAttempts.current > MAX_POLL_ATTEMPTS) {
-      toast.error('Generation timed out');
+      toast.error(t('pages.image.toast.generationTimedOut'));
       clearGenerationTask();
       return;
     }
@@ -316,7 +319,7 @@ export function useImageGeneration() {
       taskStatus.status === 'cancelled' ||
       taskStatus.status === 'interrupted'
     ) {
-      toast.error(taskStatus.error_msg ?? 'Image generation failed');
+      toast.error(taskStatus.error_msg ?? t('pages.image.error.generationFailed'));
       clearGenerationTask();
       return;
     }
@@ -332,9 +335,9 @@ export function useImageGeneration() {
     }
 
     const message = taskStatusError instanceof Error ? taskStatusError.message : String(taskStatusError);
-    toast.error(`Polling error: ${message}`);
+    toast.error(t('pages.image.toast.pollingError', { message }));
     clearGenerationTask();
-  }, [clearGenerationTask, isPolling, taskId, taskStatusError]);
+  }, [clearGenerationTask, isPolling, taskId, taskStatusError, t]);
 
   useEffect(() => {
     if (!isFetchingResult || !taskId || taskResultUpdatedAt === 0 || !taskResult) {
@@ -356,7 +359,7 @@ export function useImageGeneration() {
       }));
 
     setImages((previous) => [...generated, ...previous]);
-    toast.success(`Generated ${generated.length} image${generated.length !== 1 ? 's' : ''}!`);
+    toast.success(t('pages.image.toast.generated', { count: generated.length }));
     clearGenerationTask();
   }, [
     clearGenerationTask,
@@ -367,6 +370,7 @@ export function useImageGeneration() {
     taskId,
     taskResult,
     taskResultUpdatedAt,
+    t,
     widthStr,
   ]);
 
@@ -376,9 +380,9 @@ export function useImageGeneration() {
     }
 
     const message = taskResultError instanceof Error ? taskResultError.message : String(taskResultError);
-    toast.error(`Failed to fetch generation result: ${message}`);
+    toast.error(t('pages.image.toast.resultFetchFailed', { message }));
     clearGenerationTask();
-  }, [clearGenerationTask, isFetchingResult, taskId, taskResultError]);
+  }, [clearGenerationTask, isFetchingResult, taskId, taskResultError, t]);
 
   const handleCancel = useCallback(async () => {
     if (taskId) {

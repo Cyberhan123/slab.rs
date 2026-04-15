@@ -1,7 +1,9 @@
 import { Download, Image, ListChecks, Mic } from 'lucide-react';
 
-export function formatDateTime(value: string) {
-  return new Date(value).toLocaleString('en-US', {
+type Translate = (key: string, options?: Record<string, unknown>) => string;
+
+export function formatDateTime(value: string, locale: string) {
+  return new Date(value).toLocaleString(locale, {
     year: 'numeric',
     month: 'short',
     day: '2-digit',
@@ -75,41 +77,41 @@ export function getSparklineWeight(status: string) {
   }
 }
 
-export function getStatusTone(status: string) {
+export function getStatusTone(status: string, t: Translate) {
   switch (status) {
     case 'succeeded':
       return {
-        label: 'Succeeded',
+        label: t('pages.task.status.succeeded'),
         className: 'bg-[var(--status-success-bg)] text-[var(--success)]',
         dotClassName: 'bg-[var(--success)]',
       };
     case 'running':
       return {
-        label: 'Running',
+        label: t('pages.task.status.running'),
         className: 'bg-[var(--status-info-bg)] text-primary',
         dotClassName: 'bg-primary',
       };
     case 'failed':
       return {
-        label: 'Failed',
+        label: t('pages.task.status.failed'),
         className: 'bg-[var(--status-danger-bg)] text-destructive',
         dotClassName: 'bg-destructive',
       };
     case 'pending':
       return {
-        label: 'Queued',
+        label: t('pages.task.status.pending'),
         className: 'bg-[var(--status-neutral-bg)] text-muted-foreground',
         dotClassName: 'bg-muted-foreground',
       };
     case 'cancelled':
       return {
-        label: 'Cancelled',
+        label: t('pages.task.status.cancelled'),
         className: 'bg-[var(--status-neutral-bg)] text-muted-foreground',
         dotClassName: 'bg-muted-foreground',
       };
     case 'interrupted':
       return {
-        label: 'Interrupted',
+        label: t('pages.task.status.interrupted'),
         className: 'bg-[var(--status-neutral-bg)] text-muted-foreground',
         dotClassName: 'bg-muted-foreground',
       };
@@ -122,12 +124,12 @@ export function getStatusTone(status: string) {
   }
 }
 
-export function getTaskTypeMeta(taskType: string) {
+export function getTaskTypeMeta(taskType: string, t: Translate) {
   const normalized = taskType.toLowerCase();
 
   if (normalized.includes('whisper') || normalized.includes('transcription')) {
     return {
-      label: 'Transcription',
+      label: t('pages.task.taskType.transcription'),
       icon: Mic,
       iconBg: 'bg-[var(--status-info-bg)]',
       iconColor: 'text-primary',
@@ -136,7 +138,7 @@ export function getTaskTypeMeta(taskType: string) {
 
   if (normalized.includes('diffusion') || normalized.includes('image')) {
     return {
-      label: 'Image Generation',
+      label: t('pages.task.taskType.imageGeneration'),
       icon: Image,
       iconBg: 'bg-[var(--surface-soft)]',
       iconColor: 'text-[var(--accent-foreground)]',
@@ -145,7 +147,7 @@ export function getTaskTypeMeta(taskType: string) {
 
   if (normalized.includes('download')) {
     return {
-      label: 'Model Download',
+      label: t('pages.task.taskType.modelDownload'),
       icon: Download,
       iconBg: 'bg-[var(--surface-soft)]',
       iconColor: 'text-muted-foreground',

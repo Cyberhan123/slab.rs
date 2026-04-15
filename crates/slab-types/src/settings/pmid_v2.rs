@@ -3,6 +3,7 @@ use super::pmid::SettingPmid;
 /// The complete V2 settings PMID catalog.
 #[derive(Debug, Clone, Copy)]
 pub struct SettingsV2PmidCatalog {
+    pub general: GeneralPmids,
     pub database: DatabasePmids,
     pub logging: LoggingPmids,
     pub tools: ToolsPmids,
@@ -15,6 +16,7 @@ pub struct SettingsV2PmidCatalog {
 impl SettingsV2PmidCatalog {
     pub const fn new() -> Self {
         Self {
+            general: GeneralPmids,
             database: DatabasePmids,
             logging: LoggingPmids::new("logging"),
             tools: ToolsPmids::new(),
@@ -27,6 +29,7 @@ impl SettingsV2PmidCatalog {
 
     pub fn all(self) -> Vec<SettingPmid> {
         vec![
+            self.general.language(),
             self.database.url(),
             self.logging.level(),
             self.logging.json(),
@@ -133,6 +136,15 @@ impl Default for SettingsV2PmidCatalog {
 }
 
 pub const V2_PMID: SettingsV2PmidCatalog = SettingsV2PmidCatalog::new();
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GeneralPmids;
+
+impl GeneralPmids {
+    pub fn language(self) -> SettingPmid {
+        SettingPmid::from_path("general.language")
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DatabasePmids;
@@ -607,6 +619,7 @@ mod tests {
         let unique: BTreeSet<String> = all.iter().map(|pmid| pmid.as_str().to_owned()).collect();
 
         assert_eq!(all.len(), unique.len());
+        assert!(unique.contains("general.language"));
         assert!(unique.contains("runtime.ggml.backends.llama.context_length"));
         assert!(unique.contains("providers.registry"));
         assert!(unique.contains("server.cloud_http_trace"));

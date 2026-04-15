@@ -58,6 +58,14 @@ export function SettingFieldCard({
     propertyType === 'string' &&
     Array.isArray(property.schema.enum) &&
     property.schema.enum.length > 0;
+  const displayLabel =
+    property.pmid === 'general.language'
+      ? t('pages.settings.language.title')
+      : property.label;
+  const displayDescription =
+    property.pmid === 'general.language'
+      ? t('pages.settings.language.description')
+      : property.description_md;
 
   const textValue =
     typeof draftValue === 'string'
@@ -87,11 +95,11 @@ export function SettingFieldCard({
     >
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 flex-1 space-y-1.5">
-          <h3 className="text-sm font-bold tracking-[-0.02em] text-foreground">{property.label}</h3>
+          <h3 className="text-sm font-bold tracking-[-0.02em] text-foreground">{displayLabel}</h3>
 
-          {property.description_md ? (
+          {displayDescription ? (
             <p className="max-w-2xl text-[11px] leading-[16.5px] text-muted-foreground">
-              {property.description_md}
+              {displayDescription}
             </p>
           ) : null}
         </div>
@@ -139,7 +147,9 @@ export function SettingFieldCard({
               <SelectContent variant="soft">
                 {property.schema.enum?.map((option) => (
                   <SelectItem key={option} value={option}>
-                    {option}
+                    {property.pmid === 'general.language'
+                      ? t(`pages.settings.language.options.${option}`)
+                      : option}
                   </SelectItem>
                 ))}
               </SelectContent>

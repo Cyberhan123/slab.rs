@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'sonner';
+import { useTranslation } from '@slab/i18n';
 
 import useFile, { type SelectedFile } from '@/hooks/use-file';
 import { usePageHeader, usePageHeaderControl } from '@/hooks/use-global-header-meta';
@@ -67,9 +68,14 @@ function findBundledVadArtifact(
 }
 
 export function useAudio() {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const isTauri = useIsTauri();
-  usePageHeader(PAGE_HEADER_META.audio);
+  usePageHeader({
+    icon: PAGE_HEADER_META.audio.icon,
+    title: t('pages.audio.header.title'),
+    subtitle: t('pages.audio.header.subtitle'),
+  });
 
   const [file, setFile] = useState<SelectedFile | null>(null);
   const [preparingStage, setPreparingStage] = useState<PreparingStage>(null);
@@ -251,13 +257,13 @@ export function useAudio() {
         label: model.display_name,
       })),
       onValueChange: setSelectedModelId,
-      groupLabel: 'Whisper Models',
-      placeholder: 'Select model',
+      groupLabel: t('pages.audio.modelPicker.groupLabel'),
+      placeholder: t('pages.audio.modelPicker.placeholder'),
       loading: catalogModelsLoading,
       disabled: catalogModelsLoading || isBusy || whisperTranscribeModels.length === 0,
-      emptyLabel: 'No whisper models',
+      emptyLabel: t('pages.audio.modelPicker.emptyLabel'),
     }),
-    [catalogModelsLoading, isBusy, selectedModelId, setSelectedModelId, whisperTranscribeModels],
+    [catalogModelsLoading, isBusy, selectedModelId, setSelectedModelId, t, whisperTranscribeModels],
   );
   const webFileInputRef = useRef<HTMLInputElement>(null);
 
@@ -344,13 +350,19 @@ export function useAudio() {
       }
 
       if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted') {
-        throw new Error(task.error_msg ?? `Task ${tid} ended with status: ${task.status}`);
+        throw new Error(
+          task.error_msg ??
+            t('pages.hub.error.taskEndedWithStatus', {
+              taskId: tid,
+              status: task.status,
+            }),
+        );
       }
 
       await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
     }
 
-    throw new Error('Model download timed out');
+    throw new Error(t('pages.audio.error.downloadTimedOut'));
   };
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
@@ -371,10 +383,10 @@ export function useAudio() {
 
     const parsed = Number(trimmed);
     if (!Number.isInteger(parsed)) {
-      throw new Error(`${fieldLabel} must be an integer.`);
+      throw new Error(t('pages.audio.validation.integer', { label: fieldLabel }));
     }
     if (parsed < min) {
-      throw new Error(`${fieldLabel} must be >= ${min}.`);
+      throw new Error(t('pages.audio.validation.min', { label: fieldLabel, value: min }));
     }
     return parsed;
   };
@@ -389,16 +401,25 @@ export function useAudio() {
 
     const parsed = Number(trimmed);
     if (!Number.isFinite(parsed)) {
-      throw new Error(`${fieldLabel} must be a valid number.`);
+      throw new Error(t('pages.audio.validation.number', { label: fieldLabel }));
     }
     if (options.min !== undefined && parsed < options.min) {
-      throw new Error(`${fieldLabel} must be >= ${options.min}.`);
+      throw new Error(
+        t('pages.audio.validation.min', { label: fieldLabel, value: options.min }),
+      );
     }
     if (options.max !== undefined && parsed > options.max) {
-      throw new Error(`${fieldLabel} must be <= ${options.max}.`);
+      throw new Error(
+        t('pages.audio.validation.max', { label: fieldLabel, value: options.max }),
+      );
     }
     if (options.exclusiveMin !== undefined && parsed <= options.exclusiveMin) {
-      throw new Error(`${fieldLabel} must be > ${options.exclusiveMin}.`);
+      throw new Error(
+        t('pages.audio.validation.exclusiveMin', {
+          label: fieldLabel,
+          value: options.exclusiveMin,
+        }),
+      );
     }
     return parsed;
   };
@@ -412,11 +433,11 @@ export function useAudio() {
     }
 
     if (!model) {
-      throw new Error('Selected model does not exist in catalog');
+      throw new Error(t('pages.audio.error.selectedModelMissingGeneric'));
     }
 
     if (model.kind !== 'local') {
-      throw new Error('Selected model is not a local audio model.');
+      throw new Error(t('pages.audio.error.selectedModelNotLocal'));
     }
 
     if (model.local_path) {
@@ -431,14 +452,14 @@ export function useAudio() {
     const tid = extractTaskId(downloadResponse);
 
     if (!tid) {
-      throw new Error('Failed to start model download task');
+      throw new Error(t('pages.audio.error.startDownloadFailed'));
     }
 
     await waitForTaskToFinish(tid);
 
     const refreshedModel = await refreshCatalogAndFindModel(modelId);
     if (!refreshedModel?.local_path) {
-      throw new Error('Model download completed, but local_path is empty');
+      throw new Error(t('pages.audio.error.missingDownloadedPath'));
     }
 
     return { modelPath: refreshedModel.local_path, downloadedNow: true };
@@ -446,18 +467,18 @@ export function useAudio() {
 
   const prepareSelectedModel = async (): Promise<string> => {
     if (!selectedModelId) {
-      throw new Error('Please select a whisper model first.');
+      throw new Error(t('pages.audio.error.selectModelFirst'));
     }
 
     const model = whisperTranscribeModels.find((item) => item.id === selectedModelId);
     if (!model) {
-      throw new Error('Selected model no longer exists in catalog.');
+      throw new Error(t('pages.audio.error.selectedModelMissing'));
     }
 
     const { downloadedNow } = await ensureDownloadedModelPath(selectedModelId);
 
     if (downloadedNow) {
-      toast.success(`Downloaded ${model.display_name}`);
+      toast.success(t('pages.audio.toast.downloaded', { model: model.display_name }));
     }
 
     await loadModelMutation.mutateAsync({
@@ -475,17 +496,17 @@ export function useAudio() {
     const bundledArtifact = findBundledVadArtifact(modelConfigDocument);
 
     let modelPath: string | null = null;
-    let modelName = 'Bundled VAD';
+    let modelName = t('pages.audio.vad.bundledFallback');
 
     if (selectedVadModelId === BUNDLED_VAD_MODEL_ID) {
       modelPath = bundledArtifact?.value?.trim() ?? null;
-      modelName = bundledArtifact?.label?.trim() || 'Bundled VAD';
+      modelName = bundledArtifact?.label?.trim() || t('pages.audio.vad.bundledFallback');
       if (!modelPath) {
-        throw new Error('The current Whisper model does not expose a bundled VAD file.');
+        throw new Error(t('pages.audio.error.bundledVadMissing'));
       }
     } else {
       if (!selectedVadModelId) {
-        throw new Error('Please select a dedicated VAD model.');
+        throw new Error(t('pages.audio.error.selectDedicatedVadModel'));
       }
 
       let model = whisperVadModels.find((item) => item.id === selectedVadModelId);
@@ -493,23 +514,23 @@ export function useAudio() {
         model = await refreshCatalogAndFindModel(selectedVadModelId);
       }
       if (!model) {
-        throw new Error('Selected VAD model no longer exists in catalog.');
+        throw new Error(t('pages.audio.error.selectedVadMissing'));
       }
       if (!modelSupportsCapability(model, 'audio_vad')) {
-        throw new Error('Selected model is not a dedicated VAD model.');
+        throw new Error(t('pages.audio.error.selectedModelNotDedicatedVad'));
       }
 
       const preparedModel = await ensureDownloadedModelPath(selectedVadModelId);
       modelPath = preparedModel.modelPath;
       modelName = model.display_name;
       if (preparedModel.downloadedNow) {
-        toast.success(`Downloaded VAD model ${model.display_name}`);
+        toast.success(t('pages.audio.toast.downloadedVadModel', { model: model.display_name }));
       }
     }
 
     const resolvedModelPath = modelPath?.trim();
     if (!resolvedModelPath) {
-      throw new Error('Unable to resolve a local VAD model path for transcription.');
+      throw new Error(t('pages.audio.error.resolveVadPath'));
     }
 
     const settings: TranscribeVadSettings = {
@@ -517,22 +538,38 @@ export function useAudio() {
       model_path: resolvedModelPath,
     };
 
-    const threshold = parseOptionalFloat(vadThreshold, 'VAD threshold', { min: 0, max: 1 });
+    const threshold = parseOptionalFloat(
+      vadThreshold,
+      t('pages.audio.validation.labels.vadThreshold'),
+      { min: 0, max: 1 },
+    );
     const minSpeechDurationMs = parseOptionalInt(
       vadMinSpeechDurationMs,
-      'VAD min speech duration (ms)',
+      t('pages.audio.validation.labels.vadMinSpeechDurationMs'),
       0,
     );
     const minSilenceDurationMs = parseOptionalInt(
       vadMinSilenceDurationMs,
-      'VAD min silence duration (ms)',
+      t('pages.audio.validation.labels.vadMinSilenceDurationMs'),
       0,
     );
-    const maxSpeechDurationS = parseOptionalFloat(vadMaxSpeechDurationS, 'VAD max speech duration (s)', {
-      exclusiveMin: 0,
-    });
-    const speechPadMs = parseOptionalInt(vadSpeechPadMs, 'VAD speech pad (ms)', 0);
-    const samplesOverlap = parseOptionalFloat(vadSamplesOverlap, 'VAD samples overlap (s)', { min: 0 });
+    const maxSpeechDurationS = parseOptionalFloat(
+      vadMaxSpeechDurationS,
+      t('pages.audio.validation.labels.vadMaxSpeechDurationS'),
+      {
+        exclusiveMin: 0,
+      },
+    );
+    const speechPadMs = parseOptionalInt(
+      vadSpeechPadMs,
+      t('pages.audio.validation.labels.vadSpeechPadMs'),
+      0,
+    );
+    const samplesOverlap = parseOptionalFloat(
+      vadSamplesOverlap,
+      t('pages.audio.validation.labels.vadSamplesOverlap'),
+      { min: 0 },
+    );
 
     if (threshold !== undefined) settings.threshold = threshold;
     if (minSpeechDurationMs !== undefined) settings.min_speech_duration_ms = minSpeechDurationMs;
@@ -568,16 +605,53 @@ export function useAudio() {
 
     const decode: NonNullable<TranscribeOptions['decode']> = {};
 
-    const offsetMs = parseOptionalInt(decodeOffsetMs, 'Decode offset (ms)', 0);
-    const durationMs = parseOptionalInt(decodeDurationMs, 'Decode duration (ms)', 0);
-    const wordThold = parseOptionalFloat(decodeWordThold, 'Word threshold', { min: 0, max: 1 });
-    const maxLen = parseOptionalInt(decodeMaxLen, 'Max segment length', 0);
-    const maxTokens = parseOptionalInt(decodeMaxTokens, 'Max tokens per segment', 0);
-    const temperature = parseOptionalFloat(decodeTemperature, 'Temperature', { min: 0 });
-    const temperatureInc = parseOptionalFloat(decodeTemperatureInc, 'Temperature increment', { min: 0 });
-    const entropyThold = parseOptionalFloat(decodeEntropyThold, 'Entropy threshold');
-    const logprobThold = parseOptionalFloat(decodeLogprobThold, 'Logprob threshold');
-    const noSpeechThold = parseOptionalFloat(decodeNoSpeechThold, 'No speech threshold');
+    const offsetMs = parseOptionalInt(
+      decodeOffsetMs,
+      t('pages.audio.validation.labels.decodeOffsetMs'),
+      0,
+    );
+    const durationMs = parseOptionalInt(
+      decodeDurationMs,
+      t('pages.audio.validation.labels.decodeDurationMs'),
+      0,
+    );
+    const wordThold = parseOptionalFloat(
+      decodeWordThold,
+      t('pages.audio.validation.labels.decodeWordThreshold'),
+      { min: 0, max: 1 },
+    );
+    const maxLen = parseOptionalInt(
+      decodeMaxLen,
+      t('pages.audio.validation.labels.decodeMaxSegmentLength'),
+      0,
+    );
+    const maxTokens = parseOptionalInt(
+      decodeMaxTokens,
+      t('pages.audio.validation.labels.decodeMaxTokensPerSegment'),
+      0,
+    );
+    const temperature = parseOptionalFloat(
+      decodeTemperature,
+      t('pages.audio.validation.labels.decodeTemperature'),
+      { min: 0 },
+    );
+    const temperatureInc = parseOptionalFloat(
+      decodeTemperatureInc,
+      t('pages.audio.validation.labels.decodeTemperatureIncrement'),
+      { min: 0 },
+    );
+    const entropyThold = parseOptionalFloat(
+      decodeEntropyThold,
+      t('pages.audio.validation.labels.decodeEntropyThreshold'),
+    );
+    const logprobThold = parseOptionalFloat(
+      decodeLogprobThold,
+      t('pages.audio.validation.labels.decodeLogprobThreshold'),
+    );
+    const noSpeechThold = parseOptionalFloat(
+      decodeNoSpeechThold,
+      t('pages.audio.validation.labels.decodeNoSpeechThreshold'),
+    );
 
     if (offsetMs !== undefined) decode.offset_ms = offsetMs;
     if (durationMs !== undefined) decode.duration_ms = durationMs;
@@ -617,17 +691,17 @@ export function useAudio() {
 
   const handleTranscribe = async () => {
     if (!isTauri) {
-      toast.error('Web transcription upload is not implemented yet. Please use the desktop app.');
+      toast.error(t('pages.audio.error.webUploadNotImplemented'));
       return;
     }
 
     if (!file) {
-      toast.error('Please select a file first.');
+      toast.error(t('pages.audio.error.selectFileFirst'));
       return;
     }
 
     if (!selectedModelId) {
-      toast.error('Please select a whisper model first.');
+      toast.error(t('pages.audio.error.selectModelFirst'));
       return;
     }
 
@@ -638,8 +712,8 @@ export function useAudio() {
       const refreshedModelConfigDocument = selectedModelId
         ? (await refetchSelectedModelConfigDocument()).data ?? selectedModelConfigDocument
         : selectedModelConfigDocument;
-      let vadDescription = 'VAD: off';
-      let decodeDescription = 'Decode: default';
+      let vadDescription = t('pages.audio.summary.vadOff');
+      let decodeDescription = t('pages.audio.summary.decodeDefault');
       let transcribeOptions: TranscribeOptions | undefined;
 
       const inferenceOptions = prepareInferenceOptions();
@@ -650,30 +724,35 @@ export function useAudio() {
       if (enableVad) {
         const preparedVad = await prepareVadSettings(refreshedModelConfigDocument);
         transcribeOptions = { ...(transcribeOptions ?? {}), vad: preparedVad.settings };
-        vadDescription = `VAD: on (${preparedVad.modelName})`;
+        vadDescription = t('pages.audio.summary.vadOn', { model: preparedVad.modelName });
       }
 
       const decodeOptions = prepareDecodeOptions();
       if (decodeOptions) {
         transcribeOptions = { ...(transcribeOptions ?? {}), decode: decodeOptions };
-        decodeDescription = 'Decode: custom';
+        decodeDescription = t('pages.audio.summary.decodeCustom');
       }
 
       setPreparingStage('transcribe');
       const result = await transcribe.handleTranscribe(file.file, transcribeOptions);
       setTaskId(result.operation_id);
 
-      toast.success('Transcription task created.', {
-        description: `Task ID: ${result.operation_id} | Model: ${modelName} | ${vadDescription} | ${decodeDescription}`,
+      toast.success(t('pages.audio.toast.taskCreated'), {
+        description: t('pages.audio.toast.taskCreatedDescription', {
+          id: result.operation_id,
+          model: modelName,
+          vad: vadDescription,
+          decode: decodeDescription,
+        }),
         action: {
-          label: 'View tasks',
+          label: t('pages.audio.toast.viewTasks'),
           onClick: () => navigate('/task'),
         },
       });
     } catch (err: unknown) {
       const anyErr = err as { message?: string; error?: string } | null;
-      toast.error('Failed to create transcription task.', {
-        description: anyErr?.message || anyErr?.error || 'Unknown error',
+      toast.error(t('pages.audio.toast.failedToCreateTask'), {
+        description: anyErr?.message || anyErr?.error || t('pages.audio.toast.unknownError'),
       });
     } finally {
       setPreparingStage(null);
@@ -688,25 +767,44 @@ export function useAudio() {
     (!enableVad || hasBundledVad || Boolean(selectedVadModelId));
 
   const previewRows = [
-    { label: 'Model', value: selectedModel?.display_name ?? 'Not selected', accent: Boolean(selectedModel), chip: true },
-    { label: 'Source', value: file?.name ?? 'Awaiting upload', accent: Boolean(file), chip: false },
     {
-      label: 'VAD Mode',
+      label: t('pages.audio.preview.rows.model'),
+      value: selectedModel?.display_name ?? t('pages.audio.preview.values.notSelected'),
+      accent: Boolean(selectedModel),
+      chip: true,
+    },
+    {
+      label: t('pages.audio.preview.rows.source'),
+      value: file?.name ?? t('pages.audio.preview.values.awaitingUpload'),
+      accent: Boolean(file),
+      chip: false,
+    },
+    {
+      label: t('pages.audio.preview.rows.vadMode'),
       value: enableVad
         ? isUsingBundledVad
-          ? `Active (${bundledVadArtifact?.label ?? 'Bundled VAD'})`
+          ? t('pages.audio.preview.values.activeBundled', {
+              model: bundledVadArtifact?.label ?? t('pages.audio.vad.bundledFallback'),
+            })
           : selectedVadModel?.display_name
-            ? `Active (${selectedVadModel.display_name})`
-            : 'Active'
-        : 'Inactive',
+            ? t('pages.audio.preview.values.activeModel', { model: selectedVadModel.display_name })
+            : t('pages.audio.preview.values.active')
+        : t('pages.audio.preview.values.inactive'),
       accent: enableVad,
       chip: false,
     },
-    { label: 'Decode', value: showDecodeOptions ? 'Custom profile' : 'Default profile', accent: showDecodeOptions, chip: false },
+    {
+      label: t('pages.audio.preview.rows.decode'),
+      value: showDecodeOptions
+        ? t('pages.audio.preview.values.customProfile')
+        : t('pages.audio.preview.values.defaultProfile'),
+      accent: showDecodeOptions,
+      chip: false,
+    },
   ];
 
   return {
-    bundledVadLabel: bundledVadArtifact?.label ?? 'Bundled VAD',
+    bundledVadLabel: bundledVadArtifact?.label ?? t('pages.audio.vad.bundledFallback'),
     canStartTranscription,
     catalogModelsError,
     catalogModelsLoading,

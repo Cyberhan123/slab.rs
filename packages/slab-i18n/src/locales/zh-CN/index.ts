@@ -1,9 +1,8 @@
-import { chat } from './pages/chat';
-import { settings } from './pages/settings';
+import type { LocaleSchema } from '../en-US';
+import { layouts } from './layouts';
+import { pages } from './pages';
 
 export const zhCN = {
-  pages: {
-    chat,
-    settings,
-  },
-} as const;
+  layouts,
+  pages,
+} satisfies LocaleSchema;

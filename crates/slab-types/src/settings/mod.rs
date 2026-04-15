@@ -23,16 +23,17 @@ pub use pmid::{
 };
 pub use pmid_v2::{
     AdminPmids, AutoUnloadPmids, CapacityPmids, CorsPmids, DatabasePmids, EndpointPmids,
-    FfmpegToolPmids, GgmlBackendPmids, GgmlRuntimePmids, LlamaRuntimePmids, ModelsPmids,
-    ProvidersPmids, RuntimeBackendLeafPmids, RuntimeSessionsPmids, RuntimeV2Pmids, ServerPmids,
-    SettingsV2PmidCatalog, SingleRuntimeFamilyPmids, SourcePmids, SwaggerPmids, ToolsPmids,
-    V2_PMID,
+    FfmpegToolPmids, GeneralPmids, GgmlBackendPmids, GgmlRuntimePmids, LlamaRuntimePmids,
+    ModelsPmids, ProvidersPmids, RuntimeBackendLeafPmids, RuntimeSessionsPmids, RuntimeV2Pmids,
+    ServerPmids, SettingsV2PmidCatalog, SingleRuntimeFamilyPmids, SourcePmids, SwaggerPmids,
+    ToolsPmids, V2_PMID,
 };
 pub use v2::{
     AdminConfig, AutoUnloadConfig, CapacityConfig, CapacityOverrideConfig, CorsConfig,
-    DatabaseConfig, EndpointConfig, FfmpegToolConfig, GgmlRuntimeBackendsConfig,
-    GgmlRuntimeFamilyConfig, HttpEndpointConfig, IpcEndpointConfig, LlamaRuntimeLeafConfig,
-    LoggingConfig, LoggingOverrideConfig, ModelsConfigV2, PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL,
+    DatabaseConfig, EndpointConfig, FfmpegToolConfig, GeneralConfigV2,
+    GgmlRuntimeBackendsConfig, GgmlRuntimeFamilyConfig, HttpEndpointConfig,
+    InterfaceLanguagePreference, IpcEndpointConfig, LlamaRuntimeLeafConfig, LoggingConfig,
+    LoggingOverrideConfig, ModelsConfigV2, PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL,
     ProviderAuthConfig, ProviderDefaultsConfig, ProviderFamily, ProviderRegistryEntry,
     ProvidersConfig, RuntimeConfigV2, RuntimeLeafConfig, RuntimeMode, RuntimeSessionsConfig,
     ServerConfigV2, SettingsDocumentV2, SingleRuntimeFamilyConfig, SourceConfig, SwaggerConfig,

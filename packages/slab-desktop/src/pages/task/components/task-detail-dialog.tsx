@@ -4,7 +4,9 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { Spinner } from '@slab/components/spinner';
 import { SoftPanel } from '@slab/components/workspace';
 import { toast } from 'sonner';
+import { useTranslation } from '@slab/i18n';
 import type { Task, TaskResult } from '../const';
+import { formatDateTime, getTaskTypeMeta } from '../utils';
 import { renderStatusPill } from './task-status-pill';
 
 type TaskDetailDialogProps = {
@@ -28,6 +30,11 @@ export function TaskDetailDialog({
   onCancel,
   onRestart,
 }: TaskDetailDialogProps) {
+  const { t, i18n } = useTranslation();
+  const locale = i18n.resolvedLanguage ?? i18n.language;
+  const taskDetail = selectedTask ?? task;
+  const taskMeta = getTaskTypeMeta(taskDetail.task_type, t);
+
   return (
     <Dialog>
       <DialogTrigger asChild>
@@ -39,13 +46,15 @@ export function TaskDetailDialog({
             onOpen(task.id);
           }}
         >
-          Details
+          {t('pages.task.dialog.detailsButton')}
         </Button>
       </DialogTrigger>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Task Details</DialogTitle>
-          <DialogDescription>Task ID: {selectedTask?.id ?? task.id}</DialogDescription>
+          <DialogTitle>{t('pages.task.dialog.title')}</DialogTitle>
+          <DialogDescription>
+            {t('pages.task.dialog.taskId', { id: taskDetail.id })}
+          </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           {selectedTask ? (
@@ -53,27 +62,39 @@ export function TaskDetailDialog({
               <SoftPanel className="space-y-3 rounded-[20px]">
                 <div className="grid gap-3 md:grid-cols-2">
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Type</p>
-                    <p className="mt-1 text-sm font-medium">{selectedTask.task_type}</p>
+                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                      {t('pages.task.dialog.fields.type')}
+                    </p>
+                    <p className="mt-1 text-sm font-medium">{taskMeta.label}</p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Status</p>
-                    <div className="mt-1">{renderStatusPill(selectedTask.status)}</div>
+                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                      {t('pages.task.dialog.fields.status')}
+                    </p>
+                    <div className="mt-1">{renderStatusPill(selectedTask.status, t)}</div>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Created</p>
-                    <p className="mt-1 text-sm font-medium">{new Date(selectedTask.created_at).toLocaleString()}</p>
+                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                      {t('pages.task.dialog.fields.created')}
+                    </p>
+                    <p className="mt-1 text-sm font-medium">
+                      {formatDateTime(selectedTask.created_at, locale)}
+                    </p>
                   </div>
                   <div>
-                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">Updated</p>
-                    <p className="mt-1 text-sm font-medium">{new Date(selectedTask.updated_at).toLocaleString()}</p>
+                    <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">
+                      {t('pages.task.dialog.fields.updated')}
+                    </p>
+                    <p className="mt-1 text-sm font-medium">
+                      {formatDateTime(selectedTask.updated_at, locale)}
+                    </p>
                   </div>
                 </div>
               </SoftPanel>
 
               {selectedTask.status === 'failed' && selectedTask.error_msg ? (
                 <Alert variant="destructive">
-                  <AlertTitle>Failure reason</AlertTitle>
+                  <AlertTitle>{t('pages.task.dialog.failureReason')}</AlertTitle>
                   <AlertDescription className="whitespace-pre-wrap break-words">
                     {selectedTask.error_msg}
                   </AlertDescription>
@@ -83,7 +104,7 @@ export function TaskDetailDialog({
               {selectedTask.status === 'succeeded' && taskResult ? (
                 <SoftPanel className="space-y-3 rounded-[20px]">
                   <h4 className="text-sm font-semibold uppercase tracking-[0.1em] text-muted-foreground">
-                    Task Result
+                    {t('pages.task.dialog.taskResult')}
                   </h4>
                   {taskResult.text ? (
                     <div className="space-y-3">
@@ -93,10 +114,10 @@ export function TaskDetailDialog({
                         size="sm"
                         onClick={() => {
                           navigator.clipboard.writeText(taskResult.text);
-                          toast.success('Copied to clipboard');
+                          toast.success(t('pages.task.dialog.copied'));
                         }}
                       >
-                        Copy result
+                        {t('pages.task.dialog.copyResult')}
                       </Button>
                     </div>
                   ) : (
@@ -115,7 +136,9 @@ export function TaskDetailDialog({
                     onClick={() => void onCancel(selectedTask.id)}
                     disabled={cancelTaskMutation.isPending}
                   >
-                    {cancelTaskMutation.isPending ? 'Cancelling...' : 'Cancel task'}
+                    {cancelTaskMutation.isPending
+                      ? t('pages.task.dialog.cancelling')
+                      : t('pages.task.dialog.cancelTask')}
                   </Button>
                 ) : null}
                 {selectedTask.status === 'failed' ||
@@ -127,7 +150,9 @@ export function TaskDetailDialog({
                     onClick={() => void onRestart(selectedTask.id)}
                     disabled={restartTaskMutation.isPending}
                   >
-                    {restartTaskMutation.isPending ? 'Restarting...' : 'Restart task'}
+                    {restartTaskMutation.isPending
+                      ? t('pages.task.dialog.restarting')
+                      : t('pages.task.dialog.restartTask')}
                   </Button>
                 ) : null}
               </div>
