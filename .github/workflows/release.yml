@@ -111,34 +111,22 @@ jobs:
 
           case "${{ matrix.platform }}" in
             macos)
-              patterns=( '*.dmg' )
+              find "$bundle_dir" -type f -name '*.dmg' -exec cp {} "$staging_dir/" \;
               ;;
             windows)
-              patterns=(
-                'Slab_*_x64-setup.exe'
-                'Slab_*_x64-offline-setup.exe'
-                'base.cab'
-                'cuda.cab'
-                'hip.cab'
-              )
+              find "$bundle_dir" -type f \( \
+                -name 'Slab_*_x64-setup.exe' -o \
+                -name 'Slab_*_x64-offline-setup.exe' -o \
+                -name 'base.cab' -o \
+                -name 'cuda.cab' -o \
+                -name 'hip.cab' \
+              \) -exec cp {} "$staging_dir/" \;
               ;;
             *)
               echo "Unsupported release platform: ${{ matrix.platform }}"
               exit 1
               ;;
           esac
-
-          while IFS= read -r -d '' file; do
-            cp "$file" "$staging_dir/"
-          done < <(
-            find_args=( "$bundle_dir" -type f \( )
-            for pattern in "${patterns[@]}"; do
-              find_args+=( -name "$pattern" -o )
-            done
-            unset 'find_args[${#find_args[@]}-1]'
-            find_args+=( \) -print0 )
-            find "${find_args[@]}"
-          )
 
           if ! find "$staging_dir" -maxdepth 1 -type f | grep -q .; then
             echo "No publishable release assets found in $bundle_dir"
