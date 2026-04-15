@@ -502,7 +502,7 @@ impl HubClient {
             }
         }
 
-        find_models_cat_downloaded_path(&repo, filename).ok_or_else(|| {
+        find_models_cat_downloaded_path(&repo, filename)?.ok_or_else(|| {
             HubError::operation(
                 HubProvider::ModelsCat,
                 format!("download succeeded for {filename} but no local file was found"),
@@ -608,29 +608,65 @@ fn split_repo_id(repo_id: &str) -> Option<(&str, &str)> {
 }
 
 #[cfg(feature = "provider-models-cat")]
-fn find_models_cat_downloaded_path(repo: &models_cat::Repo, filename: &str) -> Option<PathBuf> {
+fn find_models_cat_downloaded_path(
+    repo: &models_cat::Repo,
+    filename: &str,
+) -> Result<Option<PathBuf>, HubError> {
     let base_path = repo.cache_dir().join("snapshots");
     let target = Path::new(filename);
-    let mut snapshot_dirs = std::fs::read_dir(&base_path)
-        .ok()?
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            let path = entry.path();
-            entry.file_type().ok().filter(|file_type| file_type.is_dir()).map(|_| {
-                let modified = std::fs::metadata(&path)
-                    .and_then(|metadata| metadata.modified())
-                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-                (modified, path)
-            })
-        })
-        .collect::<Vec<_>>();
+    let mut snapshot_dirs = Vec::new();
+
+    for entry in std::fs::read_dir(&base_path).map_err(|error| {
+        HubError::operation(
+            HubProvider::ModelsCat,
+            format!(
+                "failed to read models-cat snapshot directory '{}': {error}",
+                base_path.display()
+            ),
+        )
+    })? {
+        let entry = entry.map_err(|error| {
+            HubError::operation(
+                HubProvider::ModelsCat,
+                format!(
+                    "failed to iterate models-cat snapshot entries under '{}': {error}",
+                    base_path.display()
+                ),
+            )
+        })?;
+        let path = entry.path();
+        let metadata = entry.metadata().map_err(|error| {
+            HubError::operation(
+                HubProvider::ModelsCat,
+                format!(
+                    "failed to inspect models-cat snapshot metadata under '{}': {error}",
+                    base_path.display()
+                ),
+            )
+        })?;
+
+        if !metadata.is_dir() {
+            continue;
+        }
+
+        let modified = metadata.modified().map_err(|error| {
+            HubError::operation(
+                HubProvider::ModelsCat,
+                format!(
+                    "failed to read models-cat snapshot timestamp under '{}': {error}",
+                    base_path.display()
+                ),
+            )
+        })?;
+        snapshot_dirs.push((modified, path));
+    }
 
     snapshot_dirs.sort_by(|a, b| b.0.cmp(&a.0));
 
-    snapshot_dirs.into_iter().find_map(|(_, snapshot_dir)| {
+    Ok(snapshot_dirs.into_iter().find_map(|(_, snapshot_dir)| {
         let candidate = snapshot_dir.join(target);
         candidate.is_file().then_some(candidate)
-    })
+    }))
 }
 
 fn is_network_message(message: &str) -> bool {
