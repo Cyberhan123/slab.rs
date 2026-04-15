@@ -7,7 +7,9 @@ use serde::Deserialize;
 use utoipa::OpenApi;
 use validator::Validate;
 
-use crate::api::v1::tasks::schema::{TaskResponse, TaskResultPayload, TaskStatus, TaskTypeQuery};
+use crate::api::v1::tasks::schema::{
+    TaskProgressResponse, TaskResponse, TaskResultPayload, TaskStatus, TaskTypeQuery,
+};
 use crate::api::validation::{ValidatedQuery, validate};
 use crate::error::ServerError;
 use slab_app_core::context::AppState;
@@ -16,7 +18,13 @@ use slab_app_core::domain::services::TaskApplicationService;
 #[derive(OpenApi)]
 #[openapi(
     paths(list_tasks, get_task, get_task_result, cancel_task, restart_task),
-    components(schemas(TaskResponse, TaskResultPayload, TaskStatus, TaskTypeQuery))
+    components(schemas(
+        TaskProgressResponse,
+        TaskResponse,
+        TaskResultPayload,
+        TaskStatus,
+        TaskTypeQuery
+    ))
 )]
 pub struct TasksApi;
 

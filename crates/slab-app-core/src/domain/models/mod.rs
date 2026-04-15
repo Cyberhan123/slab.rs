@@ -52,6 +52,8 @@ pub use settings::{
 };
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
-pub use task::{AcceptedOperation, TaskPayloadEnvelope, TaskResult, TaskStatus, TaskView};
+pub use task::{
+    AcceptedOperation, TaskPayloadEnvelope, TaskProgress, TaskResult, TaskStatus, TaskView,
+};
 pub use ui_state::{DeleteUiStateView, UiStateValueView, UpdateUiStateCommand};
 pub use video::{DecodedVideoInitImage, VideoGenerationCommand};

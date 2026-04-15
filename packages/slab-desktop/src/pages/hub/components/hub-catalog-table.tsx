@@ -3,6 +3,7 @@ import { useTranslation } from '@slab/i18n';
 
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
+import { Progress } from '@slab/components/progress';
 import { StageEmptyState } from '@slab/components/workspace';
 
 import { canDownloadModel, type ModelItem } from '../hooks/use-hub-model-catalog';
@@ -71,6 +72,10 @@ function HubModelCard({
     : t('pages.hub.catalog.runtime');
   const showDownloadAction = model.pending || canDownloadModel(model);
   const sourceLabel = model.local_path ?? model.repo_id ?? model.id;
+  const downloadProgress = model.download_progress;
+  const downloadProgressValue = getDownloadProgressValue(downloadProgress);
+  const downloadProgressLabel = getDownloadProgressLabel(downloadProgress);
+  const downloadProgressSummary = getDownloadProgressSummary(downloadProgress);
 
   return (
     <article
@@ -167,6 +172,20 @@ function HubModelCard({
                     ? t('pages.hub.catalog.downloadPendingDescription')
                     : t('pages.hub.catalog.downloadIdleDescription')}
                 </p>
+                {downloadProgress ? (
+                  <div className="w-full space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-medium text-muted-foreground">
+                      <span className="truncate" title={downloadProgressLabel}>
+                        {downloadProgressLabel}
+                      </span>
+                      <span>{downloadProgressSummary}</span>
+                    </div>
+                    <Progress
+                      value={downloadProgressValue ?? 0}
+                      className="h-2 bg-[var(--surface-soft)]"
+                    />
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -301,4 +320,51 @@ function formatDateTime(
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function getDownloadProgressValue(progress: ModelItem['download_progress']) {
+  if (!progress?.total || progress.total <= 0) {
+    return null;
+  }
+
+  return Math.min(100, Math.max(0, (progress.current / progress.total) * 100));
+}
+
+function getDownloadProgressLabel(progress: ModelItem['download_progress']) {
+  if (!progress) {
+    return '';
+  }
+
+  const label = progress.label?.trim() || 'download';
+  if (progress.step && progress.step_count) {
+    return `${label} (${progress.step}/${progress.step_count})`;
+  }
+
+  return label;
+}
+
+function getDownloadProgressSummary(progress: ModelItem['download_progress']) {
+  if (!progress) {
+    return '';
+  }
+
+  const current = formatBytes(progress.current);
+  if (!progress.total || progress.total <= 0) {
+    return current;
+  }
+
+  const percentage = Math.round((progress.current / progress.total) * 100);
+  return `${percentage}% · ${current} / ${formatBytes(progress.total)}`;
+}
+
+function formatBytes(value: number) {
+  if (!Number.isFinite(value) || value <= 0) {
+    return '0 B';
+  }
+
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const exponent = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1);
+  const size = value / 1024 ** exponent;
+  const fractionDigits = size >= 100 || exponent === 0 ? 0 : size >= 10 ? 1 : 2;
+  return `${size.toFixed(fractionDigits)} ${units[exponent]}`;
 }

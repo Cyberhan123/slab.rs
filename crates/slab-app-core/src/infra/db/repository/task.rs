@@ -35,6 +35,13 @@ pub trait TaskStore: Send + Sync + 'static {
         result_data: Option<&str>,
         error_msg: Option<&str>,
     ) -> impl Future<Output = Result<(), sqlx::Error>> + Send;
+    fn update_task_status_if_active(
+        &self,
+        id: &str,
+        status: TaskStatus,
+        result_data: Option<&str>,
+        error_msg: Option<&str>,
+    ) -> impl Future<Output = Result<bool, sqlx::Error>> + Send;
     fn get_task(
         &self,
         id: &str,
@@ -88,6 +95,28 @@ impl TaskStore for AnyStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    async fn update_task_status_if_active(
+        &self,
+        id: &str,
+        status: TaskStatus,
+        result_data: Option<&str>,
+        error_msg: Option<&str>,
+    ) -> Result<bool, sqlx::Error> {
+        let updated_at = chrono::Utc::now().to_rfc3339();
+        let result = sqlx::query(
+            "UPDATE tasks SET status = ?1, result_data = ?2, error_msg = ?3, updated_at = ?4 \
+             WHERE id = ?5 AND status IN ('pending', 'running')",
+        )
+        .bind(status.as_str())
+        .bind(encode_task_payload(result_data))
+        .bind(error_msg)
+        .bind(&updated_at)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     async fn get_task(&self, id: &str) -> Result<Option<TaskRecord>, sqlx::Error> {

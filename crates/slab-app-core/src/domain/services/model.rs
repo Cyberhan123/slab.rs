@@ -1,11 +1,14 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
-use slab_hub::{HubClient, HubErrorKind, HubProviderPreference};
+use slab_hub::{
+    DownloadProgress, DownloadProgressUpdate, HubClient, HubErrorKind, HubProviderPreference,
+};
 use slab_proto::convert;
 use slab_types::load_config::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
@@ -25,20 +28,22 @@ use crate::domain::models::{
     ModelConfigFieldScope, ModelConfigFieldView, ModelConfigOrigin, ModelConfigPresetOption,
     ModelConfigSectionView, ModelConfigSelectionView, ModelConfigSourceArtifact,
     ModelConfigSourceSummary, ModelConfigValueType, ModelConfigVariantOption, ModelLoadCommand,
-    ModelPackSelection, ModelSpec, ModelStatus, RuntimePresets, StoredModelConfig, TaskStatus,
-    UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
+    ModelPackSelection, ModelSpec, ModelStatus, RuntimePresets, StoredModelConfig, TaskProgress,
+    TaskStatus, UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
     UpdateModelConfigSelectionCommand, normalize_model_capabilities,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{
     ModelConfigStateRecord, ModelConfigStateStore, ModelDownloadRecord, ModelDownloadStore,
-    ModelStore, TaskRecord, UnifiedModelRecord,
+    ModelStore, TaskRecord, TaskStore, UnifiedModelRecord,
 };
 use crate::infra::model_packs;
 use crate::infra::rpc::{self, pb};
 use crate::model_auto_unload::{ModelReplayPlan, build_model_load_request};
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
+const MODEL_DOWNLOAD_PROGRESS_MIN_INTERVAL: Duration = Duration::from_millis(500);
+const MODEL_DOWNLOAD_PROGRESS_MIN_BYTES_DELTA: u64 = 512 * 1024;
 type CloudProviderConfig = slab_types::settings::CloudProviderConfig;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -55,6 +60,142 @@ struct ModelDownloadTaskInput {
     artifacts: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     primary_artifact_id: Option<String>,
+}
+
+#[derive(Debug, Default)]
+struct ModelDownloadProgressState {
+    last_progress: Option<TaskProgress>,
+    last_published_at: Option<Instant>,
+}
+
+#[derive(Debug)]
+struct ModelDownloadProgressReporter {
+    task_id: String,
+    store: Arc<crate::infra::db::AnyStore>,
+    artifact_index_by_filename: HashMap<String, u32>,
+    artifact_count: u32,
+    state: Mutex<ModelDownloadProgressState>,
+}
+
+impl ModelDownloadProgressReporter {
+    fn new(
+        task_id: impl Into<String>,
+        store: Arc<crate::infra::db::AnyStore>,
+        artifacts: &BTreeMap<String, String>,
+    ) -> Self {
+        let artifact_index_by_filename = artifacts
+            .values()
+            .enumerate()
+            .map(|(index, filename)| (filename.clone(), index as u32))
+            .collect();
+
+        Self {
+            task_id: task_id.into(),
+            store,
+            artifact_index_by_filename,
+            artifact_count: artifacts.len() as u32,
+            state: Mutex::new(ModelDownloadProgressState::default()),
+        }
+    }
+
+    fn to_task_progress(&self, update: &DownloadProgressUpdate) -> TaskProgress {
+        let step =
+            self.artifact_index_by_filename.get(&update.filename).copied().map(|index| index + 1);
+
+        TaskProgress {
+            label: Some(update.filename.clone()),
+            current: update.downloaded_bytes,
+            total: update.total_bytes,
+            unit: Some("bytes".to_owned()),
+            step,
+            step_count: (self.artifact_count > 1).then_some(self.artifact_count),
+        }
+    }
+
+    fn publish(&self, update: &DownloadProgressUpdate, force: bool) {
+        let progress = self.to_task_progress(update);
+        let should_publish = {
+            let mut state = self.state.lock().expect("model download progress state");
+            if !should_publish_model_download_progress(&state, &progress, force) {
+                false
+            } else {
+                state.last_progress = Some(progress.clone());
+                state.last_published_at = Some(Instant::now());
+                true
+            }
+        };
+
+        if !should_publish {
+            return;
+        }
+
+        let payload = serde_json::json!({ "progress": progress }).to_string();
+        let task_id = self.task_id.clone();
+        let store = Arc::clone(&self.store);
+
+        tokio::spawn(async move {
+            if let Err(error) = store
+                .update_task_status_if_active(&task_id, TaskStatus::Running, Some(&payload), None)
+                .await
+            {
+                warn!(task_id = %task_id, error = %error, "failed to persist model download progress");
+            }
+        });
+    }
+}
+
+impl DownloadProgress for ModelDownloadProgressReporter {
+    fn on_start(&self, update: &DownloadProgressUpdate) {
+        self.publish(update, true);
+    }
+
+    fn on_progress(&self, update: &DownloadProgressUpdate) {
+        self.publish(update, false);
+    }
+
+    fn on_finish(&self, update: &DownloadProgressUpdate) {
+        self.publish(update, true);
+    }
+}
+
+fn should_publish_model_download_progress(
+    state: &ModelDownloadProgressState,
+    progress: &TaskProgress,
+    force: bool,
+) -> bool {
+    if force {
+        return true;
+    }
+
+    let Some(previous) = state.last_progress.as_ref() else {
+        return true;
+    };
+
+    if previous == progress {
+        return false;
+    }
+
+    if previous.label != progress.label
+        || previous.total != progress.total
+        || previous.step != progress.step
+        || previous.step_count != progress.step_count
+        || progress.current < previous.current
+    {
+        return true;
+    }
+
+    if progress.total.is_some() && Some(progress.current) == progress.total {
+        return true;
+    }
+
+    if progress.current.saturating_sub(previous.current) >= MODEL_DOWNLOAD_PROGRESS_MIN_BYTES_DELTA
+    {
+        return true;
+    }
+
+    state
+        .last_published_at
+        .is_none_or(|published_at| published_at.elapsed() >= MODEL_DOWNLOAD_PROGRESS_MIN_INTERVAL)
 }
 
 fn validate_and_normalize_model_workers(
@@ -804,10 +945,17 @@ impl ModelService {
                         build_hub_client(model_cache_dir.as_deref(), hub_provider.as_deref())
                             .map_err(|error| error.to_string())?;
                     let mut materialized_artifacts = BTreeMap::new();
+                    let progress: Arc<dyn DownloadProgress> = Arc::new(
+                        ModelDownloadProgressReporter::new(
+                            operation_id.clone(),
+                            Arc::clone(&store),
+                            &download_artifacts,
+                        ),
+                    );
 
                     for (artifact_id, artifact_file) in &download_artifacts {
                         let path = client
-                            .download_file(&repo_id, artifact_file, None)
+                            .download_file(&repo_id, artifact_file, Some(Arc::clone(&progress)))
                             .await
                             .map_err(|error| format!("hub download failed for {artifact_file}: {error}"))?;
                         materialized_artifacts

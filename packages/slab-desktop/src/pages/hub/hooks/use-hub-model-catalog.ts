@@ -39,14 +39,30 @@ export type ModelItem = {
   status: ModelStatus;
   local_path: string | null;
   pending: boolean;
+  download_task_id: string | null;
+  download_progress: ModelDownloadProgress | null;
   updated_at: string;
 };
 
 type ImportedModelResponse = components['schemas']['UnifiedModelResponse'];
+export type ModelDownloadProgress = {
+  label: string | null;
+  current: number;
+  total: number | null;
+  unit: string | null;
+  step: number | null;
+  step_count: number | null;
+};
 
 type TaskStatusResponse = {
   status: string;
   error_msg?: string | null;
+  progress?: unknown;
+};
+
+type DownloadTrackingState = {
+  taskId: string;
+  progress: ModelDownloadProgress | null;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -61,6 +77,9 @@ export function useHubModelCatalog() {
   const [createModelPending, setCreateModelPending] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
   const [modelToEnhance, setModelToEnhance] = useState<ModelItem | null>(null);
+  const [downloadTracking, setDownloadTracking] = useState<Record<string, DownloadTrackingState>>(
+    {},
+  );
 
   const {
     data,
@@ -79,21 +98,10 @@ export function useHubModelCatalog() {
 
   const models = useMemo<ModelItem[]>(
     () =>
-      toCatalogModelList(data).map((model) => ({
-        id: model.id,
-        display_name: model.display_name,
-        kind: model.kind,
-        repo_id: model.repo_id,
-        filename: model.filename,
-        capabilities: model.capabilities,
-        backend_ids: model.backend_ids,
-        is_vad_model: modelSupportsCapability(model, 'audio_vad'),
-        status: model.status,
-        local_path: model.local_path,
-        pending: model.pending,
-        updated_at: model.updated_at,
-      })),
-    [data],
+      toCatalogModelList(data).map((model) =>
+        toModelItem(model, downloadTracking[model.id]),
+      ),
+    [data, downloadTracking],
   );
   const filteredModels = useMemo(
     () =>
@@ -192,13 +200,35 @@ export function useHubModelCatalog() {
     }
   }
 
-  const waitForTaskToFinish = async (taskId: string) => {
+  function setModelDownloadTracking(modelId: string, next: DownloadTrackingState | null) {
+    setDownloadTracking((current) => {
+      if (next) {
+        return {
+          ...current,
+          [modelId]: next,
+        };
+      }
+
+      if (!(modelId in current)) {
+        return current;
+      }
+
+      const { [modelId]: _removed, ...rest } = current;
+      return rest;
+    });
+  }
+
+  const waitForTaskToFinish = async (modelId: string, taskId: string) => {
     const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
       const task = (await getTaskMutation.mutateAsync({
         params: { path: { id: taskId } },
       })) as TaskStatusResponse;
+      setModelDownloadTracking(modelId, {
+        taskId,
+        progress: normalizeTaskProgress(task.progress),
+      });
 
       if (task.status === 'succeeded') {
         return;
@@ -228,12 +258,12 @@ export function useHubModelCatalog() {
 
   async function trackModelDownload(model: ModelItem, taskId: string) {
     try {
-      await waitForTaskToFinish(taskId);
+      await waitForTaskToFinish(model.id, taskId);
 
-        const refreshedModel = await refreshCatalogAndFindModel(model.id);
-        if (!refreshedModel?.local_path) {
-          throw new Error(t('pages.hub.error.missingDownloadedPath'));
-        }
+      const refreshedModel = await refreshCatalogAndFindModel(model.id);
+      if (!refreshedModel?.local_path) {
+        throw new Error(t('pages.hub.error.missingDownloadedPath'));
+      }
 
       toast.success(t('pages.hub.toast.downloaded'), {
         description: model.display_name,
@@ -243,6 +273,7 @@ export function useHubModelCatalog() {
         description: getErrorMessage(downloadError),
       });
     } finally {
+      setModelDownloadTracking(model.id, null);
       void refetch();
     }
   }
@@ -264,6 +295,10 @@ export function useHubModelCatalog() {
         throw new Error(t('pages.hub.error.startDownloadFailed'));
       }
 
+      setModelDownloadTracking(model.id, {
+        taskId,
+        progress: null,
+      });
       toast.success(t('pages.hub.toast.downloadStarted'), {
         description: model.display_name,
       });
@@ -421,4 +456,59 @@ function extractTaskId(payload: unknown): string | null {
 
   const trimmed = taskId.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function toModelItem(
+  model: ReturnType<typeof toCatalogModelList>[number],
+  tracking: DownloadTrackingState | undefined,
+): ModelItem {
+  const hasLocalPath = Boolean(model.local_path);
+  const pending = !hasLocalPath && (model.pending || Boolean(tracking));
+  const status = hasLocalPath ? 'ready' : pending ? 'downloading' : model.status;
+
+  return {
+    id: model.id,
+    display_name: model.display_name,
+    kind: model.kind,
+    repo_id: model.repo_id,
+    filename: model.filename,
+    capabilities: model.capabilities,
+    backend_ids: model.backend_ids,
+    is_vad_model: modelSupportsCapability(model, 'audio_vad'),
+    status,
+    local_path: model.local_path,
+    pending,
+    download_task_id: tracking?.taskId ?? null,
+    download_progress: tracking?.progress ?? null,
+    updated_at: model.updated_at,
+  };
+}
+
+function normalizeTaskProgress(value: unknown): ModelDownloadProgress | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const progress = value as Record<string, unknown>;
+  if (typeof progress.current !== 'number' || !Number.isFinite(progress.current)) {
+    return null;
+  }
+
+  const total =
+    typeof progress.total === 'number' && Number.isFinite(progress.total) ? progress.total : null;
+  const step =
+    typeof progress.step === 'number' && Number.isFinite(progress.step) ? progress.step : null;
+  const stepCount =
+    typeof progress.step_count === 'number' && Number.isFinite(progress.step_count)
+      ? progress.step_count
+      : null;
+
+  return {
+    label: typeof progress.label === 'string' ? progress.label : null,
+    current: progress.current,
+    total,
+    unit: typeof progress.unit === 'string' ? progress.unit : null,
+    step,
+    step_count: stepCount,
+  };
 }
