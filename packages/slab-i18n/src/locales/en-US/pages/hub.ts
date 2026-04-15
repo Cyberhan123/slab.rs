@@ -8,7 +8,7 @@ export const hub = {
     titleLead: 'Shape your local',
     titleAccent: 'model catalog.',
     description:
-      'Import JSON manifests or .slab packs into the catalog, then download the local runtimes you want from each card when you are ready to use them.',
+      'Import .slab packs into the catalog, then download the local runtimes you want from each card when you are ready to use them.',
     importModel: 'Import model',
     refreshCatalog: 'Refresh catalog',
   },
@@ -48,7 +48,7 @@ export const hub = {
     loadingDescription: 'Fetching model entries and runtime status.',
     emptyFilteredTitle: 'No model entries match the current filters',
     emptyFilteredDescription:
-      'Try another category, adjust status, or import a new model manifest or pack.',
+      'Try another category, adjust status, or import a new .slab pack.',
   },
   catalog: {
     emptyPageTitle: 'No cards on this page',
@@ -70,7 +70,7 @@ export const hub = {
       local:
         'Local {{backend}} model ready for inference. The manifest is already connected to a runtime path and can be used without leaving this workspace.',
       imported:
-        'Imported {{backend}} manifest from {{repo}}. It is listed in the catalog now, and you can download the actual model files from this card when you need a local runtime copy.',
+        'Imported {{backend}} pack from {{repo}}. It is listed in the catalog now, and you can download the actual model files from this card when you need a local runtime copy.',
     },
     actions: {
       enhanceAria: 'Enhance {{model}} config',
