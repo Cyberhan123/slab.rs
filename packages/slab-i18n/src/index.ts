@@ -15,15 +15,14 @@ export const DEFAULT_CHAT_LABELS = [
   enUS.pages.chat.runtime.newConversation,
   zhCN.pages.chat.runtime.newChat,
   zhCN.pages.chat.runtime.newConversation,
-  'New Conversation',
 ] as const;
-export const LEGACY_DEFAULT_CHAT_LABELS = ['新对话'] as const;
+export const LEGACY_DEFAULT_CHAT_LABELS = ['New Conversation', '新对话'] as const;
 
 const DEFAULT_LANGUAGE: SupportedLanguage = 'en-US';
 const AUTO_LANGUAGE = 'auto' as const;
 const LANGUAGE_LOOKUP = new Set<string>(SUPPORTED_LANGUAGES);
 const TRADITIONAL_CHINESE_PATTERN = /^zh(?:[-_][a-z0-9]+)*[-_](?:tw|hk|mo|hant)(?:[-_][a-z0-9]+)*$/i;
-const SIMPLIFIED_CHINESE_PATTERN = /^zh(?:[-_][a-z0-9]+)*$/i;
+const CHINESE_PATTERN = /^zh(?:[-_][a-z0-9]+)*$/i;
 
 function isSupportedLanguage(value: string | null | undefined): value is SupportedLanguage {
   return Boolean(value && LANGUAGE_LOOKUP.has(value));
@@ -39,11 +38,15 @@ function normalizeLanguage(value: string | null | undefined): SupportedLanguage 
   }
 
   const normalized = value?.toLowerCase() ?? '';
-  if (!SIMPLIFIED_CHINESE_PATTERN.test(normalized)) {
+  if (!CHINESE_PATTERN.test(normalized)) {
     return DEFAULT_LANGUAGE;
   }
 
-  return TRADITIONAL_CHINESE_PATTERN.test(normalized) ? DEFAULT_LANGUAGE : 'zh-CN';
+  if (TRADITIONAL_CHINESE_PATTERN.test(normalized)) {
+    return DEFAULT_LANGUAGE;
+  }
+
+  return 'zh-CN';
 }
 
 function detectNavigatorLanguage(): SupportedLanguage {
