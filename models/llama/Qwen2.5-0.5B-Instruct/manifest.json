@@ -16,28 +16,33 @@
       "ggml.llama"
     ]
   },
-  "source": {
-    "kind": "hugging_face",
-    "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
-    "files": [
-      {
-        "id": "model",
-        "path": "Qwen2.5-0.5B-Instruct-f16.gguf"
+  "sources": [
+    {
+      "source": {
+        "kind": "hugging_face",
+        "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+        "files": [
+          {
+            "id": "model",
+            "path": "Qwen2.5-0.5B-Instruct-f16.gguf"
+          },
+          {
+            "id": "Q4_K_M",
+            "path": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+          },
+          {
+            "id": "Q5_K_M",
+            "path": "Qwen2.5-0.5B-Instruct-Q5_K_M.gguf"
+          },
+          {
+            "id": "Q8_0",
+            "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf"
+          }
+        ]
       },
-      {
-        "id": "Q4_K_M",
-        "path": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
-      },
-      {
-        "id": "Q5_K_M",
-        "path": "Qwen2.5-0.5B-Instruct-Q5_K_M.gguf"
-      },
-      {
-        "id": "Q8_0",
-        "path": "Qwen2.5-0.5B-Instruct-Q8_0.gguf"
-      }
-    ]
-  },
+      "hub_provider": "hugging_face"
+    }
+  ],
   "variants": [
     {
       "id": "model",

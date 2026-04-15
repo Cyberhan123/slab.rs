@@ -72,6 +72,13 @@
       ],
       "type": "string"
     },
+    "PackHubProvider": {
+      "enum": [
+        "hugging_face",
+        "model_scope"
+      ],
+      "type": "string"
+    },
     "PackModelStatus": {
       "enum": [
         "ready",
@@ -117,7 +124,7 @@
       },
       "type": "object"
     },
-    "PackSource": {
+    "PackSourceCandidate": {
       "oneOf": [
         {
           "properties": {
@@ -201,7 +208,27 @@
           ],
           "type": "object"
         }
-      ]
+      ],
+      "properties": {
+        "hub_provider": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PackHubProvider"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "priority": {
+          "format": "int32",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "PackSourceFile": {
       "properties": {
@@ -376,15 +403,11 @@
         }
       ]
     },
-    "source": {
-      "anyOf": [
-        {
-          "$ref": "#/$defs/PackSource"
-        },
-        {
-          "type": "null"
-        }
-      ]
+    "sources": {
+      "items": {
+        "$ref": "#/$defs/PackSourceCandidate"
+      },
+      "type": "array"
     },
     "status": {
       "anyOf": [

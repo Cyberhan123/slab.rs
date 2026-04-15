@@ -156,6 +156,7 @@ impl TryFrom<UnifiedModelRecord> for UnifiedModel {
             spec,
             runtime_presets,
             materialized_artifacts: BTreeMap::new(),
+            selected_download_source: None,
             pack_selection: None,
         })?;
 

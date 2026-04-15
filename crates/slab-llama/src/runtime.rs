@@ -532,7 +532,8 @@ impl InferenceWorkerState {
     fn describe_stream_error(&self, error: &LlamaError, batch_tokens: usize) -> String {
         match error {
             LlamaError::DecodeFailed(1) => {
-                let active_sessions = self.sessions.values().filter(|session| session.stream_tx.is_some()).count();
+                let active_sessions =
+                    self.sessions.values().filter(|session| session.stream_tx.is_some()).count();
                 format!(
                     "llama decode could not find a KV slot for the current batch (context_length={}, batch_tokens={}, active_sessions={}); this usually means the loaded context is too small or multiple sessions have exhausted the KV cache",
                     self.context_length, batch_tokens, active_sessions

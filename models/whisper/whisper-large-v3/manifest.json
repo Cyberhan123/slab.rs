@@ -15,20 +15,25 @@
       "ggml.whisper"
     ]
   },
-  "source": {
-    "kind": "hugging_face",
-    "repo_id": "ggerganov/whisper.cpp",
-    "files": [
-      {
-        "id": "model",
-        "path": "ggml-large-v3.bin"
+  "sources": [
+    {
+      "source": {
+        "kind": "hugging_face",
+        "repo_id": "ggerganov/whisper.cpp",
+        "files": [
+          {
+            "id": "model",
+            "path": "ggml-large-v3.bin"
+          },
+          {
+            "id": "Q5_0",
+            "path": "ggml-large-v3-q5_0.bin"
+          }
+        ]
       },
-      {
-        "id": "Q5_0",
-        "path": "ggml-large-v3-q5_0.bin"
-      }
-    ]
-  },
+      "hub_provider": "hugging_face"
+    }
+  ],
   "variants": [
     {
       "id": "model",

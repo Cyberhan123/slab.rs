@@ -336,7 +336,11 @@ pub(crate) fn build_ggml_whisper_full_params_from_legacy(
         strategy: WhisperSamplingStrategy::BeamSearch { beam_size: 5, patience: -1.0 },
         language: language.clone(),
         initial_prompt: prompt.filter(|value| !value.trim().is_empty()),
-        detect_language: language.is_none().then(|| detect_language).flatten().filter(|value| *value),
+        detect_language: language
+            .is_none()
+            .then(|| detect_language)
+            .flatten()
+            .filter(|value| *value),
         ..Default::default()
     };
 

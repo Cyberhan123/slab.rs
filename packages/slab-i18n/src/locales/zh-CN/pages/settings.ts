@@ -31,6 +31,15 @@ export const settings = {
     },
     current: '当前界面语言：{{language}}',
   },
+  modelSource: {
+    title: '模型来源',
+    description: '选择下载模型文件时优先使用的远程来源。',
+    options: {
+      auto: '自动',
+      hugging_face: 'Hugging Face',
+      model_scope: 'ModelScope',
+    },
+  },
   field: {
     reset: '重置',
     selectOption: '选择一个选项',

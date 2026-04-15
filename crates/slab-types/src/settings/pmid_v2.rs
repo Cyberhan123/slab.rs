@@ -115,6 +115,7 @@ impl SettingsV2PmidCatalog {
             self.providers.registry(),
             self.models.cache_dir(),
             self.models.config_dir(),
+            self.models.download_source(),
             self.models.auto_unload.enabled(),
             self.models.auto_unload.idle_minutes(),
             self.server.address(),
@@ -525,6 +526,10 @@ impl ModelsPmids {
 
     pub fn config_dir(self) -> SettingPmid {
         SettingPmid::from_path("models.config_dir")
+    }
+
+    pub fn download_source(self) -> SettingPmid {
+        SettingPmid::from_path("models.download_source")
     }
 }
 

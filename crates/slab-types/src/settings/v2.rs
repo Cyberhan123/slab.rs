@@ -533,14 +533,32 @@ pub struct ModelsConfigV2 {
     /// Directory containing model configuration documents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_dir: Option<String>,
+    /// Preferred remote source used when downloading model artifacts.
+    #[serde(default)]
+    pub download_source: ModelDownloadSourcePreference,
     #[serde(default)]
     pub auto_unload: AutoUnloadConfig,
 }
 
 impl Default for ModelsConfigV2 {
     fn default() -> Self {
-        Self { cache_dir: None, config_dir: None, auto_unload: AutoUnloadConfig::default() }
+        Self {
+            cache_dir: None,
+            config_dir: None,
+            download_source: ModelDownloadSourcePreference::Auto,
+            auto_unload: AutoUnloadConfig::default(),
+        }
     }
+}
+
+/// Preferred remote source used when downloading model artifacts.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelDownloadSourcePreference {
+    #[default]
+    Auto,
+    HuggingFace,
+    ModelScope,
 }
 
 /// Automatic model-unload settings.

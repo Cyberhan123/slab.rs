@@ -79,7 +79,7 @@ fn parse_inference_options(raw: &Payload) -> Result<WhisperFullParams, String> {
         opts.vad,
         opts.decode,
     )
-        .map_err(|error| error.to_string())
+    .map_err(|error| error.to_string())
 }
 
 #[backend_handler]

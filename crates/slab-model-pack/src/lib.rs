@@ -12,9 +12,9 @@ pub use artifacts::{ResolvedArtifact, ResolvedArtifactMap};
 pub use error::ModelPackError;
 pub use manifest::{
     AdapterDocument, BackendConfigDocument, BackendConfigScope, ComponentDocument, ConfigEntryRef,
-    DynamicFootprint, ModelPackManifest, PackDocument, PackDocumentKind, PackModelStatus,
-    PackPricing, PackRuntimePresets, PackSource, PackSourceFile, PresetDocument, PresetEntryRef,
-    ResourceFootprint, VariantDocument,
+    DynamicFootprint, ModelPackManifest, PackDocument, PackDocumentKind, PackHubProvider,
+    PackModelStatus, PackPricing, PackRuntimePresets, PackSource, PackSourceCandidate,
+    PackSourceFile, PresetDocument, PresetEntryRef, ResourceFootprint, VariantDocument,
 };
 pub use pack::{MANIFEST_FILE_NAME, ModelPack, PACK_EXTENSION};
 pub use refs::ConfigRef;

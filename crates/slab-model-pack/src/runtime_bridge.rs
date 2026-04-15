@@ -165,13 +165,13 @@ fn build_model_source(preset: &ResolvedPreset) -> Result<ModelSource, ModelPackE
         return build_model_source_from_components(preset);
     }
 
-    let Some(source) = preset.variant.effective_source.clone() else {
+    let Some(source) = preset.variant.effective_sources.first() else {
         return Err(ModelPackError::MissingPrimaryArtifact {
             preset_id: preset.document.id.clone(),
         });
     };
 
-    pack_source_to_model_source(source)
+    pack_source_to_model_source(&source.source)
 }
 
 fn build_model_source_from_components(
@@ -242,15 +242,17 @@ fn build_model_source_from_components(
     Ok(ModelSource::LocalArtifacts { files: local_files })
 }
 
-fn pack_source_to_model_source(source: PackSource) -> Result<ModelSource, ModelPackError> {
+fn pack_source_to_model_source(source: &PackSource) -> Result<ModelSource, ModelPackError> {
     Ok(match source {
         PackSource::LocalPath { path } => ModelSource::LocalPath { path: PathBuf::from(path) },
         PackSource::LocalFiles { files } => {
             ModelSource::LocalArtifacts { files: source_file_map(None, &files) }
         }
-        PackSource::HuggingFace { repo_id, revision, files } => {
-            ModelSource::HuggingFace { repo_id, revision, files: source_file_map(None, &files) }
-        }
+        PackSource::HuggingFace { repo_id, revision, files } => ModelSource::HuggingFace {
+            repo_id: repo_id.clone(),
+            revision: revision.clone(),
+            files: source_file_map(None, files),
+        },
         PackSource::Cloud { .. } => {
             return Err(ModelPackError::UnsupportedRuntimeBridgeSource {
                 source_kind: "cloud".into(),

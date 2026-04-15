@@ -15,16 +15,21 @@
       "ggml.whisper"
     ]
   },
-  "source": {
-    "kind": "hugging_face",
-    "repo_id": "ggml-org/whisper-vad",
-    "files": [
-      {
-        "id": "model",
-        "path": "ggml-silero-v6.2.0.bin"
-      }
-    ]
-  },
+  "sources": [
+    {
+      "source": {
+        "kind": "hugging_face",
+        "repo_id": "ggml-org/whisper-vad",
+        "files": [
+          {
+            "id": "model",
+            "path": "ggml-silero-v6.2.0.bin"
+          }
+        ]
+      },
+      "hub_provider": "hugging_face"
+    }
+  ],
   "presets": [
     {
       "id": "default",

@@ -116,17 +116,13 @@ pub struct SelectedPayloadFile {
 impl PackagedPayloadManifest {
     pub fn selected_for(&self, packages: &[RuntimeVariant]) -> Result<SelectedPayloadManifest> {
         let mut files = BTreeMap::new();
-        let package_set: BTreeMap<_, _> = self
-            .packages
-            .iter()
-            .map(|package| (package.variant, package))
-            .collect();
+        let package_set: BTreeMap<_, _> =
+            self.packages.iter().map(|package| (package.variant, package)).collect();
 
         for package in packages {
-            let package_manifest = package_set
-                .get(package)
-                .copied()
-                .with_context(|| format!("payload package '{}' missing from manifest", package.as_str()))?;
+            let package_manifest = package_set.get(package).copied().with_context(|| {
+                format!("payload package '{}' missing from manifest", package.as_str())
+            })?;
 
             for file in &package_manifest.files {
                 match files.entry(file.dest_relative_path.clone()) {
@@ -160,7 +156,10 @@ impl PackagedPayloadManifest {
     }
 }
 
-pub fn build_runtime_payload_plan(workspace_root: &Path, version: &str) -> Result<RuntimePayloadPlan> {
+pub fn build_runtime_payload_plan(
+    workspace_root: &Path,
+    version: &str,
+) -> Result<RuntimePayloadPlan> {
     let vendor_root = workspace_root.join("vendor");
     let mut package_files: BTreeMap<RuntimeVariant, Vec<ResolvedPayloadFile>> = BTreeMap::new();
 
@@ -190,11 +189,7 @@ pub fn build_runtime_payload_plan(workspace_root: &Path, version: &str) -> Resul
     let mut packages = Vec::new();
     let mut packaged_packages = Vec::new();
     for variant in [RuntimeVariant::Base, RuntimeVariant::Cuda, RuntimeVariant::Hip] {
-        let deduped = dedupe_payload_files(
-            package_files
-                .remove(&variant)
-                .unwrap_or_default(),
-        )?;
+        let deduped = dedupe_payload_files(package_files.remove(&variant).unwrap_or_default())?;
 
         let manifest_files = deduped
             .iter()
@@ -232,9 +227,9 @@ fn resolve_vendor_runtime_tree(root: &Path) -> Result<Vec<ResolvedPayloadFile>> 
     let files = collect_files_recursive(root)?;
     let mut resolved = Vec::with_capacity(files.len());
     for source_path in files {
-        let relative = source_path
-            .strip_prefix(root)
-            .with_context(|| format!("failed to strip vendor runtime root for {}", source_path.display()))?;
+        let relative = source_path.strip_prefix(root).with_context(|| {
+            format!("failed to strip vendor runtime root for {}", source_path.display())
+        })?;
         let relative = normalize_relative_path(relative)?;
         let source_relative_path = format!("resources/libs/{relative}");
         let metadata = fs::metadata(&source_path)
