@@ -25,11 +25,16 @@ Slab model packs use a manifest document at the root of the pack. The canonical 
     "temperature": 0.7,
     "top_p": 0.95
   },
-  "source": {
-    "kind": "cloud",
-    "provider_id": "openrouter-main",
-    "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
-  }
+  "sources": [
+    {
+      "source": {
+        "kind": "cloud",
+        "provider_id": "openrouter-main",
+        "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
+      },
+      "priority": 0
+    }
+  ]
 }
 ```
 

@@ -53,16 +53,10 @@ pub fn resolve_ggml_runtime_packages(
 
     validate_manifest(&manifest, manifest_path)?;
 
-    let components_by_id: HashMap<_, _> = manifest
-        .components
-        .iter()
-        .map(|component| (component.id.as_str(), component))
-        .collect();
-    let entry_by_path: HashMap<_, _> = manifest
-        .files
-        .iter()
-        .map(|entry| (entry.path.as_str(), entry))
-        .collect();
+    let components_by_id: HashMap<_, _> =
+        manifest.components.iter().map(|component| (component.id.as_str(), component)).collect();
+    let entry_by_path: HashMap<_, _> =
+        manifest.files.iter().map(|entry| (entry.path.as_str(), entry)).collect();
 
     let mut packages = BTreeMap::new();
     packages.insert(RuntimeVariant::Base, Vec::new());
@@ -94,23 +88,28 @@ pub fn resolve_ggml_runtime_packages(
                 .strip_prefix("bin/")
                 .ok_or_else(|| anyhow!("GGML runtime file '{}' is not under bin/", file))?;
             let source_path = vendor_root.join(pathbuf_from_forward_slashes(file));
-            let source_relative_path = format!("resources/libs/{}", runtime_relative.replace('\\', "/"));
+            let source_relative_path =
+                format!("resources/libs/{}", runtime_relative.replace('\\', "/"));
 
-            packages
-                .get_mut(&target_variant)
-                .expect("package initialized")
-                .push(ResolvedPayloadFile {
+            packages.get_mut(&target_variant).expect("package initialized").push(
+                ResolvedPayloadFile {
                     source_path,
                     source_relative_path,
                     dest_relative_path: normalize_relative_path(Path::new(runtime_relative))?,
                     size: entry.size,
                     sha256: entry.sha256.clone(),
-                });
+                },
+            );
         }
     }
 
     ensure_remapped_file_present(&packages, RuntimeVariant::Base, GGML_BASE_DLL, "ggml-base.dll")?;
-    ensure_remapped_file_present(&packages, RuntimeVariant::Base, GGML_VULKAN_DLL, "ggml-vulkan.dll")?;
+    ensure_remapped_file_present(
+        &packages,
+        RuntimeVariant::Base,
+        GGML_VULKAN_DLL,
+        "ggml-vulkan.dll",
+    )?;
     ensure_file_absent(&packages, RuntimeVariant::Hip, GGML_BASE_DLL)?;
 
     Ok(packages)
@@ -198,11 +197,7 @@ fn ensure_file_absent(
         .ok_or_else(|| anyhow!("GGML package '{}' is missing", variant.as_str()))?;
 
     if package.iter().any(|file| file.dest_relative_path == runtime_relative) {
-        bail!(
-            "GGML package '{}' unexpectedly contains '{}'",
-            variant.as_str(),
-            manifest_path
-        );
+        bail!("GGML package '{}' unexpectedly contains '{}'", variant.as_str(), manifest_path);
     }
 
     Ok(())

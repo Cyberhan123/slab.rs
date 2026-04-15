@@ -31,6 +31,16 @@ export const settings = {
     },
     current: 'Current app language: {{language}}',
   },
+  modelSource: {
+    title: 'Model source',
+    description:
+      'Choose which remote source should be preferred when downloading model artifacts.',
+    options: {
+      auto: 'Auto',
+      hugging_face: 'Hugging Face',
+      model_scope: 'ModelScope',
+    },
+  },
   field: {
     reset: 'Reset',
     selectOption: 'Select an option',

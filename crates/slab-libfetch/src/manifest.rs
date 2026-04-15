@@ -174,12 +174,13 @@ impl ArtifactSpec {
                     os_str, self.lib_name
                 ))
             })?;
-            let (resolved_arch, target) = find_declared_target(os_targets, arch_str).ok_or_else(|| {
-                FetchError::ManifestError(format!(
-                    "arch '{}' is not declared for OS '{}' in artifact '{}'",
-                    arch_str, os_str, self.lib_name
-                ))
-            })?;
+            let (resolved_arch, target) =
+                find_declared_target(os_targets, arch_str).ok_or_else(|| {
+                    FetchError::ManifestError(format!(
+                        "arch '{}' is not declared for OS '{}' in artifact '{}'",
+                        arch_str, os_str, self.lib_name
+                    ))
+                })?;
 
             if target.variants.is_empty() {
                 return Ok(ResolvedTarget {
@@ -298,9 +299,8 @@ fn find_declared_target<'a>(
 
 fn find_declared_arch<'a>(declared_arches: &'a [String], arch_str: &str) -> Option<&'a str> {
     for candidate in arch_aliases(arch_str) {
-        if let Some(declared_arch) = declared_arches
-            .iter()
-            .find(|declared_arch| declared_arch.as_str() == candidate)
+        if let Some(declared_arch) =
+            declared_arches.iter().find(|declared_arch| declared_arch.as_str() == candidate)
         {
             return Some(declared_arch.as_str());
         }

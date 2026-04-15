@@ -14,6 +14,7 @@ use slab_types::load_config::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
 };
 use slab_types::runtime::DiffusionLoadOptions;
+use slab_types::settings::ModelDownloadSourcePreference;
 use slab_types::{Capability, ModelSource, RuntimeBackendId, RuntimeBackendLoadSpec};
 use tonic::transport::Channel;
 use tracing::{info, warn};
@@ -28,9 +29,10 @@ use crate::domain::models::{
     ModelConfigFieldScope, ModelConfigFieldView, ModelConfigOrigin, ModelConfigPresetOption,
     ModelConfigSectionView, ModelConfigSelectionView, ModelConfigSourceArtifact,
     ModelConfigSourceSummary, ModelConfigValueType, ModelConfigVariantOption, ModelLoadCommand,
-    ModelPackSelection, ModelSpec, ModelStatus, RuntimePresets, StoredModelConfig, TaskProgress,
-    TaskStatus, UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
-    UpdateModelConfigSelectionCommand, normalize_model_capabilities,
+    ModelPackSelection, ModelSpec, ModelStatus, RuntimePresets, SelectedModelDownloadSource,
+    StoredModelConfig, TaskProgress, TaskStatus, UnifiedModel, UnifiedModelKind,
+    UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
+    normalize_model_capabilities,
 };
 use crate::error::AppCoreError;
 use crate::infra::db::{
@@ -50,16 +52,29 @@ type CloudProviderConfig = slab_types::settings::CloudProviderConfig;
 struct ModelDownloadTaskInput {
     model_id: String,
     backend_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    model_cache_dir: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    candidates: Vec<ModelDownloadTaskCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ModelDownloadTaskCandidate {
+    source_key: String,
     repo_id: String,
     filename: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     hub_provider: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    model_cache_dir: Option<String>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     artifacts: BTreeMap<String, String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     primary_artifact_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ResolvedModelDownloadPlan {
+    task_key: ModelDownloadSourceKey,
+    candidates: Vec<ModelDownloadTaskCandidate>,
 }
 
 #[derive(Debug, Default)]
@@ -351,8 +366,10 @@ struct ResolvedModelPackSelectionView {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct ModelDownloadSourceKey {
     model_id: String,
+    source_key: String,
     repo_id: String,
     filename: String,
+    hub_provider: Option<String>,
 }
 
 #[derive(Clone)]
@@ -753,35 +770,16 @@ impl ModelService {
         let backend_id = resolve_local_backend_from_model(&model)?;
 
         let canonical_backend_id = backend_id.to_string();
-
-        let (repo_id, download_artifacts, primary_artifact_id) =
-            self.resolve_model_download_artifacts(&model).await?;
-        let filename = primary_artifact_id
-            .as_ref()
-            .and_then(|artifact_id| download_artifacts.get(artifact_id))
-            .cloned()
-            .or_else(|| model.spec.filename.clone())
-            .ok_or_else(|| {
-                AppCoreError::BadRequest(format!(
-                    "model {model_id} spec is missing filename required for download"
-                ))
-            })?;
-        let download_key = model_download_source_key_from_parts(&model_id, &repo_id, &filename)
-            .ok_or_else(|| {
-                AppCoreError::BadRequest(format!(
-                    "model {model_id} spec is missing repo_id or filename required for download"
-                ))
-            })?;
+        let download_preference =
+            self.model_state.pmid().model_download_source_preference().await?;
+        let download_plan = self.resolve_model_download_plan(&model, download_preference).await?;
+        let download_key = download_plan.task_key.clone();
 
         self.model_state.store().reconcile_model_downloads().await?;
         if let Some(existing) = self
             .model_state
             .store()
-            .get_active_model_download_for_source(
-                &download_key.model_id,
-                &download_key.repo_id,
-                &download_key.filename,
-            )
+            .get_active_model_download_for_source(&download_key.model_id, &download_key.source_key)
             .await?
         {
             info!(
@@ -796,12 +794,8 @@ impl ModelService {
         let input_data = serde_json::to_string(&ModelDownloadTaskInput {
             model_id: model.id,
             backend_id: canonical_backend_id,
-            repo_id: repo_id.clone(),
-            filename: filename.clone(),
-            hub_provider: model.spec.hub_provider.clone(),
             model_cache_dir: configured_model_cache_dir,
-            artifacts: download_artifacts.clone(),
-            primary_artifact_id: primary_artifact_id.clone(),
+            candidates: download_plan.candidates.clone(),
         })
         .map_err(|error| {
             AppCoreError::Internal(format!(
@@ -834,8 +828,10 @@ impl ModelService {
                 ModelDownloadRecord {
                     task_id: operation_id.clone(),
                     model_id: model_id.clone(),
+                    source_key: download_key.source_key.clone(),
                     repo_id: download_key.repo_id.clone(),
                     filename: download_key.filename.clone(),
+                    hub_provider: download_key.hub_provider.clone(),
                     status: TaskStatus::Pending,
                     error_msg: None,
                     created_at: now,
@@ -852,8 +848,7 @@ impl ModelService {
                     .store()
                     .get_active_model_download_for_source(
                         &download_key.model_id,
-                        &download_key.repo_id,
-                        &download_key.filename,
+                        &download_key.source_key,
                     )
                     .await?
                 {
@@ -904,158 +899,187 @@ impl ModelService {
                 };
 
                 let model_id = input.model_id.trim().to_owned();
-                let repo_id = input.repo_id.trim().to_owned();
-                let filename = input.filename.trim().to_owned();
-                let hub_provider = input
-                    .hub_provider
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|value| !value.is_empty())
-                    .map(str::to_owned);
                 let model_cache_dir = input
                     .model_cache_dir
                     .as_deref()
                     .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .map(str::to_owned);
-                let download_artifacts = if input.artifacts.is_empty() {
-                    let mut artifacts = BTreeMap::new();
-                    artifacts.insert("model".to_owned(), filename.clone());
-                    artifacts
-                } else {
-                    input.artifacts
-                };
-                let primary_artifact_id =
-                    input.primary_artifact_id.or_else(|| primary_artifact_key(&download_artifacts));
+                let download_candidates = input.candidates;
 
-                if model_id.is_empty() || repo_id.is_empty() || filename.is_empty() {
-                    warn!(task_id = %operation_id, "model_download task is missing model_id, repo_id, or filename");
+                if model_id.is_empty() || download_candidates.is_empty() {
+                    warn!(task_id = %operation_id, "model_download task is missing model_id or candidates");
                     mark_model_download_failed(
                         &operation,
                         &store,
                         &operation_id,
-                        "missing model_id, repo_id, or filename in stored input_data",
+                        "missing model_id or candidates in stored input_data",
                     )
                     .await;
                     return;
                 }
 
-                let result = async {
-                    let client =
-                        build_hub_client(model_cache_dir.as_deref(), hub_provider.as_deref())
-                            .map_err(|error| error.to_string())?;
-                    let mut materialized_artifacts = BTreeMap::new();
-                    let progress: Arc<dyn DownloadProgress> = Arc::new(
-                        ModelDownloadProgressReporter::new(
-                            operation_id.clone(),
-                            Arc::clone(&store),
-                            &download_artifacts,
-                        ),
-                    );
+                let mut attempt_errors = Vec::new();
+                let mut successful_download: Option<(
+                    String,
+                    BTreeMap<String, String>,
+                    SelectedModelDownloadSource,
+                )> = None;
 
-                    for (artifact_id, artifact_file) in &download_artifacts {
-                        let path = client
-                            .download_file(&repo_id, artifact_file, Some(Arc::clone(&progress)))
-                            .await
-                            .map_err(|error| format!("hub download failed for {artifact_file}: {error}"))?;
-                        materialized_artifacts
-                            .insert(artifact_id.clone(), path.to_string_lossy().into_owned());
+                for candidate in download_candidates {
+                    let repo_id = candidate.repo_id.trim().to_owned();
+                    let filename = candidate.filename.trim().to_owned();
+                    let hub_provider = candidate
+                        .hub_provider
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|value| !value.is_empty())
+                        .map(str::to_owned);
+                    let download_artifacts = if candidate.artifacts.is_empty() {
+                        let mut artifacts = BTreeMap::new();
+                        artifacts.insert("model".to_owned(), filename.clone());
+                        artifacts
+                    } else {
+                        candidate.artifacts
+                    };
+                    let primary_artifact_id = candidate
+                        .primary_artifact_id
+                        .or_else(|| primary_artifact_key(&download_artifacts));
+
+                    if repo_id.is_empty() || filename.is_empty() {
+                        attempt_errors.push(format!(
+                            "{}: candidate is missing repo_id or filename",
+                            candidate.source_key
+                        ));
+                        continue;
                     }
 
-                    let local_path = primary_artifact_id
-                        .as_ref()
-                        .and_then(|artifact_id| materialized_artifacts.get(artifact_id))
-                        .cloned()
-                        .or_else(|| materialized_artifacts.values().next().cloned())
-                        .ok_or_else(|| "hub download produced no local artifacts".to_owned())?;
+                    let attempt_result = async {
+                        let client =
+                            build_hub_client(model_cache_dir.as_deref(), hub_provider.as_deref())
+                                .map_err(|error| error.to_string())?;
+                        let mut materialized_artifacts = BTreeMap::new();
+                        let progress: Arc<dyn DownloadProgress> = Arc::new(
+                            ModelDownloadProgressReporter::new(
+                                operation_id.clone(),
+                                Arc::clone(&store),
+                                &download_artifacts,
+                            ),
+                        );
 
-                    Ok::<(String, BTreeMap<String, String>), String>((local_path, materialized_artifacts))
-                }
-                .await;
-
-                match result {
-                    Ok((local_path, materialized_artifacts)) => {
-                        if let Err(error) = store
-                            .update_model_local_path(&model_id, &local_path, "ready")
-                            .await
-                        {
-                            warn!(task_id = %operation_id, error = %error, "failed to persist downloaded model path");
-                            let message =
-                                format!("downloaded file but failed to persist path: {error}");
-                            mark_model_download_failed(&operation, &store, &operation_id, &message)
-                                .await;
-                            return;
-                        }
-
-                        let updated_record = match store.get_model(&model_id).await {
-                            Ok(Some(record)) => record,
-                            Ok(None) => {
-                                let message = format!(
-                                    "downloaded file but model {model_id} no longer exists after update"
-                                );
-                                mark_model_download_failed(
-                                    &operation,
-                                    &store,
-                                    &operation_id,
-                                    &message,
-                                )
-                                .await;
-                                return;
-                            }
-                            Err(error) => {
-                                let message = format!(
-                                    "downloaded file but failed to reload model {model_id}: {error}"
-                                );
-                                mark_model_download_failed(
-                                    &operation,
-                                    &store,
-                                    &operation_id,
-                                    &message,
-                                )
-                                .await;
-                                return;
-                            }
-                        };
-
-                        if let Err(error) = sync_model_pack_record(
-                            &model_config_dir,
-                            updated_record,
-                            Some(materialized_artifacts),
-                        )
-                        {
-                            warn!(task_id = %operation_id, error = %error, "failed to sync downloaded model pack");
-                            let message =
-                                format!("downloaded file but failed to sync model pack: {error}");
-                            mark_model_download_failed(&operation, &store, &operation_id, &message)
-                                .await;
-                            return;
-                        }
-
-                        auto_unload
-                            .invalidate_model_replay(
-                                &model_id,
-                                "model download updated catalog local_path",
-                            )
-                            .await;
-
-                        let result_json =
-                            serde_json::json!({ "local_path": local_path }).to_string();
-                        if let Err(db_error) = operation.mark_succeeded(&result_json).await {
-                            warn!(task_id = %operation_id, error = %db_error, "failed to persist model download success");
-                        }
-                        if let Err(error) =
-                            persist_model_download_status(&store, &operation_id, TaskStatus::Succeeded, None)
+                        for (artifact_id, artifact_file) in &download_artifacts {
+                            let path = client
+                                .download_file(&repo_id, artifact_file, Some(Arc::clone(&progress)))
                                 .await
-                        {
-                            warn!(task_id = %operation_id, error = %error, "failed to persist model download success status");
+                                .map_err(|error| {
+                                    format!("hub download failed for {artifact_file}: {error}")
+                                })?;
+                            materialized_artifacts
+                                .insert(artifact_id.clone(), path.to_string_lossy().into_owned());
                         }
-                        info!(task_id = %operation_id, local_path = %local_path, "model download succeeded");
+
+                        let local_path = primary_artifact_id
+                            .as_ref()
+                            .and_then(|artifact_id| materialized_artifacts.get(artifact_id))
+                            .cloned()
+                            .or_else(|| materialized_artifacts.values().next().cloned())
+                            .ok_or_else(|| "hub download produced no local artifacts".to_owned())?;
+
+                        Ok::<(String, BTreeMap<String, String>), String>((
+                            local_path,
+                            materialized_artifacts,
+                        ))
+                    }
+                    .await;
+
+                    match attempt_result {
+                        Ok((local_path, materialized_artifacts)) => {
+                            successful_download = Some((
+                                local_path,
+                                materialized_artifacts,
+                                SelectedModelDownloadSource {
+                                    source_key: candidate.source_key,
+                                    repo_id,
+                                    filename,
+                                    hub_provider,
+                                },
+                            ));
+                            break;
+                        }
+                        Err(error) => {
+                            attempt_errors.push(format!("{}: {error}", candidate.source_key));
+                        }
+                    }
+                }
+
+                let Some((local_path, materialized_artifacts, selected_source)) = successful_download
+                else {
+                    let error = if attempt_errors.is_empty() {
+                        "model download failed without a candidate attempt".to_owned()
+                    } else {
+                        attempt_errors.join(" | ")
+                    };
+                    warn!(task_id = %operation_id, error = %error, "model download failed");
+                    mark_model_download_failed(&operation, &store, &operation_id, &error).await;
+                    return;
+                };
+
+                if let Err(error) = store
+                    .update_model_local_path(&model_id, &local_path, "ready")
+                    .await
+                {
+                    warn!(task_id = %operation_id, error = %error, "failed to persist downloaded model path");
+                    let message = format!("downloaded file but failed to persist path: {error}");
+                    mark_model_download_failed(&operation, &store, &operation_id, &message).await;
+                    return;
+                }
+
+                let updated_record = match store.get_model(&model_id).await {
+                    Ok(Some(record)) => record,
+                    Ok(None) => {
+                        let message = format!(
+                            "downloaded file but model {model_id} no longer exists after update"
+                        );
+                        mark_model_download_failed(&operation, &store, &operation_id, &message)
+                            .await;
+                        return;
                     }
                     Err(error) => {
-                        warn!(task_id = %operation_id, error = %error, "model download failed");
-                        mark_model_download_failed(&operation, &store, &operation_id, &error).await;
+                        let message =
+                            format!("downloaded file but failed to reload model {model_id}: {error}");
+                        mark_model_download_failed(&operation, &store, &operation_id, &message)
+                            .await;
+                        return;
                     }
+                };
+
+                if let Err(error) = sync_model_pack_record(
+                    &model_config_dir,
+                    updated_record,
+                    Some(materialized_artifacts),
+                    Some(selected_source),
+                ) {
+                    warn!(task_id = %operation_id, error = %error, "failed to sync downloaded model pack");
+                    let message = format!("downloaded file but failed to sync model pack: {error}");
+                    mark_model_download_failed(&operation, &store, &operation_id, &message).await;
+                    return;
                 }
+
+                auto_unload
+                    .invalidate_model_replay(&model_id, "model download updated catalog local_path")
+                    .await;
+
+                let result_json = serde_json::json!({ "local_path": local_path }).to_string();
+                if let Err(db_error) = operation.mark_succeeded(&result_json).await {
+                    warn!(task_id = %operation_id, error = %db_error, "failed to persist model download success");
+                }
+                if let Err(error) =
+                    persist_model_download_status(&store, &operation_id, TaskStatus::Succeeded, None)
+                        .await
+                {
+                    warn!(task_id = %operation_id, error = %error, "failed to persist model download success status");
+                }
+                info!(task_id = %operation_id, local_path = %local_path, "model download succeeded");
             });
 
         info!(
@@ -1068,28 +1092,73 @@ impl ModelService {
         Ok(AcceptedOperation { operation_id })
     }
 
-    async fn resolve_model_download_artifacts(
+    async fn resolve_model_download_plan(
         &self,
         model: &UnifiedModel,
-    ) -> Result<(String, BTreeMap<String, String>, Option<String>), AppCoreError> {
-        let repo_id = model.spec.repo_id.clone().ok_or_else(|| {
+        preference: ModelDownloadSourcePreference,
+    ) -> Result<ResolvedModelDownloadPlan, AppCoreError> {
+        let mut candidates = self
+            .resolve_model_download_plan_from_pack(model, preference)
+            .await?
+            .unwrap_or_default();
+
+        if candidates.is_empty() {
+            candidates.push(build_download_task_candidate(
+                &model.id,
+                model.spec.repo_id.clone().ok_or_else(|| {
+                    AppCoreError::BadRequest(format!(
+                        "model {} spec is missing repo_id required for download",
+                        model.id
+                    ))
+                })?,
+                model.spec.filename.clone().ok_or_else(|| {
+                    AppCoreError::BadRequest(format!(
+                        "model {} spec is missing filename required for download",
+                        model.id
+                    ))
+                })?,
+                effective_hub_provider_for_model_spec(
+                    model.spec.hub_provider.as_deref(),
+                    preference,
+                )?,
+                BTreeMap::from([(
+                    "model".to_owned(),
+                    model.spec.filename.clone().expect("filename checked above"),
+                )]),
+                Some("model".to_owned()),
+            )?);
+        }
+
+        let task_candidate = candidates.first().cloned().ok_or_else(|| {
             AppCoreError::BadRequest(format!(
-                "model {} spec is missing repo_id required for download",
+                "model {} does not expose any downloadable source candidates",
                 model.id
             ))
         })?;
-        let filename = model.spec.filename.clone().ok_or_else(|| {
+        let task_key = model_download_source_key_from_parts(
+            &model.id,
+            task_candidate.hub_provider.as_deref(),
+            &task_candidate.repo_id,
+            &task_candidate.filename,
+        )
+        .ok_or_else(|| {
             AppCoreError::BadRequest(format!(
-                "model {} spec is missing filename required for download",
+                "model {} download candidate is missing repo_id or filename",
                 model.id
             ))
         })?;
 
+        Ok(ResolvedModelDownloadPlan { task_key, candidates })
+    }
+
+    async fn resolve_model_download_plan_from_pack(
+        &self,
+        model: &UnifiedModel,
+        preference: ModelDownloadSourcePreference,
+    ) -> Result<Option<Vec<ModelDownloadTaskCandidate>>, AppCoreError> {
         let pack_path = model_packs::model_pack_file_path(self.model_config_dir(), &model.id);
         if !pack_path.exists() {
-            let mut artifacts = BTreeMap::new();
-            artifacts.insert("model".to_owned(), filename);
-            return Ok((repo_id, artifacts, Some("model".to_owned())));
+            return Ok(None);
         }
 
         let context = self.load_model_pack_context(&model.id)?;
@@ -1101,6 +1170,22 @@ impl ModelService {
                 true,
             )
             .await?;
+
+        let candidates = selection
+            .selected_preset
+            .variant
+            .effective_sources
+            .iter()
+            .filter_map(|candidate| {
+                pack_source_candidate_to_download_task_candidate(&model.id, candidate, preference)
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if !candidates.is_empty() {
+            return Ok(Some(candidates));
+        }
+
         let source = match context.resolved.compile_runtime_bridge(&selection.selected_preset) {
             Ok(bridge) => bridge.model_spec.source,
             Err(slab_model_pack::ModelPackError::MissingRuntimeCapability)
@@ -1118,21 +1203,39 @@ impl ModelService {
                 )));
             }
         };
-        let source = materialized_model_source(&source, context.persisted.as_ref());
 
-        let ModelSource::HuggingFace { repo_id: source_repo_id, files, .. } = source else {
-            let mut artifacts = BTreeMap::new();
-            artifacts.insert("model".to_owned(), filename);
-            return Ok((repo_id, artifacts, Some("model".to_owned())));
+        let source = match source {
+            ModelSource::HuggingFace { repo_id, files, .. } => {
+                let artifacts = files
+                    .into_iter()
+                    .map(|(artifact_id, path)| (artifact_id, path.to_string_lossy().into_owned()))
+                    .collect::<BTreeMap<_, _>>();
+                let primary_artifact_id = primary_artifact_key(&artifacts);
+                let filename = primary_artifact_id
+                    .as_ref()
+                    .and_then(|artifact_id| artifacts.get(artifact_id))
+                    .cloned()
+                    .or_else(|| artifacts.values().next().cloned())
+                    .ok_or_else(|| {
+                        AppCoreError::BadRequest(format!(
+                            "model {} resolved download plan is missing a primary artifact",
+                            model.id
+                        ))
+                    })?;
+
+                Some(build_download_task_candidate(
+                    &model.id,
+                    repo_id,
+                    filename,
+                    effective_hub_provider_for_model_spec(None, preference)?,
+                    artifacts,
+                    primary_artifact_id,
+                )?)
+            }
+            _ => None,
         };
 
-        let artifacts = files
-            .into_iter()
-            .map(|(artifact_id, path)| (artifact_id, path.to_string_lossy().into_owned()))
-            .collect::<BTreeMap<_, _>>();
-        let primary_artifact_id = primary_artifact_key(&artifacts);
-
-        Ok((source_repo_id, artifacts, primary_artifact_id))
+        Ok(source.map(|candidate| vec![candidate]))
     }
 
     fn model_config_dir(&self) -> &std::path::Path {
@@ -1166,7 +1269,7 @@ impl ModelService {
     ) -> Result<(CreateModelCommand, Option<ModelConfigStateRecord>), AppCoreError> {
         let context = self.load_model_pack_context(id)?;
         if matches!(
-            context.resolved.manifest.source.as_ref(),
+            context.resolved.manifest.sources.first().map(|candidate| &candidate.source),
             Some(slab_model_pack::PackSource::Cloud { .. })
         ) {
             let command = model_packs::build_model_command_from_pack(&context.path)?;
@@ -2018,6 +2121,115 @@ pub(crate) async fn list_chat_models_from_state(
     Ok(items)
 }
 
+fn pack_source_candidate_to_download_task_candidate(
+    model_id: &str,
+    candidate: &slab_model_pack::PackSourceCandidate,
+    preference: ModelDownloadSourcePreference,
+) -> Result<Option<ModelDownloadTaskCandidate>, AppCoreError> {
+    let slab_model_pack::PackSource::HuggingFace { repo_id, files, .. } = &candidate.source else {
+        return Ok(None);
+    };
+
+    let Some(hub_provider) =
+        effective_hub_provider_for_pack_candidate(candidate.hub_provider, preference)
+    else {
+        return Ok(None);
+    };
+
+    let artifacts =
+        files.iter().map(|file| (file.id.clone(), file.path.clone())).collect::<BTreeMap<_, _>>();
+    let primary_artifact_id = primary_artifact_key(&artifacts);
+    let filename = primary_artifact_id
+        .as_ref()
+        .and_then(|artifact_id| artifacts.get(artifact_id))
+        .cloned()
+        .or_else(|| artifacts.values().next().cloned())
+        .ok_or_else(|| {
+            AppCoreError::BadRequest(format!(
+                "model {model_id} pack source candidate is missing downloadable files"
+            ))
+        })?;
+
+    Ok(Some(build_download_task_candidate(
+        model_id,
+        repo_id.clone(),
+        filename,
+        hub_provider,
+        artifacts,
+        primary_artifact_id,
+    )?))
+}
+
+fn build_download_task_candidate(
+    model_id: &str,
+    repo_id: String,
+    filename: String,
+    hub_provider: Option<String>,
+    artifacts: BTreeMap<String, String>,
+    primary_artifact_id: Option<String>,
+) -> Result<ModelDownloadTaskCandidate, AppCoreError> {
+    let source_key = model_download_source_key_from_parts(
+        model_id,
+        hub_provider.as_deref(),
+        &repo_id,
+        &filename,
+    )
+    .ok_or_else(|| {
+        AppCoreError::BadRequest(format!(
+            "model {model_id} download candidate is missing repo_id or filename"
+        ))
+    })?;
+
+    Ok(ModelDownloadTaskCandidate {
+        source_key: source_key.source_key,
+        repo_id,
+        filename,
+        hub_provider,
+        artifacts,
+        primary_artifact_id,
+    })
+}
+
+fn effective_hub_provider_for_model_spec(
+    hub_provider: Option<&str>,
+    preference: ModelDownloadSourcePreference,
+) -> Result<Option<String>, AppCoreError> {
+    match preference {
+        ModelDownloadSourcePreference::Auto => {
+            let (_, canonical_hub_provider) = normalized_hub_provider_preference(hub_provider)?;
+            Ok(canonical_hub_provider)
+        }
+        ModelDownloadSourcePreference::HuggingFace => Ok(Some("hf_hub".to_owned())),
+        ModelDownloadSourcePreference::ModelScope => Ok(Some("models_cat".to_owned())),
+    }
+}
+
+fn effective_hub_provider_for_pack_candidate(
+    candidate_hub_provider: Option<slab_model_pack::PackHubProvider>,
+    preference: ModelDownloadSourcePreference,
+) -> Option<Option<String>> {
+    match preference {
+        ModelDownloadSourcePreference::Auto => {
+            Some(candidate_hub_provider.map(pack_hub_provider_to_internal).map(str::to_owned))
+        }
+        ModelDownloadSourcePreference::HuggingFace => {
+            (!matches!(candidate_hub_provider, Some(slab_model_pack::PackHubProvider::ModelScope)))
+                .then_some(Some("hf_hub".to_owned()))
+        }
+        ModelDownloadSourcePreference::ModelScope => {
+            (!matches!(candidate_hub_provider, Some(slab_model_pack::PackHubProvider::HuggingFace)))
+                .then_some(Some("models_cat".to_owned()))
+        }
+    }
+}
+
+fn pack_hub_provider_to_internal(provider: slab_model_pack::PackHubProvider) -> &'static str {
+    match provider {
+        slab_model_pack::PackHubProvider::HuggingFace => "hf_hub",
+        slab_model_pack::PackHubProvider::ModelScope => "models_cat",
+    }
+}
+
 async fn load_models_from_state(
     state: &ModelState,
     query: ListModelsFilter,
@@ -2025,7 +2237,7 @@ async fn load_models_from_state(
     state.store().reconcile_model_downloads().await?;
 
     let records = state.store().list_models().await?;
-    let latest_downloads = load_latest_model_downloads_by_source(state).await?;
+    let download_status = load_model_download_status_index(state).await?;
     let requested_capability = query.capability;
     let models = records
         .into_iter()
@@ -2033,7 +2245,7 @@ async fn load_models_from_state(
             record
                 .try_into()
                 .map(|mut model: UnifiedModel| {
-                    model.status = effective_model_status(&model, &latest_downloads);
+                    model.status = effective_model_status(&model, &download_status);
                     model
                 })
                 .map_err(|error: String| {
@@ -2048,49 +2260,71 @@ async fn load_models_from_state(
     Ok(models)
 }
 
-async fn load_latest_model_downloads_by_source(
+#[derive(Default)]
+struct ModelDownloadStatusIndex {
+    latest_by_source: HashMap<ModelDownloadSourceKey, ModelDownloadRecord>,
+    latest_by_model: HashMap<String, ModelDownloadRecord>,
+}
+
+async fn load_model_download_status_index(
     state: &ModelState,
-) -> Result<HashMap<ModelDownloadSourceKey, ModelDownloadRecord>, AppCoreError> {
-    let mut latest = HashMap::new();
+) -> Result<ModelDownloadStatusIndex, AppCoreError> {
+    let mut index = ModelDownloadStatusIndex::default();
 
     for download in state.store().list_model_downloads().await? {
         let Some(key) = model_download_source_key_from_parts(
             &download.model_id,
+            download.hub_provider.as_deref(),
             &download.repo_id,
             &download.filename,
         ) else {
             continue;
         };
 
-        latest.entry(key).or_insert(download);
+        index.latest_by_source.entry(key).or_insert_with(|| download.clone());
+        index.latest_by_model.entry(download.model_id.clone()).or_insert(download);
     }
 
-    Ok(latest)
+    Ok(index)
 }
 
 fn effective_model_status(
     model: &UnifiedModel,
-    latest_downloads: &HashMap<ModelDownloadSourceKey, ModelDownloadRecord>,
+    download_status: &ModelDownloadStatusIndex,
 ) -> UnifiedModelStatus {
     if model.kind != UnifiedModelKind::Local {
         return model.status.clone();
     }
 
     let base_status = normalized_local_model_status(model);
-    let Some(source_key) = model_download_source_key(model) else {
-        return base_status;
-    };
 
-    let Some(download) = latest_downloads.get(&source_key) else {
-        return base_status;
-    };
+    if let Some(download) = download_status.latest_by_model.get(&model.id) {
+        if matches!(download.status, TaskStatus::Pending | TaskStatus::Running) {
+            return UnifiedModelStatus::Downloading;
+        }
+    }
 
-    match download.status {
-        TaskStatus::Pending | TaskStatus::Running => UnifiedModelStatus::Downloading,
-        TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Interrupted => {
+    if base_status == UnifiedModelStatus::Ready {
+        return UnifiedModelStatus::Ready;
+    }
+
+    if let Some(source_key) = model_download_source_key(model)
+        && let Some(download) = download_status.latest_by_source.get(&source_key)
+    {
+        return match download.status {
+            TaskStatus::Pending | TaskStatus::Running => UnifiedModelStatus::Downloading,
+            TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Interrupted => {
+                UnifiedModelStatus::Error
+            }
+            TaskStatus::Succeeded => base_status,
+        };
+    }
+
+    match download_status.latest_by_model.get(&model.id).map(|download| download.status) {
+        Some(TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Interrupted) => {
             UnifiedModelStatus::Error
         }
-        TaskStatus::Succeeded => base_status,
+        _ => base_status,
     }
 }
 
@@ -2108,6 +2342,7 @@ fn normalized_local_model_status(model: &UnifiedModel) -> UnifiedModelStatus {
 fn model_download_source_key(model: &UnifiedModel) -> Option<ModelDownloadSourceKey> {
     model_download_source_key_from_parts(
         &model.id,
+        model.spec.hub_provider.as_deref(),
         model.spec.repo_id.as_deref().unwrap_or_default(),
         model.spec.filename.as_deref().unwrap_or_default(),
     )
@@ -2115,6 +2350,7 @@ fn model_download_source_key(model: &UnifiedModel) -> Option<ModelDownloadSource
 
 fn model_download_source_key_from_parts(
     model_id: &str,
+    hub_provider: Option<&str>,
     repo_id: &str,
     filename: &str,
 ) -> Option<ModelDownloadSourceKey> {
@@ -2127,9 +2363,35 @@ fn model_download_source_key_from_parts(
 
     Some(ModelDownloadSourceKey {
         model_id: model_id.to_owned(),
+        source_key: format!(
+            "{}::{}::{}",
+            source_key_hub_provider_segment(hub_provider),
+            repo_id,
+            filename
+        ),
         repo_id: repo_id.to_owned(),
         filename: filename.to_owned(),
+        hub_provider: normalized_source_key_hub_provider(hub_provider),
     })
+}
+
+fn normalized_source_key_hub_provider(hub_provider: Option<&str>) -> Option<String> {
+    hub_provider.map(str::trim).filter(|value| !value.is_empty()).map(|value| {
+        match value.to_ascii_lowercase().replace('-', "_").as_str() {
+            "hf" | "hf_hub" | "huggingface" | "hugging_face" => "hf_hub".to_owned(),
+            "models_cat" | "modelscope" | "model_scope" => "models_cat".to_owned(),
+            other => other.to_owned(),
+        }
+    })
+}
+
+fn source_key_hub_provider_segment(hub_provider: Option<&str>) -> String {
+    match normalized_source_key_hub_provider(hub_provider).as_deref() {
+        Some("hf_hub") => "hugging_face".to_owned(),
+        Some("models_cat") => "model_scope".to_owned(),
+        Some(other) => other.to_owned(),
+        None => "auto".to_owned(),
+    }
 }
 
 fn is_model_download_conflict(error: &sqlx::Error) -> bool {
@@ -2387,23 +2649,32 @@ fn sync_model_pack_record(
     config_dir: &std::path::Path,
     record: UnifiedModelRecord,
     materialized_artifacts: Option<BTreeMap<String, String>>,
+    selected_download_source: Option<SelectedModelDownloadSource>,
 ) -> Result<(), AppCoreError> {
     let model: UnifiedModel =
         record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
     let mut config: StoredModelConfig = model.into();
+    let existing_path = model_packs::model_pack_file_path(config_dir, &config.id);
+    let existing = if existing_path.exists() {
+        model_packs::read_persisted_model_config_from_pack(&existing_path)?
+    } else {
+        None
+    };
+
     if let Some(materialized_artifacts) = materialized_artifacts {
         config.materialized_artifacts = materialized_artifacts;
         if config.spec.local_path.is_none() {
             config.spec.local_path = primary_materialized_artifact_path(&config);
         }
-    } else {
-        let existing_path = model_packs::model_pack_file_path(config_dir, &config.id);
-        if existing_path.exists()
-            && let Some(existing) =
-                model_packs::read_persisted_model_config_from_pack(&existing_path)?
-        {
-            config.materialized_artifacts = existing.materialized_artifacts;
-        }
+    } else if let Some(existing) = existing.as_ref() {
+        config.materialized_artifacts = existing.materialized_artifacts.clone();
+    }
+
+    if let Some(selected_download_source) = selected_download_source {
+        apply_selected_download_source_to_spec(&mut config.spec, &selected_download_source);
+        config.selected_download_source = Some(selected_download_source);
+    } else if let Some(existing) = existing {
+        config.selected_download_source = existing.selected_download_source;
     }
 
     model_packs::write_persisted_model_pack_from_config(config_dir, &config)?;
@@ -2631,9 +2902,9 @@ fn build_local_model_command_from_pack_preset(
 }
 
 fn source_preview_from_pack_source(
-    source: Option<&slab_model_pack::PackSource>,
+    source: Option<&slab_model_pack::PackSourceCandidate>,
 ) -> (Option<String>, Option<String>, Option<String>) {
-    match source {
+    match source.map(|candidate| &candidate.source) {
         Some(slab_model_pack::PackSource::HuggingFace { repo_id, files, .. }) => (
             Some(repo_id.clone()),
             files
@@ -2730,9 +3001,22 @@ fn apply_materialized_source_to_bridge(
     bridge.model_spec.source = materialized_model_source(&bridge.model_spec.source, persisted);
 }
 
+fn apply_selected_download_source_to_spec(
+    spec: &mut ModelSpec,
+    selected_download_source: &SelectedModelDownloadSource,
+) {
+    spec.repo_id = Some(selected_download_source.repo_id.clone());
+    spec.filename = Some(selected_download_source.filename.clone());
+    spec.hub_provider = selected_download_source.hub_provider.clone();
+}
+
 fn same_model_download_source(current: &ModelSpec, next: &ModelSpec) -> bool {
     match (current.repo_id.as_deref(), next.repo_id.as_deref()) {
-        (Some(_), Some(_)) => current.repo_id == next.repo_id && current.filename == next.filename,
+        (Some(_), Some(_)) => {
+            current.repo_id == next.repo_id
+                && current.filename == next.filename
+                && current.hub_provider == next.hub_provider
+        }
         (None, None) => current.local_path == next.local_path,
         _ => false,
     }
@@ -2757,6 +3041,19 @@ fn apply_persisted_projection_state(
     command: &mut CreateModelCommand,
     persisted: &StoredModelConfig,
 ) {
+    if let Some(selected_download_source) = persisted.selected_download_source.as_ref() {
+        apply_selected_download_source_to_spec(&mut command.spec, selected_download_source);
+        command.spec.local_path = persisted
+            .spec
+            .local_path
+            .clone()
+            .or_else(|| primary_materialized_artifact_path(persisted));
+        if let Some(status) = persisted.status.clone() {
+            command.status = Some(status);
+        }
+        return;
+    }
+
     if same_model_download_source(&persisted.spec, &command.spec) {
         command.spec.local_path = persisted
             .spec
@@ -2881,7 +3178,7 @@ fn build_model_config_selection_view(
         .values()
         .map(|variant| {
             let (repo_id, filename, local_path) =
-                source_preview_from_pack_source(variant.effective_source.as_ref());
+                source_preview_from_pack_source(variant.effective_sources.first());
             ModelConfigVariantOption {
                 id: variant.document.id.clone(),
                 label: variant.document.label.clone(),
@@ -2987,7 +3284,7 @@ fn build_model_config_field(
 }
 
 fn model_source_origin(selected_preset: &slab_model_pack::ResolvedPreset) -> ModelConfigOrigin {
-    if selected_preset.variant.document.source.is_some()
+    if !selected_preset.variant.document.sources.is_empty()
         || !selected_preset.variant.components.is_empty()
     {
         ModelConfigOrigin::SelectedVariant
@@ -3566,8 +3863,8 @@ mod tests {
     use super::{
         CloudProviderConfig, build_cloud_chat_model_option, build_local_chat_model_option,
         build_local_model_command_from_pack_preset, canonicalize_model_spec,
-        canonicalize_runtime_presets, map_grpc_model_error, normalize_required_text,
-        validate_and_normalize_model_workers,
+        canonicalize_runtime_presets, map_grpc_model_error, map_hub_client_error,
+        normalize_required_text, validate_and_normalize_model_workers,
     };
     use crate::domain::models::{
         ChatModelSource, ManagedModelBackendId, ModelSpec, RuntimePresets, UnifiedModel,
@@ -3575,6 +3872,7 @@ mod tests {
     };
     use crate::error::AppCoreError;
     use chrono::Utc;
+    use slab_hub::HubErrorKind;
     use slab_types::{Capability, DriverHints, ModelFamily, RuntimeBackendId};
     use std::collections::BTreeMap;
 
@@ -3857,16 +4155,18 @@ mod tests {
             pricing: None,
             runtime_presets: None,
             metadata: BTreeMap::new(),
-            source: Some(slab_model_pack::PackSource::HuggingFace {
-                repo_id: "ggml-org/whisper-vad".into(),
-                revision: None,
-                files: vec![slab_model_pack::PackSourceFile {
-                    id: "model".into(),
-                    label: None,
-                    description: None,
-                    path: "ggml-silero-v6.2.0.bin".into(),
-                }],
-            }),
+            sources: vec![slab_model_pack::PackSourceCandidate::new(
+                slab_model_pack::PackSource::HuggingFace {
+                    repo_id: "ggml-org/whisper-vad".into(),
+                    revision: None,
+                    files: vec![slab_model_pack::PackSourceFile {
+                        id: "model".into(),
+                        label: None,
+                        description: None,
+                        path: "ggml-silero-v6.2.0.bin".into(),
+                    }],
+                },
+            )],
             components: Vec::new(),
             variants: Vec::new(),
             adapters: Vec::new(),
@@ -3891,13 +4191,13 @@ mod tests {
                     id: String::new(),
                     label: "Original Model".into(),
                     description: None,
-                    source: None,
+                    sources: Vec::new(),
                     component_ids: Vec::new(),
                     load_config: None,
                     inference_config: None,
                     metadata: BTreeMap::new(),
                 },
-                effective_source: manifest.source.clone(),
+                effective_sources: manifest.sources.clone(),
                 components: BTreeMap::new(),
                 load_config: None,
                 inference_config: None,

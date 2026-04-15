@@ -5,7 +5,18 @@ use crate::infra::db::entities::{ModelDownloadRecord, TaskRecord};
 use chrono::Utc;
 use std::future::Future;
 
-type ModelDownloadRow = (String, String, String, String, String, Option<String>, String, String);
+type ModelDownloadRow = (
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    Option<String>,
+    String,
+    String,
+);
 
 fn parse_rfc3339_or_now(raw: String, field: &'static str) -> chrono::DateTime<Utc> {
     raw.parse().unwrap_or_else(|e: chrono::ParseError| {
@@ -25,8 +36,10 @@ fn row_to_record(
     (
         task_id,
         model_id,
+        source_key,
         repo_id,
         filename,
+        hub_provider,
         status,
         error_msg,
         created_at,
@@ -36,8 +49,10 @@ fn row_to_record(
     ModelDownloadRecord {
         task_id,
         model_id,
+        source_key,
         repo_id,
         filename,
+        hub_provider,
         status: decode_task_status(&status),
         error_msg,
         created_at: parse_rfc3339_or_now(created_at, "created_at"),
@@ -54,8 +69,7 @@ pub trait ModelDownloadStore: Send + Sync + 'static {
     fn get_active_model_download_for_source(
         &self,
         model_id: &str,
-        repo_id: &str,
-        filename: &str,
+        source_key: &str,
     ) -> impl Future<Output = Result<Option<ModelDownloadRecord>, sqlx::Error>> + Send;
     fn list_model_downloads(
         &self,
@@ -99,13 +113,15 @@ impl ModelDownloadStore for AnyStore {
         let download_created_at = download.created_at.to_rfc3339();
         let download_updated_at = download.updated_at.to_rfc3339();
         sqlx::query(
-            "INSERT INTO model_downloads (task_id, model_id, repo_id, filename, status, error_msg, created_at, updated_at) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO model_downloads (task_id, model_id, source_key, repo_id, filename, hub_provider, status, error_msg, created_at, updated_at) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         )
         .bind(&download.task_id)
         .bind(&download.model_id)
+        .bind(&download.source_key)
         .bind(&download.repo_id)
         .bind(&download.filename)
+        .bind(&download.hub_provider)
         .bind(download.status.as_str())
         .bind(&download.error_msg)
         .bind(&download_created_at)
@@ -120,19 +136,17 @@ impl ModelDownloadStore for AnyStore {
     async fn get_active_model_download_for_source(
         &self,
         model_id: &str,
-        repo_id: &str,
-        filename: &str,
+        source_key: &str,
     ) -> Result<Option<ModelDownloadRecord>, sqlx::Error> {
         let row: Option<ModelDownloadRow> = sqlx::query_as(
-            "SELECT task_id, model_id, repo_id, filename, status, error_msg, created_at, updated_at \
+            "SELECT task_id, model_id, source_key, repo_id, filename, hub_provider, status, error_msg, created_at, updated_at \
              FROM model_downloads \
-             WHERE model_id = ?1 AND repo_id = ?2 AND filename = ?3 AND status IN ('pending', 'running') \
+             WHERE model_id = ?1 AND source_key = ?2 AND status IN ('pending', 'running') \
              ORDER BY created_at DESC \
              LIMIT 1",
         )
         .bind(model_id)
-        .bind(repo_id)
-        .bind(filename)
+        .bind(source_key)
         .fetch_optional(&self.pool)
         .await?;
 
@@ -141,7 +155,7 @@ impl ModelDownloadStore for AnyStore {
 
     async fn list_model_downloads(&self) -> Result<Vec<ModelDownloadRecord>, sqlx::Error> {
         let rows: Vec<ModelDownloadRow> = sqlx::query_as(
-            "SELECT task_id, model_id, repo_id, filename, status, error_msg, created_at, updated_at \
+            "SELECT task_id, model_id, source_key, repo_id, filename, hub_provider, status, error_msg, created_at, updated_at \
              FROM model_downloads \
              ORDER BY created_at DESC",
         )
@@ -174,7 +188,7 @@ impl ModelDownloadStore for AnyStore {
 
     async fn reconcile_model_downloads(&self) -> Result<(), sqlx::Error> {
         let rows: Vec<ModelDownloadRow> = sqlx::query_as(
-            "SELECT task_id, model_id, repo_id, filename, status, error_msg, created_at, updated_at \
+            "SELECT task_id, model_id, source_key, repo_id, filename, hub_provider, status, error_msg, created_at, updated_at \
              FROM model_downloads \
              WHERE status IN ('pending', 'running')",
         )
@@ -256,8 +270,10 @@ mod tests {
             "CREATE TABLE IF NOT EXISTS model_downloads (
                 task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
                 model_id TEXT NOT NULL REFERENCES models(id) ON DELETE CASCADE,
+                source_key TEXT NOT NULL,
                 repo_id TEXT NOT NULL,
                 filename TEXT NOT NULL,
+                hub_provider TEXT,
                 status TEXT NOT NULL,
                 error_msg TEXT,
                 created_at TEXT NOT NULL,
@@ -269,7 +285,7 @@ mod tests {
         .expect("create model_downloads table");
         sqlx::query(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_model_downloads_active_source
-             ON model_downloads(model_id, repo_id, filename)
+             ON model_downloads(model_id, source_key)
              WHERE status IN ('pending', 'running')",
         )
         .execute(&store.pool)
@@ -304,8 +320,10 @@ mod tests {
         ModelDownloadRecord {
             task_id: task_id.to_owned(),
             model_id: "model-a".to_owned(),
+            source_key: "hugging_face::repo/model::model.gguf".to_owned(),
             repo_id: "repo/model".to_owned(),
             filename: "model.gguf".to_owned(),
+            hub_provider: Some("hf_hub".to_owned()),
             status: TaskStatus::Pending,
             error_msg: None,
             created_at: now,
@@ -337,7 +355,7 @@ mod tests {
         assert!(message.contains("UNIQUE constraint failed"), "unexpected error: {message}");
 
         let active = store
-            .get_active_model_download_for_source("model-a", "repo/model", "model.gguf")
+            .get_active_model_download_for_source("model-a", "hugging_face::repo/model::model.gguf")
             .await
             .expect("lookup active download")
             .expect("active download exists");
@@ -365,7 +383,10 @@ mod tests {
 
         assert!(
             store
-                .get_active_model_download_for_source("model-a", "repo/model", "model.gguf")
+                .get_active_model_download_for_source(
+                    "model-a",
+                    "hugging_face::repo/model::model.gguf",
+                )
                 .await
                 .expect("lookup active download")
                 .is_none()

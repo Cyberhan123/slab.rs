@@ -31,8 +31,10 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         let (language, prompt, detect_language, vad, decode) =
             build_whisper_inference_options(&req);
         let vad_enabled = vad.as_ref().is_some_and(|value| value.enabled);
-        let decode_configured =
-            decode.is_some() || language.is_some() || prompt.is_some() || detect_language == Some(true);
+        let decode_configured = decode.is_some()
+            || language.is_some()
+            || prompt.is_some()
+            || detect_language == Some(true);
 
         debug!(
             audio_path = %req.path,
@@ -107,18 +109,10 @@ fn build_whisper_inference_options(
     Option<WhisperVadOptions>,
     Option<WhisperDecodeOptions>,
 ) {
-    let language = req
-        .language
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned);
-    let prompt = req
-        .prompt
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned);
+    let language =
+        req.language.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned);
+    let prompt =
+        req.prompt.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned);
     let detect_language = req.detect_language.filter(|value| *value);
     let vad = if let Some(vad) = req.vad.as_ref() {
         if !vad.enabled {

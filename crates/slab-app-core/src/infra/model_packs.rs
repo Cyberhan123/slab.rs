@@ -11,8 +11,8 @@ use slab_model_pack::{
     BackendConfigDocument, BackendConfigScope, ConfigEntryRef, ConfigRef, MANIFEST_FILE_NAME,
     ModelPack, ModelPackCatalogSummary, ModelPackError, ModelPackLoadDefaults, ModelPackManifest,
     ModelPackRuntimeBridge, PACK_EXTENSION, PackDocument, PackModelStatus, PackPricing,
-    PackRuntimePresets, PackSource, PackSourceFile, PresetDocument, PresetEntryRef,
-    VariantDocument,
+    PackRuntimePresets, PackSource, PackSourceCandidate, PackSourceFile, PresetDocument,
+    PresetEntryRef, VariantDocument,
 };
 use slab_types::{DiffusionLoadOptions, DriverHints, ModelFamily, RuntimeBackendId};
 use uuid::Uuid;
@@ -223,7 +223,7 @@ fn build_model_command(
     manifest: &ModelPackManifest,
     resolved: &slab_model_pack::ResolvedModelPack,
 ) -> Result<CreateModelCommand, AppCoreError> {
-    match manifest.source.as_ref() {
+    match manifest.sources.first().map(|candidate| &candidate.source) {
         Some(PackSource::Cloud { provider_id, remote_model_id }) => {
             build_cloud_model_command(manifest, provider_id, remote_model_id)
         }
@@ -405,6 +405,15 @@ fn apply_persisted_projection_state(
     command: &mut CreateModelCommand,
     persisted: &StoredModelConfig,
 ) {
+    if let Some(selected_download_source) = persisted.selected_download_source.as_ref() {
+        apply_selected_download_source_to_spec(&mut command.spec, selected_download_source);
+        command.spec.local_path = persisted.spec.local_path.clone();
+        if let Some(status) = persisted.status.clone() {
+            command.status = Some(status);
+        }
+        return;
+    }
+
     if same_download_source(&persisted.spec, &command.spec) {
         command.spec.local_path = persisted.spec.local_path.clone();
         if let Some(status) = persisted.status.clone() {
@@ -413,9 +422,22 @@ fn apply_persisted_projection_state(
     }
 }
 
+fn apply_selected_download_source_to_spec(
+    spec: &mut ModelSpec,
+    selected_download_source: &crate::domain::models::SelectedModelDownloadSource,
+) {
+    spec.repo_id = Some(selected_download_source.repo_id.clone());
+    spec.filename = Some(selected_download_source.filename.clone());
+    spec.hub_provider = selected_download_source.hub_provider.clone();
+}
+
 fn same_download_source(current: &ModelSpec, next: &ModelSpec) -> bool {
     match (current.repo_id.as_deref(), next.repo_id.as_deref()) {
-        (Some(_), Some(_)) => current.repo_id == next.repo_id && current.filename == next.filename,
+        (Some(_), Some(_)) => {
+            current.repo_id == next.repo_id
+                && current.filename == next.filename
+                && current.hub_provider == next.hub_provider
+        }
         (None, None) => current.local_path == next.local_path,
         _ => false,
     }
@@ -496,7 +518,7 @@ fn build_generated_pack_entries(
             id: GENERATED_VARIANT_ID.to_owned(),
             label: "Default Variant".to_owned(),
             description: Some("Generated from catalog state".to_owned()),
-            source: None,
+            sources: Vec::new(),
             component_ids: Vec::new(),
             load_config: load_config_ref,
             inference_config: inference_config_ref,
@@ -556,7 +578,7 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
             .map(|pricing| PackPricing { input: pricing.input, output: pricing.output }),
         runtime_presets: config.runtime_presets.as_ref().and_then(pack_runtime_presets_from_model),
         metadata,
-        source: build_pack_source_from_config(config),
+        sources: build_pack_sources_from_config(config),
         components: Vec::new(),
         variants: Vec::new(),
         adapters: Vec::new(),
@@ -566,42 +588,67 @@ fn build_generated_manifest(config: &StoredModelConfig) -> ModelPackManifest {
     }
 }
 
-fn build_pack_source_from_config(config: &StoredModelConfig) -> Option<PackSource> {
+fn build_pack_sources_from_config(config: &StoredModelConfig) -> Vec<PackSourceCandidate> {
     if config.kind == UnifiedModelKind::Cloud {
         if let (Some(provider_id), Some(remote_model_id)) =
             (config.spec.provider_id.as_deref(), config.spec.remote_model_id.as_deref())
         {
-            return Some(PackSource::Cloud {
+            return vec![PackSourceCandidate::new(PackSource::Cloud {
                 provider_id: provider_id.to_owned(),
                 remote_model_id: remote_model_id.to_owned(),
-            });
+            })];
         }
 
-        return None;
+        return Vec::new();
     }
 
     if let Some(local_path) =
         config.spec.local_path.as_deref().filter(|path| !is_model_pack_path(path))
     {
-        return Some(PackSource::LocalPath { path: local_path.to_owned() });
+        return vec![PackSourceCandidate::new(PackSource::LocalPath {
+            path: local_path.to_owned(),
+        })];
     }
 
     if let (Some(repo_id), Some(filename)) =
         (config.spec.repo_id.as_deref(), config.spec.filename.as_deref())
     {
-        return Some(PackSource::HuggingFace {
-            repo_id: repo_id.to_owned(),
-            revision: None,
-            files: vec![PackSourceFile {
-                id: "model".to_owned(),
-                label: None,
-                description: None,
-                path: filename.to_owned(),
-            }],
-        });
+        return vec![PackSourceCandidate {
+            source: PackSource::HuggingFace {
+                repo_id: repo_id.to_owned(),
+                revision: None,
+                files: vec![PackSourceFile {
+                    id: "model".to_owned(),
+                    label: None,
+                    description: None,
+                    path: filename.to_owned(),
+                }],
+            },
+            hub_provider: pack_hub_provider_from_spec(config.spec.hub_provider.as_deref()),
+            priority: None,
+        }];
     }
 
-    None
+    Vec::new()
+}
+
+fn pack_hub_provider_from_spec(
+    hub_provider: Option<&str>,
+) -> Option<slab_model_pack::PackHubProvider> {
+    match hub_provider
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(|value| value.to_ascii_lowercase().replace('-', "_"))
+        .as_deref()
+    {
+        Some("hf") | Some("hf_hub") | Some("huggingface") | Some("hugging_face") => {
+            Some(slab_model_pack::PackHubProvider::HuggingFace)
+        }
+        Some("models_cat") | Some("modelscope") | Some("model_scope") => {
+            Some(slab_model_pack::PackHubProvider::ModelScope)
+        }
+        _ => None,
+    }
 }
 
 fn build_generated_backend_hints(backend: Option<ManagedModelBackendId>) -> DriverHints {
@@ -1263,6 +1310,7 @@ mod tests {
             runtime_presets: Some(RuntimePresets { temperature: Some(0.2), top_p: Some(0.8) }),
             materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
+            selected_download_source: None,
         };
 
         let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &config)
@@ -1309,6 +1357,7 @@ mod tests {
             runtime_presets: None,
             materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
+            selected_download_source: None,
         };
 
         let bytes = attach_persisted_state_to_pack_bytes(&base_bytes, &config)
@@ -1358,6 +1407,7 @@ mod tests {
             runtime_presets: Some(RuntimePresets { temperature: Some(0.6), top_p: Some(0.9) }),
             materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
+            selected_download_source: None,
         };
 
         let bytes = build_generated_model_pack_bytes(&config).expect("generate pack");
@@ -1544,6 +1594,7 @@ mod tests {
                 preset_id: Some("default".to_owned()),
                 variant_id: Some("q8_0".to_owned()),
             }),
+            selected_download_source: None,
         };
         let bytes = attach_persisted_state_to_pack_bytes(&bytes, &persisted)
             .expect("attach persisted state");
@@ -1678,23 +1729,25 @@ fn local_source_fields(
     let source = resolved
         .default_preset()
         .and_then(|preset| {
-            preset.variant.effective_source.as_ref().or_else(|| {
-                preset
-                    .variant
-                    .components
-                    .get("model")
-                    .map(|component| &component.document.source)
-                    .or_else(|| {
-                        preset
-                            .variant
-                            .components
-                            .values()
-                            .next()
-                            .map(|component| &component.document.source)
-                    })
-            })
+            preset.variant.effective_sources.first().map(|candidate| &candidate.source).or_else(
+                || {
+                    preset
+                        .variant
+                        .components
+                        .get("model")
+                        .map(|component| &component.document.source)
+                        .or_else(|| {
+                            preset
+                                .variant
+                                .components
+                                .values()
+                                .next()
+                                .map(|component| &component.document.source)
+                        })
+                },
+            )
         })
-        .or(resolved.manifest.source.as_ref());
+        .or_else(|| resolved.manifest.sources.first().map(|candidate| &candidate.source));
 
     match source {
         Some(PackSource::HuggingFace { repo_id, files, .. }) => {

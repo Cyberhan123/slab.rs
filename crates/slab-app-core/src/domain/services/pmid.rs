@@ -5,11 +5,11 @@ use serde_json::Value;
 use slab_types::settings::{
     ChatConfig, CloudProviderConfig, DesktopLaunchProfileConfig, DiffusionConfig,
     DiffusionPathsConfig, DiffusionPerformanceConfig, LaunchBackendConfig, LaunchBackendsConfig,
-    LaunchConfig, LaunchProfilesConfig, PmidConfig, ProviderRegistryEntry, RuntimeConfig,
-    RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig, RuntimeTransportMode, RuntimeWorkerConfig,
-    ServerLaunchProfileConfig, SettingsDocumentV2, SetupBackendReleaseConfig, SetupBackendsConfig,
-    SetupConfig, SetupFfmpegConfig, V2_PMID, provider_registry_json_schema,
-    string_list_json_schema,
+    LaunchConfig, LaunchProfilesConfig, ModelDownloadSourcePreference, PmidConfig,
+    ProviderRegistryEntry, RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig,
+    RuntimeTransportMode, RuntimeWorkerConfig, ServerLaunchProfileConfig, SettingsDocumentV2,
+    SetupBackendReleaseConfig, SetupBackendsConfig, SetupConfig, SetupFfmpegConfig, V2_PMID,
+    provider_registry_json_schema, string_list_json_schema,
 };
 
 use crate::domain::models::{
@@ -156,6 +156,22 @@ impl PmidService {
             SettingsBackend::V2(_) => Err(AppCoreError::NotImplemented(
                 "setup.initialized is stored in config_store for V2 settings".to_owned(),
             )),
+        }
+    }
+
+    pub async fn model_download_source_preference(
+        &self,
+    ) -> Result<ModelDownloadSourcePreference, AppCoreError> {
+        match &self.backend {
+            SettingsBackend::Legacy(_) => Ok(ModelDownloadSourcePreference::Auto),
+            SettingsBackend::V2(settings) => {
+                let value = settings.value(V2_PMID.models.download_source().as_str()).await?;
+                serde_json::from_value(value).map_err(|error| {
+                    AppCoreError::Internal(format!(
+                        "invalid models.download_source setting value: {error}"
+                    ))
+                })
+            }
         }
     }
 }
@@ -772,15 +788,14 @@ fn v2_value_type(path: &str, effective: &Value, default: &Value) -> SettingValue
 
 fn v2_enum_values(path: &str) -> Option<Vec<String>> {
     match path {
-        "general.language" => Some(vec![
-            "auto".to_owned(),
-            "en-US".to_owned(),
-            "zh-CN".to_owned(),
-        ]),
+        "general.language" => Some(vec!["auto".to_owned(), "en-US".to_owned(), "zh-CN".to_owned()]),
         "runtime.mode" => {
             Some(vec!["managed_children".to_owned(), "external_endpoints".to_owned()])
         }
         "runtime.transport" => Some(vec!["http".to_owned(), "ipc".to_owned()]),
+        "models.download_source" => {
+            Some(vec!["auto".to_owned(), "hugging_face".to_owned(), "model_scope".to_owned()])
+        }
         _ => None,
     }
 }
@@ -826,6 +841,7 @@ fn v2_property_label(path: &str) -> String {
         "providers.registry" => "Provider Registry".to_owned(),
         "models.cache_dir" => "Model Cache Directory".to_owned(),
         "models.config_dir" => "Model Config Directory".to_owned(),
+        "models.download_source" => "Model Source".to_owned(),
         "server.address" => "Bind Address".to_owned(),
         "server.admin.token" => "Admin Token".to_owned(),
         "server.cors.allowed_origins" => "Allowed Origins".to_owned(),
@@ -852,6 +868,7 @@ fn v2_property_description(path: &str) -> String {
         "providers.registry" => "Structured list of remote providers, credentials, and request defaults.".to_owned(),
         "models.cache_dir" => "Directory used for cached model artifacts.".to_owned(),
         "models.config_dir" => "Directory scanned for persisted model configuration documents.".to_owned(),
+        "models.download_source" => "Preferred remote source used when downloading model artifacts. Auto follows the pack candidate order.".to_owned(),
         "models.auto_unload.enabled" => "Unload idle models automatically to reclaim memory.".to_owned(),
         "models.auto_unload.idle_minutes" => "Idle timeout in minutes before auto-unload triggers.".to_owned(),
         "server.address" => "Bind address for the slab-server HTTP gateway.".to_owned(),

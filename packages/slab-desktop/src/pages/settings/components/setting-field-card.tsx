@@ -58,13 +58,19 @@ export function SettingFieldCard({
     propertyType === 'string' &&
     Array.isArray(property.schema.enum) &&
     property.schema.enum.length > 0;
+  const isLanguageField = property.pmid === 'general.language';
+  const isModelSourceField = property.pmid === 'models.download_source';
   const displayLabel =
-    property.pmid === 'general.language'
+    isLanguageField
       ? t('pages.settings.language.title')
+      : isModelSourceField
+        ? t('pages.settings.modelSource.title')
       : property.label;
   const displayDescription =
-    property.pmid === 'general.language'
+    isLanguageField
       ? t('pages.settings.language.description')
+      : isModelSourceField
+        ? t('pages.settings.modelSource.description')
       : property.description_md;
 
   const textValue =
@@ -147,8 +153,10 @@ export function SettingFieldCard({
               <SelectContent variant="soft">
                 {property.schema.enum?.map((option) => (
                   <SelectItem key={option} value={option}>
-                    {property.pmid === 'general.language'
+                    {isLanguageField
                       ? t(`pages.settings.language.options.${option}`)
+                      : isModelSourceField
+                        ? t(`pages.settings.modelSource.options.${option}`)
                       : option}
                   </SelectItem>
                 ))}

@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 use crate::error::ModelPackError;
 use crate::manifest::{
     AdapterDocument, BackendConfigDocument, BackendConfigScope, ComponentDocument,
-    ModelPackManifest, PackSource, PresetDocument, VariantDocument,
+    ModelPackManifest, PackSource, PackSourceCandidate, PresetDocument, VariantDocument,
 };
 use crate::pack::ModelPack;
 use crate::refs::ConfigRef;
@@ -38,7 +38,7 @@ pub struct ResolvedAdapter {
 #[derive(Debug, Clone)]
 pub struct ResolvedVariant {
     pub document: VariantDocument,
-    pub effective_source: Option<PackSource>,
+    pub effective_sources: Vec<PackSourceCandidate>,
     pub components: BTreeMap<String, ResolvedComponent>,
     pub load_config: Option<BackendConfigDocument>,
     pub inference_config: Option<BackendConfigDocument>,
@@ -116,8 +116,8 @@ impl ModelPack {
             let document = self.resolve_variant(&entry.config_ref)?.clone();
             let resolved_components =
                 resolve_named_components(components, &document.component_ids)?;
-            let effective_source =
-                resolve_variant_effective_source(self.manifest().source.as_ref(), &document);
+            let effective_sources =
+                resolve_variant_effective_sources(&self.manifest().sources, &document);
             let load_config = document
                 .load_config
                 .as_ref()
@@ -137,7 +137,7 @@ impl ModelPack {
                 entry.id.clone(),
                 ResolvedVariant {
                     document,
-                    effective_source,
+                    effective_sources,
                     components: resolved_components,
                     load_config,
                     inference_config,
@@ -215,14 +215,22 @@ impl ModelPack {
     }
 }
 
-fn resolve_variant_effective_source(
-    manifest_source: Option<&PackSource>,
+fn resolve_variant_effective_sources(
+    manifest_sources: &[PackSourceCandidate],
     document: &VariantDocument,
-) -> Option<PackSource> {
-    document
-        .source
-        .clone()
-        .or_else(|| manifest_source.map(|source| select_variant_source(source, &document.id)))
+) -> Vec<PackSourceCandidate> {
+    let sources = if document.sources.is_empty() {
+        manifest_sources.to_vec()
+    } else {
+        document.sources.clone()
+    };
+
+    ordered_source_candidates(sources)
+        .into_iter()
+        .map(|candidate| {
+            candidate.with_source(select_variant_source(&candidate.source, &document.id))
+        })
+        .collect()
 }
 
 fn select_variant_source(source: &PackSource, variant_id: &str) -> PackSource {
@@ -245,6 +253,17 @@ fn select_variant_source(source: &PackSource, variant_id: &str) -> PackSource {
             .unwrap_or_else(|| source.clone()),
         PackSource::LocalPath { .. } | PackSource::Cloud { .. } => source.clone(),
     }
+}
+
+fn ordered_source_candidates(candidates: Vec<PackSourceCandidate>) -> Vec<PackSourceCandidate> {
+    let mut indexed = candidates.into_iter().enumerate().collect::<Vec<_>>();
+    indexed.sort_by(|(left_index, left), (right_index, right)| {
+        left.priority
+            .unwrap_or(i32::MAX)
+            .cmp(&right.priority.unwrap_or(i32::MAX))
+            .then_with(|| left_index.cmp(right_index))
+    });
+    indexed.into_iter().map(|(_, candidate)| candidate).collect()
 }
 
 fn resolve_named_components(
@@ -281,11 +300,14 @@ fn resolve_manifest_default_variant(
     pack: &ModelPack,
     components: &BTreeMap<String, ResolvedComponent>,
 ) -> ResolvedVariant {
-    let (component_ids, resolved_components, effective_source) = if pack.manifest().source.is_some()
+    let (component_ids, resolved_components, effective_sources) = if !pack
+        .manifest()
+        .sources
+        .is_empty()
     {
-        (Vec::new(), BTreeMap::new(), pack.manifest().source.clone())
+        (Vec::new(), BTreeMap::new(), ordered_source_candidates(pack.manifest().sources.clone()))
     } else {
-        (components.keys().cloned().collect(), components.clone(), None)
+        (components.keys().cloned().collect(), components.clone(), Vec::new())
     };
 
     ResolvedVariant {
@@ -293,13 +315,13 @@ fn resolve_manifest_default_variant(
             id: String::new(),
             label: "Original Model".to_owned(),
             description: Some("Resolved from manifest without an explicit variant".to_owned()),
-            source: None,
+            sources: Vec::new(),
             component_ids,
             load_config: None,
             inference_config: None,
             metadata: BTreeMap::new(),
         },
-        effective_source,
+        effective_sources,
         components: resolved_components,
         load_config: None,
         inference_config: None,
@@ -557,8 +579,8 @@ mod tests {
         let preset = resolved.default_preset().expect("default preset");
 
         assert_eq!(
-            preset.variant.effective_source,
-            Some(PackSource::LocalPath { path: "C:/models/base.gguf".to_owned() })
+            preset.variant.effective_sources.first().map(|candidate| &candidate.source),
+            Some(&PackSource::LocalPath { path: "C:/models/base.gguf".to_owned() })
         );
         assert_eq!(
             preset
@@ -626,8 +648,8 @@ mod tests {
         let preset = resolved.default_preset().expect("default preset");
 
         assert_eq!(
-            preset.variant.effective_source,
-            Some(PackSource::HuggingFace {
+            preset.variant.effective_sources.first().map(|candidate| &candidate.source),
+            Some(&PackSource::HuggingFace {
                 repo_id: "bartowski/Qwen2.5-0.5B-Instruct-GGUF".to_owned(),
                 revision: None,
                 files: vec![crate::manifest::PackSourceFile {
@@ -700,8 +722,8 @@ mod tests {
 
         assert_eq!(preset.document.variant_id.as_deref(), Some("Q8_0"));
         assert_eq!(
-            preset.variant.effective_source,
-            Some(PackSource::HuggingFace {
+            preset.variant.effective_sources.first().map(|candidate| &candidate.source),
+            Some(&PackSource::HuggingFace {
                 repo_id: "bartowski/Qwen2.5-0.5B-Instruct-GGUF".to_owned(),
                 revision: None,
                 files: vec![crate::manifest::PackSourceFile {

@@ -23,7 +23,8 @@ fn collect_files_recursive_inner(root: &Path, files: &mut Vec<PathBuf>) -> Resul
     let entries = fs::read_dir(root)
         .with_context(|| format!("failed to read directory {}", root.display()))?;
     for entry in entries {
-        let entry = entry.with_context(|| format!("failed to read entry under {}", root.display()))?;
+        let entry =
+            entry.with_context(|| format!("failed to read entry under {}", root.display()))?;
         let path = entry.path();
         if path.is_dir() {
             collect_files_recursive_inner(&path, files)?;
@@ -74,7 +75,8 @@ pub fn validate_relative_path(path: &Path) -> Result<()> {
 }
 
 pub fn read_json<T: DeserializeOwned>(path: &Path) -> Result<T> {
-    let file = fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     serde_json::from_reader(BufReader::new(file))
         .with_context(|| format!("failed to parse JSON from {}", path.display()))
 }
@@ -94,7 +96,8 @@ pub fn ensure_parent_dir(path: &Path) -> Result<()> {
 }
 
 pub fn sha256_file(path: &Path) -> Result<String> {
-    let file = fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let file =
+        fs::File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
     let mut reader = BufReader::new(file);
     hash_reader(&mut reader)
 }
@@ -143,10 +146,7 @@ pub fn apply_selected_payload(source_root: &Path, dest_root: &Path) -> Result<()
     let manifest: SelectedPayloadManifest = read_json(&manifest_path)?;
 
     let dest_parent = dest_root.parent().ok_or_else(|| {
-        anyhow!(
-            "destination '{}' does not have a parent directory",
-            dest_root.display()
-        )
+        anyhow!("destination '{}' does not have a parent directory", dest_root.display())
     })?;
     fs::create_dir_all(dest_parent)
         .with_context(|| format!("failed to create directory {}", dest_parent.display()))?;
@@ -158,8 +158,9 @@ pub fn apply_selected_payload(source_root: &Path, dest_root: &Path) -> Result<()
     let staging_root = dest_parent.join(format!("{dest_name}.staging-{}", Uuid::new_v4()));
 
     let result = (|| -> Result<()> {
-        fs::create_dir_all(&staging_root)
-            .with_context(|| format!("failed to create staging directory {}", staging_root.display()))?;
+        fs::create_dir_all(&staging_root).with_context(|| {
+            format!("failed to create staging directory {}", staging_root.display())
+        })?;
 
         for file in &manifest.files {
             let source_relative = Path::new(&file.source_relative_path);

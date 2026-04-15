@@ -391,6 +391,15 @@
       },
       "type": "object"
     },
+    "ModelDownloadSourcePreference": {
+      "description": "Preferred remote source used when downloading model artifacts.",
+      "enum": [
+        "auto",
+        "hugging_face",
+        "model_scope"
+      ],
+      "type": "string"
+    },
     "ModelsConfigV2": {
       "description": "Model storage settings.",
       "properties": {
@@ -414,6 +423,11 @@
             "string",
             "null"
           ]
+        },
+        "download_source": {
+          "$ref": "#/$defs/ModelDownloadSourcePreference",
+          "default": "auto",
+          "description": "Preferred remote source used when downloading model artifacts."
         }
       },
       "type": "object"
@@ -834,7 +848,8 @@
         "auto_unload": {
           "enabled": false,
           "idle_minutes": 10
-        }
+        },
+        "download_source": "auto"
       }
     },
     "providers": {
