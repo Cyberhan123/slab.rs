@@ -16,9 +16,7 @@ provider-huggingface-hub-rust = ["dep:huggingface-hub"]
 
 [dependencies]
 reqwest = { workspace = true }
-tokio = { workspace = true }
 thiserror = { workspace = true }
-walkdir = "2.5.0"
 async-trait = { workspace = true }
 
 hf-hub = { version = "0.5.0", default-features = false, features = ["tokio", "native-tls"], optional = true }

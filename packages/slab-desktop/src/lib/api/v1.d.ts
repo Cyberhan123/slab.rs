@@ -1499,10 +1499,19 @@ export interface components {
             /** Format: int32 */
             num_workers?: number | null;
         };
+        TaskProgressResponse: {
+            current: number;
+            label?: string | null;
+            step?: number | null;
+            step_count?: number | null;
+            total?: number | null;
+            unit?: string | null;
+        };
         TaskResponse: {
             created_at: string;
             error_msg?: string | null;
             id: string;
+            progress?: components["schemas"]["TaskProgressResponse"] | null;
             status: components["schemas"]["TaskStatus"];
             task_type: string;
             updated_at: string;

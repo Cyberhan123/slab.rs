@@ -3,7 +3,7 @@ use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
 use crate::domain::models::{
-    AcceptedOperation, TaskResult, TaskStatus as DomainTaskStatus, TaskView,
+    AcceptedOperation, TaskProgress, TaskResult, TaskStatus as DomainTaskStatus, TaskView,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -51,9 +51,26 @@ pub struct TaskResponse {
     pub id: String,
     pub task_type: String,
     pub status: TaskStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub progress: Option<TaskProgressResponse>,
     pub error_msg: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+pub struct TaskProgressResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub current: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_count: Option<u32>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
@@ -90,9 +107,23 @@ impl From<TaskView> for TaskResponse {
             id: view.id,
             task_type: view.task_type,
             status: view.status.into(),
+            progress: view.progress.map(Into::into),
             error_msg: view.error_msg,
             created_at: view.created_at,
             updated_at: view.updated_at,
+        }
+    }
+}
+
+impl From<TaskProgress> for TaskProgressResponse {
+    fn from(progress: TaskProgress) -> Self {
+        Self {
+            label: progress.label,
+            current: progress.current,
+            total: progress.total,
+            unit: progress.unit,
+            step: progress.step,
+            step_count: progress.step_count,
         }
     }
 }
