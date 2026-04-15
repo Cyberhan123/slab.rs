@@ -134,6 +134,18 @@ pub struct SelectedPayloadFile {
 }
 
 impl PackagedPayloadManifest {
+    pub fn empty(version: impl Into<String>) -> Self {
+        Self {
+            format_version: PACKAGED_PAYLOAD_MANIFEST_VERSION,
+            version: version.into(),
+            packages: Vec::new(),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.packages.is_empty()
+    }
+
     pub fn selected_for(&self, packages: &[RuntimeVariant]) -> Result<SelectedPayloadManifest> {
         let mut files = BTreeMap::new();
         let package_set: BTreeMap<_, _> =
@@ -364,6 +376,15 @@ fn dedupe_payload_files(files: Vec<ResolvedPayloadFile>) -> Result<Vec<ResolvedP
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn empty_manifest_reports_empty_state() {
+        let manifest = PackagedPayloadManifest::empty("0.1.0");
+
+        assert_eq!(manifest.format_version, PACKAGED_PAYLOAD_MANIFEST_VERSION);
+        assert_eq!(manifest.version, "0.1.0");
+        assert!(manifest.is_empty());
+    }
 
     #[test]
     fn selected_gpu_packages_include_base_first() {
