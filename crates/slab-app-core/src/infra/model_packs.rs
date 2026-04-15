@@ -874,6 +874,7 @@ fn map_model_pack_error(error: ModelPackError) -> AppCoreError {
 }
 
 #[cfg(test)]
+#[allow(clippy::items_after_test_module)]
 mod tests {
     use std::collections::BTreeMap;
     use std::io::Write;

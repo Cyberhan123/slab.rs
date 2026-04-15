@@ -2,8 +2,7 @@ use std::path::PathBuf;
 
 use slab_types::runtime::RuntimeModelStatus;
 use slab_types::{
-    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, ModelSource, ModelSpec,
-    RuntimeBackendLoadSpec,
+    GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, ModelSource, ModelSpec, RuntimeBackendLoadSpec,
 };
 
 use super::{BackendKind, RuntimeApplicationError, SharedRuntimeState};
@@ -58,10 +57,10 @@ impl ModelLifecycleService {
 fn build_model_spec(backend: BackendKind, load_spec: &RuntimeBackendLoadSpec) -> ModelSpec {
     let model_path = match load_spec {
         RuntimeBackendLoadSpec::GgmlLlama(GgmlLlamaLoadConfig { model_path, .. })
-        | RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path })
-        | RuntimeBackendLoadSpec::GgmlDiffusion(GgmlDiffusionLoadConfig { model_path, .. }) => {
+        | RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path }) => {
             model_path.clone()
         }
+        RuntimeBackendLoadSpec::GgmlDiffusion(config) => config.model_path.clone(),
         other => other.to_legacy_spec().model_path,
     };
     let mut spec = ModelSpec::new(

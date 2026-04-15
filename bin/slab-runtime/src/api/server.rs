@@ -163,15 +163,15 @@ fn init_tracing(
     let registry = tracing_subscriber::registry().with(env_filter).with(stdout_layer);
 
     if let Some(path) = log_file {
-        if let Some(parent) = path.parent() {
-            if let Err(error) = std::fs::create_dir_all(parent) {
-                eprintln!(
-                    "WARN: failed to create slab-runtime log directory '{}': {error}; continuing without file logging",
-                    parent.display()
-                );
-                registry.init();
-                return Ok(guards);
-            }
+        if let Some(parent) = path.parent()
+            && let Err(error) = std::fs::create_dir_all(parent)
+        {
+            eprintln!(
+                "WARN: failed to create slab-runtime log directory '{}': {error}; continuing without file logging",
+                parent.display()
+            );
+            registry.init();
+            return Ok(guards);
         }
 
         match OpenOptions::new().create(true).append(true).open(path) {

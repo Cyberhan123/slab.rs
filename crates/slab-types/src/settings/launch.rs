@@ -66,21 +66,11 @@ impl Default for LaunchConfig {
 }
 
 /// Per-backend enablement flags used by both server and desktop launch profiles.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct LaunchBackendsConfig {
     pub llama: LaunchBackendConfig,
     pub whisper: LaunchBackendConfig,
     pub diffusion: LaunchBackendConfig,
-}
-
-impl Default for LaunchBackendsConfig {
-    fn default() -> Self {
-        Self {
-            llama: LaunchBackendConfig::default(),
-            whisper: LaunchBackendConfig::default(),
-            diffusion: LaunchBackendConfig::default(),
-        }
-    }
 }
 
 /// Launch settings for a single runtime backend child.
@@ -96,19 +86,10 @@ impl Default for LaunchBackendConfig {
 }
 
 /// Profile-specific launch settings.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct LaunchProfilesConfig {
     pub server: ServerLaunchProfileConfig,
     pub desktop: DesktopLaunchProfileConfig,
-}
-
-impl Default for LaunchProfilesConfig {
-    fn default() -> Self {
-        Self {
-            server: ServerLaunchProfileConfig::default(),
-            desktop: DesktopLaunchProfileConfig::default(),
-        }
-    }
 }
 
 /// Host-specific launch settings for `slab-server`.

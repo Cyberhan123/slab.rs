@@ -31,7 +31,7 @@ use slab_diffusion_sys::{
 #[allow(non_camel_case_types)]
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))]
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))]
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SampleMethod {
     Euler = sample_method_t_EULER_SAMPLE_METHOD,
     EULER_A = sample_method_t_EULER_A_SAMPLE_METHOD,
@@ -47,6 +47,7 @@ pub enum SampleMethod {
     TCD = sample_method_t_TCD_SAMPLE_METHOD,
     RES_MULTISTEP = sample_method_t_RES_MULTISTEP_SAMPLE_METHOD,
     RES_2S = sample_method_t_RES_2S_SAMPLE_METHOD,
+    #[default]
     Unknown = sample_method_t_SAMPLE_METHOD_COUNT,
 }
 
@@ -76,12 +77,6 @@ impl From<sample_method_t> for SampleMethod {
             sample_method_t_RES_2S_SAMPLE_METHOD => SampleMethod::RES_2S,
             _ => SampleMethod::Unknown,
         }
-    }
-}
-
-impl Default for SampleMethod {
-    fn default() -> Self {
-        Self::Unknown
     }
 }
 

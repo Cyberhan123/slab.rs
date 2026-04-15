@@ -328,7 +328,7 @@ pub struct RuntimeSessionsConfig {
 }
 
 /// GGML runtime family configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct GgmlRuntimeFamilyConfig {
     /// Shared install directory for GGML runtime libraries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -345,21 +345,8 @@ pub struct GgmlRuntimeFamilyConfig {
     pub backends: GgmlRuntimeBackendsConfig,
 }
 
-impl Default for GgmlRuntimeFamilyConfig {
-    fn default() -> Self {
-        Self {
-            install_dir: None,
-            source: SourceConfig::default(),
-            logging: LoggingOverrideConfig::default(),
-            capacity: CapacityOverrideConfig::default(),
-            endpoint: EndpointConfig::default(),
-            backends: GgmlRuntimeBackendsConfig::default(),
-        }
-    }
-}
-
 /// GGML leaf backend configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct GgmlRuntimeBackendsConfig {
     #[serde(default)]
     pub llama: LlamaRuntimeLeafConfig,
@@ -367,16 +354,6 @@ pub struct GgmlRuntimeBackendsConfig {
     pub whisper: RuntimeLeafConfig,
     #[serde(default)]
     pub diffusion: RuntimeLeafConfig,
-}
-
-impl Default for GgmlRuntimeBackendsConfig {
-    fn default() -> Self {
-        Self {
-            llama: LlamaRuntimeLeafConfig::default(),
-            whisper: RuntimeLeafConfig::default(),
-            diffusion: RuntimeLeafConfig::default(),
-        }
-    }
 }
 
 /// Shared runtime leaf configuration.
@@ -440,7 +417,7 @@ impl Default for LlamaRuntimeLeafConfig {
 }
 
 /// Single-node runtime family configuration used for candle and onnx.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SingleRuntimeFamilyConfig {
     /// Whether this runtime family is enabled.
     #[serde(default = "default_disabled")]
@@ -456,19 +433,6 @@ pub struct SingleRuntimeFamilyConfig {
     pub capacity: CapacityOverrideConfig,
     #[serde(default)]
     pub endpoint: EndpointConfig,
-}
-
-impl Default for SingleRuntimeFamilyConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            install_dir: None,
-            source: SourceConfig::default(),
-            logging: LoggingOverrideConfig::default(),
-            capacity: CapacityOverrideConfig::default(),
-            endpoint: EndpointConfig::default(),
-        }
-    }
 }
 
 /// Global provider registry configuration.

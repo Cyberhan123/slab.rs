@@ -11,6 +11,12 @@ type NativeLibrary = libloading::Library;
 
 pub trait RuntimeLibrary: Sized {
     /// Load a generated dlopen wrapper type from the resolved shared-library path.
+    ///
+    /// # Safety
+    ///
+    /// Callers must ensure the target library path points to a compatible shared
+    /// library for the requested wrapper type and that any lifetime or threading
+    /// requirements imposed by the loaded symbols are upheld after loading.
     unsafe fn load_from_dir(lib_dir: &Path, path: &Path) -> Result<Self, LibraryLoadError>;
 }
 

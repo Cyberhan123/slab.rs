@@ -107,7 +107,7 @@ fn default_execution_providers() -> Vec<String> {
 pub enum RuntimeBackendLoadSpec {
     GgmlLlama(GgmlLlamaLoadConfig),
     GgmlWhisper(GgmlWhisperLoadConfig),
-    GgmlDiffusion(GgmlDiffusionLoadConfig),
+    GgmlDiffusion(Box<GgmlDiffusionLoadConfig>),
     CandleLlama(CandleLlamaLoadConfig),
     CandleWhisper(CandleWhisperLoadConfig),
     CandleDiffusion(CandleDiffusionLoadConfig),
@@ -156,7 +156,7 @@ impl RuntimeBackendLoadSpec {
             }
             crate::backend::RuntimeBackendId::GgmlDiffusion => {
                 let diffusion = diffusion.unwrap_or_default();
-                Self::GgmlDiffusion(GgmlDiffusionLoadConfig {
+                Self::GgmlDiffusion(Box::new(GgmlDiffusionLoadConfig {
                     model_path,
                     diffusion_model_path: diffusion.diffusion_model_path,
                     vae_path: diffusion.vae_path,
@@ -173,7 +173,7 @@ impl RuntimeBackendLoadSpec {
                     offload_params_to_cpu: diffusion.offload_params_to_cpu,
                     enable_mmap: false,
                     n_threads: None,
-                })
+                }))
             }
             crate::backend::RuntimeBackendId::CandleLlama => {
                 Self::CandleLlama(CandleLlamaLoadConfig {

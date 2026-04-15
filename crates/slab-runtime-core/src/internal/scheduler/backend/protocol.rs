@@ -3,7 +3,7 @@ use std::str::FromStr;
 use tokio::sync::oneshot;
 
 use crate::base::types::Payload;
-pub use crate::base::types::{StreamChunk, StreamHandle};
+pub use crate::base::types::StreamHandle;
 
 /// Typed request route understood by backend workers.
 ///

@@ -308,7 +308,7 @@ fn build_backend_load_spec(
         }
         RuntimeBackendId::GgmlDiffusion => {
             let diffusion = diffusion.unwrap_or_default();
-            Ok(RuntimeBackendLoadSpec::GgmlDiffusion(GgmlDiffusionLoadConfig {
+            Ok(RuntimeBackendLoadSpec::GgmlDiffusion(Box::new(GgmlDiffusionLoadConfig {
                 model_path,
                 diffusion_model_path: diffusion.diffusion_model_path,
                 vae_path: diffusion.vae_path,
@@ -324,7 +324,7 @@ fn build_backend_load_spec(
                 offload_params_to_cpu: diffusion.offload_params_to_cpu,
                 enable_mmap: false,
                 n_threads: None,
-            }))
+            })))
         }
         other => Err(AppCoreError::Internal(format!(
             "unsupported backend for managed model load spec assembly: {}",
@@ -442,15 +442,15 @@ async fn build_selected_model_pack_load_target(
     let (effective_selection, selected_preset, _) =
         pack::resolve_effective_model_pack_selection(&resolved, &explicit_selection)?;
 
-    if state_record.is_none() {
-        if let Some(record) = pack::selection_state_record_for_storage(
+    if state_record.is_none()
+        && let Some(record) = pack::selection_state_record_for_storage(
             model_id,
             &resolved,
             &legacy_selection.unwrap_or_default(),
             &effective_selection,
-        ) {
-            let _ = state.store().upsert_model_config_state(record).await;
-        }
+        )
+    {
+        let _ = state.store().upsert_model_config_state(record).await;
     }
 
     let mut bridge = resolved.compile_runtime_bridge(&selected_preset).map_err(|error| {

@@ -33,7 +33,7 @@ use slab_app_core::runtime_supervisor::{
     RuntimeSupervisorOptions, RuntimeSupervisorStatus,
 };
 
-#[derive(Parser, Debug, Clone)]
+#[derive(Parser, Debug, Clone, Default)]
 #[command(name = "slab-server", version, about = "Slab supervisor and HTTP gateway")]
 struct SupervisorArgs {
     #[arg(long = "database-url")]
@@ -70,30 +70,6 @@ struct SupervisorArgs {
     backend_capacity: Option<usize>,
     #[arg(long = "lib-dir", hide = true)]
     lib_dir: Option<PathBuf>,
-}
-
-impl Default for SupervisorArgs {
-    fn default() -> Self {
-        Self {
-            database_url: None,
-            settings_path: None,
-            model_config_dir: None,
-            log_level: None,
-            log_json: false,
-            log_file: None,
-            shutdown_on_stdin_close: false,
-            gateway_bind: None,
-            whisper_bind: None,
-            llama_bind: None,
-            diffusion_bind: None,
-            include_diffusion: None,
-            runtime_transport: None,
-            runtime_ipc_dir: None,
-            queue_capacity: None,
-            backend_capacity: None,
-            lib_dir: None,
-        }
-    }
 }
 
 impl SupervisorArgs {
@@ -561,27 +537,24 @@ async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow
     let shutdown = shutdown_signal(args.shutdown_on_stdin_close);
     tokio::pin!(shutdown);
 
-    let mut result = Ok(());
-    loop {
-        tokio::select! {
-            _ = &mut shutdown => {
-                info!("supervisor received shutdown signal");
-                break;
-            }
-            gateway_res = &mut gateway_join => {
-                gateway_result_observed = true;
-                result = map_gateway_join_result(gateway_res);
-                if let Err(e) = &result {
-                    error!(
-                        error = %e,
-                        error_chain = %format_error_chain(e),
-                        "HTTP gateway task exited with error"
-                    );
-                }
-                break;
-            }
+    let mut result = tokio::select! {
+        _ = &mut shutdown => {
+            info!("supervisor received shutdown signal");
+            Ok(())
         }
-    }
+        gateway_res = &mut gateway_join => {
+            gateway_result_observed = true;
+            let result = map_gateway_join_result(gateway_res);
+            if let Err(e) = &result {
+                error!(
+                    error = %e,
+                    error_chain = %format_error_chain(e),
+                    "HTTP gateway task exited with error"
+                );
+            }
+            result
+        }
+    };
 
     if let Some(tx) = gateway_shutdown_tx.take() {
         let _ = tx.send(());

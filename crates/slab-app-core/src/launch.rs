@@ -366,12 +366,11 @@ fn resolve_managed_launch_spec_v2(
         if log_dir != runtime_log_dir {
             extra_dirs.insert(log_dir.clone());
         }
-        if transport == RuntimeTransportMode::Ipc {
-            if let Some(dir) = directory_from_ipc_endpoint(&endpoint) {
-                if runtime_ipc_dir.as_ref() != Some(&dir) {
-                    extra_dirs.insert(dir);
-                }
-            }
+        if transport == RuntimeTransportMode::Ipc
+            && let Some(dir) = directory_from_ipc_endpoint(&endpoint)
+            && runtime_ipc_dir.as_ref() != Some(&dir)
+        {
+            extra_dirs.insert(dir);
         }
 
         match backend {
@@ -570,6 +569,7 @@ fn resolve_backend_endpoint(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn resolve_managed_backend_endpoint_v2(
     settings: &SettingsDocumentV2,
     profile: LaunchProfile,

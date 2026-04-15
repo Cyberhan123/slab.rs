@@ -26,11 +26,10 @@ fn main() {
         .dynamic_library_name("WhisperLib")
         .generate();
 
-    let out = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
 
     match bindings {
         Ok(b) => {
-            let out_path = PathBuf::from(env::var("OUT_DIR").unwrap());
             b.write_to_file(out_path.join("bindings.rs")).expect("Couldn't write bindings!");
         }
         Err(e) => {

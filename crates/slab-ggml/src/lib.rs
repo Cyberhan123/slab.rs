@@ -110,7 +110,7 @@ impl GGML {
         if device.is_null() {
             return Err(GGMLError::NullPointer);
         }
-        Ok(GGMLBackendDevice { device: device })
+        Ok(GGMLBackendDevice { device })
     }
 
     pub fn ggml_backend_dev_name(&self, device: GGMLBackendDevice) -> Result<&str, GGMLError> {

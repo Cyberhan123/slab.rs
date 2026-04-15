@@ -221,18 +221,14 @@ async fn streaming_pipeline_returns_stream_handle() {
                 match req {
                     Some(req) => {
                         let (stream_tx, stream_rx) =
-                            mpsc::channel::<crate::internal::scheduler::backend::protocol::StreamChunk>(8);
+                            mpsc::channel::<crate::backend::StreamChunk>(8);
                         let _ = req.reply_tx.send(BackendReply::Stream(stream_rx));
                         for word in ["hello", " ", "world"] {
                             let _ = stream_tx
-                                .send(crate::internal::scheduler::backend::protocol::StreamChunk::Token(
-                                    word.to_owned(),
-                                ))
+                                .send(crate::backend::StreamChunk::Token(word.to_owned()))
                                 .await;
                         }
-                        let _ = stream_tx
-                            .send(crate::internal::scheduler::backend::protocol::StreamChunk::Done)
-                            .await;
+                        let _ = stream_tx.send(crate::backend::StreamChunk::Done).await;
                     }
                     None => break,
                 }
@@ -267,15 +263,13 @@ async fn streaming_pipeline_returns_stream_handle() {
     let mut tokens = String::new();
     while let Some(chunk) = handle.recv().await {
         match chunk {
-            crate::internal::scheduler::backend::protocol::StreamChunk::Token(t) => {
-                tokens.push_str(&t)
-            }
-            crate::internal::scheduler::backend::protocol::StreamChunk::Json(_) => continue,
-            crate::internal::scheduler::backend::protocol::StreamChunk::Done => break,
-            crate::internal::scheduler::backend::protocol::StreamChunk::Error(e) => {
+            crate::backend::StreamChunk::Token(t) => tokens.push_str(&t),
+            crate::backend::StreamChunk::Json(_) => continue,
+            crate::backend::StreamChunk::Done => break,
+            crate::backend::StreamChunk::Error(e) => {
                 panic!("stream error: {e}")
             }
-            crate::internal::scheduler::backend::protocol::StreamChunk::Image(_) => {
+            crate::backend::StreamChunk::Image(_) => {
                 panic!("unexpected image chunk in stream")
             }
         }

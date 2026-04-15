@@ -205,18 +205,17 @@ impl HubClient {
             ));
         }
 
-        if matches!(self.provider_preference, HubProviderPreference::Auto) {
-            if let Some(cached_provider) = self.cached_provider() {
-                if let Some(index) =
-                    providers.iter().position(|provider| *provider == cached_provider)
-                {
-                    let mut providers = providers;
-                    let provider = providers.remove(index);
-                    providers.insert(0, provider);
-                    return Ok(providers);
-                } else {
-                    self.clear_cached_provider();
-                }
+        if matches!(self.provider_preference, HubProviderPreference::Auto)
+            && let Some(cached_provider) = self.cached_provider()
+        {
+            if let Some(index) = providers.iter().position(|provider| *provider == cached_provider)
+            {
+                let mut providers = providers;
+                let provider = providers.remove(index);
+                providers.insert(0, provider);
+                return Ok(providers);
+            } else {
+                self.clear_cached_provider();
             }
         }
 
@@ -224,14 +223,15 @@ impl HubClient {
     }
 
     fn default_enabled_providers(&self) -> Vec<HubProvider> {
-        let mut providers = Vec::new();
-        #[cfg(feature = "provider-hf-hub")]
-        providers.push(HubProvider::HfHub);
-        #[cfg(feature = "provider-models-cat")]
-        providers.push(HubProvider::ModelsCat);
-        #[cfg(feature = "provider-huggingface-hub-rust")]
-        providers.push(HubProvider::HuggingfaceHubRust);
-        providers
+        let providers: &[HubProvider] = &[
+            #[cfg(feature = "provider-hf-hub")]
+            HubProvider::HfHub,
+            #[cfg(feature = "provider-models-cat")]
+            HubProvider::ModelsCat,
+            #[cfg(feature = "provider-huggingface-hub-rust")]
+            HubProvider::HuggingfaceHubRust,
+        ];
+        providers.to_vec()
     }
 
     fn is_provider_enabled(&self, provider: HubProvider) -> bool {

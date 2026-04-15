@@ -78,8 +78,9 @@ use slab_diffusion_sys::{
 
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum RngType {
+    #[default]
     Default = rng_type_t_STD_DEFAULT_RNG,
     Cuda = rng_type_t_CUDA_RNG,
     Cpu = rng_type_t_CPU_RNG,
@@ -89,12 +90,6 @@ pub enum RngType {
 impl From<RngType> for rng_type_t {
     fn from(value: RngType) -> Self {
         value as Self
-    }
-}
-
-impl Default for RngType {
-    fn default() -> Self {
-        Self::Default
     }
 }
 
@@ -141,7 +136,7 @@ use slab_diffusion_sys::{
 #[allow(non_camel_case_types)]
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum WeightType {
     F32 = sd_type_t_SD_TYPE_F32,
     F16 = sd_type_t_SD_TYPE_F16,
@@ -175,17 +170,12 @@ pub enum WeightType {
     TQ1_0 = sd_type_t_SD_TYPE_TQ1_0,
     TQ2_0 = sd_type_t_SD_TYPE_TQ2_0,
     MXFP4 = sd_type_t_SD_TYPE_MXFP4,
+    #[default]
     Unknown = sd_type_t_SD_TYPE_COUNT,
 }
 
 impl From<WeightType> for sd_type_t {
     fn from(value: WeightType) -> Self {
         value as Self
-    }
-}
-
-impl Default for WeightType {
-    fn default() -> Self {
-        Self::Unknown
     }
 }

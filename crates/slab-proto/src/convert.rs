@@ -172,7 +172,7 @@ pub fn decode_model_load_request(
             Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path }))
         }
         BackendParams::GgmlDiffusion(config) => {
-            Ok(RuntimeBackendLoadSpec::GgmlDiffusion(GgmlDiffusionLoadConfig {
+            Ok(RuntimeBackendLoadSpec::GgmlDiffusion(Box::new(GgmlDiffusionLoadConfig {
                 model_path,
                 diffusion_model_path: non_empty_path(config.diffusion_model_path.as_deref()),
                 vae_path: non_empty_path(config.vae_path.as_deref()),
@@ -188,7 +188,7 @@ pub fn decode_model_load_request(
                 offload_params_to_cpu: config.offload_params_to_cpu,
                 enable_mmap: config.enable_mmap,
                 n_threads: config.n_threads.filter(|value| *value != 0),
-            }))
+            })))
         }
         BackendParams::CandleLlama(config) => {
             Ok(RuntimeBackendLoadSpec::CandleLlama(CandleLlamaLoadConfig {
@@ -1030,7 +1030,7 @@ mod tests {
 
     #[test]
     fn model_load_spec_round_trips_diffusion_backend_fields() {
-        let spec = RuntimeBackendLoadSpec::GgmlDiffusion(GgmlDiffusionLoadConfig {
+        let spec = RuntimeBackendLoadSpec::GgmlDiffusion(Box::new(GgmlDiffusionLoadConfig {
             model_path: PathBuf::from("C:/models/model.gguf"),
             diffusion_model_path: Some(PathBuf::from("C:/models/diffusion.safetensors")),
             vae_path: Some(PathBuf::from("C:/models/vae.safetensors")),
@@ -1046,7 +1046,7 @@ mod tests {
             offload_params_to_cpu: true,
             enable_mmap: true,
             n_threads: Some(8),
-        });
+        }));
 
         let request = encode_model_load_request(&spec);
         let roundtrip = decode_model_load_request(&request).unwrap();
@@ -1170,7 +1170,6 @@ mod tests {
                 clip_skip: None,
                 ..Default::default()
             }),
-            ..Default::default()
         };
 
         let proto = encode_diffusion_image_request("demo-model", &request);

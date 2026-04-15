@@ -221,17 +221,18 @@ impl ModelService {
             None
         };
 
-        if persist_legacy_selection && state_record.is_none() {
-            if let Some(selection) = legacy_selection_to_import.as_ref() {
-                self.model_state
-                    .store()
-                    .upsert_model_config_state(model_config_state_record(
-                        model_id,
-                        selection.preset_id.clone(),
-                        selection.variant_id.clone(),
-                    ))
-                    .await?;
-            }
+        if persist_legacy_selection
+            && state_record.is_none()
+            && let Some(selection) = legacy_selection_to_import.as_ref()
+        {
+            self.model_state
+                .store()
+                .upsert_model_config_state(model_config_state_record(
+                    model_id,
+                    selection.preset_id.clone(),
+                    selection.variant_id.clone(),
+                ))
+                .await?;
         }
 
         Ok(ResolvedModelPackSelectionView {

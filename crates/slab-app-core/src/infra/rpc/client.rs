@@ -39,6 +39,12 @@ impl RequestIdInterceptor {
     }
 }
 
+impl Default for RequestIdInterceptor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Interceptor for RequestIdInterceptor {
     fn call(&mut self, mut req: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
         match tonic::metadata::MetadataValue::try_from(self.request_id.as_str()) {
