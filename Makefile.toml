@@ -121,7 +121,8 @@ server_pid = set ""
 
 fn probe_docs
 	probe_exit = exec --get-exit-code bun -e "fetch(process.argv[1]).then((response)=>process.exit(response.ok ? 0 : 1)).catch(()=>process.exit(1))" ${docs_url}
-	return ${probe_exit}
+	probe_ready = not ${probe_exit}
+	return ${probe_ready}
 end
 
 fn cleanup_server
@@ -137,8 +138,7 @@ fn cleanup_server
 	end
 end
 
-probe_exit = probe_docs
-probe_ready = eq ${probe_exit} 0
+probe_ready = probe_docs
 need_server = not ${probe_ready}
 
 if ${need_server}
@@ -159,20 +159,25 @@ if ${need_server}
 	server_pid = spawn --silent ${server_bin} --settings-path ./testdata/api-settings.json
 	server_started = set true
 
-	attempts = set 0
+	attempts_remaining = set 50
 	ready = set false
-	while not ${ready} and less_than ${attempts} 50
-		probe_exit = probe_docs
-		probe_ready = eq ${probe_exit} 0
+	timed_out = set false
+	while not ${ready}
+		probe_ready = probe_docs
 		if ${probe_ready}
 			ready = set true
 		else
-			attempts = calc ${attempts} + 1
-			sleep 200
+			attempts_remaining = calc ${attempts_remaining} - 1
+			if not ${attempts_remaining}
+				timed_out = set true
+				ready = set true
+			else
+				sleep 200
+			end
 		end
 	end
 
-	if not ${ready}
+	if ${timed_out}
 		echo slab-server did not expose /api-docs/openapi.json in time.
 		cleanup_server
 		exit 1
@@ -181,7 +186,7 @@ end
 
 cd ${CARGO_MAKE_WORKING_DIRECTORY}/packages/slab-desktop
 api_result = exec bun run api
-api_succeeded = eq ${api_result.code} 0
+api_succeeded = not ${api_result.code}
 api_failed = not ${api_succeeded}
 
 if ${server_started}
