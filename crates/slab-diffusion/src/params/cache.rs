@@ -19,8 +19,9 @@ use slab_diffusion_sys::{
 
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))]
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))]
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum CacheMode {
+    #[default]
     Disabled = sd_cache_mode_t_SD_CACHE_DISABLED,
     EasyCache = sd_cache_mode_t_SD_CACHE_EASYCACHE,
     UCache = sd_cache_mode_t_SD_CACHE_UCACHE,
@@ -33,12 +34,6 @@ pub enum CacheMode {
 impl From<CacheMode> for sd_cache_mode_t {
     fn from(value: CacheMode) -> Self {
         value as Self
-    }
-}
-
-impl Default for CacheMode {
-    fn default() -> Self {
-        Self::Disabled
     }
 }
 
@@ -333,7 +328,7 @@ mod tests {
             inner
         };
 
-        assert_eq!(inner.fp.mode, CacheMode::Spectrum.into());
+        assert_eq!(inner.fp.mode, sd_cache_mode_t::from(CacheMode::Spectrum));
         assert_eq!(unsafe { CStr::from_ptr(inner.fp.scm_mask) }.to_str().unwrap(), "101010");
         assert_eq!(inner.fp.spectrum_window_size, 64);
         assert!(inner.fp.use_relative_threshold);

@@ -276,6 +276,12 @@ impl FfmpegToolPmids {
     }
 }
 
+impl Default for FfmpegToolPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeV2Pmids {
     pub sessions: RuntimeSessionsPmids,
@@ -349,6 +355,12 @@ impl GgmlRuntimePmids {
     }
 }
 
+impl Default for GgmlRuntimePmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct GgmlBackendPmids {
     pub llama: LlamaRuntimePmids,
@@ -363,6 +375,12 @@ impl GgmlBackendPmids {
             whisper: RuntimeBackendLeafPmids::whisper(),
             diffusion: RuntimeBackendLeafPmids::diffusion(),
         }
+    }
+}
+
+impl Default for GgmlBackendPmids {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -443,6 +461,12 @@ impl LlamaRuntimePmids {
 
     pub fn context_length(self) -> SettingPmid {
         SettingPmid::from_path(format!("{}.context_length", self.prefix))
+    }
+}
+
+impl Default for LlamaRuntimePmids {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

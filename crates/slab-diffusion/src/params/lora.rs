@@ -14,8 +14,9 @@ pub use slab_diffusion_sys::{
 
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))]
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum LoraApplyMode {
+    #[default]
     Auto = lora_apply_mode_t_LORA_APPLY_AUTO,
     Immediately = lora_apply_mode_t_LORA_APPLY_IMMEDIATELY,
     AtRuntime = lora_apply_mode_t_LORA_APPLY_AT_RUNTIME,
@@ -25,12 +26,6 @@ pub enum LoraApplyMode {
 impl From<LoraApplyMode> for lora_apply_mode_t {
     fn from(value: LoraApplyMode) -> Self {
         value as Self
-    }
-}
-
-impl Default for LoraApplyMode {
-    fn default() -> Self {
-        Self::Auto
     }
 }
 

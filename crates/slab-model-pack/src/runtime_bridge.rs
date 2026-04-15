@@ -32,7 +32,7 @@ pub struct ModelPackRuntimeBridge {
 impl ResolvedModelPack {
     pub fn compile_default_runtime_bridge(&self) -> Result<ModelPackRuntimeBridge, ModelPackError> {
         let preset =
-            self.default_preset().ok_or_else(|| ModelPackError::MissingDefaultPresetDeclaration)?;
+            self.default_preset().ok_or(ModelPackError::MissingDefaultPresetDeclaration)?;
         self.compile_runtime_bridge(preset)
     }
 
@@ -246,7 +246,7 @@ fn pack_source_to_model_source(source: &PackSource) -> Result<ModelSource, Model
     Ok(match source {
         PackSource::LocalPath { path } => ModelSource::LocalPath { path: PathBuf::from(path) },
         PackSource::LocalFiles { files } => {
-            ModelSource::LocalArtifacts { files: source_file_map(None, &files) }
+            ModelSource::LocalArtifacts { files: source_file_map(None, files) }
         }
         PackSource::HuggingFace { repo_id, revision, files } => ModelSource::HuggingFace {
             repo_id: repo_id.clone(),

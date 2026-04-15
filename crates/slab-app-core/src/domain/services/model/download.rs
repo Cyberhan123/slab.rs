@@ -867,10 +867,10 @@ pub(super) fn effective_model_status(
 
     let base_status = normalized_local_model_status(model);
 
-    if let Some(download) = download_status.latest_by_model.get(&model.id) {
-        if matches!(download.status, TaskStatus::Pending | TaskStatus::Running) {
-            return UnifiedModelStatus::Downloading;
-        }
+    if let Some(download) = download_status.latest_by_model.get(&model.id)
+        && matches!(download.status, TaskStatus::Pending | TaskStatus::Running)
+    {
+        return UnifiedModelStatus::Downloading;
     }
 
     if base_status == UnifiedModelStatus::Ready {

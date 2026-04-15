@@ -822,27 +822,27 @@ impl InferenceWorkerState {
                     }
                 }
                 prefill_counts.insert(session_id, take_n);
-            } else if let Some(last_token) = session.last_token {
-                if (batch.n_tokens() as usize) < batch_capacity {
-                    if let Err(error) = Self::ensure_window_capacity(
-                        &mut self.ctx,
-                        kv_cache_can_shift,
-                        context_length,
-                        window_drop_chunk,
-                        session,
-                        1,
-                    ) {
-                        Self::fail_session_stream(session, error);
-                        continue;
-                    }
-
-                    let batch_token_index = batch.n_tokens();
-                    batch
-                        .add(last_token, session.n_past, &[session.seq_id], true)
-                        .expect("batch capacity verified; add cannot fail");
-                    logit_owners.push((session_id, batch_token_index));
-                    gen_sessions.push(session_id);
+            } else if let Some(last_token) = session.last_token
+                && (batch.n_tokens() as usize) < batch_capacity
+            {
+                if let Err(error) = Self::ensure_window_capacity(
+                    &mut self.ctx,
+                    kv_cache_can_shift,
+                    context_length,
+                    window_drop_chunk,
+                    session,
+                    1,
+                ) {
+                    Self::fail_session_stream(session, error);
+                    continue;
                 }
+
+                let batch_token_index = batch.n_tokens();
+                batch
+                    .add(last_token, session.n_past, &[session.seq_id], true)
+                    .expect("batch capacity verified; add cannot fail");
+                logit_owners.push((session_id, batch_token_index));
+                gen_sessions.push(session_id);
             }
         }
 

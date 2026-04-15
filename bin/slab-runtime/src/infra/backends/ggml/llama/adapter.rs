@@ -423,10 +423,10 @@ impl GGMLLlamaEngine {
             self.session_bindings.lock().await.remove(&key);
         }
 
-        if let Some(sid) = sid {
-            if let Err(error) = self.end_session(sid).await {
-                warn!(session_id = sid, error = %error, "failed to end llama session during cleanup");
-            }
+        if let Some(sid) = sid
+            && let Err(error) = self.end_session(sid).await
+        {
+            warn!(session_id = sid, error = %error, "failed to end llama session during cleanup");
         }
     }
 
@@ -528,14 +528,15 @@ impl GGMLLlamaEngine {
                                 generated.push_str(&text);
                                 if stream_tx.send(BaseStreamChunk::Token(text)).await.is_err() {
                                     forward_failed = true;
-                                    if !completed && !stream_error {
-                                        if let Err(error) = engine.cancel_generate(sid).await {
-                                            warn!(
-                                                session_id = sid,
-                                                error = %error,
-                                                "failed to cancel llama generation after downstream disconnect"
-                                            );
-                                        }
+                                    if !completed
+                                        && !stream_error
+                                        && let Err(error) = engine.cancel_generate(sid).await
+                                    {
+                                        warn!(
+                                            session_id = sid,
+                                            error = %error,
+                                            "failed to cancel llama generation after downstream disconnect"
+                                        );
                                     }
                                     break;
                                 }
@@ -556,15 +557,17 @@ impl GGMLLlamaEngine {
                 }
             }
 
-            if completed && !forward_failed && !stream_error && !cancelled {
-                if let Some(usage) = engine.build_usage(&full_prompt, &generated, cached_tokens)
-                    && stream_tx
-                        .send(BaseStreamChunk::Json(serde_json::json!({ "usage": usage })))
-                        .await
-                        .is_err()
-                {
-                    forward_failed = true;
-                }
+            if completed
+                && !forward_failed
+                && !stream_error
+                && !cancelled
+                && let Some(usage) = engine.build_usage(&full_prompt, &generated, cached_tokens)
+                && stream_tx
+                    .send(BaseStreamChunk::Json(serde_json::json!({ "usage": usage })))
+                    .await
+                    .is_err()
+            {
+                forward_failed = true;
             }
 
             if completed
@@ -602,6 +605,10 @@ impl GGMLLlamaEngine {
         &self,
         grammar: Option<String>,
     ) -> Result<SessionId, ggml::EngineError> {
+        if grammar.is_none() {
+            return self.create_session().await;
+        }
+
         let engine = self.require_engine()?;
         engine
             .create_session_with_grammar(grammar)

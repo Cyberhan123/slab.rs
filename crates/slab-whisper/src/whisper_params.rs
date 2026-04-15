@@ -81,7 +81,7 @@ pub struct SegmentCallbackData {
 }
 
 /// Stable Rust-native full inference parameters shared across the runtime chain.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct FullParams {
     #[serde(default)]
     pub strategy: SamplingStrategy,
@@ -169,56 +169,6 @@ pub struct FullParams {
     pub vad_model_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vad_params: Option<WhisperVadParams>,
-}
-
-impl Default for FullParams {
-    fn default() -> Self {
-        Self {
-            strategy: SamplingStrategy::default(),
-            n_threads: None,
-            n_max_text_ctx: None,
-            offset_ms: None,
-            duration_ms: None,
-            translate: None,
-            no_context: None,
-            no_timestamps: None,
-            single_segment: None,
-            print_special: None,
-            print_progress: None,
-            print_realtime: None,
-            print_timestamps: None,
-            token_timestamps: None,
-            thold_pt: None,
-            thold_ptsum: None,
-            max_len: None,
-            split_on_word: None,
-            max_tokens: None,
-            debug_mode: None,
-            audio_ctx: None,
-            tdrz_enable: None,
-            suppress_regex: None,
-            initial_prompt: None,
-            carry_initial_prompt: None,
-            prompt_tokens: Vec::new(),
-            language: None,
-            detect_language: None,
-            suppress_blank: None,
-            suppress_nst: None,
-            temperature: None,
-            max_initial_ts: None,
-            length_penalty: None,
-            temperature_inc: None,
-            entropy_thold: None,
-            logprob_thold: None,
-            no_speech_thold: None,
-            grammar: None,
-            i_start_rule: None,
-            grammar_penalty: None,
-            vad: None,
-            vad_model_path: None,
-            vad_params: None,
-        }
-    }
 }
 
 impl FullParams {

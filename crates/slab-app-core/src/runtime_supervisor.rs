@@ -540,6 +540,7 @@ async fn supervise_backend(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn restart_child_with_retries(
     child_spec: &ResolvedRuntimeChildSpec,
     spawner: Arc<dyn RuntimeChildSpawner>,

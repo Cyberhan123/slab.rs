@@ -338,7 +338,7 @@ pub(crate) fn build_ggml_whisper_full_params_from_legacy(
         initial_prompt: prompt.filter(|value| !value.trim().is_empty()),
         detect_language: language
             .is_none()
-            .then(|| detect_language)
+            .then_some(detect_language)
             .flatten()
             .filter(|value| *value),
         ..Default::default()

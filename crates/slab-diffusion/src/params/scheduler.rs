@@ -23,7 +23,7 @@ pub use slab_diffusion_sys::{
 #[allow(non_camel_case_types)]
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))] // include windows-gnu
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))] // msvc being *special* again
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum Scheduler {
     DISCRETE = scheduler_t_DISCRETE_SCHEDULER,
     KARRAS = scheduler_t_KARRAS_SCHEDULER,
@@ -36,6 +36,7 @@ pub enum Scheduler {
     KL_OPTIMAL = scheduler_t_KL_OPTIMAL_SCHEDULER,
     LCM = scheduler_t_LCM_SCHEDULER,
     BONG_TANGENT = scheduler_t_BONG_TANGENT_SCHEDULER,
+    #[default]
     UNKNOWN = scheduler_t_SCHEDULER_COUNT,
 }
 
@@ -62,12 +63,6 @@ impl From<scheduler_t> for Scheduler {
             scheduler_t_BONG_TANGENT_SCHEDULER => Scheduler::BONG_TANGENT,
             _ => Scheduler::UNKNOWN, // Handle unknown values gracefully
         }
-    }
-}
-
-impl Default for Scheduler {
-    fn default() -> Self {
-        Self::UNKNOWN
     }
 }
 

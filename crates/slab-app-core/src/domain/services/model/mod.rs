@@ -207,6 +207,7 @@ impl ModelService {
         Ok(payload)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build_model_config_sections(
         &self,
         model: &UnifiedModel,

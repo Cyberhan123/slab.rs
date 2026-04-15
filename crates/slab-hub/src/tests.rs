@@ -40,14 +40,15 @@ fn explicit_provider_preference_disables_fallback_order_changes() {
 #[test]
 fn auto_provider_preference_uses_default_enabled_order() {
     let providers = HubClient::new().enabled_providers().expect("providers");
-    let mut expected = Vec::new();
-    #[cfg(feature = "provider-hf-hub")]
-    expected.push(HubProvider::HfHub);
-    #[cfg(feature = "provider-models-cat")]
-    expected.push(HubProvider::ModelsCat);
-    #[cfg(feature = "provider-huggingface-hub-rust")]
-    expected.push(HubProvider::HuggingfaceHubRust);
-    assert_eq!(providers, expected);
+    let expected: &[HubProvider] = &[
+        #[cfg(feature = "provider-hf-hub")]
+        HubProvider::HfHub,
+        #[cfg(feature = "provider-models-cat")]
+        HubProvider::ModelsCat,
+        #[cfg(feature = "provider-huggingface-hub-rust")]
+        HubProvider::HuggingfaceHubRust,
+    ];
+    assert_eq!(providers, expected.to_vec());
 }
 
 #[test]
