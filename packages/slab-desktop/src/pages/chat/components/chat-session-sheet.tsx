@@ -54,14 +54,14 @@ export function ChatSessionSheet({
         side="right"
         className="w-full overflow-hidden border-l border-border/60 bg-[var(--surface-1)] p-0 sm:max-w-xl"
       >
-          <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
-            <div className="space-y-1">
-              <SheetTitle className="text-xl">{t("pages.chat.sessionSheet.title")}</SheetTitle>
-              <SheetDescription>
-                {t("pages.chat.sessionSheet.description")}
-              </SheetDescription>
-            </div>
-          </SheetHeader>
+        <SheetHeader className="shrink-0 border-b border-border/60 px-6 py-5 pr-14">
+          <div className="space-y-1">
+            <SheetTitle className="text-xl">{t("pages.chat.sessionSheet.title")}</SheetTitle>
+            <SheetDescription>
+              {t("pages.chat.sessionSheet.description")}
+            </SheetDescription>
+          </div>
+        </SheetHeader>
 
         <ScrollArea className="min-h-0 flex-1 overflow-hidden">
           <div className="space-y-3 px-6 py-5">
@@ -97,26 +97,26 @@ export function ChatSessionSheet({
                     </p>
                   </button>
 
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="quiet" size="icon-sm" className="rounded-full" disabled={busy}>
-                          <MoreHorizontal className="size-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end" className="rounded-2xl border-border/70">
-                        <DropdownMenuItem disabled={busy} onClick={() => onSelect(conversation.key)}>
-                          {t("pages.chat.sessionSheet.open")}
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          disabled={busy}
-                          variant="destructive"
-                          onClick={() => onDelete(conversation.key)}
-                        >
-                          <Trash2 className="size-4" />
-                          {t("pages.chat.sessionSheet.delete")}
-                        </DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="quiet" size="icon-sm" className="rounded-full" disabled={busy}>
+                        <MoreHorizontal className="size-4" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="rounded-2xl border-border/70">
+                      <DropdownMenuItem disabled={busy} onClick={() => onSelect(conversation.key)}>
+                        {t("pages.chat.sessionSheet.open")}
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={busy}
+                        variant="destructive"
+                        onClick={() => onDelete(conversation.key)}
+                      >
+                        <Trash2 className="size-4" />
+                        {t("pages.chat.sessionSheet.delete")}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 </div>
               )
             })}

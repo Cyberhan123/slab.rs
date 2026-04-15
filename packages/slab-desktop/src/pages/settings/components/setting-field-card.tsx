@@ -177,11 +177,11 @@ export function SettingFieldCard({
               variant="soft"
               value={textValue}
               onChange={(event) => onChange(property, event.target.value)}
-               placeholder={
-                 propertyType === 'array' || propertyType === 'object'
-                   ? t('pages.settings.field.jsonPlaceholder')
-                   : t('pages.settings.field.valuePlaceholder')
-                }
+              placeholder={
+                propertyType === 'array' || propertyType === 'object'
+                  ? t('pages.settings.field.jsonPlaceholder')
+                  : t('pages.settings.field.valuePlaceholder')
+              }
               className="min-h-40 rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 py-3 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               aria-invalid={Boolean(errorState)}
             />

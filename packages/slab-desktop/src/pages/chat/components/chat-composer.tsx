@@ -93,10 +93,10 @@ export function ChatComposer({
             value={value}
             variant="shell"
             autoResize
-             disabled={disabled}
-             onChange={(event) => onValueChange(event.target.value)}
-             placeholder={t("pages.chat.composer.placeholder")}
-             className="min-h-[48px] max-h-48 resize-none border-0 bg-transparent px-3 py-3 text-base text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
+            disabled={disabled}
+            onChange={(event) => onValueChange(event.target.value)}
+            placeholder={t("pages.chat.composer.placeholder")}
+            className="min-h-[48px] max-h-48 resize-none border-0 bg-transparent px-3 py-3 text-base text-foreground shadow-none placeholder:text-muted-foreground/60 focus-visible:ring-0"
             onKeyDown={(event) => {
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault()
@@ -133,14 +133,14 @@ export function ChatComposer({
                 }
 
                 handleSubmit()
-               }}
-               disabled={disabled || (!isRequesting && !value.trim())}
-               aria-label={
-                 isRequesting
-                   ? t("pages.chat.composer.stopGeneratingResponse")
-                   : t("pages.chat.composer.sendMessage")
-               }
-             >
+              }}
+              disabled={disabled || (!isRequesting && !value.trim())}
+              aria-label={
+                isRequesting
+                  ? t("pages.chat.composer.stopGeneratingResponse")
+                  : t("pages.chat.composer.sendMessage")
+              }
+            >
               {isRequesting ? <Square className="size-4" /> : <SendHorizontal className="size-4" />}
             </Button>
           </div>
