@@ -264,99 +264,13 @@ fn legacy_settings_schema() -> RawSettingsSchema {
                     legacy_subsection(
                         "backends",
                         "AI Backend Libraries",
-                        "Settings for automatic download of GGML backend libraries and bundled Candle/ONNX backend packages.",
+                        "State mirrored from setup provisioning for the installed runtime library directory.",
                         30,
-                        vec![
-                            legacy_path_property(
-                                PMID.setup.backends.dir().into_string(),
-                                "Backend Library Directory",
-                                10,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.ggml_llama.tag().into_string(),
-                                "GGML Llama Release Tag",
-                                "",
-                                20,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.ggml_llama.asset().into_string(),
-                                "GGML Llama Asset Name",
-                                "",
-                                30,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.ggml_whisper.tag().into_string(),
-                                "GGML Whisper Release Tag",
-                                "",
-                                40,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.ggml_whisper.asset().into_string(),
-                                "GGML Whisper Asset Name",
-                                "",
-                                50,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.ggml_diffusion.tag().into_string(),
-                                "GGML Diffusion Release Tag",
-                                "",
-                                60,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.ggml_diffusion.asset().into_string(),
-                                "GGML Diffusion Asset Name",
-                                "",
-                                70,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.candle_llama.tag().into_string(),
-                                "Candle Llama Release Tag",
-                                "",
-                                80,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.candle_llama.asset().into_string(),
-                                "Candle Llama Asset Name",
-                                "",
-                                90,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.candle_whisper.tag().into_string(),
-                                "Candle Whisper Release Tag",
-                                "",
-                                100,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.candle_whisper.asset().into_string(),
-                                "Candle Whisper Asset Name",
-                                "",
-                                110,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.candle_diffusion.tag().into_string(),
-                                "Candle Diffusion Release Tag",
-                                "",
-                                120,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.candle_diffusion.asset().into_string(),
-                                "Candle Diffusion Asset Name",
-                                "",
-                                130,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.onnx.tag().into_string(),
-                                "ONNX Release Tag",
-                                "",
-                                140,
-                            ),
-                            legacy_string_property(
-                                PMID.setup.backends.onnx.asset().into_string(),
-                                "ONNX Asset Name",
-                                "",
-                                150,
-                            ),
-                        ],
+                        vec![legacy_path_property(
+                            PMID.setup.backends.dir().into_string(),
+                            "Backend Library Directory",
+                            10,
+                        )],
                     ),
                 ],
             ),
@@ -462,7 +376,7 @@ fn legacy_settings_schema() -> RawSettingsSchema {
                     legacy_subsection(
                         "general",
                         "General",
-                        "Shared runtime transport and capacity settings. Backend library directories continue to come from setup.backends.dir.",
+                        "Shared runtime transport and capacity settings.",
                         10,
                         vec![
                             legacy_enum_string_property(

@@ -121,22 +121,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/backends/download": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        post: operations["download_lib"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/backends/status": {
         parameters: {
             query?: never;
@@ -494,7 +478,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/setup/ffmpeg/download": {
+    "/v1/setup/provision": {
         parameters: {
             query?: never;
             header?: never;
@@ -503,11 +487,8 @@ export interface paths {
         };
         get?: never;
         put?: never;
-        /**
-         * Kick off an FFmpeg download task.  Returns immediately with a task ID;
-         *     poll `GET /v1/tasks/{id}` to track progress.
-         */
-        post: operations["download_ffmpeg"];
+        /** Kick off the one-shot online setup provision task. */
+        post: operations["provision_setup"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1053,12 +1034,6 @@ export interface components {
         CreateSessionRequest: {
             name?: string | null;
         };
-        DownloadLibRequest: {
-            /** @description Backend identifier, e.g. `"ggml.llama"`, `"ggml.whisper"`, `"ggml.diffusion"`. */
-            backend_id: string;
-            /** @description Absolute directory where release assets should be installed. */
-            target_dir: string;
-        };
         /** @description Request body for `POST /v1/models/download`. */
         DownloadModelRequest: {
             /** @description Model ID from `/v1/models`. */
@@ -1319,6 +1294,8 @@ export interface components {
             context_window?: number | null;
             /** @description Filename within the HF repo. */
             filename?: string | null;
+            /** @description Optional explicit local hub provider override (`hf_hub`, `models_cat`, `huggingface_hub_rust`). */
+            hub_provider?: string | null;
             /** @description Absolute path to the downloaded model file (populated after download). */
             local_path?: string | null;
             pricing?: null | components["schemas"]["PricingRequest"];
@@ -1338,6 +1315,7 @@ export interface components {
             /** Format: int32 */
             context_window?: number | null;
             filename?: string | null;
+            hub_provider?: string | null;
             local_path?: string | null;
             pricing?: null | components["schemas"]["PricingResponse"];
             provider_id?: string | null;
@@ -1499,10 +1477,23 @@ export interface components {
             /** Format: int32 */
             num_workers?: number | null;
         };
+        TaskProgressResponse: {
+            /** Format: int64 */
+            current: number;
+            label?: string | null;
+            /** Format: int32 */
+            step?: number | null;
+            /** Format: int32 */
+            step_count?: number | null;
+            /** Format: int64 */
+            total?: number | null;
+            unit?: string | null;
+        };
         TaskResponse: {
             created_at: string;
             error_msg?: string | null;
             id: string;
+            progress?: null | components["schemas"]["TaskProgressResponse"];
             status: components["schemas"]["TaskStatus"];
             task_type: string;
             updated_at: string;
@@ -1987,44 +1978,6 @@ export interface operations {
                 };
             };
             /** @description Unauthorised (admin token required) */
-            401: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-        };
-    };
-    download_lib: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DownloadLibRequest"];
-            };
-        };
-        responses: {
-            /** @description Download task accepted */
-            202: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OperationAcceptedResponse"];
-                };
-            };
-            /** @description Bad request (invalid path) */
-            400: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
-            };
-            /** @description Unauthorised (management token required) */
             401: {
                 headers: {
                     [name: string]: unknown;
@@ -3060,7 +3013,7 @@ export interface operations {
             };
         };
     };
-    download_ffmpeg: {
+    provision_setup: {
         parameters: {
             query?: never;
             header?: never;
@@ -3069,7 +3022,7 @@ export interface operations {
         };
         requestBody?: never;
         responses: {
-            /** @description FFmpeg download task accepted */
+            /** @description Provision task accepted */
             202: {
                 headers: {
                     [name: string]: unknown;

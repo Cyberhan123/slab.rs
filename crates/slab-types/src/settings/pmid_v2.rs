@@ -3,6 +3,7 @@ use super::pmid::SettingPmid;
 /// The complete V2 settings PMID catalog.
 #[derive(Debug, Clone, Copy)]
 pub struct SettingsV2PmidCatalog {
+    pub general: GeneralPmids,
     pub database: DatabasePmids,
     pub logging: LoggingPmids,
     pub tools: ToolsPmids,
@@ -15,6 +16,7 @@ pub struct SettingsV2PmidCatalog {
 impl SettingsV2PmidCatalog {
     pub const fn new() -> Self {
         Self {
+            general: GeneralPmids,
             database: DatabasePmids,
             logging: LoggingPmids::new("logging"),
             tools: ToolsPmids::new(),
@@ -27,6 +29,7 @@ impl SettingsV2PmidCatalog {
 
     pub fn all(self) -> Vec<SettingPmid> {
         vec![
+            self.general.language(),
             self.database.url(),
             self.logging.level(),
             self.logging.json(),
@@ -112,6 +115,7 @@ impl SettingsV2PmidCatalog {
             self.providers.registry(),
             self.models.cache_dir(),
             self.models.config_dir(),
+            self.models.download_source(),
             self.models.auto_unload.enabled(),
             self.models.auto_unload.idle_minutes(),
             self.server.address(),
@@ -133,6 +137,15 @@ impl Default for SettingsV2PmidCatalog {
 }
 
 pub const V2_PMID: SettingsV2PmidCatalog = SettingsV2PmidCatalog::new();
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct GeneralPmids;
+
+impl GeneralPmids {
+    pub fn language(self) -> SettingPmid {
+        SettingPmid::from_path("general.language")
+    }
+}
 
 #[derive(Debug, Clone, Copy, Default)]
 pub struct DatabasePmids;
@@ -263,6 +276,12 @@ impl FfmpegToolPmids {
     }
 }
 
+impl Default for FfmpegToolPmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct RuntimeV2Pmids {
     pub sessions: RuntimeSessionsPmids,
@@ -336,6 +355,12 @@ impl GgmlRuntimePmids {
     }
 }
 
+impl Default for GgmlRuntimePmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct GgmlBackendPmids {
     pub llama: LlamaRuntimePmids,
@@ -350,6 +375,12 @@ impl GgmlBackendPmids {
             whisper: RuntimeBackendLeafPmids::whisper(),
             diffusion: RuntimeBackendLeafPmids::diffusion(),
         }
+    }
+}
+
+impl Default for GgmlBackendPmids {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
@@ -433,6 +464,12 @@ impl LlamaRuntimePmids {
     }
 }
 
+impl Default for LlamaRuntimePmids {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct SingleRuntimeFamilyPmids {
     prefix: &'static str,
@@ -513,6 +550,10 @@ impl ModelsPmids {
 
     pub fn config_dir(self) -> SettingPmid {
         SettingPmid::from_path("models.config_dir")
+    }
+
+    pub fn download_source(self) -> SettingPmid {
+        SettingPmid::from_path("models.download_source")
     }
 }
 
@@ -607,6 +648,7 @@ mod tests {
         let unique: BTreeSet<String> = all.iter().map(|pmid| pmid.as_str().to_owned()).collect();
 
         assert_eq!(all.len(), unique.len());
+        assert!(unique.contains("general.language"));
         assert!(unique.contains("runtime.ggml.backends.llama.context_length"));
         assert!(unique.contains("providers.registry"));
         assert!(unique.contains("server.cloud_http_trace"));

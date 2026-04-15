@@ -4,7 +4,6 @@ import { BrowserRouter } from "react-router-dom";
 import "@slab/components/globals.css";
 import App from "./App";
 import "@slab/i18n";
-import "./styles/vendor.css";
 
 ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
   <React.StrictMode>

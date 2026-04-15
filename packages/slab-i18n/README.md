@@ -4,7 +4,7 @@ Shared internationalization package for Slab.
 
 ## Role
 
-`@slab/i18n` provides the i18next configuration and locale resource files used across Slab frontend packages. It exports a pre-configured i18next instance and re-exports `react-i18next` helpers, so consuming packages (`@slab/desktop`) do not need to configure i18next independently.
+`@slab/i18n` provides the i18next configuration and locale resources used across Slab frontend packages. Locale content is organized by frontend page domains (for example `pages/chat` and `pages/settings`) so feature UI copy can live with a predictable key structure. The package exports a pre-configured i18next instance, re-exports `react-i18next` helpers, and owns frontend language preference handling (`Auto`, `English`, `中文`) so consuming packages (`@slab/desktop`) do not need to configure i18next independently.
 
 ## Stack
 

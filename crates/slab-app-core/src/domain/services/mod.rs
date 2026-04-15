@@ -31,6 +31,7 @@ pub use ui_state::UiStateService;
 pub use video::VideoService;
 
 use crate::context::{ModelState, WorkerState};
+use crate::runtime_supervisor::RuntimeSupervisorControlHandle;
 
 #[derive(Clone)]
 pub struct AppServices {
@@ -51,17 +52,22 @@ pub struct AppServices {
 }
 
 impl AppServices {
-    pub fn new(model_state: ModelState, worker_state: WorkerState, agent: AgentService) -> Self {
+    pub fn new(
+        model_state: ModelState,
+        worker_state: WorkerState,
+        agent: AgentService,
+        runtime_control: Option<RuntimeSupervisorControlHandle>,
+    ) -> Self {
         Self {
             audio: AudioService::new(worker_state.clone()),
-            backend: BackendService::new(model_state.clone(), worker_state.clone()),
+            backend: BackendService::new(model_state.clone()),
             chat: ChatService::new(model_state.clone()),
             ffmpeg: FfmpegService::new(worker_state.clone()),
             image: ImageService::new(worker_state.clone()),
             model: ModelService::new(model_state.clone(), worker_state.clone()),
             settings: SettingsService::new(model_state.clone()),
             session: SessionService::new(model_state.clone()),
-            setup: SetupService::new(model_state.clone(), worker_state.clone()),
+            setup: SetupService::new(model_state.clone(), worker_state.clone(), runtime_control),
             system: SystemService::new(),
             task_application: TaskApplicationService::new(worker_state.clone()),
             ui_state: UiStateService::new(model_state.clone()),

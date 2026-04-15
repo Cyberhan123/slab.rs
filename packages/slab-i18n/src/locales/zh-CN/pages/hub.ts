@@ -1,0 +1,153 @@
+export const hub = {
+  header: {
+    title: '模型库',
+    subtitle: '模型仓库',
+  },
+  hero: {
+    badge: '新版本',
+    titleLead: '塑造你的本地',
+    titleAccent: '模型目录。',
+    description:
+      '将 .slab 包导入目录中，然后在准备使用时，从每张卡片下载你需要的本地运行时。',
+    importModel: '导入模型',
+    refreshCatalog: '刷新目录',
+  },
+  summary: {
+    catalogEntries: '目录条目',
+    catalogDescription_one: '当前已映射 {{count}} 个后端',
+    catalogDescription_other: '当前已映射 {{count}} 个后端',
+    readyLocally: '本地已就绪',
+    pendingDescription_one: '当前有 {{count}} 个下载正在同步',
+    pendingDescription_other: '当前有 {{count}} 个下载正在同步',
+    readyDescription: '导入的包会保留在目录中，直到你下载本地运行时副本。',
+  },
+  filters: {
+    categories: {
+      all: '全部模型',
+      language: '大语言模型',
+      vision: '视觉',
+      audio: '音频',
+      coding: '编程',
+      embedding: '向量',
+    },
+    statuses: {
+      all: '全部状态',
+      ready: '已就绪',
+      downloading: '下载中',
+      not_downloaded: '未下载',
+      error: '错误',
+    },
+    statusPlaceholder: '状态',
+  },
+  alerts: {
+    loadFailedTitle: '模型目录加载失败',
+  },
+  states: {
+    loadingTitle: '正在加载模型目录',
+    loadingDescription: '正在获取模型条目和运行时状态。',
+    emptyFilteredTitle: '当前筛选条件下没有匹配的模型条目',
+    emptyFilteredDescription: '试试切换分类、调整状态，或导入新的 .slab 模型包。',
+  },
+  catalog: {
+    emptyPageTitle: '当前页没有卡片',
+    emptyPageDescription: '试试切换页面，或放宽当前筛选条件。',
+    runtime: '运行时',
+    vad: 'VAD',
+    download: '下载',
+    downloading: '下载中...',
+    source: '来源',
+    updatedAt: '更新于 {{value}}',
+    downloadRunning: '下载任务正在运行',
+    downloadPendingDescription: '模型文件正在拉取到本地存储中。运行时路径就绪后，卡片会自动刷新。',
+    downloadIdleDescription: '导入只会把这个包加入目录。需要本地运行时副本时，再在这里下载即可。',
+    descriptions: {
+      pending:
+        '这个 {{backend}} 条目正在同步到本地运行时目录中。下载完成后，运行时路径和就绪状态会自动更新。',
+      local:
+        '本地 {{backend}} 模型已可用于推理。清单已经绑定到运行时路径，无需离开当前工作区即可使用。',
+      imported:
+        '已从 {{repo}} 导入 {{backend}} 模型包。它现在已经出现在目录中，当你需要本地运行时副本时，可以直接在这张卡片上下载模型文件。',
+    },
+    actions: {
+      enhanceAria: '调整 {{model}} 配置',
+      deleteAria: '删除 {{model}}',
+    },
+    kind: {
+      local: '本地',
+      cloud: '云端',
+    },
+    backend: {
+      llama: 'Llama',
+      whisper: 'Whisper',
+      diffusion: 'Diffusion',
+    },
+    unknownTime: '未知',
+    configuredRepository: '已配置仓库',
+  },
+  dialogs: {
+    create: {
+      title: '导入模型',
+      description:
+        '上传一个 .slab 模型包。导入只会把条目加入目录中。提供方凭据仍在设置页中管理，支持的本地模型可以稍后从目录卡片中下载。',
+      modelPackLabel: '模型包',
+      selectedDescription: '这个包会先经过校验、保存，并生成目录条目，但暂时不会拉取远端模型文件。',
+      emptyDescription: '选择一个 .slab 包以导入模型条目。',
+      submit: '导入模型',
+    },
+    delete: {
+      title: '删除模型条目？',
+      descriptionWithModel:
+        '将 <strong>{{model}}</strong> 从模型目录中移除，并删除它保存的 .slab 包。这不会删除磁盘上已经下载的模型文件。',
+      descriptionFallback: '从目录中移除这个模型条目。',
+      cancel: '取消',
+      confirm: '删除条目',
+    },
+  },
+  sheet: {
+    title: '模型配置文档',
+    description: '模型包声明仍是唯一事实来源。你只能在这里切换预设和变体，后端字段保持锁定且只读。',
+    loading: '正在加载模型配置文档...',
+    failedLoadTitle: '加载增强配置失败',
+    selectionWarningTitle: '选择警告',
+    blocks: {
+      displayName: '显示名称',
+      backend: '后端',
+      preset: '预设',
+      variant: '变体',
+      presetPlaceholder: '选择预设',
+      variantPlaceholder: '选择变体',
+      close: '关闭',
+      saveSelection: '保存选择',
+      packLocked: '模型包已锁定',
+      notSet: '未设置',
+      enabled: '已启用',
+      disabled: '已禁用',
+      origin: {
+        pack_manifest: '包清单',
+        selected_preset: '预设',
+        selected_variant: '变体',
+        selected_backend_config: '后端配置',
+        pmid_fallback: 'PMID 回退',
+        derived: '派生',
+      },
+    },
+  },
+  toast: {
+    imported: '模型已导入目录。',
+    importFailed: '导入模型失败。',
+    downloaded: '模型已下载。',
+    downloadFailed: '模型下载失败。',
+    downloadStarted: '已开始下载。',
+    removed: '模型已从目录中移除。',
+    deleteFailed: '删除模型失败。',
+    selectionUpdated: '模型选择已更新。',
+    selectionUpdateFailed: '更新模型选择失败。',
+  },
+  error: {
+    taskEndedWithStatus: '任务 {{taskId}} 已结束，状态为：{{status}}',
+    downloadTimedOut: '模型下载超时',
+    missingDownloadedPath: '模型下载完成，但 local_path 为空',
+    startDownloadFailed: '启动模型下载任务失败',
+    onlySlabPacks: '仅支持 .slab 模型包。',
+  },
+} as const;

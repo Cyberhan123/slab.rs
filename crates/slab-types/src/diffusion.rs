@@ -78,20 +78,11 @@ impl DiffusionImageBackend {
 }
 
 /// Normalized diffusion image request independent of HTTP and protobuf DTOs.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DiffusionImageRequest {
     pub common: DiffusionRequestCommon,
     #[serde(default)]
     pub backend: DiffusionImageBackend,
-}
-
-impl Default for DiffusionImageRequest {
-    fn default() -> Self {
-        Self {
-            common: DiffusionRequestCommon::default(),
-            backend: DiffusionImageBackend::default(),
-        }
-    }
 }
 
 /// Generated diffusion image artifacts.
@@ -104,7 +95,7 @@ pub struct DiffusionImageResponse {
 }
 
 /// GGML diffusion video-generation parameters.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct GgmlDiffusionVideoParams {
     #[serde(default)]
     pub video_frames: Option<i32>,
@@ -124,22 +115,6 @@ pub struct GgmlDiffusionVideoParams {
     pub scheduler: Option<String>,
     #[serde(default)]
     pub strength: Option<f32>,
-}
-
-impl Default for GgmlDiffusionVideoParams {
-    fn default() -> Self {
-        Self {
-            video_frames: None,
-            fps: None,
-            cfg_scale: None,
-            guidance: None,
-            steps: None,
-            seed: None,
-            sample_method: None,
-            scheduler: None,
-            strength: None,
-        }
-    }
 }
 
 /// Backend-specific video-generation parameters kept distinct from shared diffusion fields.
@@ -164,20 +139,11 @@ impl DiffusionVideoBackend {
 }
 
 /// Normalized diffusion video request independent of HTTP and protobuf DTOs.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DiffusionVideoRequest {
     pub common: DiffusionRequestCommon,
     #[serde(default)]
     pub backend: DiffusionVideoBackend,
-}
-
-impl Default for DiffusionVideoRequest {
-    fn default() -> Self {
-        Self {
-            common: DiffusionRequestCommon::default(),
-            backend: DiffusionVideoBackend::default(),
-        }
-    }
 }
 
 /// Generated raw frames returned by a diffusion video pipeline.

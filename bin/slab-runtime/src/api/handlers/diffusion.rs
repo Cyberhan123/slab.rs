@@ -43,23 +43,22 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             "diffusion generate_image request received"
         );
 
-        let session = self.session_for_backend(BackendKind::Diffusion).await.map_err(|status| {
-            error!(
-                grpc.code = %status.code(),
-                grpc.message = %status.message(),
-                elapsed_ms = started_at.elapsed().as_millis(),
-                "diffusion pipeline unavailable for image request"
-            );
-            status
-        })?;
-        let image_params = build_image_params(&request).map_err(|status| {
+        let session =
+            self.session_for_backend(BackendKind::Diffusion).await.inspect_err(|status| {
+                error!(
+                    grpc.code = %status.code(),
+                    grpc.message = %status.message(),
+                    elapsed_ms = started_at.elapsed().as_millis(),
+                    "diffusion pipeline unavailable for image request"
+                );
+            })?;
+        let image_params = build_image_params(&request).inspect_err(|status| {
             error!(
                 grpc.code = %status.code(),
                 grpc.message = %status.message(),
                 elapsed_ms = started_at.elapsed().as_millis(),
                 "diffusion image request validation failed"
             );
-            status
         })?;
         let generated = session.run_inference_image(image_params).await.map_err(|error| {
             error!(error = %error, "diffusion image generation failed");
@@ -101,23 +100,22 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
             "diffusion generate_video request received"
         );
 
-        let session = self.session_for_backend(BackendKind::Diffusion).await.map_err(|status| {
-            error!(
-                grpc.code = %status.code(),
-                grpc.message = %status.message(),
-                elapsed_ms = started_at.elapsed().as_millis(),
-                "diffusion pipeline unavailable for video request"
-            );
-            status
-        })?;
-        let video_params = build_video_params(&request).map_err(|status| {
+        let session =
+            self.session_for_backend(BackendKind::Diffusion).await.inspect_err(|status| {
+                error!(
+                    grpc.code = %status.code(),
+                    grpc.message = %status.message(),
+                    elapsed_ms = started_at.elapsed().as_millis(),
+                    "diffusion pipeline unavailable for video request"
+                );
+            })?;
+        let video_params = build_video_params(&request).inspect_err(|status| {
             error!(
                 grpc.code = %status.code(),
                 grpc.message = %status.message(),
                 elapsed_ms = started_at.elapsed().as_millis(),
                 "diffusion video request validation failed"
             );
-            status
         })?;
         let generated = session
             .run_inference_image(lower_video_to_image_params(&video_params))

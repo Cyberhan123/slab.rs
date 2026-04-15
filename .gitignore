@@ -36,3 +36,6 @@ llama.cpp-master/
 
 docs/.vitepress/dist/
 docs/.vitepress/.temp/
+
+setup.inf
+setup.rpt

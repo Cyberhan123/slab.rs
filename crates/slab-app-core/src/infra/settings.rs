@@ -724,6 +724,9 @@ pub(crate) fn settings_document_v2_to_json_value(
     serde_json::json!({
         "$schema": document.schema,
         "schema_version": document.schema_version,
+        "general": {
+            "language": document.general.language,
+        },
         "database": {
             "url": document.database.url,
         },
@@ -935,6 +938,7 @@ pub(crate) fn settings_document_v2_to_json_value(
         "models": {
             "cache_dir": document.models.cache_dir,
             "config_dir": document.models.config_dir,
+            "download_source": document.models.download_source,
             "auto_unload": {
                 "enabled": document.models.auto_unload.enabled,
                 "idle_minutes": document.models.auto_unload.idle_minutes,

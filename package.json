@@ -29,7 +29,7 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "tailwindcss": "^4.2.2",
-    "typescript": "~6.0.2",
+    "typescript": "~5.9.3",
     "vitepress": "^2.0.0-alpha.17"
   },
   "license": "AGPL-3.0-only"

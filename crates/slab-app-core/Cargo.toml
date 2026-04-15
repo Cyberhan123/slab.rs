@@ -12,6 +12,10 @@ license.workspace = true
 default = []
 axum = ["dep:axum"]
 
+[build-dependencies]
+serde_json = { workspace = true }
+slab-utils = { workspace = true }
+
 [dependencies]
 # Internal workspace deps
 slab-runtime-core = { workspace = true }
@@ -20,7 +24,8 @@ slab-proto        = { workspace = true }
 slab-model-pack   = { workspace = true }
 slab-types        = { workspace = true }
 slab-libfetch     = { workspace = true }
-hf-hub            = { workspace = true }
+slab-hub          = { workspace = true }
+slab-utils        = { workspace = true }
 
 # Async runtime
 tokio   = { workspace = true }
@@ -66,12 +71,11 @@ image       = { workspace = true }
 sha2        = { workspace = true }
 zip         = { workspace = true }
 dirs-next   = "2.0.0"
-jsonschema  = { version = "0.45.0", default-features = false }
+jsonschema  = { version = "0.46.0", default-features = false }
 ffmpeg-sidecar = { workspace = true, features = ["download_ffmpeg"] }
-all-smi = "0.17"
+all-smi = "0.20"
 windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 validator = { version = "0.20", features = ["derive"] }
 
 # Optional: Axum state extractor integration
 axum = { workspace = true, optional = true }
-

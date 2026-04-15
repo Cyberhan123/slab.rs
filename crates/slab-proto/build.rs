@@ -16,6 +16,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     tonic_prost_build::configure()
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
+        .type_attribute(
+            "slab.ipc.v1.ModelLoadRequest.backend_params",
+            "#[allow(clippy::large_enum_variant)]",
+        )
+        .type_attribute(
+            "slab.ipc.v1.ModelLoadRequest.BackendParams",
+            "#[allow(clippy::large_enum_variant)]",
+        )
         .build_server(true)
         .build_client(true)
         .compile_protos(&protos, &["proto"])?;

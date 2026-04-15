@@ -1,5 +1,6 @@
 import api from "@/lib/api";
 import useIsTauri from "@/hooks/use-tauri";
+import { useTranslation } from "@slab/i18n";
 
 export type TranscribeVadSettings = {
     enabled: true;
@@ -38,6 +39,7 @@ export type TranscribeOptions = {
 };
 
 const useTranscribe = () => {
+    const { t } = useTranslation();
     const isTauri = useIsTauri();
     // Generated typings currently point this endpoint at CompletionRequest.
     const { isPending, isError, error, mutateAsync } = api.useMutation('post', '/v1/audio/transcriptions') as unknown as {
@@ -61,10 +63,10 @@ const useTranscribe = () => {
         options?: TranscribeOptions
     ): Promise<{ operation_id: string }> => {
         if (!isTauri) {
-            throw new Error('Web audio upload is not implemented yet. Please use the desktop app.');
+            throw new Error(t('pages.audio.error.webUploadNotImplemented'));
         }
         if (typeof value !== 'string' || !value.trim()) {
-            throw new Error('Invalid desktop file path.');
+            throw new Error(t('pages.audio.error.invalidDesktopFilePath'));
         }
 
         const body: {

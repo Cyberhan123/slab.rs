@@ -5,10 +5,10 @@ use serde_json::Value;
 use slab_types::settings::{
     ChatConfig, CloudProviderConfig, DesktopLaunchProfileConfig, DiffusionConfig,
     DiffusionPathsConfig, DiffusionPerformanceConfig, LaunchBackendConfig, LaunchBackendsConfig,
-    LaunchConfig, LaunchProfilesConfig, PmidConfig, ProviderRegistryEntry, RuntimeConfig,
-    RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig, RuntimeTransportMode, RuntimeWorkerConfig,
-    ServerLaunchProfileConfig, SettingsDocumentV2, SetupBackendReleaseConfig, SetupBackendsConfig,
-    SetupConfig, SetupFfmpegConfig, V2_PMID, provider_registry_json_schema,
+    LaunchConfig, LaunchProfilesConfig, ModelDownloadSourcePreference, PmidConfig,
+    ProviderRegistryEntry, RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig,
+    RuntimeTransportMode, RuntimeWorkerConfig, ServerLaunchProfileConfig, SettingsDocumentV2,
+    SetupBackendsConfig, SetupConfig, SetupFfmpegConfig, V2_PMID, provider_registry_json_schema,
     string_list_json_schema,
 };
 
@@ -158,6 +158,22 @@ impl PmidService {
             )),
         }
     }
+
+    pub async fn model_download_source_preference(
+        &self,
+    ) -> Result<ModelDownloadSourcePreference, AppCoreError> {
+        match &self.backend {
+            SettingsBackend::Legacy(_) => Ok(ModelDownloadSourcePreference::Auto),
+            SettingsBackend::V2(settings) => {
+                let value = settings.value(V2_PMID.models.download_source().as_str()).await?;
+                serde_json::from_value(value).map_err(|error| {
+                    AppCoreError::Internal(format!(
+                        "invalid models.download_source setting value: {error}"
+                    ))
+                })
+            }
+        }
+    }
 }
 
 async fn load_legacy_config(settings: &SettingsProvider) -> Result<PmidConfig, AppCoreError> {
@@ -170,56 +186,6 @@ async fn load_legacy_config(settings: &SettingsProvider) -> Result<PmidConfig, A
             },
             backends: SetupBackendsConfig {
                 dir: settings.get_optional_string(PMID.setup.backends.dir()).await?,
-                ggml_llama: SetupBackendReleaseConfig {
-                    tag: settings.get_optional_string(PMID.setup.backends.ggml_llama.tag()).await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.ggml_llama.asset())
-                        .await?,
-                },
-                ggml_whisper: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.ggml_whisper.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.ggml_whisper.asset())
-                        .await?,
-                },
-                ggml_diffusion: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.ggml_diffusion.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.ggml_diffusion.asset())
-                        .await?,
-                },
-                candle_llama: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.candle_llama.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.candle_llama.asset())
-                        .await?,
-                },
-                candle_whisper: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.candle_whisper.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.candle_whisper.asset())
-                        .await?,
-                },
-                candle_diffusion: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.candle_diffusion.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.candle_diffusion.asset())
-                        .await?,
-                },
-                onnx: SetupBackendReleaseConfig {
-                    tag: settings.get_optional_string(PMID.setup.backends.onnx.tag()).await?,
-                    asset: settings.get_optional_string(PMID.setup.backends.onnx.asset()).await?,
-                },
             },
         },
         runtime: RuntimeConfig {
@@ -332,48 +298,6 @@ fn load_v2_config(settings: &SettingsDocumentV2) -> PmidConfig {
             },
             backends: SetupBackendsConfig {
                 dir: normalize_string(settings.runtime.ggml.install_dir.clone()),
-                ggml_llama: merged_release(
-                    &settings.runtime.ggml.source.version,
-                    &settings.runtime.ggml.source.artifact,
-                    &settings.runtime.ggml.backends.llama.source.version,
-                    &settings.runtime.ggml.backends.llama.source.artifact,
-                ),
-                ggml_whisper: merged_release(
-                    &settings.runtime.ggml.source.version,
-                    &settings.runtime.ggml.source.artifact,
-                    &settings.runtime.ggml.backends.whisper.source.version,
-                    &settings.runtime.ggml.backends.whisper.source.artifact,
-                ),
-                ggml_diffusion: merged_release(
-                    &settings.runtime.ggml.source.version,
-                    &settings.runtime.ggml.source.artifact,
-                    &settings.runtime.ggml.backends.diffusion.source.version,
-                    &settings.runtime.ggml.backends.diffusion.source.artifact,
-                ),
-                candle_llama: merged_release(
-                    &settings.runtime.candle.source.version,
-                    &settings.runtime.candle.source.artifact,
-                    &None,
-                    &None,
-                ),
-                candle_whisper: merged_release(
-                    &settings.runtime.candle.source.version,
-                    &settings.runtime.candle.source.artifact,
-                    &None,
-                    &None,
-                ),
-                candle_diffusion: merged_release(
-                    &settings.runtime.candle.source.version,
-                    &settings.runtime.candle.source.artifact,
-                    &None,
-                    &None,
-                ),
-                onnx: merged_release(
-                    &settings.runtime.onnx.source.version,
-                    &settings.runtime.onnx.source.artifact,
-                    &None,
-                    &None,
-                ),
             },
         },
         runtime: RuntimeConfig {
@@ -507,6 +431,20 @@ fn build_v2_property_view_from_values(
 
 fn empty_v2_sections() -> Vec<SettingsSectionView> {
     vec![
+        SettingsSectionView {
+            id: "general".to_owned(),
+            title: "General".to_owned(),
+            description_md: "Desktop application preferences shared across the frontend shell."
+                .to_owned(),
+            subsections: vec![SettingsSubsectionView {
+                id: "general".to_owned(),
+                title: "General".to_owned(),
+                description_md:
+                    "Choose how the desktop app should present shared interface preferences."
+                        .to_owned(),
+                properties: Vec::new(),
+            }],
+        },
         SettingsSectionView {
             id: "database".to_owned(),
             title: "Database".to_owned(),
@@ -699,6 +637,7 @@ fn push_v2_property(
 
 fn v2_section_location(path: &str) -> (&'static str, &'static str) {
     match path {
+        _ if path.starts_with("general.") => ("general", "general"),
         _ if path.starts_with("database.") => ("database", "general"),
         _ if path.starts_with("logging.") => ("logging", "general"),
         _ if path.starts_with("tools.ffmpeg.") => ("tools", "ffmpeg"),
@@ -757,10 +696,14 @@ fn v2_value_type(path: &str, effective: &Value, default: &Value) -> SettingValue
 
 fn v2_enum_values(path: &str) -> Option<Vec<String>> {
     match path {
+        "general.language" => Some(vec!["auto".to_owned(), "en-US".to_owned(), "zh-CN".to_owned()]),
         "runtime.mode" => {
             Some(vec!["managed_children".to_owned(), "external_endpoints".to_owned()])
         }
         "runtime.transport" => Some(vec!["http".to_owned(), "ipc".to_owned()]),
+        "models.download_source" => {
+            Some(vec!["auto".to_owned(), "hugging_face".to_owned(), "model_scope".to_owned()])
+        }
         _ => None,
     }
 }
@@ -795,6 +738,7 @@ fn v2_multiline(path: &str) -> bool {
 
 fn v2_property_label(path: &str) -> String {
     match path {
+        "general.language" => "Interface Language".to_owned(),
         "database.url" => "Database URL".to_owned(),
         "logging.level" => "Log Level".to_owned(),
         "logging.json" => "JSON Logs".to_owned(),
@@ -805,6 +749,7 @@ fn v2_property_label(path: &str) -> String {
         "providers.registry" => "Provider Registry".to_owned(),
         "models.cache_dir" => "Model Cache Directory".to_owned(),
         "models.config_dir" => "Model Config Directory".to_owned(),
+        "models.download_source" => "Model Source".to_owned(),
         "server.address" => "Bind Address".to_owned(),
         "server.admin.token" => "Admin Token".to_owned(),
         "server.cors.allowed_origins" => "Allowed Origins".to_owned(),
@@ -815,6 +760,9 @@ fn v2_property_label(path: &str) -> String {
 
 fn v2_property_description(path: &str) -> String {
     match path {
+        "general.language" => {
+            "Choose how the desktop frontend selects translation resources.".to_owned()
+        }
         "database.url" => "SQLx connection string used for the shared application database.".to_owned(),
         "logging.level" => "Default tracing filter inherited by server and runtime processes.".to_owned(),
         "logging.json" => "Emit newline-delimited JSON logs by default.".to_owned(),
@@ -828,6 +776,7 @@ fn v2_property_description(path: &str) -> String {
         "providers.registry" => "Structured list of remote providers, credentials, and request defaults.".to_owned(),
         "models.cache_dir" => "Directory used for cached model artifacts.".to_owned(),
         "models.config_dir" => "Directory scanned for persisted model configuration documents.".to_owned(),
+        "models.download_source" => "Preferred remote source used when downloading model artifacts. Auto follows the pack candidate order.".to_owned(),
         "models.auto_unload.enabled" => "Unload idle models automatically to reclaim memory.".to_owned(),
         "models.auto_unload.idle_minutes" => "Idle timeout in minutes before auto-unload triggers.".to_owned(),
         "server.address" => "Bind address for the slab-server HTTP gateway.".to_owned(),
@@ -889,18 +838,6 @@ fn value_at_path<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
         current = current.as_object()?.get(segment)?;
     }
     Some(current)
-}
-
-fn merged_release(
-    family_version: &Option<String>,
-    family_artifact: &Option<String>,
-    leaf_version: &Option<String>,
-    leaf_artifact: &Option<String>,
-) -> SetupBackendReleaseConfig {
-    SetupBackendReleaseConfig {
-        tag: normalize_string(leaf_version.clone().or_else(|| family_version.clone())),
-        asset: normalize_string(leaf_artifact.clone().or_else(|| family_artifact.clone())),
-    }
 }
 
 fn normalize_string(raw: Option<String>) -> Option<String> {
@@ -988,8 +925,8 @@ mod tests {
     use super::*;
     use crate::domain::models::{PMID, SettingsValuesFile};
     use slab_types::settings::{
-        ProviderAuthConfig, ProviderDefaultsConfig, ProviderFamily, ProviderRegistryEntry,
-        SettingsDocumentV2,
+        InterfaceLanguagePreference, ProviderAuthConfig, ProviderDefaultsConfig, ProviderFamily,
+        ProviderRegistryEntry, SettingsDocumentV2,
     };
 
     fn temp_settings_path() -> PathBuf {
@@ -1171,6 +1108,55 @@ mod tests {
 
         assert_eq!(service.config().runtime.model_cache_dir.as_deref(), Some("D:/models"));
         assert_eq!(persisted.models.cache_dir.as_deref(), Some("D:/models"));
+
+        let _ = fs::remove_dir_all(path.parent().expect("parent"));
+    }
+
+    #[tokio::test]
+    async fn v2_general_language_setting_is_grouped_and_persisted() {
+        let path = temp_settings_path();
+        fs::create_dir_all(path.parent().expect("parent")).expect("dir");
+        fs::write(
+            &path,
+            serde_json::to_string_pretty(&SettingsDocumentV2::default()).expect("serialize"),
+        )
+        .expect("write");
+
+        let service = PmidService::load_from_path(path.clone()).await.expect("pmid service");
+        let document = service.document().await;
+        let general_section = document
+            .sections
+            .iter()
+            .find(|section| section.id == "general")
+            .expect("general section");
+        let general_subsection = general_section
+            .subsections
+            .iter()
+            .find(|subsection| subsection.id == "general")
+            .expect("general subsection");
+
+        assert!(
+            general_subsection
+                .properties
+                .iter()
+                .any(|property| property.pmid == "general.language")
+        );
+
+        service
+            .update_setting(
+                "general.language",
+                UpdateSettingCommand {
+                    op: UpdateSettingOperation::Set,
+                    value: Some(json!("zh-CN")),
+                },
+            )
+            .await
+            .expect("update");
+
+        let persisted: SettingsDocumentV2 =
+            serde_json::from_str(&fs::read_to_string(&path).expect("file")).expect("json");
+
+        assert_eq!(persisted.general.language, InterfaceLanguagePreference::ZhCn);
 
         let _ = fs::remove_dir_all(path.parent().expect("parent"));
     }

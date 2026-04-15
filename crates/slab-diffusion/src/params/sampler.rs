@@ -7,7 +7,7 @@ use slab_diffusion_sys::sd_sample_params_t;
 
 use crate::Diffusion;
 use crate::params::guidance::GuidanceParams;
-use crate::params::scheduler::Scheduler;
+use crate::params::scheduler::{Scheduler, scheduler_t};
 
 #[rustfmt::skip]
 use slab_diffusion_sys::{
@@ -31,7 +31,7 @@ use slab_diffusion_sys::{
 #[allow(non_camel_case_types)]
 #[cfg_attr(any(not(windows), target_env = "gnu"), repr(u32))]
 #[cfg_attr(all(windows, not(target_env = "gnu")), repr(i32))]
-#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[derive(Debug, Copy, Clone, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 pub enum SampleMethod {
     Euler = sample_method_t_EULER_SAMPLE_METHOD,
     EULER_A = sample_method_t_EULER_A_SAMPLE_METHOD,
@@ -47,6 +47,7 @@ pub enum SampleMethod {
     TCD = sample_method_t_TCD_SAMPLE_METHOD,
     RES_MULTISTEP = sample_method_t_RES_MULTISTEP_SAMPLE_METHOD,
     RES_2S = sample_method_t_RES_2S_SAMPLE_METHOD,
+    #[default]
     Unknown = sample_method_t_SAMPLE_METHOD_COUNT,
 }
 
@@ -76,12 +77,6 @@ impl From<sample_method_t> for SampleMethod {
             sample_method_t_RES_2S_SAMPLE_METHOD => SampleMethod::RES_2S,
             _ => SampleMethod::Unknown,
         }
-    }
-}
-
-impl Default for SampleMethod {
-    fn default() -> Self {
-        Self::Unknown
     }
 }
 
@@ -213,11 +208,11 @@ impl InnerSampleParams {
         }
 
         // important: must set a sample method and scheduler for the native layer to consider the params valid
-        if inner.fp.sample_method == SampleMethod::Unknown.into() {
+        if inner.fp.sample_method == sample_method_t::from(SampleMethod::Unknown) {
             inner.set_sample_method(SampleMethod::Euler);
         }
 
-        if inner.fp.scheduler == Scheduler::UNKNOWN.into() {
+        if inner.fp.scheduler == scheduler_t::from(Scheduler::UNKNOWN) {
             inner.set_scheduler(Scheduler::DISCRETE);
         }
 

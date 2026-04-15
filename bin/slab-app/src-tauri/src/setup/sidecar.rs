@@ -24,17 +24,17 @@ impl ServerSidecarState {
 }
 
 pub fn shutdown_server_sidecar<R: tauri::Runtime>(app_handle: &tauri::AppHandle<R>) {
-    if let Some(state) = app_handle.try_state::<ServerSidecarState>() {
-        if let Some(mut child) = state.take_child() {
-            tauri::async_runtime::spawn(async move {
-                if let Err(error) = child.write(b"shutdown\n") {
-                    warn!("failed to request slab-server shutdown over stdin: {error}");
-                }
+    if let Some(state) = app_handle.try_state::<ServerSidecarState>()
+        && let Some(mut child) = state.take_child()
+    {
+        tauri::async_runtime::spawn(async move {
+            if let Err(error) = child.write(b"shutdown\n") {
+                warn!("failed to request slab-server shutdown over stdin: {error}");
+            }
 
-                tokio::time::sleep(SERVER_SHUTDOWN_TIMEOUT).await;
-                let _ = child.kill();
-            });
-        }
+            tokio::time::sleep(SERVER_SHUTDOWN_TIMEOUT).await;
+            let _ = child.kill();
+        });
     }
 }
 

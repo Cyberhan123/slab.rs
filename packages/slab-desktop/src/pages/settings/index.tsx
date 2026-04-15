@@ -5,6 +5,7 @@ import { Alert, AlertDescription, AlertTitle } from '@slab/components/alert';
 import { Badge } from '@slab/components/badge';
 import { Button } from '@slab/components/button';
 import { StageEmptyState, StatusPill } from '@slab/components/workspace';
+import { useTranslation } from '@slab/i18n';
 import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 import api, { getErrorMessage } from '@/lib/api';
@@ -23,6 +24,7 @@ import {
 export default function SettingsPage() {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [activeSectionId, setActiveSectionId] = useState<string | null>(null);
+  const { t } = useTranslation();
 
   const { data, error, isLoading, refetch } = api.useQuery('get', '/v1/settings');
 
@@ -60,7 +62,11 @@ export default function SettingsPage() {
     setActiveSectionId(nextSectionId);
   }, [activeSectionId, sections]);
 
-  usePageHeader(PAGE_HEADER_META.settings);
+  usePageHeader({
+    ...PAGE_HEADER_META.settings,
+    title: t('pages.settings.header.title'),
+    subtitle: t('pages.settings.header.subtitle'),
+  });
 
   const {
     drafts,
@@ -95,8 +101,8 @@ export default function SettingsPage() {
     return (
       <StageEmptyState
         icon={Loader2}
-        title="Loading settings document"
-        description="Fetching runtime schema and values."
+        title={t('pages.settings.page.loadingTitle')}
+        description={t('pages.settings.page.loadingDescription')}
         className="[&_svg]:animate-spin"
       />
     );
@@ -107,7 +113,7 @@ export default function SettingsPage() {
       <div className="mx-auto flex max-w-3xl flex-col gap-4 py-10">
         <Alert variant="destructive">
           <TriangleAlert className="h-4 w-4" />
-          <AlertTitle>Settings failed to load</AlertTitle>
+          <AlertTitle>{t('pages.settings.page.failedLoadTitle')}</AlertTitle>
           <AlertDescription>
             {getErrorMessage(error ?? new Error('Unknown settings error.'))}
           </AlertDescription>
@@ -115,7 +121,7 @@ export default function SettingsPage() {
         <div>
           <Button variant="pill" size="pill" onClick={() => void refetch()}>
             <RefreshCw className="mr-2 h-4 w-4" />
-            Try again
+            {t('pages.settings.page.tryAgain')}
           </Button>
         </div>
       </div>
@@ -137,7 +143,7 @@ export default function SettingsPage() {
           {data.warnings.length > 0 ? (
             <Alert>
               <TriangleAlert className="h-4 w-4" />
-              <AlertTitle>Recovered settings warnings</AlertTitle>
+              <AlertTitle>{t('pages.settings.page.warningsTitle')}</AlertTitle>
               <AlertDescription>
                 <div className="space-y-1">
                   {data.warnings.map((warning) => (
@@ -150,8 +156,8 @@ export default function SettingsPage() {
 
           {!activeSection ? (
             <StageEmptyState
-              title="No settings available"
-              description="The settings document is empty."
+              title={t('pages.settings.page.noSettingsTitle')}
+              description={t('pages.settings.page.noSettingsDescription')}
             />
           ) : (
             <>
@@ -169,13 +175,17 @@ export default function SettingsPage() {
                         variant="chip"
                         className="rounded-full border-border/60 bg-border/30 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground"
                       >
-                        {countSectionProperties(activeSection)} settings
+                        {t('pages.settings.page.settingsCount', {
+                          count: countSectionProperties(activeSection),
+                        })}
                       </Badge>
                       <Badge
                         variant="chip"
                         className="rounded-full border-border/60 bg-border/20 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.08em] text-muted-foreground"
                       >
-                        schema v{data.schema_version}
+                        {t('pages.settings.page.schemaVersion', {
+                          version: data.schema_version,
+                        })}
                       </Badge>
                     </div>
                     {activeSection.description_md ? (
@@ -194,14 +204,18 @@ export default function SettingsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       {statusSummary.error > 0 ? (
                         <StatusPill status="danger">
-                          {statusSummary.error} issue{statusSummary.error > 1 ? 's' : ''}
+                          {t('pages.settings.page.issues', { count: statusSummary.error })}
                         </StatusPill>
                       ) : null}
                       {statusSummary.saving > 0 ? (
-                        <StatusPill status="info">{statusSummary.saving} saving</StatusPill>
+                        <StatusPill status="info">
+                          {t('pages.settings.page.saving', { count: statusSummary.saving })}
+                        </StatusPill>
                       ) : null}
                       {statusSummary.dirty > 0 ? (
-                        <Badge variant="counter">{statusSummary.dirty} pending</Badge>
+                        <Badge variant="counter">
+                          {t('pages.settings.page.pending', { count: statusSummary.dirty })}
+                        </Badge>
                       ) : null}
                     </div>
                   ) : null}

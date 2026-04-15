@@ -1,0 +1,113 @@
+export const video = {
+  header: {
+    title: '视频',
+    subtitle: '视频工具与处理',
+  },
+  modelPicker: {
+    groupLabel: '视频模型',
+    placeholder: '选择模型',
+    emptyLabel: '暂无扩散模型',
+    optionDownloadInHub: '{{model}}（请先在模型库下载）',
+  },
+  options: {
+    sampleMethods: {
+      auto: '自动',
+      euler: 'Euler',
+      euler_a: 'Euler A',
+      lcm: 'LCM',
+      'dpm++2m': 'DPM++ 2M',
+    },
+    schedulers: {
+      auto: '自动',
+      discrete: '离散',
+      karras: 'Karras',
+    },
+  },
+  workbench: {
+    configTitle: '配置',
+    modelHint: '请从全局顶部栏选择当前扩散模型。',
+    prompt: {
+      label: '创意提示词',
+      placeholder: '用电影镜头语言详细描述这个场景...',
+    },
+    negativePrompt: {
+      label: '负面提示词',
+      placeholder: '模糊、低质量、畸变...',
+    },
+    fields: {
+      width: '宽度',
+      height: '高度',
+      frames: '帧数',
+      fps: '帧率',
+      referenceImage: '参考图像',
+      advanced: '高级参数',
+      cfgScale: 'CFG Scale',
+      guidance: 'Guidance',
+      steps: '步数',
+      strength: '强度',
+      seed: '种子（-1 为随机）',
+      sampler: '采样器',
+      scheduler: '调度器',
+    },
+    referenceImage: {
+      readyTitle: '参考帧已就绪',
+      readyDescription: 'Slab 会将这张图像作为起始帧使用。',
+      uploadTitle: '拖放 PNG/JPG，或点击上传',
+      uploadDescription: '可选的运动生成起始帧。',
+      previewAlt: '参考图像预览',
+      removeAria: '移除参考图像',
+    },
+    actions: {
+      generating: '正在生成...',
+      generate: '生成视频',
+      cancel: '取消当前渲染',
+    },
+    stage: {
+      toggleScale: '切换画布缩放',
+      downloadVideo: '下载视频',
+      renderStatus: '渲染状态',
+      clipSpec: '片段规格',
+      canvas: '画布',
+      clipSpecValue: '{{frames}} 帧 - {{fps}} fps',
+    },
+  },
+  stage: {
+    title: {
+      ready: '渲染已完成',
+      rendering: '渲染预览中',
+      idle: '预览画布',
+    },
+    description: {
+      ready: '生成的视频已经可以查看、在画布中调整展示方式，或下载到本地。',
+      rendering: '正在生成 {{frames}} 帧、{{fps}} fps 的视频。Slab 会持续轮询运行时状态。',
+      idle: '处理完成后，生成的视频会显示在这里，随时可以开始电影感渲染。',
+    },
+    status: {
+      ready: '渲染完成',
+      rendering: '生成中',
+      queued: '可开始渲染',
+      awaitingPrompt: '等待提示词',
+    },
+    footerHint: {
+      ready: '生成的视频已保存在本地，可随时下载。',
+      polling: '每 {{seconds}} 秒轮询一次，直到运行时处理完成。',
+      estimate: '预计片段时长：{{seconds}} 秒。',
+      downloadFirst: '开始渲染前，请先在模型库中下载本地扩散模型。',
+    },
+  },
+  toast: {
+    started: '视频生成已开始（{{frames}} 帧，{{fps}} fps）...',
+    generated: '视频已生成！',
+    timedOut: '视频生成超时',
+    pollingError: '轮询出错：{{message}}',
+    completedWithoutPath: '视频生成完成，但没有返回视频路径',
+    resultFetchFailed: '获取视频结果失败：{{message}}',
+  },
+  error: {
+    enterPrompt: '请输入提示词',
+    selectDownloadedModel: '所选模型尚未下载，请先在模型库中下载。',
+    chooseImageFile: '请选择图像文件',
+    readImageFileFailed: '读取图像文件失败',
+    generationFailed: '视频生成失败',
+  },
+} as const;

@@ -1,6 +1,11 @@
 import { useEffect, useEffectEvent, useMemo, useRef, useState } from 'react';
 import { toast } from 'sonner';
 
+import {
+  applyAppLanguagePreference,
+  isAppLanguagePreference,
+  useTranslation,
+} from '@slab/i18n';
 import api, { getErrorMessage } from '@/lib/api';
 
 import type {
@@ -20,6 +25,7 @@ export function useSettingsAutosave({
   propertyMap,
   refetch,
 }: UseSettingsAutosaveArgs) {
+  const { t } = useTranslation();
   const [drafts, setDrafts] = useState<Record<string, DraftValue>>({});
   const [fieldErrors, setFieldErrors] = useState<Record<string, FieldErrorState>>({});
   const [fieldStatuses, setFieldStatuses] = useState<Record<string, FieldStatusState>>({});
@@ -107,14 +113,14 @@ export function useSettingsAutosave({
       }));
       setFieldStatus(pmid, {
         tone: 'error',
-        message: 'Needs attention before auto-save.',
+        message: t('pages.settings.autosave.needsAttention'),
       });
       return;
     }
 
     setFieldStatus(pmid, {
       tone: 'saving',
-      message: 'Saving changes...',
+      message: t('pages.settings.autosave.savingChanges'),
     });
 
     try {
@@ -126,6 +132,11 @@ export function useSettingsAutosave({
         },
         body,
       });
+
+      await syncLanguagePreferenceSetting(
+        pmid,
+        body.op === 'set' ? body.value : property.schema.default_value,
+      );
 
       let draftWasConsumed = false;
       setDrafts((current) => {
@@ -143,12 +154,12 @@ export function useSettingsAutosave({
         clearFieldError(pmid);
         setFieldStatus(pmid, {
           tone: 'saved',
-          message: 'Saved automatically.',
+          message: t('pages.settings.autosave.savedAutomatically'),
         });
       } else {
         setFieldStatus(pmid, {
           tone: 'dirty',
-          message: 'New edits are waiting to save.',
+          message: t('pages.settings.autosave.newEditsWaiting'),
         });
       }
 
@@ -185,7 +196,7 @@ export function useSettingsAutosave({
     clearFieldError(property.pmid);
     setFieldStatus(property.pmid, {
       tone: 'dirty',
-      message: 'Waiting to auto-save...',
+      message: t('pages.settings.autosave.waitingAutoSave'),
     });
     scheduleAutosave(property);
   }
@@ -195,7 +206,7 @@ export function useSettingsAutosave({
     setResettingPmid(property.pmid);
     setFieldStatus(property.pmid, {
       tone: 'saving',
-      message: 'Resetting to default...',
+      message: t('pages.settings.autosave.resettingToDefault'),
     });
 
     try {
@@ -210,6 +221,8 @@ export function useSettingsAutosave({
         },
       });
 
+      await syncLanguagePreferenceSetting(property.pmid, property.schema.default_value);
+
       setDrafts((current) => {
         if (!(property.pmid in current)) {
           return current;
@@ -222,10 +235,14 @@ export function useSettingsAutosave({
       clearFieldError(property.pmid);
       setFieldStatus(property.pmid, {
         tone: 'saved',
-        message: 'Restored to default.',
+        message: t('pages.settings.autosave.restoredToDefault'),
       });
       await refetch();
-      toast.success(`Reset ${property.label} to default.`);
+      toast.success(
+        t('pages.settings.autosave.resetToast', {
+          label: property.label,
+        }),
+      );
     } catch (error) {
       const structured = extractStructuredError(error);
       if (structured) {
@@ -254,4 +271,16 @@ export function useSettingsAutosave({
     setDraftValue,
     resetSetting,
   };
+}
+
+async function syncLanguagePreferenceSetting(pmid: string, value: unknown) {
+  if (pmid !== 'general.language') {
+    return;
+  }
+
+  if (typeof value !== 'string' || !isAppLanguagePreference(value)) {
+    return;
+  }
+
+  await applyAppLanguagePreference(value);
 }

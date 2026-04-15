@@ -31,8 +31,10 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
         let (language, prompt, detect_language, vad, decode) =
             build_whisper_inference_options(&req);
         let vad_enabled = vad.as_ref().is_some_and(|value| value.enabled);
-        let decode_configured =
-            decode.is_some() || language.is_some() || prompt.is_some() || detect_language == Some(true);
+        let decode_configured = decode.is_some()
+            || language.is_some()
+            || prompt.is_some()
+            || detect_language == Some(true);
 
         debug!(
             audio_path = %req.path,
@@ -98,44 +100,24 @@ impl pb::whisper_service_server::WhisperService for GrpcServiceImpl {
     }
 }
 
-fn build_whisper_inference_options(
-    req: &pb::TranscribeRequest,
-) -> (
-    Option<String>,
-    Option<String>,
-    Option<bool>,
-    Option<WhisperVadOptions>,
-    Option<WhisperDecodeOptions>,
-) {
-    let language = req
-        .language
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned);
-    let prompt = req
-        .prompt
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_owned);
+fn build_whisper_inference_options(req: &pb::TranscribeRequest) -> WhisperInferenceOptions {
+    let language =
+        req.language.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned);
+    let prompt =
+        req.prompt.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(str::to_owned);
     let detect_language = req.detect_language.filter(|value| *value);
     let vad = if let Some(vad) = req.vad.as_ref() {
         if !vad.enabled {
             None
         } else {
-            let params = if let Some(params) = vad.params.as_ref() {
-                Some(WhisperVadParams {
-                    threshold: params.threshold,
-                    min_speech_duration_ms: params.min_speech_duration_ms,
-                    min_silence_duration_ms: params.min_silence_duration_ms,
-                    max_speech_duration_s: params.max_speech_duration_s,
-                    speech_pad_ms: params.speech_pad_ms,
-                    samples_overlap: params.samples_overlap,
-                })
-            } else {
-                None
-            };
+            let params = vad.params.as_ref().map(|params| WhisperVadParams {
+                threshold: params.threshold,
+                min_speech_duration_ms: params.min_speech_duration_ms,
+                min_silence_duration_ms: params.min_silence_duration_ms,
+                max_speech_duration_s: params.max_speech_duration_s,
+                speech_pad_ms: params.speech_pad_ms,
+                samples_overlap: params.samples_overlap,
+            });
 
             Some(WhisperVadOptions {
                 enabled: true,
@@ -147,31 +129,35 @@ fn build_whisper_inference_options(
         None
     };
 
-    let decode = if let Some(decode) = req.decode.as_ref() {
-        Some(WhisperDecodeOptions {
-            offset_ms: decode.offset_ms,
-            duration_ms: decode.duration_ms,
-            no_context: decode.no_context,
-            no_timestamps: decode.no_timestamps,
-            token_timestamps: decode.token_timestamps,
-            split_on_word: decode.split_on_word,
-            suppress_nst: decode.suppress_nst,
-            word_thold: decode.word_thold,
-            max_len: decode.max_len,
-            max_tokens: decode.max_tokens,
-            temperature: decode.temperature,
-            temperature_inc: decode.temperature_inc,
-            entropy_thold: decode.entropy_thold,
-            logprob_thold: decode.logprob_thold,
-            no_speech_thold: decode.no_speech_thold,
-            tdrz_enable: decode.tdrz_enable,
-        })
-    } else {
-        None
-    };
+    let decode = req.decode.as_ref().map(|decode| WhisperDecodeOptions {
+        offset_ms: decode.offset_ms,
+        duration_ms: decode.duration_ms,
+        no_context: decode.no_context,
+        no_timestamps: decode.no_timestamps,
+        token_timestamps: decode.token_timestamps,
+        split_on_word: decode.split_on_word,
+        suppress_nst: decode.suppress_nst,
+        word_thold: decode.word_thold,
+        max_len: decode.max_len,
+        max_tokens: decode.max_tokens,
+        temperature: decode.temperature,
+        temperature_inc: decode.temperature_inc,
+        entropy_thold: decode.entropy_thold,
+        logprob_thold: decode.logprob_thold,
+        no_speech_thold: decode.no_speech_thold,
+        tdrz_enable: decode.tdrz_enable,
+    });
 
     (language, prompt, detect_language, vad, decode)
 }
+
+type WhisperInferenceOptions = (
+    Option<String>,
+    Option<String>,
+    Option<bool>,
+    Option<WhisperVadOptions>,
+    Option<WhisperDecodeOptions>,
+);
 
 fn convert_file_to_pcm_f32le(path: &str) -> Result<Arc<[f32]>, String> {
     let ffmpeg_bin = ffmpeg_sidecar::paths::ffmpeg_path();

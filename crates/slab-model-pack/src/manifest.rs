@@ -1,6 +1,7 @@
 use std::collections::BTreeMap;
 
 use schemars::JsonSchema;
+use serde::de::Deserializer;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use slab_types::{Capability, DriverHints, ModelFamily};
@@ -27,8 +28,13 @@ pub struct ModelPackManifest {
     pub runtime_presets: Option<PackRuntimePresets>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<PackSource>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        alias = "source",
+        deserialize_with = "deserialize_pack_source_candidates"
+    )]
+    pub sources: Vec<PackSourceCandidate>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub components: Vec<ConfigEntryRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -146,6 +152,76 @@ impl PackSource {
     }
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
+pub enum PackHubProvider {
+    #[serde(rename = "hugging_face", alias = "hf_hub", alias = "huggingface")]
+    HuggingFace,
+    #[serde(rename = "model_scope", alias = "models_cat", alias = "modelscope")]
+    ModelScope,
+}
+
+impl PackHubProvider {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::HuggingFace => "hugging_face",
+            Self::ModelScope => "model_scope",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct PackSourceCandidate {
+    #[serde(flatten)]
+    pub source: PackSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hub_provider: Option<PackHubProvider>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub priority: Option<i32>,
+}
+
+impl PackSourceCandidate {
+    pub const fn new(source: PackSource) -> Self {
+        Self { source, hub_provider: None, priority: None }
+    }
+
+    pub const fn kind(&self) -> &'static str {
+        self.source.kind()
+    }
+
+    pub fn files(&self) -> Vec<PackSourceFile> {
+        self.source.files()
+    }
+
+    pub fn with_source(&self, source: PackSource) -> Self {
+        Self { source, hub_provider: self.hub_provider, priority: self.priority }
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum PackSourceCandidatesRepr {
+    SingleSource(PackSource),
+    SingleCandidate(PackSourceCandidate),
+    CandidateList(Vec<PackSourceCandidate>),
+}
+
+fn deserialize_pack_source_candidates<'de, D>(
+    deserializer: D,
+) -> Result<Vec<PackSourceCandidate>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let repr = Option::<PackSourceCandidatesRepr>::deserialize(deserializer)?;
+    Ok(match repr {
+        None => Vec::new(),
+        Some(PackSourceCandidatesRepr::SingleSource(source)) => {
+            vec![PackSourceCandidate::new(source)]
+        }
+        Some(PackSourceCandidatesRepr::SingleCandidate(candidate)) => vec![candidate],
+        Some(PackSourceCandidatesRepr::CandidateList(candidates)) => candidates,
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct PackSourceFile {
     pub id: String,
@@ -237,8 +313,13 @@ pub struct VariantDocument {
     pub label: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub source: Option<PackSource>,
+    #[serde(
+        default,
+        skip_serializing_if = "Vec::is_empty",
+        alias = "source",
+        deserialize_with = "deserialize_pack_source_candidates"
+    )]
+    pub sources: Vec<PackSourceCandidate>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub component_ids: Vec<String>,
     #[serde(rename = "$load_config", default, skip_serializing_if = "Option::is_none")]

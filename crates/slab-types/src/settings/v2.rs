@@ -48,6 +48,18 @@ const fn default_disabled() -> bool {
     false
 }
 
+/// Frontend interface language preference stored in settings.json.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+pub enum InterfaceLanguagePreference {
+    #[default]
+    #[serde(rename = "auto")]
+    Auto,
+    #[serde(rename = "en-US")]
+    EnUs,
+    #[serde(rename = "zh-CN")]
+    ZhCn,
+}
+
 /// V2 user-facing settings document persisted as nested JSON.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SettingsDocumentV2 {
@@ -61,6 +73,8 @@ pub struct SettingsDocumentV2 {
     /// Settings document schema version.
     #[serde(default = "default_schema_version")]
     pub schema_version: u32,
+    #[serde(default)]
+    pub general: GeneralConfigV2,
     #[serde(default)]
     pub database: DatabaseConfig,
     #[serde(default)]
@@ -82,6 +96,7 @@ impl Default for SettingsDocumentV2 {
         Self {
             schema: default_schema_ref(),
             schema_version: default_schema_version(),
+            general: GeneralConfigV2::default(),
             database: DatabaseConfig::default(),
             logging: LoggingConfig::default(),
             tools: ToolsConfig::default(),
@@ -90,6 +105,20 @@ impl Default for SettingsDocumentV2 {
             models: ModelsConfigV2::default(),
             server: ServerConfigV2::default(),
         }
+    }
+}
+
+/// General desktop-app settings.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct GeneralConfigV2 {
+    /// Preferred desktop interface language.
+    #[serde(default)]
+    pub language: InterfaceLanguagePreference,
+}
+
+impl Default for GeneralConfigV2 {
+    fn default() -> Self {
+        Self { language: InterfaceLanguagePreference::Auto }
     }
 }
 
@@ -299,7 +328,7 @@ pub struct RuntimeSessionsConfig {
 }
 
 /// GGML runtime family configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct GgmlRuntimeFamilyConfig {
     /// Shared install directory for GGML runtime libraries.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -316,21 +345,8 @@ pub struct GgmlRuntimeFamilyConfig {
     pub backends: GgmlRuntimeBackendsConfig,
 }
 
-impl Default for GgmlRuntimeFamilyConfig {
-    fn default() -> Self {
-        Self {
-            install_dir: None,
-            source: SourceConfig::default(),
-            logging: LoggingOverrideConfig::default(),
-            capacity: CapacityOverrideConfig::default(),
-            endpoint: EndpointConfig::default(),
-            backends: GgmlRuntimeBackendsConfig::default(),
-        }
-    }
-}
-
 /// GGML leaf backend configuration.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct GgmlRuntimeBackendsConfig {
     #[serde(default)]
     pub llama: LlamaRuntimeLeafConfig,
@@ -338,16 +354,6 @@ pub struct GgmlRuntimeBackendsConfig {
     pub whisper: RuntimeLeafConfig,
     #[serde(default)]
     pub diffusion: RuntimeLeafConfig,
-}
-
-impl Default for GgmlRuntimeBackendsConfig {
-    fn default() -> Self {
-        Self {
-            llama: LlamaRuntimeLeafConfig::default(),
-            whisper: RuntimeLeafConfig::default(),
-            diffusion: RuntimeLeafConfig::default(),
-        }
-    }
 }
 
 /// Shared runtime leaf configuration.
@@ -411,7 +417,7 @@ impl Default for LlamaRuntimeLeafConfig {
 }
 
 /// Single-node runtime family configuration used for candle and onnx.
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct SingleRuntimeFamilyConfig {
     /// Whether this runtime family is enabled.
     #[serde(default = "default_disabled")]
@@ -427,19 +433,6 @@ pub struct SingleRuntimeFamilyConfig {
     pub capacity: CapacityOverrideConfig,
     #[serde(default)]
     pub endpoint: EndpointConfig,
-}
-
-impl Default for SingleRuntimeFamilyConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            install_dir: None,
-            source: SourceConfig::default(),
-            logging: LoggingOverrideConfig::default(),
-            capacity: CapacityOverrideConfig::default(),
-            endpoint: EndpointConfig::default(),
-        }
-    }
 }
 
 /// Global provider registry configuration.
@@ -504,14 +497,32 @@ pub struct ModelsConfigV2 {
     /// Directory containing model configuration documents.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub config_dir: Option<String>,
+    /// Preferred remote source used when downloading model artifacts.
+    #[serde(default)]
+    pub download_source: ModelDownloadSourcePreference,
     #[serde(default)]
     pub auto_unload: AutoUnloadConfig,
 }
 
 impl Default for ModelsConfigV2 {
     fn default() -> Self {
-        Self { cache_dir: None, config_dir: None, auto_unload: AutoUnloadConfig::default() }
+        Self {
+            cache_dir: None,
+            config_dir: None,
+            download_source: ModelDownloadSourcePreference::Auto,
+            auto_unload: AutoUnloadConfig::default(),
+        }
     }
+}
+
+/// Preferred remote source used when downloading model artifacts.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ModelDownloadSourcePreference {
+    #[default]
+    Auto,
+    HuggingFace,
+    ModelScope,
 }
 
 /// Automatic model-unload settings.
@@ -729,6 +740,7 @@ mod tests {
 
         assert_eq!(settings.schema.as_deref(), Some(PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL));
         assert_eq!(settings.schema_version, 2);
+        assert_eq!(settings.general.language, InterfaceLanguagePreference::Auto);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
         assert_eq!(settings.server.address, "127.0.0.1:3000");
         assert!(settings.runtime.logging.level.is_none());

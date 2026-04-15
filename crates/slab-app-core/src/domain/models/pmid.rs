@@ -11,7 +11,7 @@ mod tests {
 
     #[test]
     fn nested_builder_generates_expected_pmid() {
-        assert_eq!(PMID.setup.backends.ggml_llama.tag().as_str(), "setup.backends.ggml.llama.tag");
+        assert_eq!(PMID.setup.backends.dir().as_str(), "setup.backends.dir");
         assert_eq!(
             PMID.runtime.model_auto_unload.idle_minutes().as_str(),
             "runtime.model_auto_unload.idle_minutes"

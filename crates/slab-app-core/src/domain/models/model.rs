@@ -168,6 +168,9 @@ pub struct ModelSpec {
     /// HuggingFace repo ID for local models.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repo_id: Option<String>,
+    /// Optional explicit hub provider override for local model downloads.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hub_provider: Option<String>,
     /// Filename within the HF repo.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub filename: Option<String>,
@@ -202,6 +205,15 @@ pub struct ModelPackSelection {
     pub preset_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub variant_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SelectedModelDownloadSource {
+    pub source_key: String,
+    pub repo_id: String,
+    pub filename: String,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub hub_provider: Option<String>,
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +283,8 @@ pub struct StoredModelConfig {
     pub runtime_presets: Option<RuntimePresets>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub materialized_artifacts: BTreeMap<String, String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub selected_download_source: Option<SelectedModelDownloadSource>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub pack_selection: Option<ModelPackSelection>,
 }
@@ -568,6 +582,7 @@ impl From<UnifiedModel> for StoredModelConfig {
             spec: model.spec,
             runtime_presets: model.runtime_presets,
             materialized_artifacts: BTreeMap::new(),
+            selected_download_source: None,
             pack_selection: None,
         }
     }
@@ -765,6 +780,7 @@ mod tests {
             runtime_presets: None,
             materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
+            selected_download_source: None,
         })
         .expect_err("future schema version should fail");
 
@@ -790,6 +806,7 @@ mod tests {
             runtime_presets: None,
             materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
+            selected_download_source: None,
         })
         .expect_err("future policy version should fail");
 

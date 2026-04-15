@@ -15,7 +15,7 @@ mod ui_state;
 mod video;
 
 pub use audio::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
-pub use backend::{BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand};
+pub use backend::{BackendStatusQuery, BackendStatusView};
 #[allow(unused_imports)]
 pub use chat::StructuredOutputJsonSchema;
 pub use chat::{
@@ -38,9 +38,10 @@ pub use model::{
     ModelConfigSourceSummary, ModelConfigValueType, ModelConfigVariantOption,
     ModelEnhancementPresetOption, ModelEnhancementVariantOption, ModelEnhancementView,
     ModelLoadCommand, ModelPackSelection, ModelSpec, ModelStatus, Pricing, RuntimePresets,
-    StoredModelConfig, UnifiedModel, UnifiedModelKind, UnifiedModelStatus, UpdateModelCommand,
-    UpdateModelConfigSelectionCommand, UpdateModelEnhancementCommand, default_model_capabilities,
-    normalize_model_capabilities, upgrade_stored_model_config,
+    SelectedModelDownloadSource, StoredModelConfig, UnifiedModel, UnifiedModelKind,
+    UnifiedModelStatus, UpdateModelCommand, UpdateModelConfigSelectionCommand,
+    UpdateModelEnhancementCommand, default_model_capabilities, normalize_model_capabilities,
+    upgrade_stored_model_config,
 };
 pub use pmid::PMID;
 pub use session::{CreateSessionCommand, SessionMessageView, SessionView};
@@ -52,6 +53,8 @@ pub use settings::{
 };
 pub use setup::{CompleteSetupCommand, ComponentStatus, EnvironmentStatus};
 pub use system::{GpuDeviceSnapshot, GpuStatusSnapshot};
-pub use task::{AcceptedOperation, TaskPayloadEnvelope, TaskResult, TaskStatus, TaskView};
+pub use task::{
+    AcceptedOperation, TaskPayloadEnvelope, TaskProgress, TaskResult, TaskStatus, TaskView,
+};
 pub use ui_state::{DeleteUiStateView, UiStateValueView, UpdateUiStateCommand};
 pub use video::{DecodedVideoInitImage, VideoGenerationCommand};

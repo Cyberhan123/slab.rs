@@ -6,10 +6,12 @@ import { usePageHeader } from '@/hooks/use-global-header-meta';
 import { PAGE_HEADER_META } from '@/layouts/header-meta';
 
 import {
-  PROGRESS_MAX_SIMULATED,
-  PROGRESS_STEP,
   TASK_POLL_INTERVAL_MS,
-  type DownloadState,
+  getProvisionProgressSummary,
+  getProvisionProgressValue,
+  getProvisionStageHint,
+  getProvisionStageLabel,
+  type ProvisionState,
   type SetupStatus,
   type TaskRecord,
 } from '../const';
@@ -18,32 +20,37 @@ function toErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isTerminalTaskStatus(status: TaskRecord['status']) {
+  return status === 'succeeded'
+    || status === 'failed'
+    || status === 'cancelled'
+    || status === 'interrupted';
+}
+
 export interface SetupViewModel {
-  status: SetupStatus | null;
   isChecking: boolean;
   checkError: string | null;
-  ffmpegDownload: DownloadState;
-  ffmpegError: string | null;
-  ffmpegProgress: number;
-  ffmpegReady: boolean;
-  allBackendsUnavailable: boolean;
-  completing: boolean;
-  saveError: string | null;
-  handleDownloadFfmpeg: () => Promise<void>;
-  handleComplete: () => Promise<void>;
+  provisionState: ProvisionState;
+  provisionError: string | null;
+  stageLabel: string;
+  stageHint: string;
+  progressPercent: number;
+  progressSummary: string;
+  canRetry: boolean;
+  handleRetry: () => Promise<void>;
 }
 
 export function useSetup(): SetupViewModel {
   const navigate = useNavigate();
+  const autoStartedRef = useRef(false);
   const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   usePageHeader(PAGE_HEADER_META.setup);
 
-  const [ffmpegDownload, setFfmpegDownload] = useState<DownloadState>('idle');
-  const [ffmpegTaskId, setFfmpegTaskId] = useState<string | null>(null);
-  const [ffmpegError, setFfmpegError] = useState<string | null>(null);
-  const [ffmpegProgress, setFfmpegProgress] = useState(0);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [provisionState, setProvisionState] = useState<ProvisionState>('idle');
+  const [provisionTaskId, setProvisionTaskId] = useState<string | null>(null);
+  const [provisionTask, setProvisionTask] = useState<TaskRecord | null>(null);
+  const [provisionError, setProvisionError] = useState<string | null>(null);
 
   const {
     data: setupStatus,
@@ -57,58 +64,129 @@ export function useSetup(): SetupViewModel {
     refetchOnWindowFocus: false,
     retry: false,
   });
-  const downloadFfmpegMutation = api.useMutation('post', '/v1/setup/ffmpeg/download');
-  const completeSetupMutation = api.useMutation('post', '/v1/setup/complete');
+  const provisionMutation = api.useMutation('post', '/v1/setup/provision');
   const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
-  const status = setupStatus ?? null;
+  const status: SetupStatus | null = setupStatus ?? null;
+
+  const markSetupInitialized = useCallback(() => {
+    queryClient.setQueriesData(
+      {
+        predicate: (query) => JSON.stringify(query.queryKey).includes('/v1/setup/status'),
+      },
+      (current) => {
+        if (!current || typeof current !== 'object') {
+          return current;
+        }
+
+        return {
+          ...current,
+          initialized: true,
+        };
+      },
+    );
+  }, []);
 
   useEffect(() => {
     if (status?.initialized) {
+      markSetupInitialized();
       navigate('/', { replace: true });
     }
-  }, [navigate, status?.initialized]);
+  }, [markSetupInitialized, navigate, status?.initialized]);
 
-  const handleFfmpegDone = useCallback(
+  const startProvision = useCallback(async () => {
+    setProvisionState('starting');
+    setProvisionError(null);
+    setProvisionTask(null);
+    setProvisionTaskId(null);
+
+    try {
+      const operation = await provisionMutation.mutateAsync({});
+      setProvisionTaskId(operation.operation_id);
+    } catch (error) {
+      setProvisionState('failed');
+      setProvisionError(toErrorMessage(error));
+    }
+  }, [provisionMutation]);
+
+  const handleProvisionTask = useCallback(
     async (task: TaskRecord) => {
-      if (task.status === 'succeeded') {
-        setFfmpegDownload('done');
-        setFfmpegProgress(100);
-        setFfmpegError(null);
-        setFfmpegTaskId(null);
-        await refetchSetupStatus();
+      setProvisionTask(task);
+
+      if (task.status === 'pending') {
+        setProvisionState('starting');
         return;
       }
 
-      setFfmpegDownload('error');
-      setFfmpegError(task.error_msg ?? 'Download failed');
-      setFfmpegProgress(0);
-      setFfmpegTaskId(null);
+      if (task.status === 'running') {
+        setProvisionState('running');
+        setProvisionError(null);
+        return;
+      }
+
+      if (task.status === 'succeeded') {
+        setProvisionState('succeeded');
+        setProvisionError(null);
+        setProvisionTaskId(null);
+        markSetupInitialized();
+
+        try {
+          await refetchSetupStatus();
+        } catch {
+          // Keep going; the cache has already been marked initialized.
+        }
+
+        navigate('/', { replace: true });
+        return;
+      }
+
+      setProvisionState('failed');
+      setProvisionTaskId(null);
+      setProvisionError(task.error_msg ?? 'Setup failed before provisioning could finish.');
     },
-    [refetchSetupStatus],
+    [markSetupInitialized, navigate, refetchSetupStatus],
   );
 
   useEffect(() => {
-    if (!ffmpegTaskId) {
+    if (autoStartedRef.current) {
       return;
     }
+
+    if (setupStatusLoading || setupStatusError || !status || status.initialized) {
+      return;
+    }
+
+    autoStartedRef.current = true;
+    void startProvision();
+  }, [setupStatusError, setupStatusLoading, startProvision, status]);
+
+  useEffect(() => {
+    if (!provisionTaskId) {
+      return;
+    }
+
+    let disposed = false;
 
     const poll = async () => {
       try {
         const task = await getTaskMutation.mutateAsync({
           params: {
-            path: { id: ffmpegTaskId },
+            path: { id: provisionTaskId },
           },
         });
 
-        if (task.status === 'succeeded' || task.status === 'failed') {
-          if (pollIntervalRef.current) {
-            clearInterval(pollIntervalRef.current);
-          }
-          await handleFfmpegDone(task);
+        if (disposed) {
+          return;
         }
+
+        if (isTerminalTaskStatus(task.status) && pollIntervalRef.current) {
+          clearInterval(pollIntervalRef.current);
+          pollIntervalRef.current = null;
+        }
+
+        await handleProvisionTask(task);
       } catch {
-        // Ignore transient polling failures and keep monitoring the task.
+        // Ignore transient polling failures while the local host is still alive.
       }
     };
 
@@ -118,86 +196,29 @@ export function useSetup(): SetupViewModel {
     }, TASK_POLL_INTERVAL_MS);
 
     return () => {
+      disposed = true;
       if (pollIntervalRef.current) {
         clearInterval(pollIntervalRef.current);
+        pollIntervalRef.current = null;
       }
     };
-  }, [ffmpegTaskId, getTaskMutation, handleFfmpegDone]);
+  }, [getTaskMutation, handleProvisionTask, provisionTaskId]);
 
-  useEffect(() => {
-    if (ffmpegDownload !== 'downloading') {
-      return;
-    }
-
-    const timer = setInterval(() => {
-      setFfmpegProgress((current) =>
-        Math.min(current + PROGRESS_STEP, PROGRESS_MAX_SIMULATED),
-      );
-    }, 800);
-
-    return () => {
-      clearInterval(timer);
-    };
-  }, [ffmpegDownload]);
-
-  const handleDownloadFfmpeg = useCallback(async () => {
-    setSaveError(null);
-    setFfmpegDownload('downloading');
-    setFfmpegError(null);
-    setFfmpegProgress(5);
-
-    try {
-      const operation = await downloadFfmpegMutation.mutateAsync({});
-      setFfmpegTaskId(operation.operation_id);
-    } catch (error) {
-      setFfmpegDownload('error');
-      setFfmpegError(toErrorMessage(error));
-      setFfmpegProgress(0);
-    }
-  }, [downloadFfmpegMutation]);
-
-  const handleComplete = useCallback(async () => {
-    setSaveError(null);
-
-    try {
-      await completeSetupMutation.mutateAsync({
-        body: { initialized: true },
-      });
-      queryClient.setQueriesData(
-        {
-          predicate: (query) => JSON.stringify(query.queryKey).includes('/v1/setup/status'),
-        },
-        (current) => {
-          if (!current || typeof current !== 'object') {
-            return current;
-          }
-
-          return {
-            ...current,
-            initialized: true,
-          };
-        },
-      );
-      navigate('/', { replace: true });
-    } catch (error) {
-      setSaveError(toErrorMessage(error));
-    }
-  }, [completeSetupMutation, navigate]);
+  const handleRetry = useCallback(async () => {
+    autoStartedRef.current = true;
+    await startProvision();
+  }, [startProvision]);
 
   return {
-    status,
     isChecking: setupStatusLoading,
     checkError: setupStatusError ? toErrorMessage(setupStatusError) : null,
-    ffmpegDownload,
-    ffmpegError,
-    ffmpegProgress,
-    ffmpegReady: Boolean(status?.ffmpeg.installed) || ffmpegDownload === 'done',
-    allBackendsUnavailable: Boolean(
-      status && status.backends.every((backend) => !backend.installed),
-    ),
-    completing: completeSetupMutation.isPending,
-    saveError,
-    handleDownloadFfmpeg,
-    handleComplete,
+    provisionState,
+    provisionError,
+    stageLabel: getProvisionStageLabel(provisionState, provisionTask),
+    stageHint: getProvisionStageHint(provisionState, provisionTask),
+    progressPercent: getProvisionProgressValue(provisionState, provisionTask),
+    progressSummary: getProvisionProgressSummary(provisionState, provisionTask),
+    canRetry: provisionState === 'failed',
+    handleRetry,
   };
 }

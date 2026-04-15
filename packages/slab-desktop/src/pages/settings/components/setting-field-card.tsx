@@ -18,6 +18,7 @@ import {
 import { Switch } from '@slab/components/switch';
 import { Textarea } from '@slab/components/textarea';
 import { StatusPill } from '@slab/components/workspace';
+import { useTranslation } from '@slab/i18n';
 import { cn } from '@/lib/utils';
 
 import { parseStructuredJsonSchema } from '../schema';
@@ -50,12 +51,27 @@ export function SettingFieldCard({
   onChange,
   onReset,
 }: SettingFieldCardProps) {
+  const { t } = useTranslation();
   const propertyType = property.schema.type;
   const structuredSchema = parseStructuredJsonSchema(property);
   const isEnum =
     propertyType === 'string' &&
     Array.isArray(property.schema.enum) &&
     property.schema.enum.length > 0;
+  const isLanguageField = property.pmid === 'general.language';
+  const isModelSourceField = property.pmid === 'models.download_source';
+  const displayLabel =
+    isLanguageField
+      ? t('pages.settings.language.title')
+      : isModelSourceField
+        ? t('pages.settings.modelSource.title')
+      : property.label;
+  const displayDescription =
+    isLanguageField
+      ? t('pages.settings.language.description')
+      : isModelSourceField
+        ? t('pages.settings.modelSource.description')
+      : property.description_md;
 
   const textValue =
     typeof draftValue === 'string'
@@ -85,11 +101,11 @@ export function SettingFieldCard({
     >
       <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0 flex-1 space-y-1.5">
-          <h3 className="text-sm font-bold tracking-[-0.02em] text-foreground">{property.label}</h3>
+          <h3 className="text-sm font-bold tracking-[-0.02em] text-foreground">{displayLabel}</h3>
 
-          {property.description_md ? (
+          {displayDescription ? (
             <p className="max-w-2xl text-[11px] leading-[16.5px] text-muted-foreground">
-              {property.description_md}
+              {displayDescription}
             </p>
           ) : null}
         </div>
@@ -108,7 +124,7 @@ export function SettingFieldCard({
             ) : (
               <RotateCcw className="mr-2 h-4 w-4" />
             )}
-            Reset
+            {t('pages.settings.field.reset')}
           </Button>
 
           {propertyType === 'boolean' ? (
@@ -132,12 +148,16 @@ export function SettingFieldCard({
                 variant="soft"
                 className="h-[42px] w-full rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               >
-                <SelectValue placeholder="Select an option" />
+                <SelectValue placeholder={t('pages.settings.field.selectOption')} />
               </SelectTrigger>
               <SelectContent variant="soft">
                 {property.schema.enum?.map((option) => (
                   <SelectItem key={option} value={option}>
-                    {option}
+                    {isLanguageField
+                      ? t(`pages.settings.language.options.${option}`)
+                      : isModelSourceField
+                        ? t(`pages.settings.modelSource.options.${option}`)
+                      : option}
                   </SelectItem>
                 ))}
               </SelectContent>
@@ -149,7 +169,7 @@ export function SettingFieldCard({
               variant="soft"
               value={textValue}
               onChange={(event) => onChange(property, event.target.value)}
-              placeholder="Enter a whole number"
+              placeholder={t('pages.settings.field.integerPlaceholder')}
               className="h-[42px] rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               aria-invalid={Boolean(errorState)}
             />
@@ -177,8 +197,8 @@ export function SettingFieldCard({
               onChange={(event) => onChange(property, event.target.value)}
               placeholder={
                 propertyType === 'array' || propertyType === 'object'
-                  ? 'Enter valid JSON'
-                  : 'Enter a value'
+                  ? t('pages.settings.field.jsonPlaceholder')
+                  : t('pages.settings.field.valuePlaceholder')
               }
               className="min-h-40 rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 py-3 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               aria-invalid={Boolean(errorState)}
@@ -190,7 +210,7 @@ export function SettingFieldCard({
               variant="soft"
               value={textValue}
               onChange={(event) => onChange(property, event.target.value)}
-              placeholder="Enter a value"
+              placeholder={t('pages.settings.field.valuePlaceholder')}
               className="h-[42px] rounded-[12px] border-border/70 bg-[var(--surface-soft)] px-4 font-mono text-xs shadow-[inset_0_1px_0_color-mix(in_oklab,var(--foreground)_4%,transparent)]"
               aria-invalid={Boolean(errorState)}
             />

@@ -70,11 +70,27 @@ pub struct TaskPayloadEnvelope {
     pub data: Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TaskProgress {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    pub current: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub total: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub step_count: Option<u32>,
+}
+
 #[derive(Debug, Clone)]
 pub struct TaskView {
     pub id: String,
     pub task_type: String,
     pub status: TaskStatus,
+    pub progress: Option<TaskProgress>,
     pub error_msg: Option<String>,
     pub created_at: String,
     pub updated_at: String,
@@ -94,9 +110,76 @@ impl From<&TaskRecord> for TaskView {
             id: record.id.clone(),
             task_type: record.task_type.clone(),
             status: record.status,
+            progress: task_progress_from_payload(record.result_data.as_deref()),
             error_msg: record.error_msg.clone(),
             created_at: record.created_at.to_rfc3339(),
             updated_at: record.updated_at.to_rfc3339(),
         }
+    }
+}
+
+fn task_progress_from_payload(raw: Option<&str>) -> Option<TaskProgress> {
+    let raw = raw?;
+    let payload: Value = serde_json::from_str(raw).ok()?;
+    let progress = payload.get("progress")?;
+    serde_json::from_value(progress.clone()).ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use chrono::Utc;
+
+    use super::*;
+
+    #[test]
+    fn task_view_reads_embedded_progress_payload() {
+        let now = Utc::now();
+        let record = TaskRecord {
+            id: "task-1".to_owned(),
+            task_type: "model_download".to_owned(),
+            status: TaskStatus::Running,
+            model_id: Some("model-a".to_owned()),
+            input_data: None,
+            result_data: Some(
+                r#"{"progress":{"label":"model.gguf","current":512,"total":1024,"unit":"bytes","step":1,"step_count":2}}"#
+                    .to_owned(),
+            ),
+            error_msg: None,
+            core_task_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        let view = TaskView::from(&record);
+        assert_eq!(
+            view.progress,
+            Some(TaskProgress {
+                label: Some("model.gguf".to_owned()),
+                current: 512,
+                total: Some(1024),
+                unit: Some("bytes".to_owned()),
+                step: Some(1),
+                step_count: Some(2),
+            })
+        );
+    }
+
+    #[test]
+    fn task_view_ignores_non_progress_payloads() {
+        let now = Utc::now();
+        let record = TaskRecord {
+            id: "task-1".to_owned(),
+            task_type: "model_download".to_owned(),
+            status: TaskStatus::Succeeded,
+            model_id: Some("model-a".to_owned()),
+            input_data: None,
+            result_data: Some(r#"{"local_path":"C:/models/model.gguf"}"#.to_owned()),
+            error_msg: None,
+            core_task_id: None,
+            created_at: now,
+            updated_at: now,
+        };
+
+        assert!(TaskView::from(&record).progress.is_none());
     }
 }

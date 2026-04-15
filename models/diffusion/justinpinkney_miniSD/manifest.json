@@ -16,16 +16,21 @@
       "ggml.diffusion"
     ]
   },
-  "source": {
-    "kind": "hugging_face",
-    "repo_id": "justinpinkney/miniSD",
-    "files": [
-      {
-        "id": "model",
-        "path": "miniSD.ckpt"
-      }
-    ]
-  },
+  "sources": [
+    {
+      "source": {
+        "kind": "hugging_face",
+        "repo_id": "justinpinkney/miniSD",
+        "files": [
+          {
+            "id": "model",
+            "path": "miniSD.ckpt"
+          }
+        ]
+      },
+      "hub_provider": "hugging_face"
+    }
+  ],
   "presets": [
     {
       "id": "default",

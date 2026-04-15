@@ -142,6 +142,17 @@
       },
       "type": "object"
     },
+    "GeneralConfigV2": {
+      "description": "General desktop-app settings.",
+      "properties": {
+        "language": {
+          "$ref": "#/$defs/InterfaceLanguagePreference",
+          "default": "auto",
+          "description": "Preferred desktop interface language."
+        }
+      },
+      "type": "object"
+    },
     "GgmlRuntimeBackendsConfig": {
       "description": "GGML leaf backend configuration.",
       "properties": {
@@ -269,6 +280,15 @@
       },
       "type": "object"
     },
+    "InterfaceLanguagePreference": {
+      "description": "Frontend interface language preference stored in settings.json.",
+      "enum": [
+        "auto",
+        "en-US",
+        "zh-CN"
+      ],
+      "type": "string"
+    },
     "IpcEndpointConfig": {
       "description": "IPC endpoint configuration.",
       "properties": {
@@ -371,6 +391,15 @@
       },
       "type": "object"
     },
+    "ModelDownloadSourcePreference": {
+      "description": "Preferred remote source used when downloading model artifacts.",
+      "enum": [
+        "auto",
+        "hugging_face",
+        "model_scope"
+      ],
+      "type": "string"
+    },
     "ModelsConfigV2": {
       "description": "Model storage settings.",
       "properties": {
@@ -394,6 +423,11 @@
             "string",
             "null"
           ]
+        },
+        "download_source": {
+          "$ref": "#/$defs/ModelDownloadSourcePreference",
+          "default": "auto",
+          "description": "Preferred remote source used when downloading model artifacts."
         }
       },
       "type": "object"
@@ -795,6 +829,12 @@
         "url": "sqlite://slab.db?mode=rwc"
       }
     },
+    "general": {
+      "$ref": "#/$defs/GeneralConfigV2",
+      "default": {
+        "language": "auto"
+      }
+    },
     "logging": {
       "$ref": "#/$defs/LoggingConfig",
       "default": {
@@ -808,7 +848,8 @@
         "auto_unload": {
           "enabled": false,
           "idle_minutes": 10
-        }
+        },
+        "download_source": "auto"
       }
     },
     "providers": {

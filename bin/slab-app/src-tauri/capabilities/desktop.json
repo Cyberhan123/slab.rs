@@ -9,8 +9,6 @@
     "main"
   ],
   "permissions": [
-    "window-state:default",
-    "allow-get-model-config-document",
-    "allow-update-model-config-selection"
+    "window-state:default"
   ]
 }

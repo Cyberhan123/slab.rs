@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
+import { useTranslation } from '@slab/i18n';
 
 import api, { getErrorMessage } from '@/lib/api';
 import type { components } from '@/lib/api/v1.d.ts';
@@ -14,23 +15,17 @@ const DEFAULT_VISIBLE_COUNT = 10;
 const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
 const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
 export const CATEGORY_OPTIONS = [
-  { value: 'all', label: 'All models' },
-  { value: 'language', label: 'Large language' },
-  { value: 'vision', label: 'Vision' },
-  { value: 'audio', label: 'Audio' },
-  { value: 'coding', label: 'Coding' },
-  { value: 'embedding', label: 'Embedding' },
+  'all',
+  'language',
+  'vision',
+  'audio',
+  'coding',
+  'embedding',
 ] as const;
-export const STATUS_OPTIONS = [
-  { value: 'all', label: 'All statuses' },
-  { value: 'ready', label: 'Ready' },
-  { value: 'downloading', label: 'Downloading' },
-  { value: 'not_downloaded', label: 'Not downloaded' },
-  { value: 'error', label: 'Error' },
-] as const;
+export const STATUS_OPTIONS = ['all', 'ready', 'downloading', 'not_downloaded', 'error'] as const;
 
-export type ModelCategory = (typeof CATEGORY_OPTIONS)[number]['value'];
-export type ModelFilterStatus = (typeof STATUS_OPTIONS)[number]['value'];
+export type ModelCategory = (typeof CATEGORY_OPTIONS)[number];
+export type ModelFilterStatus = (typeof STATUS_OPTIONS)[number];
 export type ModelStatus = CatalogModelStatus;
 export type ModelItem = {
   id: string;
@@ -44,19 +39,36 @@ export type ModelItem = {
   status: ModelStatus;
   local_path: string | null;
   pending: boolean;
+  download_task_id: string | null;
+  download_progress: ModelDownloadProgress | null;
   updated_at: string;
 };
 
 type ImportedModelResponse = components['schemas']['UnifiedModelResponse'];
+export type ModelDownloadProgress = {
+  label: string | null;
+  current: number;
+  total: number | null;
+  unit: string | null;
+  step: number | null;
+  step_count: number | null;
+};
 
 type TaskStatusResponse = {
   status: string;
   error_msg?: string | null;
+  progress?: unknown;
+};
+
+type DownloadTrackingState = {
+  taskId: string;
+  progress: ModelDownloadProgress | null;
 };
 
 const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export function useHubModelCatalog() {
+  const { t } = useTranslation();
   const [category, setCategory] = useState<ModelCategory>('all');
   const [status, setStatus] = useState<ModelFilterStatus>('all');
   const [visibleCount, setVisibleCount] = useState(DEFAULT_VISIBLE_COUNT);
@@ -65,6 +77,9 @@ export function useHubModelCatalog() {
   const [createModelPending, setCreateModelPending] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
   const [modelToEnhance, setModelToEnhance] = useState<ModelItem | null>(null);
+  const [downloadTracking, setDownloadTracking] = useState<Record<string, DownloadTrackingState>>(
+    {},
+  );
 
   const {
     data,
@@ -83,21 +98,10 @@ export function useHubModelCatalog() {
 
   const models = useMemo<ModelItem[]>(
     () =>
-      toCatalogModelList(data).map((model) => ({
-        id: model.id,
-        display_name: model.display_name,
-        kind: model.kind,
-        repo_id: model.repo_id,
-        filename: model.filename,
-        capabilities: model.capabilities,
-        backend_ids: model.backend_ids,
-        is_vad_model: modelSupportsCapability(model, 'audio_vad'),
-        status: model.status,
-        local_path: model.local_path,
-        pending: model.pending,
-        updated_at: model.updated_at,
-      })),
-    [data],
+      toCatalogModelList(data).map((model) =>
+        toModelItem(model, downloadTracking[model.id]),
+      ),
+    [data, downloadTracking],
   );
   const filteredModels = useMemo(
     () =>
@@ -173,10 +177,10 @@ export function useHubModelCatalog() {
     setCreateModelPending(true);
     try {
       const created = await importModelPackMutation.mutateAsync({
-        body: buildImportModelPackBody(createFile),
+        body: buildImportModelPackBody(createFile, t('pages.hub.error.onlySlabPacks')),
       });
 
-      toast.success('Model imported to catalog.', {
+      toast.success(t('pages.hub.toast.imported'), {
         description:
           typeof created?.display_name === 'string' && created.display_name.trim()
             ? created.display_name
@@ -188,7 +192,7 @@ export function useHubModelCatalog() {
       setCreateOpen(false);
       void refetch();
     } catch (createError) {
-      toast.error('Failed to import model.', {
+      toast.error(t('pages.hub.toast.importFailed'), {
         description: getErrorMessage(createError),
       });
     } finally {
@@ -196,26 +200,54 @@ export function useHubModelCatalog() {
     }
   }
 
-  const waitForTaskToFinish = async (taskId: string) => {
+  function setModelDownloadTracking(modelId: string, next: DownloadTrackingState | null) {
+    setDownloadTracking((current) => {
+      if (next) {
+        return {
+          ...current,
+          [modelId]: next,
+        };
+      }
+
+      if (!(modelId in current)) {
+        return current;
+      }
+
+      const { [modelId]: _removed, ...rest } = current;
+      return rest;
+    });
+  }
+
+  const waitForTaskToFinish = async (modelId: string, taskId: string) => {
     const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
       const task = (await getTaskMutation.mutateAsync({
         params: { path: { id: taskId } },
       })) as TaskStatusResponse;
+      setModelDownloadTracking(modelId, {
+        taskId,
+        progress: normalizeTaskProgress(task.progress),
+      });
 
       if (task.status === 'succeeded') {
         return;
       }
 
       if (task.status === 'failed' || task.status === 'cancelled' || task.status === 'interrupted') {
-        throw new Error(task.error_msg ?? `Task ${taskId} ended with status: ${task.status}`);
+        throw new Error(
+          task.error_msg ??
+            t('pages.hub.error.taskEndedWithStatus', {
+              taskId,
+              status: task.status,
+            }),
+        );
       }
 
       await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
     }
 
-    throw new Error('Model download timed out');
+    throw new Error(t('pages.hub.error.downloadTimedOut'));
   };
 
   const refreshCatalogAndFindModel = async (modelId: string) => {
@@ -226,21 +258,22 @@ export function useHubModelCatalog() {
 
   async function trackModelDownload(model: ModelItem, taskId: string) {
     try {
-      await waitForTaskToFinish(taskId);
+      await waitForTaskToFinish(model.id, taskId);
 
       const refreshedModel = await refreshCatalogAndFindModel(model.id);
       if (!refreshedModel?.local_path) {
-        throw new Error('Model download completed, but local_path is empty');
+        throw new Error(t('pages.hub.error.missingDownloadedPath'));
       }
 
-      toast.success('Model downloaded.', {
+      toast.success(t('pages.hub.toast.downloaded'), {
         description: model.display_name,
       });
     } catch (downloadError) {
-      toast.error('Model download failed.', {
+      toast.error(t('pages.hub.toast.downloadFailed'), {
         description: getErrorMessage(downloadError),
       });
     } finally {
+      setModelDownloadTracking(model.id, null);
       void refetch();
     }
   }
@@ -259,16 +292,20 @@ export function useHubModelCatalog() {
       const taskId = extractTaskId(response);
 
       if (!taskId) {
-        throw new Error('Failed to start model download task');
+        throw new Error(t('pages.hub.error.startDownloadFailed'));
       }
 
-      toast.success('Download started.', {
+      setModelDownloadTracking(model.id, {
+        taskId,
+        progress: null,
+      });
+      toast.success(t('pages.hub.toast.downloadStarted'), {
         description: model.display_name,
       });
       void refetch();
       void trackModelDownload(model, taskId);
     } catch (downloadError) {
-      toast.error('Failed to start download.', {
+      toast.error(t('pages.hub.toast.downloadFailed'), {
         description: getErrorMessage(downloadError),
       });
     }
@@ -284,13 +321,13 @@ export function useHubModelCatalog() {
         params: { path: { id: modelToDelete.id } },
       });
 
-      toast.success('Model removed from catalog.', {
+      toast.success(t('pages.hub.toast.removed'), {
         description: modelToDelete.display_name,
       });
       setModelToDelete(null);
       void refetch();
     } catch (deleteError) {
-      toast.error('Failed to delete model.', {
+      toast.error(t('pages.hub.toast.deleteFailed'), {
         description: getErrorMessage(deleteError),
       });
     }
@@ -394,9 +431,9 @@ function isModelPackFile(file: File): boolean {
   return file.name.trim().toLowerCase().endsWith('.slab');
 }
 
-function buildImportModelPackBody(file: File) {
+function buildImportModelPackBody(file: File, invalidFileMessage: string) {
   if (!isModelPackFile(file)) {
-    throw new Error('Only .slab model packs are supported.');
+    throw new Error(invalidFileMessage);
   }
 
   const body = new FormData();
@@ -419,4 +456,59 @@ function extractTaskId(payload: unknown): string | null {
 
   const trimmed = taskId.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function toModelItem(
+  model: ReturnType<typeof toCatalogModelList>[number],
+  tracking: DownloadTrackingState | undefined,
+): ModelItem {
+  const hasLocalPath = Boolean(model.local_path);
+  const pending = !hasLocalPath && (model.pending || Boolean(tracking));
+  const status = hasLocalPath ? 'ready' : pending ? 'downloading' : model.status;
+
+  return {
+    id: model.id,
+    display_name: model.display_name,
+    kind: model.kind,
+    repo_id: model.repo_id,
+    filename: model.filename,
+    capabilities: model.capabilities,
+    backend_ids: model.backend_ids,
+    is_vad_model: modelSupportsCapability(model, 'audio_vad'),
+    status,
+    local_path: model.local_path,
+    pending,
+    download_task_id: tracking?.taskId ?? null,
+    download_progress: tracking?.progress ?? null,
+    updated_at: model.updated_at,
+  };
+}
+
+function normalizeTaskProgress(value: unknown): ModelDownloadProgress | null {
+  if (typeof value !== 'object' || value === null) {
+    return null;
+  }
+
+  const progress = value as Record<string, unknown>;
+  if (typeof progress.current !== 'number' || !Number.isFinite(progress.current)) {
+    return null;
+  }
+
+  const total =
+    typeof progress.total === 'number' && Number.isFinite(progress.total) ? progress.total : null;
+  const step =
+    typeof progress.step === 'number' && Number.isFinite(progress.step) ? progress.step : null;
+  const stepCount =
+    typeof progress.step_count === 'number' && Number.isFinite(progress.step_count)
+      ? progress.step_count
+      : null;
+
+  return {
+    label: typeof progress.label === 'string' ? progress.label : null,
+    current: progress.current,
+    total,
+    unit: typeof progress.unit === 'string' ? progress.unit : null,
+    step,
+    step_count: stepCount,
+  };
 }
