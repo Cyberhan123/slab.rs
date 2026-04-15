@@ -8,7 +8,7 @@ export const hub = {
     titleLead: '塑造你的本地',
     titleAccent: '模型目录。',
     description:
-      '将 JSON 清单或 .slab 包导入目录中，然后在准备使用时，从每张卡片下载你需要的本地运行时。',
+      '将 .slab 包导入目录中，然后在准备使用时，从每张卡片下载你需要的本地运行时。',
     importModel: '导入模型',
     refreshCatalog: '刷新目录',
   },
@@ -46,7 +46,7 @@ export const hub = {
     loadingTitle: '正在加载模型目录',
     loadingDescription: '正在获取模型条目和运行时状态。',
     emptyFilteredTitle: '当前筛选条件下没有匹配的模型条目',
-    emptyFilteredDescription: '试试切换分类、调整状态，或导入新的模型清单或模型包。',
+    emptyFilteredDescription: '试试切换分类、调整状态，或导入新的 .slab 模型包。',
   },
   catalog: {
     emptyPageTitle: '当前页没有卡片',
@@ -66,7 +66,7 @@ export const hub = {
       local:
         '本地 {{backend}} 模型已可用于推理。清单已经绑定到运行时路径，无需离开当前工作区即可使用。',
       imported:
-        '已从 {{repo}} 导入 {{backend}} 清单。它现在已经出现在目录中，当你需要本地运行时副本时，可以直接在这张卡片上下载模型文件。',
+        '已从 {{repo}} 导入 {{backend}} 模型包。它现在已经出现在目录中，当你需要本地运行时副本时，可以直接在这张卡片上下载模型文件。',
     },
     actions: {
       enhanceAria: '调整 {{model}} 配置',
