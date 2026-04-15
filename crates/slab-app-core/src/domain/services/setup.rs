@@ -155,6 +155,7 @@ impl SetupService {
 
     async fn provision_inner(&self, operation: &OperationContext) -> Result<String, AppCoreError> {
         let manifest = embedded_payload_manifest()?;
+        ensure_packaged_payload_manifest_available(&manifest)?;
         let variant = tokio::task::spawn_blocking(detect_best_variant)
             .await
             .map_err(|error| {
@@ -515,6 +516,19 @@ fn embedded_payload_manifest() -> Result<PackagedPayloadManifest, AppCoreError> 
         })
 }
 
+fn ensure_packaged_payload_manifest_available(
+    manifest: &PackagedPayloadManifest,
+) -> Result<(), AppCoreError> {
+    if manifest.is_empty() {
+        return Err(AppCoreError::NotImplemented(format!(
+            "setup provisioning is only available in builds that embed packaged runtime payloads; the current '{}' build does not include them",
+            std::env::consts::OS
+        )));
+    }
+
+    Ok(())
+}
+
 async fn publish_progress(
     operation: &OperationContext,
     label: impl Into<String>,
@@ -663,4 +677,31 @@ fn github_release_asset_url(version: &str, asset_name: &str) -> String {
     format!(
         "https://github.com/{GITHUB_RELEASE_OWNER}/{GITHUB_RELEASE_REPO}/releases/download/v{version}/{asset_name}"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn setup_provisioning_rejects_empty_embedded_manifest() {
+        let error =
+            ensure_packaged_payload_manifest_available(&PackagedPayloadManifest::empty("0.1.0"))
+                .expect_err("empty payload manifests should not allow setup provisioning");
+
+        assert!(matches!(error, AppCoreError::NotImplemented(_)));
+        assert!(error.to_string().contains("setup provisioning"));
+    }
+
+    #[test]
+    fn setup_provisioning_accepts_non_empty_manifest() {
+        let mut manifest = PackagedPayloadManifest::empty("0.1.0");
+        manifest.packages.push(slab_utils::cab::PackagedPayloadPackage {
+            variant: RuntimeVariant::Base,
+            cab_name: RuntimeVariant::Base.cab_name().to_owned(),
+            files: Vec::new(),
+        });
+
+        assert!(ensure_packaged_payload_manifest_available(&manifest).is_ok());
+    }
 }
