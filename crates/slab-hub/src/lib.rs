@@ -7,6 +7,8 @@ use std::time::Duration;
 use reqwest::Client;
 use thiserror::Error;
 
+const DEFAULT_HF_ENDPOINT: &str = "https://huggingface.co";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum HubProvider {
     HfHub,
@@ -25,7 +27,8 @@ impl HubProvider {
 
     fn base_url(self, endpoints: &HubEndpoints) -> &str {
         match self {
-            Self::HfHub | Self::HuggingfaceHubRust => endpoints.hf_endpoint.as_str(),
+            Self::HfHub => endpoints.hf_endpoint.as_str(),
+            Self::HuggingfaceHubRust => DEFAULT_HF_ENDPOINT,
             Self::ModelsCat => endpoints.models_cat_endpoint.as_str(),
         }
     }
@@ -61,10 +64,14 @@ pub enum HubProviderPreference {
 
 impl HubProviderPreference {
     pub fn from_optional_str(value: Option<&str>) -> Result<Self, String> {
-        match value.map(str::trim).filter(|value| !value.is_empty()) {
+        match value
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_ascii_lowercase())
+        {
             None => Ok(Self::Auto),
-            Some("auto") => Ok(Self::Auto),
-            Some(value) => HubProvider::from_str(value).map(Self::Provider),
+            Some(value) if value == "auto" => Ok(Self::Auto),
+            Some(value) => HubProvider::from_str(&value).map(Self::Provider),
         }
     }
 }
@@ -112,7 +119,7 @@ pub struct HubEndpoints {
 impl Default for HubEndpoints {
     fn default() -> Self {
         Self {
-            hf_endpoint: "https://huggingface.co".to_owned(),
+            hf_endpoint: DEFAULT_HF_ENDPOINT.to_owned(),
             models_cat_endpoint: "https://www.modelscope.cn".to_owned(),
         }
     }
@@ -140,21 +147,21 @@ pub struct HubClient {
     probe_timeout: Duration,
     endpoints: HubEndpoints,
     probe_client: Client,
+    last_successful_provider: Arc<Mutex<Option<HubProvider>>>,
 }
 
 impl Default for HubClient {
     fn default() -> Self {
         let probe_timeout = Duration::from_secs(3);
-        let probe_client = Client::builder()
-            .timeout(probe_timeout)
-            .build()
-            .expect("probe client should build");
+        let probe_client =
+            Client::builder().timeout(probe_timeout).build().expect("probe client should build");
         Self {
             provider_preference: HubProviderPreference::Auto,
             cache_dir: None,
             probe_timeout,
             endpoints: HubEndpoints::default(),
             probe_client,
+            last_successful_provider: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -166,6 +173,7 @@ impl HubClient {
 
     pub fn with_provider_preference(mut self, provider_preference: HubProviderPreference) -> Self {
         self.provider_preference = provider_preference;
+        self.clear_cached_provider();
         self
     }
 
@@ -176,20 +184,21 @@ impl HubClient {
 
     pub fn with_probe_timeout(mut self, probe_timeout: Duration) -> Self {
         self.probe_timeout = probe_timeout;
-        self.probe_client = Client::builder()
-            .timeout(probe_timeout)
-            .build()
-            .expect("probe client should build");
+        self.probe_client =
+            Client::builder().timeout(probe_timeout).build().expect("probe client should build");
+        self.clear_cached_provider();
         self
     }
 
     pub fn with_hf_endpoint(mut self, endpoint: impl Into<String>) -> Self {
         self.endpoints.hf_endpoint = endpoint.into();
+        self.clear_cached_provider();
         self
     }
 
     pub fn with_models_cat_endpoint(mut self, endpoint: impl Into<String>) -> Self {
         self.endpoints.models_cat_endpoint = endpoint.into();
+        self.clear_cached_provider();
         self
     }
 
@@ -224,27 +233,28 @@ impl HubClient {
         self.run_with_provider_fallback(|provider| {
             let progress = progress.clone();
             async move {
-            match provider {
-                #[cfg(feature = "provider-hf-hub")]
-                HubProvider::HfHub => {
-                    self.download_file_with_hf_hub(repo_id, filename, progress.clone()).await
+                match provider {
+                    #[cfg(feature = "provider-hf-hub")]
+                    HubProvider::HfHub => {
+                        self.download_file_with_hf_hub(repo_id, filename, progress.clone()).await
+                    }
+                    #[cfg(feature = "provider-models-cat")]
+                    HubProvider::ModelsCat => {
+                        self.download_file_with_models_cat(repo_id, filename, progress.clone())
+                            .await
+                    }
+                    #[cfg(feature = "provider-huggingface-hub-rust")]
+                    HubProvider::HuggingfaceHubRust => {
+                        self.download_file_with_huggingface_hub_rust(repo_id, filename).await
+                    }
+                    #[allow(unreachable_patterns)]
+                    other => Err(HubError::new(
+                        HubErrorKind::UnsupportedProvider,
+                        Some(other),
+                        format!("hub provider '{other}' was requested but is not enabled"),
+                    )),
                 }
-                #[cfg(feature = "provider-models-cat")]
-                HubProvider::ModelsCat => {
-                    self.download_file_with_models_cat(repo_id, filename, progress.clone()).await
-                }
-                #[cfg(feature = "provider-huggingface-hub-rust")]
-                HubProvider::HuggingfaceHubRust => {
-                    self.download_file_with_huggingface_hub_rust(repo_id, filename).await
-                }
-                #[allow(unreachable_patterns)]
-                other => Err(HubError::new(
-                    HubErrorKind::UnsupportedProvider,
-                    Some(other),
-                    format!("hub provider '{other}' was requested but is not enabled"),
-                )),
             }
-        }
         })
         .await
     }
@@ -256,10 +266,12 @@ impl HubClient {
     {
         let candidates = self.enabled_providers()?;
         let is_explicit = matches!(self.provider_preference, HubProviderPreference::Provider(_));
+        let cached_provider = (!is_explicit).then(|| self.cached_provider()).flatten();
         let mut last_error = None;
 
         for provider in candidates {
-            if !is_explicit {
+            let should_probe = !is_explicit && cached_provider != Some(provider);
+            if should_probe {
                 match self.probe_provider(provider).await {
                     Ok(()) => {}
                     Err(error) => {
@@ -270,10 +282,18 @@ impl HubClient {
             }
 
             match operation(provider).await {
-                Ok(result) => return Ok(result),
+                Ok(result) => {
+                    if !is_explicit {
+                        self.set_cached_provider(Some(provider));
+                    }
+                    return Ok(result);
+                }
                 Err(error)
                     if !is_explicit && matches!(error.kind(), HubErrorKind::NetworkUnavailable) =>
                 {
+                    if cached_provider == Some(provider) {
+                        self.clear_cached_provider();
+                    }
                     last_error = Some(error);
                 }
                 Err(error) => return Err(error),
@@ -284,27 +304,24 @@ impl HubClient {
             HubError::new(
                 HubErrorKind::NetworkUnavailable,
                 None,
-                format!(
-                    "no enabled hub provider is reachable within {:?}",
-                    self.probe_timeout
-                ),
+                format!("no enabled hub provider is reachable within {:?}", self.probe_timeout),
             )
         }))
     }
 
     fn enabled_providers(&self) -> Result<Vec<HubProvider>, HubError> {
         let providers = match self.provider_preference {
-            HubProviderPreference::Auto => {
-                let mut providers = Vec::new();
-                #[cfg(feature = "provider-hf-hub")]
-                providers.push(HubProvider::HfHub);
-                #[cfg(feature = "provider-models-cat")]
-                providers.push(HubProvider::ModelsCat);
-                #[cfg(feature = "provider-huggingface-hub-rust")]
-                providers.push(HubProvider::HuggingfaceHubRust);
-                providers
+            HubProviderPreference::Auto => self.default_enabled_providers(),
+            HubProviderPreference::Provider(provider) => {
+                if !self.is_provider_enabled(provider) {
+                    return Err(HubError::new(
+                        HubErrorKind::UnsupportedProvider,
+                        Some(provider),
+                        format!("hub provider '{provider}' is not enabled in this build"),
+                    ));
+                }
+                vec![provider]
             }
-            HubProviderPreference::Provider(provider) => vec![provider],
         };
 
         if providers.is_empty() {
@@ -315,17 +332,53 @@ impl HubClient {
             ));
         }
 
-        if let HubProviderPreference::Provider(provider) = self.provider_preference {
-            if !providers.contains(&provider) {
-                return Err(HubError::new(
-                    HubErrorKind::UnsupportedProvider,
-                    Some(provider),
-                    format!("hub provider '{provider}' is not enabled in this build"),
-                ));
+        if matches!(self.provider_preference, HubProviderPreference::Auto) {
+            if let Some(cached_provider) = self.cached_provider() {
+                if let Some(index) =
+                    providers.iter().position(|provider| *provider == cached_provider)
+                {
+                    let mut providers = providers;
+                    let provider = providers.remove(index);
+                    providers.insert(0, provider);
+                    return Ok(providers);
+                } else {
+                    self.clear_cached_provider();
+                }
             }
         }
 
         Ok(providers)
+    }
+
+    fn default_enabled_providers(&self) -> Vec<HubProvider> {
+        let mut providers = Vec::new();
+        #[cfg(feature = "provider-hf-hub")]
+        providers.push(HubProvider::HfHub);
+        #[cfg(feature = "provider-models-cat")]
+        providers.push(HubProvider::ModelsCat);
+        #[cfg(feature = "provider-huggingface-hub-rust")]
+        providers.push(HubProvider::HuggingfaceHubRust);
+        providers
+    }
+
+    fn is_provider_enabled(&self, provider: HubProvider) -> bool {
+        match provider {
+            HubProvider::HfHub => cfg!(feature = "provider-hf-hub"),
+            HubProvider::ModelsCat => cfg!(feature = "provider-models-cat"),
+            HubProvider::HuggingfaceHubRust => cfg!(feature = "provider-huggingface-hub-rust"),
+        }
+    }
+
+    fn cached_provider(&self) -> Option<HubProvider> {
+        *self.last_successful_provider.lock().expect("cached provider lock")
+    }
+
+    fn set_cached_provider(&self, provider: Option<HubProvider>) {
+        *self.last_successful_provider.lock().expect("cached provider lock") = provider;
+    }
+
+    fn clear_cached_provider(&self) {
+        self.set_cached_provider(None);
     }
 
     async fn probe_provider(&self, provider: HubProvider) -> Result<(), HubError> {
@@ -345,7 +398,9 @@ impl HubClient {
     async fn list_repo_files_with_hf_hub(&self, repo_id: &str) -> Result<Vec<String>, HubError> {
         let api = self.hf_hub_api(HubProvider::HfHub)?;
         let repo = api.model(repo_id.to_owned());
-        let info = repo.info().await.map_err(|error| map_hf_hub_error(HubProvider::HfHub, "list repo files failed", error))?;
+        let info = repo.info().await.map_err(|error| {
+            map_hf_hub_error(HubProvider::HfHub, "list repo files failed", error)
+        })?;
         Ok(info.siblings.into_iter().map(|item| item.rfilename).collect())
     }
 
@@ -360,15 +415,23 @@ impl HubClient {
         let repo = api.model(repo_id.to_owned());
         match progress {
             Some(progress) => {
-                let adapter = HfHubProgressAdapter::new(HubProvider::HfHub, repo_id, filename, progress);
-                repo.download_with_progress(filename, adapter)
-                    .await
-                    .map_err(|error| map_hf_hub_error(HubProvider::HfHub, format!("download failed for {filename}"), error))
+                let adapter =
+                    HfHubProgressAdapter::new(HubProvider::HfHub, repo_id, filename, progress);
+                repo.download_with_progress(filename, adapter).await.map_err(|error| {
+                    map_hf_hub_error(
+                        HubProvider::HfHub,
+                        format!("download failed for {filename}"),
+                        error,
+                    )
+                })
             }
-            None => repo
-                .get(filename)
-                .await
-                .map_err(|error| map_hf_hub_error(HubProvider::HfHub, format!("download failed for {filename}"), error)),
+            None => repo.get(filename).await.map_err(|error| {
+                map_hf_hub_error(
+                    HubProvider::HfHub,
+                    format!("download failed for {filename}"),
+                    error,
+                )
+            }),
         }
     }
 
@@ -380,22 +443,24 @@ impl HubClient {
         if let Some(cache_dir) = self.cache_dir.clone() {
             builder = builder.with_cache_dir(cache_dir);
         }
-        builder
-            .build()
-            .map_err(|error| map_hf_hub_error(provider, "failed to initialize hf-hub client", error))
+        builder.build().map_err(|error| {
+            map_hf_hub_error(provider, "failed to initialize hf-hub client", error)
+        })
     }
 
     #[cfg(feature = "provider-models-cat")]
-    async fn list_repo_files_with_models_cat(&self, repo_id: &str) -> Result<Vec<String>, HubError> {
+    async fn list_repo_files_with_models_cat(
+        &self,
+        repo_id: &str,
+    ) -> Result<Vec<String>, HubError> {
         let repo = self.models_cat_repo(repo_id);
         let client = models_cat::asynchronous::ModelsCat::new_with_endpoint(
             repo,
             self.endpoints.models_cat_endpoint.clone(),
         );
-        client
-            .list_hub_files()
-            .await
-            .map_err(|error| map_models_cat_error(HubProvider::ModelsCat, "list repo files failed", error))
+        client.list_hub_files().await.map_err(|error| {
+            map_models_cat_error(HubProvider::ModelsCat, "list repo files failed", error)
+        })
     }
 
     #[cfg(feature = "provider-models-cat")]
@@ -412,18 +477,28 @@ impl HubClient {
         );
         match progress {
             Some(progress) => {
-                let adapter =
-                    ModelsCatProgressAdapter::new(HubProvider::ModelsCat, repo_id, filename, progress);
-                client
-                    .download_with_progress(filename, adapter)
-                    .await
-                    .map_err(|error| map_models_cat_error(HubProvider::ModelsCat, format!("download failed for {filename}"), error))?;
+                let adapter = ModelsCatProgressAdapter::new(
+                    HubProvider::ModelsCat,
+                    repo_id,
+                    filename,
+                    progress,
+                );
+                client.download_with_progress(filename, adapter).await.map_err(|error| {
+                    map_models_cat_error(
+                        HubProvider::ModelsCat,
+                        format!("download failed for {filename}"),
+                        error,
+                    )
+                })?;
             }
             None => {
-                client
-                    .download(filename)
-                    .await
-                    .map_err(|error| map_models_cat_error(HubProvider::ModelsCat, format!("download failed for {filename}"), error))?;
+                client.download(filename).await.map_err(|error| {
+                    map_models_cat_error(
+                        HubProvider::ModelsCat,
+                        format!("download failed for {filename}"),
+                        error,
+                    )
+                })?;
             }
         }
 
@@ -458,15 +533,13 @@ impl HubClient {
             )
         })?;
         let repo = self.huggingface_hub_rust_repo(&client, repo_id)?;
-        repo.list_files(&RepoListFilesParams::default())
-            .await
-            .map_err(|error| {
-                map_huggingface_hub_rust_error(
-                    HubProvider::HuggingfaceHubRust,
-                    "list repo files failed",
-                    error,
-                )
-            })
+        repo.list_files(&RepoListFilesParams::default()).await.map_err(|error| {
+            map_huggingface_hub_rust_error(
+                HubProvider::HuggingfaceHubRust,
+                "list repo files failed",
+                error,
+            )
+        })
     }
 
     #[cfg(feature = "provider-huggingface-hub-rust")]
@@ -492,10 +565,7 @@ impl HubClient {
             .join(repo_id.replace('/', "--"));
 
         repo.download_file(
-            &RepoDownloadFileParams::builder()
-                .filename(filename)
-                .local_dir(local_dir)
-                .build(),
+            &RepoDownloadFileParams::builder().filename(filename).local_dir(local_dir).build(),
         )
         .await
         .map_err(|error| {
@@ -541,19 +611,26 @@ fn split_repo_id(repo_id: &str) -> Option<(&str, &str)> {
 fn find_models_cat_downloaded_path(repo: &models_cat::Repo, filename: &str) -> Option<PathBuf> {
     let base_path = repo.cache_dir().join("snapshots");
     let target = Path::new(filename);
-
-    walkdir::WalkDir::new(&base_path)
-        .min_depth(2)
-        .max_depth(16)
-        .into_iter()
+    let mut snapshot_dirs = std::fs::read_dir(&base_path)
+        .ok()?
         .filter_map(Result::ok)
-        .find_map(|entry| {
-            entry
-                .file_type()
-                .is_file()
-                .then_some(entry.path().to_path_buf())
-                .filter(|path| path.ends_with(target))
+        .filter_map(|entry| {
+            let path = entry.path();
+            entry.file_type().ok().filter(|file_type| file_type.is_dir()).map(|_| {
+                let modified = std::fs::metadata(&path)
+                    .and_then(|metadata| metadata.modified())
+                    .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+                (modified, path)
+            })
         })
+        .collect::<Vec<_>>();
+
+    snapshot_dirs.sort_by(|a, b| b.0.cmp(&a.0));
+
+    snapshot_dirs.into_iter().find_map(|(_, snapshot_dir)| {
+        let candidate = snapshot_dir.join(target);
+        candidate.is_file().then_some(candidate)
+    })
 }
 
 fn is_network_message(message: &str) -> bool {
@@ -588,7 +665,11 @@ fn is_network_io_error(error: &std::io::Error) -> bool {
     )
 }
 
-fn map_reqwest_error(provider: HubProvider, context: impl Into<String>, error: reqwest::Error) -> HubError {
+fn map_reqwest_error(
+    provider: HubProvider,
+    context: impl Into<String>,
+    error: reqwest::Error,
+) -> HubError {
     let context = context.into();
     let message = format!("{context}: {error}");
     let kind = if is_reqwest_network_error(&error) {
@@ -800,10 +881,7 @@ mod tests {
     #[test]
     fn parses_provider_aliases() {
         assert_eq!("hf".parse::<HubProvider>().ok(), Some(HubProvider::HfHub));
-        assert_eq!(
-            "models_cat".parse::<HubProvider>().ok(),
-            Some(HubProvider::ModelsCat)
-        );
+        assert_eq!("models_cat".parse::<HubProvider>().ok(), Some(HubProvider::ModelsCat));
         assert_eq!(
             "huggingface_hub".parse::<HubProvider>().ok(),
             Some(HubProvider::HuggingfaceHubRust)
@@ -818,6 +896,10 @@ mod tests {
         );
         assert_eq!(
             HubProviderPreference::from_optional_str(Some(" auto ")).unwrap(),
+            HubProviderPreference::Auto
+        );
+        assert_eq!(
+            HubProviderPreference::from_optional_str(Some("AUTO")).unwrap(),
             HubProviderPreference::Auto
         );
     }
@@ -842,5 +924,27 @@ mod tests {
         #[cfg(feature = "provider-huggingface-hub-rust")]
         expected.push(HubProvider::HuggingfaceHubRust);
         assert_eq!(providers, expected);
+    }
+
+    #[test]
+    fn auto_provider_preference_reuses_last_successful_provider_first() {
+        let client = HubClient::new();
+        #[cfg(all(feature = "provider-hf-hub", feature = "provider-models-cat"))]
+        {
+            client.set_cached_provider(Some(HubProvider::ModelsCat));
+            let providers = client.enabled_providers().expect("providers");
+            assert_eq!(providers.first().copied(), Some(HubProvider::ModelsCat));
+        }
+    }
+
+    #[test]
+    fn huggingface_hub_rust_probe_uses_default_hf_endpoint() {
+        let endpoints = HubEndpoints {
+            hf_endpoint: "https://custom-hf.example".to_owned(),
+            models_cat_endpoint: "https://modelscope.example".to_owned(),
+        };
+
+        assert_eq!(HubProvider::HuggingfaceHubRust.base_url(&endpoints), DEFAULT_HF_ENDPOINT);
+        assert_eq!(HubProvider::HfHub.base_url(&endpoints), "https://custom-hf.example");
     }
 }

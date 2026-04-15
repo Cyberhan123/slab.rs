@@ -5,8 +5,8 @@ use std::sync::Arc;
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+use slab_hub::{HubClient, HubErrorKind, HubProviderPreference};
 use slab_proto::convert;
-use slab_hub::{HubClient, HubProviderPreference};
 use slab_types::load_config::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
 };
@@ -150,8 +150,8 @@ fn primary_materialized_artifact_path(config: &StoredModelConfig) -> Option<Stri
 fn normalized_hub_provider_preference(
     value: Option<&str>,
 ) -> Result<(HubProviderPreference, Option<String>), AppCoreError> {
-    let preference = HubProviderPreference::from_optional_str(value)
-        .map_err(AppCoreError::BadRequest)?;
+    let preference =
+        HubProviderPreference::from_optional_str(value).map_err(AppCoreError::BadRequest)?;
     let canonical = match preference {
         HubProviderPreference::Auto => None,
         HubProviderPreference::Provider(provider) => Some(provider.as_config_value().to_owned()),
@@ -169,6 +169,18 @@ fn build_hub_client(
         client = client.with_cache_dir(PathBuf::from(dir));
     }
     Ok(client)
+}
+
+fn map_hub_client_error(context: &str, kind: HubErrorKind, message: String) -> AppCoreError {
+    match kind {
+        HubErrorKind::InvalidRepoId | HubErrorKind::UnsupportedProvider => {
+            AppCoreError::BadRequest(format!("{context}: {message}"))
+        }
+        HubErrorKind::NetworkUnavailable => {
+            AppCoreError::BackendNotReady(format!("{context}: {message}"))
+        }
+        HubErrorKind::OperationFailed => AppCoreError::Internal(format!("{context}: {message}")),
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -504,10 +516,9 @@ impl ModelService {
         &self,
         query: AvailableModelsQuery,
     ) -> Result<AvailableModelsView, AppCoreError> {
-        let files = HubClient::new()
-            .list_repo_files(&query.repo_id)
-            .await
-            .map_err(|error| AppCoreError::Internal(format!("hub file listing failed: {error}")))?;
+        let files = HubClient::new().list_repo_files(&query.repo_id).await.map_err(|error| {
+            map_hub_client_error("hub file listing failed", error.kind(), error.to_string())
+        })?;
 
         Ok(AvailableModelsView { repo_id: query.repo_id, files })
     }
@@ -3523,10 +3534,7 @@ mod tests {
         let (_, spec) = canonicalize_model_spec(
             UnifiedModelKind::Local,
             Some(ManagedModelBackendId::GgmlLlama),
-            ModelSpec {
-                hub_provider: Some(" hf ".into()),
-                ..ModelSpec::default()
-            },
+            ModelSpec { hub_provider: Some(" hf ".into()), ..ModelSpec::default() },
         )
         .expect("local spec");
 
@@ -3538,14 +3546,40 @@ mod tests {
         let error = canonicalize_model_spec(
             UnifiedModelKind::Local,
             Some(ManagedModelBackendId::GgmlLlama),
-            ModelSpec {
-                hub_provider: Some("unknown".into()),
-                ..ModelSpec::default()
-            },
+            ModelSpec { hub_provider: Some("unknown".into()), ..ModelSpec::default() },
         )
         .expect_err("invalid hub provider");
 
-        assert!(error.to_string().contains("unsupported hub provider"), "unexpected error: {error}");
+        assert!(
+            error.to_string().contains("unsupported hub provider"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn hub_invalid_repo_errors_map_to_bad_request() {
+        let error = map_hub_client_error(
+            "hub file listing failed",
+            HubErrorKind::InvalidRepoId,
+            "repo_id is invalid".to_owned(),
+        );
+
+        assert!(
+            matches!(error, AppCoreError::BadRequest(message) if message.contains("repo_id is invalid"))
+        );
+    }
+
+    #[test]
+    fn hub_network_errors_map_to_backend_not_ready() {
+        let error = map_hub_client_error(
+            "hub file listing failed",
+            HubErrorKind::NetworkUnavailable,
+            "network unreachable".to_owned(),
+        );
+
+        assert!(
+            matches!(error, AppCoreError::BackendNotReady(message) if message.contains("network unreachable"))
+        );
     }
 
     #[test]
