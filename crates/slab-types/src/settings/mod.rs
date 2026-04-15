@@ -7,8 +7,8 @@ mod v2;
 pub use config::{
     ChatConfig, CloudProviderConfig, DiffusionConfig, DiffusionPathsConfig,
     DiffusionPerformanceConfig, PmidConfig, RuntimeConfig, RuntimeLlamaConfig,
-    RuntimeModelAutoUnloadConfig, RuntimeWorkerConfig, SetupBackendReleaseConfig,
-    SetupBackendsConfig, SetupConfig, SetupFfmpegConfig,
+    RuntimeModelAutoUnloadConfig, RuntimeWorkerConfig, SetupBackendsConfig, SetupConfig,
+    SetupFfmpegConfig,
 };
 pub use launch::{
     DesktopLaunchProfileConfig, LaunchBackendConfig, LaunchBackendsConfig, LaunchConfig,
@@ -18,8 +18,8 @@ pub use pmid::{
     ChatPmids, DesktopLaunchProfilePmids, DiffusionPathPmids, DiffusionPerformancePmids,
     DiffusionPmids, LaunchBackendPmids, LaunchBackendTogglePmids, LaunchPmids, LaunchProfilePmids,
     PMID, PmidCatalog, RuntimeLlamaPmids, RuntimeModelAutoUnloadPmids, RuntimePmids,
-    RuntimeWorkerPmids, ServerLaunchProfilePmids, SettingPmid, SetupBackendPmids,
-    SetupBackendReleasePmids, SetupFfmpegPmids, SetupPmids,
+    RuntimeWorkerPmids, ServerLaunchProfilePmids, SettingPmid, SetupBackendPmids, SetupFfmpegPmids,
+    SetupPmids,
 };
 pub use pmid_v2::{
     AdminPmids, AutoUnloadPmids, CapacityPmids, CorsPmids, DatabasePmids, EndpointPmids,

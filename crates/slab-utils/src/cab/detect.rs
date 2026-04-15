@@ -1,6 +1,6 @@
 use anyhow::Result;
 
-use crate::payload::RuntimeVariant;
+use super::payload::RuntimeVariant;
 
 #[cfg(windows)]
 use windows::Win32::Graphics::Dxgi::{

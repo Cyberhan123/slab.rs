@@ -58,6 +58,7 @@ impl AppState {
         pmid: Arc<crate::domain::services::PmidService>,
         grpc: Arc<crate::infra::rpc::gateway::GrpcGateway>,
         runtime_status: Arc<crate::runtime_supervisor::RuntimeSupervisorStatus>,
+        runtime_control: Option<crate::runtime_supervisor::RuntimeSupervisorControlHandle>,
         store: Arc<crate::infra::db::AnyStore>,
         model_auto_unload: Arc<crate::model_auto_unload::ModelAutoUnloadManager>,
     ) -> Self {
@@ -81,6 +82,7 @@ impl AppState {
             (*context.model_state).clone(),
             (*context.worker_state).clone(),
             agent_service,
+            runtime_control,
         ));
 
         Self { context, services }

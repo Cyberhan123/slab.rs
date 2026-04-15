@@ -1,9 +1,7 @@
 import type { ReactNode } from 'react';
 import type { LucideIcon } from 'lucide-react';
 import {
-  ArrowRight,
-  Check,
-  Download,
+  CheckCircle2,
   Loader2,
   RefreshCw,
   TriangleAlert,
@@ -13,33 +11,8 @@ import { Button } from '@slab/components/button';
 import { cn } from '@/lib/utils';
 import Header from '@/layouts/header';
 
-import {
-  SETUP_ACTIVE_TONE,
-  SETUP_CTA_GRADIENT,
-  type DependencyTone,
-  getDependencyMeta,
-} from '../const';
+import { SETUP_ACTIVE_TONE, SETUP_CTA_GRADIENT } from '../const';
 import type { SetupViewModel } from '../hooks/use-setup';
-
-interface DependencyAction {
-  label: string;
-  icon: LucideIcon;
-  onClick: () => Promise<void>;
-}
-
-interface DependencyItemView {
-  key: string;
-  title: string;
-  subtitle: string;
-  icon: LucideIcon;
-  tone: DependencyTone;
-  progress: number;
-  helperText: string;
-  percentLabel: string;
-  badgeLabel?: string;
-  action?: DependencyAction;
-  subtle?: boolean;
-}
 
 function SetupScaffold({ children }: { children: ReactNode }) {
   return (
@@ -83,176 +56,45 @@ function SetupStateCard({
   );
 }
 
-function DependencyBadge({
-  tone,
+function SetupBadge({
   label,
+  tone,
 }: {
-  tone: Extract<DependencyTone, 'success' | 'active'>;
   label: string;
+  tone: 'active' | 'success' | 'error';
 }) {
-  const Icon = tone === 'success' ? Check : Loader2;
-
   return (
     <div
       className={cn(
-        'inline-flex items-center gap-2 rounded-full px-3 py-1',
-        tone === 'success'
-          ? 'bg-[#00685f]/10 text-[#00685f]'
-          : 'bg-[#00685f]/5 text-[#00685f]/70',
+        'inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em]',
+        tone === 'active' && 'bg-[#00685f]/10 text-[#00685f]',
+        tone === 'success' && 'bg-[#00685f]/10 text-[#00685f]',
+        tone === 'error' && 'bg-destructive/10 text-destructive',
       )}
     >
-      <Icon className={cn('size-3', tone === 'active' && 'animate-spin')} />
-      <span className="text-[11px] font-bold uppercase tracking-[0.12em]">
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function DependencyActionButton({ action }: { action: DependencyAction }) {
-  const Icon = action.icon;
-
-  return (
-    <Button
-      type="button"
-      size="sm"
-      variant="outline"
-      className="h-8 rounded-full border-0 bg-white/70 px-4 text-[11px] font-semibold text-[#00685f] shadow-none hover:bg-white"
-      onClick={() => {
-        void action.onClick();
-      }}
-    >
-      <Icon className="size-3.5" />
-      {action.label}
-    </Button>
-  );
-}
-
-function DependencyRow({ item }: { item: DependencyItemView }) {
-  const Icon = item.icon;
-  const helperToneClass =
-    item.tone === 'error'
-      ? 'text-destructive'
-      : item.tone === 'idle'
-        ? 'text-muted-foreground'
-        : 'text-[#00685f]';
-  const progressTrackClass =
-    item.tone === 'error'
-      ? 'bg-destructive/15'
-      : item.tone === 'idle'
-        ? 'bg-muted-foreground/10'
-        : 'bg-[#00685f]/10';
-  const progressFillClass =
-    item.tone === 'error'
-      ? 'bg-destructive'
-      : item.tone === 'idle'
-        ? 'bg-muted-foreground/25'
-        : 'bg-[#00685f]';
-
-  return (
-    <div
-      className={cn(
-        'rounded-xl bg-surface-soft p-5 md:p-[21px]',
-        item.subtle && 'opacity-70',
-        item.tone === 'error' && 'ring-1 ring-destructive/15',
-      )}
-    >
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="min-w-0 flex-1">
-          <div className="flex items-start gap-4">
-            <div
-              className={cn(
-                'mt-0.5 flex size-12 shrink-0 items-center justify-center rounded-xl bg-surface-input',
-                item.tone === 'error'
-                  ? 'text-destructive'
-                  : item.tone === 'idle'
-                    ? 'text-muted-foreground'
-                    : 'text-[#00685f]',
-              )}
-            >
-              <Icon className="size-5" />
-            </div>
-
-            <div className="min-w-0 flex-1">
-              <div className="text-base font-semibold text-foreground">
-                {item.title}
-              </div>
-              <div className="mt-0.5 text-xs leading-4 text-secondary-foreground">
-                {item.subtitle}
-              </div>
-
-              <div className="mt-3 space-y-1">
-                <div className="flex items-center justify-between gap-3">
-                  <span
-                    className={cn(
-                      'min-w-0 text-[10px] font-medium leading-[15px]',
-                      helperToneClass,
-                    )}
-                  >
-                    {item.helperText}
-                  </span>
-                  <span
-                    className={cn(
-                      'shrink-0 text-[10px] font-medium leading-[15px]',
-                      helperToneClass,
-                    )}
-                  >
-                    {item.percentLabel}
-                  </span>
-                </div>
-                <div
-                  className={cn(
-                    'h-1.5 w-full overflow-hidden rounded-full',
-                    progressTrackClass,
-                  )}
-                >
-                  <div
-                    className={cn(
-                      'h-full rounded-full transition-[width] duration-300 ease-out',
-                      progressFillClass,
-                    )}
-                    style={{ width: `${item.progress}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="flex shrink-0 justify-end md:pl-4">
-          {item.action ? <DependencyActionButton action={item.action} /> : null}
-          {!item.action && item.badgeLabel ? (
-            <DependencyBadge
-              tone={item.tone === 'active' ? 'active' : 'success'}
-              label={item.badgeLabel}
-            />
-          ) : null}
-        </div>
-      </div>
+      {label}
     </div>
   );
 }
 
 export function SetupWorkbench({
-  status,
   isChecking,
   checkError,
-  ffmpegDownload,
-  ffmpegError,
-  ffmpegProgress,
-  ffmpegReady,
-  allBackendsUnavailable,
-  completing,
-  saveError,
-  handleDownloadFfmpeg,
-  handleComplete,
+  provisionState,
+  provisionError,
+  stageLabel,
+  stageHint,
+  progressPercent,
+  progressSummary,
+  canRetry,
+  handleRetry,
 }: SetupViewModel) {
-  if (isChecking || (!status && !checkError)) {
+  if (isChecking) {
     return (
       <SetupStateCard
         icon={Loader2}
-        title="Checking environment"
-        description="Inspecting your local runtime before the setup wizard continues."
+        title="Checking desktop environment"
+        description="Inspecting the local Slab host before the online installer starts."
         action={
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
@@ -267,12 +109,12 @@ export function SetupWorkbench({
     return (
       <SetupStateCard
         icon={TriangleAlert}
-        title="Could not reach the server"
+        title="Could not reach the local host"
         description={
           <>
             <p>{checkError}</p>
             <p className="mt-2">
-              Make sure <code>slab-server</code> is running, then try again.
+              Make sure <code>slab-server</code> is running, then reload this page.
             </p>
           </>
         }
@@ -292,179 +134,114 @@ export function SetupWorkbench({
     );
   }
 
-  if (!status) {
-    return null;
-  }
-
-  const ffmpegMeta = getDependencyMeta('ffmpeg');
-
-  const ffmpegItem: DependencyItemView =
-    ffmpegDownload === 'downloading'
-      ? {
-          key: 'ffmpeg',
-          title: ffmpegMeta.title,
-          subtitle: ffmpegMeta.subtitle,
-          icon: ffmpegMeta.icon,
-          tone: 'active',
-          progress: ffmpegProgress,
-          helperText: 'Downloading binaries...',
-          percentLabel: `${Math.round(ffmpegProgress)}%`,
-          badgeLabel: 'Active',
-        }
-      : ffmpegReady
-        ? {
-            key: 'ffmpeg',
-            title: ffmpegMeta.title,
-            subtitle: ffmpegMeta.subtitle,
-            icon: ffmpegMeta.icon,
-            tone: 'success',
-            progress: 100,
-            helperText: 'Installation complete',
-            percentLabel: '100%',
-            badgeLabel: 'Installed',
-          }
-        : ffmpegDownload === 'error'
-          ? {
-              key: 'ffmpeg',
-              title: ffmpegMeta.title,
-              subtitle: ffmpegMeta.subtitle,
-              icon: ffmpegMeta.icon,
-              tone: 'error',
-              progress: 0,
-              helperText: ffmpegError ?? 'Download failed',
-              percentLabel: '0%',
-              action: {
-                label: 'Retry',
-                icon: RefreshCw,
-                onClick: handleDownloadFfmpeg,
-              },
-            }
-          : {
-              key: 'ffmpeg',
-              title: ffmpegMeta.title,
-              subtitle: ffmpegMeta.subtitle,
-              icon: ffmpegMeta.icon,
-              tone: 'idle',
-              progress: 0,
-              helperText: ffmpegMeta.idleLabel,
-              percentLabel: '0%',
-              action: {
-                label: 'Download',
-                icon: Download,
-                onClick: handleDownloadFfmpeg,
-              },
-            };
-
-  const dependencyItems: DependencyItemView[] = [
-    ffmpegItem,
-    ...status.backends.map((backend): DependencyItemView => {
-      const meta = getDependencyMeta(backend.name);
-
-      if (backend.installed) {
-        return {
-          key: backend.name,
-          title: meta.title,
-          subtitle: meta.subtitle,
-          icon: meta.icon,
-          tone: 'success',
-          progress: 100,
-          helperText: 'Installation complete',
-          percentLabel: '100%',
-          badgeLabel: 'Installed',
-        };
-      }
-
-      return {
-        key: backend.name,
-        title: meta.title,
-        subtitle: meta.subtitle,
-        icon: meta.icon,
-        tone: 'idle',
-        progress: 0,
-        helperText: meta.idleLabel,
-        percentLabel: '0%',
-        subtle: true,
-      };
-    }),
-  ];
-
-  const hasFooterNotes = allBackendsUnavailable || Boolean(saveError);
+  const isFailed = provisionState === 'failed';
+  const isSucceeded = provisionState === 'succeeded';
+  const isActive = provisionState === 'starting' || provisionState === 'running';
+  const Icon = isFailed ? TriangleAlert : isSucceeded ? CheckCircle2 : Loader2;
 
   return (
     <SetupScaffold>
-      <main className="mx-auto flex min-h-full w-full max-w-[944px] flex-col gap-10 px-6 py-8">
-        <div className="max-w-[576px]">
-          <p className="text-lg leading-[29px] text-secondary-foreground">
-            Slab needs a few dependencies before it can process AI workloads.
-          </p>
-        </div>
+      <main className="mx-auto flex min-h-full w-full max-w-6xl items-center px-6 py-8">
+        <section className="relative w-full overflow-hidden rounded-[32px] border border-border/40 bg-surface-1 shadow-[0px_18px_60px_-30px_rgba(25,28,30,0.18)]">
+          <div className="absolute inset-0 opacity-80 [background:radial-gradient(circle_at_top_left,color-mix(in_oklab,var(--brand-teal)_14%,transparent),transparent_34%),radial-gradient(circle_at_bottom_right,color-mix(in_oklab,var(--brand-gold)_12%,transparent),transparent_28%)]" />
 
-        <section className="flex h-[min(720px,calc(100vh-8rem))] min-h-[560px] flex-col overflow-hidden rounded-xl border border-border/40 bg-surface-1 shadow-[0px_12px_40px_-12px_rgba(25,28,30,0.06)]">
-          <div className="flex min-h-0 flex-1 flex-col gap-6 p-6 md:p-8">
-            <div className="shrink-0">
-              <div>
-                <p className="text-[13px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                  System Dependencies
+          <div className="relative grid gap-8 p-8 md:p-10 lg:grid-cols-[1.2fr,0.9fr]">
+            <div className="space-y-6">
+              <div className="inline-flex size-14 items-center justify-center rounded-2xl bg-[color:color-mix(in_oklab,var(--surface-soft)_84%,white)] text-[var(--brand-teal)]">
+                <Icon className={cn('size-6', isActive && 'animate-spin')} />
+              </div>
+
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                    Online Installer
+                  </p>
+                  <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-foreground md:text-[2.8rem]">
+                    Slab is preparing your local runtime.
+                  </h1>
+                </div>
+
+                <p className="max-w-2xl text-sm leading-7 text-secondary-foreground md:text-base">
+                  This installer reuses the release CAB payloads for your current version,
+                  verifies them against the embedded manifest, installs the runtime into
+                  <code className="mx-1 rounded bg-surface-soft px-1.5 py-0.5 text-[0.9em]">
+                    resources/libs
+                  </code>
+                  , checks FFmpeg, and restarts the managed runtime workers.
                 </p>
               </div>
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto pr-4">
-              <div className="space-y-4">
-                {dependencyItems.map((item) => (
-                  <DependencyRow key={item.key} item={item} />
-                ))}
+            <div className="rounded-[28px] border border-border/50 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-6 shadow-[0_12px_32px_-24px_rgba(25,28,30,0.18)]">
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-2">
+                  <p className="text-[12px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Current Stage
+                  </p>
+                  <h2 className="text-xl font-semibold text-foreground">{stageLabel}</h2>
+                  <p className="text-sm leading-6 text-muted-foreground">{stageHint}</p>
+                </div>
+
+                <SetupBadge
+                  label={isFailed ? 'Failed' : isSucceeded ? 'Complete' : 'Running'}
+                  tone={isFailed ? 'error' : isSucceeded ? 'success' : 'active'}
+                />
+              </div>
+
+              <div className="mt-8 space-y-3">
+                <div className="flex items-center justify-between gap-3 text-xs font-medium text-muted-foreground">
+                  <span>{progressSummary}</span>
+                  <span>{Math.round(progressPercent)}%</span>
+                </div>
+                <div className="h-2.5 overflow-hidden rounded-full bg-[color:color-mix(in_oklab,var(--surface-soft)_78%,transparent)]">
+                  <div
+                    className={cn(
+                      'h-full rounded-full transition-[width] duration-300 ease-out',
+                      isFailed ? 'bg-destructive' : 'bg-[var(--brand-teal)]',
+                    )}
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="mt-8 border-t border-border/30 pt-6">
+                {provisionError ? (
+                  <p className="text-sm leading-6 text-destructive">{provisionError}</p>
+                ) : (
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {isSucceeded
+                      ? 'Setup has completed. Slab will enter the application automatically.'
+                      : 'Keep this window open while the local installer finishes the provisioning task.'}
+                  </p>
+                )}
+              </div>
+
+              <div className="mt-6 flex flex-wrap items-center gap-3">
+                {canRetry ? (
+                  <Button
+                    type="button"
+                    size="lg"
+                    className="rounded-xl px-6 text-white hover:brightness-[1.03]"
+                    style={{
+                      backgroundColor: SETUP_ACTIVE_TONE,
+                      backgroundImage: SETUP_CTA_GRADIENT,
+                    }}
+                    onClick={() => {
+                      void handleRetry();
+                    }}
+                  >
+                    <RefreshCw className="size-4" />
+                    Retry setup
+                  </Button>
+                ) : (
+                  <div className="inline-flex items-center gap-3 rounded-xl bg-surface-soft px-4 py-3 text-sm text-muted-foreground">
+                    <Loader2 className={cn('size-4', isActive && 'animate-spin')} />
+                    <span>{isSucceeded ? 'Launching Slab...' : 'Provisioning in progress'}</span>
+                  </div>
+                )}
               </div>
             </div>
           </div>
-
-          <footer
-            className={cn(
-              'mt-auto flex flex-col gap-4 border-t border-border/20 px-6 py-5 md:px-8',
-              hasFooterNotes
-                ? 'md:flex-row md:items-center md:justify-between'
-                : 'md:flex-row md:items-center md:justify-end',
-            )}
-          >
-            <div className="space-y-1">
-              {allBackendsUnavailable ? (
-                <p className="max-w-[560px] text-sm leading-6 text-muted-foreground">
-                  AI backends can be added later from <strong>Settings -&gt; Backends</strong>.
-                  You can continue now and use cloud-provider mode in the meantime.
-                </p>
-              ) : null}
-
-              {saveError ? (
-                <p className="text-sm leading-6 text-destructive">{saveError}</p>
-              ) : null}
-            </div>
-
-            <Button
-              type="button"
-              size="lg"
-              className="h-12 w-full rounded-xl px-8 text-base font-semibold text-white shadow-[0px_10px_15px_-3px_rgba(0,0,0,0.10),0px_4px_6px_-4px_rgba(0,0,0,0.10)] hover:brightness-[1.03] sm:w-auto"
-              style={{
-                backgroundColor: SETUP_ACTIVE_TONE,
-                backgroundImage: SETUP_CTA_GRADIENT,
-              }}
-              disabled={completing}
-              onClick={() => {
-                void handleComplete();
-              }}
-            >
-              {completing ? (
-                <>
-                  <Loader2 className="size-4 animate-spin" />
-                  Saving...
-                </>
-              ) : (
-                <>
-                  Continue to App
-                  <ArrowRight className="size-4" />
-                </>
-              )}
-            </Button>
-          </footer>
         </section>
       </main>
     </SetupScaffold>

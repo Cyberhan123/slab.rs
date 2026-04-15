@@ -8,9 +8,7 @@ use serde::de::DeserializeOwned;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
-use crate::payload::SelectedPayloadManifest;
-
-const PAYLOAD_MANIFEST_FILE_NAME: &str = "payload-manifest.json";
+use super::payload::{PAYLOAD_MANIFEST_FILE_NAME, SelectedPayloadManifest};
 
 pub fn collect_files_recursive(root: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
@@ -60,8 +58,7 @@ pub fn validate_relative_path(path: &Path) -> Result<()> {
 
     for component in path.components() {
         match component {
-            Component::Normal(_) => {}
-            Component::CurDir => {}
+            Component::Normal(_) | Component::CurDir => {}
             Component::ParentDir => {
                 bail!("path '{}' cannot contain parent segments", path.display());
             }
@@ -144,7 +141,14 @@ pub fn remove_dir_if_exists(path: &Path) -> Result<()> {
 pub fn apply_selected_payload(source_root: &Path, dest_root: &Path) -> Result<()> {
     let manifest_path = source_root.join(PAYLOAD_MANIFEST_FILE_NAME);
     let manifest: SelectedPayloadManifest = read_json(&manifest_path)?;
+    apply_payload_manifest(source_root, dest_root, &manifest)
+}
 
+pub fn apply_payload_manifest(
+    source_root: &Path,
+    dest_root: &Path,
+    manifest: &SelectedPayloadManifest,
+) -> Result<()> {
     let dest_parent = dest_root.parent().ok_or_else(|| {
         anyhow!("destination '{}' does not have a parent directory", dest_root.display())
     })?;
@@ -217,4 +221,21 @@ pub fn apply_selected_payload(source_root: &Path, dest_root: &Path) -> Result<()
     }
 
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_parent_segments() {
+        assert!(validate_relative_path(Path::new("../escape.dll")).is_err());
+        assert!(validate_relative_path(Path::new("nested/../escape.dll")).is_err());
+    }
+
+    #[test]
+    fn normalizes_relative_paths() {
+        let normalized = normalize_relative_path(Path::new("a/b/c.dll")).unwrap();
+        assert_eq!(normalized, "a/b/c.dll");
+    }
 }

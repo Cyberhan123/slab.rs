@@ -15,7 +15,7 @@ mod ui_state;
 mod video;
 
 pub use audio::{AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions};
-pub use backend::{BackendStatusQuery, BackendStatusView, DownloadBackendLibCommand};
+pub use backend::{BackendStatusQuery, BackendStatusView};
 #[allow(unused_imports)]
 pub use chat::StructuredOutputJsonSchema;
 pub use chat::{

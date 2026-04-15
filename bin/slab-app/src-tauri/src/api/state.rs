@@ -45,6 +45,7 @@ pub async fn init_state<R: tauri::Runtime>(
         pmid,
         grpc,
         runtime_status,
+        None,
         store,
         model_auto_unload,
     ));

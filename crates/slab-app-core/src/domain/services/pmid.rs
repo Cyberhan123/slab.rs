@@ -8,8 +8,8 @@ use slab_types::settings::{
     LaunchConfig, LaunchProfilesConfig, ModelDownloadSourcePreference, PmidConfig,
     ProviderRegistryEntry, RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig,
     RuntimeTransportMode, RuntimeWorkerConfig, ServerLaunchProfileConfig, SettingsDocumentV2,
-    SetupBackendReleaseConfig, SetupBackendsConfig, SetupConfig, SetupFfmpegConfig, V2_PMID,
-    provider_registry_json_schema, string_list_json_schema,
+    SetupBackendsConfig, SetupConfig, SetupFfmpegConfig, V2_PMID, provider_registry_json_schema,
+    string_list_json_schema,
 };
 
 use crate::domain::models::{
@@ -186,56 +186,6 @@ async fn load_legacy_config(settings: &SettingsProvider) -> Result<PmidConfig, A
             },
             backends: SetupBackendsConfig {
                 dir: settings.get_optional_string(PMID.setup.backends.dir()).await?,
-                ggml_llama: SetupBackendReleaseConfig {
-                    tag: settings.get_optional_string(PMID.setup.backends.ggml_llama.tag()).await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.ggml_llama.asset())
-                        .await?,
-                },
-                ggml_whisper: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.ggml_whisper.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.ggml_whisper.asset())
-                        .await?,
-                },
-                ggml_diffusion: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.ggml_diffusion.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.ggml_diffusion.asset())
-                        .await?,
-                },
-                candle_llama: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.candle_llama.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.candle_llama.asset())
-                        .await?,
-                },
-                candle_whisper: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.candle_whisper.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.candle_whisper.asset())
-                        .await?,
-                },
-                candle_diffusion: SetupBackendReleaseConfig {
-                    tag: settings
-                        .get_optional_string(PMID.setup.backends.candle_diffusion.tag())
-                        .await?,
-                    asset: settings
-                        .get_optional_string(PMID.setup.backends.candle_diffusion.asset())
-                        .await?,
-                },
-                onnx: SetupBackendReleaseConfig {
-                    tag: settings.get_optional_string(PMID.setup.backends.onnx.tag()).await?,
-                    asset: settings.get_optional_string(PMID.setup.backends.onnx.asset()).await?,
-                },
             },
         },
         runtime: RuntimeConfig {
@@ -348,48 +298,6 @@ fn load_v2_config(settings: &SettingsDocumentV2) -> PmidConfig {
             },
             backends: SetupBackendsConfig {
                 dir: normalize_string(settings.runtime.ggml.install_dir.clone()),
-                ggml_llama: merged_release(
-                    &settings.runtime.ggml.source.version,
-                    &settings.runtime.ggml.source.artifact,
-                    &settings.runtime.ggml.backends.llama.source.version,
-                    &settings.runtime.ggml.backends.llama.source.artifact,
-                ),
-                ggml_whisper: merged_release(
-                    &settings.runtime.ggml.source.version,
-                    &settings.runtime.ggml.source.artifact,
-                    &settings.runtime.ggml.backends.whisper.source.version,
-                    &settings.runtime.ggml.backends.whisper.source.artifact,
-                ),
-                ggml_diffusion: merged_release(
-                    &settings.runtime.ggml.source.version,
-                    &settings.runtime.ggml.source.artifact,
-                    &settings.runtime.ggml.backends.diffusion.source.version,
-                    &settings.runtime.ggml.backends.diffusion.source.artifact,
-                ),
-                candle_llama: merged_release(
-                    &settings.runtime.candle.source.version,
-                    &settings.runtime.candle.source.artifact,
-                    &None,
-                    &None,
-                ),
-                candle_whisper: merged_release(
-                    &settings.runtime.candle.source.version,
-                    &settings.runtime.candle.source.artifact,
-                    &None,
-                    &None,
-                ),
-                candle_diffusion: merged_release(
-                    &settings.runtime.candle.source.version,
-                    &settings.runtime.candle.source.artifact,
-                    &None,
-                    &None,
-                ),
-                onnx: merged_release(
-                    &settings.runtime.onnx.source.version,
-                    &settings.runtime.onnx.source.artifact,
-                    &None,
-                    &None,
-                ),
             },
         },
         runtime: RuntimeConfig {
@@ -930,18 +838,6 @@ fn value_at_path<'a>(root: &'a Value, path: &str) -> Option<&'a Value> {
         current = current.as_object()?.get(segment)?;
     }
     Some(current)
-}
-
-fn merged_release(
-    family_version: &Option<String>,
-    family_artifact: &Option<String>,
-    leaf_version: &Option<String>,
-    leaf_artifact: &Option<String>,
-) -> SetupBackendReleaseConfig {
-    SetupBackendReleaseConfig {
-        tag: normalize_string(leaf_version.clone().or_else(|| family_version.clone())),
-        asset: normalize_string(leaf_artifact.clone().or_else(|| family_artifact.clone())),
-    }
 }
 
 fn normalize_string(raw: Option<String>) -> Option<String> {

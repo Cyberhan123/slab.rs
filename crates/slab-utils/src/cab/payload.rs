@@ -5,11 +5,16 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, anyhow, bail};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-use crate::fsops::{collect_files_recursive, normalize_relative_path, sha256_file};
-use crate::ggml_manifest::resolve_ggml_runtime_packages;
+use super::cabinet::create_cab;
+use super::fsops::{collect_files_recursive, normalize_relative_path, sha256_file, write_json};
+use super::ggml_manifest::resolve_ggml_runtime_packages;
 
+pub const PAYLOAD_MANIFEST_FILE_NAME: &str = "payload-manifest.json";
 const PACKAGED_PAYLOAD_MANIFEST_VERSION: u32 = 1;
+const CACHE_DIR_NAME: &str = ".slab-cab-cache";
+const CACHE_FINGERPRINT_FILE: &str = "payload-fingerprint.sha256";
 
 #[derive(
     Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize,
@@ -68,6 +73,21 @@ pub struct CabPackage {
 pub struct RuntimePayloadPlan {
     pub packages: Vec<CabPackage>,
     pub packaged_manifest: PackagedPayloadManifest,
+}
+
+#[derive(Clone, Debug)]
+pub struct StagedRuntimePayloads {
+    pub output_dir: PathBuf,
+    pub cache_dir: PathBuf,
+    pub manifest_path: PathBuf,
+    pub packages: Vec<StagedRuntimePackage>,
+    pub packaged_manifest: PackagedPayloadManifest,
+}
+
+#[derive(Clone, Debug)]
+pub struct StagedRuntimePackage {
+    pub variant: RuntimeVariant,
+    pub cab_path: PathBuf,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -156,6 +176,14 @@ impl PackagedPayloadManifest {
     }
 }
 
+pub fn selected_packages(variant: RuntimeVariant) -> Vec<RuntimeVariant> {
+    match variant {
+        RuntimeVariant::Base => vec![RuntimeVariant::Base],
+        RuntimeVariant::Cuda => vec![RuntimeVariant::Base, RuntimeVariant::Cuda],
+        RuntimeVariant::Hip => vec![RuntimeVariant::Base, RuntimeVariant::Hip],
+    }
+}
+
 pub fn build_runtime_payload_plan(
     workspace_root: &Path,
     version: &str,
@@ -219,6 +247,67 @@ pub fn build_runtime_payload_plan(
     })
 }
 
+pub fn stage_runtime_payloads(
+    workspace_root: &Path,
+    version: &str,
+    output_dir: &Path,
+) -> Result<StagedRuntimePayloads> {
+    let payload_plan = build_runtime_payload_plan(workspace_root, version)?;
+    fs::create_dir_all(output_dir)
+        .with_context(|| format!("failed to create payload output dir {}", output_dir.display()))?;
+
+    let cache_dir = output_dir.join(CACHE_DIR_NAME);
+    fs::create_dir_all(&cache_dir)
+        .with_context(|| format!("failed to create payload cache dir {}", cache_dir.display()))?;
+    let manifest_path = cache_dir.join(PAYLOAD_MANIFEST_FILE_NAME);
+    let fingerprint_path = cache_dir.join(CACHE_FINGERPRINT_FILE);
+    let fingerprint = payload_plan_fingerprint(&payload_plan.packaged_manifest)?;
+
+    let cabs_ready = payload_plan
+        .packages
+        .iter()
+        .all(|package| output_dir.join(package.variant.cab_name()).is_file());
+    let cache_matches = fs::read_to_string(&fingerprint_path)
+        .map(|stored| stored.trim() == fingerprint)
+        .unwrap_or(false);
+
+    if !cache_matches || !cabs_ready {
+        for package in &payload_plan.packages {
+            let cab_path = output_dir.join(package.variant.cab_name());
+            create_cab(&cab_path, &package.files)
+                .with_context(|| format!("failed to create {}", cab_path.display()))?;
+        }
+        fs::write(&fingerprint_path, format!("{fingerprint}\n")).with_context(|| {
+            format!("failed to write payload fingerprint {}", fingerprint_path.display())
+        })?;
+    }
+
+    write_json(&manifest_path, &payload_plan.packaged_manifest)?;
+
+    let packages = payload_plan
+        .packages
+        .iter()
+        .map(|package| StagedRuntimePackage {
+            variant: package.variant,
+            cab_path: output_dir.join(package.variant.cab_name()),
+        })
+        .collect();
+
+    Ok(StagedRuntimePayloads {
+        output_dir: output_dir.to_path_buf(),
+        cache_dir,
+        manifest_path,
+        packages,
+        packaged_manifest: payload_plan.packaged_manifest,
+    })
+}
+
+fn payload_plan_fingerprint(manifest: &PackagedPayloadManifest) -> Result<String> {
+    let bytes = serde_json::to_vec(manifest).context("failed to serialize payload manifest")?;
+    let digest = Sha256::digest(bytes);
+    Ok(super::fsops::bytes_to_hex(&digest))
+}
+
 fn resolve_vendor_runtime_tree(root: &Path) -> Result<Vec<ResolvedPayloadFile>> {
     if !root.is_dir() {
         bail!("vendor runtime root is missing: {}", root.display());
@@ -270,4 +359,22 @@ fn dedupe_payload_files(files: Vec<ResolvedPayloadFile>) -> Result<Vec<ResolvedP
     }
 
     Ok(deduped.into_values().collect())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn selected_gpu_packages_include_base_first() {
+        assert_eq!(selected_packages(RuntimeVariant::Base), vec![RuntimeVariant::Base]);
+        assert_eq!(
+            selected_packages(RuntimeVariant::Cuda),
+            vec![RuntimeVariant::Base, RuntimeVariant::Cuda]
+        );
+        assert_eq!(
+            selected_packages(RuntimeVariant::Hip),
+            vec![RuntimeVariant::Base, RuntimeVariant::Hip]
+        );
+    }
 }

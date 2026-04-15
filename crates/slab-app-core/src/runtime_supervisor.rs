@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use slab_types::RuntimeBackendId;
-use tokio::sync::watch;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 use tracing::{error, info, warn};
 
@@ -149,6 +149,16 @@ impl RuntimeSupervisorStatus {
         entry.last_error = None;
     }
 
+    fn mark_restarting(&self, backend: RuntimeBackendId, restart_attempts: usize) {
+        let mut guard = self.inner.lock().unwrap_or_else(|error| error.into_inner());
+        let entry = guard.entry(backend).or_insert_with(|| {
+            RuntimeBackendStatusSnapshot::new(RuntimeBackendRuntimeStatus::Disabled)
+        });
+        entry.status = RuntimeBackendRuntimeStatus::Restarting;
+        entry.restart_attempts = restart_attempts;
+        entry.last_error = None;
+    }
+
     fn mark_failure(
         &self,
         backend: RuntimeBackendId,
@@ -235,9 +245,58 @@ pub trait RuntimeChildSpawner: Send + Sync {
     ) -> Result<Box<dyn RuntimeChildHandle>, AppCoreError>;
 }
 
+#[derive(Debug, Clone, Copy)]
+enum RuntimeSupervisorCommand {
+    ControlledRestart,
+}
+
+#[derive(Clone, Debug)]
+pub struct RuntimeSupervisorControlHandle {
+    senders: Arc<HashMap<RuntimeBackendId, mpsc::UnboundedSender<RuntimeSupervisorCommand>>>,
+}
+
+impl RuntimeSupervisorControlHandle {
+    pub fn managed_backends(&self) -> Vec<RuntimeBackendId> {
+        RuntimeBackendId::ALL
+            .into_iter()
+            .filter(|backend| self.senders.contains_key(backend))
+            .collect()
+    }
+
+    pub fn restart_backend(&self, backend: RuntimeBackendId) -> Result<(), AppCoreError> {
+        let sender = self.senders.get(&backend).ok_or_else(|| {
+            AppCoreError::BadRequest(format!(
+                "runtime backend '{}' is not managed by this supervisor",
+                backend.canonical_id()
+            ))
+        })?;
+        sender.send(RuntimeSupervisorCommand::ControlledRestart).map_err(|_| {
+            AppCoreError::Internal(format!(
+                "runtime supervisor task for '{}' is no longer accepting commands",
+                backend.canonical_id()
+            ))
+        })
+    }
+
+    pub fn restart_backends(
+        &self,
+        backends: &[RuntimeBackendId],
+    ) -> Result<Vec<RuntimeBackendId>, AppCoreError> {
+        let mut requested = Vec::new();
+        for backend in backends {
+            if self.senders.contains_key(backend) {
+                self.restart_backend(*backend)?;
+                requested.push(*backend);
+            }
+        }
+        Ok(requested)
+    }
+}
+
 pub struct ManagedRuntimeSupervisor {
     launch_spec: ResolvedLaunchSpec,
     status: Arc<RuntimeSupervisorStatus>,
+    control: RuntimeSupervisorControlHandle,
     shutdown_tx: watch::Sender<bool>,
     tasks: Mutex<Vec<JoinHandle<()>>>,
     shutdown_started: AtomicBool,
@@ -284,20 +343,26 @@ impl ManagedRuntimeSupervisor {
 
         let (shutdown_tx, _) = watch::channel(false);
         let mut tasks = Vec::new();
+        let mut command_senders = HashMap::new();
         for (child_spec, handle) in started_children {
+            let (command_tx, command_rx) = mpsc::unbounded_channel();
+            command_senders.insert(child_spec.backend, command_tx);
             tasks.push(tokio::spawn(supervise_backend(
                 child_spec,
                 handle,
                 Arc::clone(&spawner),
                 Arc::clone(&status),
                 shutdown_tx.subscribe(),
+                command_rx,
                 options.clone(),
             )));
         }
+        let control = RuntimeSupervisorControlHandle { senders: Arc::new(command_senders) };
 
         Ok(Self {
             launch_spec,
             status,
+            control,
             shutdown_tx,
             tasks: Mutex::new(tasks),
             shutdown_started: AtomicBool::new(false),
@@ -310,6 +375,10 @@ impl ManagedRuntimeSupervisor {
 
     pub fn status_registry(&self) -> Arc<RuntimeSupervisorStatus> {
         Arc::clone(&self.status)
+    }
+
+    pub fn control_handle(&self) -> RuntimeSupervisorControlHandle {
+        self.control.clone()
     }
 
     pub fn trigger_shutdown(&self) {
@@ -354,6 +423,7 @@ async fn supervise_backend(
     spawner: Arc<dyn RuntimeChildSpawner>,
     status: Arc<RuntimeSupervisorStatus>,
     mut shutdown_rx: watch::Receiver<bool>,
+    mut command_rx: mpsc::UnboundedReceiver<RuntimeSupervisorCommand>,
     options: RuntimeSupervisorOptions,
 ) {
     let backend = child_spec.backend;
@@ -368,6 +438,44 @@ async fn supervise_backend(
                 if changed.is_err() || *shutdown_rx.borrow() {
                     shutdown_child(&child_spec, &mut handle, &options).await;
                     return;
+                }
+            }
+            command = command_rx.recv() => {
+                match command {
+                    Some(RuntimeSupervisorCommand::ControlledRestart) => {
+                        status.mark_restarting(backend, restart_attempts);
+                        info!(
+                            backend = backend.canonical_id(),
+                            bind_address = %bind_address,
+                            log_file = %child_spec.log_file.display(),
+                            "runtime child controlled restart requested"
+                        );
+                        shutdown_child(&child_spec, &mut handle, &options).await;
+                        consecutive_failures = 0;
+
+                        let Some(new_handle) = restart_child_with_retries(
+                            &child_spec,
+                            Arc::clone(&spawner),
+                            Arc::clone(&status),
+                            &mut shutdown_rx,
+                            &options,
+                            &bind_address,
+                            &mut consecutive_failures,
+                            &mut restart_attempts,
+                            Duration::ZERO,
+                        ).await else {
+                            return;
+                        };
+                        handle = new_handle;
+                        last_started_at = tokio::time::Instant::now();
+                    }
+                    None => {
+                        warn!(
+                            backend = backend.canonical_id(),
+                            bind_address = %bind_address,
+                            "runtime supervisor command channel closed"
+                        );
+                    }
                 }
             }
             exit = handle.wait_for_exit() => {
@@ -412,68 +520,100 @@ async fn supervise_backend(
                     "runtime child exited unexpectedly; scheduling restart"
                 );
 
-                let mut retry_delay = restart_delay;
-                loop {
-                    tokio::select! {
-                        changed = shutdown_rx.changed() => {
-                            if changed.is_err() || *shutdown_rx.borrow() {
-                                return;
-                            }
-                        }
-                        _ = tokio::time::sleep(retry_delay) => {}
-                    }
+                let Some(new_handle) = restart_child_with_retries(
+                    &child_spec,
+                    Arc::clone(&spawner),
+                    Arc::clone(&status),
+                    &mut shutdown_rx,
+                    &options,
+                    &bind_address,
+                    &mut consecutive_failures,
+                    &mut restart_attempts,
+                    restart_delay,
+                ).await else {
+                    return;
+                };
+                handle = new_handle;
+                last_started_at = tokio::time::Instant::now();
+            }
+        }
+    }
+}
 
-                    match spawner.spawn_child(&child_spec).await {
-                        Ok(new_handle) => {
-                            handle = new_handle;
-                            last_started_at = tokio::time::Instant::now();
-                            restart_attempts = restart_attempts.saturating_add(1);
-                            status.mark_ready(backend, restart_attempts);
-                            info!(
-                                backend = backend.canonical_id(),
-                                bind_address = %bind_address,
-                                consecutive_failures,
-                                restart_attempts,
-                                log_file = %child_spec.log_file.display(),
-                                "runtime child restarted"
-                            );
-                            break;
-                        }
-                        Err(error) => {
-                            consecutive_failures = consecutive_failures.saturating_add(1);
-                            retry_delay = options.restart_delay(consecutive_failures);
-                            let transition_status = options.status_for_failures(consecutive_failures);
-                            let error_text = error.to_string();
-                            status.mark_failure(
-                                backend,
-                                transition_status,
-                                consecutive_failures,
-                                restart_attempts,
-                                format!("failed to restart runtime child: {error_text}"),
-                                UnexpectedRuntimeExit {
-                                    backend,
-                                    bind_address: bind_address.clone(),
-                                    exit: RuntimeChildExit {
-                                        code: None,
-                                        signal: None,
-                                        message: Some(format!("restart spawn failed: {error_text}")),
-                                    },
-                                    consecutive_failures,
-                                    restart_delay: retry_delay,
-                                },
-                            );
-                            warn!(
-                                backend = backend.canonical_id(),
-                                bind_address = %bind_address,
-                                consecutive_failures,
-                                retry_delay_ms = retry_delay.as_millis(),
-                                error = %error_text,
-                                log_file = %child_spec.log_file.display(),
-                                "failed to restart runtime child; will retry"
-                            );
-                        }
+async fn restart_child_with_retries(
+    child_spec: &ResolvedRuntimeChildSpec,
+    spawner: Arc<dyn RuntimeChildSpawner>,
+    status: Arc<RuntimeSupervisorStatus>,
+    shutdown_rx: &mut watch::Receiver<bool>,
+    options: &RuntimeSupervisorOptions,
+    bind_address: &str,
+    consecutive_failures: &mut usize,
+    restart_attempts: &mut usize,
+    initial_delay: Duration,
+) -> Option<Box<dyn RuntimeChildHandle>> {
+    let backend = child_spec.backend;
+    let mut retry_delay = initial_delay;
+
+    loop {
+        if !retry_delay.is_zero() {
+            tokio::select! {
+                changed = shutdown_rx.changed() => {
+                    if changed.is_err() || *shutdown_rx.borrow() {
+                        return None;
                     }
                 }
+                _ = tokio::time::sleep(retry_delay) => {}
+            }
+        } else if *shutdown_rx.borrow() {
+            return None;
+        }
+
+        match spawner.spawn_child(child_spec).await {
+            Ok(new_handle) => {
+                *restart_attempts = (*restart_attempts).saturating_add(1);
+                status.mark_ready(backend, *restart_attempts);
+                info!(
+                    backend = backend.canonical_id(),
+                    bind_address = %bind_address,
+                    consecutive_failures = *consecutive_failures,
+                    restart_attempts = *restart_attempts,
+                    log_file = %child_spec.log_file.display(),
+                    "runtime child restarted"
+                );
+                return Some(new_handle);
+            }
+            Err(error) => {
+                *consecutive_failures = (*consecutive_failures).saturating_add(1);
+                retry_delay = options.restart_delay(*consecutive_failures);
+                let transition_status = options.status_for_failures(*consecutive_failures);
+                let error_text = error.to_string();
+                status.mark_failure(
+                    backend,
+                    transition_status,
+                    *consecutive_failures,
+                    *restart_attempts,
+                    format!("failed to restart runtime child: {error_text}"),
+                    UnexpectedRuntimeExit {
+                        backend,
+                        bind_address: bind_address.to_owned(),
+                        exit: RuntimeChildExit {
+                            code: None,
+                            signal: None,
+                            message: Some(format!("restart spawn failed: {error_text}")),
+                        },
+                        consecutive_failures: *consecutive_failures,
+                        restart_delay: retry_delay,
+                    },
+                );
+                warn!(
+                    backend = backend.canonical_id(),
+                    bind_address = %bind_address,
+                    consecutive_failures = *consecutive_failures,
+                    retry_delay_ms = retry_delay.as_millis(),
+                    error = %error_text,
+                    log_file = %child_spec.log_file.display(),
+                    "failed to restart runtime child; will retry"
+                );
             }
         }
     }
@@ -919,6 +1059,34 @@ mod tests {
 
         assert_eq!(spawner.spawn_count(), 1);
         assert_eq!(first.graceful_shutdowns.load(Ordering::SeqCst), 1);
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn controlled_restart_restarts_without_failure_backoff() {
+        let spawner = FakeSpawner::default();
+        let first = FakeChildControl::new();
+        let second = FakeChildControl::new();
+        spawner.push_success(RuntimeBackendId::GgmlLlama, Arc::clone(&first));
+        spawner.push_success(RuntimeBackendId::GgmlLlama, Arc::clone(&second));
+
+        let supervisor = ManagedRuntimeSupervisor::start(
+            launch_spec(vec![child_spec(RuntimeBackendId::GgmlLlama, "127.0.0.1:50051")]),
+            Arc::new(spawner.clone()),
+            test_options(),
+        )
+        .await
+        .unwrap();
+
+        supervisor.control_handle().restart_backend(RuntimeBackendId::GgmlLlama).unwrap();
+
+        yield_until(|| first.graceful_shutdowns.load(Ordering::SeqCst) == 1).await;
+        yield_until(|| spawner.spawn_count() == 2).await;
+        assert_eq!(
+            supervisor.status_registry().status(RuntimeBackendId::GgmlLlama),
+            RuntimeBackendRuntimeStatus::Ready
+        );
+
+        supervisor.shutdown().await;
     }
 
     #[tokio::test(start_paused = true)]

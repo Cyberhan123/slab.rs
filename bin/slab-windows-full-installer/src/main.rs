@@ -3,11 +3,6 @@
 
 mod bootstrap_ui;
 mod bundle;
-mod cab;
-mod detect;
-mod fsops;
-mod ggml_manifest;
-mod payload;
 
 use std::env;
 use std::fs;
@@ -22,12 +17,10 @@ use crate::bootstrap_ui::run_bootstrap_with_ui;
 use crate::bundle::{
     AssetInput, AssetKind, EmbeddedBundle, load_embedded_bundle, write_embedded_bundle,
 };
-use crate::cab::{create_cab, expand_cab_with_progress};
-use crate::detect::detect_best_variant;
-use crate::fsops::{apply_selected_payload, remove_dir_if_exists, write_json};
-use crate::payload::{
+use slab_utils::cab::{
     PackagedPayloadManifest, RequestedVariant, RuntimeVariant, SelectedPayloadManifest,
-    build_runtime_payload_plan,
+    apply_selected_payload, detect_best_variant, expand_cab_with_progress, remove_dir_if_exists,
+    selected_packages, stage_runtime_payloads, write_json,
 };
 
 const PAYLOAD_MANIFEST_FILE_NAME: &str = "payload-manifest.json";
@@ -43,6 +36,7 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Commands {
     Pack(PackArgs),
+    StagePayloads(StagePayloadsArgs),
     Run(RunArgs),
     Apply(ApplyArgs),
     DetectGpu,
@@ -55,6 +49,15 @@ struct PackArgs {
 
     #[arg(long)]
     output: Option<PathBuf>,
+
+    #[arg(long)]
+    version: Option<String>,
+}
+
+#[derive(Debug, Args)]
+struct StagePayloadsArgs {
+    #[arg(long)]
+    output_dir: Option<PathBuf>,
 
     #[arg(long)]
     version: Option<String>,
@@ -118,6 +121,7 @@ fn run_main() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Some(Commands::Pack(args)) => run_pack(args),
+        Some(Commands::StagePayloads(args)) => run_stage_payloads(args),
         Some(Commands::Run(args)) => run_bootstrap(args),
         Some(Commands::Apply(args)) => {
             apply_selected_payload(&args.source, &args.dest)?;
@@ -152,8 +156,11 @@ fn run_pack(args: PackArgs) -> Result<()> {
             .join(full_installer_output_name(&version))
     });
     let nsis_installer = resolve_nsis_installer(&workspace_root, args.nsis_installer)?;
+    let bundle_dir = output_path.parent().ok_or_else(|| {
+        anyhow!("offline installer output path '{}' has no parent", output_path.display())
+    })?;
+    let staged_payloads = stage_runtime_payloads(&workspace_root, &version, bundle_dir)?;
 
-    let payload_plan = build_runtime_payload_plan(&workspace_root, &version)?;
     let staging_root = env::temp_dir().join(format!("slab-full-installer-pack-{}", Uuid::new_v4()));
     fs::create_dir_all(&staging_root).with_context(|| {
         format!("failed to create staging directory {}", staging_root.display())
@@ -175,22 +182,18 @@ fn run_pack(args: PackArgs) -> Result<()> {
             source_path: setup_staging_path,
         });
 
-        for package in &payload_plan.packages {
-            let cab_path = staging_root.join(package.variant.cab_name());
-            create_cab(&cab_path, &package.files)?;
+        for package in &staged_payloads.packages {
             asset_inputs.push(AssetInput {
                 name: package.variant.cab_name().to_string(),
                 kind: AssetKind::Cab,
-                source_path: cab_path,
+                source_path: package.cab_path.clone(),
             });
         }
 
-        let manifest_path = staging_root.join(PAYLOAD_MANIFEST_FILE_NAME);
-        write_json(&manifest_path, &payload_plan.packaged_manifest)?;
         asset_inputs.push(AssetInput {
             name: PAYLOAD_MANIFEST_FILE_NAME.to_string(),
             kind: AssetKind::PayloadManifest,
-            source_path: manifest_path,
+            source_path: staged_payloads.manifest_path.clone(),
         });
 
         let base_executable = env::current_exe().context("failed to locate pack executable")?;
@@ -200,6 +203,20 @@ fn run_pack(args: PackArgs) -> Result<()> {
 
     let _ = remove_dir_if_exists(&staging_root);
     result
+}
+
+fn run_stage_payloads(args: StagePayloadsArgs) -> Result<()> {
+    let workspace_root = workspace_root()?;
+    let version = args.version.unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string());
+    let output_dir = args.output_dir.unwrap_or_else(|| {
+        workspace_root.join("target").join("release").join("bundle").join("nsis")
+    });
+    let staged = stage_runtime_payloads(&workspace_root, &version, &output_dir)?;
+
+    for package in &staged.packages {
+        println!("{}", package.cab_path.display());
+    }
+    Ok(())
 }
 
 fn run_bootstrap(args: RunArgs) -> Result<()> {
@@ -346,14 +363,6 @@ fn resolve_requested_variant(requested: RequestedVariant) -> Result<RuntimeVaria
         RequestedVariant::Base => Ok(RuntimeVariant::Base),
         RequestedVariant::Cuda => Ok(RuntimeVariant::Cuda),
         RequestedVariant::Hip => Ok(RuntimeVariant::Hip),
-    }
-}
-
-fn selected_packages(variant: RuntimeVariant) -> Vec<RuntimeVariant> {
-    match variant {
-        RuntimeVariant::Base => vec![RuntimeVariant::Base],
-        RuntimeVariant::Cuda => vec![RuntimeVariant::Base, RuntimeVariant::Cuda],
-        RuntimeVariant::Hip => vec![RuntimeVariant::Base, RuntimeVariant::Hip],
     }
 }
 
