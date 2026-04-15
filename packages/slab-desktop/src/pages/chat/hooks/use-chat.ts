@@ -1,6 +1,5 @@
 import { SSEFields, useXChat, XModelResponse } from '@ant-design/x-sdk'
 import { useState } from 'react'
-import locale from '../local'
 import {
   DEFAULT_CONVERSATION_KEY,
   getContinueGenerationPrefix,
@@ -14,6 +13,7 @@ import {
   type ChatRuntimePresets,
   type ChatUiMessage,
 } from '../chat-context'
+import { useChatLocale } from '../chat-locale'
 
 export const useChat = (
   conversationKey: string,
@@ -25,6 +25,7 @@ export const useChat = (
 ) => {
   const [activeConversation, setActiveConversation] = useState<string>()
   const resolvedConversationKey = conversationKey || DEFAULT_CONVERSATION_KEY
+  const locale = useChatLocale()
 
   const {
     onRequest,
