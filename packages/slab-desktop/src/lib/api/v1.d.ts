@@ -1294,6 +1294,8 @@ export interface components {
             context_window?: number | null;
             /** @description Filename within the HF repo. */
             filename?: string | null;
+            /** @description Optional explicit local hub provider override (`hf_hub`, `models_cat`, `huggingface_hub_rust`). */
+            hub_provider?: string | null;
             /** @description Absolute path to the downloaded model file (populated after download). */
             local_path?: string | null;
             pricing?: null | components["schemas"]["PricingRequest"];
@@ -1313,6 +1315,7 @@ export interface components {
             /** Format: int32 */
             context_window?: number | null;
             filename?: string | null;
+            hub_provider?: string | null;
             local_path?: string | null;
             pricing?: null | components["schemas"]["PricingResponse"];
             provider_id?: string | null;
@@ -1475,10 +1478,14 @@ export interface components {
             num_workers?: number | null;
         };
         TaskProgressResponse: {
+            /** Format: int64 */
             current: number;
             label?: string | null;
+            /** Format: int32 */
             step?: number | null;
+            /** Format: int32 */
             step_count?: number | null;
+            /** Format: int64 */
             total?: number | null;
             unit?: string | null;
         };
@@ -1486,7 +1493,7 @@ export interface components {
             created_at: string;
             error_msg?: string | null;
             id: string;
-            progress?: components["schemas"]["TaskProgressResponse"] | null;
+            progress?: null | components["schemas"]["TaskProgressResponse"];
             status: components["schemas"]["TaskStatus"];
             task_type: string;
             updated_at: string;
