@@ -8,15 +8,12 @@ use std::fs::OpenOptions;
 use std::io::ErrorKind;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
-use std::process::Stdio;
 use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{Context, anyhow};
-use async_trait::async_trait;
+use anyhow::anyhow;
 use clap::Parser;
 use tokio::io::{AsyncBufReadExt, BufReader};
-use tokio::process::{Child, ChildStdin, Command as TokioCommand};
 use tracing::{error, info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
@@ -27,16 +24,8 @@ use slab_app_core::context::AppState;
 use slab_app_core::domain::services::PmidService;
 use slab_app_core::infra::db::{AnyStore, TaskStore};
 use slab_app_core::infra::rpc::gateway::GrpcGateway;
-use slab_app_core::launch::{LaunchHostPaths, LaunchProfile, ResolvedRuntimeChildSpec};
-use slab_app_core::runtime_supervisor::{
-    ManagedRuntimeSupervisor, RuntimeChildExit, RuntimeChildHandle, RuntimeChildSpawner,
-    RuntimeSupervisorOptions, RuntimeSupervisorStatus,
-};
-
-const RUNTIME_CHILD_READY_TIMEOUT: Duration = Duration::from_secs(5);
-const RUNTIME_CHILD_READY_POLL_INTERVAL: Duration = Duration::from_millis(100);
-const RUNTIME_CHILD_READY_CONNECT_TIMEOUT: Duration = Duration::from_millis(250);
-const RUNTIME_CHILD_FAILED_START_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
+use slab_app_core::infra::runtime::{ManagedRuntimeHost, ManagedRuntimeHostStartOptions};
+use slab_app_core::runtime_supervisor::RuntimeSupervisorStatus;
 
 #[derive(Parser, Debug, Clone, Default)]
 #[command(name = "slab-server", version, about = "Slab supervisor and HTTP gateway")]
@@ -265,7 +254,7 @@ fn init_tracing(
 async fn run_gateway<F>(
     cfg: Config,
     runtime_status: Arc<RuntimeSupervisorStatus>,
-    runtime_control: slab_app_core::runtime_supervisor::RuntimeSupervisorControlHandle,
+    runtime_host: Option<Arc<ManagedRuntimeHost>>,
     shutdown: F,
 ) -> anyhow::Result<()>
 where
@@ -290,9 +279,8 @@ where
         "model config directory ready"
     );
     info!("typed PMID config ready");
-    let grpc = GrpcGateway::connect_from_config(&cfg)
-        .await
-        .context("failed to initialize shared gRPC gateway services")?;
+    let grpc = GrpcGateway::connect_from_config_best_effort(&cfg).await;
+    info!(?grpc, "shared gRPC gateway services initialized");
 
     let grpc = Arc::new(grpc);
     let store = Arc::new(store.clone());
@@ -307,7 +295,7 @@ where
         pmid,
         grpc,
         runtime_status,
-        Some(runtime_control),
+        runtime_host,
         Arc::clone(&store),
         model_auto_unload,
     ));
@@ -330,420 +318,45 @@ where
     Ok(())
 }
 
-struct TokioRuntimeSpawner {
-    runtime_exe: PathBuf,
-    log_level: Option<String>,
-    log_json: bool,
-}
-
-impl TokioRuntimeSpawner {
-    fn new(runtime_exe: PathBuf, log_level: Option<String>, log_json: bool) -> Self {
-        Self { runtime_exe, log_level, log_json }
-    }
-}
-
-async fn runtime_endpoint_ready(
-    child_spec: &ResolvedRuntimeChildSpec,
-) -> Result<bool, slab_app_core::error::AppCoreError> {
-    match child_spec.transport {
-        slab_types::settings::RuntimeTransportMode::Http => {
-            let target = normalize_http_probe_target(&child_spec.grpc_bind_address)?;
-            match tokio::time::timeout(
-                RUNTIME_CHILD_READY_CONNECT_TIMEOUT,
-                tokio::net::TcpStream::connect(target.as_str()),
-            )
-            .await
-            {
-                Ok(Ok(stream)) => {
-                    drop(stream);
-                    Ok(true)
-                }
-                Ok(Err(_)) | Err(_) => Ok(false),
-            }
-        }
-        slab_types::settings::RuntimeTransportMode::Ipc => {
-            let target = normalize_ipc_probe_target(&child_spec.grpc_bind_address)?;
-            match tokio::time::timeout(
-                RUNTIME_CHILD_READY_CONNECT_TIMEOUT,
-                parity_tokio_ipc::Endpoint::connect(target),
-            )
-            .await
-            {
-                Ok(Ok(stream)) => {
-                    drop(stream);
-                    Ok(true)
-                }
-                Ok(Err(_)) | Err(_) => Ok(false),
-            }
-        }
-    }
-}
-
-fn normalize_http_probe_target(
-    bind_address: &str,
-) -> Result<String, slab_app_core::error::AppCoreError> {
-    let trimmed = bind_address.trim();
-    if trimmed.is_empty() {
-        return Err(slab_app_core::error::AppCoreError::Internal(
-            "runtime child HTTP bind address is empty".to_owned(),
-        ));
-    }
-
-    let without_scheme = trimmed
-        .strip_prefix("http://")
-        .or_else(|| trimmed.strip_prefix("https://"))
-        .unwrap_or(trimmed);
-    let authority = without_scheme.split('/').next().unwrap_or("").trim();
-    if authority.is_empty() {
-        return Err(slab_app_core::error::AppCoreError::Internal(format!(
-            "runtime child HTTP bind address '{}' is invalid",
-            bind_address
-        )));
-    }
-
-    Ok(authority.to_owned())
-}
-
-fn normalize_ipc_probe_target(
-    bind_address: &str,
-) -> Result<String, slab_app_core::error::AppCoreError> {
-    let trimmed = bind_address.trim();
-    if trimmed.is_empty() {
-        return Err(slab_app_core::error::AppCoreError::Internal(
-            "runtime child IPC bind address is empty".to_owned(),
-        ));
-    }
-
-    let path = trimmed.strip_prefix("ipc://").unwrap_or(trimmed).trim();
-    if path.is_empty() {
-        return Err(slab_app_core::error::AppCoreError::Internal(format!(
-            "runtime child IPC bind address '{}' is invalid",
-            bind_address
-        )));
-    }
-
-    Ok(path.to_owned())
-}
-
-async fn terminate_failed_start_child(child_spec: &ResolvedRuntimeChildSpec, child: &mut Child) {
-    let backend = child_spec.backend.canonical_id();
-    let bind_address = &child_spec.grpc_bind_address;
-
-    match child.try_wait() {
-        Ok(Some(status)) => {
-            warn!(
-                backend,
-                bind_address = %bind_address,
-                log_file = %child_spec.log_file.display(),
-                exit = %status,
-                "runtime child already exited during startup failure cleanup"
-            );
-            return;
-        }
-        Ok(None) => {}
-        Err(error) => {
-            warn!(
-                backend,
-                bind_address = %bind_address,
-                log_file = %child_spec.log_file.display(),
-                error = %error,
-                "failed to inspect runtime child during startup failure cleanup"
-            );
-            return;
-        }
-    }
-
-    if let Err(error) = child.start_kill() {
-        warn!(
-            backend,
-            bind_address = %bind_address,
-            log_file = %child_spec.log_file.display(),
-            error = %error,
-            "failed to kill runtime child after startup failure"
-        );
-        return;
-    }
-
-    match tokio::time::timeout(RUNTIME_CHILD_FAILED_START_SHUTDOWN_TIMEOUT, child.wait()).await {
-        Ok(Ok(status)) => {
-            warn!(
-                backend,
-                bind_address = %bind_address,
-                log_file = %child_spec.log_file.display(),
-                exit = %status,
-                "runtime child exited after startup failure cleanup"
-            );
-        }
-        Ok(Err(error)) => {
-            warn!(
-                backend,
-                bind_address = %bind_address,
-                log_file = %child_spec.log_file.display(),
-                error = %error,
-                "failed while waiting for runtime child cleanup after startup failure"
-            );
-        }
-        Err(_) => {
-            warn!(
-                backend,
-                bind_address = %bind_address,
-                log_file = %child_spec.log_file.display(),
-                timeout_ms = RUNTIME_CHILD_FAILED_START_SHUTDOWN_TIMEOUT.as_millis(),
-                "timed out waiting for runtime child cleanup after startup failure"
-            );
-        }
-    }
-}
-
-async fn wait_for_runtime_child_ready(
-    child_spec: &ResolvedRuntimeChildSpec,
-    child: &mut Child,
-) -> Result<(), slab_app_core::error::AppCoreError> {
-    let started_at = tokio::time::Instant::now();
-
-    loop {
-        let endpoint_ready = match runtime_endpoint_ready(child_spec).await {
-            Ok(ready) => ready,
-            Err(error) => {
-                terminate_failed_start_child(child_spec, child).await;
-                return Err(error);
-            }
-        };
-        if endpoint_ready {
-            return Ok(());
-        }
-
-        match child.try_wait().map_err(|error| {
-            slab_app_core::error::AppCoreError::Internal(format!(
-                "failed to inspect runtime child '{}' startup state: {error}",
-                child_spec.backend.canonical_id()
-            ))
-        })? {
-            Some(status) => {
-                return Err(slab_app_core::error::AppCoreError::Internal(format!(
-                    "runtime child '{}' exited before gRPC endpoint '{}' became ready: {status}",
-                    child_spec.backend.canonical_id(),
-                    child_spec.grpc_bind_address
-                )));
-            }
-            None => {}
-        }
-
-        if started_at.elapsed() >= RUNTIME_CHILD_READY_TIMEOUT {
-            terminate_failed_start_child(child_spec, child).await;
-            return Err(slab_app_core::error::AppCoreError::Internal(format!(
-                "runtime child '{}' did not expose gRPC endpoint '{}' within {} ms",
-                child_spec.backend.canonical_id(),
-                child_spec.grpc_bind_address,
-                RUNTIME_CHILD_READY_TIMEOUT.as_millis()
-            )));
-        }
-
-        tokio::time::sleep(RUNTIME_CHILD_READY_POLL_INTERVAL).await;
-    }
-}
-
-struct TokioRuntimeChildHandle {
-    backend: String,
-    bind_address: String,
-    child: Child,
-    stdin: Option<ChildStdin>,
-}
-
-#[async_trait]
-impl RuntimeChildHandle for TokioRuntimeChildHandle {
-    async fn wait_for_exit(
-        &mut self,
-    ) -> Result<RuntimeChildExit, slab_app_core::error::AppCoreError> {
-        let status = self.child.wait().await.map_err(|error| {
-            slab_app_core::error::AppCoreError::Internal(format!(
-                "failed to wait for runtime child '{}': {error}",
-                self.backend
-            ))
-        })?;
-        Ok(RuntimeChildExit {
-            code: status.code(),
-            signal: None,
-            message: (!status.success()).then(|| format!("process exited with status {status}")),
-        })
-    }
-
-    async fn request_graceful_shutdown(
-        &mut self,
-    ) -> Result<(), slab_app_core::error::AppCoreError> {
-        if self.stdin.take().is_some() {
-            info!(
-                backend = %self.backend,
-                bind_address = %self.bind_address,
-                "requested child graceful shutdown via stdin close"
-            );
-        } else {
-            warn!(
-                backend = %self.backend,
-                bind_address = %self.bind_address,
-                "child stdin handle missing; graceful shutdown may already be in progress"
-            );
-        }
-        Ok(())
-    }
-
-    async fn force_kill(&mut self) -> Result<(), slab_app_core::error::AppCoreError> {
-        self.child.start_kill().map_err(|error| {
-            slab_app_core::error::AppCoreError::Internal(format!(
-                "failed to signal child force kill '{}': {error}",
-                self.backend
-            ))
-        })
-    }
-}
-
-#[async_trait]
-impl RuntimeChildSpawner for TokioRuntimeSpawner {
-    async fn spawn_child(
-        &self,
-        child_spec: &ResolvedRuntimeChildSpec,
-    ) -> Result<Box<dyn RuntimeChildHandle>, slab_app_core::error::AppCoreError> {
-        let mut cmd = TokioCommand::new(&self.runtime_exe);
-        cmd.args(child_spec.command_args(self.log_level.as_deref(), self.log_json))
-            .stdout(Stdio::inherit())
-            .stderr(Stdio::inherit())
-            .stdin(Stdio::piped());
-
-        let mut child = cmd.spawn().map_err(|error| {
-            slab_app_core::error::AppCoreError::Internal(format!(
-                "failed to spawn slab-runtime child '{}' from {}: {error}",
-                child_spec.backend.canonical_id(),
-                self.runtime_exe.display()
-            ))
-        })?;
-        let stdin = child.stdin.take();
-        info!(
-            backend = child_spec.backend.canonical_id(),
-            bind_address = %child_spec.grpc_bind_address,
-            pid = ?child.id(),
-            log_file = %child_spec.log_file.display(),
-            "spawned backend child process"
-        );
-        wait_for_runtime_child_ready(child_spec, &mut child).await?;
-        info!(
-            backend = child_spec.backend.canonical_id(),
-            bind_address = %child_spec.grpc_bind_address,
-            pid = ?child.id(),
-            log_file = %child_spec.log_file.display(),
-            timeout_ms = RUNTIME_CHILD_READY_TIMEOUT.as_millis(),
-            "runtime child gRPC endpoint became ready"
-        );
-
-        Ok(Box::new(TokioRuntimeChildHandle {
-            backend: child_spec.backend.canonical_id().to_owned(),
-            bind_address: child_spec.grpc_bind_address.clone(),
-            child,
-            stdin,
-        }))
-    }
-}
-
-fn resolve_runtime_exe(server_exe: &Path) -> anyhow::Result<PathBuf> {
-    let parent = server_exe
-        .parent()
-        .ok_or_else(|| anyhow!("failed to resolve server executable parent directory"))?;
-    let server_name = server_exe
-        .file_name()
-        .and_then(|n| n.to_str())
-        .ok_or_else(|| anyhow!("server executable name is not valid UTF-8"))?;
-    let ext = if cfg!(windows) { ".exe" } else { "" };
-
-    let mut candidates: Vec<PathBuf> = Vec::new();
-    if let Some(rest) = server_name.strip_prefix("slab-server-") {
-        candidates.push(parent.join(format!("slab-runtime-{rest}")));
-    }
-    candidates.push(parent.join(format!("slab-runtime{ext}")));
-
-    if let Ok(entries) = std::fs::read_dir(parent) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            if cfg!(windows) {
-                if name.starts_with("slab-runtime-") && name.ends_with(".exe") {
-                    candidates.push(path);
-                }
-            } else if name.starts_with("slab-runtime-") {
-                candidates.push(path);
-            }
-        }
-    }
-
-    for candidate in candidates {
-        if candidate.exists() {
-            return Ok(candidate);
-        }
-    }
-
-    anyhow::bail!(
-        "slab-runtime executable not found near {}. Build and bundle slab-runtime sidecar first.",
-        server_exe.display()
-    );
-}
-
 async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow::Result<()> {
     info!("slab-server supervisor starting");
-    let server_exe =
-        std::env::current_exe().context("failed to resolve current executable path")?;
-    let runtime_exe = resolve_runtime_exe(&server_exe)?;
-
-    let runtime_log_dir_fallback = gateway_cfg
-        .settings_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| std::env::temp_dir().join("Slab"))
-        .join("logs");
-    let runtime_ipc_dir_fallback = gateway_cfg
-        .settings_path
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| std::env::temp_dir().join("Slab"))
-        .join("ipc");
-
-    let pmid = PmidService::load_from_path(gateway_cfg.settings_path.clone()).await?;
-    let launch_spec = pmid
-        .resolve_launch_spec(
-            LaunchProfile::Server,
-            &LaunchHostPaths {
-                runtime_lib_dir_fallback: gateway_cfg.lib_dir.clone(),
-                runtime_log_dir_fallback,
-                runtime_ipc_dir_fallback,
-                shutdown_on_stdin_close: true,
+    let runtime_host = Arc::new(
+        ManagedRuntimeHost::start_server(
+            &gateway_cfg,
+            ManagedRuntimeHostStartOptions {
+                log_level: args.log_level.clone(),
+                log_json: args.log_json,
+                ..Default::default()
             },
-        )
-        .await?;
-    launch_spec.prepare_filesystem().map_err(anyhow::Error::from)?;
-
-    let runtime_supervisor = Arc::new(
-        ManagedRuntimeSupervisor::start(
-            launch_spec,
-            Arc::new(TokioRuntimeSpawner::new(runtime_exe, args.log_level.clone(), args.log_json)),
-            RuntimeSupervisorOptions::default(),
         )
         .await
         .map_err(anyhow::Error::from)?,
     );
+    runtime_host.apply_to_config(&mut gateway_cfg);
 
-    info!(
-        child_count = runtime_supervisor.launch_spec().children.len(),
-        gateway_bind = %runtime_supervisor.launch_spec().gateway.as_ref().map(|gateway| gateway.bind_address.as_str()).unwrap_or(""),
-        runtime_transport = %runtime_supervisor.launch_spec().transport.as_str(),
-        "supervisor started backend children and is booting HTTP gateway"
-    );
-    runtime_supervisor.launch_spec().apply_to_config(&mut gateway_cfg);
+    if let Some(error) = runtime_host.startup_error().await {
+        warn!(
+            error = %error,
+            child_count = runtime_host.launch_spec().children.len(),
+            gateway_bind = %runtime_host.launch_spec().gateway.as_ref().map(|gateway| gateway.bind_address.as_str()).unwrap_or(""),
+            runtime_transport = %runtime_host.launch_spec().transport.as_str(),
+            "runtime supervisor unavailable; booting HTTP gateway without managed children"
+        );
+    } else {
+        info!(
+            child_count = runtime_host.launch_spec().children.len(),
+            gateway_bind = %runtime_host.launch_spec().gateway.as_ref().map(|gateway| gateway.bind_address.as_str()).unwrap_or(""),
+            runtime_transport = %runtime_host.launch_spec().transport.as_str(),
+            "supervisor started backend children and is booting HTTP gateway"
+        );
+    }
 
     let (gateway_shutdown_tx, gateway_shutdown_rx) = tokio::sync::oneshot::channel::<()>();
     let mut gateway_shutdown_tx = Some(gateway_shutdown_tx);
-    let runtime_status = runtime_supervisor.status_registry();
-    let runtime_control = runtime_supervisor.control_handle();
+    let runtime_status = runtime_host.status_registry();
+    let runtime_host_for_gateway = Arc::clone(&runtime_host);
     let mut gateway_join = tokio::spawn(async move {
-        run_gateway(gateway_cfg, runtime_status, runtime_control, async move {
+        run_gateway(gateway_cfg, runtime_status, Some(runtime_host_for_gateway), async move {
             let _ = gateway_shutdown_rx.await;
         })
         .await
@@ -793,7 +406,7 @@ async fn run_supervisor(args: SupervisorArgs, mut gateway_cfg: Config) -> anyhow
         }
     }
 
-    runtime_supervisor.shutdown().await;
+    runtime_host.shutdown().await;
     info!("supervisor stopped");
     result
 }

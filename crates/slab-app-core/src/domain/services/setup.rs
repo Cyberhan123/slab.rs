@@ -21,7 +21,8 @@ use crate::domain::models::{
 };
 use crate::error::AppCoreError;
 use crate::infra::db::repository::config::ConfigStore;
-use crate::runtime_supervisor::{RuntimeBackendRuntimeStatus, RuntimeSupervisorControlHandle};
+use crate::infra::runtime::ManagedRuntimeHost;
+use crate::runtime_supervisor::RuntimeBackendRuntimeStatus;
 
 const SETUP_INITIALIZED_CONFIG_KEY: &str = "setup_initialized";
 const SETUP_INITIALIZED_CONFIG_NAME: &str = "Setup Initialized";
@@ -57,16 +58,16 @@ impl ProvisionStep {
 pub struct SetupService {
     model_state: ModelState,
     worker_state: WorkerState,
-    runtime_control: Option<RuntimeSupervisorControlHandle>,
+    runtime_host: Option<std::sync::Arc<ManagedRuntimeHost>>,
 }
 
 impl SetupService {
     pub fn new(
         model_state: ModelState,
         worker_state: WorkerState,
-        runtime_control: Option<RuntimeSupervisorControlHandle>,
+        runtime_host: Option<std::sync::Arc<ManagedRuntimeHost>>,
     ) -> Self {
-        Self { model_state, worker_state, runtime_control }
+        Self { model_state, worker_state, runtime_host }
     }
 
     pub async fn environment_status(&self) -> Result<EnvironmentStatus, AppCoreError> {
@@ -274,6 +275,7 @@ impl SetupService {
             .await?;
             let restarted_backends = self.restart_runtime_backends().await?;
             self.wait_for_backends_ready(&restarted_backends).await?;
+            self.reconnect_runtime_gateway().await?;
 
             self.persist_setup_initialized(true).await?;
             Ok::<PathBuf, AppCoreError>(ffmpeg_path)
@@ -282,10 +284,10 @@ impl SetupService {
 
         let ffmpeg_path = payload_result?;
         let backends = self
-            .runtime_control
+            .runtime_host
             .as_ref()
-            .map(|control| {
-                control
+            .map(|runtime_host| {
+                runtime_host
                     .managed_backends()
                     .into_iter()
                     .filter(|backend| backend.is_runtime_worker_backend())
@@ -427,18 +429,18 @@ impl SetupService {
     }
 
     async fn restart_runtime_backends(&self) -> Result<Vec<RuntimeBackendId>, AppCoreError> {
-        let Some(control) = self.runtime_control.as_ref() else {
+        let Some(runtime_host) = self.runtime_host.as_ref() else {
             return Err(AppCoreError::Internal(
-                "setup provision requires runtime supervisor control".to_owned(),
+                "setup provision requires runtime host control".to_owned(),
             ));
         };
 
-        let managed_ggml_backends: Vec<_> = control
+        let managed_ggml_backends: Vec<_> = runtime_host
             .managed_backends()
             .into_iter()
             .filter(|backend| backend.is_runtime_worker_backend())
             .collect();
-        control.restart_backends(&managed_ggml_backends)
+        runtime_host.restart_or_start_backends(&managed_ggml_backends).await
     }
 
     async fn wait_for_backends_ready(
@@ -478,6 +480,14 @@ impl SetupService {
 
             tokio::time::sleep(RUNTIME_READY_POLL_INTERVAL).await;
         }
+    }
+
+    async fn reconnect_runtime_gateway(&self) -> Result<(), AppCoreError> {
+        self.model_state
+            .grpc()
+            .refresh_from_config(self.model_state.config().as_ref())
+            .await
+            .map_err(AppCoreError::from)
     }
 
     async fn load_setup_initialized(&self) -> Result<bool, AppCoreError> {
