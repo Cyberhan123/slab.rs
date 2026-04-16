@@ -10,10 +10,20 @@ import {
   type CatalogModelStatus,
   type ModelCapability,
 } from '@/lib/api/models';
+import {
+  extractTaskId,
+  getModelDownloadTask,
+  MODEL_DOWNLOAD_POLL_INTERVAL_MS,
+  MODEL_DOWNLOAD_TIMEOUT_MS,
+  normalizeTaskProgress,
+  sleep,
+  startModelDownloadTask,
+  type DownloadTrackingState,
+  type ModelDownloadProgress,
+} from '../lib/model-download';
+import { useHubModelDownloadStore } from '../store/useHubModelDownloadStore';
 
 const DEFAULT_VISIBLE_COUNT = 10;
-const MODEL_DOWNLOAD_POLL_INTERVAL_MS = 2_000;
-const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000;
 export const CATEGORY_OPTIONS = [
   'all',
   'language',
@@ -45,27 +55,6 @@ export type ModelItem = {
 };
 
 type ImportedModelResponse = components['schemas']['UnifiedModelResponse'];
-export type ModelDownloadProgress = {
-  label: string | null;
-  current: number;
-  total: number | null;
-  unit: string | null;
-  step: number | null;
-  step_count: number | null;
-};
-
-type TaskStatusResponse = {
-  status: string;
-  error_msg?: string | null;
-  progress?: unknown;
-};
-
-type DownloadTrackingState = {
-  taskId: string;
-  progress: ModelDownloadProgress | null;
-};
-
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
 
 export function useHubModelCatalog() {
   const { t } = useTranslation();
@@ -77,9 +66,8 @@ export function useHubModelCatalog() {
   const [createModelPending, setCreateModelPending] = useState(false);
   const [modelToDelete, setModelToDelete] = useState<ModelItem | null>(null);
   const [modelToEnhance, setModelToEnhance] = useState<ModelItem | null>(null);
-  const [downloadTracking, setDownloadTracking] = useState<Record<string, DownloadTrackingState>>(
-    {},
-  );
+  const downloadTracking = useHubModelDownloadStore((state) => state.downloadTracking);
+  const setModelDownloadTracking = useHubModelDownloadStore((state) => state.setDownloadTracking);
 
   const {
     data,
@@ -92,9 +80,7 @@ export function useHubModelCatalog() {
     isPending: boolean;
     mutateAsync: (options: { body: FormData }) => Promise<ImportedModelResponse>;
   };
-  const downloadModelMutation = api.useMutation('post', '/v1/models/download');
   const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
-  const getTaskMutation = api.useMutation('get', '/v1/tasks/{id}');
 
   const models = useMemo<ModelItem[]>(
     () =>
@@ -200,31 +186,11 @@ export function useHubModelCatalog() {
     }
   }
 
-  function setModelDownloadTracking(modelId: string, next: DownloadTrackingState | null) {
-    setDownloadTracking((current) => {
-      if (next) {
-        return {
-          ...current,
-          [modelId]: next,
-        };
-      }
-
-      if (!(modelId in current)) {
-        return current;
-      }
-
-      const { [modelId]: _removed, ...rest } = current;
-      return rest;
-    });
-  }
-
   const waitForTaskToFinish = async (modelId: string, taskId: string) => {
     const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
-      const task = (await getTaskMutation.mutateAsync({
-        params: { path: { id: taskId } },
-      })) as TaskStatusResponse;
+      const task = await getModelDownloadTask(taskId);
       setModelDownloadTracking(modelId, {
         taskId,
         progress: normalizeTaskProgress(task.progress),
@@ -284,11 +250,7 @@ export function useHubModelCatalog() {
     }
 
     try {
-      const response = await downloadModelMutation.mutateAsync({
-        body: {
-          model_id: model.id,
-        },
-      });
+      const response = await startModelDownloadTask(model.id);
       const taskId = extractTaskId(response);
 
       if (!taskId) {
@@ -441,23 +403,6 @@ function buildImportModelPackBody(file: File, invalidFileMessage: string) {
   return body;
 }
 
-function extractTaskId(payload: unknown): string | null {
-  if (typeof payload !== 'object' || payload === null) {
-    return null;
-  }
-
-  const taskId =
-    (payload as { operation_id?: unknown }).operation_id ??
-    (payload as { task_id?: unknown }).task_id;
-
-  if (typeof taskId !== 'string') {
-    return null;
-  }
-
-  const trimmed = taskId.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
 function toModelItem(
   model: ReturnType<typeof toCatalogModelList>[number],
   tracking: DownloadTrackingState | undefined,
@@ -481,34 +426,5 @@ function toModelItem(
     download_task_id: tracking?.taskId ?? null,
     download_progress: tracking?.progress ?? null,
     updated_at: model.updated_at,
-  };
-}
-
-function normalizeTaskProgress(value: unknown): ModelDownloadProgress | null {
-  if (typeof value !== 'object' || value === null) {
-    return null;
-  }
-
-  const progress = value as Record<string, unknown>;
-  if (typeof progress.current !== 'number' || !Number.isFinite(progress.current)) {
-    return null;
-  }
-
-  const total =
-    typeof progress.total === 'number' && Number.isFinite(progress.total) ? progress.total : null;
-  const step =
-    typeof progress.step === 'number' && Number.isFinite(progress.step) ? progress.step : null;
-  const stepCount =
-    typeof progress.step_count === 'number' && Number.isFinite(progress.step_count)
-      ? progress.step_count
-      : null;
-
-  return {
-    label: typeof progress.label === 'string' ? progress.label : null,
-    current: progress.current,
-    total,
-    unit: typeof progress.unit === 'string' ? progress.unit : null,
-    step,
-    step_count: stepCount,
   };
 }
