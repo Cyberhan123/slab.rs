@@ -55,7 +55,7 @@ pub struct CommonChatParams {
 
 #[derive(Debug, Clone, Default)]
 pub struct LocalChatParams {
-    pub grammar: Option<String>,
+    pub gbnf: Option<String>,
     pub structured_output: Option<StructuredOutput>,
 }
 

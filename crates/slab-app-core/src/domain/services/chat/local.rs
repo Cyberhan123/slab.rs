@@ -11,10 +11,10 @@ use uuid::Uuid;
 use crate::context::ModelState;
 use crate::domain::models::{
     ChatReasoningEffort, ChatStreamChunk, ChatVerbosity,
-    ConversationMessage as DomainConversationMessage, ConversationMessageContent, UnifiedModel,
+    ConversationMessage as DomainConversationMessage, ConversationMessageContent, StructuredOutput,
 };
+use crate::domain::services::model;
 use crate::error::AppCoreError;
-use crate::infra::db::ModelStore;
 use crate::infra::rpc;
 
 use super::GeneratedChatOutput;
@@ -160,8 +160,8 @@ pub(super) struct LocalChatRequestConfig {
     pub(super) top_p: Option<f32>,
     pub(super) reasoning_effort: Option<ChatReasoningEffort>,
     pub(super) verbosity: Option<ChatVerbosity>,
-    pub(super) grammar: Option<String>,
-    pub(super) grammar_json: bool,
+    pub(super) gbnf: Option<String>,
+    pub(super) structured_output: Option<StructuredOutput>,
     pub(super) stream: bool,
     pub(super) include_usage: bool,
 }
@@ -173,8 +173,8 @@ pub(super) struct LocalTextRequestConfig {
     pub(super) top_p: Option<f32>,
     pub(super) reasoning_effort: Option<ChatReasoningEffort>,
     pub(super) verbosity: Option<ChatVerbosity>,
-    pub(super) grammar: Option<String>,
-    pub(super) grammar_json: bool,
+    pub(super) gbnf: Option<String>,
+    pub(super) structured_output: Option<StructuredOutput>,
 }
 
 fn local_reasoning_guidance(
@@ -283,20 +283,25 @@ pub(super) async fn create_chat_completion(
 ) -> Result<GeneratedChatOutput, AppCoreError> {
     let request_messages =
         apply_local_reasoning_controls(messages, config.reasoning_effort, config.verbosity);
-    let prompt_template_context = resolve_prompt_template_context(state, model).await?;
-    let prompt = super::template::build_prompt(&request_messages, prompt_template_context.as_ref());
+    let prompt_profile = model::resolve_local_chat_prompt_profile(state, model).await?;
+    let prompt = super::template::build_prompt(
+        &request_messages,
+        prompt_profile.chat_template_source.as_deref(),
+    )?;
+    let gbnf = super::gbnf::resolve_effective_gbnf(
+        config.gbnf.as_deref(),
+        config.structured_output.as_ref(),
+        prompt_profile.default_gbnf.as_deref(),
+    )?;
     let request = TextGenerationRequest {
         prompt: prompt.clone(),
         system_prompt: None,
-        chat_messages: request_messages,
-        apply_chat_template: true,
         max_tokens: Some(config.max_tokens),
         temperature: Some(config.temperature),
         top_p: config.top_p,
         session_key: config.session_id.clone(),
         stream: config.stream,
-        grammar: config.grammar.clone(),
-        grammar_json: config.grammar_json,
+        gbnf,
         ..Default::default()
     };
     let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
@@ -564,19 +569,22 @@ pub(super) async fn create_text_completion(
     prompt: &str,
     config: LocalTextRequestConfig,
 ) -> Result<slab_types::inference::TextGenerationResponse, AppCoreError> {
+    let prompt_profile = model::resolve_local_chat_prompt_profile(state, model).await?;
     let prompt =
         apply_local_reasoning_controls_to_prompt(prompt, config.reasoning_effort, config.verbosity);
+    let gbnf = super::gbnf::resolve_effective_gbnf(
+        config.gbnf.as_deref(),
+        config.structured_output.as_ref(),
+        prompt_profile.default_gbnf.as_deref(),
+    )?;
     let request = TextGenerationRequest {
         prompt: prompt.clone(),
         system_prompt: None,
-        chat_messages: Vec::new(),
-        apply_chat_template: false,
         max_tokens: Some(config.max_tokens),
         temperature: Some(config.temperature),
         top_p: config.top_p,
         stream: false,
-        grammar: config.grammar,
-        grammar_json: config.grammar_json,
+        gbnf,
         ..Default::default()
     };
     let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
@@ -605,18 +613,6 @@ pub(super) async fn create_text_completion(
     });
 
     Ok(response)
-}
-
-async fn resolve_prompt_template_context(
-    state: &ModelState,
-    model: &str,
-) -> Result<Option<super::template::PromptTemplateContext>, AppCoreError> {
-    let Some(record) = state.store().get_model(model).await? else {
-        return Ok(None);
-    };
-    let model: UnifiedModel =
-        record.try_into().map_err(|error: String| AppCoreError::Internal(error))?;
-    Ok(Some(super::template::PromptTemplateContext::from_model(&model)))
 }
 
 fn map_runtime_chat_error(

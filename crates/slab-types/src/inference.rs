@@ -5,7 +5,6 @@ use std::sync::Arc;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::chat::ConversationMessage;
 use crate::media::RawImageInput;
 use crate::whisper::{WhisperDecodeOptions, WhisperVadOptions};
 
@@ -38,19 +37,6 @@ pub struct TextGenerationRequest {
     pub prompt: String,
     #[serde(default)]
     pub system_prompt: Option<String>,
-    /// Structured conversation messages for chat-template–aware inference.
-    ///
-    /// When this list is non-empty and `apply_chat_template` is `true` the
-    /// backend will pass these messages directly to the model's embedded chat
-    /// template (via `llama_chat_apply_template`) instead of using the
-    /// pre-rendered `prompt` string.
-    #[serde(default)]
-    pub chat_messages: Vec<ConversationMessage>,
-    /// When `true`, the llama backend applies the model's own embedded chat
-    /// template to `chat_messages` and uses the result as the inference
-    /// prompt.  Has no effect when `chat_messages` is empty.
-    #[serde(default)]
-    pub apply_chat_template: bool,
     #[serde(default)]
     pub max_tokens: Option<u32>,
     #[serde(default)]
@@ -61,31 +47,8 @@ pub struct TextGenerationRequest {
     pub session_key: Option<String>,
     #[serde(default)]
     pub stream: bool,
-    /// Raw GBNF grammar string to constrain token sampling.
-    ///
-    /// When set, the llama backend injects a grammar sampler into the
-    /// sampling chain so that every generated token is guaranteed to be valid
-    /// according to the grammar.  If grammar initialization fails for any
-    /// reason (invalid GBNF, unsupported backend, etc.) a warning is logged
-    /// and generation falls back to unconstrained sampling.
-    ///
-    /// Takes precedence over `grammar_json` and `grammar_tool_call`.
     #[serde(default)]
-    pub grammar: Option<String>,
-    /// When `true`, apply the built-in JSON grammar so the model output is
-    /// constrained to well-formed JSON.
-    ///
-    /// Ignored when `grammar` is also set.  Falls back to unconstrained
-    /// sampling if grammar initialization fails.
-    #[serde(default)]
-    pub grammar_json: bool,
-    /// When `true`, apply the built-in tool-call envelope grammar which
-    /// constrains output to `{"tool":"<name>","arguments":{...}}`.
-    ///
-    /// Ignored when `grammar` or `grammar_json` is set.  Falls back to
-    /// unconstrained sampling if grammar initialization fails.
-    #[serde(default)]
-    pub grammar_tool_call: bool,
+    pub gbnf: Option<String>,
     #[serde(default)]
     pub options: JsonOptions,
 }
@@ -104,15 +67,7 @@ pub struct TextGenerationOpOptions {
     #[serde(default)]
     pub stream: bool,
     #[serde(default)]
-    pub apply_chat_template: bool,
-    #[serde(default)]
-    pub chat_messages: Vec<ConversationMessage>,
-    #[serde(default)]
-    pub grammar: Option<String>,
-    #[serde(default)]
-    pub grammar_json: bool,
-    #[serde(default)]
-    pub grammar_tool_call: bool,
+    pub gbnf: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]

@@ -38,6 +38,7 @@ use crate::schemas::chat::ChatModelCapabilities;
 
 /// Pricing info for cost tracking.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
+#[serde(deny_unknown_fields)]
 pub struct PricingRequest {
     /// Cost per 1K input tokens in USD.
     pub input: f64,
@@ -47,6 +48,7 @@ pub struct PricingRequest {
 
 /// Provider-specific model configuration (request).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+#[serde(deny_unknown_fields)]
 pub struct ModelSpecRequest {
     /// Cloud provider id from the settings document `providers.registry` list
     /// (e.g. `"openai-main"`).
@@ -73,9 +75,6 @@ pub struct ModelSpecRequest {
     /// Maximum context window size in tokens.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub context_window: Option<u32>,
-    /// Optional prompt template name used for local chat rendering.
-    #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub chat_template: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, ToSchema)]
@@ -99,6 +98,7 @@ pub enum ModelCapability {
 
 /// Default runtime parameters (request).
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
+#[serde(deny_unknown_fields)]
 pub struct RuntimePresetsRequest {
     /// Sampling temperature.
     #[serde(skip_serializing_if = "Option::is_none", default)]
@@ -114,6 +114,7 @@ pub struct RuntimePresetsRequest {
 
 /// Request body for `POST /v1/models`.
 #[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct CreateModelRequest {
     #[validate(custom(
         function = "crate::schemas::validation::validate_non_blank",
@@ -141,6 +142,7 @@ pub struct CreateModelRequest {
 
 /// Request body for `PUT /v1/models/{id}`.
 #[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateModelRequest {
     #[validate(custom(
         function = "crate::schemas::validation::validate_non_blank",
@@ -165,6 +167,7 @@ pub struct UpdateModelRequest {
 
 /// Request body for `PUT /v1/models/{id}/enhancement`.
 #[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateModelEnhancementRequest {
     #[validate(custom(
         function = "crate::schemas::validation::validate_non_blank",
@@ -178,13 +181,12 @@ pub struct UpdateModelEnhancementRequest {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub context_window: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub chat_template: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub runtime_presets: Option<RuntimePresetsRequest>,
 }
 
 /// Request body for `PUT /v1/models/{id}/config-selection`.
 #[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct UpdateModelConfigSelectionRequest {
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub selected_preset_id: Option<String>,
@@ -198,6 +200,7 @@ pub struct UpdateModelConfigSelectionRequest {
 
 /// Request body for `POST /v1/models/load`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
 #[validate(schema(function = "validate_load_model_request"))]
 pub struct LoadModelRequest {
     /// Catalog model id from `/v1/models`. Preferred for local lifecycle operations.
@@ -226,6 +229,7 @@ pub struct ModelStatusResponse {
 
 /// Request body for `POST /v1/models/switch`.
 #[derive(Debug, Clone, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
 #[validate(schema(function = "validate_switch_model_request"))]
 pub struct SwitchModelRequest {
     /// Catalog model id from `/v1/models`. Preferred for local lifecycle operations.
@@ -244,6 +248,7 @@ pub struct SwitchModelRequest {
 
 /// Request body for `POST /v1/models/unload`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
 #[validate(schema(function = "validate_unload_model_request"))]
 pub struct UnloadModelRequest {
     /// Catalog model id from `/v1/models`. Preferred for local lifecycle operations.
@@ -256,6 +261,7 @@ pub struct UnloadModelRequest {
 
 /// Request body for `POST /v1/models/download`.
 #[derive(Debug, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
 pub struct DownloadModelRequest {
     /// Model ID from `/v1/models`.
     #[validate(custom(
@@ -316,8 +322,6 @@ pub struct ModelSpecResponse {
     pub local_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub chat_template: Option<String>,
 }
 
 /// Default runtime parameters (response).
@@ -543,7 +547,6 @@ impl From<DomainModelSpec> for ModelSpecResponse {
             filename: spec.filename,
             local_path: spec.local_path,
             context_window: spec.context_window,
-            chat_template: spec.chat_template,
         }
     }
 }
@@ -821,7 +824,6 @@ impl From<ModelSpecRequest> for DomainModelSpec {
             filename: req.filename,
             local_path: req.local_path,
             context_window: req.context_window,
-            chat_template: req.chat_template,
         }
     }
 }
@@ -876,7 +878,6 @@ impl From<UpdateModelEnhancementRequest> for DomainUpdateModelEnhancementCommand
             selected_preset_id: req.selected_preset_id,
             selected_variant_id: req.selected_variant_id,
             context_window: req.context_window,
-            chat_template: req.chat_template,
             runtime_presets: req.runtime_presets.map(Into::into),
         }
     }
@@ -1017,4 +1018,27 @@ fn validation_error(code: &'static str, message: &'static str) -> ValidationErro
     let mut error = ValidationError::new(code);
     error.message = Some(message.into());
     error
+}
+
+#[cfg(test)]
+mod tests {
+    use super::CreateModelRequest;
+    use serde_json::json;
+
+    #[test]
+    fn create_model_request_rejects_legacy_spec_chat_template() {
+        let error = serde_json::from_value::<CreateModelRequest>(json!({
+            "display_name": "Qwen",
+            "kind": "local",
+            "backend_id": "ggml.llama",
+            "spec": {
+                "repo_id": "Qwen/Qwen2.5",
+                "filename": "model.gguf",
+                "chat_template": "legacy-alias"
+            }
+        }))
+        .expect_err("legacy spec.chat_template must fail");
+
+        assert!(error.to_string().contains("chat_template"));
+    }
 }

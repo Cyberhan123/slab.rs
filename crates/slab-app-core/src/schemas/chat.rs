@@ -267,6 +267,7 @@ pub struct ChatResponseFormat {
 
 /// Request body for `POST /v1/chat/completions`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
 #[validate(schema(function = "validate_chat_completion_request"))]
 pub struct ChatCompletionRequest {
     /// Optional chat session ID for stateful conversations.
@@ -312,9 +313,9 @@ pub struct ChatCompletionRequest {
     /// Optional stop sequences.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub stop: Option<StopSequences>,
-    /// Raw grammar passed through to the local llama backend.
+    /// Raw GBNF passed through to the local llama backend.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub grammar: Option<String>,
+    pub gbnf: Option<String>,
     /// OpenAI-style structured output hint.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub response_format: Option<ChatResponseFormat>,
@@ -334,6 +335,7 @@ pub struct ChatCompletionRequest {
 
 /// Request body for `POST /v1/completions`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]
+#[serde(deny_unknown_fields)]
 #[validate(schema(function = "validate_completion_request"))]
 pub struct CompletionRequest {
     /// Unified model identifier from `/v1/models`.
@@ -364,9 +366,9 @@ pub struct CompletionRequest {
     /// Stream the result using SSE.
     #[serde(default)]
     pub stream: bool,
-    /// Raw grammar passed through to the local llama backend.
+    /// Raw GBNF passed through to the local llama backend.
     #[serde(skip_serializing_if = "Option::is_none", default)]
-    pub grammar: Option<String>,
+    pub gbnf: Option<String>,
     /// OpenAI-style structured output hint.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub response_format: Option<ChatResponseFormat>,
@@ -499,7 +501,7 @@ pub struct ChatModelOption {
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct ChatModelCapabilities {
-    pub raw_grammar: bool,
+    pub raw_gbnf: bool,
     pub structured_output: bool,
     pub reasoning_controls: bool,
 }
@@ -632,7 +634,7 @@ impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
             top_p,
             n,
             stop,
-            grammar,
+            gbnf,
             response_format,
             json_schema,
             thinking,
@@ -663,7 +665,7 @@ impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
                 stop,
                 stream_options: stream_options.map(Into::into).unwrap_or_default(),
             },
-            local: DomainLocalChatParams { grammar, structured_output: structured_output.clone() },
+            local: DomainLocalChatParams { gbnf, structured_output: structured_output.clone() },
             cloud: DomainCloudChatParams { reasoning_effort, verbosity, structured_output },
         }
     }
@@ -680,7 +682,7 @@ impl From<CompletionRequest> for DomainTextCompletionCommand {
             n,
             stop,
             stream,
-            grammar,
+            gbnf,
             response_format,
             json_schema,
         } = request;
@@ -699,7 +701,7 @@ impl From<CompletionRequest> for DomainTextCompletionCommand {
                 stop,
                 stream_options: DomainChatStreamOptions::default(),
             },
-            local: DomainLocalChatParams { grammar, structured_output: structured_output.clone() },
+            local: DomainLocalChatParams { gbnf, structured_output: structured_output.clone() },
             cloud: DomainCloudChatParams {
                 reasoning_effort: None,
                 verbosity: None,
@@ -803,7 +805,7 @@ impl From<DomainChatModelSource> for ChatModelSource {
 impl From<DomainChatModelCapabilities> for ChatModelCapabilities {
     fn from(value: DomainChatModelCapabilities) -> Self {
         Self {
-            raw_grammar: value.raw_grammar,
+            raw_gbnf: value.raw_gbnf,
             structured_output: value.structured_output,
             reasoning_controls: value.reasoning_controls,
         }
@@ -1077,7 +1079,7 @@ mod tests {
             top_p: None,
             n: None,
             stop: None,
-            grammar: None,
+            gbnf: None,
             response_format: None,
             json_schema: None,
             thinking: None,
@@ -1096,7 +1098,7 @@ mod tests {
             n: None,
             stop: None,
             stream: false,
-            grammar: None,
+            gbnf: None,
             response_format: None,
             json_schema: None,
         }
@@ -1158,7 +1160,7 @@ mod tests {
     }
 
     #[test]
-    fn response_format_json_object_maps_to_grammar_json() {
+    fn response_format_json_object_maps_to_structured_output() {
         let mut request = make_request();
         request.response_format = Some(ChatResponseFormat {
             format_type: ChatResponseFormatType::JsonObject,
@@ -1168,7 +1170,7 @@ mod tests {
 
         let command = DomainChatCompletionCommand::from(request);
 
-        assert_eq!(command.local.grammar, None);
+        assert_eq!(command.local.gbnf, None);
         assert_eq!(command.local.structured_output, Some(DomainStructuredOutput::JsonObject));
         assert_eq!(command.cloud.structured_output, Some(DomainStructuredOutput::JsonObject));
     }
@@ -1192,7 +1194,7 @@ mod tests {
     }
 
     #[test]
-    fn json_schema_field_maps_to_grammar_json() {
+    fn json_schema_field_maps_to_structured_output() {
         let mut request = make_request();
         request.json_schema = Some(json!({ "const": "42" }));
 
@@ -1249,7 +1251,7 @@ mod tests {
     }
 
     #[test]
-    fn completion_response_format_maps_to_grammar_json() {
+    fn completion_response_format_maps_to_structured_output() {
         let mut request = make_completion_request();
         request.response_format = Some(ChatResponseFormat {
             format_type: ChatResponseFormatType::JsonObject,
@@ -1261,5 +1263,31 @@ mod tests {
 
         assert_eq!(command.local.structured_output, Some(DomainStructuredOutput::JsonObject));
         assert_eq!(command.cloud.structured_output, Some(DomainStructuredOutput::JsonObject));
+    }
+
+    #[test]
+    fn chat_completion_request_rejects_legacy_grammar_field() {
+        let error = serde_json::from_value::<ChatCompletionRequest>(json!({
+            "model": "cloud/provider/model",
+            "messages": [
+                {"role": "user", "content": "hello"}
+            ],
+            "grammar": "root ::= \"ok\""
+        }))
+        .expect_err("legacy grammar field must fail");
+
+        assert!(error.to_string().contains("grammar"));
+    }
+
+    #[test]
+    fn completion_request_rejects_legacy_grammar_field() {
+        let error = serde_json::from_value::<CompletionRequest>(json!({
+            "model": "cloud/provider/model",
+            "prompt": "hello",
+            "grammar": "root ::= \"ok\""
+        }))
+        .expect_err("legacy grammar field must fail");
+
+        assert!(error.to_string().contains("grammar"));
     }
 }

@@ -20,6 +20,7 @@ pub const MANIFEST_FILE_NAME: &str = "manifest.json";
 pub struct ModelPack {
     manifest: ModelPackManifest,
     documents: BTreeMap<String, PackDocument>,
+    text_assets: BTreeMap<String, String>,
 }
 
 impl ModelPack {
@@ -45,6 +46,7 @@ impl ModelPack {
 
         let mut manifest: Option<ModelPackManifest> = None;
         let mut documents = BTreeMap::new();
+        let mut text_assets = BTreeMap::new();
 
         for index in 0..archive.len() {
             let mut entry = archive
@@ -56,27 +58,33 @@ impl ModelPack {
             }
 
             let path = normalize_archive_path(entry.name())?;
-            if !path.ends_with(".json") {
-                continue;
-            }
-
-            let mut raw = String::new();
-            entry.read_to_string(&mut raw).map_err(|source| ModelPackError::ReadArchiveEntry {
+            let mut raw = Vec::new();
+            entry.read_to_end(&mut raw).map_err(|source| ModelPackError::ReadArchiveEntry {
                 path: path.clone(),
                 source,
             })?;
+            let raw = String::from_utf8(raw).map_err(|source| {
+                ModelPackError::InvalidTextAsset { path: path.clone(), source }
+            })?;
 
-            if path == MANIFEST_FILE_NAME {
-                if manifest.is_some() {
-                    return Err(ModelPackError::DuplicateDocumentPath { path });
+            if path.ends_with(".json") {
+                if path == MANIFEST_FILE_NAME {
+                    if manifest.is_some() {
+                        return Err(ModelPackError::DuplicateDocumentPath { path });
+                    }
+
+                    manifest = Some(parse_json_document(&path, &raw)?);
+                    continue;
                 }
 
-                manifest = Some(parse_json_document(&path, &raw)?);
+                let document: PackDocument = parse_json_document(&path, &raw)?;
+                if documents.insert(path.clone(), document).is_some() {
+                    return Err(ModelPackError::DuplicateDocumentPath { path });
+                }
                 continue;
             }
 
-            let document: PackDocument = parse_json_document(&path, &raw)?;
-            if documents.insert(path.clone(), document).is_some() {
+            if text_assets.insert(path.clone(), raw).is_some() {
                 return Err(ModelPackError::DuplicateDocumentPath { path });
             }
         }
@@ -84,7 +92,7 @@ impl ModelPack {
         let mut manifest = manifest.ok_or(ModelPackError::MissingManifest)?;
         manifest.capabilities = normalized_manifest_capabilities(&manifest);
 
-        let pack = Self { manifest, documents };
+        let pack = Self { manifest, documents, text_assets };
 
         pack.validate_manifest_references()?;
         Ok(pack)
@@ -98,8 +106,21 @@ impl ModelPack {
         &self.documents
     }
 
+    pub fn text_assets(&self) -> &BTreeMap<String, String> {
+        &self.text_assets
+    }
+
     pub fn document(&self, config_ref: &ConfigRef) -> Result<&PackDocument, ModelPackError> {
         self.documents.get(config_ref.path()).ok_or_else(|| {
+            ModelPackError::MissingReferencedDocument {
+                from: MANIFEST_FILE_NAME.into(),
+                path: config_ref.path().into(),
+            }
+        })
+    }
+
+    pub fn text_asset(&self, config_ref: &ConfigRef) -> Result<&str, ModelPackError> {
+        self.text_assets.get(config_ref.path()).map(String::as_str).ok_or_else(|| {
             ModelPackError::MissingReferencedDocument {
                 from: MANIFEST_FILE_NAME.into(),
                 path: config_ref.path().into(),

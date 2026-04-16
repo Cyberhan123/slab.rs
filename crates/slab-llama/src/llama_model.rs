@@ -1,8 +1,5 @@
-use std::ffi::{CStr, CString};
-use std::os::raw::c_char;
+use std::ffi::CString;
 use std::sync::Arc;
-
-use serde::{Deserialize, Serialize};
 
 use crate::Llama;
 use crate::LlamaSampler;
@@ -35,13 +32,6 @@ impl Drop for LlamaModelInner {
 #[derive(Clone)]
 pub struct LlamaModel {
     pub(crate) inner: Arc<LlamaModelInner>,
-}
-
-/// A single chat message used by `llama_chat_apply_template`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ChatMessage {
-    pub role: String,
-    pub content: String,
 }
 
 impl Llama {
@@ -389,22 +379,22 @@ impl LlamaModel {
         SamplerChainBuilder::new(Arc::clone(&self.inner.lib)).build()
     }
 
-    /// Create a sampler chain with an optional GBNF grammar constraint.
+    /// Create a sampler chain with an optional raw GBNF constraint.
     ///
-    /// When `grammar` is `Some(gbnf)` the grammar sampler is inserted into the
+    /// When `gbnf` is `Some(raw_gbnf)` the grammar sampler is inserted into the
     /// chain after the temperature sampler and before the final distribution
     /// sampler.  If grammar initialisation fails (invalid GBNF, null vocab, or
     /// unsupported runtime) a warning is logged and the chain falls back to
     /// standard unconstrained sampling — identical to calling [`new_sampler`].
     ///
-    /// When `grammar` is `None` this is equivalent to [`new_sampler`].
+    /// When `gbnf` is `None` this is equivalent to [`new_sampler`].
     ///
     /// [`new_sampler`]: LlamaModel::new_sampler
-    pub fn new_sampler_with_grammar(&self, grammar: Option<&str>) -> LlamaSampler {
-        match grammar {
+    pub fn new_sampler_with_gbnf(&self, gbnf: Option<&str>) -> LlamaSampler {
+        match gbnf {
             None | Some("") => SamplerChainBuilder::new(Arc::clone(&self.inner.lib)).build(),
-            Some(grammar_str) => SamplerChainBuilder::new(Arc::clone(&self.inner.lib))
-                .build_with_grammar(self.vocab(), grammar_str),
+            Some(gbnf_str) => SamplerChainBuilder::new(Arc::clone(&self.inner.lib))
+                .build_with_grammar(self.vocab(), gbnf_str),
         }
     }
 
@@ -428,94 +418,6 @@ impl LlamaModel {
         }
         buf.truncate(n as usize);
         String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()))
-    }
-
-    /// Retrieve the built-in chat template for this model (if any).
-    ///
-    /// # Arguments
-    /// * `name` – optional template name; pass `None` for the default template.
-    pub fn chat_template(&self, name: Option<&str>) -> Result<&str, LlamaError> {
-        let c_name: Option<CString> = name.map(CString::new).transpose()?;
-        let ptr = unsafe {
-            self.inner.lib.llama_model_chat_template(
-                self.inner.model,
-                c_name.as_ref().map_or(std::ptr::null(), |s| s.as_ptr()),
-            )
-        };
-        if ptr.is_null() {
-            return Err(LlamaError::NullPointer);
-        }
-        let cstr = unsafe { CStr::from_ptr(ptr) };
-        cstr.to_str().map_err(LlamaError::from)
-    }
-
-    /// Apply the model chat template to a message list.
-    ///
-    /// `llama.cpp` returns the required byte length; this helper retries with a
-    /// larger output buffer when needed.
-    pub fn apply_chat_template(
-        &self,
-        name: Option<&str>,
-        messages: &[ChatMessage],
-        add_assistant_prompt: bool,
-    ) -> Result<String, LlamaError> {
-        let template = self.chat_template(name)?;
-        self.apply_chat_template_str(template, messages, add_assistant_prompt)
-    }
-
-    pub fn apply_chat_template_str(
-        &self,
-        template: &str,
-        messages: &[ChatMessage],
-        add_assistant_prompt: bool,
-    ) -> Result<String, LlamaError> {
-        let c_template = CString::new(template)?;
-
-        let mut roles: Vec<CString> = Vec::with_capacity(messages.len());
-        let mut contents: Vec<CString> = Vec::with_capacity(messages.len());
-        for msg in messages {
-            roles.push(CString::new(msg.role.as_str())?);
-            contents.push(CString::new(msg.content.as_str())?);
-        }
-
-        let mut c_messages: Vec<slab_llama_sys::llama_chat_message> =
-            Vec::with_capacity(messages.len());
-        for idx in 0..messages.len() {
-            c_messages.push(slab_llama_sys::llama_chat_message {
-                role: roles[idx].as_ptr(),
-                content: contents[idx].as_ptr(),
-            });
-        }
-
-        let total_chars = messages.iter().map(|m| m.role.len() + m.content.len()).sum::<usize>();
-        let mut capacity = (total_chars.saturating_mul(2)).max(256);
-
-        loop {
-            let mut buf = vec![0u8; capacity];
-            let written = unsafe {
-                self.inner.lib.llama_chat_apply_template(
-                    c_template.as_ptr(),
-                    c_messages.as_ptr(),
-                    c_messages.len(),
-                    add_assistant_prompt,
-                    buf.as_mut_ptr() as *mut c_char,
-                    capacity as i32,
-                )
-            };
-
-            if written < 0 {
-                return Err(LlamaError::ChatTemplateApplyFailed(written));
-            }
-
-            let written = written as usize;
-            if written > capacity {
-                capacity = written.saturating_add(1);
-                continue;
-            }
-
-            buf.truncate(written);
-            return String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()));
-        }
     }
 }
 

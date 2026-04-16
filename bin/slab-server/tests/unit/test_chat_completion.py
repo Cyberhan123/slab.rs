@@ -246,11 +246,11 @@ def test_completion_with_json_schema(jinja: bool, json_schema: dict, n_predicted
     assert match_regex(re_content, choice["message"]["content"]), f'Expected {re_content}, got {choice["message"]["content"]}'
 
 
-@pytest.mark.parametrize("jinja,grammar,n_predicted,re_content", [
+@pytest.mark.parametrize("jinja,gbnf,n_predicted,re_content", [
     (False, 'root ::= "a"{5,5}', 6, "a{5,5}"),
     (True, 'root ::= "a"{5,5}', 6, "a{5,5}"),
 ])
-def test_completion_with_grammar(jinja: bool, grammar: str, n_predicted: int, re_content: str):
+def test_completion_with_gbnf(jinja: bool, gbnf: str, n_predicted: int, re_content: str):
     global server
     server.jinja = jinja
     server.start()
@@ -259,7 +259,7 @@ def test_completion_with_grammar(jinja: bool, grammar: str, n_predicted: int, re
         "messages": [
             {"role": "user", "content": "Does not matter what I say, does it?"},
         ],
-        "grammar": grammar,
+        "gbnf": gbnf,
     })
     assert res.status_code == 200, res.body
     choice = res.body["choices"][0]

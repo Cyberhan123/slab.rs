@@ -11,10 +11,7 @@ use slab_diffusion::{
     SampleMethod as DiffusionSampleMethod, SampleParams as DiffusionSampleParams,
     Scheduler as DiffusionScheduler, SlgParams,
 };
-use slab_llama::{
-    ChatMessage as LlamaChatMessage,
-    runtime::{LlamaInferenceParams, LlamaLoadConfig, resolve_grammar as resolve_llama_grammar},
-};
+use slab_llama::runtime::{LlamaInferenceParams, LlamaLoadConfig};
 use slab_runtime_core::backend::StreamChunk;
 use slab_runtime_core::{CoreError, Payload};
 use slab_types::diffusion::{
@@ -56,6 +53,7 @@ fn encode_ggml_llama_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError
         num_workers: usize_option(spec, "num_workers").unwrap_or(1),
         context_length: optional_nonzero_u32_option(spec, "context_length")?,
         chat_template: optional_nonempty_string_option(spec, "chat_template"),
+        gbnf: optional_nonempty_string_option(spec, "gbnf"),
     }))
 }
 
@@ -63,35 +61,8 @@ fn encode_ggml_llama_text_generation_options(request: &TextGenerationRequest) ->
     Payload::typed(LlamaInferenceParams {
         max_tokens: request.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256),
         session_key: request.session_key.clone(),
-        apply_chat_template: request.apply_chat_template,
-        chat_messages: extract_llama_chat_messages(&request.chat_messages),
-        grammar: resolve_llama_grammar(
-            request.grammar.as_deref(),
-            request.grammar_json,
-            request.grammar_tool_call,
-        ),
+        gbnf: request.gbnf.clone(),
     })
-}
-
-fn extract_llama_chat_messages(
-    messages: &[slab_types::chat::ConversationMessage],
-) -> Vec<LlamaChatMessage> {
-    messages
-        .iter()
-        .filter(|message| !message.role.trim().is_empty() && message.has_meaningful_content())
-        .map(|message| LlamaChatMessage {
-            role: normalize_llama_chat_role(&message.role).to_owned(),
-            content: message.rendered_text(),
-        })
-        .collect()
-}
-
-fn normalize_llama_chat_role(role: &str) -> &'static str {
-    match role {
-        "system" | "developer" => "system",
-        "assistant" => "assistant",
-        _ => "user",
-    }
 }
 
 fn encode_ggml_whisper_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError> {
@@ -187,11 +158,7 @@ pub(crate) fn encode_text_generation_request(
             top_p: request.top_p,
             session_key: request.session_key.clone(),
             stream: request.stream,
-            apply_chat_template: request.apply_chat_template,
-            chat_messages: request.chat_messages.clone(),
-            grammar: request.grammar.clone(),
-            grammar_json: request.grammar_json,
-            grammar_tool_call: request.grammar_tool_call,
+            gbnf: request.gbnf.clone(),
         })
     };
 

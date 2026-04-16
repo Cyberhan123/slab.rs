@@ -4,19 +4,24 @@ use std::str::FromStr;
 
 use serde_json::Value;
 use slab_types::{
-    Capability, DiffusionLoadOptions, DriverHints, JsonOptions, ModelSource, ModelSpec,
-    RuntimeBackendId, RuntimeBackendLoadSpec, RuntimeModelLoadCommand, RuntimeModelLoadSpec,
+    Capability, DiffusionLoadOptions, DriverHints, GbnfAssetRef, JsonOptions, ModelSource,
+    ModelSpec, RuntimeBackendId, RuntimeBackendLoadSpec, RuntimeModelLoadCommand,
+    RuntimeModelLoadSpec, TemplateAssetRef,
 };
 
 use crate::error::ModelPackError;
 use crate::manifest::{BackendConfigDocument, PackSource, PackSourceFile};
+use crate::refs::ConfigRef;
 use crate::resolve::{ResolvedModelPack, ResolvedPreset};
 
 #[derive(Debug, Clone, Default)]
 pub struct ModelPackLoadDefaults {
     pub num_workers: Option<u32>,
     pub context_length: Option<u32>,
-    pub chat_template: Option<String>,
+    pub chat_template: Option<TemplateAssetRef>,
+    pub chat_template_source: Option<String>,
+    pub gbnf: Option<GbnfAssetRef>,
+    pub gbnf_source: Option<String>,
     pub diffusion: Option<DiffusionLoadOptions>,
 }
 
@@ -60,6 +65,7 @@ impl ResolvedModelPack {
         let inference_defaults =
             config_payload_as_options(preset.effective_inference_config.as_ref())?;
         let load_defaults = build_load_defaults(
+            self,
             &preset.document.id,
             backend,
             &source,
@@ -131,7 +137,8 @@ impl ModelPackRuntimeBridge {
             model_path,
             num_workers: self.load_defaults.num_workers.unwrap_or(1),
             context_length: self.load_defaults.context_length,
-            chat_template: self.load_defaults.chat_template.clone(),
+            chat_template: self.load_defaults.chat_template_source.clone(),
+            gbnf: self.load_defaults.gbnf_source.clone(),
             diffusion: self.load_defaults.diffusion.clone(),
         })
     }
@@ -299,17 +306,30 @@ fn config_payload_as_options(
 }
 
 fn build_load_defaults(
+    resolved: &ResolvedModelPack,
     preset_id: &str,
     backend: RuntimeBackendId,
     source: &ModelSource,
     config: Option<&BackendConfigDocument>,
 ) -> Result<ModelPackLoadDefaults, ModelPackError> {
     let options = config_payload_as_options(config)?;
+    let config_id = config.map(|value| value.id.as_str()).unwrap_or(preset_id);
+    reject_legacy_llama_load_fields(backend, config_id, &options)?;
+    let chat_template = parse_optional_asset_ref(&options, "chat_template", config_id)?;
+    let gbnf = parse_optional_asset_ref(&options, "gbnf", config_id)?;
 
     Ok(ModelPackLoadDefaults {
         num_workers: options.get("num_workers").and_then(as_u32),
         context_length: options.get("context_length").and_then(as_u32),
-        chat_template: options.get("chat_template").and_then(as_string),
+        chat_template_source: resolve_text_asset_ref(
+            resolved,
+            config_id,
+            "chat_template",
+            chat_template.as_ref(),
+        )?,
+        chat_template,
+        gbnf_source: resolve_text_asset_ref(resolved, config_id, "gbnf", gbnf.as_ref())?,
+        gbnf,
         diffusion: (backend == RuntimeBackendId::GgmlDiffusion)
             .then(|| build_diffusion_load_defaults(preset_id, source, &options))
             .transpose()?,
@@ -370,6 +390,96 @@ fn as_string(value: &Value) -> Option<String> {
     value.as_str().map(str::to_owned).filter(|value| !value.trim().is_empty())
 }
 
+fn parse_optional_asset_ref(
+    options: &JsonOptions,
+    field: &str,
+    config_id: &str,
+) -> Result<Option<slab_types::AssetRef>, ModelPackError> {
+    let Some(value) = options.get(field) else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let asset_ref: slab_types::AssetRef =
+        serde_json::from_value(value.clone()).map_err(|error| {
+            ModelPackError::InvalidBackendConfigAssetRef {
+                id: config_id.to_owned(),
+                field: field.to_owned(),
+                message: error.to_string(),
+            }
+        })?;
+    asset_ref.validate_configured(field).map_err(|error| {
+        ModelPackError::InvalidBackendConfigAssetRef {
+            id: config_id.to_owned(),
+            field: field.to_owned(),
+            message: error.to_string(),
+        }
+    })
+}
+
+fn resolve_text_asset_ref(
+    resolved: &ResolvedModelPack,
+    config_id: &str,
+    field: &str,
+    asset_ref: Option<&slab_types::AssetRef>,
+) -> Result<Option<String>, ModelPackError> {
+    let Some(asset_ref) = asset_ref else {
+        return Ok(None);
+    };
+    let path = asset_ref.path.as_deref().expect("validated asset ref always has a path");
+    let config_ref = ConfigRef::parse(path.to_owned()).map_err(|error| {
+        ModelPackError::InvalidBackendConfigAssetRef {
+            id: config_id.to_owned(),
+            field: field.to_owned(),
+            message: error.to_string(),
+        }
+    })?;
+    resolved.text_asset(&config_ref).map(str::to_owned).map(Some).map_err(|_| {
+        ModelPackError::MissingBackendConfigAsset {
+            id: config_id.to_owned(),
+            field: field.to_owned(),
+            path: config_ref.path().to_owned(),
+        }
+    })
+}
+
+fn reject_legacy_llama_load_fields(
+    backend: RuntimeBackendId,
+    config_id: &str,
+    options: &JsonOptions,
+) -> Result<(), ModelPackError> {
+    if backend != RuntimeBackendId::GgmlLlama {
+        return Ok(());
+    }
+
+    for (field, message) in [
+        ("grammar", "legacy load payload field removed; use 'gbnf' instead"),
+        (
+            "grammar_json",
+            "legacy boolean grammar flags were removed; compile structured output to GBNF instead",
+        ),
+        (
+            "grammar_tool_call",
+            "legacy boolean grammar flags were removed; compile structured output to GBNF instead",
+        ),
+        (
+            "apply_chat_template",
+            "legacy runtime chat-template application was removed; configure 'chat_template' asset refs instead",
+        ),
+    ] {
+        if options.contains_key(field) {
+            return Err(ModelPackError::UnsupportedBackendConfigField {
+                id: config_id.to_owned(),
+                field: field.to_owned(),
+                message: message.to_owned(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use std::io::Write;
@@ -416,8 +526,20 @@ mod tests {
             }).to_string()),
             ("models/configs/load.json", json!({
                 "kind": "backend_config", "id": "load", "label": "Load", "scope": "load",
-                "payload": {"context_length": 8192, "chat_template": "chatml", "num_workers": 2}
+                "payload": {
+                    "context_length": 8192,
+                    "chat_template": {
+                        "id": "chatml-template",
+                        "name": "ChatML",
+                        "$path": "ref://models/assets/chat_template.jinja"
+                    },
+                    "num_workers": 2
+                }
             }).to_string()),
+            (
+                "models/assets/chat_template.jinja",
+                "{% for message in messages %}<|im_start|>{{ message.role }}\n{{ message.content }}<|im_end|>\n{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}".to_owned(),
+            ),
             ("models/configs/inference.json", json!({
                 "kind": "backend_config", "id": "inference", "label": "Inference", "scope": "inference",
                 "payload": {"temperature": 0.7, "top_p": 0.95}
@@ -447,6 +569,9 @@ mod tests {
             Some("C:/models/qwen.gguf")
         );
         assert_eq!(load_spec.context_length, Some(8192));
+        assert!(bridge.load_defaults.chat_template.is_some());
+        assert!(bridge.load_defaults.chat_template_source.is_some());
+        assert!(load_spec.chat_template.is_some());
         assert_eq!(bridge.inference_defaults.get("temperature").and_then(Value::as_f64), Some(0.7));
     }
 
@@ -501,6 +626,49 @@ mod tests {
             .expect_err("cloud source must not compile runtime bridge");
 
         assert!(error.to_string().contains("source kind 'cloud'"));
+    }
+
+    #[test]
+    fn rejects_legacy_grammar_field_in_llama_load_payload() {
+        let bytes = build_pack(vec![
+            ("manifest.json", json!({
+                "version": 2,
+                "id": "qwen2.5-7b-instruct",
+                "label": "Qwen2.5 7B Instruct",
+                "family": "llama",
+                "capabilities": ["text_generation"],
+                "backend_hints": {"prefer_drivers": ["ggml.llama"], "avoid_drivers": [], "require_streaming": true},
+                "components": [{"id": "model", "label": "Model", "$config": "ref://models/components/model.json"}],
+                "variants": [{"id": "q4_k_m", "label": "Q4_K_M", "$config": "ref://models/variants/q4.json"}],
+                "presets": [{"id": "default", "label": "Default", "$config": "ref://models/presets/default.json"}],
+                "default_preset": "default"
+            }).to_string()),
+            ("models/components/model.json", json!({
+                "kind": "component", "id": "model", "label": "Model",
+                "source": {"kind": "local_path", "path": "C:/models/qwen.gguf"}
+            }).to_string()),
+            ("models/configs/load.json", json!({
+                "kind": "backend_config", "id": "load", "label": "Load", "scope": "load",
+                "payload": {
+                    "grammar": "root ::= \"ok\"",
+                    "num_workers": 2
+                }
+            }).to_string()),
+            ("models/variants/q4.json", json!({
+                "kind": "variant", "id": "q4_k_m", "label": "Q4", "component_ids": ["model"]
+            }).to_string()),
+            ("models/presets/default.json", json!({
+                "kind": "preset", "id": "default", "label": "Default",
+                "$load_config": "ref://models/configs/load.json"
+            }).to_string()),
+        ]);
+
+        let pack = ModelPack::from_bytes(&bytes).expect("load pack");
+        let resolved = pack.resolve().expect("resolve pack");
+        let error =
+            resolved.compile_default_runtime_bridge().expect_err("legacy grammar field must fail");
+
+        assert!(error.to_string().contains("use 'gbnf' instead"));
     }
 
     #[test]

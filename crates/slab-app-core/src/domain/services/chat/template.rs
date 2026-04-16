@@ -1,109 +1,84 @@
-use crate::domain::models::{ConversationMessage as DomainConversationMessage, UnifiedModel};
+use std::time::{SystemTime, UNIX_EPOCH};
 
-#[derive(Debug, Clone, Default)]
-pub(super) struct PromptTemplateContext {
-    explicit_template: Option<String>,
-    model_id: Option<String>,
-    display_name: Option<String>,
-    repo_id: Option<String>,
-    filename: Option<String>,
-    local_path: Option<String>,
-}
+use minijinja::{Environment, Error, ErrorKind, UndefinedBehavior, context};
+use serde_json::Value;
 
-impl PromptTemplateContext {
-    pub(super) fn from_model(model: &UnifiedModel) -> Self {
-        Self {
-            explicit_template: model.spec.chat_template.clone(),
-            model_id: Some(model.id.clone()),
-            display_name: Some(model.display_name.clone()),
-            repo_id: model.spec.repo_id.clone(),
-            filename: model.spec.filename.clone(),
-            local_path: model.spec.local_path.clone(),
-        }
-    }
-
-    fn hint_values(&self) -> impl Iterator<Item = &str> {
-        [
-            self.model_id.as_deref(),
-            self.display_name.as_deref(),
-            self.repo_id.as_deref(),
-            self.filename.as_deref(),
-            self.local_path.as_deref(),
-        ]
-        .into_iter()
-        .flatten()
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ChatPromptTemplate {
-    Simple,
-    ChatMl,
-    Llama3,
-    CommandR,
-}
-
-impl ChatPromptTemplate {
-    fn from_name(value: &str) -> Self {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "chatml" | "qwen" | "qwen3" | "deepseek" | "deepseek-r1" => Self::ChatMl,
-            "llama3" | "llama-3" | "llama_3" | "meta-llama-3" => Self::Llama3,
-            "command-r" | "command_r" | "commandr" | "cohere" => Self::CommandR,
-            _ => Self::Simple,
-        }
-    }
-
-    fn resolve(context: Option<&PromptTemplateContext>) -> Self {
-        if let Some(template_name) = context.and_then(|ctx| ctx.explicit_template.as_deref()) {
-            return Self::from_name(template_name);
-        }
-
-        let combined_hints = context
-            .map(|ctx| {
-                ctx.hint_values().map(str::to_ascii_lowercase).collect::<Vec<_>>().join("\n")
-            })
-            .unwrap_or_default();
-
-        if combined_hints.contains("command-r")
-            || combined_hints.contains("commandr")
-            || combined_hints.contains("cohere")
-        {
-            Self::CommandR
-        } else if combined_hints.contains("llama3")
-            || combined_hints.contains("llama-3")
-            || combined_hints.contains("llama_3")
-            || combined_hints.contains("meta-llama-3")
-        {
-            Self::Llama3
-        } else if combined_hints.contains("chatml")
-            || combined_hints.contains("qwen")
-            || combined_hints.contains("deepseek")
-        {
-            Self::ChatMl
-        } else {
-            Self::Simple
-        }
-    }
-
-    fn render(self, messages: &[DomainConversationMessage]) -> String {
-        let (history, assistant_prefill) = split_prefill(messages);
-        match self {
-            Self::Simple => render_simple(history, assistant_prefill.as_deref()),
-            Self::ChatMl => render_chatml(history, assistant_prefill.as_deref()),
-            Self::Llama3 => render_llama3(history, assistant_prefill.as_deref()),
-            Self::CommandR => render_command_r(history, assistant_prefill.as_deref()),
-        }
-    }
-}
+use crate::domain::models::ConversationMessage as DomainConversationMessage;
+use crate::error::AppCoreError;
 
 pub(super) fn build_prompt(
     messages: &[DomainConversationMessage],
-    context: Option<&PromptTemplateContext>,
-) -> String {
-    ChatPromptTemplate::resolve(context).render(messages)
+    chat_template_source: Option<&str>,
+) -> Result<String, AppCoreError> {
+    match chat_template_source.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(source) => render_minijinja_template(source, messages),
+        None => Ok(render_raw_chat(messages)),
+    }
 }
 
-fn split_prefill(
+fn render_minijinja_template(
+    source: &str,
+    messages: &[DomainConversationMessage],
+) -> Result<String, AppCoreError> {
+    let mut env = Environment::new();
+    env.set_undefined_behavior(UndefinedBehavior::Strict);
+    env.add_function("raise_exception", |message: String| -> Result<String, Error> {
+        Err(Error::new(ErrorKind::InvalidOperation, message))
+    });
+    env.add_function("strftime_now", |format: String| -> Result<String, Error> {
+        render_strftime_now(&format)
+            .ok_or_else(|| Error::new(ErrorKind::InvalidOperation, "unsupported time format"))
+    });
+    env.add_template("chat_template", source).map_err(|error| {
+        AppCoreError::BadRequest(format!("configured chat_template failed to parse: {error}"))
+    })?;
+
+    let has_assistant_prefill = messages.last().is_some_and(|message| message.role == "assistant");
+    let template = env.get_template("chat_template").map_err(|error| {
+        AppCoreError::BadRequest(format!("configured chat_template failed to load: {error}"))
+    })?;
+
+    template
+        .render(context! {
+            messages => messages,
+            add_generation_prompt => !has_assistant_prefill,
+            continue_final_message => has_assistant_prefill,
+            bos_token => "",
+            eos_token => "",
+            unk_token => "",
+            pad_token => "",
+            tools => Vec::<Value>::new(),
+            documents => Vec::<Value>::new(),
+        })
+        .map_err(|error| {
+            AppCoreError::BadRequest(format!("configured chat_template failed to render: {error}"))
+        })
+}
+
+fn render_strftime_now(format: &str) -> Option<String> {
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).ok()?.as_secs();
+    let datetime = chrono::DateTime::<chrono::Utc>::from_timestamp(now as i64, 0)?;
+    Some(datetime.format(format).to_string())
+}
+
+fn render_raw_chat(messages: &[DomainConversationMessage]) -> String {
+    let (history, assistant_prefill) = split_assistant_prefill(messages);
+    let mut lines: Vec<String> = history
+        .iter()
+        .map(|message| format!("{}: {}", display_role(&message.role), message.rendered_text()))
+        .collect();
+    let mut assistant = String::from("Assistant:");
+    if let Some(prefill) = assistant_prefill.as_deref()
+        && !prefill.is_empty()
+    {
+        assistant.push(' ');
+        assistant.push_str(prefill);
+    }
+    lines.push(assistant);
+    lines.join("\n")
+}
+
+fn split_assistant_prefill(
     messages: &[DomainConversationMessage],
 ) -> (&[DomainConversationMessage], Option<String>) {
     match messages.last() {
@@ -112,81 +87,6 @@ fn split_prefill(
         }
         _ => (messages, None),
     }
-}
-
-fn render_simple(
-    messages: &[DomainConversationMessage],
-    assistant_prefill: Option<&str>,
-) -> String {
-    let mut parts: Vec<String> = messages
-        .iter()
-        .map(|message| format!("{}: {}", display_role(&message.role), message.rendered_text()))
-        .collect();
-    let mut assistant = String::from("Assistant:");
-    if let Some(prefill) = assistant_prefill
-        && !prefill.is_empty()
-    {
-        assistant.push(' ');
-        assistant.push_str(prefill);
-    }
-    parts.push(assistant);
-    parts.join("\n")
-}
-
-fn render_chatml(
-    messages: &[DomainConversationMessage],
-    assistant_prefill: Option<&str>,
-) -> String {
-    let mut prompt = String::new();
-    for message in messages {
-        prompt.push_str("<|im_start|>");
-        prompt.push_str(template_role(&message.role));
-        prompt.push('\n');
-        prompt.push_str(&message.rendered_text());
-        prompt.push_str("<|im_end|>\n");
-    }
-    prompt.push_str("<|im_start|>assistant\n");
-    if let Some(prefill) = assistant_prefill {
-        prompt.push_str(prefill);
-    }
-    prompt
-}
-
-fn render_llama3(
-    messages: &[DomainConversationMessage],
-    assistant_prefill: Option<&str>,
-) -> String {
-    let mut prompt = String::from("<|begin_of_text|>");
-    for message in messages {
-        prompt.push_str("<|start_header_id|>");
-        prompt.push_str(template_role(&message.role));
-        prompt.push_str("<|end_header_id|>\n\n");
-        prompt.push_str(&message.rendered_text());
-        prompt.push_str("<|eot_id|>");
-    }
-    prompt.push_str("<|start_header_id|>assistant<|end_header_id|>\n\n");
-    if let Some(prefill) = assistant_prefill {
-        prompt.push_str(prefill);
-    }
-    prompt
-}
-
-fn render_command_r(
-    messages: &[DomainConversationMessage],
-    assistant_prefill: Option<&str>,
-) -> String {
-    let mut prompt = String::new();
-    for message in messages {
-        prompt.push_str("<|START_OF_TURN_TOKEN|>");
-        prompt.push_str(command_r_role(&message.role));
-        prompt.push_str(&message.rendered_text());
-        prompt.push_str("<|END_OF_TURN_TOKEN|>");
-    }
-    prompt.push_str("<|START_OF_TURN_TOKEN|><|CHATBOT_TOKEN|>");
-    if let Some(prefill) = assistant_prefill {
-        prompt.push_str(prefill);
-    }
-    prompt
 }
 
 fn display_role(role: &str) -> &str {
@@ -199,18 +99,50 @@ fn display_role(role: &str) -> &str {
     }
 }
 
-fn template_role(role: &str) -> &str {
-    match role {
-        "system" | "developer" => "system",
-        "assistant" => "assistant",
-        _ => "user",
-    }
-}
+#[cfg(test)]
+mod tests {
+    use super::build_prompt;
+    use crate::domain::models::{
+        ConversationMessage as DomainConversationMessage, ConversationMessageContent,
+    };
 
-fn command_r_role(role: &str) -> &str {
-    match template_role(role) {
-        "system" => "<|SYSTEM_TOKEN|>",
-        "assistant" => "<|CHATBOT_TOKEN|>",
-        _ => "<|USER_TOKEN|>",
+    fn message(role: &str, content: &str) -> DomainConversationMessage {
+        DomainConversationMessage {
+            role: role.to_owned(),
+            content: ConversationMessageContent::Text(content.to_owned()),
+            name: None,
+            tool_call_id: None,
+            tool_calls: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn raw_chat_fallback_transcribes_messages_without_heuristics() {
+        let rendered = build_prompt(&[message("system", "hi"), message("user", "hello")], None)
+            .expect("raw fallback prompt");
+
+        assert_eq!(rendered, "System: hi\nUser: hello\nAssistant:");
+    }
+
+    #[test]
+    fn minijinja_template_renders_hf_style_messages() {
+        let template = "{% for message in messages %}[{{ message.role }}] {{ message.content }}\n{% endfor %}{% if add_generation_prompt %}[assistant] {% endif %}";
+        let rendered =
+            build_prompt(&[message("system", "hi"), message("user", "hello")], Some(template))
+                .expect("template prompt");
+
+        assert_eq!(rendered, "[system] hi\n[user] hello\n[assistant] ");
+    }
+
+    #[test]
+    fn assistant_prefill_disables_generation_prompt_for_templates() {
+        let template = "{% for message in messages %}[{{ message.role }}] {{ message.content }}\n{% endfor %}{% if add_generation_prompt %}[assistant]{% endif %}";
+        let rendered = build_prompt(
+            &[message("user", "hello"), message("assistant", "partial")],
+            Some(template),
+        )
+        .expect("template prompt");
+
+        assert_eq!(rendered, "[user] hello\n[assistant] partial\n");
     }
 }

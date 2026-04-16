@@ -135,7 +135,7 @@ function isChatModelCapabilities(value: unknown): value is ChatModelCapabilities
     typeof value === 'object' &&
     value !== null &&
     !Array.isArray(value) &&
-    typeof (value as UnknownRecord).raw_grammar === 'boolean' &&
+    typeof (value as UnknownRecord).raw_gbnf === 'boolean' &&
     typeof (value as UnknownRecord).structured_output === 'boolean' &&
     typeof (value as UnknownRecord).reasoning_controls === 'boolean'
   );

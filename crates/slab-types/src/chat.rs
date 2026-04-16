@@ -283,8 +283,8 @@ impl ChatModelSource {
 /// Route-level chat capabilities exposed to clients via `GET /v1/chat/models`.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 pub struct ChatModelCapabilities {
-    /// Whether the route accepts raw `grammar` constraints.
-    pub raw_grammar: bool,
+    /// Whether the route accepts raw `gbnf` constraints.
+    pub raw_gbnf: bool,
     /// Whether the route accepts structured output controls.
     pub structured_output: bool,
     /// Whether the route accepts reasoning/verbosity controls.
@@ -293,11 +293,11 @@ pub struct ChatModelCapabilities {
 
 impl ChatModelCapabilities {
     pub fn local() -> Self {
-        Self { raw_grammar: true, structured_output: true, reasoning_controls: true }
+        Self { raw_gbnf: true, structured_output: true, reasoning_controls: true }
     }
 
     pub fn cloud() -> Self {
-        Self { raw_grammar: false, structured_output: true, reasoning_controls: true }
+        Self { raw_gbnf: false, structured_output: true, reasoning_controls: true }
     }
 }
 
@@ -310,7 +310,7 @@ mod tests {
         let capabilities = ChatModelCapabilities::local();
 
         assert!(capabilities.reasoning_controls);
-        assert!(capabilities.raw_grammar);
+        assert!(capabilities.raw_gbnf);
         assert!(capabilities.structured_output);
     }
 }
