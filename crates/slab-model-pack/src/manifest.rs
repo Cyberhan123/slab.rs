@@ -122,6 +122,13 @@ pub enum PackSource {
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         files: Vec<PackSourceFile>,
     },
+    ModelScope {
+        repo_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        revision: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        files: Vec<PackSourceFile>,
+    },
     Cloud {
         provider_id: String,
         remote_model_id: String,
@@ -134,6 +141,7 @@ impl PackSource {
             Self::LocalPath { .. } => "local_path",
             Self::LocalFiles { .. } => "local_files",
             Self::HuggingFace { .. } => "hugging_face",
+            Self::ModelScope { .. } => "model_scope",
             Self::Cloud { .. } => "cloud",
         }
     }
@@ -146,42 +154,71 @@ impl PackSource {
                 description: None,
                 path: path.clone(),
             }],
-            Self::LocalFiles { files } | Self::HuggingFace { files, .. } => files.clone(),
+            Self::LocalFiles { files }
+            | Self::HuggingFace { files, .. }
+            | Self::ModelScope { files, .. } => files.clone(),
             Self::Cloud { .. } => Vec::new(),
         }
     }
-}
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Hash)]
-pub enum PackHubProvider {
-    #[serde(rename = "hugging_face", alias = "hf_hub", alias = "huggingface")]
-    HuggingFace,
-    #[serde(rename = "model_scope", alias = "models_cat", alias = "modelscope")]
-    ModelScope,
-}
-
-impl PackHubProvider {
-    pub const fn as_str(self) -> &'static str {
+    pub fn with_files(&self, files: Vec<PackSourceFile>) -> Self {
         match self {
-            Self::HuggingFace => "hugging_face",
-            Self::ModelScope => "model_scope",
+            Self::LocalPath { .. } | Self::Cloud { .. } => self.clone(),
+            Self::LocalFiles { .. } => Self::LocalFiles { files },
+            Self::HuggingFace { repo_id, revision, .. } => Self::HuggingFace {
+                repo_id: repo_id.clone(),
+                revision: revision.clone(),
+                files,
+            },
+            Self::ModelScope { repo_id, revision, .. } => Self::ModelScope {
+                repo_id: repo_id.clone(),
+                revision: revision.clone(),
+                files,
+            },
+        }
+    }
+
+    pub fn remote_repository(&self) -> Option<PackRemoteRepository<'_>> {
+        match self {
+            Self::HuggingFace { repo_id, revision, files } => Some(PackRemoteRepository {
+                source_kind: "hugging_face",
+                hub_provider: "hf_hub",
+                repo_id,
+                revision: revision.as_deref(),
+                files,
+            }),
+            Self::ModelScope { repo_id, revision, files } => Some(PackRemoteRepository {
+                source_kind: "model_scope",
+                hub_provider: "models_cat",
+                repo_id,
+                revision: revision.as_deref(),
+                files,
+            }),
+            Self::LocalPath { .. } | Self::LocalFiles { .. } | Self::Cloud { .. } => None,
         }
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct PackRemoteRepository<'a> {
+    pub source_kind: &'static str,
+    pub hub_provider: &'static str,
+    pub repo_id: &'a str,
+    pub revision: Option<&'a str>,
+    pub files: &'a [PackSourceFile],
+}
+
+#[derive(Debug, Clone, Serialize, JsonSchema, PartialEq, Eq)]
 pub struct PackSourceCandidate {
     #[serde(flatten)]
     pub source: PackSource,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub hub_provider: Option<PackHubProvider>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub priority: Option<i32>,
 }
 
 impl PackSourceCandidate {
     pub const fn new(source: PackSource) -> Self {
-        Self { source, hub_provider: None, priority: None }
+        Self { source, priority: None }
     }
 
     pub const fn kind(&self) -> &'static str {
@@ -193,7 +230,88 @@ impl PackSourceCandidate {
     }
 
     pub fn with_source(&self, source: PackSource) -> Self {
-        Self { source, hub_provider: self.hub_provider, priority: self.priority }
+        Self { source, priority: self.priority }
+    }
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+enum LegacyRemoteSourceKind {
+    #[serde(rename = "hugging_face", alias = "hf_hub", alias = "huggingface")]
+    HuggingFace,
+    #[serde(rename = "model_scope", alias = "models_cat", alias = "modelscope")]
+    ModelScope,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct FlatPackSourceCandidateWire {
+    #[serde(flatten)]
+    source: PackSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    priority: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hub_provider: Option<LegacyRemoteSourceKind>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LegacyPackSourceCandidateWire {
+    source: PackSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    priority: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hub_provider: Option<LegacyRemoteSourceKind>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum PackSourceCandidateWire {
+    SourceOnly(PackSource),
+    Flat(FlatPackSourceCandidateWire),
+    Legacy(LegacyPackSourceCandidateWire),
+}
+
+impl PackSourceCandidateWire {
+    fn into_candidate(self) -> PackSourceCandidate {
+        match self {
+            Self::SourceOnly(source) => PackSourceCandidate::new(source),
+            Self::Flat(wire) => PackSourceCandidate {
+                source: apply_legacy_remote_source_kind(wire.source, wire.hub_provider),
+                priority: wire.priority,
+            },
+            Self::Legacy(wire) => PackSourceCandidate {
+                source: apply_legacy_remote_source_kind(wire.source, wire.hub_provider),
+                priority: wire.priority,
+            },
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PackSourceCandidate {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        PackSourceCandidateWire::deserialize(deserializer).map(PackSourceCandidateWire::into_candidate)
+    }
+}
+
+fn apply_legacy_remote_source_kind(
+    source: PackSource,
+    legacy_kind: Option<LegacyRemoteSourceKind>,
+) -> PackSource {
+    match legacy_kind {
+        None => source,
+        Some(LegacyRemoteSourceKind::HuggingFace) => match source {
+            PackSource::ModelScope { repo_id, revision, files } => {
+                PackSource::HuggingFace { repo_id, revision, files }
+            }
+            other => other,
+        },
+        Some(LegacyRemoteSourceKind::ModelScope) => match source {
+            PackSource::HuggingFace { repo_id, revision, files } => {
+                PackSource::ModelScope { repo_id, revision, files }
+            }
+            other => other,
+        },
     }
 }
 
@@ -404,4 +522,79 @@ pub struct BackendConfigDocument {
     pub payload: Value,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub metadata: BTreeMap<String, String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::{PackSource, PackSourceCandidate, PackSourceFile};
+
+    #[test]
+    fn serializes_source_candidates_without_nested_source_wrapper() {
+        let candidate = PackSourceCandidate {
+            source: PackSource::HuggingFace {
+                repo_id: "bartowski/Qwen2.5-0.5B-Instruct-GGUF".into(),
+                revision: None,
+                files: vec![PackSourceFile {
+                    id: "model".into(),
+                    label: None,
+                    description: None,
+                    path: "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf".into(),
+                }],
+            },
+            priority: Some(0),
+        };
+
+        assert_eq!(
+            serde_json::to_value(&candidate).expect("candidate should serialize"),
+            json!({
+                "kind": "hugging_face",
+                "repo_id": "bartowski/Qwen2.5-0.5B-Instruct-GGUF",
+                "files": [
+                    {
+                        "id": "model",
+                        "path": "Qwen2.5-0.5B-Instruct-Q4_K_M.gguf"
+                    }
+                ],
+                "priority": 0
+            })
+        );
+    }
+
+    #[test]
+    fn deserializes_legacy_nested_source_candidates() {
+        let candidate: PackSourceCandidate = serde_json::from_value(json!({
+            "source": {
+                "kind": "hugging_face",
+                "repo_id": "Qwen/Qwen2.5-7B-Instruct-GGUF",
+                "files": [
+                    {
+                        "id": "model",
+                        "path": "Qwen2.5-7B-Instruct-Q4_K_M.gguf"
+                    }
+                ]
+            },
+            "hub_provider": "model_scope",
+            "priority": 5
+        }))
+        .expect("legacy candidate should deserialize");
+
+        assert_eq!(
+            candidate,
+            PackSourceCandidate {
+                source: PackSource::ModelScope {
+                    repo_id: "Qwen/Qwen2.5-7B-Instruct-GGUF".into(),
+                    revision: None,
+                    files: vec![PackSourceFile {
+                        id: "model".into(),
+                        label: None,
+                        description: None,
+                        path: "Qwen2.5-7B-Instruct-Q4_K_M.gguf".into(),
+                    }],
+                },
+                priority: Some(5),
+            }
+        );
+    }
 }

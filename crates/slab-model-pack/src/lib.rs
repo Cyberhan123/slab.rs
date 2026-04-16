@@ -12,8 +12,8 @@ pub use artifacts::{ResolvedArtifact, ResolvedArtifactMap};
 pub use error::ModelPackError;
 pub use manifest::{
     AdapterDocument, BackendConfigDocument, BackendConfigScope, ComponentDocument, ConfigEntryRef,
-    DynamicFootprint, ModelPackManifest, PackDocument, PackDocumentKind, PackHubProvider,
-    PackModelStatus, PackPricing, PackRuntimePresets, PackSource, PackSourceCandidate,
+    DynamicFootprint, ModelPackManifest, PackDocument, PackDocumentKind, PackModelStatus,
+    PackPricing, PackRemoteRepository, PackRuntimePresets, PackSource, PackSourceCandidate,
     PackSourceFile, PresetDocument, PresetEntryRef, ResourceFootprint, VariantDocument,
 };
 pub use pack::{MANIFEST_FILE_NAME, ModelPack, PACK_EXTENSION};

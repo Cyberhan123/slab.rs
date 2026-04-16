@@ -72,13 +72,6 @@
       ],
       "type": "string"
     },
-    "PackHubProvider": {
-      "enum": [
-        "hugging_face",
-        "model_scope"
-      ],
-      "type": "string"
-    },
     "PackModelStatus": {
       "enum": [
         "ready",
@@ -190,6 +183,34 @@
         },
         {
           "properties": {
+            "files": {
+              "items": {
+                "$ref": "#/$defs/PackSourceFile"
+              },
+              "type": "array"
+            },
+            "kind": {
+              "const": "model_scope",
+              "type": "string"
+            },
+            "repo_id": {
+              "type": "string"
+            },
+            "revision": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "kind",
+            "repo_id"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
             "kind": {
               "const": "cloud",
               "type": "string"
@@ -210,16 +231,6 @@
         }
       ],
       "properties": {
-        "hub_provider": {
-          "anyOf": [
-            {
-              "$ref": "#/$defs/PackHubProvider"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "priority": {
           "format": "int32",
           "type": [
