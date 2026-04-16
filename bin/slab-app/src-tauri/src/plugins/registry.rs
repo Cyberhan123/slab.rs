@@ -6,6 +6,8 @@ use std::sync::RwLock;
 
 use percent_encoding::percent_decode_str;
 use sha2::{Digest, Sha256};
+use tauri::Manager;
+use tauri::path::BaseDirectory;
 
 use super::types::{PluginInfo, PluginManifest, PluginNetworkMode};
 
@@ -105,14 +107,43 @@ impl PluginRegistryState {
     }
 }
 
-pub fn resolve_plugins_root() -> Result<PathBuf, String> {
-    if let Ok(path) = std::env::var("SLAB_PLUGINS_DIR") {
-        return Ok(PathBuf::from(path));
+pub fn resolve_plugins_root<R: tauri::Runtime>(app: &tauri::App<R>) -> Result<PathBuf, String> {
+    let app_data_dir = app
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("failed to resolve app data directory for plugins: {e}"))?;
+    let bundled_plugins_dir = app.path().resolve(DEFAULT_PLUGINS_DIR, BaseDirectory::Resource).ok();
+    let current_dir = std::env::current_dir().ok();
+
+    Ok(resolve_plugins_root_with(
+        std::env::var("SLAB_PLUGINS_DIR").ok().map(PathBuf::from),
+        bundled_plugins_dir,
+        current_dir,
+        app_data_dir,
+    ))
+}
+
+fn resolve_plugins_root_with(
+    explicit_root: Option<PathBuf>,
+    bundled_root: Option<PathBuf>,
+    current_dir: Option<PathBuf>,
+    app_data_dir: PathBuf,
+) -> PathBuf {
+    if let Some(path) = explicit_root {
+        return path;
     }
 
-    let current_dir = std::env::current_dir()
-        .map_err(|e| format!("failed to resolve current working directory: {e}"))?;
-    Ok(current_dir.join(DEFAULT_PLUGINS_DIR))
+    if let Some(path) = bundled_root.filter(|path| path.exists()) {
+        return path;
+    }
+
+    if let Some(path) =
+        current_dir.map(|dir| dir.join(DEFAULT_PLUGINS_DIR)).filter(|path| path.exists())
+    {
+        return path;
+    }
+
+    app_data_dir.join(DEFAULT_PLUGINS_DIR)
 }
 
 pub fn normalize_relative_path(raw: &str) -> Result<String, String> {
@@ -374,6 +405,7 @@ fn network_mode_label(mode: &PluginNetworkMode) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn plugin_id_validation_works() {
@@ -390,5 +422,37 @@ mod tests {
         assert!(normalize_relative_path("../test").is_err());
         assert!(normalize_relative_path("a/../../b").is_err());
         assert!(normalize_relative_path("/ui/index.html").is_ok());
+    }
+
+    #[test]
+    fn plugins_root_prefers_existing_dev_directory() {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("slab-plugin-root-{suffix}"));
+        let cwd = root.join("repo");
+        let app_data_dir = root.join("app-data");
+        let dev_plugins_dir = cwd.join(DEFAULT_PLUGINS_DIR);
+        fs::create_dir_all(&dev_plugins_dir).unwrap();
+
+        let resolved =
+            resolve_plugins_root_with(None, None, Some(cwd.clone()), app_data_dir.clone());
+
+        assert_eq!(resolved, dev_plugins_dir);
+
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn plugins_root_falls_back_to_app_data_when_cwd_has_no_plugins() {
+        let suffix = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+        let root = std::env::temp_dir().join(format!("slab-plugin-root-{suffix}"));
+        let cwd = root.join("launchd-cwd");
+        let app_data_dir = root.join("app-data");
+        fs::create_dir_all(&cwd).unwrap();
+
+        let resolved = resolve_plugins_root_with(None, None, Some(cwd), app_data_dir.clone());
+
+        assert_eq!(resolved, app_data_dir.join(DEFAULT_PLUGINS_DIR));
+
+        fs::remove_dir_all(root).unwrap();
     }
 }

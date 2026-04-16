@@ -26,7 +26,8 @@ pub fn init<R: Runtime>(
     app: &mut tauri::App<R>,
     api_endpoint: ApiEndpointConfig,
 ) -> Result<(), String> {
-    let plugins_root = resolve_plugins_root()?;
+    let plugins_root = resolve_plugins_root(app)?;
+    log::info!("resolved plugins root to {}", plugins_root.display());
     let registry = PluginRegistryState::new(plugins_root)?;
     let runtime = PluginRuntimeManager::new(api_endpoint)?;
     app.manage(registry);
