@@ -89,6 +89,26 @@ impl RuntimeBackendStatusSnapshot {
             last_unexpected_exit: None,
         }
     }
+
+    pub fn compact_summary(&self) -> String {
+        let mut parts = vec![
+            format!("status={}", self.status.as_str()),
+            format!("consecutive_failures={}", self.consecutive_failures),
+            format!("restart_attempts={}", self.restart_attempts),
+        ];
+
+        if let Some(last_error) = self.last_error.as_deref().filter(|value| !value.is_empty()) {
+            parts.push(format!("last_error={last_error}"));
+        }
+
+        if let Some(last_exit) = self.last_unexpected_exit.as_ref() {
+            parts.push(format!("last_exit={}", last_exit.exit.description()));
+            parts.push(format!("last_bind_address={}", last_exit.bind_address));
+            parts.push(format!("last_restart_delay_ms={}", last_exit.restart_delay.as_millis()));
+        }
+
+        parts.join(", ")
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -266,6 +286,7 @@ enum RuntimeSupervisorCommand {
 #[derive(Clone, Debug)]
 pub struct RuntimeSupervisorControlHandle {
     senders: Arc<HashMap<RuntimeBackendId, mpsc::UnboundedSender<RuntimeSupervisorCommand>>>,
+    status: Arc<RuntimeSupervisorStatus>,
 }
 
 impl RuntimeSupervisorControlHandle {
@@ -283,12 +304,18 @@ impl RuntimeSupervisorControlHandle {
                 backend.canonical_id()
             ))
         })?;
-        sender.send(RuntimeSupervisorCommand::ControlledRestart).map_err(|_| {
-            AppCoreError::Internal(format!(
+        let restart_attempts = self.status.snapshot(backend).restart_attempts;
+        self.status.mark_restarting(backend, restart_attempts);
+        if sender.send(RuntimeSupervisorCommand::ControlledRestart).is_err() {
+            let message = format!(
                 "runtime supervisor task for '{}' is no longer accepting commands",
                 backend.canonical_id()
-            ))
-        })
+            );
+            self.status.mark_unavailable(backend, message.clone());
+            return Err(AppCoreError::Internal(message));
+        }
+
+        Ok(())
     }
 
     pub fn restart_backends(
@@ -322,6 +349,15 @@ impl ManagedRuntimeSupervisor {
         options: RuntimeSupervisorOptions,
     ) -> Result<Self, AppCoreError> {
         let status = Arc::new(RuntimeSupervisorStatus::from_launch_spec(&launch_spec));
+        Self::start_with_status(launch_spec, status, spawner, options).await
+    }
+
+    pub(crate) async fn start_with_status(
+        launch_spec: ResolvedLaunchSpec,
+        status: Arc<RuntimeSupervisorStatus>,
+        spawner: Arc<dyn RuntimeChildSpawner>,
+        options: RuntimeSupervisorOptions,
+    ) -> Result<Self, AppCoreError> {
         let mut started_children = Vec::new();
 
         for child_spec in &launch_spec.children {
@@ -370,7 +406,10 @@ impl ManagedRuntimeSupervisor {
                 options.clone(),
             )));
         }
-        let control = RuntimeSupervisorControlHandle { senders: Arc::new(command_senders) };
+        let control = RuntimeSupervisorControlHandle {
+            senders: Arc::new(command_senders),
+            status: Arc::clone(&status),
+        };
 
         Ok(Self {
             launch_spec,
@@ -1092,6 +1131,10 @@ mod tests {
         .unwrap();
 
         supervisor.control_handle().restart_backend(RuntimeBackendId::GgmlLlama).unwrap();
+        assert_eq!(
+            supervisor.status_registry().status(RuntimeBackendId::GgmlLlama),
+            RuntimeBackendRuntimeStatus::Restarting
+        );
 
         yield_until(|| first.graceful_shutdowns.load(Ordering::SeqCst) == 1).await;
         yield_until(|| spawner.spawn_count() == 2).await;
@@ -1101,6 +1144,42 @@ mod tests {
         );
 
         supervisor.shutdown().await;
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn start_with_status_reuses_external_registry() {
+        let spawner = FakeSpawner::default();
+        let child = FakeChildControl::new();
+        spawner.push_success(RuntimeBackendId::GgmlLlama, Arc::clone(&child));
+
+        let spec = launch_spec(vec![child_spec(RuntimeBackendId::GgmlLlama, "127.0.0.1:50051")]);
+        let shared_status = Arc::new(RuntimeSupervisorStatus::from_launch_spec(&spec));
+        assert_eq!(
+            shared_status.status(RuntimeBackendId::GgmlLlama),
+            RuntimeBackendRuntimeStatus::Restarting
+        );
+
+        let supervisor = ManagedRuntimeSupervisor::start_with_status(
+            spec,
+            Arc::clone(&shared_status),
+            Arc::new(spawner),
+            test_options(),
+        )
+        .await
+        .unwrap();
+
+        assert!(Arc::ptr_eq(&shared_status, &supervisor.status_registry()));
+        assert_eq!(
+            shared_status.status(RuntimeBackendId::GgmlLlama),
+            RuntimeBackendRuntimeStatus::Ready
+        );
+
+        supervisor.shutdown().await;
+
+        assert_eq!(
+            shared_status.status(RuntimeBackendId::GgmlLlama),
+            RuntimeBackendRuntimeStatus::Disabled
+        );
     }
 
     #[tokio::test(start_paused = true)]

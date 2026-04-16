@@ -453,23 +453,34 @@ impl SetupService {
 
         let deadline = tokio::time::Instant::now() + RUNTIME_READY_TIMEOUT;
         loop {
-            let all_ready = backends.iter().all(|backend| {
-                self.model_state.runtime_status().status(*backend)
-                    == RuntimeBackendRuntimeStatus::Ready
-            });
-            if all_ready {
+            let snapshots = backends
+                .iter()
+                .map(|backend| (*backend, self.model_state.runtime_status().snapshot(*backend)))
+                .collect::<Vec<_>>();
+
+            if snapshots
+                .iter()
+                .all(|(_, snapshot)| snapshot.status == RuntimeBackendRuntimeStatus::Ready)
+            {
                 return Ok(());
             }
 
+            if let Some((backend, snapshot)) = snapshots
+                .iter()
+                .find(|(_, snapshot)| snapshot.status == RuntimeBackendRuntimeStatus::Unavailable)
+            {
+                return Err(AppCoreError::Internal(format!(
+                    "runtime backend '{}' became unavailable while restarting: {}",
+                    backend.canonical_id(),
+                    snapshot.compact_summary()
+                )));
+            }
+
             if tokio::time::Instant::now() >= deadline {
-                let statuses = backends
+                let statuses = snapshots
                     .iter()
-                    .map(|backend| {
-                        format!(
-                            "{}={}",
-                            backend.canonical_id(),
-                            self.model_state.runtime_status().status(*backend).as_str()
-                        )
+                    .map(|(backend, snapshot)| {
+                        format!("{}({})", backend.canonical_id(), snapshot.compact_summary())
                     })
                     .collect::<Vec<_>>()
                     .join(", ");
