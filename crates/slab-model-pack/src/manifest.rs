@@ -165,16 +165,12 @@ impl PackSource {
         match self {
             Self::LocalPath { .. } | Self::Cloud { .. } => self.clone(),
             Self::LocalFiles { .. } => Self::LocalFiles { files },
-            Self::HuggingFace { repo_id, revision, .. } => Self::HuggingFace {
-                repo_id: repo_id.clone(),
-                revision: revision.clone(),
-                files,
-            },
-            Self::ModelScope { repo_id, revision, .. } => Self::ModelScope {
-                repo_id: repo_id.clone(),
-                revision: revision.clone(),
-                files,
-            },
+            Self::HuggingFace { repo_id, revision, .. } => {
+                Self::HuggingFace { repo_id: repo_id.clone(), revision: revision.clone(), files }
+            }
+            Self::ModelScope { repo_id, revision, .. } => {
+                Self::ModelScope { repo_id: repo_id.clone(), revision: revision.clone(), files }
+            }
         }
     }
 
@@ -290,7 +286,8 @@ impl<'de> Deserialize<'de> for PackSourceCandidate {
     where
         D: Deserializer<'de>,
     {
-        PackSourceCandidateWire::deserialize(deserializer).map(PackSourceCandidateWire::into_candidate)
+        PackSourceCandidateWire::deserialize(deserializer)
+            .map(PackSourceCandidateWire::into_candidate)
     }
 }
 

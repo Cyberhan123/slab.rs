@@ -54,7 +54,11 @@ impl ModelService {
             .compile_runtime_bridge(&selection.selected_preset)
         {
             Ok(mut bridge) => {
-                pack::apply_materialized_source_to_bridge(&mut bridge, context.persisted.as_ref());
+                pack::apply_materialized_source_to_bridge(
+                    &mut bridge,
+                    context.persisted.as_ref(),
+                    selection.selected_preset.variant.effective_sources.first(),
+                );
                 let source_summary = build_model_config_source_summary(&bridge.model_spec.source);
                 let resolved_load_spec = self
                     .build_model_config_load_json(
@@ -89,6 +93,7 @@ impl ModelService {
                         "failed to resolve selected pack preset source for config document",
                     )?,
                     context.persisted.as_ref(),
+                    selection.selected_preset.variant.effective_sources.first(),
                 );
                 let source_summary = build_model_config_source_summary(&source);
                 let resolved_inference_spec = selection
@@ -793,15 +798,15 @@ fn build_model_config_selection_view(
         .variants
         .values()
         .map(|variant| {
-            let (repo_id, filename, local_path) =
+            let source_preview =
                 pack::source_preview_from_pack_source(variant.effective_sources.first());
             ModelConfigVariantOption {
                 id: variant.document.id.clone(),
                 label: variant.document.label.clone(),
                 description: variant.document.description.clone(),
-                repo_id,
-                filename,
-                local_path,
+                repo_id: source_preview.repo_id,
+                filename: source_preview.filename,
+                local_path: source_preview.local_path,
                 is_default: default_selection.variant_id.as_deref()
                     == Some(variant.document.id.as_str()),
             }
@@ -1359,6 +1364,7 @@ mod tests {
         assert_eq!(command.capabilities, Some(vec![Capability::AudioVad]));
         assert_eq!(command.status, Some(UnifiedModelStatus::NotDownloaded));
         assert_eq!(command.spec.repo_id.as_deref(), Some("ggml-org/whisper-vad"));
+        assert_eq!(command.spec.hub_provider.as_deref(), Some("hf_hub"));
         assert_eq!(command.spec.filename.as_deref(), Some("ggml-silero-v6.2.0.bin"));
         assert!(command.spec.local_path.is_none());
     }

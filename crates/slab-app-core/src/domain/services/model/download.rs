@@ -820,12 +820,10 @@ fn effective_hub_provider_for_pack_source(
     match preference {
         ModelDownloadSourcePreference::Auto => Some(Some(remote_source.hub_provider.to_owned())),
         ModelDownloadSourcePreference::HuggingFace => {
-            (remote_source.hub_provider != "models_cat")
-                .then_some(Some("hf_hub".to_owned()))
+            (remote_source.hub_provider != "models_cat").then_some(Some("hf_hub".to_owned()))
         }
         ModelDownloadSourcePreference::ModelScope => {
-            (remote_source.hub_provider != "hf_hub")
-                .then_some(Some("models_cat".to_owned()))
+            (remote_source.hub_provider != "hf_hub").then_some(Some("models_cat".to_owned()))
         }
     }
 }

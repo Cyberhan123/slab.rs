@@ -641,16 +641,10 @@ fn build_remote_pack_source_from_spec(
         .map(|value| value.to_ascii_lowercase().replace('-', "_"))
         .as_deref()
     {
-        Some("models_cat") | Some("modelscope") | Some("model_scope") => PackSource::ModelScope {
-            repo_id: repo_id.to_owned(),
-            revision: None,
-            files,
-        },
-        _ => PackSource::HuggingFace {
-            repo_id: repo_id.to_owned(),
-            revision: None,
-            files,
-        },
+        Some("models_cat") | Some("modelscope") | Some("model_scope") => {
+            PackSource::ModelScope { repo_id: repo_id.to_owned(), revision: None, files }
+        }
+        _ => PackSource::HuggingFace { repo_id: repo_id.to_owned(), revision: None, files },
     }
 }
 
@@ -1755,8 +1749,9 @@ fn local_source_fields(
 
     match source {
         Some(source @ (PackSource::HuggingFace { .. } | PackSource::ModelScope { .. })) => {
-            let remote_source =
-                source.remote_repository().expect("remote source candidates expose repository info");
+            let remote_source = source
+                .remote_repository()
+                .expect("remote source candidates expose repository info");
             let filename = remote_source
                 .files
                 .iter()
