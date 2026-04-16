@@ -458,7 +458,11 @@ async fn build_selected_model_pack_load_target(
             "failed to compile selected pack preset for load target: {error}"
         ))
     })?;
-    pack::apply_materialized_source_to_bridge(&mut bridge, persisted.as_ref());
+    pack::apply_materialized_source_to_bridge(
+        &mut bridge,
+        persisted.as_ref(),
+        selected_preset.variant.effective_sources.first(),
+    );
     let preset_id = effective_selection
         .preset_id
         .clone()
