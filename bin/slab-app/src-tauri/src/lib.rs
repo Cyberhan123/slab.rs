@@ -45,7 +45,10 @@ pub fn run() {
         .setup(move |app| {
             setup::setup_windows(app)?;
             setup::run_server_sidecar(app)?;
-            plugins::init(app, api_endpoint.clone()).map_err(std::io::Error::other)?;
+            plugins::init(app, api_endpoint.clone()).map_err(|error| {
+                log::error!("failed to initialize plugins: {error}");
+                std::io::Error::other(error)
+            })?;
 
             Ok(())
         })
