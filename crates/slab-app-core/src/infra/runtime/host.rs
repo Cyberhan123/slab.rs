@@ -132,7 +132,13 @@ impl ManagedRuntimeHost {
             return Ok(SupervisorActivation::Existing(supervisor.control_handle()));
         }
 
-        match start_runtime_supervisor(&self.launch_spec, &self.start_options).await {
+        match start_runtime_supervisor(
+            &self.launch_spec,
+            Arc::clone(&self.status),
+            &self.start_options,
+        )
+        .await
+        {
             Ok(supervisor) => {
                 let supervisor = Arc::new(supervisor);
                 let control = supervisor.control_handle();
@@ -167,6 +173,7 @@ enum SupervisorActivation {
 
 async fn start_runtime_supervisor(
     launch_spec: &ResolvedLaunchSpec,
+    status: Arc<RuntimeSupervisorStatus>,
     options: &ManagedRuntimeHostStartOptions,
 ) -> Result<ManagedRuntimeSupervisor, AppCoreError> {
     launch_spec.prepare_filesystem()?;
@@ -176,8 +183,9 @@ async fn start_runtime_supervisor(
     })?;
     let runtime_exe = resolve_runtime_exe(&server_exe)?;
 
-    ManagedRuntimeSupervisor::start(
+    ManagedRuntimeSupervisor::start_with_status(
         launch_spec.clone(),
+        status,
         Arc::new(TokioRuntimeSpawner::new(
             runtime_exe,
             options.log_level.clone(),

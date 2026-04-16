@@ -15,8 +15,6 @@ use crate::domain::models::{
 };
 use crate::error::AppCoreError;
 use crate::infra::rpc::{self, pb};
-use crate::runtime_supervisor::RuntimeBackendStatusSnapshot;
-
 #[derive(Clone)]
 pub struct ImageService {
     state: WorkerState,
@@ -183,8 +181,7 @@ impl ImageService {
                         Err(error) => {
                             let runtime_snapshot =
                                 runtime_status.snapshot(RuntimeBackendId::GgmlDiffusion);
-                            let runtime_status =
-                                format_runtime_backend_snapshot(&runtime_snapshot);
+                            let runtime_status = runtime_snapshot.compact_summary();
                             let transport_disconnect =
                                 rpc::client::transient_runtime_detail(&error);
                             let message = format!(
@@ -209,24 +206,4 @@ impl ImageService {
 
         Ok(AcceptedOperation { operation_id })
     }
-}
-
-fn format_runtime_backend_snapshot(snapshot: &RuntimeBackendStatusSnapshot) -> String {
-    let mut parts = vec![
-        format!("status={}", snapshot.status.as_str()),
-        format!("consecutive_failures={}", snapshot.consecutive_failures),
-        format!("restart_attempts={}", snapshot.restart_attempts),
-    ];
-
-    if let Some(last_error) = snapshot.last_error.as_deref().filter(|value| !value.is_empty()) {
-        parts.push(format!("last_error={last_error}"));
-    }
-
-    if let Some(last_exit) = snapshot.last_unexpected_exit.as_ref() {
-        parts.push(format!("last_exit={}", last_exit.exit.description()));
-        parts.push(format!("last_bind_address={}", last_exit.bind_address));
-        parts.push(format!("last_restart_delay_ms={}", last_exit.restart_delay.as_millis()));
-    }
-
-    parts.join(", ")
 }
