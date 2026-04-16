@@ -65,8 +65,33 @@ args = ["build", "--release", "-p", "slab-runtime"]
 
 [tasks.run-tauri]
 workspace = false
+script_runner = "@duckscript"
+script = '''
+windows = is_windows
+
+if ${windows}
+    cm_run_task run-tauri-windows
+else
+    cm_run_task run-tauri-default
+end
+'''
+
+[tasks.run-tauri-default]
+workspace = false
 command = "bun"
 args = ["run", "dev"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
+
+[tasks.run-tauri-windows]
+workspace = false
+command = "bun"
+args = [
+    "run",
+    "tauri",
+    "dev",
+    "--config",
+    "src-tauri/tauri.windows.dev.conf.json",
+]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 
 [tasks.build-tauri-release]
@@ -91,13 +116,48 @@ cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 [tasks.build-tauri-release-windows]
 workspace = false
 command = "bun"
-args = ["run", "tauri", "build", "--bundles", "nsis"]
+args = [
+    "run",
+    "tauri",
+    "build",
+    "--bundles",
+    "nsis",
+    "--config",
+    "src-tauri/tauri.windows.release.conf.json",
+]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 
 [tasks.build-tauri-debug]
 workspace = false
+script_runner = "@duckscript"
+script = '''
+windows = is_windows
+
+if ${windows}
+    cm_run_task build-tauri-debug-windows
+else
+    cm_run_task build-tauri-debug-default
+end
+'''
+
+[tasks.build-tauri-debug-default]
+workspace = false
 command = "bun"
 args = ["run", "tauri", "build", "--no-bundle", "--debug"]
+cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
+
+[tasks.build-tauri-debug-windows]
+workspace = false
+command = "bun"
+args = [
+    "run",
+    "tauri",
+    "build",
+    "--no-bundle",
+    "--debug",
+    "--config",
+    "src-tauri/tauri.windows.dev.conf.json",
+]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 
 [tasks.install-frontend]
@@ -214,7 +274,7 @@ args = [
     "--bundles",
     "nsis",
     "--config",
-    "src-tauri/tauri.full-installer.conf.json",
+    "src-tauri/tauri.windows.offline-release.conf.json",
 ]
 cwd = "${CARGO_MAKE_WORKING_DIRECTORY}/bin/slab-app"
 env = { SLAB_SKIP_VENDOR_RUNTIME_SYNC = "1" }
