@@ -65,7 +65,7 @@ impl LlmPort for ServerLlmAdapter {
                 stop: vec![],
                 stream_options: ChatStreamOptions::default(),
             },
-            local: LocalChatParams { grammar: None, structured_output: None },
+            local: LocalChatParams { gbnf: None, structured_output: None },
             cloud: CloudChatParams {
                 reasoning_effort: None,
                 verbosity: None,

@@ -22,7 +22,7 @@
 use std::sync::Arc;
 
 use serde_json::json;
-use slab_llama::{ChatMessage as LlamaChatMessage, LlamaInferenceParams, LlamaLoadConfig};
+use slab_llama::{LlamaInferenceParams, LlamaLoadConfig};
 use tokio::sync::{broadcast, watch};
 
 use crate::infra::backends::ggml::llama::adapter::{
@@ -40,9 +40,7 @@ use slab_runtime_macros::backend_handler;
 struct InferenceOptions {
     max_tokens: usize,
     session_key: Option<String>,
-    apply_chat_template: bool,
-    chat_messages: Vec<LlamaChatMessage>,
-    grammar: Option<String>,
+    gbnf: Option<String>,
 }
 
 impl InferenceOptions {
@@ -50,9 +48,7 @@ impl InferenceOptions {
         Self {
             max_tokens: if params.max_tokens == 0 { 256 } else { params.max_tokens },
             session_key: params.session_key,
-            apply_chat_template: params.apply_chat_template,
-            chat_messages: params.chat_messages,
-            grammar: params.grammar,
+            gbnf: params.gbnf,
         }
     }
 }
@@ -207,7 +203,6 @@ impl LlamaWorker {
                 LlamaModelParams::default(),
                 ctx_params,
                 config.num_workers,
-                config.chat_template,
             )
         });
 
@@ -252,13 +247,7 @@ impl LlamaWorker {
         options: InferenceOptions,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let InferenceOptions {
-            max_tokens,
-            session_key,
-            apply_chat_template,
-            chat_messages,
-            grammar,
-        } = options;
+        let InferenceOptions { max_tokens, session_key, gbnf } = options;
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
@@ -274,14 +263,7 @@ impl LlamaWorker {
                 return;
             }
         };
-        let request = LlamaDispatchRequest {
-            prompt,
-            max_tokens,
-            session_key,
-            apply_chat_template,
-            chat_messages,
-            grammar,
-        };
+        let request = LlamaDispatchRequest { prompt, max_tokens, session_key, gbnf };
 
         match engine.dispatch_inference(request).await {
             Ok(LlamaDispatchOutput { text, usage }) => {
@@ -307,13 +289,7 @@ impl LlamaWorker {
         cancel_rx: watch::Receiver<bool>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let InferenceOptions {
-            max_tokens,
-            session_key,
-            apply_chat_template,
-            chat_messages,
-            grammar,
-        } = options;
+        let InferenceOptions { max_tokens, session_key, gbnf } = options;
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
@@ -333,9 +309,7 @@ impl LlamaWorker {
             prompt: prompt.as_ref().to_owned(),
             max_tokens,
             session_key,
-            apply_chat_template,
-            chat_messages,
-            grammar,
+            gbnf,
         };
 
         match engine.dispatch_inference_stream(request, cancel_rx).await {
@@ -368,38 +342,10 @@ pub fn spawn_backend_with_engine(
 #[cfg(test)]
 mod tests {
     use super::LlamaWorker;
-    use crate::infra::backends::ggml::llama::adapter::infer_add_assistant_prompt;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::RuntimeControlSignal;
 
     // ── infer_add_assistant_prompt ────────────────────────────────────────────
-
-    fn msg(role: &str, content: &str) -> super::LlamaChatMessage {
-        super::LlamaChatMessage { role: role.to_owned(), content: content.to_owned() }
-    }
-
-    #[test]
-    fn infer_add_assistant_returns_true_for_empty_messages() {
-        assert!(infer_add_assistant_prompt(&[]), "empty list should default to add_assistant=true");
-    }
-
-    #[test]
-    fn infer_add_assistant_returns_true_when_last_role_is_user() {
-        let messages = vec![msg("user", "hello")];
-        assert!(
-            infer_add_assistant_prompt(&messages),
-            "user-last messages should yield add_assistant=true"
-        );
-    }
-
-    #[test]
-    fn infer_add_assistant_returns_false_when_last_role_is_assistant() {
-        let messages = vec![msg("user", "hello"), msg("assistant", "hi there")];
-        assert!(
-            !infer_add_assistant_prompt(&messages),
-            "assistant-last messages (prefill) should yield add_assistant=false"
-        );
-    }
 
     // ── LlamaWorker session management ────────────────────────────────────────
 

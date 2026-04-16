@@ -55,7 +55,7 @@ const MODEL_DOWNLOAD_TIMEOUT_MS = 30 * 60 * 1_000
 type ModelOptionSource = "local" | "cloud"
 
 type ChatModelCapabilities = {
-  raw_grammar: boolean
+  raw_gbnf: boolean
   structured_output: boolean
   reasoning_controls: boolean
 }
@@ -84,12 +84,12 @@ function createConversationLabel(value: string, fallback: string) {
 function defaultCapabilitiesForSource(source: ModelOptionSource): ChatModelCapabilities {
   return source === "cloud"
     ? {
-        raw_grammar: false,
+        raw_gbnf: false,
         structured_output: true,
         reasoning_controls: true,
       }
     : {
-        raw_grammar: true,
+        raw_gbnf: true,
         structured_output: true,
         reasoning_controls: false,
       }

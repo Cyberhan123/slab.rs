@@ -431,7 +431,6 @@ pub(super) fn canonicalize_model_spec(
     spec.hub_provider = canonical_hub_provider;
     spec.filename = normalize_optional_text(spec.filename);
     spec.local_path = normalize_optional_text(spec.local_path);
-    spec.chat_template = normalize_optional_text(spec.chat_template);
 
     match kind {
         UnifiedModelKind::Cloud => {
@@ -439,7 +438,6 @@ pub(super) fn canonicalize_model_spec(
             spec.hub_provider = None;
             spec.filename = None;
             spec.local_path = None;
-            spec.chat_template = None;
 
             if spec.provider_id.is_none() {
                 return Err(AppCoreError::BadRequest(

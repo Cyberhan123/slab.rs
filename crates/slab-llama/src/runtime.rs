@@ -8,8 +8,7 @@ use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
 
 use crate::{
-    ChatMessage, LlamaBatch, LlamaContext, LlamaContextParams, LlamaError, LlamaModel, LlamaSeqId,
-    LlamaToken,
+    LlamaBatch, LlamaContext, LlamaContextParams, LlamaError, LlamaModel, LlamaSeqId, LlamaToken,
 };
 
 pub type SessionId = u64;
@@ -21,69 +20,6 @@ pub struct LlamaSessionSnapshot {
     pub state: Arc<[u8]>,
 }
 
-/// Minimal GBNF grammar that constrains output to a valid JSON value.
-pub const GRAMMAR_JSON: &str = r#"root   ::= value
-value  ::= object | array | string | number | "true" | "false" | "null"
-object ::=
-    "{" ws (
-                        string ":" ws value
-        ("," ws string ":" ws value)*
-    )? "}" ws
-array ::=
-    "[" ws (
-                        value
-        ("," ws value)*
-    )? "]" ws
-string ::=
-    "\"" (
-        [^\\"\x7F\x00-\x1F] |
-        "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
-    )* "\"" ws
-number ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? (([eE] [-+]? [0-9]+))? ws
-ws     ::= ([ \t\n] ws)?
-"#;
-
-/// GBNF grammar for tool-call envelope: {"tool":"<name>","arguments":{...}}.
-pub const GRAMMAR_TOOL_CALL: &str = r#"root      ::= "{" ws "\"tool\"" ws ":" ws string ws "," ws "\"arguments\"" ws ":" ws object ws "}"
-object    ::=
-    "{" ws (
-                        string ":" ws value
-        ("," ws string ":" ws value)*
-    )? "}" ws
-value     ::= object | array | string | number | "true" | "false" | "null"
-array     ::=
-    "[" ws (
-                        value
-        ("," ws value)*
-    )? "]" ws
-string    ::=
-    "\"" (
-        [^\\"\x7F\x00-\x1F] |
-        "\\" (["\\/bfnrt] | "u" [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F] [0-9a-fA-F])
-    )* "\"" ws
-number    ::= ("-"? ([0-9] | [1-9] [0-9]*)) ("." [0-9]+)? (([eE] [-+]? [0-9]+))? ws
-ws        ::= ([ \t\n] ws)?
-"#;
-
-pub fn resolve_grammar(
-    grammar: Option<&str>,
-    grammar_json: bool,
-    grammar_tool_call: bool,
-) -> Option<String> {
-    if let Some(grammar) = grammar
-        && !grammar.is_empty()
-    {
-        return Some(grammar.to_owned());
-    }
-    if grammar_json {
-        return Some(GRAMMAR_JSON.to_owned());
-    }
-    if grammar_tool_call {
-        return Some(GRAMMAR_TOOL_CALL.to_owned());
-    }
-    None
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlamaLoadConfig {
     pub model_path: PathBuf,
@@ -91,15 +27,15 @@ pub struct LlamaLoadConfig {
     pub context_length: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gbnf: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LlamaInferenceParams {
     pub max_tokens: usize,
     pub session_key: Option<String>,
-    pub apply_chat_template: bool,
-    pub chat_messages: Vec<ChatMessage>,
-    pub grammar: Option<String>,
+    pub gbnf: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -619,7 +555,7 @@ impl InferenceWorkerState {
                     return;
                 };
 
-                let sampler = self.model.new_sampler_with_grammar(grammar.as_deref());
+                let sampler = self.model.new_sampler_with_gbnf(grammar.as_deref());
                 let mut state = SessionState {
                     seq_id,
                     n_past: 0,
@@ -996,16 +932,16 @@ impl LlamaRuntime {
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub async fn create_session(&self) -> Result<SessionId, LlamaRuntimeError> {
-        self.create_session_with_grammar(None).await
+        self.create_session_with_gbnf(None).await
     }
 
-    pub async fn create_session_with_grammar(
+    pub async fn create_session_with_gbnf(
         &self,
-        grammar: Option<String>,
+        gbnf: Option<String>,
     ) -> Result<SessionId, LlamaRuntimeError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
-            .send(GlobalCommand::CreateSession { grammar, reply_tx })
+            .send(GlobalCommand::CreateSession { grammar: gbnf, reply_tx })
             .await
             .map_err(|_| LlamaRuntimeError::WorkerShutdown)?;
         reply_rx.await.map_err(|_| LlamaRuntimeError::WorkerShutdown)?
@@ -1014,11 +950,11 @@ impl LlamaRuntime {
     pub async fn create_session_from_snapshot(
         &self,
         snapshot: LlamaSessionSnapshot,
-        grammar: Option<String>,
+        gbnf: Option<String>,
     ) -> Result<SessionId, LlamaRuntimeError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
-            .send(GlobalCommand::CreateSessionFromSnapshot { grammar, snapshot, reply_tx })
+            .send(GlobalCommand::CreateSessionFromSnapshot { grammar: gbnf, snapshot, reply_tx })
             .await
             .map_err(|_| LlamaRuntimeError::WorkerShutdown)?;
         reply_rx.await.map_err(|_| LlamaRuntimeError::WorkerShutdown)?

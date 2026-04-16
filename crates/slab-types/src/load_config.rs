@@ -3,6 +3,8 @@ use std::path::PathBuf;
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::{GbnfAssetRef, TemplateAssetRef};
+
 /// Typed `model.load` payload for the `ggml.llama` backend.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct GgmlLlamaLoadConfig {
@@ -12,6 +14,18 @@ pub struct GgmlLlamaLoadConfig {
     pub context_length: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gbnf: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+pub struct GgmlLlamaLoadDefaultsConfig {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub context_length: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub chat_template: Option<TemplateAssetRef>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gbnf: Option<GbnfAssetRef>,
 }
 
 /// Typed `model.load` payload for the `ggml.whisper` backend.
@@ -136,6 +150,7 @@ impl RuntimeBackendLoadSpec {
             num_workers,
             context_length,
             chat_template,
+            gbnf,
             diffusion,
         } = spec;
 
@@ -150,6 +165,7 @@ impl RuntimeBackendLoadSpec {
                 })?,
                 context_length,
                 chat_template,
+                gbnf,
             }),
             crate::backend::RuntimeBackendId::GgmlWhisper => {
                 Self::GgmlWhisper(GgmlWhisperLoadConfig { model_path })
@@ -209,6 +225,7 @@ impl RuntimeBackendLoadSpec {
                 num_workers: u32::try_from(config.num_workers).unwrap_or(u32::MAX),
                 context_length: config.context_length,
                 chat_template: config.chat_template.clone(),
+                gbnf: config.gbnf.clone(),
                 diffusion: None,
             },
             Self::GgmlWhisper(config) => crate::runtime::RuntimeModelLoadSpec {

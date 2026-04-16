@@ -10,6 +10,7 @@ message GgmlLlamaLoadParams {
   uint32 num_workers = 1;
   optional uint32 context_length = 2;
   optional string chat_template = 3;
+  optional string gbnf = 4;
 }
 
 message GgmlWhisperLoadParams {}

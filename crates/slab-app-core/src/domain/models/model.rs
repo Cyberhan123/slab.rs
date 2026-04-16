@@ -180,9 +180,6 @@ pub struct ModelSpec {
     /// Maximum context window size in tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_window: Option<u32>,
-    /// Optional chat prompt template name for local chat rendering.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub chat_template: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -389,7 +386,6 @@ pub struct UpdateModelEnhancementCommand {
     pub selected_preset_id: Option<String>,
     pub selected_variant_id: Option<String>,
     pub context_window: Option<u32>,
-    pub chat_template: Option<String>,
     pub runtime_presets: Option<RuntimePresets>,
 }
 

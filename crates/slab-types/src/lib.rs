@@ -14,6 +14,7 @@
 //! - [`whisper`] shared whisper VAD and decode option types.
 
 pub mod agent;
+pub mod asset_ref;
 pub mod backend;
 pub mod chat;
 pub mod common;
@@ -27,6 +28,7 @@ pub mod settings;
 pub mod whisper;
 
 pub use agent::{AgentThreadStatus, ToolCallStatus};
+pub use asset_ref::{AssetRef, GbnfAssetRef, TemplateAssetRef};
 pub use backend::RuntimeBackendId;
 pub use chat::{
     ChatModelSource, ChatReasoningEffort, ChatVerbosity, ConversationContentPart,
@@ -48,8 +50,8 @@ pub use inference::{
 };
 pub use load_config::{
     CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
-    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
-    RuntimeBackendLoadSpec,
+    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlLlamaLoadDefaultsConfig,
+    GgmlWhisperLoadConfig, OnnxLoadConfig, RuntimeBackendLoadSpec,
 };
 pub use media::{GeneratedFrame, GeneratedImage, RawImageInput};
 pub use runtime::{

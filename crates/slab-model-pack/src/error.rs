@@ -1,4 +1,5 @@
 use std::io;
+use std::string::FromUtf8Error;
 
 use thiserror::Error;
 use zip::result::ZipError;
@@ -48,6 +49,13 @@ pub enum ModelPackError {
         source: serde_json::Error,
     },
 
+    #[error("invalid UTF-8 text asset '{path}': {source}")]
+    InvalidTextAsset {
+        path: String,
+        #[source]
+        source: FromUtf8Error,
+    },
+
     #[error("duplicate JSON document path '{path}' in .slab archive")]
     DuplicateDocumentPath { path: String },
 
@@ -76,6 +84,15 @@ pub enum ModelPackError {
 
     #[error("backend config '{id}' payload must be a JSON object")]
     InvalidBackendConfigPayloadShape { id: String },
+
+    #[error("backend config '{id}' field '{field}' is not supported: {message}")]
+    UnsupportedBackendConfigField { id: String, field: String, message: String },
+
+    #[error("backend config '{id}' field '{field}' has an invalid asset ref: {message}")]
+    InvalidBackendConfigAssetRef { id: String, field: String, message: String },
+
+    #[error("backend config '{id}' field '{field}' references missing asset '{path}'")]
+    MissingBackendConfigAsset { id: String, field: String, path: String },
 
     #[error(
         "resolved preset '{preset_id}' could not build a typed runtime load command: {message}"

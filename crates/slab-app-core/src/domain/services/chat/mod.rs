@@ -1,6 +1,7 @@
 //! OpenAI-compatible chat completion routes.
 
 mod cloud;
+mod gbnf;
 mod local;
 mod template;
 
@@ -488,10 +489,10 @@ fn validate_chat_route_params(
     command: &ChatCompletionCommand,
 ) -> Result<(), AppCoreError> {
     if route_to_cloud {
-        if command.local.grammar.is_some() {
+        if command.local.gbnf.is_some() {
             return Err(unsupported_chat_parameter(
-                "grammar",
-                "cloud chat completions do not support raw grammar constraints",
+                "gbnf",
+                "cloud chat completions do not support raw gbnf constraints",
             ));
         }
         validate_cloud_structured_output(command.cloud.structured_output.as_ref())?;
@@ -506,10 +507,10 @@ fn validate_text_route_params(
     command: &TextCompletionCommand,
 ) -> Result<(), AppCoreError> {
     if route_to_cloud {
-        if command.local.grammar.is_some() {
+        if command.local.gbnf.is_some() {
             return Err(unsupported_chat_parameter(
-                "grammar",
-                "cloud text completions do not support raw grammar constraints",
+                "gbnf",
+                "cloud text completions do not support raw gbnf constraints",
             ));
         }
         validate_cloud_structured_output(command.cloud.structured_output.as_ref())?;
@@ -638,8 +639,8 @@ async fn create_chat_completion_with_state(
                     top_p: command.common.top_p,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
-                    grammar: command.local.grammar.clone(),
-                    grammar_json: command.local.structured_output.is_some(),
+                    gbnf: command.local.gbnf.clone(),
+                    structured_output: command.local.structured_output.clone(),
                     stream: true,
                     include_usage: command.common.stream_options.include_usage,
                 },
@@ -713,8 +714,8 @@ async fn create_chat_completion_with_state(
                     top_p: command.common.top_p,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
-                    grammar: command.local.grammar.clone(),
-                    grammar_json: command.local.structured_output.is_some(),
+                    gbnf: command.local.gbnf.clone(),
+                    structured_output: command.local.structured_output.clone(),
                     stream: false,
                     include_usage: false,
                 },
@@ -831,8 +832,8 @@ async fn create_text_completion_with_state(
                     top_p: command.common.top_p,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
-                    grammar: command.local.grammar.clone(),
-                    grammar_json: command.local.structured_output.is_some(),
+                    gbnf: command.local.gbnf.clone(),
+                    structured_output: command.local.structured_output.clone(),
                 },
             )
             .await?
@@ -960,10 +961,7 @@ mod test {
                 stop: Vec::new(),
                 stream_options: Default::default(),
             },
-            local: crate::domain::models::LocalChatParams {
-                grammar: None,
-                structured_output: None,
-            },
+            local: crate::domain::models::LocalChatParams { gbnf: None, structured_output: None },
             cloud: crate::domain::models::CloudChatParams {
                 reasoning_effort: None,
                 verbosity: None,
@@ -986,10 +984,7 @@ mod test {
                 stop: Vec::new(),
                 stream_options: Default::default(),
             },
-            local: crate::domain::models::LocalChatParams {
-                grammar: None,
-                structured_output: None,
-            },
+            local: crate::domain::models::LocalChatParams { gbnf: None, structured_output: None },
             cloud: crate::domain::models::CloudChatParams {
                 reasoning_effort: None,
                 verbosity: None,
@@ -1095,9 +1090,9 @@ mod test {
     }
 
     #[test]
-    fn cloud_route_rejects_raw_grammar() {
+    fn cloud_route_rejects_raw_gbnf() {
         let mut command = make_command("user", "hello");
-        command.local.grammar = Some("root ::= \"ok\"".into());
+        command.local.gbnf = Some("root ::= \"ok\"".into());
 
         let result = validate_chat_route_params(true, &command);
 

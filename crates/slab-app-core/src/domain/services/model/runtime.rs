@@ -21,6 +21,12 @@ use super::{ModelService, catalog, pack};
 
 const DEFAULT_MODEL_NUM_WORKERS: u32 = 1;
 
+#[derive(Debug, Clone, Default)]
+pub(crate) struct LocalLlamaPromptProfile {
+    pub(crate) chat_template_source: Option<String>,
+    pub(crate) default_gbnf: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 struct ResolvedModelLoadTarget {
     backend_id: RuntimeBackendId,
@@ -65,6 +71,35 @@ impl ModelService {
     ) -> Result<ModelStatus, AppCoreError> {
         load_model_with_state(self.model_state.clone(), action, log_message, command).await
     }
+}
+
+pub(crate) async fn resolve_local_chat_prompt_profile(
+    state: &ModelState,
+    model_id: &str,
+) -> Result<LocalLlamaPromptProfile, AppCoreError> {
+    let model = resolve_local_catalog_model(state, model_id).await?;
+    let backend_id = resolve_local_backend_from_model(&model)?;
+    if backend_id != RuntimeBackendId::GgmlLlama {
+        return Err(AppCoreError::BadRequest(format!(
+            "model '{model_id}' uses backend '{}' and does not support local llama chat prompt rendering",
+            backend_id.canonical_id()
+        )));
+    }
+
+    let Some(model_path) = model.spec.local_path.as_deref() else {
+        return Ok(LocalLlamaPromptProfile::default());
+    };
+    if !model_packs::is_model_pack_path(model_path) {
+        return Ok(LocalLlamaPromptProfile::default());
+    }
+
+    let pack_target =
+        build_selected_model_pack_load_target(state, model_id, std::path::Path::new(model_path))
+            .await?;
+    Ok(LocalLlamaPromptProfile {
+        chat_template_source: pack_target.load_defaults.chat_template_source,
+        default_gbnf: pack_target.load_defaults.gbnf_source,
+    })
 }
 
 pub(super) fn validate_and_normalize_model_workers(
@@ -263,7 +298,11 @@ async fn load_model_with_state(
         resolved_target
             .pack_load_defaults
             .as_ref()
-            .and_then(|defaults| defaults.chat_template.clone()),
+            .and_then(|defaults| defaults.chat_template_source.clone()),
+        resolved_target
+            .pack_load_defaults
+            .as_ref()
+            .and_then(|defaults| defaults.gbnf_source.clone()),
         diffusion,
     )?;
     let grpc_req = build_model_load_request(&load_spec);
@@ -288,6 +327,7 @@ fn build_backend_load_spec(
     num_workers: u32,
     context_length: u32,
     chat_template: Option<String>,
+    gbnf: Option<String>,
     diffusion: Option<DiffusionLoadOptions>,
 ) -> Result<RuntimeBackendLoadSpec, AppCoreError> {
     let model_path = PathBuf::from(model_path);
@@ -302,6 +342,7 @@ fn build_backend_load_spec(
             })?,
             context_length: (context_length > 0).then_some(context_length),
             chat_template,
+            gbnf,
         })),
         RuntimeBackendId::GgmlWhisper => {
             Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path }))

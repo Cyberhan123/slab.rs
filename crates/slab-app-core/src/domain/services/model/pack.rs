@@ -493,7 +493,6 @@ pub(super) fn build_local_model_command_from_pack_preset(
                             .flatten()
                     }),
                     context_window: manifest.context_window.or(bridge.load_defaults.context_length),
-                    chat_template: bridge.load_defaults.chat_template.clone(),
                     ..Default::default()
                 },
                 runtime_presets,
@@ -559,7 +558,6 @@ pub(super) fn build_local_model_command_from_pack_preset(
                             .flatten()
                     }),
                     context_window: manifest.context_window,
-                    chat_template: None,
                     ..Default::default()
                 },
                 runtime_presets: runtime_presets_from_manifest(manifest),

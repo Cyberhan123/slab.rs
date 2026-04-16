@@ -726,8 +726,8 @@ export interface components {
         ChatCompletionRequest: {
             /** @description When `true`, continue generating from the last assistant message instead of starting a new turn. */
             continue_generation?: boolean;
-            /** @description Raw grammar passed through to the local llama backend. */
-            grammar?: string | null;
+            /** @description Raw GBNF passed through to the local llama backend. */
+            gbnf?: string | null;
             /** @description Optional chat session ID for stateful conversations. */
             id?: string | null;
             /** @description Legacy llama.cpp-compatible top-level JSON schema field. */
@@ -843,7 +843,7 @@ export interface components {
         };
         ChatMessageContent: string | components["schemas"]["ChatContentPart"][];
         ChatModelCapabilities: {
-            raw_grammar: boolean;
+            raw_gbnf: boolean;
             reasoning_controls: boolean;
             structured_output: boolean;
         };
@@ -945,8 +945,8 @@ export interface components {
         };
         /** @description Request body for `POST /v1/completions`. */
         CompletionRequest: {
-            /** @description Raw grammar passed through to the local llama backend. */
-            grammar?: string | null;
+            /** @description Raw GBNF passed through to the local llama backend. */
+            gbnf?: string | null;
             /** @description Legacy llama.cpp-compatible top-level JSON schema field. */
             json_schema?: unknown;
             /**
@@ -1285,8 +1285,6 @@ export interface components {
         ModelKind: "local" | "cloud";
         /** @description Provider-specific model configuration (request). */
         ModelSpecRequest: {
-            /** @description Optional prompt template name used for local chat rendering. */
-            chat_template?: string | null;
             /**
              * Format: int32
              * @description Maximum context window size in tokens.
@@ -1311,7 +1309,6 @@ export interface components {
         };
         /** @description Provider-specific model configuration (response). */
         ModelSpecResponse: {
-            chat_template?: string | null;
             /** Format: int32 */
             context_window?: number | null;
             filename?: string | null;

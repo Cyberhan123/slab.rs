@@ -668,9 +668,6 @@ fn build_generated_load_config(
     if let Some(context_window) = config.spec.context_window {
         payload.insert("context_length".into(), Value::from(context_window));
     }
-    if let Some(chat_template) = config.spec.chat_template.as_deref() {
-        payload.insert("chat_template".into(), Value::from(chat_template.to_owned()));
-    }
 
     (!payload.is_empty()).then_some(Ok(BackendConfigDocument {
         id: GENERATED_LOAD_CONFIG_ID.to_owned(),
@@ -1003,11 +1000,19 @@ mod tests {
                     "scope": "load",
                     "payload": {
                         "context_length": 8192,
-                        "chat_template": "chatml",
+                        "chat_template": {
+                            "id": "chatml-template",
+                            "name": "ChatML",
+                            "$path": "ref://models/assets/chat_template.jinja"
+                        },
                         "num_workers": 2
                     }
                 })
                 .to_string(),
+            ),
+            (
+                "models/assets/chat_template.jinja",
+                "{% for message in messages %}<|im_start|>{{ message.role }}\n{{ message.content }}<|im_end|>\n{% endfor %}{% if add_generation_prompt %}<|im_start|>assistant\n{% endif %}".to_owned(),
             ),
             (
                 "models/configs/inference.json",
@@ -1056,7 +1061,6 @@ mod tests {
         assert_eq!(command.spec.filename.as_deref(), Some("Qwen2.5-7B-Instruct-Q4_K_M.gguf"));
         assert_eq!(command.spec.local_path, None);
         assert_eq!(command.spec.context_window, Some(32768));
-        assert_eq!(command.spec.chat_template.as_deref(), Some("chatml"));
         assert_eq!(
             command.runtime_presets.as_ref().and_then(|presets| presets.temperature),
             Some(0.4)
@@ -1652,7 +1656,6 @@ fn build_local_model_command(
                     .flatten()
             }),
             context_window: manifest.context_window.or(bridge.load_defaults.context_length),
-            chat_template: bridge.load_defaults.chat_template.clone(),
             ..Default::default()
         },
         runtime_presets,

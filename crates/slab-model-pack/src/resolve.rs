@@ -16,11 +16,21 @@ pub struct ResolvedModelPack {
     pub variants: BTreeMap<String, ResolvedVariant>,
     pub presets: BTreeMap<String, ResolvedPreset>,
     pub default_preset_id: Option<String>,
+    pub text_assets: BTreeMap<String, String>,
 }
 
 impl ResolvedModelPack {
     pub fn default_preset(&self) -> Option<&ResolvedPreset> {
         self.default_preset_id.as_ref().and_then(|id| self.presets.get(id))
+    }
+
+    pub fn text_asset(&self, config_ref: &ConfigRef) -> Result<&str, ModelPackError> {
+        self.text_assets.get(config_ref.path()).map(String::as_str).ok_or_else(|| {
+            ModelPackError::MissingReferencedDocument {
+                from: "resolved_model_pack".into(),
+                path: config_ref.path().into(),
+            }
+        })
     }
 }
 
@@ -68,6 +78,7 @@ impl ModelPack {
             variants,
             presets,
             default_preset_id,
+            text_assets: self.text_assets().clone(),
         })
     }
 

@@ -4,6 +4,7 @@ mod pack;
 mod runtime;
 
 pub(crate) use catalog::list_chat_models_from_state;
+pub(crate) use runtime::resolve_local_chat_prompt_profile;
 
 use std::path::PathBuf;
 
@@ -175,7 +176,24 @@ impl ModelService {
                 }
             }
             if let Some(chat_template) = bridge.load_defaults.chat_template.as_ref() {
-                object.insert("chat_template".into(), Value::String(chat_template.clone()));
+                object.insert(
+                    "chat_template".into(),
+                    serde_json::to_value(chat_template).map_err(|error| {
+                        AppCoreError::Internal(format!(
+                            "failed to serialize load.chat_template for config document: {error}"
+                        ))
+                    })?,
+                );
+            }
+            if let Some(gbnf) = bridge.load_defaults.gbnf.as_ref() {
+                object.insert(
+                    "gbnf".into(),
+                    serde_json::to_value(gbnf).map_err(|error| {
+                        AppCoreError::Internal(format!(
+                            "failed to serialize load.gbnf for config document: {error}"
+                        ))
+                    })?,
+                );
             }
         }
 
@@ -365,10 +383,23 @@ impl ModelService {
                     "load.chat_template",
                     ModelConfigFieldScope::Load,
                     "Chat Template",
-                    Some("Effective chat template resolved for llama chat formatting.".into()),
-                    ModelConfigValueType::String,
+                    Some("Configured llama chat template asset reference.".into()),
+                    ModelConfigValueType::Json,
                     json_property_or_null(resolved_load_spec, "chat_template"),
                     if bridge.load_defaults.chat_template.is_some() {
+                        ModelConfigOrigin::SelectedBackendConfig
+                    } else {
+                        ModelConfigOrigin::Derived
+                    },
+                ));
+                load_fields.push(build_model_config_field(
+                    "load.gbnf",
+                    ModelConfigFieldScope::Load,
+                    "GBNF",
+                    Some("Configured llama GBNF asset reference.".into()),
+                    ModelConfigValueType::Json,
+                    json_property_or_null(resolved_load_spec, "gbnf"),
+                    if bridge.load_defaults.gbnf.is_some() {
                         ModelConfigOrigin::SelectedBackendConfig
                     } else {
                         ModelConfigOrigin::Derived
@@ -1059,7 +1090,6 @@ mod tests {
                 hub_provider: Some("hf".into()),
                 filename: Some("qwen3-8b.gguf".into()),
                 local_path: Some("C:/models/qwen3-8b.gguf".into()),
-                chat_template: Some("chatml".into()),
                 ..ModelSpec::default()
             },
         )
@@ -1069,7 +1099,6 @@ mod tests {
         assert!(spec.hub_provider.is_none());
         assert!(spec.filename.is_none());
         assert!(spec.local_path.is_none());
-        assert!(spec.chat_template.is_none());
     }
 
     #[test]
@@ -1340,6 +1369,7 @@ mod tests {
         let resolved = slab_model_pack::ResolvedModelPack {
             manifest: manifest.clone(),
             components: BTreeMap::new(),
+            text_assets: BTreeMap::new(),
             adapters: BTreeMap::new(),
             variants: BTreeMap::new(),
             presets,

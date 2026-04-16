@@ -1,8 +1,7 @@
 use crate::infra::backends::ggml;
 use slab_llama::Llama;
 use slab_llama::{
-    ChatMessage, LlamaContextParams, LlamaModel, LlamaModelParams, LlamaRuntime,
-    LlamaSessionSnapshot,
+    LlamaContextParams, LlamaModel, LlamaModelParams, LlamaRuntime, LlamaSessionSnapshot,
 };
 use slab_runtime_core::backend::{
     StreamChunk as BaseStreamChunk, StreamHandle as BaseStreamHandle,
@@ -22,9 +21,7 @@ pub(crate) struct LlamaDispatchRequest {
     pub prompt: String,
     pub max_tokens: usize,
     pub session_key: Option<String>,
-    pub apply_chat_template: bool,
-    pub chat_messages: Vec<ChatMessage>,
-    pub grammar: Option<String>,
+    pub gbnf: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,60 +51,11 @@ struct PreparedSession {
     cached_tokens: u32,
 }
 
-struct ParsedChatPrompt {
-    messages: Vec<ChatMessage>,
-    add_assistant_prompt: bool,
-}
-
-fn parse_role_prefixed_chat_prompt(prompt: &str) -> Option<ParsedChatPrompt> {
-    if !(prompt.contains("User:") || prompt.contains("Assistant:") || prompt.contains("System:")) {
-        return None;
-    }
-
-    let mut messages: Vec<ChatMessage> = Vec::new();
-    for raw_line in prompt.lines() {
-        let line = raw_line.trim_end();
-        if line.is_empty() {
-            continue;
-        }
-        let (raw_role, raw_content) = line.split_once(':')?;
-        let role = raw_role.trim().to_ascii_lowercase();
-        if !matches!(role.as_str(), "system" | "user" | "assistant") {
-            return None;
-        }
-        messages.push(ChatMessage { role, content: raw_content.trim_start().to_owned() });
-    }
-
-    if messages.is_empty() {
-        return None;
-    }
-
-    let mut add_assistant_prompt = false;
-    if let Some(last) = messages.last() {
-        if last.role == "assistant" && last.content.is_empty() {
-            let _ = messages.pop();
-            add_assistant_prompt = true;
-        } else if last.role != "assistant" {
-            add_assistant_prompt = true;
-        }
-    }
-
-    if messages.is_empty() && !add_assistant_prompt {
-        return None;
-    }
-
-    Some(ParsedChatPrompt { messages, add_assistant_prompt })
-}
-
-pub(super) fn infer_add_assistant_prompt(messages: &[ChatMessage]) -> bool {
-    messages.last().map(|message| message.role != "assistant").unwrap_or(true)
-}
-
 fn plan_session_reuse(
     key: &str,
     existing: Option<&SessionBinding>,
     full_prompt: &str,
-    grammar: Option<&str>,
+    gbnf: Option<&str>,
 ) -> Result<SessionReusePlan, GGMLLlamaEngineError> {
     match existing {
         None => Ok(SessionReusePlan::CreateFresh {
@@ -118,7 +66,7 @@ fn plan_session_reuse(
             Err(GGMLLlamaEngineError::SessionKeyBusy { key: key.to_owned() })
         }
         Some(SessionBinding::Ready { snapshot, cached_prompt, grammar: cached_grammar }) => {
-            if cached_grammar.as_deref() != grammar {
+            if cached_grammar.as_deref() != gbnf {
                 return Ok(SessionReusePlan::CreateFresh {
                     delta_prompt: full_prompt.to_owned(),
                     cached_tokens: 0,
@@ -145,7 +93,6 @@ pub struct GGMLLlamaEngine {
     instance: Arc<Llama>,
     inference_engine: RwLock<Option<LlamaRuntime>>,
     loaded_model: RwLock<Option<Arc<LlamaModel>>>,
-    explicit_chat_template: RwLock<Option<String>>,
     session_bindings: Mutex<HashMap<String, SessionBinding>>,
 }
 
@@ -186,7 +133,6 @@ impl GGMLLlamaEngine {
                 instance: Arc::new(llama),
                 inference_engine: RwLock::new(None),
                 loaded_model: RwLock::new(None),
-                explicit_chat_template: RwLock::new(None),
                 session_bindings: Mutex::new(HashMap::new()),
             }))
         })
@@ -201,7 +147,6 @@ impl GGMLLlamaEngine {
         model_params: LlamaModelParams,
         ctx_params: LlamaContextParams,
         num_workers: usize,
-        chat_template: Option<String>,
     ) -> Result<(), ggml::EngineError> {
         if num_workers == 0 {
             return Err(GGMLLlamaEngineError::InvalidWorkerCount { num_workers }.into());
@@ -215,12 +160,6 @@ impl GGMLLlamaEngine {
             GGMLLlamaEngineError::LockPoisoned { operation: "lock loaded llama model state" }
         })?;
         *model_write_lock = None;
-        let mut template_write_lock = self.explicit_chat_template.write().map_err(|_| {
-            GGMLLlamaEngineError::LockPoisoned {
-                operation: "lock explicit llama chat template state",
-            }
-        })?;
-        *template_write_lock = None;
         self.session_bindings.blocking_lock().clear();
 
         let path =
@@ -236,16 +175,7 @@ impl GGMLLlamaEngine {
 
         *write_lock = Some(engine);
         *model_write_lock = Some(model);
-        *template_write_lock = chat_template.filter(|value| !value.trim().is_empty());
         Ok(())
-    }
-
-    fn explicit_chat_template(&self) -> Result<Option<String>, ggml::EngineError> {
-        let read_lock =
-            self.explicit_chat_template.read().map_err(|_| GGMLLlamaEngineError::LockPoisoned {
-                operation: "read explicit llama chat template state",
-            })?;
-        Ok(read_lock.clone())
     }
 
     fn require_engine(&self) -> Result<LlamaRuntime, ggml::EngineError> {
@@ -265,59 +195,11 @@ impl GGMLLlamaEngine {
         Ok(Arc::clone(model))
     }
 
-    /// Apply the current model chat template to structured chat messages.
-    pub fn apply_chat_template(
-        &self,
-        messages: &[ChatMessage],
-        add_assistant_prompt: bool,
-    ) -> Result<String, ggml::EngineError> {
-        let model = self.require_model()?;
-        if let Some(template) = self.explicit_chat_template()? {
-            return model
-                .apply_chat_template_str(&template, messages, add_assistant_prompt)
-                .map_err(|source| GGMLLlamaEngineError::ApplyChatTemplate { source }.into());
-        }
-
-        model
-            .apply_chat_template(None, messages, add_assistant_prompt)
-            .map_err(|source| GGMLLlamaEngineError::ApplyChatTemplate { source }.into())
-    }
-
-    fn render_prompt(&self, request: &LlamaDispatchRequest) -> String {
-        if request.apply_chat_template && !request.chat_messages.is_empty() {
-            let add_assistant = infer_add_assistant_prompt(&request.chat_messages);
-            match self.apply_chat_template(&request.chat_messages, add_assistant) {
-                Ok(applied) => return applied,
-                Err(error) => {
-                    warn!(
-                        error = %error,
-                        "failed to apply embedded chat template; falling back to raw prompt"
-                    );
-                }
-            }
-        }
-
-        let Some(parsed) = parse_role_prefixed_chat_prompt(&request.prompt) else {
-            return request.prompt.clone();
-        };
-
-        match self.apply_chat_template(&parsed.messages, parsed.add_assistant_prompt) {
-            Ok(applied) => applied,
-            Err(error) => {
-                warn!(
-                    error = %error,
-                    "failed to apply llama chat template; falling back to raw prompt"
-                );
-                request.prompt.clone()
-            }
-        }
-    }
-
     async fn prepare_managed_session(
         &self,
         session_key: Option<String>,
         full_prompt: String,
-        grammar: Option<String>,
+        gbnf: Option<String>,
     ) -> Result<PreparedSession, ggml::EngineError> {
         let Some(key) = session_key else {
             return Ok(PreparedSession {
@@ -333,14 +215,14 @@ impl GGMLLlamaEngine {
 
         {
             let mut bindings = self.session_bindings.lock().await;
-            plan = plan_session_reuse(&key, bindings.get(&key), &full_prompt, grammar.as_deref())
+            plan = plan_session_reuse(&key, bindings.get(&key), &full_prompt, gbnf.as_deref())
                 .map_err(ggml::EngineError::from)?;
             bindings.insert(key.clone(), SessionBinding::Busy);
         }
 
         let (sid, delta_prompt, cached_tokens) = match plan {
             SessionReusePlan::CreateFresh { delta_prompt, cached_tokens } => {
-                match self.create_session_with_grammar(grammar.clone()).await {
+                match self.create_session_with_gbnf(gbnf.clone()).await {
                     Ok(sid) => (Some(sid), delta_prompt, cached_tokens),
                     Err(error) => {
                         self.session_bindings.lock().await.remove(&key);
@@ -349,7 +231,7 @@ impl GGMLLlamaEngine {
                 }
             }
             SessionReusePlan::RestoreSnapshot { snapshot, delta_prompt, cached_tokens } => {
-                match self.create_session_from_snapshot(snapshot, grammar.clone()).await {
+                match self.create_session_from_snapshot(snapshot, gbnf.clone()).await {
                     Ok(sid) => (Some(sid), delta_prompt, cached_tokens),
                     Err(error) => {
                         self.session_bindings.lock().await.remove(&key);
@@ -389,7 +271,7 @@ impl GGMLLlamaEngine {
         sid: Option<SessionId>,
         full_prompt: &str,
         generated: &str,
-        grammar: Option<String>,
+        gbnf: Option<String>,
     ) -> Result<(), ggml::EngineError> {
         let (Some(key), Some(sid)) = (key, sid) else {
             return Ok(());
@@ -414,7 +296,7 @@ impl GGMLLlamaEngine {
         self.session_bindings
             .lock()
             .await
-            .insert(key, SessionBinding::Ready { snapshot, cached_prompt, grammar });
+            .insert(key, SessionBinding::Ready { snapshot, cached_prompt, grammar: gbnf });
         Ok(())
     }
 
@@ -434,14 +316,14 @@ impl GGMLLlamaEngine {
         &self,
         request: LlamaDispatchRequest,
     ) -> Result<LlamaDispatchOutput, ggml::EngineError> {
-        let prompt = self.render_prompt(&request);
+        let prompt = request.prompt.clone();
         let max_tokens = request.max_tokens;
-        let grammar = request.grammar.clone();
+        let gbnf = request.gbnf.clone();
         let session_key = request.session_key.clone();
-        let commit_grammar = request.grammar.clone();
-        let prepared = self.prepare_managed_session(session_key, prompt, grammar.clone()).await?;
+        let commit_gbnf = request.gbnf.clone();
+        let prepared = self.prepare_managed_session(session_key, prompt, gbnf.clone()).await?;
 
-        match self.inference(&prepared.delta_prompt, max_tokens, prepared.sid, grammar).await {
+        match self.inference(&prepared.delta_prompt, max_tokens, prepared.sid, gbnf).await {
             Ok(text) => {
                 let usage = self.build_usage(&prepared.full_prompt, &text, prepared.cached_tokens);
                 if let Err(error) = self
@@ -450,7 +332,7 @@ impl GGMLLlamaEngine {
                         prepared.sid,
                         &prepared.full_prompt,
                         &text,
-                        commit_grammar,
+                        commit_gbnf,
                     )
                     .await
                 {
@@ -470,15 +352,15 @@ impl GGMLLlamaEngine {
         request: LlamaDispatchRequest,
         cancel_rx: watch::Receiver<bool>,
     ) -> Result<BaseStreamHandle, ggml::EngineError> {
-        let prompt = self.render_prompt(&request);
+        let prompt = request.prompt.clone();
         let max_tokens = request.max_tokens;
-        let grammar = request.grammar.clone();
+        let gbnf = request.gbnf.clone();
         let session_key = request.session_key.clone();
-        let commit_grammar = request.grammar.clone();
-        let prepared = self.prepare_managed_session(session_key, prompt, grammar.clone()).await?;
+        let commit_gbnf = request.gbnf.clone();
+        let prepared = self.prepare_managed_session(session_key, prompt, gbnf.clone()).await?;
 
         let (mut llama_rx, sid) = match self
-            .inference_stream(&prepared.delta_prompt, max_tokens, prepared.sid, grammar)
+            .inference_stream(&prepared.delta_prompt, max_tokens, prepared.sid, gbnf)
             .await
         {
             Ok(stream) => stream,
@@ -492,7 +374,7 @@ impl GGMLLlamaEngine {
         let engine = Arc::clone(self);
         tokio::spawn(async move {
             let PreparedSession { key, full_prompt, cached_tokens, .. } = prepared;
-            let grammar = commit_grammar;
+            let gbnf = commit_gbnf;
             let mut generated = String::new();
             let mut completed = false;
             let mut forward_failed = false;
@@ -580,7 +462,7 @@ impl GGMLLlamaEngine {
 
             if key.is_some() && completed && !forward_failed && !stream_error && !cancelled {
                 if let Err(error) = engine
-                    .commit_managed_session(key, Some(sid), &full_prompt, &generated, grammar)
+                    .commit_managed_session(key, Some(sid), &full_prompt, &generated, gbnf)
                     .await
                 {
                     warn!(error = %error, "failed to persist llama session snapshot after stream");
@@ -600,18 +482,18 @@ impl GGMLLlamaEngine {
         engine.create_session().await.map_err(GGMLLlamaEngineError::from).map_err(Into::into)
     }
 
-    /// Create a new session with an optional GBNF grammar constraint.
-    pub async fn create_session_with_grammar(
+    /// Create a new session with an optional raw GBNF constraint.
+    pub async fn create_session_with_gbnf(
         &self,
-        grammar: Option<String>,
+        gbnf: Option<String>,
     ) -> Result<SessionId, ggml::EngineError> {
-        if grammar.is_none() {
+        if gbnf.is_none() {
             return self.create_session().await;
         }
 
         let engine = self.require_engine()?;
         engine
-            .create_session_with_grammar(grammar)
+            .create_session_with_gbnf(gbnf)
             .await
             .map_err(GGMLLlamaEngineError::from)
             .map_err(Into::into)
@@ -620,11 +502,11 @@ impl GGMLLlamaEngine {
     async fn create_session_from_snapshot(
         &self,
         snapshot: LlamaSessionSnapshot,
-        grammar: Option<String>,
+        gbnf: Option<String>,
     ) -> Result<SessionId, ggml::EngineError> {
         let engine = self.require_engine()?;
         engine
-            .create_session_from_snapshot(snapshot, grammar)
+            .create_session_from_snapshot(snapshot, gbnf)
             .await
             .map_err(GGMLLlamaEngineError::from)
             .map_err(Into::into)
@@ -695,24 +577,24 @@ impl GGMLLlamaEngine {
     /// Generate text from a prompt by delegating to the shared llama runtime.
     ///
     /// If `session_id` is `None`, creates a temporary session (with the
-    /// optional grammar constraint applied to its sampler chain), appends the
+    /// optional GBNF constraint applied to its sampler chain), appends the
     /// full prompt, consumes stream chunks until `Done`, and then ends the
     /// session.
     ///
     /// If `session_id` is `Some(sid)`, appends to the existing session and
     /// returns the output without ending the session (caller is responsible
-    /// for cleanup).  `grammar` is ignored when `session_id` is `Some` because
+    /// for cleanup).  `gbnf` is ignored when `session_id` is `Some` because
     /// the session's sampler was already built at creation time.
     pub async fn inference(
         &self,
         prompt: &str,
         max_tokens: usize,
         session_id: Option<SessionId>,
-        grammar: Option<String>,
+        gbnf: Option<String>,
     ) -> Result<String, ggml::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
-            None => self.create_session_with_grammar(grammar).await?,
+            None => self.create_session_with_gbnf(gbnf).await?,
         };
         let should_end = session_id.is_none();
 
@@ -763,24 +645,24 @@ impl GGMLLlamaEngine {
     /// Generate text from a prompt as an async stream.
     ///
     /// If `session_id` is `None`, creates a new temporary session (with the
-    /// optional grammar constraint applied to its sampler chain) and returns
+    /// optional GBNF constraint applied to its sampler chain) and returns
     /// both the stream handle and the session ID (caller must end the session
     /// when done).
     ///
     /// If `session_id` is `Some(sid)`, appends to the existing session and
     /// returns the stream handle (caller is responsible for session
-    /// management).  `grammar` is ignored when `session_id` is `Some` because
+    /// management).  `gbnf` is ignored when `session_id` is `Some` because
     /// the session's sampler was already built at creation time.
     pub async fn inference_stream(
         &self,
         prompt: &str,
         max_tokens: usize,
         session_id: Option<SessionId>,
-        grammar: Option<String>,
+        gbnf: Option<String>,
     ) -> Result<(StreamHandle, SessionId), ggml::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
-            None => self.create_session_with_grammar(grammar).await?,
+            None => self.create_session_with_gbnf(gbnf).await?,
         };
 
         if let Err(error) = self.append_input(sid, prompt.to_string()).await {
@@ -826,11 +708,8 @@ impl GGMLLlamaEngine {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        SessionBinding, SessionReusePlan, infer_add_assistant_prompt,
-        parse_role_prefixed_chat_prompt, plan_session_reuse,
-    };
-    use slab_llama::{ChatMessage, LlamaSessionSnapshot};
+    use super::{SessionBinding, SessionReusePlan, plan_session_reuse};
+    use slab_llama::LlamaSessionSnapshot;
     use std::sync::Arc;
 
     fn snapshot() -> LlamaSessionSnapshot {
@@ -898,27 +777,5 @@ mod tests {
                 panic!("expected fresh session when grammar changes")
             }
         }
-    }
-
-    #[test]
-    fn parse_role_prefixed_chat_prompt_detects_assistant_prefill() {
-        let parsed = parse_role_prefixed_chat_prompt("User: hi\nAssistant:")
-            .expect("role-prefixed prompt should parse");
-        assert_eq!(
-            parsed.messages,
-            vec![ChatMessage { role: "user".to_owned(), content: "hi".to_owned() }]
-        );
-        assert!(parsed.add_assistant_prompt);
-    }
-
-    #[test]
-    fn infer_add_assistant_prompt_respects_last_assistant_message() {
-        let user_last = vec![ChatMessage { role: "user".to_owned(), content: "hi".to_owned() }];
-        let assistant_last = vec![
-            ChatMessage { role: "user".to_owned(), content: "hi".to_owned() },
-            ChatMessage { role: "assistant".to_owned(), content: "hello".to_owned() },
-        ];
-        assert!(infer_add_assistant_prompt(&user_last));
-        assert!(!infer_add_assistant_prompt(&assistant_last));
     }
 }

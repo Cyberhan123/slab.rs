@@ -33,12 +33,6 @@ pub enum GGMLLlamaEngineError {
         source: LlamaError,
     },
 
-    #[error("Failed to apply chat template")]
-    ApplyChatTemplate {
-        #[source]
-        source: LlamaError,
-    },
-
     #[error("Session key '{key}' is already active")]
     SessionKeyBusy { key: String },
 
