@@ -14,7 +14,8 @@
     "docs:schemas": "cargo run -p slab-model-pack --bin generate_manifest_schema && cargo run -p slab-types --bin generate_settings_document_schema",
     "docs:dev": "bun run docs:schemas && vitepress dev docs",
     "docs:build": "bun run docs:schemas && vitepress build docs",
-    "docs:preview": "vitepress preview docs"
+    "docs:preview": "vitepress preview docs",
+    "models:pack": "bun run --filter @slab/models pack"
   },
   "workspaces": [
     "packages/slab-desktop",

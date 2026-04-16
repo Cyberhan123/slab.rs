@@ -1,0 +1,6 @@
+{
+    "kind": "variant",
+    "id": "Q5_K_M",
+    "label": "Q5_K_M",
+    "$inference_config": "ref://configs/inference.json"
+}

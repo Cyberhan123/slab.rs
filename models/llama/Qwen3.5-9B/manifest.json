@@ -1,0 +1,101 @@
+{
+  "$schema": "https://slab.reorgix.com/manifests/v1/slab-manifest.schema.json",
+  "version": 2,
+  "id": "Qwen3.5-9B",
+  "label": "Qwen3.5-9B",
+  "family": "llama",
+  "metadata": {
+    "author": "QwenTeam"
+  },
+  "capabilities": [
+    "chat_generation",
+    "text_generation"
+  ],
+  "backend_hints": {
+    "prefer_drivers": [
+      "ggml.llama"
+    ]
+  },
+  "sources": [
+    {
+      "kind": "hugging_face",
+      "repo_id": "unsloth/Qwen3.5-9B-GGUF",
+      "files": [
+        {
+          "id": "model",
+          "path": "Qwen3.5-9B-BF16.gguf"
+        },
+        {
+          "id": "Q4_K_M",
+          "path": "Qwen3.5-9B-Q4_K_M.gguf"
+        },
+        {
+          "id": "Q5_K_M",
+          "path": "Qwen3.5-9B-Q5_K_M.gguf"
+        },
+        {
+          "id": "Q8_0",
+          "path": "Qwen3.5-9B-Q8_0.gguf"
+        }
+      ]
+    },
+    {
+      "kind": "model_scope",
+      "repo_id": "unsloth/Qwen3.5-9B-GGUF",
+      "files": [
+        {
+          "id": "model",
+          "path": "Qwen3.5-9B-BF16.gguf"
+        },
+        {
+          "id": "Q4_K_M",
+          "path": "Qwen3.5-9B-Q4_K_M.gguf"
+        },
+        {
+          "id": "Q5_K_M",
+          "path": "Qwen3.5-9B-Q5_K_M.gguf"
+        },
+        {
+          "id": "Q8_0",
+          "path": "Qwen3.5-9B-Q8_0.gguf"
+        }
+      ]
+    }
+  ],
+  "variants": [
+    {
+      "id": "model",
+      "label": "Qwen3.5-9B",
+      "$config": "ref://variants/model.json"
+    },
+    {
+      "id": "Q4_K_M",
+      "label": "Qwen3.5-9B-Q4_K_M",
+      "$config": "ref://variants/Q4_K_M.json"
+    },
+    {
+      "id": "Q4_K_M",
+      "label": "Qwen3.5-9B-Q4_K_M",
+      "$config": "ref://variants/Q4_K_M.json"
+    },
+    {
+      "id": "Q5_K_M",
+      "label": "Qwen3.5-9B-Q5_K_M",
+      "$config": "ref://variants/Q5_K_M.json"
+    },
+    {
+      "id": "Q8_0",
+      "label": "Qwen3.5-9B-Q8_0",
+      "$config": "ref://variants/Q8_0.json"
+    }
+  ],
+  "presets": [
+    {
+      "id": "default",
+      "label": "Default",
+      "description": "Default preset for Qwen3.5-9B.",
+      "$config": "ref://presets/default.json"
+    }
+  ],
+  "default_preset": "default"
+}
