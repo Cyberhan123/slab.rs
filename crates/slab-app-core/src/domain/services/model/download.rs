@@ -730,18 +730,20 @@ fn pack_source_candidate_to_download_task_candidate(
     candidate: &slab_model_pack::PackSourceCandidate,
     preference: ModelDownloadSourcePreference,
 ) -> Result<Option<ModelDownloadTaskCandidate>, AppCoreError> {
-    let slab_model_pack::PackSource::HuggingFace { repo_id, files, .. } = &candidate.source else {
+    let Some(remote_source) = candidate.source.remote_repository() else {
         return Ok(None);
     };
 
-    let Some(hub_provider) =
-        effective_hub_provider_for_pack_candidate(candidate.hub_provider, preference)
+    let Some(hub_provider) = effective_hub_provider_for_pack_source(&candidate.source, preference)
     else {
         return Ok(None);
     };
 
-    let artifacts =
-        files.iter().map(|file| (file.id.clone(), file.path.clone())).collect::<BTreeMap<_, _>>();
+    let artifacts = remote_source
+        .files
+        .iter()
+        .map(|file| (file.id.clone(), file.path.clone()))
+        .collect::<BTreeMap<_, _>>();
     let primary_artifact_id = catalog::primary_artifact_key(&artifacts);
     let filename = primary_artifact_id
         .as_ref()
@@ -756,7 +758,7 @@ fn pack_source_candidate_to_download_task_candidate(
 
     Ok(Some(build_download_task_candidate(
         model_id,
-        repo_id.clone(),
+        remote_source.repo_id.to_owned(),
         filename,
         hub_provider,
         artifacts,
@@ -809,29 +811,22 @@ fn effective_hub_provider_for_model_spec(
     }
 }
 
-fn effective_hub_provider_for_pack_candidate(
-    candidate_hub_provider: Option<slab_model_pack::PackHubProvider>,
+fn effective_hub_provider_for_pack_source(
+    source: &slab_model_pack::PackSource,
     preference: ModelDownloadSourcePreference,
 ) -> Option<Option<String>> {
+    let remote_source = source.remote_repository()?;
+
     match preference {
-        ModelDownloadSourcePreference::Auto => {
-            Some(candidate_hub_provider.map(pack_hub_provider_to_internal).map(str::to_owned))
-        }
+        ModelDownloadSourcePreference::Auto => Some(Some(remote_source.hub_provider.to_owned())),
         ModelDownloadSourcePreference::HuggingFace => {
-            (!matches!(candidate_hub_provider, Some(slab_model_pack::PackHubProvider::ModelScope)))
+            (remote_source.hub_provider != "models_cat")
                 .then_some(Some("hf_hub".to_owned()))
         }
         ModelDownloadSourcePreference::ModelScope => {
-            (!matches!(candidate_hub_provider, Some(slab_model_pack::PackHubProvider::HuggingFace)))
+            (remote_source.hub_provider != "hf_hub")
                 .then_some(Some("models_cat".to_owned()))
         }
-    }
-}
-
-fn pack_hub_provider_to_internal(provider: slab_model_pack::PackHubProvider) -> &'static str {
-    match provider {
-        slab_model_pack::PackHubProvider::HuggingFace => "hf_hub",
-        slab_model_pack::PackHubProvider::ModelScope => "models_cat",
     }
 }
 

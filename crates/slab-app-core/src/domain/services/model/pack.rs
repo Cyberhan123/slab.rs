@@ -568,15 +568,23 @@ pub(super) fn source_preview_from_pack_source(
     source: Option<&slab_model_pack::PackSourceCandidate>,
 ) -> (Option<String>, Option<String>, Option<String>) {
     match source.map(|candidate| &candidate.source) {
-        Some(slab_model_pack::PackSource::HuggingFace { repo_id, files, .. }) => (
-            Some(repo_id.clone()),
-            files
-                .iter()
-                .find(|file| file.id == "model")
-                .or_else(|| files.first())
-                .map(|file| file.path.clone()),
-            None,
-        ),
+        Some(
+            source @ (slab_model_pack::PackSource::HuggingFace { .. }
+            | slab_model_pack::PackSource::ModelScope { .. }),
+        ) => {
+            let remote_source =
+                source.remote_repository().expect("remote source candidates expose repository info");
+            (
+                Some(remote_source.repo_id.to_owned()),
+                remote_source
+                    .files
+                    .iter()
+                    .find(|file| file.id == "model")
+                    .or_else(|| remote_source.files.first())
+                    .map(|file| file.path.clone()),
+                None,
+            )
+        }
         Some(slab_model_pack::PackSource::LocalPath { path }) => (None, None, Some(path.clone())),
         Some(slab_model_pack::PackSource::LocalFiles { files }) => (
             None,

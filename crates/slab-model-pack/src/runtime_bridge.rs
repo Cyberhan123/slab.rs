@@ -195,7 +195,8 @@ fn build_model_source_from_components(
                     local_files.insert(key, path);
                 }
             }
-            PackSource::HuggingFace { repo_id, revision, files } => {
+            PackSource::HuggingFace { repo_id, revision, files }
+            | PackSource::ModelScope { repo_id, revision, files } => {
                 saw_hf = true;
                 if let Some(existing) = &hf_repo_id {
                     if existing != repo_id || hf_revision.as_ref() != revision.as_ref() {
@@ -248,7 +249,8 @@ fn pack_source_to_model_source(source: &PackSource) -> Result<ModelSource, Model
         PackSource::LocalFiles { files } => {
             ModelSource::LocalArtifacts { files: source_file_map(None, files) }
         }
-        PackSource::HuggingFace { repo_id, revision, files } => ModelSource::HuggingFace {
+        PackSource::HuggingFace { repo_id, revision, files }
+        | PackSource::ModelScope { repo_id, revision, files } => ModelSource::HuggingFace {
             repo_id: repo_id.clone(),
             revision: revision.clone(),
             files: source_file_map(None, files),

@@ -613,41 +613,44 @@ fn build_pack_sources_from_config(config: &StoredModelConfig) -> Vec<PackSourceC
     if let (Some(repo_id), Some(filename)) =
         (config.spec.repo_id.as_deref(), config.spec.filename.as_deref())
     {
-        return vec![PackSourceCandidate {
-            source: PackSource::HuggingFace {
-                repo_id: repo_id.to_owned(),
-                revision: None,
-                files: vec![PackSourceFile {
-                    id: "model".to_owned(),
-                    label: None,
-                    description: None,
-                    path: filename.to_owned(),
-                }],
-            },
-            hub_provider: pack_hub_provider_from_spec(config.spec.hub_provider.as_deref()),
-            priority: None,
-        }];
+        return vec![PackSourceCandidate::new(build_remote_pack_source_from_spec(
+            repo_id,
+            filename,
+            config.spec.hub_provider.as_deref(),
+        ))];
     }
 
     Vec::new()
 }
 
-fn pack_hub_provider_from_spec(
+fn build_remote_pack_source_from_spec(
+    repo_id: &str,
+    filename: &str,
     hub_provider: Option<&str>,
-) -> Option<slab_model_pack::PackHubProvider> {
+) -> PackSource {
+    let files = vec![PackSourceFile {
+        id: "model".to_owned(),
+        label: None,
+        description: None,
+        path: filename.to_owned(),
+    }];
+
     match hub_provider
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(|value| value.to_ascii_lowercase().replace('-', "_"))
         .as_deref()
     {
-        Some("hf") | Some("hf_hub") | Some("huggingface") | Some("hugging_face") => {
-            Some(slab_model_pack::PackHubProvider::HuggingFace)
-        }
-        Some("models_cat") | Some("modelscope") | Some("model_scope") => {
-            Some(slab_model_pack::PackHubProvider::ModelScope)
-        }
-        _ => None,
+        Some("models_cat") | Some("modelscope") | Some("model_scope") => PackSource::ModelScope {
+            repo_id: repo_id.to_owned(),
+            revision: None,
+            files,
+        },
+        _ => PackSource::HuggingFace {
+            repo_id: repo_id.to_owned(),
+            revision: None,
+            files,
+        },
     }
 }
 
@@ -1751,13 +1754,16 @@ fn local_source_fields(
         .or_else(|| resolved.manifest.sources.first().map(|candidate| &candidate.source));
 
     match source {
-        Some(PackSource::HuggingFace { repo_id, files, .. }) => {
-            let filename = files
+        Some(source @ (PackSource::HuggingFace { .. } | PackSource::ModelScope { .. })) => {
+            let remote_source =
+                source.remote_repository().expect("remote source candidates expose repository info");
+            let filename = remote_source
+                .files
                 .iter()
                 .find(|file| file.id == "model")
-                .or_else(|| files.first())
+                .or_else(|| remote_source.files.first())
                 .map(|file| file.path.clone());
-            (Some(repo_id.clone()), filename, None)
+            (Some(remote_source.repo_id.to_owned()), filename, None)
         }
         Some(PackSource::LocalPath { path }) => (None, None, Some(path.clone())),
         Some(PackSource::LocalFiles { files }) => {

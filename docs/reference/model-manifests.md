@@ -27,11 +27,9 @@ Slab model packs use a manifest document at the root of the pack. The canonical 
   },
   "sources": [
     {
-      "source": {
-        "kind": "cloud",
-        "provider_id": "openrouter-main",
-        "remote_model_id": "meta-llama/llama-3.1-8b-instruct"
-      },
+      "kind": "cloud",
+      "provider_id": "openrouter-main",
+      "remote_model_id": "meta-llama/llama-3.1-8b-instruct",
       "priority": 0
     }
   ]
@@ -43,3 +41,4 @@ Slab model packs use a manifest document at the root of the pack. The canonical 
 - The schema is generated from the Rust `slab-model-pack` crate with `schemars`.
 - The public docs copy is the canonical published artifact for tooling and validation.
 - Example manifests in the repo can still live under `manifests/`, but they should reference the public schema URL instead of a local relative schema path.
+- `sources[]` entries serialize as flattened source objects. Legacy nested `source` wrappers are still accepted for backwards compatibility when reading older packs.

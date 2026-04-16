@@ -18,17 +18,14 @@
   },
   "sources": [
     {
-      "source": {
-        "kind": "hugging_face",
-        "repo_id": "justinpinkney/miniSD",
-        "files": [
-          {
-            "id": "model",
-            "path": "miniSD.ckpt"
-          }
-        ]
-      },
-      "hub_provider": "hugging_face"
+      "kind": "hugging_face",
+      "repo_id": "justinpinkney/miniSD",
+      "files": [
+        {
+          "id": "model",
+          "path": "miniSD.ckpt"
+        }
+      ]
     }
   ],
   "presets": [

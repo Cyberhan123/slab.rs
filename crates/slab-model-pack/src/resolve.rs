@@ -239,17 +239,13 @@ fn select_variant_source(source: &PackSource, variant_id: &str) -> PackSource {
             .iter()
             .find(|file| file.id == variant_id)
             .cloned()
-            .map(|file| PackSource::LocalFiles { files: vec![file] })
+            .map(|file| source.with_files(vec![file]))
             .unwrap_or_else(|| source.clone()),
-        PackSource::HuggingFace { repo_id, revision, files } => files
+        PackSource::HuggingFace { files, .. } | PackSource::ModelScope { files, .. } => files
             .iter()
             .find(|file| file.id == variant_id)
             .cloned()
-            .map(|file| PackSource::HuggingFace {
-                repo_id: repo_id.clone(),
-                revision: revision.clone(),
-                files: vec![file],
-            })
+            .map(|file| source.with_files(vec![file]))
             .unwrap_or_else(|| source.clone()),
         PackSource::LocalPath { .. } | PackSource::Cloud { .. } => source.clone(),
     }
