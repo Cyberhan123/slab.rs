@@ -28,6 +28,7 @@ function isTerminalTaskStatus(status: TaskRecord['status']) {
 }
 
 export interface SetupViewModel {
+  setupStatus: SetupStatus | null;
   isChecking: boolean;
   checkError: string | null;
   provisionState: ProvisionState;
@@ -56,12 +57,13 @@ export function useSetup(): SetupViewModel {
     data: setupStatus,
     error: setupStatusError,
     isLoading: setupStatusLoading,
+    isFetching: setupStatusFetching,
     refetch: refetchSetupStatus,
   } = api.useQuery('get', '/v1/setup/status', undefined, {
-    staleTime: Number.POSITIVE_INFINITY,
-    refetchOnMount: false,
-    refetchOnReconnect: false,
-    refetchOnWindowFocus: false,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
     retry: false,
   });
   const provisionMutation = api.useMutation('post', '/v1/setup/provision');
@@ -88,11 +90,15 @@ export function useSetup(): SetupViewModel {
   }, []);
 
   useEffect(() => {
+    if (setupStatusFetching) {
+      return;
+    }
+
     if (status?.initialized) {
       markSetupInitialized();
       navigate('/', { replace: true });
     }
-  }, [markSetupInitialized, navigate, status?.initialized]);
+  }, [markSetupInitialized, navigate, setupStatusFetching, status?.initialized]);
 
   const startProvision = useCallback(async () => {
     setProvisionState('starting');
@@ -152,13 +158,19 @@ export function useSetup(): SetupViewModel {
       return;
     }
 
-    if (setupStatusLoading || setupStatusError || !status || status.initialized) {
+    if (
+      setupStatusLoading
+      || setupStatusFetching
+      || setupStatusError
+      || !status
+      || status.initialized
+    ) {
       return;
     }
 
     autoStartedRef.current = true;
     void startProvision();
-  }, [setupStatusError, setupStatusLoading, startProvision, status]);
+  }, [setupStatusError, setupStatusFetching, setupStatusLoading, startProvision, status]);
 
   useEffect(() => {
     if (!provisionTaskId) {
@@ -208,16 +220,31 @@ export function useSetup(): SetupViewModel {
     autoStartedRef.current = true;
     await startProvision();
   }, [startProvision]);
+  const isCheckingSetupStatus =
+    setupStatusLoading || (setupStatusFetching && provisionState === 'idle');
 
   return {
-    isChecking: setupStatusLoading,
+    setupStatus: status,
+    isChecking: isCheckingSetupStatus,
     checkError: setupStatusError ? toErrorMessage(setupStatusError) : null,
     provisionState,
     provisionError,
-    stageLabel: getProvisionStageLabel(provisionState, provisionTask),
-    stageHint: getProvisionStageHint(provisionState, provisionTask),
+    stageLabel: getProvisionStageLabel(
+      provisionState,
+      provisionTask,
+      status?.runtime_payload_installed ?? false,
+    ),
+    stageHint: getProvisionStageHint(
+      provisionState,
+      provisionTask,
+      status?.runtime_payload_installed ?? false,
+    ),
     progressPercent: getProvisionProgressValue(provisionState, provisionTask),
-    progressSummary: getProvisionProgressSummary(provisionState, provisionTask),
+    progressSummary: getProvisionProgressSummary(
+      provisionState,
+      provisionTask,
+      status?.runtime_payload_installed ?? false,
+    ),
     canRetry: provisionState === 'failed',
     handleRetry,
   };

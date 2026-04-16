@@ -51,6 +51,7 @@ export function normalizeTaskProgress(
 export function getProvisionStageLabel(
   state: ProvisionState,
   task: TaskRecord | null,
+  runtimePayloadInstalled = false,
 ) {
   const progress = normalizeTaskProgress(task?.progress);
   if (progress?.label?.trim()) {
@@ -63,17 +64,18 @@ export function getProvisionStageLabel(
     case 'succeeded':
       return 'Setup finished';
     case 'starting':
-      return 'Starting online installer';
+      return runtimePayloadInstalled ? 'Checking desktop prerequisites' : 'Starting setup';
     case 'running':
-      return 'Preparing Slab runtime';
+      return runtimePayloadInstalled ? 'Verifying installed runtime' : 'Preparing Slab runtime';
     default:
-      return 'Preparing environment';
+      return runtimePayloadInstalled ? 'Checking desktop environment' : 'Preparing environment';
   }
 }
 
 export function getProvisionStageHint(
   state: ProvisionState,
   task: TaskRecord | null,
+  runtimePayloadInstalled = false,
 ) {
   const progress = normalizeTaskProgress(task?.progress);
   if (progress?.step && progress.stepCount) {
@@ -82,15 +84,25 @@ export function getProvisionStageHint(
 
   switch (state) {
     case 'failed':
-      return 'Review the error below, then retry the online installer.';
+      return runtimePayloadInstalled
+        ? 'Review the error below, then retry the local prerequisite check.'
+        : 'Review the error below, then retry the setup task.';
     case 'succeeded':
-      return 'Runtime payloads are in place. Launching Slab now.';
+      return runtimePayloadInstalled
+        ? 'FFmpeg and local runtime checks are complete. Launching Slab now.'
+        : 'Runtime payloads are in place. Launching Slab now.';
     case 'starting':
-      return 'Creating the setup task and connecting to the local host.';
+      return runtimePayloadInstalled
+        ? 'Inspecting the installed runtime and checking whether FFmpeg is already available.'
+        : 'Creating the setup task and connecting to the local host.';
     case 'running':
-      return 'Downloading payloads, verifying CABs, checking FFmpeg, and restarting runtime workers.';
+      return runtimePayloadInstalled
+        ? 'Checking FFmpeg, downloading it when needed, and confirming local workers are ready.'
+        : 'Downloading payloads, verifying CABs, checking FFmpeg, and restarting runtime workers.';
     default:
-      return 'Inspecting the local desktop installation.';
+      return runtimePayloadInstalled
+        ? 'Inspecting the local desktop installation and FFmpeg availability.'
+        : 'Inspecting the local desktop installation.';
   }
 }
 
@@ -126,9 +138,12 @@ export function getProvisionProgressValue(
 export function getProvisionProgressSummary(
   state: ProvisionState,
   task: TaskRecord | null,
+  runtimePayloadInstalled = false,
 ) {
   if (state === 'failed') {
-    return 'Provisioning stopped before setup could complete.';
+    return runtimePayloadInstalled
+      ? 'Desktop prerequisite checks stopped before setup could complete.'
+      : 'Provisioning stopped before setup could complete.';
   }
 
   if (state === 'succeeded') {
@@ -146,11 +161,13 @@ export function getProvisionProgressSummary(
   }
 
   if (state === 'starting') {
-    return 'Creating setup task...';
+    return runtimePayloadInstalled ? 'Checking installed runtime...' : 'Creating setup task...';
   }
 
   if (state === 'running') {
-    return 'Waiting for progress updates...';
+    return runtimePayloadInstalled
+      ? 'Checking FFmpeg and local workers...'
+      : 'Waiting for progress updates...';
   }
 
   return 'Waiting to begin';

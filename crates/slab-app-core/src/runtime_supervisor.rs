@@ -239,6 +239,8 @@ pub trait RuntimeChildHandle: Send {
 
 #[async_trait]
 pub trait RuntimeChildSpawner: Send + Sync {
+    /// Spawn a backend child and return only after it is ready to serve on its configured gRPC
+    /// endpoint.
     async fn spawn_child(
         &self,
         child_spec: &ResolvedRuntimeChildSpec,

@@ -4,6 +4,7 @@ const API_BASE_URL = process.env.PLAYWRIGHT_API_BASE_URL ?? "http://127.0.0.1:33
 
 type SetupStatus = {
   initialized: boolean;
+  runtime_payload_installed: boolean;
   ffmpeg: {
     name: string;
     installed: boolean;

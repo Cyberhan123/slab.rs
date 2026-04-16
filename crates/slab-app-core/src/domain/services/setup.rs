@@ -5,8 +5,9 @@ use std::time::Duration;
 use futures::StreamExt;
 use slab_types::RuntimeBackendId;
 use slab_utils::cab::{
-    PackagedPayloadManifest, RuntimeVariant, apply_payload_manifest, detect_best_variant,
-    expand_cab_with_progress, remove_dir_if_exists, selected_packages,
+    PackagedPayloadManifest, RuntimeVariant, SelectedPayloadFile, SelectedPayloadManifest,
+    apply_payload_manifest, detect_best_variant, expand_cab_with_progress, remove_dir_if_exists,
+    selected_packages,
 };
 use tokio::io::AsyncWriteExt;
 use tracing::{info, warn};
@@ -70,6 +71,7 @@ impl SetupService {
 
     pub async fn environment_status(&self) -> Result<EnvironmentStatus, AppCoreError> {
         let initialized = self.load_setup_initialized().await?;
+        let runtime_payload_installed = self.runtime_payload_installed();
         let ffmpeg_installed =
             tokio::task::spawn_blocking(ffmpeg_sidecar::command::ffmpeg_is_installed)
                 .await
@@ -94,6 +96,7 @@ impl SetupService {
 
         Ok(EnvironmentStatus {
             initialized,
+            runtime_payload_installed,
             ffmpeg: ComponentStatus {
                 name: "ffmpeg".to_owned(),
                 installed: ffmpeg_installed,
@@ -154,24 +157,15 @@ impl SetupService {
     }
 
     async fn provision_inner(&self, operation: &OperationContext) -> Result<String, AppCoreError> {
-        let manifest = embedded_payload_manifest()?;
-        ensure_packaged_payload_manifest_available(&manifest)?;
         let variant = tokio::task::spawn_blocking(detect_best_variant)
             .await
             .map_err(|error| {
                 AppCoreError::Internal(format!("failed to join GPU detection task: {error}"))
             })?
             .map_err(AppCoreError::from)?;
-        let selected_variants = selected_packages(variant);
-        let selected_manifest =
-            manifest.selected_for(&selected_variants).map_err(AppCoreError::from)?;
-        let version = manifest.version.clone();
+        let version = env!("CARGO_PKG_VERSION").to_owned();
         let target_dir = self.runtime_lib_dir()?;
-        let download_cache_dir = self.payload_cache_dir(&version);
-        let expand_root = std::env::temp_dir()
-            .join("Slab")
-            .join("setup")
-            .join(format!("payload-{}", Uuid::new_v4()));
+        let runtime_payload_installed = self.runtime_payload_installed();
 
         publish_stage_progress(
             operation,
@@ -180,50 +174,83 @@ impl SetupService {
         )
         .await?;
 
-        tokio::fs::create_dir_all(&download_cache_dir).await.map_err(|error| {
-            AppCoreError::Internal(format!(
-                "failed to create payload cache directory '{}': {error}",
-                download_cache_dir.display()
-            ))
-        })?;
-        tokio::fs::create_dir_all(&expand_root).await.map_err(|error| {
-            AppCoreError::Internal(format!(
-                "failed to create payload staging directory '{}': {error}",
-                expand_root.display()
-            ))
-        })?;
-
         let payload_result = async {
-            self.download_required_cabs(
-                operation,
-                &version,
-                &selected_variants,
-                &download_cache_dir,
-            )
-            .await?;
-
-            publish_progress(
-                operation,
-                "Expanding runtime payload",
-                0,
-                Some(100),
-                ProvisionStep::ExpandPayload.index(),
-                PROVISION_STEP_COUNT,
-            )
-            .await?;
-            self.expand_selected_cabs(&selected_variants, &download_cache_dir, &expand_root)
+            if runtime_payload_installed {
+                publish_progress(
+                    operation,
+                    "Using installed runtime payload",
+                    100,
+                    Some(100),
+                    ProvisionStep::InstallPayload.index(),
+                    PROVISION_STEP_COUNT,
+                )
                 .await?;
+            } else {
+                let manifest = embedded_payload_manifest()?;
+                ensure_packaged_payload_manifest_available(&manifest)?;
+                let selected_variants = selected_packages(variant);
+                let selected_manifest =
+                    manifest.selected_for(&selected_variants).map_err(AppCoreError::from)?;
+                let download_cache_dir = self.payload_cache_dir(&version);
+                let expand_root = std::env::temp_dir()
+                    .join("Slab")
+                    .join("setup")
+                    .join(format!("payload-{}", Uuid::new_v4()));
 
-            publish_progress(
-                operation,
-                "Installing runtime libraries",
-                0,
-                Some(100),
-                ProvisionStep::InstallPayload.index(),
-                PROVISION_STEP_COUNT,
-            )
-            .await?;
-            self.apply_selected_payload(&expand_root, &target_dir, &selected_manifest).await?;
+                tokio::fs::create_dir_all(&download_cache_dir).await.map_err(|error| {
+                    AppCoreError::Internal(format!(
+                        "failed to create payload cache directory '{}': {error}",
+                        download_cache_dir.display()
+                    ))
+                })?;
+                tokio::fs::create_dir_all(&expand_root).await.map_err(|error| {
+                    AppCoreError::Internal(format!(
+                        "failed to create payload staging directory '{}': {error}",
+                        expand_root.display()
+                    ))
+                })?;
+
+                let install_result = async {
+                    self.download_required_cabs(
+                        operation,
+                        &version,
+                        &selected_variants,
+                        &download_cache_dir,
+                    )
+                    .await?;
+
+                    publish_progress(
+                        operation,
+                        "Expanding runtime payload",
+                        0,
+                        Some(100),
+                        ProvisionStep::ExpandPayload.index(),
+                        PROVISION_STEP_COUNT,
+                    )
+                    .await?;
+                    self.expand_selected_cabs(
+                        &selected_variants,
+                        &download_cache_dir,
+                        &expand_root,
+                    )
+                    .await?;
+
+                    publish_progress(
+                        operation,
+                        "Installing runtime libraries",
+                        0,
+                        Some(100),
+                        ProvisionStep::InstallPayload.index(),
+                        PROVISION_STEP_COUNT,
+                    )
+                    .await?;
+                    self.apply_selected_payload(&expand_root, &target_dir, &selected_manifest).await
+                }
+                .await;
+
+                let _ = remove_dir_if_exists(&expand_root);
+                install_result?;
+            }
 
             publish_progress(
                 operation,
@@ -252,8 +279,6 @@ impl SetupService {
             Ok::<PathBuf, AppCoreError>(ffmpeg_path)
         }
         .await;
-
-        let _ = remove_dir_if_exists(&expand_root);
 
         let ffmpeg_path = payload_result?;
         let backends = self
@@ -501,6 +526,26 @@ impl SetupService {
             .join(PAYLOAD_CACHE_DIR_NAME)
             .join(version)
     }
+
+    fn runtime_payload_installed(&self) -> bool {
+        let Some(lib_dir) = self.model_state.config().lib_dir.as_ref() else {
+            return false;
+        };
+        let Ok(manifest) = embedded_payload_manifest() else {
+            return false;
+        };
+        if manifest.is_empty() {
+            return false;
+        }
+
+        let variant = detect_best_variant().unwrap_or(RuntimeVariant::Base);
+        let packages = selected_packages(variant);
+        let Ok(selected_manifest) = manifest.selected_for(&packages) else {
+            return false;
+        };
+
+        selected_payload_files_exist(lib_dir, &selected_manifest)
+    }
 }
 
 fn embedded_payload_manifest() -> Result<PackagedPayloadManifest, AppCoreError> {
@@ -527,6 +572,18 @@ fn ensure_packaged_payload_manifest_available(
     }
 
     Ok(())
+}
+
+fn selected_payload_files_exist(dest_root: &Path, manifest: &SelectedPayloadManifest) -> bool {
+    !manifest.files.is_empty()
+        && manifest.files.iter().all(|file| payload_file_matches(dest_root, file))
+}
+
+fn payload_file_matches(dest_root: &Path, file: &SelectedPayloadFile) -> bool {
+    let path = dest_root.join(&file.dest_relative_path);
+    std::fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.len() == file.size)
+        .unwrap_or(false)
 }
 
 async fn publish_progress(
@@ -681,6 +738,8 @@ fn github_release_asset_url(version: &str, asset_name: &str) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
 
     #[test]
@@ -703,5 +762,51 @@ mod tests {
         });
 
         assert!(ensure_packaged_payload_manifest_available(&manifest).is_ok());
+    }
+
+    #[test]
+    fn selected_payload_files_exist_returns_true_when_all_expected_files_are_present() {
+        let dir = std::env::temp_dir().join(format!("slab-setup-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("create temp setup dir");
+        fs::create_dir_all(dir.join("ggml")).expect("create nested payload dir");
+        fs::write(dir.join("ggml").join("runtime.dll"), b"payload").expect("write payload file");
+
+        let manifest = SelectedPayloadManifest {
+            format_version: 1,
+            version: "0.1.0".to_owned(),
+            selected_packages: vec![RuntimeVariant::Base],
+            files: vec![SelectedPayloadFile {
+                source_relative_path: "resources/libs/ggml/runtime.dll".to_owned(),
+                dest_relative_path: "ggml/runtime.dll".to_owned(),
+                size: 7,
+                sha256: "ignored-for-presence-check".to_owned(),
+            }],
+        };
+
+        assert!(selected_payload_files_exist(&dir, &manifest));
+
+        fs::remove_dir_all(&dir).expect("cleanup temp setup dir");
+    }
+
+    #[test]
+    fn selected_payload_files_exist_returns_false_when_required_file_is_missing() {
+        let dir = std::env::temp_dir().join(format!("slab-setup-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).expect("create temp setup dir");
+
+        let manifest = SelectedPayloadManifest {
+            format_version: 1,
+            version: "0.1.0".to_owned(),
+            selected_packages: vec![RuntimeVariant::Base],
+            files: vec![SelectedPayloadFile {
+                source_relative_path: "resources/libs/ggml/runtime.dll".to_owned(),
+                dest_relative_path: "ggml/runtime.dll".to_owned(),
+                size: 7,
+                sha256: "ignored-for-presence-check".to_owned(),
+            }],
+        };
+
+        assert!(!selected_payload_files_exist(&dir, &manifest));
+
+        fs::remove_dir_all(&dir).expect("cleanup temp setup dir");
     }
 }
