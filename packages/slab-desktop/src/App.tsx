@@ -25,16 +25,16 @@ function SetupGuard() {
   const location = useLocation();
   const isSetupRoute = location.pathname === "/setup";
 
-  const { data: setupStatus } = api.useQuery(
+  const { data: setupStatus, refetch: refetchSetupStatus } = api.useQuery(
     "get",
     "/v1/setup/status",
     undefined,
     {
       enabled: !isSetupRoute,
-      staleTime: Number.POSITIVE_INFINITY,
-      refetchOnMount: false,
-      refetchOnReconnect: false,
-      refetchOnWindowFocus: false,
+      staleTime: 0,
+      refetchOnMount: "always",
+      refetchOnReconnect: true,
+      refetchOnWindowFocus: true,
       retry: false,
     }
   );
@@ -48,6 +48,14 @@ function SetupGuard() {
       navigate("/setup", { replace: true });
     }
   }, [isSetupRoute, navigate, setupStatus?.initialized]);
+
+  useEffect(() => {
+    if (isSetupRoute) {
+      return;
+    }
+
+    void refetchSetupStatus();
+  }, [isSetupRoute, location.pathname, refetchSetupStatus]);
 
   return null;
 }

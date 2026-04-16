@@ -21,15 +21,11 @@ pub enum RuntimeBackendId {
 }
 
 impl RuntimeBackendId {
-    pub const ALL: [Self; 7] = [
-        Self::GgmlLlama,
-        Self::GgmlWhisper,
-        Self::GgmlDiffusion,
-        Self::CandleLlama,
-        Self::CandleWhisper,
-        Self::CandleDiffusion,
-        Self::Onnx,
-    ];
+    /// Backends that are currently exposed as runnable by the app.
+    ///
+    /// Candle and ONNX identifiers remain parseable for compatibility, but they are not included
+    /// here because those runtimes are not available in the current desktop distribution.
+    pub const ALL: [Self; 3] = [Self::GgmlLlama, Self::GgmlWhisper, Self::GgmlDiffusion];
 
     /// Return the canonical backend identifier used by runtime and server wiring.
     pub const fn canonical_id(self) -> &'static str {
@@ -153,10 +149,19 @@ mod tests {
     }
 
     #[test]
-    fn exposes_all_backends_once() {
-        assert_eq!(RuntimeBackendId::ALL.len(), 7);
-        assert_eq!(RuntimeBackendId::ALL[0], RuntimeBackendId::GgmlLlama);
-        assert!(RuntimeBackendId::ALL.contains(&RuntimeBackendId::Onnx));
+    fn exposes_available_backends_once() {
+        assert_eq!(
+            RuntimeBackendId::ALL,
+            [
+                RuntimeBackendId::GgmlLlama,
+                RuntimeBackendId::GgmlWhisper,
+                RuntimeBackendId::GgmlDiffusion,
+            ]
+        );
+        assert!(!RuntimeBackendId::ALL.contains(&RuntimeBackendId::CandleLlama));
+        assert!(!RuntimeBackendId::ALL.contains(&RuntimeBackendId::CandleWhisper));
+        assert!(!RuntimeBackendId::ALL.contains(&RuntimeBackendId::CandleDiffusion));
+        assert!(!RuntimeBackendId::ALL.contains(&RuntimeBackendId::Onnx));
     }
 
     #[test]

@@ -8,6 +8,8 @@ use crate::domain::models::{CompleteSetupCommand, ComponentStatus, EnvironmentSt
 pub struct SetupStatusResponse {
     /// Whether the one-time setup wizard has been completed.
     pub initialized: bool,
+    /// Whether the packaged runtime payload is already present under `resources/libs`.
+    pub runtime_payload_installed: bool,
     /// FFmpeg binary availability.
     pub ffmpeg: ComponentStatusResponse,
     /// AI backend library availability (one entry per backend).
@@ -47,6 +49,7 @@ impl From<EnvironmentStatus> for SetupStatusResponse {
     fn from(s: EnvironmentStatus) -> Self {
         Self {
             initialized: s.initialized,
+            runtime_payload_installed: s.runtime_payload_installed,
             ffmpeg: s.ffmpeg.into(),
             backends: s.backends.into_iter().map(Into::into).collect(),
         }

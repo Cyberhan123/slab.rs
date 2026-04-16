@@ -18,6 +18,8 @@ pub struct ComponentStatus {
 pub struct EnvironmentStatus {
     /// Whether the one-time setup wizard has been completed.
     pub initialized: bool,
+    /// Whether the packaged runtime payload is already present under `resources/libs`.
+    pub runtime_payload_installed: bool,
     /// Status of the FFmpeg binary.
     pub ffmpeg: ComponentStatus,
     /// Status of each AI backend library.
