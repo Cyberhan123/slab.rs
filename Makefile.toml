@@ -25,8 +25,8 @@ dependencies = [
     "build-runtime-release",
     "build-server-release",
     "stage-windows-release-payloads",
-    "build-tauri-release-windows",
     "build-windows-full-installer",
+    "build-tauri-release-windows",
 ]
 
 [tasks.debug]

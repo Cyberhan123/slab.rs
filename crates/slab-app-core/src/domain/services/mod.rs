@@ -30,8 +30,10 @@ pub use task::TaskApplicationService;
 pub use ui_state::UiStateService;
 pub use video::VideoService;
 
+use std::sync::Arc;
+
 use crate::context::{ModelState, WorkerState};
-use crate::runtime_supervisor::RuntimeSupervisorControlHandle;
+use crate::infra::runtime::ManagedRuntimeHost;
 
 #[derive(Clone)]
 pub struct AppServices {
@@ -56,7 +58,7 @@ impl AppServices {
         model_state: ModelState,
         worker_state: WorkerState,
         agent: AgentService,
-        runtime_control: Option<RuntimeSupervisorControlHandle>,
+        runtime_host: Option<Arc<ManagedRuntimeHost>>,
     ) -> Self {
         Self {
             audio: AudioService::new(worker_state.clone()),
@@ -67,7 +69,7 @@ impl AppServices {
             model: ModelService::new(model_state.clone(), worker_state.clone()),
             settings: SettingsService::new(model_state.clone()),
             session: SessionService::new(model_state.clone()),
-            setup: SetupService::new(model_state.clone(), worker_state.clone(), runtime_control),
+            setup: SetupService::new(model_state.clone(), worker_state.clone(), runtime_host),
             system: SystemService::new(),
             task_application: TaskApplicationService::new(worker_state.clone()),
             ui_state: UiStateService::new(model_state.clone()),

@@ -7,6 +7,7 @@ use uuid::Uuid;
 
 use super::payload::ResolvedPayloadFile;
 
+#[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
 #[cfg(windows)]

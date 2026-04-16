@@ -78,6 +78,7 @@ function SetupBadge({
 }
 
 export function SetupWorkbench({
+  setupStatus,
   isChecking,
   checkError,
   provisionState,
@@ -94,7 +95,7 @@ export function SetupWorkbench({
       <SetupStateCard
         icon={Loader2}
         title="Checking desktop environment"
-        description="Inspecting the local Slab host before the online installer starts."
+        description="Inspecting the local Slab host, the packaged runtime, and FFmpeg availability."
         action={
           <div className="flex items-center gap-3 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" />
@@ -137,6 +138,10 @@ export function SetupWorkbench({
   const isFailed = provisionState === 'failed';
   const isSucceeded = provisionState === 'succeeded';
   const isActive = provisionState === 'starting' || provisionState === 'running';
+  const runtimePayloadInstalled = setupStatus?.runtime_payload_installed ?? false;
+  const ffmpegInstalled = setupStatus?.ffmpeg.installed ?? false;
+  const readyBackends = setupStatus?.backends.filter((backend) => backend.installed).length ?? 0;
+  const totalBackends = setupStatus?.backends.length ?? 0;
   const Icon = isFailed ? TriangleAlert : isSucceeded ? CheckCircle2 : Loader2;
 
   return (
@@ -154,21 +159,63 @@ export function SetupWorkbench({
               <div className="space-y-4">
                 <div className="space-y-2">
                   <p className="text-[12px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    Online Installer
+                    Desktop Setup
                   </p>
                   <h1 className="max-w-2xl text-4xl font-semibold tracking-tight text-foreground md:text-[2.8rem]">
-                    Slab is preparing your local runtime.
+                    {runtimePayloadInstalled
+                      ? 'Slab is checking your local tools.'
+                      : 'Slab is preparing your local runtime.'}
                   </h1>
                 </div>
 
                 <p className="max-w-2xl text-sm leading-7 text-secondary-foreground md:text-base">
-                  This installer reuses the release CAB payloads for your current version,
-                  verifies them against the embedded manifest, installs the runtime into
-                  <code className="mx-1 rounded bg-surface-soft px-1.5 py-0.5 text-[0.9em]">
-                    resources/libs
-                  </code>
-                  , checks FFmpeg, and restarts the managed runtime workers.
+                  {runtimePayloadInstalled ? (
+                    <>
+                      This installation already includes the packaged runtime payload under
+                      <code className="mx-1 rounded bg-surface-soft px-1.5 py-0.5 text-[0.9em]">
+                        resources/libs
+                      </code>
+                      . Slab is now checking whether FFmpeg is already available and will install
+                      it automatically when needed before continuing.
+                    </>
+                  ) : (
+                    <>
+                      Slab will reuse the release CAB payloads for your current version, verify
+                      them against the embedded manifest, install the runtime into
+                      <code className="mx-1 rounded bg-surface-soft px-1.5 py-0.5 text-[0.9em]">
+                        resources/libs
+                      </code>
+                      , check FFmpeg, and restart the managed runtime workers.
+                    </>
+                  )}
                 </p>
+
+                <div className="grid gap-3 pt-2 sm:grid-cols-3">
+                  <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                      Runtime Payload
+                    </p>
+                    <p className="mt-2 text-sm font-medium text-foreground">
+                      {runtimePayloadInstalled ? 'Installed locally' : 'Needs setup'}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                      FFmpeg
+                    </p>
+                    <p className="mt-2 text-sm font-medium text-foreground">
+                      {ffmpegInstalled ? 'Available' : 'Will be installed'}
+                    </p>
+                  </div>
+                  <div className="rounded-2xl border border-border/40 bg-[color:color-mix(in_oklab,var(--surface-1)_88%,white)] p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                      Backend Workers
+                    </p>
+                    <p className="mt-2 text-sm font-medium text-foreground">
+                      {totalBackends > 0 ? `${readyBackends}/${totalBackends} ready` : 'Not reported'}
+                    </p>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -211,7 +258,9 @@ export function SetupWorkbench({
                   <p className="text-sm leading-6 text-muted-foreground">
                     {isSucceeded
                       ? 'Setup has completed. Slab will enter the application automatically.'
-                      : 'Keep this window open while the local installer finishes the provisioning task.'}
+                      : runtimePayloadInstalled
+                        ? 'Keep this window open while Slab checks FFmpeg and confirms the packaged runtime is ready.'
+                        : 'Keep this window open while the local setup task finishes provisioning the runtime.'}
                   </p>
                 )}
               </div>
@@ -236,7 +285,13 @@ export function SetupWorkbench({
                 ) : (
                   <div className="inline-flex items-center gap-3 rounded-xl bg-surface-soft px-4 py-3 text-sm text-muted-foreground">
                     <Loader2 className={cn('size-4', isActive && 'animate-spin')} />
-                    <span>{isSucceeded ? 'Launching Slab...' : 'Provisioning in progress'}</span>
+                    <span>
+                      {isSucceeded
+                        ? 'Launching Slab...'
+                        : runtimePayloadInstalled
+                          ? 'Checking desktop prerequisites'
+                          : 'Provisioning in progress'}
+                    </span>
                   </div>
                 )}
               </div>

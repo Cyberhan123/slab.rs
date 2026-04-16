@@ -1450,6 +1450,8 @@ export interface components {
             ffmpeg: components["schemas"]["ComponentStatusResponse"];
             /** @description Whether the one-time setup wizard has been completed. */
             initialized: boolean;
+            /** @description Whether the packaged runtime payload is already present under `resources/libs`. */
+            runtime_payload_installed: boolean;
         };
         /** @description Request body for `POST /v1/agents/spawn`. */
         SpawnAgentRequest: {
