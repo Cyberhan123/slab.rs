@@ -34,6 +34,11 @@ impl LlamaContext {
         unsafe { self.model.lib.llama_n_ctx(self.ctx) }
     }
 
+    /// Returns the effective context window size for each sequence.
+    pub fn n_ctx_seq(&self) -> u32 {
+        unsafe { self.model.lib.llama_n_ctx_seq(self.ctx) }
+    }
+
     /// Returns the batch size.
     pub fn n_batch(&self) -> u32 {
         unsafe { self.model.lib.llama_n_batch(self.ctx) }

@@ -188,6 +188,9 @@ impl LlamaWorker {
         let result = tokio::task::block_in_place(|| {
             use slab_llama::{LlamaContextParams, LlamaModelParams};
             let mut ctx_params = LlamaContextParams::default();
+            // This backend continuously batches multiple seq_ids inside a worker
+            // and callers treat `context_length` as the usable window per session.
+            ctx_params.kv_unified = true;
             if let Some(context_length) = config.context_length {
                 ctx_params.n_ctx = context_length;
                 if ctx_params.n_batch > context_length {

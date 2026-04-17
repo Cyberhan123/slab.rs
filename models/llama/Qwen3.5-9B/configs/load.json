@@ -5,7 +5,11 @@
     "scope": "load",
     "payload": {
         "context_length": 4096,
-        "chat_template": "chatml",
+        "chat_template": {
+            "id": "qwen3.5_chat_template",
+            "name": "qwen3.5_chat_template",
+            "$path": "ref://configs/chat_template.jinja"
+        },
         "num_workers": 4
     }
 }

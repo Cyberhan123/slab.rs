@@ -1,6 +1,8 @@
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 
+use hf_hub::{Cache, Repo, RepoType};
+
 use crate::client::HubClient;
 use crate::error::{HubError, map_hf_hub_error};
 use crate::progress::{DownloadProgress, DownloadProgressUpdate};
@@ -25,6 +27,10 @@ impl HubClient {
         filename: &str,
         progress: Option<Arc<dyn DownloadProgress>>,
     ) -> Result<PathBuf, HubError> {
+        if let Some(cached_path) = self.hf_hub_cached_path(repo_id, filename) {
+            return Ok(cached_path);
+        }
+
         let api = self.hf_hub_api(HubProvider::HfHub)?;
         let repo = api.model(repo_id.to_owned());
         match progress {
@@ -59,6 +65,15 @@ impl HubClient {
         builder.build().map_err(|error| {
             map_hf_hub_error(provider, "failed to initialize hf-hub client", error)
         })
+    }
+
+    fn hf_hub_cached_path(&self, repo_id: &str, filename: &str) -> Option<PathBuf> {
+        let cache = self
+            .cache_dir
+            .clone()
+            .map(Cache::new)
+            .unwrap_or_else(Cache::from_env);
+        cache.repo(Repo::new(repo_id.to_owned(), RepoType::Model)).get(filename)
     }
 }
 

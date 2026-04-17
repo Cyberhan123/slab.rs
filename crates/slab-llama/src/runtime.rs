@@ -95,6 +95,88 @@ pub enum StreamChunk {
 
 pub type StreamHandle = mpsc::Receiver<StreamChunk>;
 
+#[derive(Debug, Default)]
+struct Utf8PieceBuffer {
+    pending_bytes: Vec<u8>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct Utf8FlushResult {
+    text: Option<String>,
+    dropped_incomplete_tail: bool,
+}
+
+impl Utf8PieceBuffer {
+    fn push(&mut self, bytes: &[u8]) -> Result<Option<String>, LlamaError> {
+        self.pending_bytes.extend_from_slice(bytes);
+        self.flush_partial()
+    }
+
+    fn finish(&mut self) -> Result<Utf8FlushResult, LlamaError> {
+        if self.pending_bytes.is_empty() {
+            return Ok(Utf8FlushResult::default());
+        }
+
+        match std::str::from_utf8(&self.pending_bytes) {
+            Ok(text) => {
+                let text = text.to_owned();
+                self.pending_bytes.clear();
+                Ok(Utf8FlushResult { text: Some(text), dropped_incomplete_tail: false })
+            }
+            Err(error) if error.error_len().is_none() => {
+                let valid_up_to = error.valid_up_to();
+                let text = if valid_up_to == 0 {
+                    None
+                } else {
+                    Some(
+                        std::str::from_utf8(&self.pending_bytes[..valid_up_to])
+                            .expect("valid UTF-8 prefix reported by std::str::from_utf8")
+                            .to_owned(),
+                    )
+                };
+                self.pending_bytes.clear();
+                Ok(Utf8FlushResult { text, dropped_incomplete_tail: true })
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.pending_bytes.clear();
+    }
+
+    fn has_pending(&self) -> bool {
+        !self.pending_bytes.is_empty()
+    }
+
+    fn flush_partial(&mut self) -> Result<Option<String>, LlamaError> {
+        if self.pending_bytes.is_empty() {
+            return Ok(None);
+        }
+
+        match std::str::from_utf8(&self.pending_bytes) {
+            Ok(text) => {
+                let text = text.to_owned();
+                self.pending_bytes.clear();
+                Ok(Some(text))
+            }
+            Err(error) if error.error_len().is_none() => {
+                let valid_up_to = error.valid_up_to();
+                if valid_up_to == 0 {
+                    return Ok(None);
+                }
+
+                let text = std::str::from_utf8(&self.pending_bytes[..valid_up_to])
+                    .expect("valid UTF-8 prefix reported by std::str::from_utf8")
+                    .to_owned();
+                self.pending_bytes.drain(..valid_up_to);
+                Ok(Some(text))
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+}
+
 enum GlobalCommand {
     CreateSession {
         grammar: Option<String>,
@@ -408,6 +490,7 @@ struct SessionState {
     seq_id: LlamaSeqId,
     n_past: i32,
     pending_tokens: Vec<LlamaToken>,
+    pending_output: Utf8PieceBuffer,
     sampler: Option<crate::LlamaSampler>,
     stream_tx: Option<mpsc::Sender<StreamChunk>>,
     remaining_tokens: usize,
@@ -437,7 +520,7 @@ impl InferenceWorkerState {
         ctx: LlamaContext,
         cmd_rx: mpsc::Receiver<WorkerCommand>,
     ) -> Self {
-        let context_length = ctx.n_ctx() as usize;
+        let context_length = ctx.n_ctx_seq() as usize;
         let max_seq_id_exclusive = i32::try_from(ctx.n_seq_max()).unwrap_or(i32::MAX);
         let kv_cache_can_shift = ctx.kv_cache_can_shift();
         let window_drop_chunk = (context_length / 4).max(1);
@@ -461,8 +544,31 @@ impl InferenceWorkerState {
         if let Some(tx) = session.stream_tx.take() {
             let _ = tx.blocking_send(StreamChunk::Error(message.into()));
         }
+        session.pending_output.clear();
         session.remaining_tokens = 0;
         session.last_token = None;
+    }
+
+    fn finish_session_stream(
+        session: &mut SessionState,
+        final_text: Option<String>,
+    ) -> Result<(), mpsc::error::SendError<StreamChunk>> {
+        session.last_token = None;
+        session.remaining_tokens = 0;
+
+        let Some(tx) = session.stream_tx.take() else {
+            session.pending_output.clear();
+            return Ok(());
+        };
+
+        if let Some(text) = final_text
+            && !text.is_empty()
+        {
+            tx.blocking_send(StreamChunk::Token(text))?;
+        }
+
+        session.pending_output.clear();
+        tx.blocking_send(StreamChunk::Done)
     }
 
     fn describe_stream_error(&self, error: &LlamaError, batch_tokens: usize) -> String {
@@ -560,6 +666,7 @@ impl InferenceWorkerState {
                     seq_id,
                     n_past: 0,
                     pending_tokens: Vec::new(),
+                    pending_output: Utf8PieceBuffer::default(),
                     sampler: Some(sampler),
                     stream_tx: None,
                     remaining_tokens: 0,
@@ -639,6 +746,7 @@ impl InferenceWorkerState {
                 }
                 Some(session)
                     if !session.pending_tokens.is_empty()
+                        || session.pending_output.has_pending()
                         || session.stream_tx.is_some()
                         || session.remaining_tokens > 0
                         || session.last_token.is_some()
@@ -705,11 +813,9 @@ impl InferenceWorkerState {
             let session = self.sessions.get_mut(&session_id).expect("session id from map keys");
 
             if session.cancelled {
-                if let Some(tx) = session.stream_tx.take() {
-                    let _ = tx.blocking_send(StreamChunk::Done);
+                if Self::finish_session_stream(session, None).is_err() {
+                    session.stream_tx = None;
                 }
-                session.remaining_tokens = 0;
-                session.last_token = None;
                 continue;
             }
 
@@ -795,6 +901,7 @@ impl InferenceWorkerState {
                     if let Some(tx) = session.stream_tx.take() {
                         let _ = tx.blocking_send(StreamChunk::Error(message.clone()));
                     }
+                    session.pending_output.clear();
                     session.remaining_tokens = 0;
                     session.last_token = None;
                 }
@@ -827,28 +934,66 @@ impl InferenceWorkerState {
             session.sampler = Some(sampler);
 
             if token == self.model.token_eos() || session.remaining_tokens == 0 {
-                session.last_token = None;
-                session.remaining_tokens = 0;
-                if let Some(tx) = session.stream_tx.take() {
-                    let _ = tx.blocking_send(StreamChunk::Done);
+                let flush = match session.pending_output.finish() {
+                    Ok(flush) => flush,
+                    Err(error) => {
+                        Self::fail_session_stream(session, error.to_string());
+                        continue;
+                    }
+                };
+                if flush.dropped_incomplete_tail {
+                    warn!(
+                        session_id,
+                        seq_id = session.seq_id,
+                        "llama generation ended with an incomplete UTF-8 tail; dropping trailing bytes"
+                    );
+                }
+                if Self::finish_session_stream(session, flush.text).is_err() {
+                    session.stream_tx = None;
                 }
                 continue;
             }
 
-            match self.model.token_to_piece(token, true) {
+            match self.model.token_to_piece_bytes(token, true) {
                 Ok(piece) => {
-                    if let Some(tx) = session.stream_tx.as_ref() {
-                        match tx.blocking_send(StreamChunk::Token(piece)) {
-                            Ok(()) => {
-                                session.last_token = Some(token);
-                                session.remaining_tokens =
-                                    session.remaining_tokens.saturating_sub(1);
+                    let text = match session.pending_output.push(&piece) {
+                        Ok(text) => text,
+                        Err(error) => {
+                            Self::fail_session_stream(session, error.to_string());
+                            continue;
+                        }
+                    };
+
+                    if let Some(tx) = session.stream_tx.as_ref()
+                        && let Some(text) = text
+                        && tx.blocking_send(StreamChunk::Token(text)).is_err()
+                    {
+                        session.stream_tx = None;
+                        session.pending_output.clear();
+                        session.remaining_tokens = 0;
+                        session.last_token = None;
+                        continue;
+                    }
+
+                    session.last_token = Some(token);
+                    session.remaining_tokens = session.remaining_tokens.saturating_sub(1);
+                    if session.remaining_tokens == 0 {
+                        let flush = match session.pending_output.finish() {
+                            Ok(flush) => flush,
+                            Err(error) => {
+                                Self::fail_session_stream(session, error.to_string());
+                                continue;
                             }
-                            Err(_) => {
-                                session.stream_tx = None;
-                                session.remaining_tokens = 0;
-                                session.last_token = None;
-                            }
+                        };
+                        if flush.dropped_incomplete_tail {
+                            warn!(
+                                session_id,
+                                seq_id = session.seq_id,
+                                "llama generation stopped at the token budget with an incomplete UTF-8 tail; dropping trailing bytes"
+                            );
+                        }
+                        if Self::finish_session_stream(session, flush.text).is_err() {
+                            session.stream_tx = None;
                         }
                     }
                 }
@@ -856,6 +1001,7 @@ impl InferenceWorkerState {
                     if let Some(tx) = session.stream_tx.take() {
                         let _ = tx.blocking_send(StreamChunk::Error(error.to_string()));
                     }
+                    session.pending_output.clear();
                     session.remaining_tokens = 0;
                     session.last_token = None;
                 }
@@ -1016,5 +1162,50 @@ impl LlamaRuntime {
             .await
             .map_err(|_| LlamaRuntimeError::WorkerShutdown)?;
         reply_rx.await.map_err(|_| LlamaRuntimeError::WorkerShutdown)?
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Utf8FlushResult, Utf8PieceBuffer};
+
+    #[test]
+    fn utf8_piece_buffer_waits_for_multibyte_sequence_completion() {
+        let mut buffer = Utf8PieceBuffer::default();
+
+        assert_eq!(buffer.push(&[0xE4]).expect("first byte should buffer"), None);
+        assert_eq!(
+            buffer.push(&[0xB8, 0xAD]).expect("remaining bytes should flush"),
+            Some("\u{4E2D}".to_owned())
+        );
+    }
+
+    #[test]
+    fn utf8_piece_buffer_emits_valid_prefix_and_keeps_partial_tail() {
+        let mut buffer = Utf8PieceBuffer::default();
+
+        assert_eq!(
+            buffer.push(&[b'a', 0xE4]).expect("valid prefix should flush"),
+            Some("a".to_owned())
+        );
+        assert_eq!(
+            buffer.push(&[0xB8, 0xAD]).expect("tail should complete"),
+            Some("\u{4E2D}".to_owned())
+        );
+    }
+
+    #[test]
+    fn utf8_piece_buffer_finish_drops_incomplete_tail() {
+        let mut buffer = Utf8PieceBuffer::default();
+
+        assert_eq!(
+            buffer.push(&[b'a']).expect("ASCII should flush immediately"),
+            Some("a".to_owned())
+        );
+        assert_eq!(buffer.push(&[0xE4]).expect("partial UTF-8 should buffer"), None);
+        assert_eq!(
+            buffer.finish().expect("finish should succeed"),
+            Utf8FlushResult { text: None, dropped_incomplete_tail: true }
+        );
     }
 }

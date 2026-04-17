@@ -89,6 +89,7 @@ export type ChatUiMessage = XModelMessage & {
     errorParam?: ChatApiError['param'];
     errorStatus?: number;
     errorType?: ChatRequestErrorType;
+    reasoningContent?: string;
 };
 
 export type ChatMessageRecord = MessageInfo<ChatUiMessage>;
@@ -204,6 +205,13 @@ export const getChatMessageTextContent = (
     return '';
 };
 
+export const stripTrailingAssistantTurnArtifacts = (value: string): string =>
+    value
+        .replace(/<\|endoftext\|>\s*<\|im_start\|>[\s\S]*$/g, '')
+        .replace(/<\|endoftext\|>\s*$/g, '')
+        .replace(/<\|im_end\|>\s*$/g, '')
+        .replace(/<\|eot_id\|>\s*$/g, '');
+
 const hasMeaningfulChatRequestContent = (
     message?: Pick<XModelMessage, 'content'> | null,
 ): boolean => getChatMessageTextContent(message).trim().length > 0;
@@ -215,14 +223,13 @@ export const toChatRequestMessage = (
         return null;
     }
 
+    const text = message.role === 'assistant'
+        ? stripTrailingAssistantTurnArtifacts(getChatMessageTextContent(message))
+        : getChatMessageTextContent(message);
+
     return {
         role: message.role,
-        content: typeof message.content === 'string'
-            ? message.content
-            : {
-                text: message.content?.text ?? '',
-                type: message.content?.type ?? 'text',
-            },
+        content: text,
     };
 };
 
@@ -243,7 +250,9 @@ export const getContinueGenerationPrefix = (
             continue;
         }
 
-        const content = getChatMessageTextContent(message);
+        const content = message.role === 'assistant'
+            ? stripTrailingAssistantTurnArtifacts(getChatMessageTextContent(message))
+            : getChatMessageTextContent(message);
         if (!content.trim()) {
             continue;
         }
@@ -273,6 +282,88 @@ const mergeContinuationContent = (prefix: string, generated: string): string => 
     return `${prefix}${generated}`;
 };
 
+const parseSsePayload = (value: unknown): unknown => {
+    if (typeof value !== 'string') {
+        return value;
+    }
+
+    const trimmed = value.trim();
+    if (!trimmed || trimmed === '[DONE]') {
+        return null;
+    }
+    if ((trimmed.startsWith('{') || trimmed.startsWith('[')) && trimmed.length > 1) {
+        try {
+            return JSON.parse(trimmed) as unknown;
+        } catch {
+            return null;
+        }
+    }
+
+    return null;
+};
+
+const extractChunkPayload = (
+    chunk: Partial<Record<SSEFields, XModelResponse>> | undefined,
+): unknown => {
+    const chunkData = (chunk as { data?: unknown } | undefined)?.data;
+    return parseSsePayload(chunkData) ?? chunkData ?? parseSsePayload(chunk) ?? chunk;
+};
+
+const extractSseDeltaTextField = (
+    chunk: Partial<Record<SSEFields, XModelResponse>> | undefined,
+    field: string,
+): string => {
+    const payload = extractChunkPayload(chunk);
+    if (!isRecord(payload) || !Array.isArray(payload.choices)) {
+        return '';
+    }
+
+    for (const choice of payload.choices) {
+        if (!isRecord(choice) || !isRecord(choice.delta)) {
+            continue;
+        }
+        const value = choice.delta[field];
+        if (typeof value === 'string' && value.length > 0) {
+            return value;
+        }
+    }
+
+    return '';
+};
+
+const withChatMessageTextContent = (message: ChatUiMessage, text: string): ChatUiMessage => {
+    if (typeof message.content === 'string') {
+        return {
+            ...message,
+            content: text,
+        };
+    }
+
+    if (message.content && typeof message.content === 'object') {
+        return {
+            ...message,
+            content: {
+                ...message.content,
+                text,
+                type: message.content.type ?? 'text',
+            },
+        };
+    }
+
+    return {
+        ...message,
+        content: text,
+    };
+};
+
+const withChatMessageReasoningContent = (
+    message: ChatUiMessage,
+    reasoningContent?: string,
+): ChatUiMessage => ({
+    ...message,
+    reasoningContent: reasoningContent?.trim() ? reasoningContent : undefined,
+});
+
 const getResponseRequestId = (source?: Response | Headers | null): string | null => {
     const headers = source instanceof Response ? source.headers : source;
     const requestId = headers?.get('x-request-id')
@@ -285,26 +376,8 @@ const getResponseRequestId = (source?: Response | Headers | null): string | null
 const extractStreamChunkError = (
     chunk: Partial<Record<SSEFields, XModelResponse>> | undefined,
 ): ChatApiError | null => {
-    const chunkData = (chunk as { data?: unknown } | undefined)?.data;
-    if (isChatApiErrorResponse(chunkData)) {
-        return chunkData.error;
-    }
-
-    if (isChatApiErrorResponse(chunk)) {
-        return chunk.error;
-    }
-
-    const rawData = typeof chunkData === 'string' ? chunkData.trim() : '';
-    if (!rawData || rawData === '[DONE]') {
-        return null;
-    }
-
-    try {
-        const payload = JSON.parse(rawData) as unknown;
-        return isChatApiErrorResponse(payload) ? payload.error : null;
-    } catch {
-        return null;
-    }
+    const payload = extractChunkPayload(chunk);
+    return isChatApiErrorResponse(payload) ? payload.error : null;
 };
 
 const buildChatTransportError = async (response: Response): Promise<ChatTransportError> => {
@@ -532,6 +605,7 @@ class ContinueGenerationChatProvider extends DeepSeekChatProvider<
     Partial<Record<SSEFields, XModelResponse>>
 > {
     private pendingContinuationPrefix = '';
+    private pendingReasoningContent = '';
 
     override transformParams(
         requestParams: Partial<ChatRequestParams>,
@@ -544,6 +618,7 @@ class ContinueGenerationChatProvider extends DeepSeekChatProvider<
         this.pendingContinuationPrefix = requestParams.continue_generation
             ? getContinueGenerationPrefix(requestParams.messages)
             : '';
+        this.pendingReasoningContent = '';
 
         return {
             ...(options?.params || {}),
@@ -560,8 +635,28 @@ class ContinueGenerationChatProvider extends DeepSeekChatProvider<
         return super.transformLocalMessage(requestParams);
     }
 
+    captureStreamChunk(chunk: Partial<Record<SSEFields, XModelResponse>> | undefined) {
+        const reasoningChunk = extractSseDeltaTextField(chunk, 'reasoning_content');
+        if (!reasoningChunk) {
+            return;
+        }
+
+        this.pendingReasoningContent = mergeContinuationContent(
+            this.pendingReasoningContent,
+            reasoningChunk,
+        );
+    }
+
     override transformMessage(info: ProviderTransformMessageInfo): ChatUiMessage {
-        const message = super.transformMessage(info);
+        let message = super.transformMessage(info);
+        if (message.role === 'assistant') {
+            const content = stripTrailingAssistantTurnArtifacts(getChatMessageTextContent(message));
+            if (content !== getChatMessageTextContent(message)) {
+                message = withChatMessageTextContent(message, content);
+            }
+            message = withChatMessageReasoningContent(message, this.pendingReasoningContent);
+        }
+
         if (!this.pendingContinuationPrefix) {
             return message;
         }
@@ -569,10 +664,10 @@ class ContinueGenerationChatProvider extends DeepSeekChatProvider<
         const prefix = this.pendingContinuationPrefix;
         this.pendingContinuationPrefix = '';
 
-        return {
-            ...message,
-            content: mergeContinuationContent(prefix, getChatMessageTextContent(message)),
-        };
+        return withChatMessageTextContent(
+            message,
+            mergeContinuationContent(prefix, getChatMessageTextContent(message)),
+        );
     }
 }
 
@@ -596,46 +691,46 @@ export const clearConversationCache = (conversationKey: string) => {
 export const providerFactory = (conversationKey: string, model: string) => {
     const cacheKey = `${conversationKey}::${model}`;
     if (!providerCaches.get(cacheKey)) {
-        providerCaches.set(
-            cacheKey,
-            new ContinueGenerationChatProvider({
-                request: XRequest<ChatRequestParams, Partial<Record<SSEFields, XModelResponse>>, ChatUiMessage>(
-                    `${API_BASE_URL}/v1/chat/completions`,
-                    {
-                        manual: true,
-                        callbacks: {
-                            onUpdate: (chunk, responseHeaders) => {
-                                // Local runtime errors can arrive as in-band SSE chunks with no `choices`.
-                                const error = extractStreamChunkError(chunk);
-                                if (!error) {
-                                    return;
-                                }
+        let provider: ContinueGenerationChatProvider | undefined;
+        const request = XRequest<ChatRequestParams, Partial<Record<SSEFields, XModelResponse>>, ChatUiMessage>(
+            `${API_BASE_URL}/v1/chat/completions`,
+            {
+                manual: true,
+                callbacks: {
+                    onUpdate: (chunk, responseHeaders) => {
+                        provider?.captureStreamChunk(chunk);
 
-                                const request_id = getResponseRequestId(responseHeaders);
-                                throw new ChatTransportError({
-                                    message: error.message,
-                                    transport_status: 200,
-                                    code: error.code ?? undefined,
-                                    param: error.param ?? undefined,
-                                    request_id,
-                                    error_type: error.type,
-                                });
-                            },
-                            onSuccess: () => { },
-                            onError: () => { },
-                        },
-                        middlewares: {
-                            onResponse: adaptChatTransportResponse,
-                        },
-                        params: {
-                            stream: true,
-                            model,
-                            ...(isEphemeralConversationKey(conversationKey) ? {} : { id: conversationKey }),
-                        },
+                        // Local runtime errors can arrive as in-band SSE chunks with no `choices`.
+                        const error = extractStreamChunkError(chunk);
+                        if (!error) {
+                            return;
+                        }
+
+                        const request_id = getResponseRequestId(responseHeaders);
+                        throw new ChatTransportError({
+                            message: error.message,
+                            transport_status: 200,
+                            code: error.code ?? undefined,
+                            param: error.param ?? undefined,
+                            request_id,
+                            error_type: error.type,
+                        });
                     },
-                ),
-            }),
+                    onSuccess: () => { },
+                    onError: () => { },
+                },
+                middlewares: {
+                    onResponse: adaptChatTransportResponse,
+                },
+                params: {
+                    stream: true,
+                    model,
+                    ...(isEphemeralConversationKey(conversationKey) ? {} : { id: conversationKey }),
+                },
+            },
         );
+        provider = new ContinueGenerationChatProvider({ request });
+        providerCaches.set(cacheKey, provider);
     }
     return providerCaches.get(cacheKey);
 };
