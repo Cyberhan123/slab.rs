@@ -44,11 +44,21 @@ pub struct TextGenerationRequest {
     #[serde(default)]
     pub top_p: Option<f32>,
     #[serde(default)]
+    pub top_k: Option<i32>,
+    #[serde(default)]
+    pub min_p: Option<f32>,
+    #[serde(default)]
+    pub presence_penalty: Option<f32>,
+    #[serde(default)]
+    pub repetition_penalty: Option<f32>,
+    #[serde(default)]
     pub session_key: Option<String>,
     #[serde(default)]
     pub stream: bool,
     #[serde(default)]
     pub gbnf: Option<String>,
+    #[serde(default)]
+    pub stop_sequences: Vec<String>,
     #[serde(default)]
     pub options: JsonOptions,
 }
@@ -62,6 +72,14 @@ pub struct TextGenerationOpOptions {
     pub temperature: Option<f32>,
     #[serde(default)]
     pub top_p: Option<f32>,
+    #[serde(default)]
+    pub top_k: Option<i32>,
+    #[serde(default)]
+    pub min_p: Option<f32>,
+    #[serde(default)]
+    pub presence_penalty: Option<f32>,
+    #[serde(default)]
+    pub repetition_penalty: Option<f32>,
     #[serde(default)]
     pub session_key: Option<String>,
     #[serde(default)]

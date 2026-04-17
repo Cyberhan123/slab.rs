@@ -78,9 +78,19 @@ pub struct PackPricing {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct PackRuntimePresets {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_p: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub presence_penalty: Option<f32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repetition_penalty: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]

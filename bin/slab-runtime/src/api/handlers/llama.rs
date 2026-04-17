@@ -32,6 +32,7 @@ struct ThinkingStreamState {
     raw_output: String,
     emitted_content_len: usize,
     emitted_reasoning_len: usize,
+    prompt_prefills_open_think: bool,
 }
 
 fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
@@ -46,6 +47,7 @@ fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
         } else {
             raw.len().saturating_sub(trailing_partial_marker_len(raw, THINK_OPEN_MARKER))
         };
+        // No <think found — treat all text as content.
         return ParsedThinkingOutput {
             content: raw[..stable_end].to_owned(),
             reasoning: String::new(),
@@ -86,7 +88,48 @@ fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
     }
 }
 
+fn prompt_prefills_open_think(prompt: &str) -> bool {
+    match (prompt.rfind(THINK_OPEN_MARKER), prompt.rfind(THINK_CLOSE_TAG)) {
+        (Some(open), Some(close)) => open > close,
+        (Some(_), None) => true,
+        _ => false,
+    }
+}
+
+fn parse_thinking_output_with_context(
+    raw: &str,
+    complete: bool,
+    prompt_prefills_open_think: bool,
+) -> ParsedThinkingOutput {
+    if prompt_prefills_open_think && raw.find(THINK_OPEN_MARKER).is_none() {
+        if let Some(close_start) = raw.find(THINK_CLOSE_TAG) {
+            let close_end = close_start + THINK_CLOSE_TAG.len();
+            return ParsedThinkingOutput {
+                content: raw[close_end..].to_owned(),
+                reasoning: raw[..close_start].to_owned(),
+            };
+        }
+
+        let stable_reasoning_end = if complete {
+            raw.len()
+        } else {
+            raw.len().saturating_sub(trailing_partial_marker_len(raw, THINK_CLOSE_TAG))
+        };
+
+        return ParsedThinkingOutput {
+            content: String::new(),
+            reasoning: raw[..stable_reasoning_end].to_owned(),
+        };
+    }
+
+    parse_thinking_output(raw, complete)
+}
+
 impl ThinkingStreamState {
+    fn new(prompt_prefills_open_think: bool) -> Self {
+        Self { prompt_prefills_open_think, ..Default::default() }
+    }
+
     fn ingest(&mut self, delta: &str) -> Vec<ThinkingDelta> {
         self.raw_output.push_str(delta);
         self.emit(false)
@@ -97,7 +140,11 @@ impl ThinkingStreamState {
     }
 
     fn emit(&mut self, complete: bool) -> Vec<ThinkingDelta> {
-        let parsed = parse_thinking_output(&self.raw_output, complete);
+        let parsed = parse_thinking_output_with_context(
+            &self.raw_output,
+            complete,
+            self.prompt_prefills_open_think,
+        );
         let mut deltas = Vec::new();
 
         if parsed.reasoning.len() > self.emitted_reasoning_len {
@@ -118,8 +165,12 @@ impl ThinkingStreamState {
     }
 }
 
-fn attach_reasoning_metadata(response: &mut TextGenerationResponse) {
-    let parsed = parse_thinking_output(&response.text, true);
+fn attach_reasoning_metadata(
+    response: &mut TextGenerationResponse,
+    prompt_prefills_open_think: bool,
+) {
+    let parsed =
+        parse_thinking_output_with_context(&response.text, true, prompt_prefills_open_think);
     let reasoning = parsed.reasoning.trim();
     if reasoning.is_empty() {
         return;
@@ -164,6 +215,7 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         let req = request.into_inner();
+        let prompt_prefills_thinking = prompt_prefills_open_think(&req.prompt);
         debug!(
             prompt_len = req.prompt.len(),
             max_tokens = req.max_tokens,
@@ -176,7 +228,7 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
             error!(error = %error, "llama text generation failed");
             runtime_to_status(error)
         })?;
-        attach_reasoning_metadata(&mut response);
+        attach_reasoning_metadata(&mut response, prompt_prefills_thinking);
 
         info!(output_len = response.text.len(), "llama chat completed");
         Ok(Response::new(convert::encode_chat_response(&response)))
@@ -193,6 +245,7 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         let req = request.into_inner();
+        let prompt_prefills_thinking = prompt_prefills_open_think(&req.prompt);
         debug!(
             prompt_len = req.prompt.len(),
             max_tokens = req.max_tokens,
@@ -222,7 +275,7 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
                 tokio::pin!(backend_stream);
                 let mut token_count = 0usize;
                 let mut terminal_usage: Option<TextGenerationUsage> = None;
-                let mut thinking_state = ThinkingStreamState::default();
+                let mut thinking_state = ThinkingStreamState::new(prompt_prefills_thinking);
                 while let Some(chunk) = backend_stream.next().await {
                     let messages: Vec<pb::ChatStreamChunk> = match chunk {
                         Ok(chunk) => {
@@ -366,7 +419,7 @@ fn build_estimated_usage(prompt: &str, completion_tokens: u32) -> TextGeneration
 mod tests {
     use super::{
         ParsedThinkingOutput, ThinkingDelta, ThinkingStreamState, attach_reasoning_metadata,
-        parse_thinking_output,
+        parse_thinking_output, parse_thinking_output_with_context, prompt_prefills_open_think,
     };
     use serde_json::json;
     use slab_types::TextGenerationResponse;
@@ -384,18 +437,53 @@ mod tests {
     }
 
     #[test]
+    fn parse_thinking_output_no_think_tag_passes_through() {
+        let parsed = parse_thinking_output("just plain content", false);
+        assert_eq!(
+            parsed,
+            ParsedThinkingOutput {
+                content: "just plain content".to_owned(),
+                reasoning: String::new(),
+            }
+        );
+    }
+
+    #[test]
     fn parse_thinking_output_holds_partial_open_tag_until_complete() {
         let parsed = parse_thinking_output("answer<th", false);
         assert_eq!(
             parsed,
             ParsedThinkingOutput { content: "answer".to_owned(), reasoning: String::new() }
         );
+
+        let completed = parse_thinking_output("answer<th", true);
+        assert_eq!(
+            completed,
+            ParsedThinkingOutput { content: "answer<th".to_owned(), reasoning: String::new() }
+        );
     }
 
     #[test]
     fn thinking_stream_state_splits_reasoning_and_content_deltas() {
         let mut state = ThinkingStreamState::default();
-        assert!(state.ingest("<th").is_empty());
+        assert_eq!(
+            state.ingest("<think>first thought"),
+            vec![ThinkingDelta::Reasoning("first thought".to_owned())]
+        );
+        assert_eq!(
+            state.ingest("</think>\n\nfinal answer"),
+            vec![ThinkingDelta::Content("\n\nfinal answer".to_owned())]
+        );
+        assert!(state.finish().is_empty());
+    }
+
+    #[test]
+    fn thinking_stream_state_holds_partial_open_tag_until_completed() {
+        let mut state = ThinkingStreamState::default();
+        assert_eq!(
+            state.ingest("answer<th"),
+            vec![ThinkingDelta::Content("answer".to_owned())]
+        );
         assert_eq!(
             state.ingest("ink>first thought"),
             vec![ThinkingDelta::Reasoning("first thought".to_owned())]
@@ -415,7 +503,69 @@ mod tests {
             ..Default::default()
         };
 
-        attach_reasoning_metadata(&mut response);
+        attach_reasoning_metadata(&mut response, false);
+
+        assert_eq!(response.text, "\n\nanswer");
+        assert_eq!(response.metadata.get("reasoning_content"), Some(&json!("step by step")));
+    }
+
+    #[test]
+    fn thinking_stream_state_no_think_tag_passes_content_through() {
+        let mut state = ThinkingStreamState::new(false);
+        assert_eq!(
+            state.ingest("hello world"),
+            vec![ThinkingDelta::Content("hello world".to_owned())]
+        );
+        assert_eq!(
+            state.ingest(" more text"),
+            vec![ThinkingDelta::Content(" more text".to_owned())]
+        );
+        assert!(state.finish().is_empty());
+    }
+
+    #[test]
+    fn prompt_prefills_open_think_detects_unclosed_suffix() {
+        assert!(prompt_prefills_open_think("<|im_start|>assistant\n<think>\n"));
+        assert!(!prompt_prefills_open_think("<think>done</think>\nanswer"));
+        assert!(!prompt_prefills_open_think("plain content"));
+    }
+
+    #[test]
+    fn parse_thinking_output_with_context_handles_prefilled_open_think() {
+        let parsed =
+            parse_thinking_output_with_context("step one</think>\n\nfinal answer", true, true);
+        assert_eq!(
+            parsed,
+            ParsedThinkingOutput {
+                content: "\n\nfinal answer".to_owned(),
+                reasoning: "step one".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn thinking_stream_state_handles_prefilled_open_think() {
+        let mut state = ThinkingStreamState::new(true);
+        assert_eq!(
+            state.ingest("first thought"),
+            vec![ThinkingDelta::Reasoning("first thought".to_owned())]
+        );
+        assert_eq!(
+            state.ingest("</think>\n\nfinal answer"),
+            vec![ThinkingDelta::Content("\n\nfinal answer".to_owned())]
+        );
+        assert!(state.finish().is_empty());
+    }
+
+    #[test]
+    fn attach_reasoning_metadata_handles_prefilled_open_think() {
+        let mut response = TextGenerationResponse {
+            text: "step by step</think>\n\nanswer".to_owned(),
+            metadata: Default::default(),
+            ..Default::default()
+        };
+
+        attach_reasoning_metadata(&mut response, true);
 
         assert_eq!(response.text, "\n\nanswer");
         assert_eq!(response.metadata.get("reasoning_content"), Some(&json!("step by step")));

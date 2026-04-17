@@ -22,6 +22,13 @@ pub(crate) struct LlamaDispatchRequest {
     pub max_tokens: usize,
     pub session_key: Option<String>,
     pub gbnf: Option<String>,
+    pub temperature: Option<f32>,
+    pub top_p: Option<f32>,
+    pub top_k: Option<i32>,
+    pub min_p: Option<f32>,
+    pub repetition_penalty: Option<f32>,
+    pub presence_penalty: Option<f32>,
+    pub stop_sequences: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -63,7 +70,19 @@ fn plan_session_reuse(
             cached_tokens: 0,
         }),
         Some(SessionBinding::Busy) => {
-            Err(GGMLLlamaEngineError::SessionKeyBusy { key: key.to_owned() })
+            // A previous request may have left this key in Busy state due to a
+            // crash, cancelled task, or unclean shutdown. Instead of permanently
+            // blocking all future requests on this conversation, we recover by
+            // discarding the stale binding and creating a fresh session.  The
+            // only cost is losing the KV cache for one turn.
+            warn!(
+                session_key = key,
+                "session binding is stuck in Busy state; recovering by creating a fresh session"
+            );
+            Ok(SessionReusePlan::CreateFresh {
+                delta_prompt: full_prompt.to_owned(),
+                cached_tokens: 0,
+            })
         }
         Some(SessionBinding::Ready { snapshot, cached_prompt, grammar: cached_grammar }) => {
             if cached_grammar.as_deref() != gbnf {
@@ -200,6 +219,12 @@ impl GGMLLlamaEngine {
         session_key: Option<String>,
         full_prompt: String,
         gbnf: Option<String>,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+        top_k: Option<i32>,
+        min_p: Option<f32>,
+        repetition_penalty: Option<f32>,
+        presence_penalty: Option<f32>,
     ) -> Result<PreparedSession, ggml::EngineError> {
         let Some(key) = session_key else {
             return Ok(PreparedSession {
@@ -222,7 +247,18 @@ impl GGMLLlamaEngine {
 
         let (sid, delta_prompt, cached_tokens) = match plan {
             SessionReusePlan::CreateFresh { delta_prompt, cached_tokens } => {
-                match self.create_session_with_gbnf(gbnf.clone()).await {
+                match self
+                    .create_session_with_options(
+                        gbnf.clone(),
+                        temperature,
+                        top_p,
+                        top_k,
+                        min_p,
+                        repetition_penalty,
+                        presence_penalty,
+                    )
+                    .await
+                {
                     Ok(sid) => (Some(sid), delta_prompt, cached_tokens),
                     Err(error) => {
                         self.session_bindings.lock().await.remove(&key);
@@ -231,7 +267,19 @@ impl GGMLLlamaEngine {
                 }
             }
             SessionReusePlan::RestoreSnapshot { snapshot, delta_prompt, cached_tokens } => {
-                match self.create_session_from_snapshot(snapshot, gbnf.clone()).await {
+                match self
+                    .create_session_from_snapshot(
+                        snapshot,
+                        gbnf.clone(),
+                        temperature,
+                        top_p,
+                        top_k,
+                        min_p,
+                        repetition_penalty,
+                        presence_penalty,
+                    )
+                    .await
+                {
                     Ok(sid) => (Some(sid), delta_prompt, cached_tokens),
                     Err(error) => {
                         self.session_bindings.lock().await.remove(&key);
@@ -321,24 +369,37 @@ impl GGMLLlamaEngine {
         let gbnf = request.gbnf.clone();
         let session_key = request.session_key.clone();
         let commit_gbnf = request.gbnf.clone();
-        let prepared = self.prepare_managed_session(session_key, prompt, gbnf.clone()).await?;
+        let stop_sequences = request.stop_sequences.clone();
+        let prepared = self.prepare_managed_session(
+            session_key,
+            prompt,
+            gbnf.clone(),
+            request.temperature,
+            request.top_p,
+            request.top_k,
+            request.min_p,
+            request.repetition_penalty,
+            request.presence_penalty,
+        ).await?;
 
         match self.inference(&prepared.delta_prompt, max_tokens, prepared.sid, gbnf).await {
             Ok(text) => {
-                let usage = self.build_usage(&prepared.full_prompt, &text, prepared.cached_tokens);
+                // Apply stop sequence trimming to the generated text before committing.
+                let (trimmed_text, _stop_matched) = apply_stop_sequences(&text, &stop_sequences);
+                let usage = self.build_usage(&prepared.full_prompt, &trimmed_text, prepared.cached_tokens);
                 if let Err(error) = self
                     .commit_managed_session(
                         prepared.key,
                         prepared.sid,
                         &prepared.full_prompt,
-                        &text,
+                        &trimmed_text,
                         commit_gbnf,
                     )
                     .await
                 {
                     warn!(error = %error, "failed to persist llama session snapshot after inference");
                 }
-                Ok(LlamaDispatchOutput { text, usage })
+                Ok(LlamaDispatchOutput { text: trimmed_text, usage })
             }
             Err(error) => {
                 self.drop_managed_session(prepared.key, prepared.sid).await;
@@ -357,7 +418,18 @@ impl GGMLLlamaEngine {
         let gbnf = request.gbnf.clone();
         let session_key = request.session_key.clone();
         let commit_gbnf = request.gbnf.clone();
-        let prepared = self.prepare_managed_session(session_key, prompt, gbnf.clone()).await?;
+        let stop_sequences = request.stop_sequences.clone();
+        let prepared = self.prepare_managed_session(
+            session_key,
+            prompt,
+            gbnf.clone(),
+            request.temperature,
+            request.top_p,
+            request.top_k,
+            request.min_p,
+            request.repetition_penalty,
+            request.presence_penalty,
+        ).await?;
 
         let (mut llama_rx, sid) = match self
             .inference_stream(&prepared.delta_prompt, max_tokens, prepared.sid, gbnf)
@@ -380,11 +452,17 @@ impl GGMLLlamaEngine {
             let mut forward_failed = false;
             let mut stream_error = false;
             let mut cancelled = false;
+            let mut stop_matched = false;
+            // Tracks how many bytes of `generated` have been forwarded downstream.
+            // When a stop sequence is partially accumulated we hold back the
+            // uncertain tail so that we never forward text that may need to be
+            // trimmed later.
+            let mut forwarded_len: usize = 0;
             let mut cancel_rx = cancel_rx;
 
             loop {
                 tokio::select! {
-                    cancel_changed = cancel_rx.changed(), if !completed && !stream_error && !forward_failed => {
+                    cancel_changed = cancel_rx.changed(), if !completed && !stream_error && !forward_failed && !stop_matched => {
                         let cancel_requested = if cancel_changed.is_ok() {
                             *cancel_rx.borrow()
                         } else {
@@ -408,19 +486,77 @@ impl GGMLLlamaEngine {
                         match chunk {
                             StreamChunk::Token(text) => {
                                 generated.push_str(&text);
-                                if stream_tx.send(BaseStreamChunk::Token(text)).await.is_err() {
-                                    forward_failed = true;
-                                    if !completed
-                                        && !stream_error
-                                        && let Err(error) = engine.cancel_generate(sid).await
+
+                                // Check for stop sequences in the accumulated output.
+                                if !stop_sequences.is_empty() {
+                                    if let Some((stop_index, _)) = stop_sequences
+                                        .iter()
+                                        .filter(|s| !s.is_empty())
+                                        .filter_map(|s| generated.find(s.as_str()).map(|i| (i, s)))
+                                        .min_by_key(|(i, _)| *i)
                                     {
-                                        warn!(
-                                            session_id = sid,
-                                            error = %error,
-                                            "failed to cancel llama generation after downstream disconnect"
-                                        );
+                                        // Found a stop sequence — forward text up to it, then cancel.
+                                        stop_matched = true;
+                                        let safe_end = stop_index;
+                                        if safe_end > forwarded_len {
+                                            let forward_text = generated[forwarded_len..safe_end].to_owned();
+                                            forwarded_len = safe_end;
+                                            if stream_tx.send(BaseStreamChunk::Token(forward_text)).await.is_err() {
+                                                forward_failed = true;
+                                            }
+                                        }
+                                        // Truncate generated to the stop boundary for session commit.
+                                        generated.truncate(safe_end);
+                                        // Cancel the backend generation.
+                                        if let Err(error) = engine.cancel_generate(sid).await {
+                                            warn!(
+                                                session_id = sid,
+                                                error = %error,
+                                                "failed to cancel llama generation after stop sequence match"
+                                            );
+                                        }
+                                        break;
                                     }
-                                    break;
+
+                                    // Hold back a trailing partial match to avoid forwarding
+                                    // text that might be the start of a stop sequence.
+                                    let hold_back = trailing_partial_stop_len(&generated, &stop_sequences);
+                                    let safe_end = generated.len().saturating_sub(hold_back);
+                                    if safe_end > forwarded_len {
+                                        let forward_text = generated[forwarded_len..safe_end].to_owned();
+                                        forwarded_len = safe_end;
+                                        if stream_tx.send(BaseStreamChunk::Token(forward_text)).await.is_err() {
+                                            forward_failed = true;
+                                            if !completed
+                                                && !stream_error
+                                                && let Err(error) = engine.cancel_generate(sid).await
+                                            {
+                                                warn!(
+                                                    session_id = sid,
+                                                    error = %error,
+                                                    "failed to cancel llama generation after downstream disconnect"
+                                                );
+                                            }
+                                            break;
+                                        }
+                                    }
+                                } else {
+                                    // No stop sequences — forward directly.
+                                    if stream_tx.send(BaseStreamChunk::Token(text)).await.is_err() {
+                                        forward_failed = true;
+                                        if !completed
+                                            && !stream_error
+                                            && let Err(error) = engine.cancel_generate(sid).await
+                                        {
+                                            warn!(
+                                                session_id = sid,
+                                                error = %error,
+                                                "failed to cancel llama generation after downstream disconnect"
+                                            );
+                                        }
+                                        break;
+                                    }
+                                    forwarded_len = generated.len();
                                 }
                             }
                             StreamChunk::Done => {
@@ -439,7 +575,17 @@ impl GGMLLlamaEngine {
                 }
             }
 
-            if completed
+            // Flush any remaining held-back text after generation completes (no stop matched).
+            if !stop_matched && !forward_failed && !stream_error && forwarded_len < generated.len() {
+                let tail = generated[forwarded_len..].to_owned();
+                if stream_tx.send(BaseStreamChunk::Token(tail)).await.is_err() {
+                    forward_failed = true;
+                }
+            }
+
+            let effectively_completed = completed || stop_matched;
+
+            if effectively_completed
                 && !forward_failed
                 && !stream_error
                 && !cancelled
@@ -452,7 +598,7 @@ impl GGMLLlamaEngine {
                 forward_failed = true;
             }
 
-            if completed
+            if effectively_completed
                 && !forward_failed
                 && !stream_error
                 && stream_tx.send(BaseStreamChunk::Done).await.is_err()
@@ -460,7 +606,7 @@ impl GGMLLlamaEngine {
                 forward_failed = true;
             }
 
-            if key.is_some() && completed && !forward_failed && !stream_error && !cancelled {
+            if key.is_some() && effectively_completed && !forward_failed && !stream_error && !cancelled {
                 if let Err(error) = engine
                     .commit_managed_session(key, Some(sid), &full_prompt, &generated, gbnf)
                     .await
@@ -487,13 +633,31 @@ impl GGMLLlamaEngine {
         &self,
         gbnf: Option<String>,
     ) -> Result<SessionId, ggml::EngineError> {
-        if gbnf.is_none() {
-            return self.create_session().await;
-        }
+        self.create_session_with_options(gbnf, None, None, None, None, None, None).await
+    }
 
+    /// Create a new session with optional GBNF and sampling overrides.
+    pub async fn create_session_with_options(
+        &self,
+        gbnf: Option<String>,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+        top_k: Option<i32>,
+        min_p: Option<f32>,
+        repetition_penalty: Option<f32>,
+        presence_penalty: Option<f32>,
+    ) -> Result<SessionId, ggml::EngineError> {
         let engine = self.require_engine()?;
         engine
-            .create_session_with_gbnf(gbnf)
+            .create_session_with_options(
+                gbnf,
+                temperature,
+                top_p,
+                top_k,
+                min_p,
+                repetition_penalty,
+                presence_penalty,
+            )
             .await
             .map_err(GGMLLlamaEngineError::from)
             .map_err(Into::into)
@@ -503,10 +667,25 @@ impl GGMLLlamaEngine {
         &self,
         snapshot: LlamaSessionSnapshot,
         gbnf: Option<String>,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+        top_k: Option<i32>,
+        min_p: Option<f32>,
+        repetition_penalty: Option<f32>,
+        presence_penalty: Option<f32>,
     ) -> Result<SessionId, ggml::EngineError> {
         let engine = self.require_engine()?;
         engine
-            .create_session_from_snapshot(snapshot, gbnf)
+            .create_session_from_snapshot(
+                snapshot,
+                gbnf,
+                temperature,
+                top_p,
+                top_k,
+                min_p,
+                repetition_penalty,
+                presence_penalty,
+            )
             .await
             .map_err(GGMLLlamaEngineError::from)
             .map_err(Into::into)
@@ -729,10 +908,18 @@ mod tests {
     }
 
     #[test]
-    fn plan_session_reuse_rejects_busy_binding() {
-        let error = plan_session_reuse("chat-1", Some(&SessionBinding::Busy), "hello", None)
-            .expect_err("busy binding should reject concurrent reuse");
-        assert!(error.to_string().contains("already active"));
+    fn plan_session_reuse_recovers_from_busy_binding() {
+        let plan = plan_session_reuse("chat-1", Some(&SessionBinding::Busy), "hello", None)
+            .expect("busy binding should recover with a fresh session");
+        match plan {
+            SessionReusePlan::CreateFresh { delta_prompt, cached_tokens } => {
+                assert_eq!(delta_prompt, "hello");
+                assert_eq!(cached_tokens, 0);
+            }
+            SessionReusePlan::RestoreSnapshot { .. } => {
+                panic!("expected fresh session when recovering from busy binding")
+            }
+        }
     }
 
     #[test]
@@ -777,5 +964,72 @@ mod tests {
                 panic!("expected fresh session when grammar changes")
             }
         }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Stop-sequence helpers
+// ---------------------------------------------------------------------------
+
+/// Trim `text` at the earliest occurrence of any stop sequence.
+/// Returns the trimmed text and whether a stop was matched.
+fn apply_stop_sequences(text: &str, stop_sequences: &[String]) -> (String, bool) {
+    if stop_sequences.is_empty() {
+        return (text.to_owned(), false);
+    }
+    if let Some((idx, _)) = stop_sequences
+        .iter()
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| text.find(s.as_str()).map(|i| (i, s)))
+        .min_by_key(|(i, _)| *i)
+    {
+        (text[..idx].to_owned(), true)
+    } else {
+        (text.to_owned(), false)
+    }
+}
+
+/// Return the length of the longest suffix of `generated` that is a *proper
+/// prefix* of any stop sequence. This is how much text we must hold back
+/// during streaming to avoid forwarding a partial stop match.
+fn trailing_partial_stop_len(generated: &str, stop_sequences: &[String]) -> usize {
+    let mut max_hold = 0usize;
+    for stop in stop_sequences.iter().filter(|s| !s.is_empty()) {
+        // Only inspect suffixes that start on UTF-8 char boundaries so the
+        // caller can safely slice `generated[..generated.len() - hold_back]`.
+        for start in generated.char_indices().map(|(idx, _)| idx) {
+            let tail = &generated[start..];
+            if tail.len() < stop.len() && stop.starts_with(tail) {
+                max_hold = max_hold.max(tail.len());
+            }
+        }
+    }
+    max_hold
+}
+
+#[cfg(test)]
+mod stop_sequence_tests {
+    use super::{apply_stop_sequences, trailing_partial_stop_len};
+
+    #[test]
+    fn apply_stop_sequences_trims_at_earliest_match() {
+        let stop_sequences = vec!["</think>".to_owned(), "###".to_owned()];
+        let (trimmed, stop_matched) =
+            apply_stop_sequences("answer</think>ignored###later", &stop_sequences);
+
+        assert!(stop_matched);
+        assert_eq!(trimmed, "answer");
+    }
+
+    #[test]
+    fn trailing_partial_stop_len_respects_utf8_boundaries() {
+        let generated = " <think>\n我";
+        let stop_sequences = vec!["我是".to_owned()];
+        let hold_back = trailing_partial_stop_len(generated, &stop_sequences);
+        let safe_end = generated.len().saturating_sub(hold_back);
+
+        assert_eq!(hold_back, "我".len());
+        assert!(generated.is_char_boundary(safe_end));
+        assert_eq!(&generated[safe_end..], "我");
     }
 }

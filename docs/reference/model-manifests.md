@@ -22,8 +22,13 @@ Slab model packs use a manifest document at the root of the pack. The canonical 
   "capabilities": ["text_generation"],
   "context_window": 131072,
   "runtime_presets": {
+    "max_tokens": 81920,
     "temperature": 0.7,
-    "top_p": 0.95
+    "top_p": 0.95,
+    "top_k": 20,
+    "min_p": 0.0,
+    "presence_penalty": 1.5,
+    "repetition_penalty": 1.0
   },
   "sources": [
     {

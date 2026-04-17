@@ -191,9 +191,19 @@ pub struct Pricing {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct RuntimePresets {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presence_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repetition_penalty: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
@@ -747,7 +757,11 @@ mod tests {
                 context_window: Some(8192),
                 ..ModelSpec::default()
             },
-            runtime_presets: Some(RuntimePresets { temperature: Some(0.7), top_p: Some(0.95) }),
+            runtime_presets: Some(RuntimePresets {
+                temperature: Some(0.7),
+                top_p: Some(0.95),
+                ..Default::default()
+            }),
             created_at: Utc::now(),
             updated_at: Utc::now(),
         }

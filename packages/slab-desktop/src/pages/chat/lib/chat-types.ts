@@ -37,17 +37,27 @@ export type ChatMessageRecord = MessageInfo<ChatUiMessage>
 
 export type ChatRequestParams = XModelParams & {
   continue_generation?: boolean
+  max_tokens?: number | null
   temperature?: number | null
   thinking?: {
     type: 'enabled' | 'disabled'
   }
   top_p?: number | null
+  top_k?: number | null
+  min_p?: number | null
+  presence_penalty?: number | null
+  repetition_penalty?: number | null
   userAction?: string
 }
 
 export type ChatRuntimePresets = {
+  max_tokens?: number | null
   temperature?: number | null
   top_p?: number | null
+  top_k?: number | null
+  min_p?: number | null
+  presence_penalty?: number | null
+  repetition_penalty?: number | null
 }
 
 export type ChatRequestErrorInfo = {

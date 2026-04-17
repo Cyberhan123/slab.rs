@@ -469,7 +469,15 @@ pub(super) fn canonicalize_model_spec(
 pub(super) fn canonicalize_runtime_presets(
     runtime_presets: Option<crate::domain::models::RuntimePresets>,
 ) -> Option<crate::domain::models::RuntimePresets> {
-    runtime_presets.filter(|presets| presets.temperature.is_some() || presets.top_p.is_some())
+    runtime_presets.filter(|presets| {
+        presets.max_tokens.is_some()
+            || presets.temperature.is_some()
+            || presets.top_p.is_some()
+            || presets.top_k.is_some()
+            || presets.min_p.is_some()
+            || presets.presence_penalty.is_some()
+            || presets.repetition_penalty.is_some()
+    })
 }
 
 fn default_status_for_kind(kind: UnifiedModelKind) -> UnifiedModelStatus {

@@ -296,7 +296,7 @@ pub struct ChatCompletionRequest {
     pub stream_options: Option<ChatStreamOptions>,
     /// Maximum tokens to generate.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(min = 1, max = 4096, message = "max_tokens must be between 1 and 4096"))]
+    #[validate(range(min = 1, message = "max_tokens must be at least 1"))]
     pub max_tokens: Option<u32>,
     /// Sampling temperature in [0, 2].
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -306,6 +306,26 @@ pub struct ChatCompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 0.0, max = 1.0, message = "top_p must be between 0.0 and 1.0"))]
     pub top_p: Option<f32>,
+    /// Top-k sampling limit for local llama backends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0, message = "top_k must be >= 0"))]
+    pub top_k: Option<i32>,
+    /// Min-p sampling threshold for local llama backends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0.0, max = 1.0, message = "min_p must be between 0.0 and 1.0"))]
+    pub min_p: Option<f32>,
+    /// Presence penalty for local llama backends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(
+        min = -2.0,
+        max = 2.0,
+        message = "presence_penalty must be between -2.0 and 2.0"
+    ))]
+    pub presence_penalty: Option<f32>,
+    /// Repetition penalty for local llama backends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0.0, message = "repetition_penalty must be >= 0.0"))]
+    pub repetition_penalty: Option<f32>,
     /// Number of completions to generate.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 1, message = "n must be at least 1"))]
@@ -346,7 +366,7 @@ pub struct CompletionRequest {
     pub prompt: String,
     /// Maximum tokens to generate.
     #[serde(skip_serializing_if = "Option::is_none")]
-    #[validate(range(min = 1, max = 4096, message = "max_tokens must be between 1 and 4096"))]
+    #[validate(range(min = 1, message = "max_tokens must be at least 1"))]
     pub max_tokens: Option<u32>,
     /// Sampling temperature in [0, 2].
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -356,6 +376,26 @@ pub struct CompletionRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 0.0, max = 1.0, message = "top_p must be between 0.0 and 1.0"))]
     pub top_p: Option<f32>,
+    /// Top-k sampling limit for local llama backends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0, message = "top_k must be >= 0"))]
+    pub top_k: Option<i32>,
+    /// Min-p sampling threshold for local llama backends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0.0, max = 1.0, message = "min_p must be between 0.0 and 1.0"))]
+    pub min_p: Option<f32>,
+    /// Presence penalty for local llama backends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(
+        min = -2.0,
+        max = 2.0,
+        message = "presence_penalty must be between -2.0 and 2.0"
+    ))]
+    pub presence_penalty: Option<f32>,
+    /// Repetition penalty for local llama backends.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[validate(range(min = 0.0, message = "repetition_penalty must be >= 0.0"))]
+    pub repetition_penalty: Option<f32>,
     /// Number of completions to generate.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[validate(range(min = 1, message = "n must be at least 1"))]
@@ -632,6 +672,10 @@ impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
             max_tokens,
             temperature,
             top_p,
+            top_k,
+            min_p,
+            presence_penalty,
+            repetition_penalty,
             n,
             stop,
             gbnf,
@@ -660,6 +704,10 @@ impl From<ChatCompletionRequest> for DomainChatCompletionCommand {
                 max_tokens,
                 temperature,
                 top_p,
+                top_k,
+                min_p,
+                presence_penalty,
+                repetition_penalty,
                 n: n.unwrap_or(1),
                 stream,
                 stop,
@@ -679,6 +727,10 @@ impl From<CompletionRequest> for DomainTextCompletionCommand {
             max_tokens,
             temperature,
             top_p,
+            top_k,
+            min_p,
+            presence_penalty,
+            repetition_penalty,
             n,
             stop,
             stream,
@@ -696,6 +748,10 @@ impl From<CompletionRequest> for DomainTextCompletionCommand {
                 max_tokens,
                 temperature,
                 top_p,
+                top_k,
+                min_p,
+                presence_penalty,
+                repetition_penalty,
                 n: n.unwrap_or(1),
                 stream,
                 stop,
@@ -1071,6 +1127,10 @@ mod tests {
             max_tokens: None,
             temperature: None,
             top_p: None,
+            top_k: None,
+            min_p: None,
+            presence_penalty: None,
+            repetition_penalty: None,
             n: None,
             stop: None,
             gbnf: None,
@@ -1089,6 +1149,10 @@ mod tests {
             max_tokens: None,
             temperature: None,
             top_p: None,
+            top_k: None,
+            min_p: None,
+            presence_penalty: None,
+            repetition_penalty: None,
             n: None,
             stop: None,
             stream: false,

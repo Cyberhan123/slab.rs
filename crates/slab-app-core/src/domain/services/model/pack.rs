@@ -298,8 +298,22 @@ fn runtime_presets_from_manifest(
     manifest: &slab_model_pack::ModelPackManifest,
 ) -> Option<RuntimePresets> {
     manifest.runtime_presets.as_ref().and_then(|presets| {
-        (presets.temperature.is_some() || presets.top_p.is_some())
-            .then_some(RuntimePresets { temperature: presets.temperature, top_p: presets.top_p })
+        (presets.max_tokens.is_some()
+            || presets.temperature.is_some()
+            || presets.top_p.is_some()
+            || presets.top_k.is_some()
+            || presets.min_p.is_some()
+            || presets.presence_penalty.is_some()
+            || presets.repetition_penalty.is_some())
+        .then_some(RuntimePresets {
+            max_tokens: presets.max_tokens,
+            temperature: presets.temperature,
+            top_p: presets.top_p,
+            top_k: presets.top_k,
+            min_p: presets.min_p,
+            presence_penalty: presets.presence_penalty,
+            repetition_penalty: presets.repetition_penalty,
+        })
     })
 }
 
@@ -447,6 +461,10 @@ pub(super) fn build_local_model_command_from_pack_preset(
                     _ => UnifiedModelStatus::Ready,
                 });
             let runtime_presets = runtime_presets_from_manifest(manifest).or_else(|| {
+                let max_tokens = bridge
+                    .inference_defaults
+                    .get("max_tokens")
+                    .and_then(|value| value.as_u64().and_then(|value| u32::try_from(value).ok()));
                 let temperature = bridge
                     .inference_defaults
                     .get("temperature")
@@ -455,8 +473,38 @@ pub(super) fn build_local_model_command_from_pack_preset(
                     .inference_defaults
                     .get("top_p")
                     .and_then(|value| value.as_f64().map(|value| value as f32));
-                (temperature.is_some() || top_p.is_some())
-                    .then_some(RuntimePresets { temperature, top_p })
+                let top_k = bridge
+                    .inference_defaults
+                    .get("top_k")
+                    .and_then(|value| value.as_i64().and_then(|value| i32::try_from(value).ok()));
+                let min_p = bridge
+                    .inference_defaults
+                    .get("min_p")
+                    .and_then(|value| value.as_f64().map(|value| value as f32));
+                let presence_penalty = bridge
+                    .inference_defaults
+                    .get("presence_penalty")
+                    .and_then(|value| value.as_f64().map(|value| value as f32));
+                let repetition_penalty = bridge
+                    .inference_defaults
+                    .get("repetition_penalty")
+                    .and_then(|value| value.as_f64().map(|value| value as f32));
+                (max_tokens.is_some()
+                    || temperature.is_some()
+                    || top_p.is_some()
+                    || top_k.is_some()
+                    || min_p.is_some()
+                    || presence_penalty.is_some()
+                    || repetition_penalty.is_some())
+                .then_some(RuntimePresets {
+                    max_tokens,
+                    temperature,
+                    top_p,
+                    top_k,
+                    min_p,
+                    presence_penalty,
+                    repetition_penalty,
+                })
             });
             let source_preview = preview_from_pack_candidate_or_model_source(
                 preset.variant.effective_sources.first(),

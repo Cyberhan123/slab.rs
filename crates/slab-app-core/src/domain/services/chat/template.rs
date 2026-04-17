@@ -25,7 +25,7 @@ pub(super) fn build_prompt(
 
 pub(super) fn default_stop_sequences(chat_template_source: Option<&str>) -> Vec<String> {
     let Some(source) = chat_template_source.map(str::trim).filter(|value| !value.is_empty()) else {
-        return Vec::new();
+        return raw_chat_stop_sequences();
     };
 
     let mut stop_sequences = Vec::new();
@@ -55,6 +55,18 @@ pub(super) fn trailing_stop_markers(chat_template_source: Option<&str>) -> Vec<S
     }
 
     markers
+}
+
+/// Returns `true` when the Jinja chat template natively references the
+/// `enable_thinking` variable.  When this is the case the template itself
+/// controls thinking behaviour (e.g. Qwen3, DeepSeek-R1) and external
+/// reasoning-guidance system messages should be skipped to avoid confusing
+/// the model.
+pub(super) fn template_supports_thinking(chat_template_source: Option<&str>) -> bool {
+    chat_template_source
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .is_some_and(|source| source.contains("enable_thinking"))
 }
 
 fn render_minijinja_template(
@@ -132,6 +144,16 @@ fn push_unique(values: &mut Vec<String>, value: &str) {
     if !values.iter().any(|item| item == value) {
         values.push(value.to_owned());
     }
+}
+
+fn raw_chat_stop_sequences() -> Vec<String> {
+    // The raw fallback prompt renders `Role: ...` lines and ends with `Assistant:`.
+    // Treat the next role marker as a stop boundary so echoed turns do not leak into output.
+    let mut stop_sequences = Vec::new();
+    for marker in ["\nSystem:", "\nUser:", "\nAssistant:", "\nTool:"] {
+        push_unique(&mut stop_sequences, marker);
+    }
+    stop_sequences
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -249,6 +271,9 @@ mod tests {
         ConversationMessageContent,
     };
 
+    const QWEN35_TEMPLATE: &str =
+        include_str!("../../../../../../models/llama/Qwen3.5-9B/configs/chat_template.jinja");
+
     fn message(role: &str, content: &str) -> DomainConversationMessage {
         DomainConversationMessage {
             role: role.to_owned(),
@@ -341,6 +366,40 @@ mod tests {
     }
 
     #[test]
+    fn qwen35_template_keeps_auto_reasoning_prompt_open() {
+        let rendered = build_prompt(&[message("user", "hello")], Some(QWEN35_TEMPLATE), None)
+            .expect("qwen3.5 prompt");
+
+        assert!(rendered.ends_with("<|im_start|>assistant\n"));
+        assert!(!rendered.ends_with("<think>\n"));
+    }
+
+    #[test]
+    fn qwen35_template_does_not_prefill_open_think_when_reasoning_is_enabled() {
+        let rendered = build_prompt(
+            &[message("user", "hello")],
+            Some(QWEN35_TEMPLATE),
+            Some(ChatReasoningEffort::Medium),
+        )
+        .expect("qwen3.5 prompt");
+
+        assert!(rendered.ends_with("<|im_start|>assistant\n"));
+        assert!(!rendered.ends_with("<think>\n"));
+    }
+
+    #[test]
+    fn qwen35_template_closes_empty_think_block_when_reasoning_is_disabled() {
+        let rendered = build_prompt(
+            &[message("user", "hello")],
+            Some(QWEN35_TEMPLATE),
+            Some(ChatReasoningEffort::None),
+        )
+        .expect("qwen3.5 prompt");
+
+        assert!(rendered.ends_with("<|im_start|>assistant\n<think>\n\n</think>\n\n"));
+    }
+
+    #[test]
     fn minijinja_template_infers_chatml_eos_token() {
         let rendered = build_prompt(
             &[message("user", "hello")],
@@ -360,5 +419,15 @@ mod tests {
         assert!(stop.contains(&"<|im_end|>".to_owned()));
         assert!(stop.contains(&"<|endoftext|><|im_start|>".to_owned()));
         assert!(trailing.contains(&"<|endoftext|>".to_owned()));
+    }
+
+    #[test]
+    fn default_stop_sequences_detect_raw_chat_boundaries() {
+        let stop = super::default_stop_sequences(None);
+
+        assert!(stop.contains(&"\nUser:".to_owned()));
+        assert!(stop.contains(&"\nAssistant:".to_owned()));
+        assert!(stop.contains(&"\nSystem:".to_owned()));
+        assert!(stop.contains(&"\nTool:".to_owned()));
     }
 }

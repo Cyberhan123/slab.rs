@@ -89,13 +89,33 @@ export const useChat = (
       : {}
 
   const buildRuntimePresetParams = (): Partial<
-    Pick<ChatRequestParams, 'temperature' | 'top_p'>
+    Pick<
+      ChatRequestParams,
+      | 'max_tokens'
+      | 'temperature'
+      | 'top_p'
+      | 'top_k'
+      | 'min_p'
+      | 'presence_penalty'
+      | 'repetition_penalty'
+    >
   > => ({
+    ...(typeof runtimePresets?.max_tokens === 'number'
+      ? { max_tokens: runtimePresets.max_tokens }
+      : {}),
     ...(typeof runtimePresets?.temperature === 'number'
       ? { temperature: runtimePresets.temperature }
       : {}),
     ...(typeof runtimePresets?.top_p === 'number'
       ? { top_p: runtimePresets.top_p }
+      : {}),
+    ...(typeof runtimePresets?.top_k === 'number' ? { top_k: runtimePresets.top_k } : {}),
+    ...(typeof runtimePresets?.min_p === 'number' ? { min_p: runtimePresets.min_p } : {}),
+    ...(typeof runtimePresets?.presence_penalty === 'number'
+      ? { presence_penalty: runtimePresets.presence_penalty }
+      : {}),
+    ...(typeof runtimePresets?.repetition_penalty === 'number'
+      ? { repetition_penalty: runtimePresets.repetition_penalty }
       : {}),
   })
 

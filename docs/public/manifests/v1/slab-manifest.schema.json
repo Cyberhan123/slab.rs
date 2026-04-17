@@ -100,10 +100,46 @@
     },
     "PackRuntimePresets": {
       "properties": {
+        "max_tokens": {
+          "format": "uint32",
+          "minimum": 0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "min_p": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "presence_penalty": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "repetition_penalty": {
+          "format": "float",
+          "type": [
+            "number",
+            "null"
+          ]
+        },
         "temperature": {
           "format": "float",
           "type": [
             "number",
+            "null"
+          ]
+        },
+        "top_k": {
+          "format": "int32",
+          "type": [
+            "integer",
             "null"
           ]
         },

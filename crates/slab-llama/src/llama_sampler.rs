@@ -232,6 +232,8 @@ pub struct SamplerChainBuilder {
     pub min_p: f32,
     /// Repetition penalty (default 1.05).
     pub repeat_penalty: f32,
+    /// Presence penalty (default 0.0).
+    pub presence_penalty: f32,
     /// Number of tokens to consider for repetition penalty (default 64).
     pub repeat_last_n: i32,
     /// Random seed (default `LLAMA_DEFAULT_SEED` = 0xFFFF_FFFF).
@@ -248,6 +250,7 @@ impl SamplerChainBuilder {
             top_p: 0.9,
             min_p: 0.05,
             repeat_penalty: 1.05,
+            presence_penalty: 0.0,
             repeat_last_n: 64,
             seed: slab_llama_sys::LLAMA_DEFAULT_SEED,
         }
@@ -258,8 +261,14 @@ impl SamplerChainBuilder {
         let mut chain = LlamaSampler::chain_new(Arc::clone(&self.lib));
 
         // penalties first (they observe the logits before sampling).
-        if self.repeat_penalty != 1.0 || self.repeat_last_n != 0 {
-            chain = chain.add_penalties(self.repeat_last_n, self.repeat_penalty, 0.0, 0.0);
+        if self.repeat_penalty != 1.0 || self.repeat_last_n != 0 || self.presence_penalty != 0.0
+        {
+            chain = chain.add_penalties(
+                self.repeat_last_n,
+                self.repeat_penalty,
+                0.0,
+                self.presence_penalty,
+            );
         }
 
         if self.top_k > 0 {
@@ -296,8 +305,14 @@ impl SamplerChainBuilder {
     ) -> LlamaSampler {
         let mut chain = LlamaSampler::chain_new(Arc::clone(&self.lib));
 
-        if self.repeat_penalty != 1.0 || self.repeat_last_n != 0 {
-            chain = chain.add_penalties(self.repeat_last_n, self.repeat_penalty, 0.0, 0.0);
+        if self.repeat_penalty != 1.0 || self.repeat_last_n != 0 || self.presence_penalty != 0.0
+        {
+            chain = chain.add_penalties(
+                self.repeat_last_n,
+                self.repeat_penalty,
+                0.0,
+                self.presence_penalty,
+            );
         }
         if self.top_k > 0 {
             chain = chain.add_top_k(self.top_k);

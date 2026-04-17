@@ -262,8 +262,13 @@ pub fn encode_chat_request(
         max_tokens: request.max_tokens.unwrap_or_default(),
         temperature: request.temperature.unwrap_or_default(),
         top_p: request.top_p.unwrap_or_default(),
+        top_k: request.top_k,
+        min_p: request.min_p,
+        presence_penalty: request.presence_penalty,
+        repetition_penalty: request.repetition_penalty,
         session_key: request.session_key.clone().unwrap_or_default(),
         gbnf: request.gbnf.clone().unwrap_or_default(),
+        stop_sequences: request.stop_sequences.clone(),
     }
 }
 
@@ -281,9 +286,14 @@ pub fn decode_chat_request(
         max_tokens: (request.max_tokens > 0).then_some(request.max_tokens),
         temperature: (request.temperature > 0.0).then_some(request.temperature),
         top_p: (request.top_p > 0.0).then_some(request.top_p),
+        top_k: request.top_k,
+        min_p: request.min_p,
+        presence_penalty: request.presence_penalty,
+        repetition_penalty: request.repetition_penalty,
         session_key: (!request.session_key.is_empty()).then_some(request.session_key.clone()),
         stream,
         gbnf: (!request.gbnf.is_empty()).then_some(request.gbnf.clone()),
+        stop_sequences: request.stop_sequences.clone(),
         ..Default::default()
     })
 }

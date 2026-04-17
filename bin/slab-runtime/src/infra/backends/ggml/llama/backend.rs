@@ -41,6 +41,13 @@ struct InferenceOptions {
     max_tokens: usize,
     session_key: Option<String>,
     gbnf: Option<String>,
+    temperature: Option<f32>,
+    top_p: Option<f32>,
+    top_k: Option<i32>,
+    min_p: Option<f32>,
+    repetition_penalty: Option<f32>,
+    presence_penalty: Option<f32>,
+    stop_sequences: Vec<String>,
 }
 
 impl InferenceOptions {
@@ -49,6 +56,13 @@ impl InferenceOptions {
             max_tokens: if params.max_tokens == 0 { 256 } else { params.max_tokens },
             session_key: params.session_key,
             gbnf: params.gbnf,
+            temperature: params.temperature,
+            top_p: params.top_p,
+            top_k: params.top_k,
+            min_p: params.min_p,
+            repetition_penalty: params.repetition_penalty,
+            presence_penalty: params.presence_penalty,
+            stop_sequences: params.stop_sequences,
         }
     }
 }
@@ -250,7 +264,18 @@ impl LlamaWorker {
         options: InferenceOptions,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let InferenceOptions { max_tokens, session_key, gbnf } = options;
+        let InferenceOptions {
+            max_tokens,
+            session_key,
+            gbnf,
+            temperature,
+            top_p,
+            top_k,
+            min_p,
+            repetition_penalty,
+            presence_penalty,
+            stop_sequences,
+        } = options;
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
@@ -266,7 +291,19 @@ impl LlamaWorker {
                 return;
             }
         };
-        let request = LlamaDispatchRequest { prompt, max_tokens, session_key, gbnf };
+        let request = LlamaDispatchRequest {
+            prompt,
+            max_tokens,
+            session_key,
+            gbnf,
+            temperature,
+            top_p,
+            top_k,
+            min_p,
+            repetition_penalty,
+            presence_penalty,
+            stop_sequences,
+        };
 
         match engine.dispatch_inference(request).await {
             Ok(LlamaDispatchOutput { text, usage }) => {
@@ -292,7 +329,18 @@ impl LlamaWorker {
         cancel_rx: watch::Receiver<bool>,
         reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
     ) {
-        let InferenceOptions { max_tokens, session_key, gbnf } = options;
+        let InferenceOptions {
+            max_tokens,
+            session_key,
+            gbnf,
+            temperature,
+            top_p,
+            top_k,
+            min_p,
+            repetition_penalty,
+            presence_penalty,
+            stop_sequences,
+        } = options;
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
@@ -313,6 +361,13 @@ impl LlamaWorker {
             max_tokens,
             session_key,
             gbnf,
+            temperature,
+            top_p,
+            top_k,
+            min_p,
+            repetition_penalty,
+            presence_penalty,
+            stop_sequences,
         };
 
         match engine.dispatch_inference_stream(request, cancel_rx).await {

@@ -766,6 +766,23 @@ export interface components {
              * @description Nucleus sampling threshold in (0, 1].
              */
             top_p?: number | null;
+            /** @description Top-k sampling limit for local llama backends. */
+            top_k?: number | null;
+            /**
+             * Format: float
+             * @description Min-p sampling threshold for local llama backends.
+             */
+            min_p?: number | null;
+            /**
+             * Format: float
+             * @description Presence penalty for local llama backends.
+             */
+            presence_penalty?: number | null;
+            /**
+             * Format: float
+             * @description Repetition penalty for local llama backends.
+             */
+            repetition_penalty?: number | null;
             verbosity?: null | components["schemas"]["ChatVerbosity"];
         };
         /** @description Response body for `POST /v1/chat/completions`. */
@@ -980,6 +997,23 @@ export interface components {
              * @description Nucleus sampling threshold in (0, 1].
              */
             top_p?: number | null;
+            /** @description Top-k sampling limit for local llama backends. */
+            top_k?: number | null;
+            /**
+             * Format: float
+             * @description Min-p sampling threshold for local llama backends.
+             */
+            min_p?: number | null;
+            /**
+             * Format: float
+             * @description Presence penalty for local llama backends.
+             */
+            presence_penalty?: number | null;
+            /**
+             * Format: float
+             * @description Repetition penalty for local llama backends.
+             */
+            repetition_penalty?: number | null;
         };
         /** @description Response body for `POST /v1/completions`. */
         CompletionResponse: {
@@ -1361,6 +1395,11 @@ export interface components {
         /** @description Default runtime parameters (request). */
         RuntimePresetsRequest: {
             /**
+             * Format: int32
+             * @description Maximum tokens to generate by default.
+             */
+            max_tokens?: number | null;
+            /**
              * Format: float
              * @description Sampling temperature.
              */
@@ -1370,13 +1409,43 @@ export interface components {
              * @description Top-p nucleus sampling probability.
              */
             top_p?: number | null;
+            /**
+             * Format: int32
+             * @description Top-k sampling limit.
+             */
+            top_k?: number | null;
+            /**
+             * Format: float
+             * @description Min-p sampling threshold.
+             */
+            min_p?: number | null;
+            /**
+             * Format: float
+             * @description Presence penalty.
+             */
+            presence_penalty?: number | null;
+            /**
+             * Format: float
+             * @description Repetition penalty.
+             */
+            repetition_penalty?: number | null;
         };
         /** @description Default runtime parameters (response). */
         RuntimePresetsResponse: {
+            /** Format: int32 */
+            max_tokens?: number | null;
             /** Format: float */
             temperature?: number | null;
             /** Format: float */
             top_p?: number | null;
+            /** Format: int32 */
+            top_k?: number | null;
+            /** Format: float */
+            min_p?: number | null;
+            /** Format: float */
+            presence_penalty?: number | null;
+            /** Format: float */
+            repetition_penalty?: number | null;
         };
         /** @description Response for a single chat session. */
         SessionResponse: {
