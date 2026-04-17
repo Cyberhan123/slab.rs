@@ -316,14 +316,27 @@ fn upgrade_stored_model_config_schema(
         ));
     }
 
-    if config.schema_version < CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION {
-        return Err(format!(
-            "missing stored model config schema upgrader for version {}",
-            config.schema_version
-        ));
+    let mut upgraded = config;
+    while upgraded.schema_version < CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION {
+        upgraded = match upgraded.schema_version {
+            1 => upgrade_stored_model_config_schema_v1_to_v2(upgraded),
+            version => {
+                return Err(format!(
+                    "missing stored model config schema upgrader for version {}",
+                    version
+                ));
+            }
+        };
     }
 
-    Ok(config)
+    Ok(upgraded)
+}
+
+fn upgrade_stored_model_config_schema_v1_to_v2(
+    mut config: StoredModelConfig,
+) -> StoredModelConfig {
+    config.schema_version = 2;
+    config
 }
 
 fn upgrade_stored_model_config_policy(
@@ -733,6 +746,37 @@ mod tests {
             .expect("deserialize legacy config"),
         )
         .expect("upgrade legacy config");
+
+        assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
+        assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);
+        assert_eq!(
+            config.capabilities,
+            vec![Capability::TextGeneration, Capability::ChatGeneration]
+        );
+    }
+
+    #[test]
+    fn schema_version_one_configs_upgrade_to_current_schema_version() {
+        let config = upgrade_stored_model_config(StoredModelConfig {
+            schema_version: 1,
+            policy_version: 1,
+            id: "cloud-model".to_owned(),
+            display_name: "Cloud Model".to_owned(),
+            kind: UnifiedModelKind::Cloud,
+            backend_id: None,
+            capabilities: Vec::new(),
+            status: Some(UnifiedModelStatus::Ready),
+            spec: ModelSpec {
+                provider_id: Some("openai-main".to_owned()),
+                remote_model_id: Some("gpt-4.1-mini".to_owned()),
+                ..ModelSpec::default()
+            },
+            runtime_presets: None,
+            materialized_artifacts: BTreeMap::new(),
+            selected_download_source: None,
+            pack_selection: None,
+        })
+        .expect("schema version one should upgrade");
 
         assert_eq!(config.schema_version, CURRENT_STORED_MODEL_CONFIG_SCHEMA_VERSION);
         assert_eq!(config.policy_version, CURRENT_STORED_MODEL_CONFIG_POLICY_VERSION);

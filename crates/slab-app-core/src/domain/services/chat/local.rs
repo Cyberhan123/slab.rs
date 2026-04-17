@@ -47,13 +47,17 @@ fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
     (1..=max).rev().find(|len| raw.ends_with(&marker[..*len])).unwrap_or(0)
 }
 
+fn normalize_thinking_content_prefix(prefix: &str) -> &str {
+    if prefix.trim().is_empty() { "" } else { prefix }
+}
+
 fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
     let Some(open_start) = raw.find(THINK_OPEN_MARKER) else {
         // No <think found — treat all text as content.
         return ParsedThinkingOutput { content: raw.to_owned(), reasoning: String::new() };
     };
 
-    let content_prefix = raw[..open_start].to_owned();
+    let content_prefix = normalize_thinking_content_prefix(&raw[..open_start]).to_owned();
     let after_open_marker = &raw[open_start..];
     let Some(open_end_rel) = after_open_marker.find('>') else {
         return ParsedThinkingOutput {
@@ -797,6 +801,20 @@ mod tests {
     fn attach_reasoning_metadata_moves_reasoning_out_of_text() {
         let mut response = TextGenerationResponse {
             text: "<think>step by step</think>\n\nanswer".to_owned(),
+            metadata: Default::default(),
+            ..Default::default()
+        };
+
+        attach_reasoning_metadata(&mut response);
+
+        assert_eq!(response.text, "\n\nanswer");
+        assert_eq!(response.metadata.get("reasoning_content"), Some(&json!("step by step")));
+    }
+
+    #[test]
+    fn attach_reasoning_metadata_ignores_whitespace_prefix_before_think() {
+        let mut response = TextGenerationResponse {
+            text: " <think>step by step</think>\n\nanswer".to_owned(),
             metadata: Default::default(),
             ..Default::default()
         };

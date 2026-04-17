@@ -83,15 +83,15 @@ function createConversationLabel(value: string, fallback: string) {
 function defaultCapabilitiesForSource(source: ModelOptionSource): ChatModelCapabilities {
   return source === "cloud"
     ? {
-        raw_gbnf: false,
-        structured_output: true,
-        reasoning_controls: true,
-      }
+      raw_gbnf: false,
+      structured_output: true,
+      reasoning_controls: true,
+    }
     : {
-        raw_gbnf: true,
-        structured_output: true,
-        reasoning_controls: false,
-      }
+      raw_gbnf: true,
+      structured_output: true,
+      reasoning_controls: false,
+    }
 }
 
 function resolveChatModelCapabilities(
@@ -405,11 +405,11 @@ function Chat() {
   const latestContinuableMessageId =
     latestMessage?.message.role === "assistant" && latestMessage.status === "abort"
       ? (() => {
-          const content = getChatMessageTextContent(latestMessage.message).trim()
-          return content && content !== locale.requestAborted && content !== locale.noData
-            ? latestMessage.id
-            : undefined
-        })()
+        const content = getChatMessageTextContent(latestMessage.message).trim()
+        return content && content !== locale.requestAborted && content !== locale.noData
+          ? latestMessage.id
+          : undefined
+      })()
       : undefined
   useEffect(() => {
     if (selectedModel && !selectedModel.capabilities.reasoning_controls && deepThink) {

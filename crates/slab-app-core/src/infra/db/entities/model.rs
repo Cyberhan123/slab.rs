@@ -222,6 +222,37 @@ mod tests {
     }
 
     #[test]
+    fn converts_records_with_schema_version_one() {
+        let now = Utc::now();
+        let model = UnifiedModel::try_from(UnifiedModelRecord {
+            id: "cloud-model".to_owned(),
+            display_name: "Cloud Model".to_owned(),
+            provider: "cloud.openai-main".to_owned(),
+            kind: "cloud".to_owned(),
+            backend_id: None,
+            capabilities: "[]".to_owned(),
+            status: "ready".to_owned(),
+            spec: json!({
+                "provider_id": "openai-main",
+                "remote_model_id": "gpt-4.1-mini"
+            })
+            .to_string(),
+            runtime_presets: None,
+            config_schema_version: 1,
+            config_policy_version: 1,
+            created_at: now,
+            updated_at: now,
+        })
+        .expect("schema version one record should deserialize");
+
+        assert_eq!(model.kind, UnifiedModelKind::Cloud);
+        assert_eq!(
+            model.capabilities,
+            vec![Capability::TextGeneration, Capability::ChatGeneration]
+        );
+    }
+
+    #[test]
     fn rejects_future_config_schema_versions() {
         let now = Utc::now();
         let error = UnifiedModel::try_from(UnifiedModelRecord {
