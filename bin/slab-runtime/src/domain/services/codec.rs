@@ -62,6 +62,13 @@ fn encode_ggml_llama_text_generation_options(request: &TextGenerationRequest) ->
         max_tokens: request.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256),
         session_key: request.session_key.clone(),
         gbnf: request.gbnf.clone(),
+        temperature: request.temperature,
+        top_p: request.top_p,
+        top_k: request.top_k,
+        min_p: request.min_p,
+        repetition_penalty: request.repetition_penalty,
+        presence_penalty: request.presence_penalty,
+        stop_sequences: request.stop_sequences.clone(),
     })
 }
 
@@ -156,6 +163,10 @@ pub(crate) fn encode_text_generation_request(
             max_tokens: request.max_tokens,
             temperature: request.temperature,
             top_p: request.top_p,
+            top_k: request.top_k,
+            min_p: request.min_p,
+            presence_penalty: request.presence_penalty,
+            repetition_penalty: request.repetition_penalty,
             session_key: request.session_key.clone(),
             stream: request.stream,
             gbnf: request.gbnf.clone(),

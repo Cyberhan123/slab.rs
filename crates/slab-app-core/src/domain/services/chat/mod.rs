@@ -495,6 +495,30 @@ fn validate_chat_route_params(
                 "cloud chat completions do not support raw gbnf constraints",
             ));
         }
+        if command.common.top_k.is_some() {
+            return Err(unsupported_chat_parameter(
+                "top_k",
+                "cloud chat completions do not support local top_k sampling controls",
+            ));
+        }
+        if command.common.min_p.is_some() {
+            return Err(unsupported_chat_parameter(
+                "min_p",
+                "cloud chat completions do not support local min_p sampling controls",
+            ));
+        }
+        if command.common.presence_penalty.is_some() {
+            return Err(unsupported_chat_parameter(
+                "presence_penalty",
+                "cloud chat completions do not support local presence penalty controls",
+            ));
+        }
+        if command.common.repetition_penalty.is_some() {
+            return Err(unsupported_chat_parameter(
+                "repetition_penalty",
+                "cloud chat completions do not support local repetition penalty controls",
+            ));
+        }
         validate_cloud_structured_output(command.cloud.structured_output.as_ref())?;
         return Ok(());
     }
@@ -511,6 +535,30 @@ fn validate_text_route_params(
             return Err(unsupported_chat_parameter(
                 "gbnf",
                 "cloud text completions do not support raw gbnf constraints",
+            ));
+        }
+        if command.common.top_k.is_some() {
+            return Err(unsupported_chat_parameter(
+                "top_k",
+                "cloud text completions do not support local top_k sampling controls",
+            ));
+        }
+        if command.common.min_p.is_some() {
+            return Err(unsupported_chat_parameter(
+                "min_p",
+                "cloud text completions do not support local min_p sampling controls",
+            ));
+        }
+        if command.common.presence_penalty.is_some() {
+            return Err(unsupported_chat_parameter(
+                "presence_penalty",
+                "cloud text completions do not support local presence penalty controls",
+            ));
+        }
+        if command.common.repetition_penalty.is_some() {
+            return Err(unsupported_chat_parameter(
+                "repetition_penalty",
+                "cloud text completions do not support local repetition penalty controls",
             ));
         }
         validate_cloud_structured_output(command.cloud.structured_output.as_ref())?;
@@ -637,6 +685,10 @@ async fn create_chat_completion_with_state(
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
+                    top_k: command.common.top_k,
+                    min_p: command.common.min_p,
+                    presence_penalty: command.common.presence_penalty,
+                    repetition_penalty: command.common.repetition_penalty,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
                     gbnf: command.local.gbnf.clone(),
@@ -713,6 +765,10 @@ async fn create_chat_completion_with_state(
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
+                    top_k: command.common.top_k,
+                    min_p: command.common.min_p,
+                    presence_penalty: command.common.presence_penalty,
+                    repetition_penalty: command.common.repetition_penalty,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
                     gbnf: command.local.gbnf.clone(),
@@ -834,6 +890,10 @@ async fn create_text_completion_with_state(
                     max_tokens,
                     temperature,
                     top_p: command.common.top_p,
+                    top_k: command.common.top_k,
+                    min_p: command.common.min_p,
+                    presence_penalty: command.common.presence_penalty,
+                    repetition_penalty: command.common.repetition_penalty,
                     reasoning_effort: command.cloud.reasoning_effort,
                     verbosity: command.cloud.verbosity,
                     gbnf: command.local.gbnf.clone(),
@@ -960,6 +1020,10 @@ mod test {
                 max_tokens: None,
                 temperature: None,
                 top_p: None,
+                top_k: None,
+                min_p: None,
+                presence_penalty: None,
+                repetition_penalty: None,
                 n: 1,
                 stream: false,
                 stop: Vec::new(),
@@ -983,6 +1047,10 @@ mod test {
                 max_tokens: None,
                 temperature: None,
                 top_p: None,
+                top_k: None,
+                min_p: None,
+                presence_penalty: None,
+                repetition_penalty: None,
                 n: 1,
                 stream: false,
                 stop: Vec::new(),
@@ -1003,15 +1071,15 @@ mod test {
         req.common.max_tokens = Some(0);
         assert_eq!(req.common.max_tokens, Some(0));
         let max_tokens = req.common.max_tokens.unwrap_or(512);
-        assert!(max_tokens == 0 || max_tokens > 4096, "should be out of range");
+        assert_eq!(max_tokens, 0, "zero should stay invalid");
     }
 
     #[test]
-    fn validate_max_tokens_too_large() {
+    fn validate_large_max_tokens_is_preserved() {
         let mut req = make_command("user", "hello");
-        req.common.max_tokens = Some(9999);
+        req.common.max_tokens = Some(81_920);
         let max_tokens = req.common.max_tokens.unwrap_or(512);
-        assert!(max_tokens > 4096, "should be out of range");
+        assert_eq!(max_tokens, 81_920);
     }
 
     #[test]

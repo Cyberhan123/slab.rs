@@ -408,10 +408,45 @@ impl LlamaModel {
     ///
     /// [`new_sampler`]: LlamaModel::new_sampler
     pub fn new_sampler_with_gbnf(&self, gbnf: Option<&str>) -> LlamaSampler {
+        self.new_sampler_with_options(gbnf, None, None, None, None, None, None)
+    }
+
+    /// Create a sampler chain with optional GBNF constraint and explicit
+    /// sampling overrides.
+    ///
+    /// When an override is `None`, the builder default is used.
+    pub fn new_sampler_with_options(
+        &self,
+        gbnf: Option<&str>,
+        temperature: Option<f32>,
+        top_p: Option<f32>,
+        top_k: Option<i32>,
+        min_p: Option<f32>,
+        repetition_penalty: Option<f32>,
+        presence_penalty: Option<f32>,
+    ) -> LlamaSampler {
+        let mut builder = SamplerChainBuilder::new(Arc::clone(&self.inner.lib));
+        if let Some(t) = temperature {
+            builder.temperature = t;
+        }
+        if let Some(p) = top_p {
+            builder.top_p = p;
+        }
+        if let Some(k) = top_k {
+            builder.top_k = k;
+        }
+        if let Some(p) = min_p {
+            builder.min_p = p;
+        }
+        if let Some(penalty) = repetition_penalty {
+            builder.repeat_penalty = penalty;
+        }
+        if let Some(penalty) = presence_penalty {
+            builder.presence_penalty = penalty;
+        }
         match gbnf {
-            None | Some("") => SamplerChainBuilder::new(Arc::clone(&self.inner.lib)).build(),
-            Some(gbnf_str) => SamplerChainBuilder::new(Arc::clone(&self.inner.lib))
-                .build_with_grammar(self.vocab(), gbnf_str),
+            None | Some("") => builder.build(),
+            Some(gbnf_str) => builder.build_with_grammar(self.vocab(), gbnf_str),
         }
     }
 

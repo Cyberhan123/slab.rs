@@ -29,9 +29,20 @@ message ChatRequest {
   // Values <= 0.0 are treated as unset (use backend default).
   // Note: the same sentinel-value convention used by the `temperature` field.
   float top_p = 8;
+  // Keep only the top-k candidate tokens during sampling.
+  optional int32 top_k = 11;
+  // Minimum probability threshold relative to the most likely token.
+  optional float min_p = 12;
+  // Presence penalty applied through the llama penalties sampler.
+  optional float presence_penalty = 13;
+  // Repetition penalty applied through the llama penalties sampler.
+  optional float repetition_penalty = 14;
   // Raw GBNF grammar string to constrain token sampling.
   // Empty string means no grammar constraint.
   string gbnf = 9;
+  // Stop sequences: generation halts when any of these strings appear in the
+  // output.  Checked against the decoded text on each token step.
+  repeated string stop_sequences = 10;
 }
 
 message ChatResponse {

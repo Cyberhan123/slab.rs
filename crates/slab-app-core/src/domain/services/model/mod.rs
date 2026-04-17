@@ -1247,8 +1247,7 @@ mod tests {
 
     #[test]
     fn empty_runtime_presets_are_dropped() {
-        let presets =
-            canonicalize_runtime_presets(Some(RuntimePresets { temperature: None, top_p: None }));
+        let presets = canonicalize_runtime_presets(Some(RuntimePresets::default()));
 
         assert!(presets.is_none());
     }

@@ -271,14 +271,42 @@ fn default_status_for_runtime_bridge(bridge: &ModelPackRuntimeBridge) -> Unified
 }
 
 fn build_runtime_presets(options: &slab_types::JsonOptions) -> Option<RuntimePresets> {
+    let max_tokens = options.get("max_tokens").and_then(value_to_u32);
     let temperature = options.get("temperature").and_then(value_to_f32);
     let top_p = options.get("top_p").and_then(value_to_f32);
+    let top_k = options.get("top_k").and_then(value_to_i32);
+    let min_p = options.get("min_p").and_then(value_to_f32);
+    let presence_penalty = options.get("presence_penalty").and_then(value_to_f32);
+    let repetition_penalty = options.get("repetition_penalty").and_then(value_to_f32);
 
-    (temperature.is_some() || top_p.is_some()).then_some(RuntimePresets { temperature, top_p })
+    (max_tokens.is_some()
+        || temperature.is_some()
+        || top_p.is_some()
+        || top_k.is_some()
+        || min_p.is_some()
+        || presence_penalty.is_some()
+        || repetition_penalty.is_some())
+    .then_some(RuntimePresets {
+        max_tokens,
+        temperature,
+        top_p,
+        top_k,
+        min_p,
+        presence_penalty,
+        repetition_penalty,
+    })
 }
 
 fn value_to_f32(value: &serde_json::Value) -> Option<f32> {
     value.as_f64().map(|value| value as f32)
+}
+
+fn value_to_u32(value: &serde_json::Value) -> Option<u32> {
+    value.as_u64().and_then(|value| u32::try_from(value).ok())
+}
+
+fn value_to_i32(value: &serde_json::Value) -> Option<i32> {
+    value.as_i64().and_then(|value| i32::try_from(value).ok())
 }
 
 fn read_pack_bytes(path: &Path) -> Result<Vec<u8>, AppCoreError> {
@@ -842,12 +870,22 @@ fn pack_status_from_unified(status: UnifiedModelStatus) -> PackModelStatus {
 }
 
 fn pack_runtime_presets_from_model(runtime_presets: &RuntimePresets) -> Option<PackRuntimePresets> {
-    (runtime_presets.temperature.is_some() || runtime_presets.top_p.is_some()).then_some(
-        PackRuntimePresets {
-            temperature: runtime_presets.temperature,
-            top_p: runtime_presets.top_p,
-        },
-    )
+    (runtime_presets.max_tokens.is_some()
+        || runtime_presets.temperature.is_some()
+        || runtime_presets.top_p.is_some()
+        || runtime_presets.top_k.is_some()
+        || runtime_presets.min_p.is_some()
+        || runtime_presets.presence_penalty.is_some()
+        || runtime_presets.repetition_penalty.is_some())
+    .then_some(PackRuntimePresets {
+        max_tokens: runtime_presets.max_tokens,
+        temperature: runtime_presets.temperature,
+        top_p: runtime_presets.top_p,
+        top_k: runtime_presets.top_k,
+        min_p: runtime_presets.min_p,
+        presence_penalty: runtime_presets.presence_penalty,
+        repetition_penalty: runtime_presets.repetition_penalty,
+    })
 }
 
 pub fn merge_diffusion_load_defaults(
@@ -1309,7 +1347,11 @@ mod tests {
                 remote_model_id: Some("meta-llama/llama-3.1-8b-instruct".to_owned()),
                 ..Default::default()
             },
-            runtime_presets: Some(RuntimePresets { temperature: Some(0.2), top_p: Some(0.8) }),
+            runtime_presets: Some(RuntimePresets {
+                temperature: Some(0.2),
+                top_p: Some(0.8),
+                ..Default::default()
+            }),
             materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
             selected_download_source: None,
@@ -1406,7 +1448,11 @@ mod tests {
                 context_window: Some(8192),
                 ..Default::default()
             },
-            runtime_presets: Some(RuntimePresets { temperature: Some(0.6), top_p: Some(0.9) }),
+            runtime_presets: Some(RuntimePresets {
+                temperature: Some(0.6),
+                top_p: Some(0.9),
+                ..Default::default()
+            }),
             materialized_artifacts: BTreeMap::new(),
             pack_selection: None,
             selected_download_source: None,
@@ -1590,7 +1636,11 @@ mod tests {
                 local_path: Some("C:/models/Qwen2.5-7B-Instruct-Q4_K_M.gguf".to_owned()),
                 ..Default::default()
             },
-            runtime_presets: Some(RuntimePresets { temperature: Some(0.7), top_p: Some(0.95) }),
+            runtime_presets: Some(RuntimePresets {
+                temperature: Some(0.7),
+                top_p: Some(0.95),
+                ..Default::default()
+            }),
             materialized_artifacts: BTreeMap::new(),
             pack_selection: Some(ModelPackSelection {
                 preset_id: Some("default".to_owned()),
@@ -1706,9 +1756,22 @@ fn build_runtime_presets_from_manifest(
     runtime_presets: Option<&PackRuntimePresets>,
 ) -> Option<RuntimePresets> {
     let runtime_presets = runtime_presets?;
-    (runtime_presets.temperature.is_some() || runtime_presets.top_p.is_some()).then_some(
-        RuntimePresets { temperature: runtime_presets.temperature, top_p: runtime_presets.top_p },
-    )
+    (runtime_presets.max_tokens.is_some()
+        || runtime_presets.temperature.is_some()
+        || runtime_presets.top_p.is_some()
+        || runtime_presets.top_k.is_some()
+        || runtime_presets.min_p.is_some()
+        || runtime_presets.presence_penalty.is_some()
+        || runtime_presets.repetition_penalty.is_some())
+    .then_some(RuntimePresets {
+        max_tokens: runtime_presets.max_tokens,
+        temperature: runtime_presets.temperature,
+        top_p: runtime_presets.top_p,
+        top_k: runtime_presets.top_k,
+        min_p: runtime_presets.min_p,
+        presence_penalty: runtime_presets.presence_penalty,
+        repetition_penalty: runtime_presets.repetition_penalty,
+    })
 }
 
 fn normalize_optional_manifest_text(value: Option<&str>) -> Option<String> {

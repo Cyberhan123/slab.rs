@@ -100,12 +100,27 @@ pub enum ModelCapability {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub struct RuntimePresetsRequest {
+    /// Maximum tokens to generate by default.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub max_tokens: Option<u32>,
     /// Sampling temperature.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub temperature: Option<f32>,
     /// Top-p nucleus sampling probability.
     #[serde(skip_serializing_if = "Option::is_none", default)]
     pub top_p: Option<f32>,
+    /// Top-k sampling limit.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub top_k: Option<i32>,
+    /// Min-p sampling threshold.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub min_p: Option<f32>,
+    /// Presence penalty.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub presence_penalty: Option<f32>,
+    /// Repetition penalty.
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pub repetition_penalty: Option<f32>,
 }
 
 // ---------------------------------------------------------------------------
@@ -328,9 +343,19 @@ pub struct ModelSpecResponse {
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 pub struct RuntimePresetsResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_tokens: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f32>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub top_k: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub min_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub presence_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repetition_penalty: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
@@ -553,7 +578,15 @@ impl From<DomainModelSpec> for ModelSpecResponse {
 
 impl From<DomainRuntimePresets> for RuntimePresetsResponse {
     fn from(presets: DomainRuntimePresets) -> Self {
-        Self { temperature: presets.temperature, top_p: presets.top_p }
+        Self {
+            max_tokens: presets.max_tokens,
+            temperature: presets.temperature,
+            top_p: presets.top_p,
+            top_k: presets.top_k,
+            min_p: presets.min_p,
+            presence_penalty: presets.presence_penalty,
+            repetition_penalty: presets.repetition_penalty,
+        }
     }
 }
 
@@ -830,7 +863,15 @@ impl From<ModelSpecRequest> for DomainModelSpec {
 
 impl From<RuntimePresetsRequest> for DomainRuntimePresets {
     fn from(req: RuntimePresetsRequest) -> Self {
-        Self { temperature: req.temperature, top_p: req.top_p }
+        Self {
+            max_tokens: req.max_tokens,
+            temperature: req.temperature,
+            top_p: req.top_p,
+            top_k: req.top_k,
+            min_p: req.min_p,
+            presence_penalty: req.presence_penalty,
+            repetition_penalty: req.repetition_penalty,
+        }
     }
 }
 

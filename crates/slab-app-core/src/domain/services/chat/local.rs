@@ -29,18 +29,7 @@ struct ParsedThinkingOutput {
     reasoning: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum ThinkingDelta {
-    Content(String),
-    Reasoning(String),
-}
 
-#[derive(Debug, Default)]
-struct ThinkingStreamState {
-    raw_output: String,
-    emitted_content_len: usize,
-    emitted_reasoning_len: usize,
-}
 
 #[derive(Debug, Default)]
 struct ContentStopState {
@@ -62,13 +51,9 @@ fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
 
 fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
     let Some(open_start) = raw.find(THINK_OPEN_MARKER) else {
-        let stable_end = if complete {
-            raw.len()
-        } else {
-            raw.len().saturating_sub(trailing_partial_marker_len(raw, THINK_OPEN_MARKER))
-        };
+        // No <think found — treat all text as content.
         return ParsedThinkingOutput {
-            content: raw[..stable_end].to_owned(),
+            content: raw.to_owned(),
             reasoning: String::new(),
         };
     };
@@ -172,37 +157,7 @@ fn merge_stop_sequences(primary: &[String], extra: &[String]) -> Vec<String> {
     merged
 }
 
-impl ThinkingStreamState {
-    fn ingest(&mut self, delta: &str) -> Vec<ThinkingDelta> {
-        self.raw_output.push_str(delta);
-        self.emit(false)
-    }
 
-    fn finish(&mut self) -> Vec<ThinkingDelta> {
-        self.emit(true)
-    }
-
-    fn emit(&mut self, complete: bool) -> Vec<ThinkingDelta> {
-        let parsed = parse_thinking_output(&self.raw_output, complete);
-        let mut deltas = Vec::new();
-
-        if parsed.reasoning.len() > self.emitted_reasoning_len {
-            deltas.push(ThinkingDelta::Reasoning(
-                parsed.reasoning[self.emitted_reasoning_len..].to_owned(),
-            ));
-            self.emitted_reasoning_len = parsed.reasoning.len();
-        }
-
-        if parsed.content.len() > self.emitted_content_len {
-            deltas.push(ThinkingDelta::Content(
-                parsed.content[self.emitted_content_len..].to_owned(),
-            ));
-            self.emitted_content_len = parsed.content.len();
-        }
-
-        deltas
-    }
-}
 
 impl ContentStopState {
     fn ingest(&mut self, delta: &str, stop: &[String], trailing: &[String]) -> StopEmission {
@@ -272,6 +227,10 @@ pub(super) struct LocalChatRequestConfig {
     pub(super) max_tokens: u32,
     pub(super) temperature: f32,
     pub(super) top_p: Option<f32>,
+    pub(super) top_k: Option<i32>,
+    pub(super) min_p: Option<f32>,
+    pub(super) presence_penalty: Option<f32>,
+    pub(super) repetition_penalty: Option<f32>,
     pub(super) reasoning_effort: Option<ChatReasoningEffort>,
     pub(super) verbosity: Option<ChatVerbosity>,
     pub(super) gbnf: Option<String>,
@@ -286,6 +245,10 @@ pub(super) struct LocalTextRequestConfig {
     pub(super) max_tokens: u32,
     pub(super) temperature: f32,
     pub(super) top_p: Option<f32>,
+    pub(super) top_k: Option<i32>,
+    pub(super) min_p: Option<f32>,
+    pub(super) presence_penalty: Option<f32>,
+    pub(super) repetition_penalty: Option<f32>,
     pub(super) reasoning_effort: Option<ChatReasoningEffort>,
     pub(super) verbosity: Option<ChatVerbosity>,
     pub(super) gbnf: Option<String>,
@@ -396,9 +359,21 @@ pub(super) async fn create_chat_completion(
     messages: &[DomainConversationMessage],
     config: LocalChatRequestConfig,
 ) -> Result<GeneratedChatOutput, AppCoreError> {
-    let request_messages =
-        apply_local_reasoning_controls(messages, config.reasoning_effort, config.verbosity);
     let prompt_profile = model::resolve_local_chat_prompt_profile(state, model).await?;
+
+    // When the Jinja chat template natively references `enable_thinking` (e.g.
+    // Qwen3, DeepSeek-R1), it already controls thinking behaviour via the
+    // template variable.  Skip injecting an extra system-level reasoning
+    // guidance message — it can confuse smaller models and conflict with the
+    // template's own thinking protocol.
+    let native_thinking =
+        super::template::template_supports_thinking(prompt_profile.chat_template_source.as_deref());
+    let request_messages = if native_thinking {
+        messages.to_vec()
+    } else {
+        apply_local_reasoning_controls(messages, config.reasoning_effort, config.verbosity)
+    };
+
     let prompt = super::template::build_prompt(
         &request_messages,
         prompt_profile.chat_template_source.as_deref(),
@@ -415,15 +390,26 @@ pub(super) async fn create_chat_completion(
         config.structured_output.as_ref(),
         prompt_profile.default_gbnf.as_deref(),
     )?;
+    tracing::debug!(
+        prompt_tail = &prompt[prompt.len().saturating_sub(120)..],
+        native_thinking,
+        stop_count = effective_stop.len(),
+        "local chat prompt rendered"
+    );
     let request = TextGenerationRequest {
         prompt: prompt.clone(),
         system_prompt: None,
         max_tokens: Some(config.max_tokens),
         temperature: Some(config.temperature),
         top_p: config.top_p,
+        top_k: config.top_k,
+        min_p: config.min_p,
+        presence_penalty: config.presence_penalty,
+        repetition_penalty: config.repetition_penalty,
         session_key: config.session_id.clone(),
         stream: config.stream,
         gbnf,
+        stop_sequences: effective_stop.clone(),
         ..Default::default()
     };
     let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
@@ -470,8 +456,6 @@ pub(super) async fn create_chat_completion(
         let token_stream_error_flag = Arc::clone(&error_flag);
         let token_stream_completion_tokens = Arc::clone(&completion_tokens);
         let token_stream_terminal_metadata = Arc::clone(&terminal_metadata);
-        let thinking_state = Arc::new(Mutex::new(ThinkingStreamState::default()));
-        let token_stream_thinking_state = Arc::clone(&thinking_state);
         let content_stop_state = Arc::new(Mutex::new(ContentStopState::default()));
         let token_stream_content_stop_state = Arc::clone(&content_stop_state);
         let effective_stop_for_tokens = effective_stop.clone();
@@ -483,7 +467,6 @@ pub(super) async fn create_chat_completion(
                 let error_flag = Arc::clone(&token_stream_error_flag);
                 let completion_tokens = Arc::clone(&token_stream_completion_tokens);
                 let terminal_metadata = Arc::clone(&token_stream_terminal_metadata);
-                let thinking_state = Arc::clone(&token_stream_thinking_state);
                 let content_stop_state = Arc::clone(&token_stream_content_stop_state);
                 let effective_stop = effective_stop_for_tokens.clone();
                 let trailing_stop_markers = trailing_stop_markers_for_tokens.clone();
@@ -505,42 +488,8 @@ pub(super) async fn create_chat_completion(
                                 if decoded.usage.is_some() {
                                     terminal.usage = decoded.usage;
                                 }
-                                let mut chunks: Vec<ChatStreamChunk> = thinking_state
-                                    .lock()
-                                    .expect("local thinking state lock poisoned")
-                                    .finish()
-                                    .into_iter()
-                                    .filter_map(|delta| match delta {
-                                        ThinkingDelta::Reasoning(token) if !token.is_empty() => {
-                                            Some(ChatStreamChunk::Data(
-                                                super::build_reasoning_chunk(
-                                                    &completion_id,
-                                                    created_ts,
-                                                    &model_name,
-                                                    &token,
-                                                ),
-                                            ))
-                                        }
-                                        ThinkingDelta::Content(token) if !token.is_empty() => {
-                                            let emission = content_stop_state
-                                                .lock()
-                                                .expect("local content stop state lock poisoned")
-                                                .ingest(&token, &effective_stop, &trailing_stop_markers);
-                                            if emission.matched {
-                                                terminal.finish_reason = Some("stop".to_owned());
-                                            }
-                                            (!emission.text.is_empty()).then(|| {
-                                                ChatStreamChunk::Data(super::build_chunk(
-                                                    &completion_id,
-                                                    created_ts,
-                                                    &model_name,
-                                                    &emission.text,
-                                                ))
-                                            })
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect();
+                                // Flush any held-back content from the stop
+                                // state now that the stream is complete.
                                 let emission = content_stop_state
                                     .lock()
                                     .expect("local content stop state lock poisoned")
@@ -548,6 +497,7 @@ pub(super) async fn create_chat_completion(
                                 if emission.matched {
                                     terminal.finish_reason = Some("stop".to_owned());
                                 }
+                                let mut chunks = Vec::new();
                                 if !emission.text.is_empty() {
                                     chunks.push(ChatStreamChunk::Data(super::build_chunk(
                                         &completion_id,
@@ -560,6 +510,10 @@ pub(super) async fn create_chat_completion(
                             } else if let Some(reasoning) =
                                 reasoning_content_from_metadata(&decoded.metadata)
                             {
+                                // The runtime layer has already separated
+                                // reasoning from content via its own
+                                // ThinkingStreamState. Pass reasoning through
+                                // directly and apply stop detection to content.
                                 let mut chunks = Vec::new();
                                 if !reasoning.is_empty() {
                                     chunks.push(ChatStreamChunk::Data(
@@ -595,46 +549,30 @@ pub(super) async fn create_chat_completion(
                             } else if decoded.delta.is_empty() {
                                 Vec::new()
                             } else {
+                                // Plain content delta — the runtime has already
+                                // stripped any <think> tags, so apply stop
+                                // detection directly without re-parsing.
                                 completion_tokens.fetch_add(1, Ordering::SeqCst);
-                                thinking_state
+                                let emission = content_stop_state
                                     .lock()
-                                    .expect("local thinking state lock poisoned")
-                                    .ingest(&decoded.delta)
-                                    .into_iter()
-                                    .filter_map(|delta| match delta {
-                                        ThinkingDelta::Reasoning(token) if !token.is_empty() => {
-                                            Some(ChatStreamChunk::Data(
-                                                super::build_reasoning_chunk(
-                                                    &completion_id,
-                                                    created_ts,
-                                                    &model_name,
-                                                    &token,
-                                                ),
-                                            ))
-                                        }
-                                        ThinkingDelta::Content(token) if !token.is_empty() => {
-                                            let emission = content_stop_state
-                                                .lock()
-                                                .expect("local content stop state lock poisoned")
-                                                .ingest(&token, &effective_stop, &trailing_stop_markers);
-                                            if emission.matched {
-                                                terminal_metadata
-                                                    .lock()
-                                                    .expect("local chat terminal metadata lock poisoned")
-                                                    .finish_reason = Some("stop".to_owned());
-                                            }
-                                            (!emission.text.is_empty()).then(|| {
-                                                ChatStreamChunk::Data(super::build_chunk(
-                                                    &completion_id,
-                                                    created_ts,
-                                                    &model_name,
-                                                    &emission.text,
-                                                ))
-                                            })
-                                        }
-                                        _ => None,
-                                    })
-                                    .collect()
+                                    .expect("local content stop state lock poisoned")
+                                    .ingest(&decoded.delta, &effective_stop, &trailing_stop_markers);
+                                if emission.matched {
+                                    terminal_metadata
+                                        .lock()
+                                        .expect("local chat terminal metadata lock poisoned")
+                                        .finish_reason = Some("stop".to_owned());
+                                }
+                                if !emission.text.is_empty() {
+                                    vec![ChatStreamChunk::Data(super::build_chunk(
+                                        &completion_id,
+                                        created_ts,
+                                        &model_name,
+                                        &emission.text,
+                                    ))]
+                                } else {
+                                    Vec::new()
+                                }
                             }
                         }
                         Err(error) => {
@@ -772,6 +710,10 @@ pub(super) async fn create_text_completion(
         max_tokens: Some(config.max_tokens),
         temperature: Some(config.temperature),
         top_p: config.top_p,
+        top_k: config.top_k,
+        min_p: config.min_p,
+        presence_penalty: config.presence_penalty,
+        repetition_penalty: config.repetition_penalty,
         stream: false,
         gbnf,
         ..Default::default()
@@ -819,7 +761,7 @@ fn map_runtime_chat_error(
 #[cfg(test)]
 mod tests {
     use super::{
-        ParsedThinkingOutput, ThinkingDelta, ThinkingStreamState, apply_local_reasoning_controls,
+        ParsedThinkingOutput, apply_local_reasoning_controls,
         apply_local_reasoning_controls_to_prompt, attach_reasoning_metadata,
         local_reasoning_guidance, parse_thinking_output, reasoning_content_from_metadata,
         trim_trailing_stop_markers,
@@ -844,33 +786,13 @@ mod tests {
     }
 
     #[test]
-    fn parse_thinking_output_holds_partial_open_tag_until_complete() {
+    fn parse_thinking_output_no_think_tag_passes_through() {
+        // Without <think>, all text is content — no hold-back.
         let parsed = parse_thinking_output("answer<th", false);
         assert_eq!(
             parsed,
-            ParsedThinkingOutput { content: "answer".to_owned(), reasoning: String::new() }
-        );
-
-        let completed = parse_thinking_output("answer<th", true);
-        assert_eq!(
-            completed,
             ParsedThinkingOutput { content: "answer<th".to_owned(), reasoning: String::new() }
         );
-    }
-
-    #[test]
-    fn thinking_stream_state_splits_reasoning_and_content_deltas() {
-        let mut state = ThinkingStreamState::default();
-        assert!(state.ingest("<th").is_empty());
-        assert_eq!(
-            state.ingest("ink>first thought"),
-            vec![ThinkingDelta::Reasoning("first thought".to_owned())]
-        );
-        assert_eq!(
-            state.ingest("</think>\n\nfinal answer"),
-            vec![ThinkingDelta::Content("\n\nfinal answer".to_owned())]
-        );
-        assert!(state.finish().is_empty());
     }
 
     #[test]
@@ -982,6 +904,32 @@ mod tests {
 
         let first = state.ingest("hello<|im", &stop, &trailing);
         let second = state.ingest("_end|>ignored", &stop, &trailing);
+
+        assert_eq!(
+            first,
+            super::StopEmission {
+                text: "hello".to_owned(),
+                matched: false,
+            }
+        );
+        assert_eq!(
+            second,
+            super::StopEmission {
+                text: String::new(),
+                matched: true,
+            }
+        );
+        assert!(state.finish(&stop, &trailing).text.is_empty());
+    }
+
+    #[test]
+    fn content_stop_state_stops_before_raw_chat_role_marker() {
+        let stop = vec!["\nUser:".to_owned(), "\nAssistant:".to_owned()];
+        let trailing = Vec::new();
+        let mut state = super::ContentStopState::default();
+
+        let first = state.ingest("hello\nUs", &stop, &trailing);
+        let second = state.ingest("er: next turn", &stop, &trailing);
 
         assert_eq!(
             first,
