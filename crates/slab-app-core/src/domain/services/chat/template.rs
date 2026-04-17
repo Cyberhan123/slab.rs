@@ -168,8 +168,8 @@ fn normalize_template_messages(messages: &[DomainConversationMessage]) -> Vec<Va
 
 fn normalize_template_message(message: &DomainConversationMessage) -> Value {
     let mut object = Map::new();
-    let mut content =
-        serde_json::to_value(&message.content).unwrap_or_else(|_| Value::String(message.rendered_text()));
+    let mut content = serde_json::to_value(&message.content)
+        .unwrap_or_else(|_| Value::String(message.rendered_text()));
 
     if message.role == "assistant"
         && let Some(text) = content.as_str()
@@ -286,12 +286,9 @@ mod tests {
 
     #[test]
     fn raw_chat_fallback_transcribes_messages_without_heuristics() {
-        let rendered = build_prompt(
-            &[message("system", "hi"), message("user", "hello")],
-            None,
-            None,
-        )
-            .expect("raw fallback prompt");
+        let rendered =
+            build_prompt(&[message("system", "hi"), message("user", "hello")], None, None)
+                .expect("raw fallback prompt");
 
         assert_eq!(rendered, "System: hi\nUser: hello\nAssistant:");
     }
@@ -299,13 +296,12 @@ mod tests {
     #[test]
     fn minijinja_template_renders_hf_style_messages() {
         let template = "{% for message in messages %}[{{ message.role }}] {{ message.content }}\n{% endfor %}{% if add_generation_prompt %}[assistant] {% endif %}";
-        let rendered =
-            build_prompt(
-                &[message("system", "hi"), message("user", "hello")],
-                Some(template),
-                None,
-            )
-                .expect("template prompt");
+        let rendered = build_prompt(
+            &[message("system", "hi"), message("user", "hello")],
+            Some(template),
+            None,
+        )
+        .expect("template prompt");
 
         assert_eq!(rendered, "[system] hi\n[user] hello\n[assistant] ");
     }
@@ -401,12 +397,9 @@ mod tests {
 
     #[test]
     fn minijinja_template_infers_chatml_eos_token() {
-        let rendered = build_prompt(
-            &[message("user", "hello")],
-            Some("{{ eos_token }}<|im_end|>"),
-            None,
-        )
-        .expect("template prompt");
+        let rendered =
+            build_prompt(&[message("user", "hello")], Some("{{ eos_token }}<|im_end|>"), None)
+                .expect("template prompt");
 
         assert_eq!(rendered, "<|im_end|><|im_end|>");
     }

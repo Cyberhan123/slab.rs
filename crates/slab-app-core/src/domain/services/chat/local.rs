@@ -29,8 +29,6 @@ struct ParsedThinkingOutput {
     reasoning: String,
 }
 
-
-
 #[derive(Debug, Default)]
 struct ContentStopState {
     raw_content: String,
@@ -52,10 +50,7 @@ fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
 fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
     let Some(open_start) = raw.find(THINK_OPEN_MARKER) else {
         // No <think found — treat all text as content.
-        return ParsedThinkingOutput {
-            content: raw.to_owned(),
-            reasoning: String::new(),
-        };
+        return ParsedThinkingOutput { content: raw.to_owned(), reasoning: String::new() };
     };
 
     let content_prefix = raw[..open_start].to_owned();
@@ -100,10 +95,7 @@ fn trailing_partial_stop_len(raw: &str, stop: &[String]) -> usize {
         .filter(|value| value.len() > 1)
         .map(|value| {
             let max = raw.len().min(value.len().saturating_sub(1));
-            (1..=max)
-                .rev()
-                .find(|len| raw.ends_with(&value[..*len]))
-                .unwrap_or(0)
+            (1..=max).rev().find(|len| raw.ends_with(&value[..*len])).unwrap_or(0)
         })
         .max()
         .unwrap_or(0)
@@ -156,8 +148,6 @@ fn merge_stop_sequences(primary: &[String], extra: &[String]) -> Vec<String> {
     }
     merged
 }
-
-
 
 impl ContentStopState {
     fn ingest(&mut self, delta: &str, stop: &[String], trailing: &[String]) -> StopEmission {
@@ -529,7 +519,11 @@ pub(super) async fn create_chat_completion(
                                     let emission = content_stop_state
                                         .lock()
                                         .expect("local content stop state lock poisoned")
-                                        .ingest(&decoded.delta, &effective_stop, &trailing_stop_markers);
+                                        .ingest(
+                                            &decoded.delta,
+                                            &effective_stop,
+                                            &trailing_stop_markers,
+                                        );
                                     if emission.matched {
                                         terminal_metadata
                                             .lock()
@@ -556,7 +550,11 @@ pub(super) async fn create_chat_completion(
                                 let emission = content_stop_state
                                     .lock()
                                     .expect("local content stop state lock poisoned")
-                                    .ingest(&decoded.delta, &effective_stop, &trailing_stop_markers);
+                                    .ingest(
+                                        &decoded.delta,
+                                        &effective_stop,
+                                        &trailing_stop_markers,
+                                    );
                                 if emission.matched {
                                     terminal_metadata
                                         .lock()
@@ -886,13 +884,7 @@ mod tests {
         let first = state.ingest("hello<|endoftext|>", &stop, &trailing);
         let last = state.finish(&stop, &trailing);
 
-        assert_eq!(
-            first,
-            super::StopEmission {
-                text: "hello".to_owned(),
-                matched: false,
-            }
-        );
+        assert_eq!(first, super::StopEmission { text: "hello".to_owned(), matched: false });
         assert_eq!(last, super::StopEmission::default());
     }
 
@@ -905,20 +897,8 @@ mod tests {
         let first = state.ingest("hello<|im", &stop, &trailing);
         let second = state.ingest("_end|>ignored", &stop, &trailing);
 
-        assert_eq!(
-            first,
-            super::StopEmission {
-                text: "hello".to_owned(),
-                matched: false,
-            }
-        );
-        assert_eq!(
-            second,
-            super::StopEmission {
-                text: String::new(),
-                matched: true,
-            }
-        );
+        assert_eq!(first, super::StopEmission { text: "hello".to_owned(), matched: false });
+        assert_eq!(second, super::StopEmission { text: String::new(), matched: true });
         assert!(state.finish(&stop, &trailing).text.is_empty());
     }
 
@@ -931,20 +911,8 @@ mod tests {
         let first = state.ingest("hello\nUs", &stop, &trailing);
         let second = state.ingest("er: next turn", &stop, &trailing);
 
-        assert_eq!(
-            first,
-            super::StopEmission {
-                text: "hello".to_owned(),
-                matched: false,
-            }
-        );
-        assert_eq!(
-            second,
-            super::StopEmission {
-                text: String::new(),
-                matched: true,
-            }
-        );
+        assert_eq!(first, super::StopEmission { text: "hello".to_owned(), matched: false });
+        assert_eq!(second, super::StopEmission { text: String::new(), matched: true });
         assert!(state.finish(&stop, &trailing).text.is_empty());
     }
 

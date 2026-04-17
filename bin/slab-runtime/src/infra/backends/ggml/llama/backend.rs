@@ -47,6 +47,8 @@ struct InferenceOptions {
     min_p: Option<f32>,
     repetition_penalty: Option<f32>,
     presence_penalty: Option<f32>,
+    ignore_eos: bool,
+    logit_bias: Option<serde_json::Value>,
     stop_sequences: Vec<String>,
 }
 
@@ -62,6 +64,8 @@ impl InferenceOptions {
             min_p: params.min_p,
             repetition_penalty: params.repetition_penalty,
             presence_penalty: params.presence_penalty,
+            ignore_eos: params.ignore_eos,
+            logit_bias: params.logit_bias,
             stop_sequences: params.stop_sequences,
         }
     }
@@ -274,6 +278,8 @@ impl LlamaWorker {
             min_p,
             repetition_penalty,
             presence_penalty,
+            ignore_eos,
+            logit_bias,
             stop_sequences,
         } = options;
         let engine = match self.engine.as_ref() {
@@ -302,16 +308,20 @@ impl LlamaWorker {
             min_p,
             repetition_penalty,
             presence_penalty,
+            ignore_eos,
+            logit_bias,
             stop_sequences,
         };
 
         match engine.dispatch_inference(request).await {
-            Ok(LlamaDispatchOutput { text, usage }) => {
+            Ok(LlamaDispatchOutput { text, usage, finish_reason, metadata }) => {
                 let tokens_used = usage.as_ref().map(|usage| usage.completion_tokens);
                 let _ = reply_tx.send(BackendReply::Value(Payload::Json(json!({
                     "text": text,
                     "tokens_used": tokens_used,
                     "usage": usage,
+                    "finish_reason": finish_reason,
+                    "metadata": metadata,
                 }))));
             }
             Err(e) => {
@@ -339,6 +349,8 @@ impl LlamaWorker {
             min_p,
             repetition_penalty,
             presence_penalty,
+            ignore_eos,
+            logit_bias,
             stop_sequences,
         } = options;
         let engine = match self.engine.as_ref() {
@@ -367,6 +379,8 @@ impl LlamaWorker {
             min_p,
             repetition_penalty,
             presence_penalty,
+            ignore_eos,
+            logit_bias,
             stop_sequences,
         };
 
@@ -399,7 +413,8 @@ pub fn spawn_backend_with_engine(
 
 #[cfg(test)]
 mod tests {
-    use super::LlamaWorker;
+    use super::{InferenceOptions, LlamaWorker};
+    use slab_llama::LlamaInferenceParams;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::RuntimeControlSignal;
 
@@ -431,5 +446,18 @@ mod tests {
             .await;
 
         assert!(worker.engine.is_none(), "global load pre-cleanup should remain safe");
+    }
+
+    #[test]
+    fn inference_options_preserve_ignore_eos_and_logit_bias() {
+        let options = InferenceOptions::from_params(LlamaInferenceParams {
+            max_tokens: 32,
+            ignore_eos: true,
+            logit_bias: Some(serde_json::json!({ "42": false })),
+            ..Default::default()
+        });
+
+        assert!(options.ignore_eos);
+        assert_eq!(options.logit_bias, Some(serde_json::json!({ "42": false })));
     }
 }
