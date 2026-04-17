@@ -933,7 +933,7 @@ impl InferenceWorkerState {
             let token = sampler.sample(&mut self.ctx, batch_token_index);
             session.sampler = Some(sampler);
 
-            if token == self.model.token_eos() || session.remaining_tokens == 0 {
+            if self.model.token_is_eog(token) || session.remaining_tokens == 0 {
                 let flush = match session.pending_output.finish() {
                     Ok(flush) => flush,
                     Err(error) => {
