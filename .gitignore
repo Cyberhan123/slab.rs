@@ -33,7 +33,8 @@ packages/*/dist/
 bin/*/node_modules/
 
 llama.cpp-master/
-
+stable-diffusion.cpp-ggml-new-backend/
+whisper.cpp-master/
 docs/.vitepress/dist/
 docs/.vitepress/.temp/
 
