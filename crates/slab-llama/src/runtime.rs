@@ -3,6 +3,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use thiserror::Error;
 use tokio::sync::{mpsc, oneshot};
 use tracing::warn;
@@ -43,7 +44,31 @@ pub struct LlamaInferenceParams {
     pub repetition_penalty: Option<f32>,
     pub presence_penalty: Option<f32>,
     #[serde(default)]
+    pub ignore_eos: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub logit_bias: Option<Value>,
+    #[serde(default)]
     pub stop_sequences: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
+pub struct LlamaLogitBias {
+    pub token: LlamaToken,
+    pub bias: f32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LlamaStopInfo {
+    pub finish_reason: String,
+    pub stop_token_id: Option<LlamaToken>,
+    pub stop_token_text: Option<String>,
+    pub stop_token_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LlamaInferenceOutput {
+    pub text: String,
+    pub stop: Option<LlamaStopInfo>,
 }
 
 #[derive(Debug, Error)]
@@ -97,6 +122,7 @@ pub enum LlamaRuntimeError {
 #[derive(Debug, Clone)]
 pub enum StreamChunk {
     Token(String),
+    Stop(LlamaStopInfo),
     Done,
     Error(String),
 }
@@ -194,6 +220,8 @@ enum GlobalCommand {
         min_p: Option<f32>,
         repetition_penalty: Option<f32>,
         presence_penalty: Option<f32>,
+        ignore_eos: bool,
+        logit_bias: Vec<LlamaLogitBias>,
         reply_tx: oneshot::Sender<Result<SessionId, LlamaRuntimeError>>,
     },
     CreateSessionFromSnapshot {
@@ -204,6 +232,8 @@ enum GlobalCommand {
         min_p: Option<f32>,
         repetition_penalty: Option<f32>,
         presence_penalty: Option<f32>,
+        ignore_eos: bool,
+        logit_bias: Vec<LlamaLogitBias>,
         snapshot: LlamaSessionSnapshot,
         reply_tx: oneshot::Sender<Result<SessionId, LlamaRuntimeError>>,
     },
@@ -252,6 +282,8 @@ impl MasterWorkerState {
                     min_p,
                     repetition_penalty,
                     presence_penalty,
+                    ignore_eos,
+                    logit_bias,
                     reply_tx,
                 } => {
                     let session_id = self.next_session_id;
@@ -270,6 +302,8 @@ impl MasterWorkerState {
                             min_p,
                             repetition_penalty,
                             presence_penalty,
+                            ignore_eos,
+                            logit_bias,
                             snapshot: None,
                             reply_tx: ack_tx,
                         })
@@ -301,6 +335,8 @@ impl MasterWorkerState {
                     min_p,
                     repetition_penalty,
                     presence_penalty,
+                    ignore_eos,
+                    logit_bias,
                     snapshot,
                     reply_tx,
                 } => {
@@ -319,6 +355,8 @@ impl MasterWorkerState {
                             min_p,
                             repetition_penalty,
                             presence_penalty,
+                            ignore_eos,
+                            logit_bias,
                             snapshot: Some(snapshot),
                             reply_tx: ack_tx,
                         })
@@ -515,6 +553,8 @@ pub(super) enum WorkerCommand {
         min_p: Option<f32>,
         repetition_penalty: Option<f32>,
         presence_penalty: Option<f32>,
+        ignore_eos: bool,
+        logit_bias: Vec<LlamaLogitBias>,
         snapshot: Option<LlamaSessionSnapshot>,
         reply_tx: oneshot::Sender<Result<(), LlamaRuntimeError>>,
     },
@@ -606,9 +646,33 @@ impl InferenceWorkerState {
         session.last_token = None;
     }
 
+    fn build_stop_info(
+        model: &LlamaModel,
+        token: Option<LlamaToken>,
+        finish_reason: &str,
+    ) -> LlamaStopInfo {
+        let (stop_token_text, stop_token_kind) = match token {
+            Some(token) => {
+                let token_text =
+                    model.token_to_piece(token, true).ok().filter(|text| !text.is_empty());
+                let token_kind = model.token_stop_kind(token).map(str::to_owned);
+                (token_text, token_kind)
+            }
+            None => (None, None),
+        };
+
+        LlamaStopInfo {
+            finish_reason: finish_reason.to_owned(),
+            stop_token_id: token,
+            stop_token_text,
+            stop_token_kind,
+        }
+    }
+
     fn finish_session_stream(
         session: &mut SessionState,
         final_text: Option<String>,
+        stop: Option<LlamaStopInfo>,
     ) -> Result<(), mpsc::error::SendError<StreamChunk>> {
         session.last_token = None;
         session.remaining_tokens = 0;
@@ -622,6 +686,10 @@ impl InferenceWorkerState {
             && !text.is_empty()
         {
             tx.blocking_send(StreamChunk::Token(text))?;
+        }
+
+        if let Some(stop) = stop {
+            tx.blocking_send(StreamChunk::Stop(stop))?;
         }
 
         session.pending_output.clear();
@@ -713,6 +781,8 @@ impl InferenceWorkerState {
                 min_p,
                 repetition_penalty,
                 presence_penalty,
+                ignore_eos,
+                logit_bias,
                 snapshot,
                 reply_tx,
             } => {
@@ -737,6 +807,8 @@ impl InferenceWorkerState {
                     min_p,
                     repetition_penalty,
                     presence_penalty,
+                    ignore_eos,
+                    &logit_bias,
                 );
                 let mut state = SessionState {
                     seq_id,
@@ -889,7 +961,7 @@ impl InferenceWorkerState {
             let session = self.sessions.get_mut(&session_id).expect("session id from map keys");
 
             if session.cancelled {
-                if Self::finish_session_stream(session, None).is_err() {
+                if Self::finish_session_stream(session, None, None).is_err() {
                     session.stream_tx = None;
                 }
                 continue;
@@ -1009,8 +1081,7 @@ impl InferenceWorkerState {
             let token = sampler.sample(&mut self.ctx, batch_token_index);
             session.sampler = Some(sampler);
 
-            if self.model.token_is_eog(token) || session.remaining_tokens == 0
-            {
+            if self.model.token_is_eog(token) || session.remaining_tokens == 0 {
                 let flush = match session.pending_output.finish() {
                     Ok(flush) => flush,
                     Err(error) => {
@@ -1025,7 +1096,11 @@ impl InferenceWorkerState {
                         "llama generation ended with an incomplete UTF-8 tail; dropping trailing bytes"
                     );
                 }
-                if Self::finish_session_stream(session, flush.text).is_err() {
+                let stop = self
+                    .model
+                    .token_is_eog(token)
+                    .then(|| Self::build_stop_info(&self.model, Some(token), "stop"));
+                if Self::finish_session_stream(session, flush.text, stop).is_err() {
                     session.stream_tx = None;
                 }
                 continue;
@@ -1069,7 +1144,8 @@ impl InferenceWorkerState {
                                 "llama generation stopped at the token budget with an incomplete UTF-8 tail; dropping trailing bytes"
                             );
                         }
-                        if Self::finish_session_stream(session, flush.text).is_err() {
+                        let stop = Some(Self::build_stop_info(&self.model, None, "length"));
+                        if Self::finish_session_stream(session, flush.text, stop).is_err() {
                             session.stream_tx = None;
                         }
                     }
@@ -1155,14 +1231,16 @@ impl LlamaRuntime {
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub async fn create_session(&self) -> Result<SessionId, LlamaRuntimeError> {
-        self.create_session_with_options(None, None, None, None, None, None, None).await
+        self.create_session_with_options(None, None, None, None, None, None, None, false, vec![])
+            .await
     }
 
     pub async fn create_session_with_gbnf(
         &self,
         gbnf: Option<String>,
     ) -> Result<SessionId, LlamaRuntimeError> {
-        self.create_session_with_options(gbnf, None, None, None, None, None, None).await
+        self.create_session_with_options(gbnf, None, None, None, None, None, None, false, vec![])
+            .await
     }
 
     pub async fn create_session_with_options(
@@ -1174,6 +1252,8 @@ impl LlamaRuntime {
         min_p: Option<f32>,
         repetition_penalty: Option<f32>,
         presence_penalty: Option<f32>,
+        ignore_eos: bool,
+        logit_bias: Vec<LlamaLogitBias>,
     ) -> Result<SessionId, LlamaRuntimeError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
@@ -1185,6 +1265,8 @@ impl LlamaRuntime {
                 min_p,
                 repetition_penalty,
                 presence_penalty,
+                ignore_eos,
+                logit_bias,
                 reply_tx,
             })
             .await
@@ -1202,6 +1284,8 @@ impl LlamaRuntime {
         min_p: Option<f32>,
         repetition_penalty: Option<f32>,
         presence_penalty: Option<f32>,
+        ignore_eos: bool,
+        logit_bias: Vec<LlamaLogitBias>,
     ) -> Result<SessionId, LlamaRuntimeError> {
         let (reply_tx, reply_rx) = oneshot::channel();
         self.global_tx
@@ -1213,6 +1297,8 @@ impl LlamaRuntime {
                 min_p,
                 repetition_penalty,
                 presence_penalty,
+                ignore_eos,
+                logit_bias,
                 snapshot,
                 reply_tx,
             })

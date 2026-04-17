@@ -68,11 +68,7 @@ impl HubClient {
     }
 
     fn hf_hub_cached_path(&self, repo_id: &str, filename: &str) -> Option<PathBuf> {
-        let cache = self
-            .cache_dir
-            .clone()
-            .map(Cache::new)
-            .unwrap_or_else(Cache::from_env);
+        let cache = self.cache_dir.clone().map(Cache::new).unwrap_or_else(Cache::from_env);
         cache.repo(Repo::new(repo_id.to_owned(), RepoType::Model)).get(filename)
     }
 }

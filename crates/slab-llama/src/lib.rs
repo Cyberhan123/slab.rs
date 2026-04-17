@@ -57,8 +57,8 @@ pub use llama_model::LlamaModel;
 pub use llama_sampler::{LlamaSampler, SamplerChainBuilder};
 pub use model_params::LlamaModelParams;
 pub use runtime::{
-    LlamaInferenceParams, LlamaLoadConfig, LlamaRuntime, LlamaRuntimeError, LlamaSessionSnapshot,
-    SessionId, StreamChunk, StreamHandle,
+    LlamaInferenceOutput, LlamaInferenceParams, LlamaLoadConfig, LlamaLogitBias, LlamaRuntime,
+    LlamaRuntimeError, LlamaSessionSnapshot, LlamaStopInfo, SessionId, StreamChunk, StreamHandle,
 };
 pub use token::{LlamaPos, LlamaSeqId, LlamaToken};
 

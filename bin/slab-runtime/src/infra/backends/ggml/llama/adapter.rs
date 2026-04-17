@@ -1,12 +1,12 @@
 use crate::infra::backends::ggml;
-use slab_llama::Llama;
 use slab_llama::{
-    LlamaContextParams, LlamaModel, LlamaModelParams, LlamaRuntime, LlamaSessionSnapshot,
+    Llama, LlamaContextParams, LlamaInferenceOutput, LlamaLogitBias, LlamaModel, LlamaModelParams,
+    LlamaRuntime, LlamaSessionSnapshot, LlamaStopInfo,
 };
 use slab_runtime_core::backend::{
     StreamChunk as BaseStreamChunk, StreamHandle as BaseStreamHandle,
 };
-use slab_types::inference::{TextGenerationUsage, TextPromptTokensDetails};
+use slab_types::inference::{JsonOptions, TextGenerationUsage, TextPromptTokensDetails};
 use slab_utils::loader::load_library_from_dir;
 use std::collections::HashMap;
 use std::path::Path;
@@ -28,6 +28,8 @@ pub(crate) struct LlamaDispatchRequest {
     pub min_p: Option<f32>,
     pub repetition_penalty: Option<f32>,
     pub presence_penalty: Option<f32>,
+    pub ignore_eos: bool,
+    pub logit_bias: Option<serde_json::Value>,
     pub stop_sequences: Vec<String>,
 }
 
@@ -35,6 +37,32 @@ pub(crate) struct LlamaDispatchRequest {
 pub(crate) struct LlamaDispatchOutput {
     pub text: String,
     pub usage: Option<TextGenerationUsage>,
+    pub finish_reason: Option<String>,
+    pub metadata: JsonOptions,
+}
+
+fn stop_info_to_metadata(stop: &LlamaStopInfo) -> JsonOptions {
+    let mut metadata = JsonOptions::default();
+    if let Some(token_id) = stop.stop_token_id {
+        metadata.insert("llama_stop_token_id".into(), serde_json::json!(token_id));
+    }
+    if let Some(token_text) = stop.stop_token_text.as_ref() {
+        metadata.insert("llama_stop_token_text".into(), serde_json::json!(token_text));
+    }
+    if let Some(token_kind) = stop.stop_token_kind.as_ref() {
+        metadata.insert("llama_stop_token_kind".into(), serde_json::json!(token_kind));
+    }
+    metadata
+}
+
+fn resolve_logit_bias_value(value: &serde_json::Value) -> Option<f32> {
+    if let Some(bias) = value.as_f64() {
+        Some(bias as f32)
+    } else if matches!(value, serde_json::Value::Bool(false)) {
+        Some(f32::NEG_INFINITY)
+    } else {
+        None
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -214,6 +242,82 @@ impl GGMLLlamaEngine {
         Ok(Arc::clone(model))
     }
 
+    fn append_string_logit_bias(
+        model: &LlamaModel,
+        text: &str,
+        bias: f32,
+        logit_bias: &mut Vec<LlamaLogitBias>,
+    ) {
+        match model.tokenize(text, false, true) {
+            Ok(tokens) => {
+                logit_bias.extend(tokens.into_iter().map(|token| LlamaLogitBias { token, bias }));
+            }
+            Err(error) => {
+                warn!(text, %error, "failed to tokenize logit_bias string; ignoring entry");
+            }
+        }
+    }
+
+    fn resolve_logit_bias(
+        &self,
+        raw_logit_bias: Option<&serde_json::Value>,
+    ) -> Result<Vec<LlamaLogitBias>, ggml::EngineError> {
+        let Some(raw_logit_bias) = raw_logit_bias else {
+            return Ok(Vec::new());
+        };
+
+        let model = self.require_model()?;
+        let n_vocab = model.n_vocab();
+        let mut logit_bias = Vec::new();
+
+        match raw_logit_bias {
+            serde_json::Value::Array(entries) => {
+                for entry in entries {
+                    let serde_json::Value::Array(pair) = entry else {
+                        continue;
+                    };
+                    if pair.len() != 2 {
+                        continue;
+                    }
+
+                    let Some(bias) = resolve_logit_bias_value(&pair[1]) else {
+                        continue;
+                    };
+
+                    if let Some(token) =
+                        pair[0].as_i64().and_then(|token| i32::try_from(token).ok())
+                    {
+                        if token >= 0 && token < n_vocab {
+                            logit_bias.push(LlamaLogitBias { token, bias });
+                        }
+                    } else if let Some(text) = pair[0].as_str() {
+                        Self::append_string_logit_bias(&model, text, bias, &mut logit_bias);
+                    }
+                }
+            }
+            serde_json::Value::Object(entries) => {
+                for (key, value) in entries {
+                    let Some(bias) = resolve_logit_bias_value(value) else {
+                        continue;
+                    };
+
+                    if let Ok(token) = key.parse::<i32>() {
+                        if token >= 0 && token < n_vocab {
+                            logit_bias.push(LlamaLogitBias { token, bias });
+                        }
+                    } else {
+                        Self::append_string_logit_bias(&model, key, bias, &mut logit_bias);
+                    }
+                }
+            }
+            _ => {
+                warn!("unsupported logit_bias JSON shape; expected array or object");
+            }
+        }
+
+        Ok(logit_bias)
+    }
+
     async fn prepare_managed_session(
         &self,
         session_key: Option<String>,
@@ -225,6 +329,8 @@ impl GGMLLlamaEngine {
         min_p: Option<f32>,
         repetition_penalty: Option<f32>,
         presence_penalty: Option<f32>,
+        ignore_eos: bool,
+        logit_bias: &[LlamaLogitBias],
     ) -> Result<PreparedSession, ggml::EngineError> {
         let Some(key) = session_key else {
             return Ok(PreparedSession {
@@ -256,6 +362,8 @@ impl GGMLLlamaEngine {
                         min_p,
                         repetition_penalty,
                         presence_penalty,
+                        ignore_eos,
+                        logit_bias.to_vec(),
                     )
                     .await
                 {
@@ -277,6 +385,8 @@ impl GGMLLlamaEngine {
                         min_p,
                         repetition_penalty,
                         presence_penalty,
+                        ignore_eos,
+                        logit_bias.to_vec(),
                     )
                     .await
                 {
@@ -370,23 +480,46 @@ impl GGMLLlamaEngine {
         let session_key = request.session_key.clone();
         let commit_gbnf = request.gbnf.clone();
         let stop_sequences = request.stop_sequences.clone();
-        let prepared = self.prepare_managed_session(
-            session_key,
-            prompt,
-            gbnf.clone(),
-            request.temperature,
-            request.top_p,
-            request.top_k,
-            request.min_p,
-            request.repetition_penalty,
-            request.presence_penalty,
-        ).await?;
+        let logit_bias = self.resolve_logit_bias(request.logit_bias.as_ref())?;
+        let prepared = self
+            .prepare_managed_session(
+                session_key,
+                prompt,
+                gbnf.clone(),
+                request.temperature,
+                request.top_p,
+                request.top_k,
+                request.min_p,
+                request.repetition_penalty,
+                request.presence_penalty,
+                request.ignore_eos,
+                &logit_bias,
+            )
+            .await?;
 
-        match self.inference(&prepared.delta_prompt, max_tokens, prepared.sid, gbnf).await {
-            Ok(text) => {
+        match self
+            .inference(
+                &prepared.delta_prompt,
+                max_tokens,
+                prepared.sid,
+                gbnf,
+                request.ignore_eos,
+                &logit_bias,
+            )
+            .await
+        {
+            Ok(output) => {
                 // Apply stop sequence trimming to the generated text before committing.
-                let (trimmed_text, _stop_matched) = apply_stop_sequences(&text, &stop_sequences);
-                let usage = self.build_usage(&prepared.full_prompt, &trimmed_text, prepared.cached_tokens);
+                let (trimmed_text, stop_matched) =
+                    apply_stop_sequences(&output.text, &stop_sequences);
+                let usage =
+                    self.build_usage(&prepared.full_prompt, &trimmed_text, prepared.cached_tokens);
+                let finish_reason = if stop_matched {
+                    Some("stop".to_owned())
+                } else {
+                    output.stop.as_ref().map(|stop| stop.finish_reason.clone())
+                };
+                let metadata = output.stop.as_ref().map(stop_info_to_metadata).unwrap_or_default();
                 if let Err(error) = self
                     .commit_managed_session(
                         prepared.key,
@@ -399,7 +532,7 @@ impl GGMLLlamaEngine {
                 {
                     warn!(error = %error, "failed to persist llama session snapshot after inference");
                 }
-                Ok(LlamaDispatchOutput { text: trimmed_text, usage })
+                Ok(LlamaDispatchOutput { text: trimmed_text, usage, finish_reason, metadata })
             }
             Err(error) => {
                 self.drop_managed_session(prepared.key, prepared.sid).await;
@@ -419,20 +552,32 @@ impl GGMLLlamaEngine {
         let session_key = request.session_key.clone();
         let commit_gbnf = request.gbnf.clone();
         let stop_sequences = request.stop_sequences.clone();
-        let prepared = self.prepare_managed_session(
-            session_key,
-            prompt,
-            gbnf.clone(),
-            request.temperature,
-            request.top_p,
-            request.top_k,
-            request.min_p,
-            request.repetition_penalty,
-            request.presence_penalty,
-        ).await?;
+        let logit_bias = self.resolve_logit_bias(request.logit_bias.as_ref())?;
+        let prepared = self
+            .prepare_managed_session(
+                session_key,
+                prompt,
+                gbnf.clone(),
+                request.temperature,
+                request.top_p,
+                request.top_k,
+                request.min_p,
+                request.repetition_penalty,
+                request.presence_penalty,
+                request.ignore_eos,
+                &logit_bias,
+            )
+            .await?;
 
         let (mut llama_rx, sid) = match self
-            .inference_stream(&prepared.delta_prompt, max_tokens, prepared.sid, gbnf)
+            .inference_stream(
+                &prepared.delta_prompt,
+                max_tokens,
+                prepared.sid,
+                gbnf,
+                request.ignore_eos,
+                &logit_bias,
+            )
             .await
         {
             Ok(stream) => stream,
@@ -453,6 +598,8 @@ impl GGMLLlamaEngine {
             let mut stream_error = false;
             let mut cancelled = false;
             let mut stop_matched = false;
+            let mut terminal_finish_reason: Option<String> = None;
+            let mut terminal_metadata = JsonOptions::default();
             // Tracks how many bytes of `generated` have been forwarded downstream.
             // When a stop sequence is partially accumulated we hold back the
             // uncertain tail so that we never forward text that may need to be
@@ -563,6 +710,10 @@ impl GGMLLlamaEngine {
                                 completed = true;
                                 break;
                             }
+                            StreamChunk::Stop(stop) => {
+                                terminal_finish_reason = Some(stop.finish_reason.clone());
+                                terminal_metadata = stop_info_to_metadata(&stop);
+                            }
                             StreamChunk::Error(error) => {
                                 stream_error = true;
                                 if stream_tx.send(BaseStreamChunk::Error(error)).await.is_err() {
@@ -576,7 +727,8 @@ impl GGMLLlamaEngine {
             }
 
             // Flush any remaining held-back text after generation completes (no stop matched).
-            if !stop_matched && !forward_failed && !stream_error && forwarded_len < generated.len() {
+            if !stop_matched && !forward_failed && !stream_error && forwarded_len < generated.len()
+            {
                 let tail = generated[forwarded_len..].to_owned();
                 if stream_tx.send(BaseStreamChunk::Token(tail)).await.is_err() {
                     forward_failed = true;
@@ -584,6 +736,26 @@ impl GGMLLlamaEngine {
             }
 
             let effectively_completed = completed || stop_matched;
+
+            if effectively_completed && !forward_failed && !stream_error && !cancelled {
+                let finish_reason = terminal_finish_reason
+                    .clone()
+                    .or_else(|| stop_matched.then(|| "stop".to_owned()));
+                if let Some(finish_reason) = finish_reason {
+                    let mut payload = serde_json::json!({
+                        "delta": "",
+                        "done": true,
+                        "finish_reason": finish_reason,
+                    });
+                    if !terminal_metadata.is_empty() {
+                        payload["metadata"] = serde_json::to_value(&terminal_metadata)
+                            .expect("llama stop metadata should serialize");
+                    }
+                    if stream_tx.send(BaseStreamChunk::Json(payload)).await.is_err() {
+                        forward_failed = true;
+                    }
+                }
+            }
 
             if effectively_completed
                 && !forward_failed
@@ -606,7 +778,12 @@ impl GGMLLlamaEngine {
                 forward_failed = true;
             }
 
-            if key.is_some() && effectively_completed && !forward_failed && !stream_error && !cancelled {
+            if key.is_some()
+                && effectively_completed
+                && !forward_failed
+                && !stream_error
+                && !cancelled
+            {
                 if let Err(error) = engine
                     .commit_managed_session(key, Some(sid), &full_prompt, &generated, gbnf)
                     .await
@@ -629,11 +806,13 @@ impl GGMLLlamaEngine {
     }
 
     /// Create a new session with an optional raw GBNF constraint.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn create_session_with_gbnf(
         &self,
         gbnf: Option<String>,
     ) -> Result<SessionId, ggml::EngineError> {
-        self.create_session_with_options(gbnf, None, None, None, None, None, None).await
+        self.create_session_with_options(gbnf, None, None, None, None, None, None, false, vec![])
+            .await
     }
 
     /// Create a new session with optional GBNF and sampling overrides.
@@ -646,6 +825,8 @@ impl GGMLLlamaEngine {
         min_p: Option<f32>,
         repetition_penalty: Option<f32>,
         presence_penalty: Option<f32>,
+        ignore_eos: bool,
+        logit_bias: Vec<LlamaLogitBias>,
     ) -> Result<SessionId, ggml::EngineError> {
         let engine = self.require_engine()?;
         engine
@@ -657,6 +838,8 @@ impl GGMLLlamaEngine {
                 min_p,
                 repetition_penalty,
                 presence_penalty,
+                ignore_eos,
+                logit_bias,
             )
             .await
             .map_err(GGMLLlamaEngineError::from)
@@ -673,6 +856,8 @@ impl GGMLLlamaEngine {
         min_p: Option<f32>,
         repetition_penalty: Option<f32>,
         presence_penalty: Option<f32>,
+        ignore_eos: bool,
+        logit_bias: Vec<LlamaLogitBias>,
     ) -> Result<SessionId, ggml::EngineError> {
         let engine = self.require_engine()?;
         engine
@@ -685,6 +870,8 @@ impl GGMLLlamaEngine {
                 min_p,
                 repetition_penalty,
                 presence_penalty,
+                ignore_eos,
+                logit_bias,
             )
             .await
             .map_err(GGMLLlamaEngineError::from)
@@ -762,18 +949,34 @@ impl GGMLLlamaEngine {
     ///
     /// If `session_id` is `Some(sid)`, appends to the existing session and
     /// returns the output without ending the session (caller is responsible
-    /// for cleanup).  `gbnf` is ignored when `session_id` is `Some` because
-    /// the session's sampler was already built at creation time.
+    /// for cleanup).  `gbnf`, `ignore_eos`, and `logit_bias` are ignored when
+    /// `session_id` is `Some` because the session's sampler was already built
+    /// at creation time.
     pub async fn inference(
         &self,
         prompt: &str,
         max_tokens: usize,
         session_id: Option<SessionId>,
         gbnf: Option<String>,
-    ) -> Result<String, ggml::EngineError> {
+        ignore_eos: bool,
+        logit_bias: &[LlamaLogitBias],
+    ) -> Result<LlamaInferenceOutput, ggml::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
-            None => self.create_session_with_gbnf(gbnf).await?,
+            None => {
+                self.create_session_with_options(
+                    gbnf,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    ignore_eos,
+                    logit_bias.to_vec(),
+                )
+                .await?
+            }
         };
         let should_end = session_id.is_none();
 
@@ -794,11 +997,15 @@ impl GGMLLlamaEngine {
             }
         };
         let mut output = String::new();
+        let mut terminal_stop: Option<LlamaStopInfo> = None;
         let mut stream_error: Option<GGMLLlamaEngineError> = None;
 
         while let Some(chunk) = stream.recv().await {
             match chunk {
                 StreamChunk::Token(piece) => output.push_str(&piece),
+                StreamChunk::Stop(stop) => {
+                    terminal_stop = Some(stop);
+                }
                 StreamChunk::Done => break,
                 StreamChunk::Error(message) => {
                     stream_error = Some(GGMLLlamaEngineError::InferenceStreamError { message });
@@ -818,7 +1025,7 @@ impl GGMLLlamaEngine {
             return Err(error.into());
         }
 
-        Ok(output)
+        Ok(LlamaInferenceOutput { text: output, stop: terminal_stop })
     }
 
     /// Generate text from a prompt as an async stream.
@@ -830,18 +1037,34 @@ impl GGMLLlamaEngine {
     ///
     /// If `session_id` is `Some(sid)`, appends to the existing session and
     /// returns the stream handle (caller is responsible for session
-    /// management).  `gbnf` is ignored when `session_id` is `Some` because
-    /// the session's sampler was already built at creation time.
+    /// management).  `gbnf`, `ignore_eos`, and `logit_bias` are ignored when
+    /// `session_id` is `Some` because the session's sampler was already built
+    /// at creation time.
     pub async fn inference_stream(
         &self,
         prompt: &str,
         max_tokens: usize,
         session_id: Option<SessionId>,
         gbnf: Option<String>,
+        ignore_eos: bool,
+        logit_bias: &[LlamaLogitBias],
     ) -> Result<(StreamHandle, SessionId), ggml::EngineError> {
         let sid = match session_id {
             Some(sid) => sid,
-            None => self.create_session_with_gbnf(gbnf).await?,
+            None => {
+                self.create_session_with_options(
+                    gbnf,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    ignore_eos,
+                    logit_bias.to_vec(),
+                )
+                .await?
+            }
         };
 
         if let Err(error) = self.append_input(sid, prompt.to_string()).await {

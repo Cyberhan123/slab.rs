@@ -1,6 +1,8 @@
 use std::ffi::CString;
 use std::sync::Arc;
 
+use tracing::debug;
+
 use crate::Llama;
 use crate::LlamaSampler;
 use crate::context_params::LlamaContextParams;
@@ -8,6 +10,7 @@ use crate::error::LlamaError;
 use crate::llama_adapter::LlamaLoraAdapter;
 use crate::llama_context::LlamaContext;
 use crate::llama_sampler::SamplerChainBuilder;
+use crate::runtime::LlamaLogitBias;
 use crate::token::LlamaToken;
 
 /// Inner (non-Clone) model data.  Wrapped in Arc so that LlamaContext can keep
@@ -15,6 +18,8 @@ use crate::token::LlamaToken;
 pub(crate) struct LlamaModelInner {
     pub(crate) model: *mut slab_llama_sys::llama_model,
     pub(crate) lib: Arc<slab_llama_sys::LlamaLib>,
+    pub(crate) eog_tokens: Box<[LlamaToken]>,
+    pub(crate) eog_logit_bias: Box<[slab_llama_sys::llama_logit_bias]>,
 }
 
 unsafe impl Send for LlamaModelInner {}
@@ -54,11 +59,65 @@ impl Llama {
         if model.is_null() {
             Err(LlamaError::ModelLoadFailed)
         } else {
+            let vocab = unsafe { self.lib.llama_model_get_vocab(model) };
+            let (eog_tokens, eog_logit_bias) = collect_eog_bias(&self.lib, vocab);
             Ok(LlamaModel {
-                inner: Arc::new(LlamaModelInner { model, lib: Arc::clone(&self.lib) }),
+                inner: Arc::new(LlamaModelInner {
+                    model,
+                    lib: Arc::clone(&self.lib),
+                    eog_tokens,
+                    eog_logit_bias,
+                }),
             })
         }
     }
+}
+
+fn collect_eog_bias(
+    lib: &Arc<slab_llama_sys::LlamaLib>,
+    vocab: *const slab_llama_sys::llama_vocab,
+) -> (Box<[LlamaToken]>, Box<[slab_llama_sys::llama_logit_bias]>) {
+    if vocab.is_null() {
+        return (Vec::new().into_boxed_slice(), Vec::new().into_boxed_slice());
+    }
+
+    let n_vocab = unsafe { lib.llama_vocab_n_tokens(vocab) };
+    let mut eog_tokens = Vec::new();
+    let mut eog_logit_bias = Vec::new();
+
+    for token in 0..n_vocab {
+        if unsafe { lib.llama_vocab_is_eog(vocab, token) } {
+            eog_tokens.push(token);
+            eog_logit_bias
+                .push(slab_llama_sys::llama_logit_bias { token, bias: f32::NEG_INFINITY });
+        }
+    }
+
+    debug!(count = eog_tokens.len(), "initialized llama EOG token cache");
+    (eog_tokens.into_boxed_slice(), eog_logit_bias.into_boxed_slice())
+}
+
+fn collect_sampler_logit_bias(
+    logit_bias: &[LlamaLogitBias],
+    ignore_eos: bool,
+    eog_logit_bias: &[slab_llama_sys::llama_logit_bias],
+) -> Vec<slab_llama_sys::llama_logit_bias> {
+    let mut raw =
+        Vec::with_capacity(logit_bias.len() + if ignore_eos { eog_logit_bias.len() } else { 0 });
+    raw.extend(
+        logit_bias
+            .iter()
+            .map(|entry| slab_llama_sys::llama_logit_bias { token: entry.token, bias: entry.bias }),
+    );
+
+    if ignore_eos {
+        raw.extend(eog_logit_bias.iter().map(|entry| slab_llama_sys::llama_logit_bias {
+            token: entry.token,
+            bias: entry.bias,
+        }));
+    }
+
+    raw
 }
 
 impl LlamaModel {
@@ -316,6 +375,29 @@ impl LlamaModel {
         unsafe { self.inner.lib.llama_vocab_is_eog(self.vocab(), token) }
     }
 
+    /// Cached list of end-of-generation token ids discovered when the model was loaded.
+    pub fn eog_tokens(&self) -> &[LlamaToken] {
+        &self.inner.eog_tokens
+    }
+
+    /// Cached `-inf` logit biases for all end-of-generation tokens.
+    pub fn eog_logit_bias(&self) -> &[slab_llama_sys::llama_logit_bias] {
+        &self.inner.eog_logit_bias
+    }
+
+    /// Classify a stop token into the most specific llama.cpp category we know.
+    pub fn token_stop_kind(&self, token: LlamaToken) -> Option<&'static str> {
+        if token == self.token_eos() {
+            Some("eos")
+        } else if token == self.token_eot() {
+            Some("eot")
+        } else if self.inner.eog_tokens.contains(&token) {
+            Some("eog")
+        } else {
+            None
+        }
+    }
+
     // ── model metadata ───────────────────────────────────────────────────────
 
     /// Training context length.
@@ -408,7 +490,7 @@ impl LlamaModel {
     ///
     /// [`new_sampler`]: LlamaModel::new_sampler
     pub fn new_sampler_with_gbnf(&self, gbnf: Option<&str>) -> LlamaSampler {
-        self.new_sampler_with_options(gbnf, None, None, None, None, None, None)
+        self.new_sampler_with_options(gbnf, None, None, None, None, None, None, false, &[])
     }
 
     /// Create a sampler chain with optional GBNF constraint and explicit
@@ -424,6 +506,8 @@ impl LlamaModel {
         min_p: Option<f32>,
         repetition_penalty: Option<f32>,
         presence_penalty: Option<f32>,
+        ignore_eos: bool,
+        logit_bias: &[LlamaLogitBias],
     ) -> LlamaSampler {
         let mut builder = SamplerChainBuilder::new(Arc::clone(&self.inner.lib));
         if let Some(t) = temperature {
@@ -443,6 +527,11 @@ impl LlamaModel {
         }
         if let Some(penalty) = presence_penalty {
             builder.presence_penalty = penalty;
+        }
+        let raw_logit_bias =
+            collect_sampler_logit_bias(logit_bias, ignore_eos, self.eog_logit_bias());
+        if !raw_logit_bias.is_empty() {
+            builder.set_logit_bias(self.n_vocab(), raw_logit_bias);
         }
         match gbnf {
             None | Some("") => builder.build(),

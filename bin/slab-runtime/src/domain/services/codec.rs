@@ -68,6 +68,12 @@ fn encode_ggml_llama_text_generation_options(request: &TextGenerationRequest) ->
         min_p: request.min_p,
         repetition_penalty: request.repetition_penalty,
         presence_penalty: request.presence_penalty,
+        ignore_eos: request
+            .options
+            .get("ignore_eos")
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false),
+        logit_bias: request.options.get("logit_bias").cloned(),
         stop_sequences: request.stop_sequences.clone(),
     })
 }

@@ -275,12 +275,16 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
                 tokio::pin!(backend_stream);
                 let mut token_count = 0usize;
                 let mut terminal_usage: Option<TextGenerationUsage> = None;
+                let mut terminal_finish_reason: Option<String> = None;
                 let mut thinking_state = ThinkingStreamState::new(prompt_prefills_thinking);
                 while let Some(chunk) = backend_stream.next().await {
                     let messages: Vec<pb::ChatStreamChunk> = match chunk {
                         Ok(chunk) => {
                             if !chunk.delta.is_empty() {
                                 token_count += 1;
+                            }
+                            if let Some(finish_reason) = chunk.finish_reason.clone() {
+                                terminal_finish_reason = Some(finish_reason);
                             }
                             if let Some(usage) = chunk.usage.clone() {
                                 terminal_usage = Some(usage);
@@ -335,7 +339,8 @@ impl pb::llama_service_server::LlamaService for GrpcServiceImpl {
 
                 debug!(token_count, "llama chat_stream relay finished");
                 let completion_tokens = u32::try_from(token_count).unwrap_or(u32::MAX);
-                let finish_reason = finish_reason_from_token_budget(completion_tokens, max_tokens);
+                let finish_reason =
+                    resolve_finish_reason(terminal_finish_reason, completion_tokens, max_tokens);
                 let usage = terminal_usage
                     .unwrap_or_else(|| build_estimated_usage(&prompt_for_usage, completion_tokens));
                 let _ = tx
@@ -403,6 +408,15 @@ fn finish_reason_from_token_budget(completion_tokens: u32, max_tokens: u32) -> S
     }
 }
 
+fn resolve_finish_reason(
+    runtime_finish_reason: Option<String>,
+    completion_tokens: u32,
+    max_tokens: u32,
+) -> String {
+    runtime_finish_reason
+        .unwrap_or_else(|| finish_reason_from_token_budget(completion_tokens, max_tokens))
+}
+
 fn build_estimated_usage(prompt: &str, completion_tokens: u32) -> TextGenerationUsage {
     let prompt_tokens = estimate_token_count(prompt);
 
@@ -420,6 +434,7 @@ mod tests {
     use super::{
         ParsedThinkingOutput, ThinkingDelta, ThinkingStreamState, attach_reasoning_metadata,
         parse_thinking_output, parse_thinking_output_with_context, prompt_prefills_open_think,
+        resolve_finish_reason,
     };
     use serde_json::json;
     use slab_types::TextGenerationResponse;
@@ -480,10 +495,7 @@ mod tests {
     #[test]
     fn thinking_stream_state_holds_partial_open_tag_until_completed() {
         let mut state = ThinkingStreamState::default();
-        assert_eq!(
-            state.ingest("answer<th"),
-            vec![ThinkingDelta::Content("answer".to_owned())]
-        );
+        assert_eq!(state.ingest("answer<th"), vec![ThinkingDelta::Content("answer".to_owned())]);
         assert_eq!(
             state.ingest("ink>first thought"),
             vec![ThinkingDelta::Reasoning("first thought".to_owned())]
@@ -569,5 +581,16 @@ mod tests {
 
         assert_eq!(response.text, "\n\nanswer");
         assert_eq!(response.metadata.get("reasoning_content"), Some(&json!("step by step")));
+    }
+
+    #[test]
+    fn resolve_finish_reason_prefers_runtime_terminal_reason() {
+        assert_eq!(resolve_finish_reason(Some("stop".to_owned()), 128, 16), "stop");
+    }
+
+    #[test]
+    fn resolve_finish_reason_falls_back_to_token_budget() {
+        assert_eq!(resolve_finish_reason(None, 16, 16), "length");
+        assert_eq!(resolve_finish_reason(None, 8, 16), "stop");
     }
 }

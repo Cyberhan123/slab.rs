@@ -135,6 +135,25 @@ impl LlamaSampler {
         self
     }
 
+    /// Add a logit-bias sampler.
+    pub fn add_logit_bias(
+        self,
+        n_vocab: i32,
+        logit_bias: &[slab_llama_sys::llama_logit_bias],
+    ) -> Self {
+        if logit_bias.is_empty() {
+            return self;
+        }
+
+        let n_logit_bias = i32::try_from(logit_bias.len()).unwrap_or(i32::MAX);
+        let s = unsafe {
+            self.lib.llama_sampler_init_logit_bias(n_vocab, n_logit_bias, logit_bias.as_ptr())
+        };
+        assert!(!s.is_null(), "llama_sampler_init_logit_bias returned null");
+        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        self
+    }
+
     /// Attempt to add a GBNF grammar sampler to the chain.
     ///
     /// The grammar sampler is inserted at the current tail of the chain and
@@ -238,6 +257,8 @@ pub struct SamplerChainBuilder {
     pub repeat_last_n: i32,
     /// Random seed (default `LLAMA_DEFAULT_SEED` = 0xFFFF_FFFF).
     pub seed: u32,
+    logit_bias_n_vocab: Option<i32>,
+    logit_bias: Vec<slab_llama_sys::llama_logit_bias>,
 }
 
 impl SamplerChainBuilder {
@@ -253,7 +274,18 @@ impl SamplerChainBuilder {
             presence_penalty: 0.0,
             repeat_last_n: 64,
             seed: slab_llama_sys::LLAMA_DEFAULT_SEED,
+            logit_bias_n_vocab: None,
+            logit_bias: Vec::new(),
         }
+    }
+
+    pub(crate) fn set_logit_bias(
+        &mut self,
+        n_vocab: i32,
+        logit_bias: Vec<slab_llama_sys::llama_logit_bias>,
+    ) {
+        self.logit_bias_n_vocab = (!logit_bias.is_empty()).then_some(n_vocab);
+        self.logit_bias = logit_bias;
     }
 
     /// Build and return a [`LlamaSampler`] chain.
@@ -261,14 +293,17 @@ impl SamplerChainBuilder {
         let mut chain = LlamaSampler::chain_new(Arc::clone(&self.lib));
 
         // penalties first (they observe the logits before sampling).
-        if self.repeat_penalty != 1.0 || self.repeat_last_n != 0 || self.presence_penalty != 0.0
-        {
+        if self.repeat_penalty != 1.0 || self.repeat_last_n != 0 || self.presence_penalty != 0.0 {
             chain = chain.add_penalties(
                 self.repeat_last_n,
                 self.repeat_penalty,
                 0.0,
                 self.presence_penalty,
             );
+        }
+
+        if let Some(n_vocab) = self.logit_bias_n_vocab {
+            chain = chain.add_logit_bias(n_vocab, &self.logit_bias);
         }
 
         if self.top_k > 0 {
@@ -305,14 +340,16 @@ impl SamplerChainBuilder {
     ) -> LlamaSampler {
         let mut chain = LlamaSampler::chain_new(Arc::clone(&self.lib));
 
-        if self.repeat_penalty != 1.0 || self.repeat_last_n != 0 || self.presence_penalty != 0.0
-        {
+        if self.repeat_penalty != 1.0 || self.repeat_last_n != 0 || self.presence_penalty != 0.0 {
             chain = chain.add_penalties(
                 self.repeat_last_n,
                 self.repeat_penalty,
                 0.0,
                 self.presence_penalty,
             );
+        }
+        if let Some(n_vocab) = self.logit_bias_n_vocab {
+            chain = chain.add_logit_bias(n_vocab, &self.logit_bias);
         }
         if self.top_k > 0 {
             chain = chain.add_top_k(self.top_k);
