@@ -551,11 +551,6 @@ async fn create_chat_completion_with_state(
     if command.common.stream && command.common.n > 1 {
         return Err(AppCoreError::NotImplemented("streaming with n > 1 is not supported".into()));
     }
-    if command.common.stream && !command.common.stop.is_empty() {
-        return Err(AppCoreError::NotImplemented(
-            "streaming with stop is not supported for chat completions".into(),
-        ));
-    }
 
     let resolved_model = resolve_requested_model(&state, &command.model).await?;
     let continue_generation = command.continue_generation;
@@ -570,6 +565,11 @@ async fn create_chat_completion_with_state(
     let max_tokens = command.common.max_tokens.unwrap_or(512);
     let temperature = command.common.temperature.unwrap_or(0.7);
     let route_to_cloud = cloud::should_route_to_cloud(&state, &resolved_model).await?;
+    if command.common.stream && route_to_cloud && !command.common.stop.is_empty() {
+        return Err(AppCoreError::NotImplemented(
+            "streaming with stop is not supported for cloud chat completions".into(),
+        ));
+    }
     validate_chat_route_params(route_to_cloud, &command)?;
 
     debug!(
@@ -641,6 +641,7 @@ async fn create_chat_completion_with_state(
                     verbosity: command.cloud.verbosity,
                     gbnf: command.local.gbnf.clone(),
                     structured_output: command.local.structured_output.clone(),
+                    stop: command.common.stop.clone(),
                     stream: true,
                     include_usage: command.common.stream_options.include_usage,
                 },
@@ -716,6 +717,7 @@ async fn create_chat_completion_with_state(
                     verbosity: command.cloud.verbosity,
                     gbnf: command.local.gbnf.clone(),
                     structured_output: command.local.structured_output.clone(),
+                    stop: command.common.stop.clone(),
                     stream: false,
                     include_usage: false,
                 },
@@ -723,11 +725,13 @@ async fn create_chat_completion_with_state(
             .await?
         };
 
-        let (trimmed_text, stop_matched) =
-            apply_stop_sequences(&generated.text, &command.common.stop);
-        if stop_matched {
-            generated.text = trimmed_text;
-            generated.finish_reason = Some("stop".into());
+        if route_to_cloud {
+            let (trimmed_text, stop_matched) =
+                apply_stop_sequences(&generated.text, &command.common.stop);
+            if stop_matched {
+                generated.text = trimmed_text;
+                generated.finish_reason = Some("stop".into());
+            }
         }
 
         merge_usage(&mut usage, generated.usage.clone());

@@ -163,15 +163,19 @@ impl LlamaModel {
         Ok(tokens)
     }
 
-    /// Convert a token id to its string representation (piece).
+    /// Convert a token id to its raw byte representation (piece).
     ///
     /// # Arguments
     /// * `token`   – the token id.
     /// * `special` – whether to render special tokens as text.
     ///
     /// # Errors
-    /// Returns [`LlamaError::TokenToPieceFailed`] or [`LlamaError::InvalidUtf8`] on failure.
-    pub fn token_to_piece(&self, token: LlamaToken, special: bool) -> Result<String, LlamaError> {
+    /// Returns [`LlamaError::TokenToPieceFailed`] on failure.
+    pub fn token_to_piece_bytes(
+        &self,
+        token: LlamaToken,
+        special: bool,
+    ) -> Result<Vec<u8>, LlamaError> {
         let vocab = self.vocab();
         // First call to get required buffer length.
         let n = unsafe {
@@ -185,7 +189,7 @@ impl LlamaModel {
             n as usize
         };
         if required == 0 {
-            return Ok(String::new());
+            return Ok(Vec::new());
         }
         let mut buf: Vec<u8> = vec![0u8; required];
         let len2 = unsafe {
@@ -202,7 +206,20 @@ impl LlamaModel {
             return Err(LlamaError::TokenToPieceFailed(len2));
         }
         buf.truncate(len2 as usize);
-        String::from_utf8(buf).map_err(|e| LlamaError::from(e.utf8_error()))
+        Ok(buf)
+    }
+
+    /// Convert a token id to its string representation (piece).
+    ///
+    /// # Arguments
+    /// * `token`   鈥?the token id.
+    /// * `special` 鈥?whether to render special tokens as text.
+    ///
+    /// # Errors
+    /// Returns [`LlamaError::TokenToPieceFailed`] or [`LlamaError::InvalidUtf8`] on failure.
+    pub fn token_to_piece(&self, token: LlamaToken, special: bool) -> Result<String, LlamaError> {
+        let bytes = self.token_to_piece_bytes(token, special)?;
+        String::from_utf8(bytes).map_err(|e| LlamaError::from(e.utf8_error()))
     }
 
     /// Detokenize a list of token ids into a string.

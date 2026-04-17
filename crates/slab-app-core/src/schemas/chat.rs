@@ -847,12 +847,6 @@ fn validate_chat_completion_request(
             "streaming with n > 1 is not supported",
         ));
     }
-    if request.stream && request.stop.as_ref().is_some_and(|stop| !stop.is_empty()) {
-        return Err(validation_error(
-            "unsupported_combination",
-            "streaming with stop is not supported for chat completions",
-        ));
-    }
     validate_structured_output(request.response_format.as_ref(), request.json_schema.as_ref())?;
 
     let Some(user_message) = request

@@ -19,6 +19,8 @@ pub struct LlamaContextParams {
     pub flash_attn: bool,
     /// Disable performance metrics.
     pub no_perf: bool,
+    /// Use a unified KV buffer across input sequences.
+    pub kv_unified: bool,
 }
 
 impl Default for LlamaContextParams {
@@ -33,6 +35,9 @@ impl Default for LlamaContextParams {
             offload_kqv: true,
             flash_attn: false,
             no_perf: false,
+            // Our runtime batches multiple seq_ids inside one context and expects
+            // `n_ctx` to behave like the per-sequence window.
+            kv_unified: true,
         }
     }
 }
@@ -87,6 +92,11 @@ impl LlamaContextParams {
         self
     }
 
+    pub fn kv_unified(mut self, v: bool) -> Self {
+        self.kv_unified = v;
+        self
+    }
+
     pub(crate) fn to_c_params(
         &self,
         lib: &slab_llama_sys::LlamaLib,
@@ -102,6 +112,7 @@ impl LlamaContextParams {
         params.n_threads_batch = self.n_threads_batch;
         params.offload_kqv = self.offload_kqv;
         params.no_perf = self.no_perf;
+        params.kv_unified = self.kv_unified;
         // flash_attn is controlled via flash_attn_type field
         if self.flash_attn {
             params.flash_attn_type =

@@ -42,6 +42,19 @@ struct ThinkingStreamState {
     emitted_reasoning_len: usize,
 }
 
+#[derive(Debug, Default)]
+struct ContentStopState {
+    raw_content: String,
+    emitted_len: usize,
+    matched: bool,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+struct StopEmission {
+    text: String,
+    matched: bool,
+}
+
 fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
     let max = raw.len().min(marker.len().saturating_sub(1));
     (1..=max).rev().find(|len| raw.ends_with(&marker[..*len])).unwrap_or(0)
@@ -97,6 +110,68 @@ fn reasoning_content_from_metadata(metadata: &slab_types::inference::JsonOptions
     metadata.get(REASONING_CONTENT_METADATA_KEY).and_then(Value::as_str)
 }
 
+fn trailing_partial_stop_len(raw: &str, stop: &[String]) -> usize {
+    stop.iter()
+        .filter(|value| value.len() > 1)
+        .map(|value| {
+            let max = raw.len().min(value.len().saturating_sub(1));
+            (1..=max)
+                .rev()
+                .find(|len| raw.ends_with(&value[..*len]))
+                .unwrap_or(0)
+        })
+        .max()
+        .unwrap_or(0)
+}
+
+fn stable_stop_boundary(raw: &str, stop: &[String], complete: bool) -> (usize, bool) {
+    if let Some((index, _)) = stop
+        .iter()
+        .filter(|value| !value.is_empty())
+        .filter_map(|value| raw.find(value).map(|index| (index, value)))
+        .min_by_key(|(index, _)| *index)
+    {
+        return (index, true);
+    }
+
+    if complete {
+        return (raw.len(), false);
+    }
+
+    let hold_len = trailing_partial_stop_len(raw, stop);
+    (raw.len().saturating_sub(hold_len), false)
+}
+
+fn trailing_trim_len(raw: &str, trailing: &[String]) -> usize {
+    trailing
+        .iter()
+        .filter(|value| !value.is_empty())
+        .filter(|value| raw.ends_with(value.as_str()))
+        .map(|value| value.len())
+        .max()
+        .unwrap_or(0)
+}
+
+fn trim_trailing_stop_markers(raw: &str, trailing: &[String]) -> String {
+    let trim_len = trailing_trim_len(raw, trailing);
+    if trim_len == 0 {
+        raw.to_owned()
+    } else {
+        raw[..raw.len().saturating_sub(trim_len)].to_owned()
+    }
+}
+
+fn merge_stop_sequences(primary: &[String], extra: &[String]) -> Vec<String> {
+    let mut merged = Vec::new();
+    for value in primary.iter().chain(extra.iter()) {
+        if value.is_empty() || merged.iter().any(|existing| existing == value) {
+            continue;
+        }
+        merged.push(value.clone());
+    }
+    merged
+}
+
 impl ThinkingStreamState {
     fn ingest(&mut self, delta: &str) -> Vec<ThinkingDelta> {
         self.raw_output.push_str(delta);
@@ -126,6 +201,45 @@ impl ThinkingStreamState {
         }
 
         deltas
+    }
+}
+
+impl ContentStopState {
+    fn ingest(&mut self, delta: &str, stop: &[String], trailing: &[String]) -> StopEmission {
+        if self.matched || delta.is_empty() {
+            return StopEmission::default();
+        }
+
+        self.raw_content.push_str(delta);
+        self.emit(stop, trailing, false)
+    }
+
+    fn finish(&mut self, stop: &[String], trailing: &[String]) -> StopEmission {
+        self.emit(stop, trailing, true)
+    }
+
+    fn emit(&mut self, stop: &[String], trailing: &[String], complete: bool) -> StopEmission {
+        if self.matched {
+            return StopEmission::default();
+        }
+
+        let (mut visible_len, matched) = stable_stop_boundary(&self.raw_content, stop, complete);
+        if complete && !matched {
+            let trim_len = trailing_trim_len(&self.raw_content[..visible_len], trailing);
+            visible_len = visible_len.saturating_sub(trim_len);
+        }
+
+        let text = if visible_len > self.emitted_len {
+            self.raw_content[self.emitted_len..visible_len].to_owned()
+        } else {
+            String::new()
+        };
+        self.emitted_len = visible_len;
+        if matched {
+            self.matched = true;
+        }
+
+        StopEmission { text, matched }
     }
 }
 
@@ -162,6 +276,7 @@ pub(super) struct LocalChatRequestConfig {
     pub(super) verbosity: Option<ChatVerbosity>,
     pub(super) gbnf: Option<String>,
     pub(super) structured_output: Option<StructuredOutput>,
+    pub(super) stop: Vec<String>,
     pub(super) stream: bool,
     pub(super) include_usage: bool,
 }
@@ -287,7 +402,14 @@ pub(super) async fn create_chat_completion(
     let prompt = super::template::build_prompt(
         &request_messages,
         prompt_profile.chat_template_source.as_deref(),
+        config.reasoning_effort,
     )?;
+    let effective_stop = merge_stop_sequences(
+        &config.stop,
+        &super::template::default_stop_sequences(prompt_profile.chat_template_source.as_deref()),
+    );
+    let trailing_stop_markers =
+        super::template::trailing_stop_markers(prompt_profile.chat_template_source.as_deref());
     let gbnf = super::gbnf::resolve_effective_gbnf(
         config.gbnf.as_deref(),
         config.structured_output.as_ref(),
@@ -350,6 +472,10 @@ pub(super) async fn create_chat_completion(
         let token_stream_terminal_metadata = Arc::clone(&terminal_metadata);
         let thinking_state = Arc::new(Mutex::new(ThinkingStreamState::default()));
         let token_stream_thinking_state = Arc::clone(&thinking_state);
+        let content_stop_state = Arc::new(Mutex::new(ContentStopState::default()));
+        let token_stream_content_stop_state = Arc::clone(&content_stop_state);
+        let effective_stop_for_tokens = effective_stop.clone();
+        let trailing_stop_markers_for_tokens = trailing_stop_markers.clone();
         let token_stream = backend_stream
             .then(move |chunk| {
                 let completion_id = completion_id_for_tokens.clone();
@@ -358,6 +484,9 @@ pub(super) async fn create_chat_completion(
                 let completion_tokens = Arc::clone(&token_stream_completion_tokens);
                 let terminal_metadata = Arc::clone(&token_stream_terminal_metadata);
                 let thinking_state = Arc::clone(&token_stream_thinking_state);
+                let content_stop_state = Arc::clone(&token_stream_content_stop_state);
+                let effective_stop = effective_stop_for_tokens.clone();
+                let trailing_stop_markers = trailing_stop_markers_for_tokens.clone();
                 async move {
                     match chunk {
                         Ok(message) if !message.error.is_empty() => {
@@ -376,7 +505,7 @@ pub(super) async fn create_chat_completion(
                                 if decoded.usage.is_some() {
                                     terminal.usage = decoded.usage;
                                 }
-                                thinking_state
+                                let mut chunks: Vec<ChatStreamChunk> = thinking_state
                                     .lock()
                                     .expect("local thinking state lock poisoned")
                                     .finish()
@@ -393,16 +522,41 @@ pub(super) async fn create_chat_completion(
                                             ))
                                         }
                                         ThinkingDelta::Content(token) if !token.is_empty() => {
-                                            Some(ChatStreamChunk::Data(super::build_chunk(
-                                                &completion_id,
-                                                created_ts,
-                                                &model_name,
-                                                &token,
-                                            )))
+                                            let emission = content_stop_state
+                                                .lock()
+                                                .expect("local content stop state lock poisoned")
+                                                .ingest(&token, &effective_stop, &trailing_stop_markers);
+                                            if emission.matched {
+                                                terminal.finish_reason = Some("stop".to_owned());
+                                            }
+                                            (!emission.text.is_empty()).then(|| {
+                                                ChatStreamChunk::Data(super::build_chunk(
+                                                    &completion_id,
+                                                    created_ts,
+                                                    &model_name,
+                                                    &emission.text,
+                                                ))
+                                            })
                                         }
                                         _ => None,
                                     })
-                                    .collect()
+                                    .collect();
+                                let emission = content_stop_state
+                                    .lock()
+                                    .expect("local content stop state lock poisoned")
+                                    .finish(&effective_stop, &trailing_stop_markers);
+                                if emission.matched {
+                                    terminal.finish_reason = Some("stop".to_owned());
+                                }
+                                if !emission.text.is_empty() {
+                                    chunks.push(ChatStreamChunk::Data(super::build_chunk(
+                                        &completion_id,
+                                        created_ts,
+                                        &model_name,
+                                        &emission.text,
+                                    )));
+                                }
+                                chunks
                             } else if let Some(reasoning) =
                                 reasoning_content_from_metadata(&decoded.metadata)
                             {
@@ -418,12 +572,24 @@ pub(super) async fn create_chat_completion(
                                     ));
                                 }
                                 if !decoded.delta.is_empty() {
-                                    chunks.push(ChatStreamChunk::Data(super::build_chunk(
-                                        &completion_id,
-                                        created_ts,
-                                        &model_name,
-                                        &decoded.delta,
-                                    )));
+                                    let emission = content_stop_state
+                                        .lock()
+                                        .expect("local content stop state lock poisoned")
+                                        .ingest(&decoded.delta, &effective_stop, &trailing_stop_markers);
+                                    if emission.matched {
+                                        terminal_metadata
+                                            .lock()
+                                            .expect("local chat terminal metadata lock poisoned")
+                                            .finish_reason = Some("stop".to_owned());
+                                    }
+                                    if !emission.text.is_empty() {
+                                        chunks.push(ChatStreamChunk::Data(super::build_chunk(
+                                            &completion_id,
+                                            created_ts,
+                                            &model_name,
+                                            &emission.text,
+                                        )));
+                                    }
                                 }
                                 chunks
                             } else if decoded.delta.is_empty() {
@@ -447,12 +613,24 @@ pub(super) async fn create_chat_completion(
                                             ))
                                         }
                                         ThinkingDelta::Content(token) if !token.is_empty() => {
-                                            Some(ChatStreamChunk::Data(super::build_chunk(
-                                                &completion_id,
-                                                created_ts,
-                                                &model_name,
-                                                &token,
-                                            )))
+                                            let emission = content_stop_state
+                                                .lock()
+                                                .expect("local content stop state lock poisoned")
+                                                .ingest(&token, &effective_stop, &trailing_stop_markers);
+                                            if emission.matched {
+                                                terminal_metadata
+                                                    .lock()
+                                                    .expect("local chat terminal metadata lock poisoned")
+                                                    .finish_reason = Some("stop".to_owned());
+                                            }
+                                            (!emission.text.is_empty()).then(|| {
+                                                ChatStreamChunk::Data(super::build_chunk(
+                                                    &completion_id,
+                                                    created_ts,
+                                                    &model_name,
+                                                    &emission.text,
+                                                ))
+                                            })
                                         }
                                         _ => None,
                                     })
@@ -559,6 +737,17 @@ pub(super) async fn create_chat_completion(
         super::finish_reason_from_token_budget(usage.completion_tokens, config.max_tokens)
     });
     attach_reasoning_metadata(&mut response);
+    let (trimmed_text, stop_matched) = super::apply_stop_sequences(&response.text, &effective_stop);
+    if stop_matched {
+        response.text = trimmed_text;
+        response.finish_reason = Some("stop".to_owned());
+    } else {
+        let trimmed_text = trim_trailing_stop_markers(&response.text, &trailing_stop_markers);
+        if trimmed_text.len() != response.text.len() {
+            response.text = trimmed_text;
+            response.finish_reason.get_or_insert_with(|| "stop".to_owned());
+        }
+    }
 
     Ok(GeneratedChatOutput::Text(response))
 }
@@ -633,6 +822,7 @@ mod tests {
         ParsedThinkingOutput, ThinkingDelta, ThinkingStreamState, apply_local_reasoning_controls,
         apply_local_reasoning_controls_to_prompt, attach_reasoning_metadata,
         local_reasoning_guidance, parse_thinking_output, reasoning_content_from_metadata,
+        trim_trailing_stop_markers,
     };
     use crate::domain::models::{
         ChatReasoningEffort, ChatVerbosity, ConversationMessage as DomainConversationMessage,
@@ -763,5 +953,58 @@ mod tests {
 
         assert!(prompt.starts_with("Local response policy:"));
         assert!(prompt.contains("Prompt:\nSolve 2+2"));
+    }
+
+    #[test]
+    fn content_stop_state_trims_chatml_boundaries() {
+        let stop = vec!["<|im_end|>".to_owned(), "<|endoftext|><|im_start|>".to_owned()];
+        let trailing = vec!["<|endoftext|>".to_owned()];
+        let mut state = super::ContentStopState::default();
+
+        let first = state.ingest("hello<|endoftext|>", &stop, &trailing);
+        let last = state.finish(&stop, &trailing);
+
+        assert_eq!(
+            first,
+            super::StopEmission {
+                text: "hello".to_owned(),
+                matched: false,
+            }
+        );
+        assert_eq!(last, super::StopEmission::default());
+    }
+
+    #[test]
+    fn content_stop_state_stops_before_im_end_marker() {
+        let stop = vec!["<|im_end|>".to_owned()];
+        let trailing = Vec::new();
+        let mut state = super::ContentStopState::default();
+
+        let first = state.ingest("hello<|im", &stop, &trailing);
+        let second = state.ingest("_end|>ignored", &stop, &trailing);
+
+        assert_eq!(
+            first,
+            super::StopEmission {
+                text: "hello".to_owned(),
+                matched: false,
+            }
+        );
+        assert_eq!(
+            second,
+            super::StopEmission {
+                text: String::new(),
+                matched: true,
+            }
+        );
+        assert!(state.finish(&stop, &trailing).text.is_empty());
+    }
+
+    #[test]
+    fn trim_trailing_stop_markers_removes_final_endoftext() {
+        let trimmed =
+            trim_trailing_stop_markers("answer<|endoftext|>", &["<|endoftext|>".to_owned()]);
+
+        assert_eq!(trimmed, "answer");
     }
 }

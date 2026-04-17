@@ -6,6 +6,7 @@ import { useTranslation } from "@slab/i18n"
 import { ChatThinkingPanel } from "@/pages/chat/components/chat-thinking-panel"
 import {
   getChatMessageTextContent,
+  stripTrailingAssistantTurnArtifacts,
   type ChatMessageRecord,
 } from "@/pages/chat/chat-context"
 import { cn } from "@/lib/utils"
@@ -69,11 +70,19 @@ export function ChatMessageBubble({
   const { t } = useTranslation()
   const role = item.message.role
   const isAssistant = role === "assistant"
-  const rawContent = getChatMessageTextContent(item.message)
-  const { thinking, answer, thinkingLoading } = parseThinkingContent(rawContent)
-  const hasNextChunk = item.status === "updating"
   const isBusy = item.status === "loading" || item.status === "updating"
+  const hasNextChunk = item.status === "updating"
   const isAborted = item.status === "abort"
+  const rawContent = stripTrailingAssistantTurnArtifacts(getChatMessageTextContent(item.message))
+  const parsed = parseThinkingContent(rawContent)
+  const liveThinking = typeof item.message.reasoningContent === "string"
+    ? item.message.reasoningContent.trim()
+    : ""
+  const thinking = liveThinking || parsed.thinking
+  const answer = liveThinking
+    ? (rawContent.includes("<think") ? parsed.answer : rawContent)
+    : parsed.answer
+  const thinkingLoading = liveThinking ? isBusy : parsed.thinkingLoading
 
   const copyMessage = async () => {
     await navigator.clipboard.writeText(rawContent)
