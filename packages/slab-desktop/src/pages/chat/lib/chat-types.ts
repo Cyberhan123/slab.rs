@@ -1,0 +1,70 @@
+import type { MessageInfo, XModelMessage, XModelParams } from '@ant-design/x-sdk'
+
+import type { components } from '@/lib/api/v1.d.ts'
+
+export type ChatApiError = components['schemas']['OpenAiError']
+export type ChatApiErrorResponse = components['schemas']['OpenAiErrorResponse']
+export type SessionMessageResponse = components['schemas']['MessageResponse']
+
+export type SessionMessagesApiClient = {
+  GET: (
+    path: '/v1/sessions/{id}/messages',
+    init: {
+      params: {
+        path: {
+          id: string
+        }
+      }
+    }
+  ) => Promise<{
+    data?: SessionMessageResponse[]
+    error?: { message?: string }
+    response: Response
+  }>
+}
+
+export type ChatRequestErrorType = ChatApiError['type']
+
+export type ChatUiMessage = XModelMessage & {
+  errorCode?: ChatApiError['code']
+  errorParam?: ChatApiError['param']
+  errorStatus?: number
+  errorType?: ChatRequestErrorType
+  reasoningContent?: string
+}
+
+export type ChatMessageRecord = MessageInfo<ChatUiMessage>
+
+export type ChatRequestParams = XModelParams & {
+  continue_generation?: boolean
+  temperature?: number | null
+  thinking?: {
+    type: 'enabled' | 'disabled'
+  }
+  top_p?: number | null
+  userAction?: string
+}
+
+export type ChatRuntimePresets = {
+  temperature?: number | null
+  top_p?: number | null
+}
+
+export type ChatRequestErrorInfo = {
+  error: ChatApiError
+  message: string
+  name: string
+  status: number
+  statusText: string
+  success: false
+}
+
+export const DEFAULT_CONVERSATION_KEY = '__pending_session__'
+
+export const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null
+
+export const isEphemeralConversationKey = (value?: string): boolean => {
+  const key = value?.trim()
+  return !key || key === DEFAULT_CONVERSATION_KEY
+}

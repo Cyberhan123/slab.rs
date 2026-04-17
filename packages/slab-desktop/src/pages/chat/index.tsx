@@ -40,7 +40,6 @@ import { HEADER_SELECT_KEYS } from "@/layouts/header-controls"
 import { useChatUiStore } from "@/store/useChatUiStore"
 
 import {
-  ChatContext,
   getChatMessageTextContent,
   type ChatMessageRecord,
 } from "./chat-context"
@@ -708,31 +707,9 @@ function Chat() {
 
   return (
     <XProvider locale={locale}>
-      <ChatContext.Provider value={{ onReload }}>
-        <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--shell-card)]">
-          <div className="pointer-events-none absolute right-4 top-4 z-20 hidden lg:block">
-            <div className="pointer-events-auto">
-              <ChatSessionSummaryCard
-                items={sessionSummaryItems}
-                onManageSessions={() => setIsSessionSheetOpen(true)}
-                onNewSession={handleCreateConversation}
-                disableNewSession={isSessionBusy || isSessionBootstrapping}
-              />
-            </div>
-          </div>
-
-          <div className="mx-auto w-full max-w-[768px] px-6 pb-6 pt-12 md:px-8 lg:px-0">
-            <div className="space-y-2">
-              <h1 className="text-[clamp(2.75rem,6vw,4rem)] font-semibold tracking-[-0.055em] text-foreground">
-                {greeting}
-              </h1>
-              <p className="text-lg leading-7 text-muted-foreground/80">
-                {t("pages.chat.hero.description")}
-              </p>
-            </div>
-          </div>
-
-          <div className="mx-auto block w-full max-w-[768px] px-6 pb-6 md:px-8 lg:hidden lg:px-0">
+      <div className="relative flex min-h-0 flex-1 flex-col bg-[var(--shell-card)]">
+        <div className="pointer-events-none absolute right-4 top-4 z-20 hidden lg:block">
+          <div className="pointer-events-auto">
             <ChatSessionSummaryCard
               items={sessionSummaryItems}
               onManageSessions={() => setIsSessionSheetOpen(true)}
@@ -740,176 +717,196 @@ function Chat() {
               disableNewSession={isSessionBusy || isSessionBootstrapping}
             />
           </div>
-
-          <ScrollArea className="min-h-0 flex-1">
-            <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-24 pt-2 md:px-8 md:pb-28 lg:px-0">
-              {isSessionBootstrapping || (isHistoryLoading && safeMessages.length === 0) ? (
-                <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
-                  <div className="max-w-md space-y-3">
-                    <p className="text-base font-medium text-foreground">
-                      {t("pages.chat.loading.title")}
-                    </p>
-                    <p className="text-sm leading-6 text-muted-foreground">
-                      {t("pages.chat.loading.description")}
-                    </p>
-                  </div>
-                </div>
-              ) : safeMessages.length === 0 ? (
-                <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
-                  <div className="max-w-md space-y-3">
-                    <p className="text-base font-medium text-foreground">
-                      {t("pages.chat.emptyState.title")}
-                    </p>
-                    <p className="text-sm leading-6 text-muted-foreground">
-                      {t("pages.chat.emptyState.description")}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                safeMessages.map((item) => (
-                  <ChatMessageBubble
-                    key={item.id}
-                    item={item}
-                    markdownClassName={markdownThemeClassName}
-                    onContinue={item.id === latestContinuableMessageId ? onContinue : undefined}
-                    onRetry={(id) =>
-                      onReload(id, {
-                        userAction: "retry",
-                      })
-                    }
-                  />
-                ))
-              )}
-              <div ref={bottomRef} />
-            </div>
-          </ScrollArea>
-
-          <div className="relative shrink-0 bg-[var(--shell-card)]">
-            <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 lg:px-0">
-              <ChatComposer
-                value={draft}
-                onValueChange={setDraft}
-                onSubmit={submitChatMessage}
-                onCancel={abort}
-                isRequesting={isRequesting || isPreparingModel}
-                disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || !curConversation}
-                deepThink={deepThink}
-                reasoningSupported={selectedModel?.capabilities.reasoning_controls ?? false}
-                setDeepThink={setDeepThink}
-                onGenerateImage={handleGenerateImage}
-                statusLabel={selectedModelStatusLabel}
-              />
-            </div>
-          </div>
-
-          <ChatSessionSheet
-            open={isSessionSheetOpen}
-            onOpenChange={setIsSessionSheetOpen}
-            conversations={sortedConversations}
-            currentConversation={curConversation}
-            activeConversation={activeConversation}
-            busy={isSessionBusy || isSessionBootstrapping}
-            onSelect={(key) => {
-              if (isSessionBusy || isSessionBootstrapping) {
-                return
-              }
-              setCurConversation(key)
-              setIsSessionSheetOpen(false)
-            }}
-            onDelete={handleDeleteConversation}
-          />
-
-          <Dialog
-            open={Boolean(pendingModelSwitchId)}
-            onOpenChange={(open) => {
-              if (!open) {
-                closePendingModelSwitch()
-              }
-            }}
-          >
-            <DialogContent className="max-w-xl" showCloseButton={!isCreatingSession}>
-              <DialogHeader className="space-y-3 text-left">
-                <DialogTitle>{t("pages.chat.dialog.title")}</DialogTitle>
-                <DialogDescription>
-                  {t("pages.chat.dialog.description")}
-                </DialogDescription>
-              </DialogHeader>
-
-              <div className="space-y-2 text-sm leading-6 text-muted-foreground">
-                <p>
-                  <Trans
-                    i18nKey="pages.chat.dialog.switchingSummary"
-                    values={{
-                      from: selectedModel?.label ?? t("pages.chat.modelPicker.placeholder"),
-                      to:
-                        pendingModelSwitch?.label ??
-                        pendingModelSwitchId ??
-                        t("pages.chat.modelPicker.placeholder"),
-                    }}
-                    components={{ strong: <strong /> }}
-                  />
-                </p>
-                <p>
-                  <Trans
-                    i18nKey="pages.chat.dialog.sessionSummary"
-                    count={safeMessages.length}
-                    values={{
-                      label: currentConversationLabel,
-                      count: safeMessages.length,
-                    }}
-                    components={{ strong: <strong /> }}
-                  />
-                </p>
-              </div>
-
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
-                  <p className="text-sm font-medium text-foreground">
-                    {t("pages.chat.dialog.keepTitle")}
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    {t("pages.chat.dialog.keepDescription")}
-                  </p>
-                </div>
-                <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
-                  <p className="text-sm font-medium text-foreground">
-                    {t("pages.chat.dialog.createTitle")}
-                  </p>
-                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
-                    {t("pages.chat.dialog.createDescription")}
-                  </p>
-                </div>
-              </div>
-
-              <DialogFooter className="gap-2">
-                <Button
-                  variant="outline"
-                  onClick={closePendingModelSwitch}
-                  disabled={isCreatingSession}
-                >
-                  {t("pages.chat.dialog.cancel")}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={handleKeepSessionOnModelSwitch}
-                  disabled={isCreatingSession}
-                >
-                  {t("pages.chat.dialog.keepTitle")}
-                </Button>
-                <Button
-                  onClick={() => void handleCreateSessionOnModelSwitch()}
-                  disabled={isCreatingSession}
-                >
-                  {isCreatingSession ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : null}
-                  {t("pages.chat.dialog.createTitle")}
-                </Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
         </div>
-      </ChatContext.Provider>
+
+        <div className="mx-auto w-full max-w-[768px] px-6 pb-6 pt-12 md:px-8 lg:px-0">
+          <div className="space-y-2">
+            <h1 className="text-[clamp(2.75rem,6vw,4rem)] font-semibold tracking-[-0.055em] text-foreground">
+              {greeting}
+            </h1>
+            <p className="text-lg leading-7 text-muted-foreground/80">
+              {t("pages.chat.hero.description")}
+            </p>
+          </div>
+        </div>
+
+        <div className="mx-auto block w-full max-w-[768px] px-6 pb-6 md:px-8 lg:hidden lg:px-0">
+          <ChatSessionSummaryCard
+            items={sessionSummaryItems}
+            onManageSessions={() => setIsSessionSheetOpen(true)}
+            onNewSession={handleCreateConversation}
+            disableNewSession={isSessionBusy || isSessionBootstrapping}
+          />
+        </div>
+
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="mx-auto flex w-full max-w-[682px] flex-col gap-8 px-6 pb-24 pt-2 md:px-8 md:pb-28 lg:px-0">
+            {isSessionBootstrapping || (isHistoryLoading && safeMessages.length === 0) ? (
+              <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
+                <div className="max-w-md space-y-3">
+                  <p className="text-base font-medium text-foreground">
+                    {t("pages.chat.loading.title")}
+                  </p>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {t("pages.chat.loading.description")}
+                  </p>
+                </div>
+              </div>
+            ) : safeMessages.length === 0 ? (
+              <div className="flex min-h-[260px] items-center justify-center rounded-[32px] border border-dashed border-border/60 bg-[linear-gradient(180deg,color-mix(in_oklab,var(--app-canvas)_90%,transparent)_0%,color-mix(in_oklab,var(--app-canvas)_50%,transparent)_100%)] px-8 text-center">
+                <div className="max-w-md space-y-3">
+                  <p className="text-base font-medium text-foreground">
+                    {t("pages.chat.emptyState.title")}
+                  </p>
+                  <p className="text-sm leading-6 text-muted-foreground">
+                    {t("pages.chat.emptyState.description")}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              safeMessages.map((item) => (
+                <ChatMessageBubble
+                  key={item.id}
+                  item={item}
+                  markdownClassName={markdownThemeClassName}
+                  onContinue={item.id === latestContinuableMessageId ? onContinue : undefined}
+                  onRetry={(id) =>
+                    onReload(id, {
+                      userAction: "retry",
+                    })
+                  }
+                />
+              ))
+            )}
+            <div ref={bottomRef} />
+          </div>
+        </ScrollArea>
+
+        <div className="relative shrink-0 bg-[var(--shell-card)]">
+          <div className="relative mx-auto w-full max-w-[768px] px-6 pb-6 pt-4 md:px-8 lg:px-0">
+            <ChatComposer
+              value={draft}
+              onValueChange={setDraft}
+              onSubmit={submitChatMessage}
+              onCancel={abort}
+              isRequesting={isRequesting || isPreparingModel}
+              disabled={isSessionBootstrapping || isHistoryLoading || isSessionMutating || !curConversation}
+              deepThink={deepThink}
+              reasoningSupported={selectedModel?.capabilities.reasoning_controls ?? false}
+              setDeepThink={setDeepThink}
+              onGenerateImage={handleGenerateImage}
+              statusLabel={selectedModelStatusLabel}
+            />
+          </div>
+        </div>
+
+        <ChatSessionSheet
+          open={isSessionSheetOpen}
+          onOpenChange={setIsSessionSheetOpen}
+          conversations={sortedConversations}
+          currentConversation={curConversation}
+          activeConversation={activeConversation}
+          busy={isSessionBusy || isSessionBootstrapping}
+          onSelect={(key) => {
+            if (isSessionBusy || isSessionBootstrapping) {
+              return
+            }
+            setCurConversation(key)
+            setIsSessionSheetOpen(false)
+          }}
+          onDelete={handleDeleteConversation}
+        />
+
+        <Dialog
+          open={Boolean(pendingModelSwitchId)}
+          onOpenChange={(open) => {
+            if (!open) {
+              closePendingModelSwitch()
+            }
+          }}
+        >
+          <DialogContent className="max-w-xl" showCloseButton={!isCreatingSession}>
+            <DialogHeader className="space-y-3 text-left">
+              <DialogTitle>{t("pages.chat.dialog.title")}</DialogTitle>
+              <DialogDescription>
+                {t("pages.chat.dialog.description")}
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-2 text-sm leading-6 text-muted-foreground">
+              <p>
+                <Trans
+                  i18nKey="pages.chat.dialog.switchingSummary"
+                  values={{
+                    from: selectedModel?.label ?? t("pages.chat.modelPicker.placeholder"),
+                    to:
+                      pendingModelSwitch?.label ??
+                      pendingModelSwitchId ??
+                      t("pages.chat.modelPicker.placeholder"),
+                  }}
+                  components={{ strong: <strong /> }}
+                />
+              </p>
+              <p>
+                <Trans
+                  i18nKey="pages.chat.dialog.sessionSummary"
+                  count={safeMessages.length}
+                  values={{
+                    label: currentConversationLabel,
+                    count: safeMessages.length,
+                  }}
+                  components={{ strong: <strong /> }}
+                />
+              </p>
+            </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
+                <p className="text-sm font-medium text-foreground">
+                  {t("pages.chat.dialog.keepTitle")}
+                </p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  {t("pages.chat.dialog.keepDescription")}
+                </p>
+              </div>
+              <div className="rounded-2xl border border-border/70 bg-[var(--surface-1)] px-4 py-3">
+                <p className="text-sm font-medium text-foreground">
+                  {t("pages.chat.dialog.createTitle")}
+                </p>
+                <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                  {t("pages.chat.dialog.createDescription")}
+                </p>
+              </div>
+            </div>
+
+            <DialogFooter className="gap-2">
+              <Button
+                variant="outline"
+                onClick={closePendingModelSwitch}
+                disabled={isCreatingSession}
+              >
+                {t("pages.chat.dialog.cancel")}
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={handleKeepSessionOnModelSwitch}
+                disabled={isCreatingSession}
+              >
+                {t("pages.chat.dialog.keepTitle")}
+              </Button>
+              <Button
+                onClick={() => void handleCreateSessionOnModelSwitch()}
+                disabled={isCreatingSession}
+              >
+                {isCreatingSession ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : null}
+                {t("pages.chat.dialog.createTitle")}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
+      </div>
     </XProvider>
   )
 }
