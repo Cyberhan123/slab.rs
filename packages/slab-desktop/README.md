@@ -26,6 +26,14 @@ React frontend application for the Slab desktop shell.
 
 Bun-managed frontend package.
 
+## Testing
+
+- `src/**/__tests__/*.test.ts[x]`: pure unit tests for hooks, stores, and logic helpers.
+- `tests/browser/visual/*.browser.test.tsx`: browser-mode page tests that use `page` from `vitest/browser` and `toMatchScreenshot` for visual regression.
+- Run unit tests with `bun run test:run`.
+- Run page/browser regression tests with `bun run test:browser`.
+- Refresh desktop screenshot baselines with `bun run test:browser:update`.
+
 ## License
 
 AGPL-3.0-only. See the root [LICENSE](../../LICENSE).
