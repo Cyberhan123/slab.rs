@@ -165,7 +165,7 @@ export const errorMiddleware: Middleware = {
 
       // If JSON parsing failed, throw generic error
       throw new Error(
-        `${response.url}: ${response.status} ${response.statusText}`
+        `${response.url}: ${response.status} ${response.statusText}`, { cause: error }
       );
     }
   },

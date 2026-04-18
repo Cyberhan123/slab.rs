@@ -154,14 +154,12 @@ export function ImageWorkbench({
   zoomedImage,
 }: ImageWorkbenchProps) {
   const { t } = useTranslation();
-  const sampleMethodOptions = SAMPLE_METHODS.map((method) => ({
-    ...method,
-    label: t(`pages.image.options.sampleMethods.${method.value}`),
-  }));
-  const schedulerOptions = SCHEDULERS.map((schedulerItem) => ({
-    ...schedulerItem,
-    label: t(`pages.image.options.schedulers.${schedulerItem.value}`),
-  }));
+  const sampleMethodOptions = SAMPLE_METHODS.map((method) =>
+    Object.assign({}, method, { label: t(`pages.image.options.sampleMethods.${method.value}`) }),
+  );
+  const schedulerOptions = SCHEDULERS.map((schedulerItem) =>
+    Object.assign({}, schedulerItem, { label: t(`pages.image.options.schedulers.${schedulerItem.value}`) }),
+  );
 
   return (
     <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
@@ -647,7 +645,7 @@ export function ImageWorkbench({
                     <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
                       {images.map((image, index) => (
                         <figure
-                          key={`${image.src}-${index}`}
+                          key={image.src}
                           className="group overflow-hidden rounded-[24px] border border-border/60 bg-[var(--surface-soft)] shadow-[0_18px_32px_-28px_color-mix(in_oklab,var(--foreground)_28%,transparent)]"
                         >
                           <div className="relative overflow-hidden bg-[var(--shell-card)]">

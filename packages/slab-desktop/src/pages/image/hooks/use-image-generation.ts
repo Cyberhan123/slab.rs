@@ -25,8 +25,8 @@ type TaskResultPayload = components['schemas']['TaskResultPayload'];
 async function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
+    reader.addEventListener("load", () => resolve(reader.result as string));
+    reader.addEventListener("error", reject);
     reader.readAsDataURL(file);
   });
 }
@@ -305,6 +305,7 @@ export function useImageGeneration() {
     seed,
     steps,
     strength,
+    t,
     widthStr,
   ]);
 

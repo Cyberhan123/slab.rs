@@ -190,6 +190,7 @@ export function useHubModelCatalog() {
     const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
+      // eslint-disable-next-line no-await-in-loop
       const task = await getModelDownloadTask(taskId);
       setModelDownloadTracking(modelId, {
         taskId,
@@ -210,6 +211,7 @@ export function useHubModelCatalog() {
         );
       }
 
+      // eslint-disable-next-line no-await-in-loop
       await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
     }
 

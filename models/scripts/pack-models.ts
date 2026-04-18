@@ -37,8 +37,11 @@ async function main() {
 
   for (const packDir of packDirs) {
     const manifestPath = path.join(packDir, "manifest.json");
+    // eslint-disable-next-line no-await-in-loop
     const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as { id?: unknown };
+    // eslint-disable-next-line no-await-in-loop
     const files = await collectPackFiles(packDir);
+    // eslint-disable-next-line no-await-in-loop
     const zipEntries: ZipEntry[] = await Promise.all(
       files.map(async (filePath) => ({
         name: normalizeArchivePath(path.relative(packDir, filePath)),
@@ -50,6 +53,7 @@ async function main() {
     const outputName = allocatePackName(manifest.id, path.relative(modelsRoot, packDir), usedNames);
     const outputPath = path.join(outputDir, `${outputName}.slab`);
 
+    // eslint-disable-next-line no-await-in-loop
     await writeFile(outputPath, createZipArchive(zipEntries));
 
     results.push({
@@ -73,6 +77,7 @@ async function resolveTargetDirs(targets: string[]) {
 
   for (const target of targets) {
     const candidate = path.resolve(process.cwd(), target);
+    // eslint-disable-next-line no-await-in-loop
     const targetStat = await stat(candidate).catch(() => null);
     if (!targetStat) {
       throw new Error(`Target does not exist: ${target}`);
@@ -80,6 +85,7 @@ async function resolveTargetDirs(targets: string[]) {
 
     const packDir = targetStat.isDirectory() ? candidate : path.dirname(candidate);
     const manifestPath = path.join(packDir, "manifest.json");
+    // eslint-disable-next-line no-await-in-loop
     const manifestStat = await stat(manifestPath).catch(() => null);
     if (!manifestStat?.isFile()) {
       throw new Error(`Target is not a model pack directory: ${target}`);
@@ -126,6 +132,7 @@ async function walkDirectories(
       continue;
     }
 
+    // eslint-disable-next-line no-await-in-loop
     await walkDirectories(path.join(currentDir, entry.name), visit);
   }
 }
@@ -141,6 +148,7 @@ async function walkPackFiles(currentDir: string, files: string[]) {
   for (const entry of entries) {
     const absolutePath = path.join(currentDir, entry.name);
     if (entry.isDirectory()) {
+      // eslint-disable-next-line no-await-in-loop
       await walkPackFiles(absolutePath, files);
       continue;
     }
@@ -215,7 +223,7 @@ function sanitizePackName(value: string) {
 }
 
 function uniqueSortedPaths(paths: string[]) {
-  return [...new Set(paths)].sort((left, right) => left.localeCompare(right));
+  return [...new Set(paths)].toSorted((left, right) => left.localeCompare(right));
 }
 
 function createZipArchive(entries: ZipEntry[]) {

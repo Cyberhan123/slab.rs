@@ -134,14 +134,12 @@ export function VideoWorkbench({
   widthValue,
 }: VideoWorkbenchProps) {
   const { t } = useTranslation();
-  const sampleMethodOptions = SAMPLE_METHODS.map((method) => ({
-    ...method,
-    label: t(`pages.video.options.sampleMethods.${method.value}`),
-  }));
-  const schedulerOptions = SCHEDULERS.map((schedulerItem) => ({
-    ...schedulerItem,
-    label: t(`pages.video.options.schedulers.${schedulerItem.value}`),
-  }));
+  const sampleMethodOptions = SAMPLE_METHODS.map((method) =>
+    Object.assign({}, method, { label: t(`pages.video.options.sampleMethods.${method.value}`) }),
+  );
+  const schedulerOptions = SCHEDULERS.map((schedulerItem) =>
+    Object.assign({}, schedulerItem, { label: t(`pages.video.options.schedulers.${schedulerItem.value}`) }),
+  );
 
   return (
     <div className="h-full w-full overflow-y-auto bg-[var(--shell-card)] lg:overflow-hidden">
@@ -482,6 +480,7 @@ export function VideoWorkbench({
               {videoPath ? (
                 <div className="relative z-10 w-full max-w-[640px] space-y-4">
                   <div className="overflow-hidden rounded-[28px] border border-[var(--shell-card)]/50 bg-[var(--media-canvas)]/88 shadow-[0_32px_80px_-42px_color-mix(in_oklab,var(--foreground)_60%,transparent)]">
+                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                     <video
                       src={`file://${videoPath}`}
                       controls

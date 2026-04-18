@@ -33,6 +33,18 @@ import useTranscribe, { type TranscribeOptions, type TranscribeVadSettings } fro
 
 const BUNDLED_VAD_MODEL_ID = '__bundled_vad__';
 
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const extractTaskId = (payload: unknown): string | null => {
+  if (typeof payload !== 'object' || payload === null) return null;
+  const tid =
+    (payload as { operation_id?: unknown }).operation_id ??
+    (payload as { task_id?: unknown }).task_id;
+  if (typeof tid !== 'string') return null;
+  const trimmed = tid.trim();
+  return trimmed.length > 0 ? trimmed : null;
+};
+
 type BundledVadArtifact = {
   id: string;
   label: string;
@@ -323,22 +335,11 @@ export function useAudio() {
     ],
   );
 
-  const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
-
-  const extractTaskId = (payload: unknown): string | null => {
-    if (typeof payload !== 'object' || payload === null) return null;
-    const tid =
-      (payload as { operation_id?: unknown }).operation_id ??
-      (payload as { task_id?: unknown }).task_id;
-    if (typeof tid !== 'string') return null;
-    const trimmed = tid.trim();
-    return trimmed.length > 0 ? trimmed : null;
-  };
-
   const waitForTaskToFinish = async (tid: string) => {
     const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
+      // eslint-disable-next-line no-await-in-loop
       const task = (await getTaskMutation.mutateAsync({
         params: {
           path: { id: tid },
@@ -359,6 +360,7 @@ export function useAudio() {
         );
       }
 
+      // eslint-disable-next-line no-await-in-loop
       await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
     }
 

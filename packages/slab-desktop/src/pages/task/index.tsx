@@ -84,6 +84,7 @@ export default function Task() {
             <div className="mt-4 flex h-12 items-end gap-1">
               {successSparkline.map((barHeight, index) => (
                 <div
+                  // eslint-disable-next-line react/no-array-index-key
                   key={`${index}-${barHeight}`}
                   className="flex-1 rounded-t-[2px] bg-[var(--brand-teal)]/10"
                   style={{ height: `${Math.max(barHeight * 48, 10)}px` }}
@@ -136,6 +137,7 @@ export default function Task() {
           >
             <div className="mt-4 flex h-12 items-end gap-1">
               {durationSparkline.map((barHeight, index) => (
+                // eslint-disable-next-line react/no-array-index-key
                 <div key={`${index}-${barHeight}`} className="flex h-full flex-1 items-end">
                   <div
                     className="w-full rounded-[2px] bg-foreground/10"

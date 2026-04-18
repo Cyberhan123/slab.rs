@@ -120,9 +120,9 @@ export function HubModelEnhancementSheet({
       });
       onSaved();
       onOpenChange(false);
-    } catch (error) {
+    } catch (err) {
       toast.error(t('pages.hub.toast.selectionUpdateFailed'), {
-        description: error instanceof Error ? error.message : String(error),
+        description: err instanceof Error ? err.message : String(err),
       });
     }
   };

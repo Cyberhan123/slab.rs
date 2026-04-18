@@ -42,7 +42,7 @@ export default function SettingsPage() {
     return map;
   }, [data]);
 
-  const sections = data?.sections ?? [];
+  const sections = useMemo(() => data?.sections ?? [], [data?.sections]);
   const activeSection = useMemo(
     () => sections.find((section) => section.id === activeSectionId) ?? sections[0] ?? null,
     [activeSectionId, sections],
@@ -80,15 +80,6 @@ export default function SettingsPage() {
     propertyMap,
     refetch,
   });
-
-  function scrollToTarget(targetId: string) {
-    window.requestAnimationFrame(() => {
-      document.getElementById(targetId)?.scrollIntoView({
-        behavior: 'smooth',
-        block: 'start',
-      });
-    });
-  }
 
   function selectSection(sectionId: string) {
     const targetId = sectionAnchorId(sectionId);
@@ -277,6 +268,15 @@ export default function SettingsPage() {
       </div>
     </div>
   );
+}
+
+function scrollToTarget(targetId: string) {
+  window.requestAnimationFrame(() => {
+    document.getElementById(targetId)?.scrollIntoView({
+      behavior: 'smooth',
+      block: 'start',
+    });
+  });
 }
 
 function shouldPropertySpanFullWidth(property: SettingResponse) {

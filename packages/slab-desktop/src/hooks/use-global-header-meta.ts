@@ -88,6 +88,7 @@ export function usePageHeaderControl(
     };
   }, [
     clearControl,
+    control,
     disabled,
     emptyLabel,
     groupLabel,

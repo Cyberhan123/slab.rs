@@ -422,6 +422,7 @@ export default function Plugins() {
                   <div className="space-y-2">
                     {events.map((event, index) => (
                       <pre
+                        // eslint-disable-next-line react/no-array-index-key
                         key={`${event.ts}-${index}`}
                         className="rounded bg-muted p-2 text-xs leading-relaxed"
                       >

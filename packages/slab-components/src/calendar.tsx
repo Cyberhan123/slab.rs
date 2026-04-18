@@ -132,6 +132,7 @@ function Calendar({
         ...classNames,
       }}
       components={{
+        // eslint-disable-next-line react/no-shadow -- shadcn/ui DayPicker component override pattern
         Root: ({ className, rootRef, ...props }) => {
           return (
             <div
@@ -142,6 +143,7 @@ function Calendar({
             />
           )
         },
+        // eslint-disable-next-line react/no-shadow -- shadcn/ui DayPicker component override pattern
         Chevron: ({ className, orientation, ...props }) => {
           if (orientation === "left") {
             return (
@@ -163,6 +165,7 @@ function Calendar({
           )
         },
         DayButton: CalendarDayButton,
+        // eslint-disable-next-line react/no-shadow -- shadcn/ui DayPicker component override pattern
         WeekNumber: ({ children, ...props }) => {
           return (
             <td {...props}>
