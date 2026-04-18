@@ -29,6 +29,8 @@ slab.rs no longer uses a separate project-skill wrapper layer. Most tasks should
   Start in `bin/slab-windows-full-installer/**`, `bin/slab-app/src-tauri/build.rs`, `bin/slab-app/src-tauri/installer-hooks/**`, and `Makefile.toml`. Add `tauri-v2` only when the change crosses into Tauri config or NSIS hook behavior.
 - Shared contracts, settings, and manifests
   Start in `crates/slab-types/**`, `crates/slab-proto/**`, and `manifests/**`.
+- Vitest + Rust test UI integration
+  Start in `packages/vitest-rust-reporter/**` when adapting Rust test or Rust coverage results for `vitest --ui`.
 
 ## Selection Order
 

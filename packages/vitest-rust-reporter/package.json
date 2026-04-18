@@ -1,0 +1,17 @@
+{
+  "name": "@slab/vitest-rust-reporter",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "vitest --config vitest.unit.config.ts",
+    "test:run": "vitest run --config vitest.unit.config.ts"
+  },
+  "peerDependencies": {
+    "vitest": "^4.1.4"
+  },
+  "license": "AGPL-3.0-only"
+}

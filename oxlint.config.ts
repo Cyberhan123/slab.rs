@@ -53,9 +53,18 @@ export default defineConfig({
         "packages/slab-desktop/tests/**/*.tsx",
         "packages/slab-desktop/vitest.setup.ts",
         "bin/slab-server/tests/**/*.ts",
+        "packages/vitest-rust-reporter/src/**/*.test.ts",
       ],
       env: {
         vitest: true,
+      },
+    },
+    {
+      files: ["packages/vitest-rust-reporter/src/runtime/rust.test.ts"],
+      rules: {
+        "jest/no-disabled-tests": "off",
+        "jest/valid-title": "off",
+        "vitest/no-conditional-tests": "off",
       },
     },
   ],

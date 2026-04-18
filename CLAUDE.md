@@ -17,6 +17,7 @@ Read [AGENTS.md](AGENTS.md) before making changes. This file only keeps the repo
 - `packages/slab-components` is the shadcn/ui-based shared component library (workspace package `@slab/components`).
 - `packages/slab-i18n` is the shared i18n package (workspace package `@slab/i18n`) with i18next and react-i18next.
 - `packages/slab-desktop` is the main React frontend app (workspace package `@slab/desktop`).
+- `packages/vitest-rust-reporter` is the workspace helper that maps Rust `cargo test` and optional `cargo llvm-cov` results into a Vitest project for `vitest --ui`.
 - Frontend/workspace lint now runs from the repo root with `bun run lint`, and auto-fixes use `bun run lint:fix`.
 - Public VitePress pages live in `docs/`, internal contributor docs live in `docs/development/`, and published JSON Schemas are generated into `docs/public/manifests/v1/` with `bun run docs:schemas`.
 - All Rust library crates live in `crates/` (e.g., `crates/slab-runtime-core`, `crates/slab-types`, `crates/slab-app-core`).
