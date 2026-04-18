@@ -6,7 +6,7 @@ import type { SettingsDocumentResponse } from '@/pages/settings/types';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseSettingsAutosave } = vi.hoisted(() => ({
-  mockUseSettingsAutosave: vi.fn<() => void>(),
+  mockUseSettingsAutosave: vi.fn<() => unknown>(),
 }));
 
 vi.mock('@/pages/settings/hooks/use-settings-autosave', () => ({
@@ -19,37 +19,37 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 const { mockApiUseQuery } = vi.hoisted(() => ({
-  mockApiUseQuery: vi.fn<() => void>(),
+  mockApiUseQuery: vi.fn<() => unknown>(),
 }));
 
 vi.mock('@/lib/api', () => ({
   apiClient: {
-    GET: vi.fn<() => void>(),
-    POST: vi.fn<() => void>(),
-    PUT: vi.fn<() => void>(),
-    DELETE: vi.fn<() => void>(),
+    GET: vi.fn(),
+    POST: vi.fn(),
+    PUT: vi.fn(),
+    DELETE: vi.fn(),
   },
   default: {
     useQuery: mockApiUseQuery,
-    useMutation: vi.fn<() => void>(() => ({
+    useMutation: vi.fn(() => ({
       isPending: false,
-      mutateAsync: vi.fn<() => void>().mockResolvedValue(undefined),
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
     })),
   },
-  getErrorMessage: vi.fn<() => void>((err: Error) => err.message),
-  isApiError: vi.fn<() => void>(() => false),
+  getErrorMessage: vi.fn((err: Error) => err.message),
+  isApiError: vi.fn(() => false),
   queryClient: {},
 }));
 
 vi.mock('@slab/i18n', () => ({
-  useTranslation: vi.fn<() => void>(() => ({
-    t: vi.fn<() => void>((key: string) => key),
+  useTranslation: vi.fn(() => ({
+    t: vi.fn((key: string) => key),
   })),
 }));
 
 function createMockSettingsData(overrides: Partial<SettingsDocumentResponse> = {}): SettingsDocumentResponse {
   return {
-    schema_version: '1.0.0',
+    schema_version: 1,
     settings_path: '/etc/slab/settings.toml',
     warnings: [],
     sections: [
@@ -66,25 +66,29 @@ function createMockSettingsData(overrides: Partial<SettingsDocumentResponse> = {
               {
                 pmid: 'general.appearance.theme',
                 label: 'Theme',
-                description: 'Application color theme',
+                description_md: 'Application color theme',
+                editable: true,
+                effective_value: 'dark',
+                is_overridden: false,
+                search_terms: [],
                 schema: {
                   type: 'string',
                   enum: ['light', 'dark', 'auto'],
-                  default: 'dark',
+                  default_value: 'dark',
                 },
-                value: 'dark',
-                source: 'default',
               },
               {
                 pmid: 'general.appearance.language',
                 label: 'Language',
-                description: 'Interface language',
+                description_md: 'Interface language',
+                editable: true,
+                effective_value: 'en',
+                is_overridden: false,
+                search_terms: [],
                 schema: {
                   type: 'string',
-                  default: 'en',
+                  default_value: 'en',
                 },
-                value: 'en',
-                source: 'default',
               },
             ],
           },
@@ -103,15 +107,18 @@ function createMockSettingsData(overrides: Partial<SettingsDocumentResponse> = {
               {
                 pmid: 'runtime.memory.max_gb',
                 label: 'Max Memory (GB)',
-                description: 'Maximum memory allocation',
+                description_md: 'Maximum memory allocation',
+                editable: true,
+                effective_value: 16,
+                is_overridden: true,
+                override_value: 16,
+                search_terms: [],
                 schema: {
-                  type: 'number',
-                  default: 8,
+                  type: 'integer',
+                  default_value: 8,
                   minimum: 2,
                   maximum: 64,
                 },
-                value: 16,
-                source: 'user',
               },
             ],
           },
@@ -134,8 +141,8 @@ function createSettingsAutosaveViewModel(overrides = {}) {
       dirty: 0,
       saved: 0,
     },
-    setDraftValue: vi.fn<() => void>(),
-    resetSetting: vi.fn<() => void>(),
+    setDraftValue: vi.fn(),
+    resetSetting: vi.fn(),
     ...overrides,
   };
 }
@@ -150,7 +157,7 @@ describe('SettingsPage browser visual regression', () => {
       data: null,
       error: null,
       isLoading: true,
-      refetch: vi.fn<() => void>().mockResolvedValue(undefined),
+      refetch: vi.fn().mockResolvedValue(undefined),
     });
 
     mockUseSettingsAutosave.mockReturnValue(createSettingsAutosaveViewModel());
@@ -167,7 +174,7 @@ describe('SettingsPage browser visual regression', () => {
       data: mockData,
       error: null,
       isLoading: false,
-      refetch: vi.fn<() => void>().mockResolvedValue(undefined),
+      refetch: vi.fn().mockResolvedValue(undefined),
     });
 
     mockUseSettingsAutosave.mockReturnValue(createSettingsAutosaveViewModel());
@@ -184,7 +191,7 @@ describe('SettingsPage browser visual regression', () => {
       data: mockData,
       error: null,
       isLoading: false,
-      refetch: vi.fn<() => void>().mockResolvedValue(undefined),
+      refetch: vi.fn().mockResolvedValue(undefined),
     });
 
     mockUseSettingsAutosave.mockReturnValue(
@@ -214,7 +221,7 @@ describe('SettingsPage browser visual regression', () => {
       data: null,
       error: new Error('Failed to load settings'),
       isLoading: false,
-      refetch: vi.fn<() => void>().mockResolvedValue(undefined),
+      refetch: vi.fn().mockResolvedValue(undefined),
     });
 
     mockUseSettingsAutosave.mockReturnValue(createSettingsAutosaveViewModel());

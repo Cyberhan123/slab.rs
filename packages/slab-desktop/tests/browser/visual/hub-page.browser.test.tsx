@@ -6,16 +6,14 @@ import type { ModelItem } from '@/pages/hub/hooks/use-hub-model-catalog';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseHubModelCatalog } = vi.hoisted(() => ({
-  mockUseHubModelCatalog: vi.fn<
-    () => Partial<ReturnType<typeof import('@/pages/hub/hooks/use-hub-model-catalog').useHubModelCatalog>>
-  >(),
+  mockUseHubModelCatalog: vi.fn<() => unknown>(),
 }));
 
 vi.mock('@/pages/hub/hooks/use-hub-model-catalog', () => ({
   useHubModelCatalog: mockUseHubModelCatalog,
   CATEGORY_OPTIONS: ['all', 'language', 'vision', 'audio', 'coding', 'embedding'] as const,
   STATUS_OPTIONS: ['all', 'ready', 'downloading', 'not_downloaded', 'error'] as const,
-  canDownloadModel: vi.fn<() => void>().mockReturnValue(true),
+  canDownloadModel: vi.fn(() => true),
 }));
 
 vi.mock('@/hooks/use-global-header-meta', () => ({
@@ -24,8 +22,8 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 vi.mock('@slab/i18n', () => ({
-  useTranslation: vi.fn<() => void>(() => ({
-    t: vi.fn<() => void>((key: string) => key),
+  useTranslation: vi.fn(() => ({
+    t: vi.fn((key: string) => key),
   })),
 }));
 
@@ -52,32 +50,32 @@ function createMockModel(overrides: Partial<ModelItem> = {}): ModelItem {
 function createHubViewModel(overrides = {}) {
   return {
     category: 'all' as const,
-    setCategory: vi.fn<() => void>(),
+    setCategory: vi.fn(),
     status: 'all' as const,
-    setStatus: vi.fn<() => void>(),
+    setStatus: vi.fn(),
     isCreateOpen: false,
-    setCreateOpen: vi.fn<() => void>(),
+    setCreateOpen: vi.fn(),
     createFileName: null,
-    setCreateFile: vi.fn<() => void>(),
+    setCreateFile: vi.fn(),
     modelToDelete: null,
-    setModelToDelete: vi.fn<() => void>(),
+    setModelToDelete: vi.fn(),
     modelToEnhance: null,
-    setModelToEnhance: vi.fn<() => void>(),
+    setModelToEnhance: vi.fn(),
     models: [] as ModelItem[],
     filteredModels: [] as ModelItem[],
     visibleModels: [] as ModelItem[],
     hasMore: false,
-    loadMore: vi.fn<() => void>(),
+    loadMore: vi.fn(),
     downloadedCount: 0,
     pendingCount: 0,
     isLoading: false,
     isRefetching: false,
     error: null,
-    refetch: vi.fn<() => void>().mockResolvedValue(undefined),
+    refetch: vi.fn().mockResolvedValue(undefined),
     canCreate: false,
-    createModel: vi.fn<() => void>().mockResolvedValue(undefined),
-    downloadModel: vi.fn<() => void>().mockResolvedValue(undefined),
-    deleteModel: vi.fn<() => void>().mockResolvedValue(undefined),
+    createModel: vi.fn().mockResolvedValue(undefined),
+    downloadModel: vi.fn().mockResolvedValue(undefined),
+    deleteModel: vi.fn().mockResolvedValue(undefined),
     createModelPending: false,
     deleteModelPending: false,
     ...overrides,
