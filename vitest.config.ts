@@ -4,6 +4,8 @@ export default defineConfig({
   test: {
     projects: [
       "packages/slab-desktop/vitest.config.ts",
+      "packages/slab-desktop/vitest.browser.config.ts",
+      "packages/slab-components/vitest.config.ts",
       "bin/slab-server/tests/vitest.config.ts",
     ],
     reporters: ["default"],
@@ -14,7 +16,9 @@ export default defineConfig({
         "node_modules/",
         "**/vitest.setup.ts",
         "**/*.config.*",
+        "**/*.browser.test.*",
         "**/dist/**",
+        "**/tests/browser/**",
         "**/e2e/**",
       ],
     },

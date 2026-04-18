@@ -13,6 +13,8 @@
     "lint": "oxlint .",
     "lint:fix": "oxlint --fix .",
     "test": "vitest",
+    "test:browser": "vitest run --config vitest.browser.config.ts",
+    "test:browser:update": "vitest run --config vitest.browser.config.ts -u",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage"
   },
@@ -48,7 +50,6 @@
     "dayjs": "^1.11.20"
   },
   "devDependencies": {
-    "@playwright/test": "^1.58.2",
     "@tailwindcss/vite": "^4.2.2",
     "@testing-library/jest-dom": "^6.6.5",
     "@testing-library/react": "^16.2.0",
@@ -58,8 +59,8 @@
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.4",
     "autoprefixer": "^10.4.27",
-    "culori": "^4.0.2",
     "cross-spawn": "^7.0.6",
+    "culori": "^4.0.2",
     "jsdom": "^25.0.1",
     "openapi-typescript": "^7.13.0",
     "postcss": "^8.5.8",

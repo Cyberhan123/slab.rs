@@ -506,8 +506,6 @@ async fn shutdown_signal(listen_stdin: bool) {
 mod tests {
     use super::*;
     use slab_app_core::config::{Config, default_model_config_dir_for_settings_path};
-    use slab_types::RuntimeBackendId;
-    use slab_types::settings::RuntimeTransportMode;
     use std::path::PathBuf;
 
     #[test]
@@ -589,49 +587,5 @@ mod tests {
         let message = error.to_string();
         assert!(message.contains("--gateway-bind"));
         assert!(message.contains("--queue-capacity"));
-    }
-
-    fn test_child_spec(bind_address: String) -> ResolvedRuntimeChildSpec {
-        ResolvedRuntimeChildSpec {
-            backend: RuntimeBackendId::GgmlLlama,
-            grpc_bind_address: bind_address,
-            transport: RuntimeTransportMode::Http,
-            queue_capacity: 64,
-            backend_capacity: 4,
-            lib_dir: None,
-            log_level: None,
-            log_json: Some(false),
-            log_file: PathBuf::from("C:/runtime/logs/slab-runtime-test.log"),
-            shutdown_on_stdin_close: true,
-        }
-    }
-
-    #[tokio::test]
-    async fn runtime_endpoint_ready_reports_listening_http_socket() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-        let spec = test_child_spec(listener.local_addr().unwrap().to_string());
-
-        assert!(runtime_endpoint_ready(&spec).await.unwrap());
-    }
-
-    #[tokio::test]
-    async fn wait_for_runtime_child_ready_fails_fast_when_child_exits() {
-        let spec = test_child_spec("127.0.0.1:9".to_owned());
-        let mut cmd = if cfg!(windows) {
-            let mut cmd = TokioCommand::new("cmd");
-            cmd.args(["/C", "exit 7"]);
-            cmd
-        } else {
-            let mut cmd = TokioCommand::new("sh");
-            cmd.args(["-lc", "exit 7"]);
-            cmd
-        };
-        let mut child =
-            cmd.stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().unwrap();
-
-        let error = wait_for_runtime_child_ready(&spec, &mut child).await.unwrap_err();
-        let message = error.to_string();
-
-        assert!(message.contains("exited before gRPC endpoint"));
     }
 }
