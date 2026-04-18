@@ -23,7 +23,8 @@
     "docs:dev": "bun run docs:schemas && vitepress dev docs",
     "docs:build": "bun run docs:schemas && vitepress build docs",
     "docs:preview": "vitepress preview docs",
-    "models:pack": "bun run --filter @slab/models pack"
+    "models:pack": "bun run --filter @slab/models pack",
+    "prepare": "husky"
   },
   "workspaces": [
     "packages/slab-desktop",
@@ -38,6 +39,8 @@
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
     "@vitest/coverage-v8": "^4.1.4",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.4.0",
     "oxlint": "^1.60.0",
     "tailwindcss": "^4.2.2",
     "typescript": "~5.9.3",
