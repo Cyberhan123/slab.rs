@@ -12,46 +12,60 @@ use crate::token::{LlamaSeqId, LlamaToken};
 ///
 /// Created via [`crate::llama_model::LlamaModel::new_context`].
 pub struct LlamaContext {
-    pub(crate) ctx: *mut slab_llama_sys::llama_context,
+    pub(crate) ctx: Option<std::ptr::NonNull<slab_llama_sys::llama_context>>,
     /// Keep the model alive as long as the context exists.
     pub(crate) model: Arc<LlamaModelInner>,
 }
 
+// SAFETY: The context pointer is only accessed through `&mut self` methods,
+// ensuring exclusive access. The underlying `llama.cpp` library does not use
+// thread-local state for context operations.
 unsafe impl Send for LlamaContext {}
+
+// SAFETY: Same as Send - all mutable access is exclusive.
 unsafe impl Sync for LlamaContext {}
 
 impl Drop for LlamaContext {
     fn drop(&mut self) {
-        unsafe { self.model.lib.llama_free(self.ctx) };
+        if let Some(ctx) = self.ctx.take() {
+            unsafe { self.model.lib.llama_free(ctx.as_ptr()) };
+        }
     }
 }
 
 impl LlamaContext {
+    // ── Private helpers ─────────────────────────────────────────────────────
+
+    #[inline]
+    fn as_ptr(&self) -> *mut slab_llama_sys::llama_context {
+        self.ctx.expect("context pointer should always be valid until Drop").as_ptr()
+    }
+
     // ── Context size helpers ─────────────────────────────────────────────────
 
     /// Returns the context window size.
     pub fn n_ctx(&self) -> u32 {
-        unsafe { self.model.lib.llama_n_ctx(self.ctx) }
+        unsafe { self.model.lib.llama_n_ctx(self.as_ptr()) }
     }
 
     /// Returns the effective context window size for each sequence.
     pub fn n_ctx_seq(&self) -> u32 {
-        unsafe { self.model.lib.llama_n_ctx_seq(self.ctx) }
+        unsafe { self.model.lib.llama_n_ctx_seq(self.as_ptr()) }
     }
 
     /// Returns the batch size.
     pub fn n_batch(&self) -> u32 {
-        unsafe { self.model.lib.llama_n_batch(self.ctx) }
+        unsafe { self.model.lib.llama_n_batch(self.as_ptr()) }
     }
 
     /// Returns the physical batch size.
     pub fn n_ubatch(&self) -> u32 {
-        unsafe { self.model.lib.llama_n_ubatch(self.ctx) }
+        unsafe { self.model.lib.llama_n_ubatch(self.as_ptr()) }
     }
 
     /// Returns the maximum number of sequences.
     pub fn n_seq_max(&self) -> u32 {
-        unsafe { self.model.lib.llama_n_seq_max(self.ctx) }
+        unsafe { self.model.lib.llama_n_seq_max(self.as_ptr()) }
     }
 
     // ── Decoding ─────────────────────────────────────────────────────────────
@@ -68,7 +82,7 @@ impl LlamaContext {
     /// Returns [`LlamaError::DecodeFailed`] if llama.cpp reports an error.
     pub fn decode(&mut self, batch: &mut LlamaBatch) -> Result<(), LlamaError> {
         let raw_batch = batch.as_llama_batch();
-        let ret = unsafe { self.model.lib.llama_decode(self.ctx, raw_batch) };
+        let ret = unsafe { self.model.lib.llama_decode(self.as_ptr(), raw_batch) };
         if ret != 0 { Err(LlamaError::DecodeFailed(ret)) } else { Ok(()) }
     }
 
@@ -78,7 +92,7 @@ impl LlamaContext {
         unsafe {
             self.model
                 .lib
-                .llama_vocab_n_tokens(self.model.lib.llama_model_get_vocab(self.model.model))
+                .llama_vocab_n_tokens(self.model.lib.llama_model_get_vocab(self.model.model.unwrap().as_ptr()))
                 as usize
         }
     }
@@ -95,7 +109,7 @@ impl LlamaContext {
     /// Panics if the returned pointer is null.
     pub fn get_logits_ith(&self, i: i32) -> &[f32] {
         let n_vocab = self.n_vocab();
-        let ptr = unsafe { self.model.lib.llama_get_logits_ith(self.ctx, i) };
+        let ptr = unsafe { self.model.lib.llama_get_logits_ith(self.as_ptr(), i) };
         assert!(!ptr.is_null(), "llama_get_logits_ith returned null");
         unsafe { std::slice::from_raw_parts(ptr, n_vocab) }
     }
@@ -110,7 +124,7 @@ impl LlamaContext {
     /// Panics if the returned pointer is null.
     pub fn get_logits(&self) -> &[f32] {
         let n_vocab = self.n_vocab();
-        let ptr = unsafe { self.model.lib.llama_get_logits(self.ctx) };
+        let ptr = unsafe { self.model.lib.llama_get_logits(self.as_ptr()) };
         assert!(!ptr.is_null(), "llama_get_logits returned null");
         unsafe { std::slice::from_raw_parts(ptr, n_vocab) }
     }
@@ -119,26 +133,26 @@ impl LlamaContext {
 
     /// Set the number of threads for generation and batch processing.
     pub fn set_n_threads(&mut self, n_threads: i32, n_threads_batch: i32) {
-        unsafe { self.model.lib.llama_set_n_threads(self.ctx, n_threads, n_threads_batch) }
+        unsafe { self.model.lib.llama_set_n_threads(self.as_ptr(), n_threads, n_threads_batch) }
     }
 
     // ── Performance ──────────────────────────────────────────────────────────
 
     /// Print performance statistics to stderr.
     pub fn perf_print(&self) {
-        unsafe { self.model.lib.llama_perf_context_print(self.ctx) }
+        unsafe { self.model.lib.llama_perf_context_print(self.as_ptr()) }
     }
 
     /// Reset performance statistics.
     pub fn perf_reset(&mut self) {
-        unsafe { self.model.lib.llama_perf_context_reset(self.ctx) }
+        unsafe { self.model.lib.llama_perf_context_reset(self.as_ptr()) }
     }
 
     // ── KV-cache management ──────────────────────────────────────────────────
 
     /// Clear all tokens from all sequences in the KV cache.
     pub fn kv_cache_clear(&mut self) {
-        let mem = unsafe { self.model.lib.llama_get_memory(self.ctx) };
+        let mem = unsafe { self.model.lib.llama_get_memory(self.as_ptr()) };
         if !mem.is_null() {
             unsafe { self.model.lib.llama_memory_clear(mem, true) }
         }
@@ -146,7 +160,7 @@ impl LlamaContext {
 
     /// Remove a range of tokens `[p0, p1)` from sequence `seq_id` in the KV cache.
     pub fn kv_cache_seq_rm(&mut self, seq_id: i32, p0: i32, p1: i32) -> bool {
-        let mem = unsafe { self.model.lib.llama_get_memory(self.ctx) };
+        let mem = unsafe { self.model.lib.llama_get_memory(self.as_ptr()) };
         if mem.is_null() {
             return false;
         }
@@ -155,7 +169,7 @@ impl LlamaContext {
 
     /// Add `delta` to token positions in `[p0, p1)` for `seq_id`.
     pub fn kv_cache_seq_add(&mut self, seq_id: i32, p0: i32, p1: i32, delta: i32) {
-        let mem = unsafe { self.model.lib.llama_get_memory(self.ctx) };
+        let mem = unsafe { self.model.lib.llama_get_memory(self.as_ptr()) };
         if mem.is_null() {
             return;
         }
@@ -164,7 +178,7 @@ impl LlamaContext {
 
     /// Returns whether the KV cache implementation supports position shifting.
     pub fn kv_cache_can_shift(&self) -> bool {
-        let mem = unsafe { self.model.lib.llama_get_memory(self.ctx) };
+        let mem = unsafe { self.model.lib.llama_get_memory(self.as_ptr()) };
         if mem.is_null() {
             return false;
         }
@@ -200,7 +214,7 @@ impl LlamaContext {
             scales.as_ptr() as *mut f32
         };
         let ret = unsafe {
-            self.model.lib.llama_set_adapters_lora(self.ctx, adapters_ptr, ptrs.len(), scales_ptr)
+            self.model.lib.llama_set_adapters_lora(self.as_ptr(), adapters_ptr, ptrs.len(), scales_ptr)
         };
         if ret != 0 { Err(LlamaError::SetAdaptersFailed(ret)) } else { Ok(()) }
     }
@@ -209,7 +223,7 @@ impl LlamaContext {
 
     /// Return the exact number of bytes needed to store the full context state.
     pub fn state_get_size(&self) -> usize {
-        unsafe { self.model.lib.llama_state_get_size(self.ctx) }
+        unsafe { self.model.lib.llama_state_get_size(self.as_ptr()) }
     }
 
     /// Copy the full context state into `dst`.
@@ -223,7 +237,7 @@ impl LlamaContext {
     /// Returns [`LlamaError::StateFailed`] if 0 bytes were written.
     pub fn state_get_data(&self, dst: &mut [u8]) -> Result<usize, LlamaError> {
         let n =
-            unsafe { self.model.lib.llama_state_get_data(self.ctx, dst.as_mut_ptr(), dst.len()) };
+            unsafe { self.model.lib.llama_state_get_data(self.as_ptr(), dst.as_mut_ptr(), dst.len()) };
         if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 
@@ -235,7 +249,7 @@ impl LlamaContext {
     /// # Errors
     /// Returns [`LlamaError::StateFailed`] if 0 bytes were consumed.
     pub fn state_set_data(&mut self, src: &[u8]) -> Result<usize, LlamaError> {
-        let n = unsafe { self.model.lib.llama_state_set_data(self.ctx, src.as_ptr(), src.len()) };
+        let n = unsafe { self.model.lib.llama_state_set_data(self.as_ptr(), src.as_ptr(), src.len()) };
         if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 
@@ -263,7 +277,7 @@ impl LlamaContext {
             if token_capacity == 0 { std::ptr::null_mut() } else { tokens.as_mut_ptr() };
         let ok = unsafe {
             self.model.lib.llama_state_load_file(
-                self.ctx,
+                self.as_ptr(),
                 c_path.as_ptr(),
                 tokens_ptr,
                 token_capacity,
@@ -291,7 +305,7 @@ impl LlamaContext {
         let (tokens_ptr, tokens_len) =
             if tokens.is_empty() { (std::ptr::null(), 0) } else { (tokens.as_ptr(), tokens.len()) };
         let ok = unsafe {
-            self.model.lib.llama_state_save_file(self.ctx, c_path.as_ptr(), tokens_ptr, tokens_len)
+            self.model.lib.llama_state_save_file(self.as_ptr(), c_path.as_ptr(), tokens_ptr, tokens_len)
         };
         if !ok { Err(LlamaError::StateFailed) } else { Ok(()) }
     }
@@ -300,7 +314,7 @@ impl LlamaContext {
 
     /// Return the exact number of bytes needed to store the state of `seq_id`.
     pub fn state_seq_get_size(&self, seq_id: LlamaSeqId) -> usize {
-        unsafe { self.model.lib.llama_state_seq_get_size(self.ctx, seq_id) }
+        unsafe { self.model.lib.llama_state_seq_get_size(self.as_ptr(), seq_id) }
     }
 
     /// Copy the state of `seq_id` into `dst`.
@@ -316,7 +330,7 @@ impl LlamaContext {
         seq_id: LlamaSeqId,
     ) -> Result<usize, LlamaError> {
         let n = unsafe {
-            self.model.lib.llama_state_seq_get_data(self.ctx, dst.as_mut_ptr(), dst.len(), seq_id)
+            self.model.lib.llama_state_seq_get_data(self.as_ptr(), dst.as_mut_ptr(), dst.len(), seq_id)
         };
         if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
@@ -334,7 +348,7 @@ impl LlamaContext {
         dest_seq_id: LlamaSeqId,
     ) -> Result<usize, LlamaError> {
         let n = unsafe {
-            self.model.lib.llama_state_seq_set_data(self.ctx, src.as_ptr(), src.len(), dest_seq_id)
+            self.model.lib.llama_state_seq_set_data(self.as_ptr(), src.as_ptr(), src.len(), dest_seq_id)
         };
         if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
@@ -358,7 +372,7 @@ impl LlamaContext {
             if tokens.is_empty() { (std::ptr::null(), 0) } else { (tokens.as_ptr(), tokens.len()) };
         let n = unsafe {
             self.model.lib.llama_state_seq_save_file(
-                self.ctx,
+                self.as_ptr(),
                 c_path.as_ptr(),
                 seq_id,
                 tokens_ptr,
@@ -394,7 +408,7 @@ impl LlamaContext {
             if token_capacity == 0 { std::ptr::null_mut() } else { tokens.as_mut_ptr() };
         let n = unsafe {
             self.model.lib.llama_state_seq_load_file(
-                self.ctx,
+                self.as_ptr(),
                 c_path.as_ptr(),
                 dest_seq_id,
                 tokens_ptr,
@@ -412,7 +426,7 @@ impl LlamaContext {
     /// Return the exact number of bytes needed to store the state of `seq_id`
     /// with the given flags.
     pub fn state_seq_get_size_ext(&self, seq_id: LlamaSeqId, flags: LlamaStateSeqFlags) -> usize {
-        unsafe { self.model.lib.llama_state_seq_get_size_ext(self.ctx, seq_id, flags) }
+        unsafe { self.model.lib.llama_state_seq_get_size_ext(self.as_ptr(), seq_id, flags) }
     }
 
     /// Copy the state of `seq_id` into `dst` with the given flags.
@@ -430,7 +444,7 @@ impl LlamaContext {
     ) -> Result<usize, LlamaError> {
         let n = unsafe {
             self.model.lib.llama_state_seq_get_data_ext(
-                self.ctx,
+                self.as_ptr(),
                 dst.as_mut_ptr(),
                 dst.len(),
                 seq_id,
@@ -455,7 +469,7 @@ impl LlamaContext {
     ) -> Result<usize, LlamaError> {
         let n = unsafe {
             self.model.lib.llama_state_seq_set_data_ext(
-                self.ctx,
+                self.as_ptr(),
                 src.as_ptr(),
                 src.len(),
                 dest_seq_id,

@@ -94,6 +94,10 @@ pub enum CoreError {
     #[error("deployment failed for driver '{driver_id}': {message}")]
     DeploymentFailed { driver_id: String, message: String },
 
+    /// An internal lock was poisoned, indicating a thread panic during access.
+    #[error("internal lock poisoned: {lock_name}")]
+    InternalPoisoned { lock_name: String },
+
     /// A model-scoped operation was attempted before the model had a live deployment.
     #[error("model is not loaded")]
     ModelNotLoaded,

@@ -73,7 +73,15 @@ impl UpscalerContext {
     }
 }
 
+// SAFETY: Each upscaler_ctx_t owns its own model weights and intermediate buffers;
+// there is no shared mutable state between separate upscaler context instances.
+// The underlying C library does not use thread-local storage or global mutable state,
+// so it is safe to send an UpscalerContext across threads.
 unsafe impl Send for UpscalerContext {}
+// SAFETY: All methods on UpscalerContext that access the raw pointer take &self
+// (shared reference). The native library does not mutate the context through shared
+// references in a way that would cause data races, and the Arc<DiffusionLib> itself
+// is Send + Sync.
 unsafe impl Sync for UpscalerContext {}
 
 impl Drop for UpscalerContext {

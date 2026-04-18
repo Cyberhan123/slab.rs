@@ -120,7 +120,8 @@ pub(super) fn runtime_to_status(err: CoreError) -> Status {
         | CoreError::EngineIo(_)
         | CoreError::GGMLEngine(_)
         | CoreError::OnnxEngine(_)
-        | CoreError::CandleEngine(_) => Status::internal(msg),
+        | CoreError::CandleEngine(_)
+        | CoreError::InternalPoisoned { .. } => Status::internal(msg),
     }
 }
 

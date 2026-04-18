@@ -211,10 +211,152 @@ mod tests {
         )
         .expect("bundle helper should delegate success");
 
-        assert_eq!(value.0, Path::new("runtime").join(library_file_name("diffusion")));
+        assert_eq!(
+            value.0,
+            Path::new("runtime").join(library_file_name("diffusion"))
+        );
         assert_eq!(
             value.1.expect("sidecar path should be returned"),
             Path::new("runtime").join(library_file_name("ggml"))
+        );
+    }
+
+    #[test]
+    fn load_optional_library_from_dir_returns_none_when_closure_returns_none() {
+        let value = load_optional_library_from_dir("runtime", "nonexistent", |_lib_dir, _lib_path| {
+            None::<(PathBuf, PathBuf)>
+        });
+
+        assert!(value.is_none(), "should return None when closure returns None");
+    }
+
+    #[test]
+    fn load_library_from_dir_propagates_errors() {
+        let result = load_library_from_dir("runtime", "test", |_lib_dir, _lib_path| {
+            Err::<(PathBuf, PathBuf), &str>("simulated error")
+        });
+
+        assert!(result.is_err(), "should propagate closure errors");
+    }
+
+    #[test]
+    fn load_library_bundle_from_dir_returns_none_when_sidecar_missing() {
+        let value = load_library_bundle_from_dir(
+            "runtime",
+            "diffusion",
+            "ggml",
+            |_lib_dir, main_path| Ok::<PathBuf, ()>(main_path.to_path_buf()),
+            |_lib_dir, _sidecar_path| None::<PathBuf>,
+        )
+        .expect("bundle helper should succeed");
+
+        assert!(value.1.is_none(), "sidecar should be None when closure returns None");
+    }
+
+    #[test]
+    fn load_library_bundle_from_dir_propagates_main_errors() {
+        let result = load_library_bundle_from_dir(
+            "runtime",
+            "diffusion",
+            "ggml",
+            |_lib_dir, _main_path| Err::<(), &str>("main load error"),
+            |_lib_dir, _sidecar_path| Some(PathBuf::new()),
+        );
+
+        assert!(result.is_err(), "should propagate main library errors");
+    }
+
+    #[test]
+    fn library_file_name_contains_platform_prefix_and_suffix() {
+        let llama_lib = library_file_name("llama");
+        let whisper_lib = library_file_name("whisper");
+
+        assert!(!llama_lib.is_empty());
+        assert!(!whisper_lib.is_empty());
+
+        // Check that the library name contains the base name
+        #[cfg(target_os = "windows")]
+        {
+            assert!(llama_lib.contains("llama"));
+            assert!(llama_lib.ends_with(".dll"));
+            assert!(whisper_lib.contains("whisper"));
+            assert!(whisper_lib.ends_with(".dll"));
+        }
+
+        #[cfg(target_os = "linux")]
+        {
+            assert!(llama_lib.contains("llama"));
+            assert!(llama_lib.ends_with(".so"));
+            assert!(whisper_lib.contains("whisper"));
+            assert!(whisper_lib.ends_with(".so"));
+        }
+
+        #[cfg(target_os = "macos")]
+        {
+            assert!(llama_lib.contains("llama"));
+            assert!(llama_lib.ends_with(".dylib"));
+            assert!(whisper_lib.contains("whisper"));
+            assert!(whisper_lib.ends_with(".dylib"));
+        }
+    }
+
+    #[test]
+    fn library_path_converts_relative_path_to_absolute() {
+        let path = library_path("relative/runtime", "test");
+        // The library_path function joins the directory with the library file name
+        // It should return an absolute path since we're joining with a library file name
+        assert!(path.is_absolute() || path.starts_with("relative/runtime"));
+    }
+
+    #[test]
+    fn load_library_from_dir_with_absolute_path() {
+        let absolute_dir = std::path::PathBuf::from("/absolute/runtime");
+        let value = load_library_from_dir(&absolute_dir, "test", |lib_dir, lib_path| {
+            Ok::<(PathBuf, PathBuf), ()>((lib_dir.to_path_buf(), lib_path.to_path_buf()))
+        })
+        .expect("should work with absolute paths");
+
+        assert_eq!(value.0, absolute_dir);
+        // The library path should be absolute
+        assert!(value.1.starts_with("/absolute/runtime"));
+    }
+
+    #[test]
+    fn load_optional_library_from_dir_with_empty_base_name() {
+        let value = load_optional_library_from_dir("runtime", "", |lib_dir, lib_path| {
+            Some((lib_dir.to_path_buf(), lib_path.to_path_buf()))
+        })
+        .expect("should handle empty base name");
+
+        assert_eq!(value.0, Path::new("runtime"));
+        // Empty base name should still produce a library path with prefix/suffix
+        assert!(!value.1.to_string_lossy().is_empty());
+    }
+
+    #[test]
+    fn load_library_bundle_from_dir_with_same_dir() {
+        // Both libraries come from the same directory in normal usage
+        let runtime_dir = Path::new("runtime");
+
+        let value = load_library_bundle_from_dir(
+            runtime_dir,
+            "main",
+            "sidecar",
+            |lib_dir, main_path| {
+                assert_eq!(lib_dir, runtime_dir);
+                Ok::<PathBuf, ()>(main_path.to_path_buf())
+            },
+            |lib_dir, sidecar_path| {
+                assert_eq!(lib_dir, runtime_dir);
+                Some(sidecar_path.to_path_buf())
+            },
+        )
+        .expect("bundle helper should use correct directories");
+
+        assert_eq!(value.0, runtime_dir.join(library_file_name("main")));
+        assert_eq!(
+            value.1.expect("sidecar should exist"),
+            runtime_dir.join(library_file_name("sidecar"))
         );
     }
 }

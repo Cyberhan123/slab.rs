@@ -224,7 +224,9 @@ impl WhisperVadContext {
 
 impl Drop for WhisperVadContext {
     fn drop(&mut self) {
-        unsafe { self.instance.lib.whisper_vad_free(self.ptr) }
+        if !self.ptr.is_null() {
+            unsafe { self.instance.lib.whisper_vad_free(self.ptr) }
+        }
     }
 }
 

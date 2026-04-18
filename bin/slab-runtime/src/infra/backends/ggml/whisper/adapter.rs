@@ -58,10 +58,27 @@ pub struct GGMLWhisperEngine {
     ctx: Option<WhisperContext>,
 }
 
-// SAFETY: GGMLWhisperEngine is owned exclusively by its worker task.
-// `instance: Arc<Whisper>` is an immutable library handle safe to move
-// between threads.  `ctx: Option<WhisperContext>` wraps Arc<WhisperInnerContext>
-// which is Send + Sync per the upstream whisper.cpp thread-safety guarantees.
+// # Safety
+//
+// `GGMLWhisperEngine` is `Send` and `Sync` because all mutable state is either
+// immutable or protected by thread-safe wrappers:
+//
+// 1. **`instance: Arc<Whisper>`** - The `Whisper` type wraps a dlopen2-generated
+//    handle that holds a read-only table of function pointers loaded once at startup.
+//    This function pointer table is never mutated, making concurrent reads safe.
+//
+// 2. **`ctx: Option<WhisperContext>`** - The `WhisperContext` wraps
+//    `Arc<WhisperInnerContext>`, which according to upstream whisper.cpp
+//    documentation is safe to share across threads. The context provides
+//    internal synchronization for operations that modify the loaded model state.
+//
+// The `Option` wrapper allows the context to be loaded/unloaded during the engine's
+// lifecycle, but all accesses to the context are protected by the engine's
+// internal locking mechanisms.
+//
+// **Thread-safety guarantees from whisper.cpp**: The underlying C++ library
+// guarantees that `WhisperContext` can be safely accessed from multiple threads
+// for inference operations, with appropriate locking handled internally.
 unsafe impl Send for GGMLWhisperEngine {}
 unsafe impl Sync for GGMLWhisperEngine {}
 

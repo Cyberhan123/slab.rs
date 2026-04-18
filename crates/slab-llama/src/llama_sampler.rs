@@ -10,16 +10,23 @@ use crate::token::LlamaToken;
 /// the builder methods, then call [`LlamaSampler::sample`] after decoding a
 /// batch to get the next token.
 pub struct LlamaSampler {
-    sampler: *mut slab_llama_sys::llama_sampler,
+    sampler: Option<std::ptr::NonNull<slab_llama_sys::llama_sampler>>,
     lib: Arc<slab_llama_sys::LlamaLib>,
 }
 
+// SAFETY: The sampler pointer is only accessed through `&mut self` methods,
+// ensuring exclusive access. The underlying `llama.cpp` library does not use
+// thread-local state for sampler operations.
 unsafe impl Send for LlamaSampler {}
+
+// SAFETY: Same as Send - all mutable access is exclusive.
 unsafe impl Sync for LlamaSampler {}
 
 impl Drop for LlamaSampler {
     fn drop(&mut self) {
-        unsafe { self.lib.llama_sampler_free(self.sampler) };
+        if let Some(sampler) = self.sampler.take() {
+            unsafe { self.lib.llama_sampler_free(sampler.as_ptr()) };
+        }
     }
 }
 
@@ -31,18 +38,26 @@ impl Llama {
 }
 
 impl LlamaSampler {
+    #[inline]
+    fn as_ptr(&self) -> *mut slab_llama_sys::llama_sampler {
+        self.sampler.expect("sampler pointer should always be valid until Drop").as_ptr()
+    }
+
     /// Create a new sampler chain (internal constructor).
     pub(crate) fn chain_new(lib: Arc<slab_llama_sys::LlamaLib>) -> Self {
         let params = unsafe { lib.llama_sampler_chain_default_params() };
         let sampler = unsafe { lib.llama_sampler_chain_init(params) };
         assert!(!sampler.is_null(), "llama_sampler_chain_init returned null");
-        Self { sampler, lib }
+        Self {
+            sampler: Some(unsafe { std::ptr::NonNull::new_unchecked(sampler) }),
+            lib,
+        }
     }
 
     /// Add a greedy (argmax) sampler to the chain.
     pub fn add_greedy(self) -> Self {
         let s = unsafe { self.lib.llama_sampler_init_greedy() };
-        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        unsafe { self.lib.llama_sampler_chain_add(self.as_ptr(), s) };
         self
     }
 
@@ -52,7 +67,7 @@ impl LlamaSampler {
     /// * `seed` – random seed; use `LLAMA_DEFAULT_SEED` (0xFFFFFFFF) for non-deterministic.
     pub fn add_dist(self, seed: u32) -> Self {
         let s = unsafe { self.lib.llama_sampler_init_dist(seed) };
-        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        unsafe { self.lib.llama_sampler_chain_add(self.as_ptr(), s) };
         self
     }
 
@@ -62,7 +77,7 @@ impl LlamaSampler {
     /// > 1.0 flattens it.
     pub fn add_temp(self, t: f32) -> Self {
         let s = unsafe { self.lib.llama_sampler_init_temp(t) };
-        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        unsafe { self.lib.llama_sampler_chain_add(self.as_ptr(), s) };
         self
     }
 
@@ -71,7 +86,7 @@ impl LlamaSampler {
     /// Keeps only the top `k` most probable tokens.
     pub fn add_top_k(self, k: i32) -> Self {
         let s = unsafe { self.lib.llama_sampler_init_top_k(k) };
-        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        unsafe { self.lib.llama_sampler_chain_add(self.as_ptr(), s) };
         self
     }
 
@@ -82,7 +97,7 @@ impl LlamaSampler {
     /// * `min_keep` – minimum number of tokens to keep.
     pub fn add_top_p(self, p: f32, min_keep: usize) -> Self {
         let s = unsafe { self.lib.llama_sampler_init_top_p(p, min_keep) };
-        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        unsafe { self.lib.llama_sampler_chain_add(self.as_ptr(), s) };
         self
     }
 
@@ -93,7 +108,7 @@ impl LlamaSampler {
     /// * `min_keep` – minimum number of tokens to keep.
     pub fn add_min_p(self, p: f32, min_keep: usize) -> Self {
         let s = unsafe { self.lib.llama_sampler_init_min_p(p, min_keep) };
-        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        unsafe { self.lib.llama_sampler_chain_add(self.as_ptr(), s) };
         self
     }
 
@@ -105,7 +120,7 @@ impl LlamaSampler {
     /// * `eta`  – learning rate.
     pub fn add_mirostat_v2(self, seed: u32, tau: f32, eta: f32) -> Self {
         let s = unsafe { self.lib.llama_sampler_init_mirostat_v2(seed, tau, eta) };
-        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        unsafe { self.lib.llama_sampler_chain_add(self.as_ptr(), s) };
         self
     }
 
@@ -131,7 +146,7 @@ impl LlamaSampler {
                 penalty_present,
             )
         };
-        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        unsafe { self.lib.llama_sampler_chain_add(self.as_ptr(), s) };
         self
     }
 
@@ -150,7 +165,7 @@ impl LlamaSampler {
             self.lib.llama_sampler_init_logit_bias(n_vocab, n_logit_bias, logit_bias.as_ptr())
         };
         assert!(!s.is_null(), "llama_sampler_init_logit_bias returned null");
-        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        unsafe { self.lib.llama_sampler_chain_add(self.as_ptr(), s) };
         self
     }
 
@@ -197,7 +212,7 @@ impl LlamaSampler {
         if s.is_null() {
             return false;
         }
-        unsafe { self.lib.llama_sampler_chain_add(self.sampler, s) };
+        unsafe { self.lib.llama_sampler_chain_add(self.as_ptr(), s) };
         true
     }
 
@@ -208,33 +223,39 @@ impl LlamaSampler {
     /// * `ctx` – the inference context (used to read logits).
     /// * `idx` – index of the token in the last decoded batch whose logits to use.
     pub fn sample(&mut self, ctx: &mut LlamaContext, idx: i32) -> LlamaToken {
-        unsafe { self.lib.llama_sampler_sample(self.sampler, ctx.ctx, idx) }
+        unsafe {
+            self.lib.llama_sampler_sample(
+                self.as_ptr(),
+                ctx.ctx.expect("context pointer should be valid").as_ptr(),
+                idx,
+            )
+        }
     }
 
     /// Inform the sampler that `token` was accepted (for stateful samplers like
     /// Mirostat and repetition-penalty).
     pub fn accept(&mut self, token: LlamaToken) {
-        unsafe { self.lib.llama_sampler_accept(self.sampler, token) }
+        unsafe { self.lib.llama_sampler_accept(self.as_ptr(), token) }
     }
 
     /// Reset the sampler state.
     pub fn reset(&mut self) {
-        unsafe { self.lib.llama_sampler_reset(self.sampler) }
+        unsafe { self.lib.llama_sampler_reset(self.as_ptr()) }
     }
 
     /// Get the seed used by this sampler (only meaningful for seeded samplers).
     pub fn get_seed(&self) -> u32 {
-        unsafe { self.lib.llama_sampler_get_seed(self.sampler) }
+        unsafe { self.lib.llama_sampler_get_seed(self.as_ptr()) }
     }
 
     /// Print performance statistics to stderr.
     pub fn perf_print(&self) {
-        unsafe { self.lib.llama_perf_sampler_print(self.sampler) }
+        unsafe { self.lib.llama_perf_sampler_print(self.as_ptr()) }
     }
 
     /// Reset performance statistics.
     pub fn perf_reset(&mut self) {
-        unsafe { self.lib.llama_perf_sampler_reset(self.sampler) }
+        unsafe { self.lib.llama_perf_sampler_reset(self.as_ptr()) }
     }
 }
 

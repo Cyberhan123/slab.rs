@@ -35,9 +35,12 @@ export function useSettingsAutosave({
 
   useEffect(() => {
     return () => {
-      for (const timer of Object.values(autosaveTimersRef.current)) {
+      // Clear all pending autosave timers on unmount
+      const timers = Object.values(autosaveTimersRef.current);
+      for (const timer of timers) {
         clearTimeout(timer);
       }
+      autosaveTimersRef.current = {};
     };
   }, []);
 

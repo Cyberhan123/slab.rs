@@ -376,6 +376,8 @@ impl SubAssign<TimeDelta> for TimeSpan {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn test_timing_display() {
         let t = -super::Timing::from_components(12, 59, 29, 450);
@@ -383,5 +385,153 @@ mod tests {
 
         let t = super::Timing::from_msecs(0);
         assert_eq!(t.to_string(), "0:00:00.000".to_string());
+    }
+
+    #[test]
+    fn test_timepoint_from_components_normalizes() {
+        // Test that components are normalized (60 seconds = 1 minute, etc.)
+        let tp = TimePoint::from_components(0, 0, 0, 3661000); // 61 minutes + 1 second in ms
+        assert_eq!(tp.mins(), 61);
+        assert_eq!(tp.secs_comp(), 1);
+    }
+
+    #[test]
+    fn test_timepoint_negative() {
+        let tp = TimePoint::from_msecs(-1000);
+        assert!(tp.is_negative());
+        assert_eq!(tp.abs().msecs(), 1000);
+    }
+
+    #[test]
+    fn test_timepoint_addition() {
+        let tp = TimePoint::from_secs(60);
+        let td = TimeDelta::from_secs(30);
+        let result = tp + td;
+        assert_eq!(result.secs(), 90);
+    }
+
+    #[test]
+    fn test_timepoint_subtraction() {
+        let tp1 = TimePoint::from_secs(60);
+        let tp2 = TimePoint::from_secs(30);
+        let result = tp1 - tp2; // This returns TimeDelta
+        assert_eq!(result.secs(), 30);
+    }
+
+    #[test]
+    fn test_timepoint_add_time_delta() {
+        let tp = TimePoint::from_secs(60);
+        let td = TimeDelta::from_secs(30);
+        let result = tp + td;
+        assert_eq!(result.secs(), 90);
+    }
+
+    #[test]
+    fn test_timedelta_from_components() {
+        let td = TimeDelta::from_components(1, 30, 45, 500);
+        assert_eq!(td.secs(), 5445); // 1*3600 + 30*60 + 45
+        assert_eq!(td.msecs_comp(), 500);
+    }
+
+    #[test]
+    fn test_timedelta_negative() {
+        let td = TimeDelta::from_secs(-60);
+        assert!(td.is_negative());
+        assert_eq!(td.abs().secs(), 60);
+    }
+
+    #[test]
+    fn test_timespan_length() {
+        let start = TimePoint::from_secs(10);
+        let end = TimePoint::from_secs(20);
+        let span = TimeSpan::new(start, end);
+        assert_eq!(span.len().secs(), 10);
+    }
+
+    #[test]
+    fn test_timespan_negative_length() {
+        let start = TimePoint::from_secs(20);
+        let end = TimePoint::from_secs(10);
+        let span = TimeSpan::new(start, end);
+        assert_eq!(span.len().secs(), -10);
+    }
+
+    #[test]
+    fn test_timespan_add_timedelta() {
+        let start = TimePoint::from_secs(10);
+        let end = TimePoint::from_secs(20);
+        let span = TimeSpan::new(start, end);
+        let offset = TimeDelta::from_secs(5);
+
+        let result = span + offset;
+        assert_eq!(result.start.secs(), 15);
+        assert_eq!(result.end.secs(), 25);
+    }
+
+    #[test]
+    fn test_timespan_subtract_timedelta() {
+        let start = TimePoint::from_secs(10);
+        let end = TimePoint::from_secs(20);
+        let span = TimeSpan::new(start, end);
+        let offset = TimeDelta::from_secs(5);
+
+        let result = span - offset;
+        assert_eq!(result.start.secs(), 5);
+        assert_eq!(result.end.secs(), 15);
+    }
+
+    #[test]
+    fn test_timepoint_comparison() {
+        let tp1 = TimePoint::from_secs(10);
+        let tp2 = TimePoint::from_secs(20);
+
+        assert!(tp1 < tp2);
+        assert!(tp2 > tp1);
+        assert_eq!(tp1, tp1);
+    }
+
+    #[test]
+    fn test_timepoint_equality() {
+        let tp1 = TimePoint::from_msecs(1000);
+        let tp2 = TimePoint::from_secs(1);
+        assert_eq!(tp1, tp2);
+    }
+
+    #[test]
+    fn test_timepoint_max_values() {
+        // Test very large timestamps (near boundaries)
+        let tp = TimePoint::from_hours(99);
+        assert_eq!(tp.hours(), 99);
+        assert_eq!(tp.mins_comp(), 0);
+    }
+
+    #[test]
+    fn test_timedelta_add_assign() {
+        let mut td = TimeDelta::from_secs(60);
+        td += TimeDelta::from_secs(30);
+        assert_eq!(td.secs(), 90);
+    }
+
+    #[test]
+    fn test_timedelta_sub_assign() {
+        let mut td = TimeDelta::from_secs(90);
+        td -= TimeDelta::from_secs(30);
+        assert_eq!(td.secs(), 60);
+    }
+
+    #[test]
+    fn test_timespan_add_assign_timedelta() {
+        let mut span = TimeSpan::new(TimePoint::from_secs(10), TimePoint::from_secs(20));
+        span += TimeDelta::from_secs(5);
+        assert_eq!(span.start.secs(), 15);
+        assert_eq!(span.end.secs(), 25);
+    }
+
+    #[test]
+    fn test_timespan_sub_assign_timedelta() {
+        let mut span = TimeSpan::new(TimePoint::from_secs(10), TimePoint::from_secs(20));
+        span -= TimeDelta::from_secs(5);
+        assert_eq!(span.start.secs(), 5);
+        assert_eq!(span.end.secs(), 15);
     }
 }

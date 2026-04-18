@@ -193,3 +193,274 @@ async fn echo_tool_missing_message_returns_empty() {
     let output = EchoTool.execute(&ctx, &args).await.expect("echo should succeed");
     assert_eq!(output.content, "");
 }
+
+// ── Tool router tests ───────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn tool_router_registers_and_retrieves_tools() {
+    use crate::tool::ToolRouter;
+    use crate::tools::EchoTool;
+
+    let mut router = ToolRouter::new();
+    router.register(Box::new(EchoTool));
+
+    let tool = router.get("echo");
+    assert!(tool.is_some(), "echo tool should be registered");
+    assert_eq!(tool.unwrap().name(), "echo");
+}
+
+#[tokio::test]
+async fn tool_router_returns_none_for_unregistered_tool() {
+    use crate::tool::ToolRouter;
+
+    let router = ToolRouter::new();
+    let tool = router.get("nonexistent");
+    assert!(tool.is_none(), "unregistered tool should return None");
+}
+
+#[tokio::test]
+async fn tool_router_overwrites_existing_tool() {
+    use crate::tool::{ToolContext, ToolHandler, ToolRouter};
+
+    // Create a custom test tool that returns "custom"
+    #[derive(Debug)]
+    struct CustomTool;
+
+    #[async_trait]
+    impl ToolHandler for CustomTool {
+        fn name(&self) -> &str {
+            "custom"
+        }
+
+        fn description(&self) -> &str {
+            "A custom test tool"
+        }
+
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        async fn execute(
+            &self,
+            _ctx: &ToolContext,
+            _arguments: &serde_json::Value,
+        ) -> Result<crate::tool::ToolOutput, AgentError> {
+            Ok(crate::tool::ToolOutput {
+                content: "custom".to_string(),
+                metadata: None,
+            })
+        }
+    }
+
+    let mut router = ToolRouter::new();
+    router.register(Box::new(CustomTool));
+
+    let ctx = ToolContext { thread_id: "t1".into(), turn_index: 0, depth: 0 };
+    let args = serde_json::json!({});
+
+    let output = router
+        .get("custom")
+        .unwrap()
+        .execute(&ctx, &args)
+        .await
+        .expect("custom tool should succeed");
+
+    assert_eq!(output.content, "custom");
+}
+
+#[tokio::test]
+async fn tool_router_generates_tool_specs() {
+    use crate::tool::ToolRouter;
+    use crate::tools::EchoTool;
+
+    let mut router = ToolRouter::new();
+    router.register(Box::new(EchoTool));
+
+    let specs = router.tool_specs();
+    assert_eq!(specs.len(), 1, "should have one tool spec");
+    assert_eq!(specs[0].name, "echo");
+    assert!(!specs[0].description.is_empty());
+}
+
+// ── Thread limit enforcement tests ────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn agent_control_enforces_thread_limit() {
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    // Set max_threads to 1
+    let control = Arc::new(AgentControl::new(llm, store, notify, router, 1, 4));
+
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 1,
+        ..AgentConfig::default()
+    };
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("test".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+
+    // First thread should spawn successfully
+    let thread_id_1 = control
+        .spawn("session-1".into(), config.clone(), messages.clone())
+        .await
+        .expect("first thread should spawn");
+
+    // Second thread should fail with ThreadLimitExceeded
+    let result = control.spawn("session-2".into(), config, messages).await;
+    assert!(
+        matches!(result, Err(AgentError::ThreadLimitExceeded { .. })),
+        "second thread should exceed limit"
+    );
+
+    // Clean up the first thread
+    control.shutdown(&thread_id_1).await.expect("shutdown should succeed");
+}
+
+#[tokio::test]
+async fn agent_control_enforces_depth_limit() {
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    // Set max_depth to 0 (only root agents allowed)
+    let control = Arc::new(AgentControl::new(llm.clone(), store, notify, router, 8, 0));
+
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 1,
+        ..AgentConfig::default()
+    };
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("test".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+
+    // Root agent at depth 0 should succeed
+    let result = control
+        .spawn("session-1".into(), config.clone(), messages.clone())
+        .await;
+    assert!(result.is_ok(), "root agent at depth 0 should spawn");
+
+    // Clean up
+    let _ = control.shutdown(&result.unwrap()).await;
+
+    // Child agent at depth 1 should fail
+    let result = control
+        .spawn_child("session-2".into(), "parent-1".into(), 1, config, messages)
+        .await;
+    assert!(
+        matches!(result, Err(AgentError::DepthLimitExceeded { .. })),
+        "child agent at depth 1 should exceed limit of 0"
+    );
+}
+
+// ── Error propagation tests ───────────────────────────────────────────────────────────
+
+struct FailingLlm;
+
+#[async_trait]
+impl LlmPort for FailingLlm {
+    async fn chat_completion(
+        &self,
+        _model: &str,
+        _messages: &[ConversationMessage],
+        _tools: &[ToolSpec],
+        _config: &AgentConfig,
+    ) -> Result<LlmResponse, AgentError> {
+        Err(AgentError::Llm("simulated LLM failure".into()))
+    }
+}
+
+#[tokio::test]
+async fn agent_propagates_llm_errors() {
+    let llm = Arc::new(FailingLlm);
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    let control = Arc::new(AgentControl::new(llm, store, notify, router, 8, 4));
+
+    let config = AgentConfig {
+        model: "mock".into(),
+        max_turns: 1,
+        ..AgentConfig::default()
+    };
+
+    let messages = vec![ConversationMessage {
+        role: "user".into(),
+        content: slab_types::ConversationMessageContent::Text("test".into()),
+        name: None,
+        tool_call_id: None,
+        tool_calls: vec![],
+    }];
+
+    let thread_id = control
+        .spawn("session-1".into(), config, messages)
+        .await
+        .expect("spawn should succeed");
+
+    // Wait for the thread to reach an error state
+    let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe should succeed");
+
+    let final_status = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            status_rx.changed().await.expect("status channel closed");
+            let status = *status_rx.borrow();
+            if matches!(status, ThreadStatus::Errored | ThreadStatus::Shutdown) {
+                return status;
+            }
+        }
+    })
+    .await
+    .expect("agent should error within timeout");
+
+    assert_eq!(final_status, ThreadStatus::Errored, "agent should error when LLM fails");
+}
+
+// ── Thread lifecycle tests ─────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn agent_control_shutdown_nonexistent_thread_fails() {
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    let control = Arc::new(AgentControl::new(llm, store, notify, router, 8, 4));
+
+    let result = control.shutdown("nonexistent-thread").await;
+    assert!(
+        matches!(result, Err(AgentError::ThreadNotFound(_))),
+        "shutdown of nonexistent thread should fail"
+    );
+}
+
+#[tokio::test]
+async fn agent_control_subscribe_to_nonexistent_thread_fails() {
+    let llm = Arc::new(MockLlm::new());
+    let store: Arc<dyn AgentStorePort> = Arc::new(NoopStore);
+    let notify = Arc::new(NoopNotify);
+    let router = Arc::new(ToolRouter::new());
+
+    let control = Arc::new(AgentControl::new(llm, store, notify, router, 8, 4));
+
+    let result = control.subscribe("nonexistent-thread").await;
+    assert!(
+        matches!(result, Err(AgentError::ThreadNotFound(_))),
+        "subscribe to nonexistent thread should fail"
+    );
+}

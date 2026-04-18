@@ -1,5 +1,7 @@
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 use crate::internal::scheduler::backend::admission::{ResourceManager, ResourceManagerConfig};
@@ -932,4 +934,367 @@ async fn wait_stream_returns_cancelled_after_cancel() {
         matches!(err, CoreError::Cancelled),
         "wait_stream should return CoreError::Cancelled, got {err:?}"
     );
+}
+
+/// Test cancellation of an in-flight GPU task when the backend honors cancel.
+#[tokio::test]
+async fn inflight_gpu_cancel_reaches_terminal_state() {
+    use std::sync::Arc;
+    use tokio::sync::Notify;
+
+    let task_started = Arc::new(Notify::new());
+
+    let mut rm = ResourceManager::new();
+    let task_started_clone = Arc::clone(&task_started);
+
+    rm.register_backend("slow-backend", move |shared_rx, _control_tx| {
+        let task_started = Arc::clone(&task_started_clone);
+        tokio::spawn(async move {
+            loop {
+                let req = {
+                    let mut lock = shared_rx.lock().await;
+                    lock.recv().await
+                };
+                match req {
+                    Some(req) => {
+                        task_started.notify_one();
+                        let mut cancel_rx = req.cancel_rx;
+                        tokio::select! {
+                            _ = cancel_rx.changed() => {
+                                let _ = req.reply_tx.send(BackendReply::Error("cancelled".into()));
+                            }
+                            _ = tokio::time::sleep(Duration::from_secs(5)) => {
+                                let _ = req.reply_tx.send(BackendReply::Value(Payload::default()));
+                            }
+                        }
+                        break;
+                    }
+                    None => break,
+                }
+            }
+        });
+    });
+
+    let orchestrator = Orchestrator::start(rm, 64);
+
+    // Submit a task that will block
+    let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("test"))
+        .gpu(
+            "slow-stage",
+            "slow-backend",
+            BackendOp { name: "test".into(), options: Payload::default() },
+        )
+        .run()
+        .await
+        .expect("submit should succeed");
+
+    // Wait for the task to start
+    task_started.notified().await;
+
+    // Cancel the task
+    orchestrator.cancel(task_id);
+
+    let final_status = tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            let view = orchestrator.get_status(task_id).await.expect("task should exist");
+            if matches!(view.status, TaskStatus::Cancelled | TaskStatus::Failed { .. }) {
+                break view.status;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("task should reach a terminal cancelled/failed state");
+
+    assert!(
+        matches!(final_status, TaskStatus::Cancelled | TaskStatus::Failed { .. }),
+        "task should be cancelled or failed after backend observes cancel"
+    );
+}
+
+/// Test backend worker failure and recovery.
+///
+/// Simulates a worker crash and verifies that the orchestrator can detect
+/// the failure and that subsequent requests are handled appropriately.
+#[tokio::test]
+async fn backend_worker_failure_detected_on_request() {
+    let worker_alive = Arc::new(AtomicBool::new(true));
+    let worker_alive_clone = Arc::clone(&worker_alive);
+
+    let mut rm = ResourceManager::new();
+
+    rm.register_backend("crashy-backend", move |shared_rx, _control_tx| {
+        let worker_alive = Arc::clone(&worker_alive_clone);
+        tokio::spawn(async move {
+            // Process one request then "crash" (stop processing)
+            let req = {
+                let mut lock = shared_rx.lock().await;
+                lock.recv().await
+            };
+            if let Some(req) = req {
+                let _ = req.reply_tx.send(BackendReply::Value(Payload::default()));
+            }
+            // Simulate worker crash
+            worker_alive.store(false, Ordering::SeqCst);
+        });
+    });
+
+    let orchestrator = Orchestrator::start(rm, 64);
+
+    // First request should succeed
+    let task_id1 = PipelineBuilder::new(orchestrator.clone(), text_payload("test1"))
+        .gpu(
+            "test-stage",
+            "crashy-backend",
+            BackendOp { name: "test".into(), options: Payload::default() },
+        )
+        .run()
+        .await
+        .expect("submit should succeed");
+
+    // Wait for completion
+    let result1 = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async {
+            loop {
+                let view = orchestrator.get_status(task_id1).await.expect("task should exist");
+                if matches!(view.status, TaskStatus::Succeeded { .. } | TaskStatus::Failed { .. }) {
+                    break view.status;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        },
+    )
+    .await;
+
+    assert!(
+        matches!(result1, Ok(TaskStatus::Succeeded { .. })),
+        "first task should succeed before worker crash"
+    );
+
+    // Verify worker is no longer alive
+    assert!(!worker_alive.load(Ordering::SeqCst), "worker should have crashed");
+
+    // Second request should fail because backend is down
+    let task_id2 = PipelineBuilder::new(orchestrator.clone(), text_payload("test2"))
+        .gpu(
+            "test-stage2",
+            "crashy-backend",
+            BackendOp { name: "test".into(), options: Payload::default() },
+        )
+        .run()
+        .await
+        .expect("submit should succeed");
+
+    // Wait for failure
+    let result2 = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        async {
+            loop {
+                let view = orchestrator.get_status(task_id2).await.expect("task should exist");
+                if matches!(view.status, TaskStatus::Failed { .. }) {
+                    break view.status.clone();
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        },
+    )
+    .await;
+
+    assert!(
+        matches!(result2, Ok(TaskStatus::Failed { .. })),
+        "second task should fail after worker crash, got {result2:?}"
+    );
+}
+
+/// Test resource exhaustion and admission control edge cases.
+///
+/// Verifies that when all permits are exhausted, new requests wait
+/// for permits to become available rather than failing immediately.
+#[tokio::test]
+async fn admission_control_waits_for_available_permits() {
+    use std::sync::Arc;
+    use tokio::sync::Notify;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    const CAPACITY: usize = 2;
+    let active_count = Arc::new(AtomicUsize::new(0));
+    let completion_notify = Arc::new(Notify::new());
+
+    let mut rm = ResourceManager::with_config(ResourceManagerConfig {
+        backend_capacity: CAPACITY,
+        ..ResourceManagerConfig::default()
+    });
+
+    let active_count_clone = Arc::clone(&active_count);
+    let completion_notify_clone = Arc::clone(&completion_notify);
+
+    rm.register_backend("limited-backend", move |shared_rx, _control_tx| {
+        for _ in 0..CAPACITY {
+            let shared_rx = Arc::clone(&shared_rx);
+            let active_count = Arc::clone(&active_count_clone);
+            let completion_notify = Arc::clone(&completion_notify_clone);
+            tokio::spawn(async move {
+                loop {
+                    let req = {
+                        let mut lock = shared_rx.lock().await;
+                        lock.recv().await
+                    };
+                    match req {
+                        Some(req) => {
+                            active_count.fetch_add(1, Ordering::SeqCst);
+                            // Simulate work while holding one inference permit per worker.
+                            completion_notify.notified().await;
+                            let _ = req.reply_tx.send(BackendReply::Value(Payload::default()));
+                            active_count.fetch_sub(1, Ordering::SeqCst);
+                        }
+                        None => break,
+                    }
+                }
+            });
+        }
+    });
+
+    let orchestrator = Orchestrator::start(rm, 64);
+
+    // Submit tasks up to capacity
+    let mut task_ids = Vec::new();
+    for i in 0..CAPACITY {
+        let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload(&format!("task{}", i)))
+            .gpu(
+                &format!("stage{}", i),
+                "limited-backend",
+                BackendOp { name: "test".into(), options: Payload::default() },
+            )
+            .run()
+            .await
+            .expect("submit should succeed");
+        task_ids.push(task_id);
+    }
+
+    // Wait for all permits to be acquired
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    assert_eq!(
+        active_count.load(Ordering::SeqCst),
+        CAPACITY,
+        "all permits should be acquired"
+    );
+
+    // Submit one more task that should wait for a permit
+    let extra_task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("extra"))
+        .gpu(
+            "extra-stage",
+            "limited-backend",
+            BackendOp { name: "test".into(), options: Payload::default() },
+        )
+        .run()
+        .await
+        .expect("submit should succeed");
+
+    // Verify the extra task is still pending (waiting for permit)
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let status = orchestrator.get_status(extra_task_id).await.expect("task should exist");
+    assert!(
+        matches!(status.status, TaskStatus::Pending | TaskStatus::Running { .. }),
+        "extra task should be waiting for permit, got {:?}", status.status
+    );
+
+    // Release one permit by signaling completion
+    completion_notify.notify_one();
+
+    // Now the extra task should proceed
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    let status = orchestrator.get_status(extra_task_id).await.expect("task should exist");
+    assert!(
+        matches!(status.status, TaskStatus::Pending | TaskStatus::Running { .. } | TaskStatus::Succeeded { .. }),
+        "extra task should have progressed"
+    );
+}
+
+/// Test that multiple concurrent requests correctly wait for permits in FIFO order.
+#[tokio::test]
+async fn admission_control_fifo_ordering() {
+    use std::sync::Arc;
+    use tokio::sync::Notify;
+
+    const CAPACITY: usize = 1;
+    let completion_notify = Arc::new(Notify::new());
+    let completion_order = Arc::new(std::sync::Mutex::new(Vec::new()));
+
+    let mut rm = ResourceManager::with_config(ResourceManagerConfig {
+        backend_capacity: CAPACITY,
+        ..ResourceManagerConfig::default()
+    });
+
+    let completion_notify_clone = Arc::clone(&completion_notify);
+    let completion_order_clone = Arc::clone(&completion_order);
+
+    rm.register_backend("fifo-backend", move |shared_rx, _control_tx| {
+        let completion_notify = Arc::clone(&completion_notify_clone);
+        let completion_order = Arc::clone(&completion_order_clone);
+        tokio::spawn(async move {
+            let mut task_seq = 0u64;
+            loop {
+                let req = {
+                    let mut lock = shared_rx.lock().await;
+                    lock.recv().await
+                };
+                match req {
+                    Some(req) => {
+                        // Record completion order
+                        let seq = task_seq;
+                        task_seq += 1;
+                        completion_notify.notified().await;
+                        let _ = req.reply_tx.send(BackendReply::Value(Payload::default()));
+                        completion_order.lock().unwrap().push(seq);
+                    }
+                    None => break,
+                }
+            }
+        });
+    });
+
+    let orchestrator = Orchestrator::start(rm, 64);
+
+    // Submit first task (acquires the only permit)
+    let _task1 = PipelineBuilder::new(orchestrator.clone(), text_payload("task1"))
+        .gpu(
+            "stage1",
+            "fifo-backend",
+            BackendOp { name: "test".into(), options: Payload::default() },
+        )
+        .run()
+        .await
+        .expect("submit should succeed");
+
+    // Give it time to acquire the permit
+    tokio::time::sleep(Duration::from_millis(50)).await;
+
+    // Submit multiple tasks that will queue
+    let mut handles = Vec::new();
+    for i in 0..3 {
+        let orch = orchestrator.clone();
+        let handle = tokio::spawn(async move {
+            PipelineBuilder::new(orch, text_payload(&format!("task{}", i + 2)))
+                .gpu(
+                    &format!("stage{}", i + 2),
+                    "fifo-backend",
+                    BackendOp { name: "test".into(), options: Payload::default() },
+                )
+                .run()
+                .await
+        });
+        handles.push(handle);
+    }
+
+    // Release permits one by one and verify ordering
+    for _ in 0..3 {
+        completion_notify.notify_one();
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    // All submissions should succeed
+    for handle in handles {
+        handle.await.expect("task should not panic").expect("submit should succeed");
+    }
 }

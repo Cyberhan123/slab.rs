@@ -137,6 +137,28 @@ impl CandleWhisperEngine {
                 }
             };
 
+            // # Safety
+            //
+            // `VarBuilder::from_mmaped_safetensors` is marked unsafe because it performs
+            // memory-mapped file I/O, which has safety requirements:
+            //
+            // 1. **Path validity**: The `path` parameter must be a valid path to an existing
+            //    file. This is guaranteed by the caller (the model loading path) which
+            //    validates the file existence before calling this function.
+            //
+            // 2. **File stability**: The memory-mapped file must not be modified or deleted
+            //    while the `VarBuilder` is in use. This is guaranteed because:
+            //    - The file is part of a loaded model that is not modified during inference
+            //    - The `VarBuilder` is stored within the engine and has the same lifetime
+            //    - The engine ensures the model is unloaded before the file can be modified
+            //
+            // 3. **Thread safety**: The `VarBuilder` is not directly shared across threads.
+            //    It is used only during model initialization and then accessed through
+            //    the thread-safe `CandleWhisperEngine` wrapper.
+            //
+            // 4. **Device compatibility**: The `device` parameter is a valid Candle device
+            //    (CPU or CUDA) that is properly initialized. This is guaranteed by the
+            //    device construction logic in the calling code.
             let vb = unsafe {
                 VarBuilder::from_mmaped_safetensors(&[path], candle_core::DType::F32, &device)
                     .map_err(|e| CandleWhisperEngineError::LoadModel {

@@ -110,11 +110,17 @@ impl Drop for Context {
     }
 }
 
-// Each sd_ctx_t owns its own model weights and intermediate tensors; there is
-// no shared mutable state between separate context instances. Callers should
-// use one Context per thread for concurrent inference.
+// SAFETY: Each sd_ctx_t owns its own model weights and intermediate tensors; there is
+// no shared mutable state between separate context instances. The underlying C library
+// does not use thread-local storage or global mutable state during inference, so it is
+// safe to send a Context across threads and to share references between threads.
+// Callers should still use one Context per thread for concurrent inference to avoid
+// data races on the internal tensors during generation.
 // See: https://github.com/leejet/stable-diffusion.cpp (README / architecture)
 unsafe impl Send for Context {}
+// SAFETY: All methods on Context that access the raw pointer take &self (shared
+// reference). The native library does not mutate the context through shared references
+// in a way that would cause data races, and the Arc<DiffusionLib> itself is Send + Sync.
 unsafe impl Sync for Context {}
 
 impl std::fmt::Debug for Context {

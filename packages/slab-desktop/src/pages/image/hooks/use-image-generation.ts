@@ -98,6 +98,16 @@ export function useImageGeneration() {
   const isPolling = generationPhase === 'polling';
   const isFetchingResult = generationPhase === 'fetchingResult';
 
+  // Cleanup polling state on unmount to prevent memory leaks
+  useEffect(() => {
+    return () => {
+      if (isPolling || isFetchingResult) {
+        clearGenerationTask();
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const {
     data: taskStatus,
     error: taskStatusError,
@@ -327,7 +337,7 @@ export function useImageGeneration() {
     if (taskStatus.status === 'succeeded') {
       setGenerationPhase('fetchingResult');
     }
-  }, [clearGenerationTask, isPolling, taskId, taskStatus, taskStatusUpdatedAt]);
+  }, [clearGenerationTask, isPolling, taskId, taskStatus, taskStatusUpdatedAt, t]);
 
   useEffect(() => {
     if (!isPolling || !taskId || !taskStatusError) {
