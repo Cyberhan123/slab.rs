@@ -93,10 +93,13 @@ pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> pb::ModelLoad
                 context_length: config.context_length.filter(|value| *value != 0),
                 chat_template: non_empty_string(config.chat_template.as_deref()),
                 gbnf: non_empty_string(config.gbnf.as_deref()),
+                flash_attn: Some(config.flash_attn),
             }))
         }
-        RuntimeBackendLoadSpec::GgmlWhisper(_) => {
-            Some(BackendParams::GgmlWhisper(pb::GgmlWhisperLoadParams {}))
+        RuntimeBackendLoadSpec::GgmlWhisper(config) => {
+            Some(BackendParams::GgmlWhisper(pb::GgmlWhisperLoadParams {
+                flash_attn: Some(config.flash_attn),
+            }))
         }
         RuntimeBackendLoadSpec::GgmlDiffusion(config) => {
             Some(BackendParams::GgmlDiffusion(pb::GgmlDiffusionLoadParams {
@@ -108,7 +111,7 @@ pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> pb::ModelLoad
                 t5xxl_path: opt_path_to_string(config.t5xxl_path.as_deref()),
                 clip_vision_path: opt_path_to_string(config.clip_vision_path.as_deref()),
                 control_net_path: opt_path_to_string(config.control_net_path.as_deref()),
-                flash_attn: config.flash_attn,
+                flash_attn: Some(config.flash_attn),
                 vae_device: non_empty_string(config.vae_device.as_deref()),
                 clip_device: non_empty_string(config.clip_device.as_deref()),
                 offload_params_to_cpu: config.offload_params_to_cpu,
@@ -162,12 +165,16 @@ pub fn decode_model_load_request(
                 model_path,
                 num_workers: u32_to_usize(config.num_workers, "ggml_llama.num_workers")?,
                 context_length: config.context_length.filter(|value| *value != 0),
+                flash_attn: config.flash_attn.unwrap_or(true),
                 chat_template: non_empty_string(config.chat_template.as_deref()),
                 gbnf: non_empty_string(config.gbnf.as_deref()),
             }))
         }
-        BackendParams::GgmlWhisper(_) => {
-            Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path }))
+        BackendParams::GgmlWhisper(config) => {
+            Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {
+                model_path,
+                flash_attn: config.flash_attn.unwrap_or(true),
+            }))
         }
         BackendParams::GgmlDiffusion(config) => {
             Ok(RuntimeBackendLoadSpec::GgmlDiffusion(Box::new(GgmlDiffusionLoadConfig {
@@ -180,7 +187,7 @@ pub fn decode_model_load_request(
                 t5xxl_path: non_empty_path(config.t5xxl_path.as_deref()),
                 clip_vision_path: non_empty_path(config.clip_vision_path.as_deref()),
                 control_net_path: non_empty_path(config.control_net_path.as_deref()),
-                flash_attn: config.flash_attn,
+                flash_attn: config.flash_attn.unwrap_or(true),
                 vae_device: non_empty_string(config.vae_device.as_deref()),
                 clip_device: non_empty_string(config.clip_device.as_deref()),
                 offload_params_to_cpu: config.offload_params_to_cpu,
@@ -911,10 +918,24 @@ mod tests {
             model_path: PathBuf::from("C:/models/model.gguf"),
             num_workers: 2,
             context_length: Some(8192),
+            flash_attn: true,
             chat_template: Some(
                 "{% for message in messages %}{{ message['content'] }}{% endfor %}".to_owned(),
             ),
             gbnf: Some("root ::= object".to_owned()),
+        });
+
+        let request = encode_model_load_request(&spec);
+        let roundtrip = decode_model_load_request(&request).unwrap();
+
+        assert_eq!(roundtrip, spec);
+    }
+
+    #[test]
+    fn model_load_spec_round_trips_ggml_whisper_fields() {
+        let spec = RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {
+            model_path: PathBuf::from("C:/models/model.bin"),
+            flash_attn: false,
         });
 
         let request = encode_model_load_request(&spec);
@@ -958,7 +979,7 @@ mod tests {
                     t5xxl_path: None,
                     clip_vision_path: None,
                     control_net_path: None,
-                    flash_attn: false,
+                    flash_attn: Some(false),
                     vae_device: None,
                     clip_device: None,
                     offload_params_to_cpu: false,

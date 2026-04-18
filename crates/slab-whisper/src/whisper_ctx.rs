@@ -484,18 +484,37 @@ impl From<slab_whisper_sys::whisper_timings> for WhisperTimings {
 }
 
 /// Stable Rust-native context parameters shared across the runtime chain.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ContextParams {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_gpu: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default = "default_flash_attn_enabled_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub flash_attn: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gpu_device: Option<c_int>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dtw_parameters: Option<DtwParameters>,
+}
+
+const fn default_flash_attn_enabled_option() -> Option<bool> {
+    Some(true)
+}
+
+impl Default for ContextParams {
+    fn default() -> Self {
+        Self {
+            model_path: None,
+            use_gpu: None,
+            flash_attn: default_flash_attn_enabled_option(),
+            gpu_device: None,
+            dtw_parameters: None,
+        }
+    }
 }
 
 impl ContextParams {

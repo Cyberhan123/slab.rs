@@ -62,7 +62,11 @@ fn parse_context_payload(raw: &Payload) -> Result<WhisperContextParams, String> 
 
     let legacy: GgmlWhisperLoadConfig =
         raw.to_typed().map_err(|e| format!("invalid model.load config: {e}"))?;
-    Ok(WhisperContextParams { model_path: Some(legacy.model_path), ..Default::default() })
+    Ok(WhisperContextParams {
+        model_path: Some(legacy.model_path),
+        flash_attn: Some(legacy.flash_attn),
+        ..Default::default()
+    })
 }
 
 fn parse_inference_options(raw: &Payload) -> Result<WhisperFullParams, String> {
@@ -384,6 +388,7 @@ mod tests {
             .expect("typed deployment snapshot should decode");
 
         assert_eq!(config.model_path, Some(PathBuf::from("model.bin")));
+        assert_eq!(config.flash_attn, Some(true));
     }
 
     #[test]
@@ -398,5 +403,6 @@ mod tests {
             .expect("json deployment snapshot should still decode through typed helper");
 
         assert_eq!(config.model_path, PathBuf::from("legacy-model.bin"));
+        assert!(config.flash_attn);
     }
 }

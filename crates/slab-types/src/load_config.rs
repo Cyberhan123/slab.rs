@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{GbnfAssetRef, TemplateAssetRef};
 
+const fn default_flash_attn_enabled() -> bool {
+    true
+}
+
 /// Typed `model.load` payload for the `ggml.llama` backend.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct GgmlLlamaLoadConfig {
@@ -12,6 +16,8 @@ pub struct GgmlLlamaLoadConfig {
     pub num_workers: usize,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
+    #[serde(default = "default_flash_attn_enabled")]
+    pub flash_attn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -32,6 +38,8 @@ pub struct GgmlLlamaLoadDefaultsConfig {
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct GgmlWhisperLoadConfig {
     pub model_path: PathBuf,
+    #[serde(default = "default_flash_attn_enabled")]
+    pub flash_attn: bool,
 }
 
 /// Typed `model.load` payload for the `ggml.diffusion` backend.
@@ -54,7 +62,7 @@ pub struct GgmlDiffusionLoadConfig {
     pub clip_vision_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_net_path: Option<PathBuf>,
-    #[serde(default)]
+    #[serde(default = "default_flash_attn_enabled")]
     pub flash_attn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vae_device: Option<String>,
@@ -164,11 +172,12 @@ impl RuntimeBackendLoadSpec {
                     }
                 })?,
                 context_length,
+                flash_attn: true,
                 chat_template,
                 gbnf,
             }),
             crate::backend::RuntimeBackendId::GgmlWhisper => {
-                Self::GgmlWhisper(GgmlWhisperLoadConfig { model_path })
+                Self::GgmlWhisper(GgmlWhisperLoadConfig { model_path, flash_attn: true })
             }
             crate::backend::RuntimeBackendId::GgmlDiffusion => {
                 let diffusion = diffusion.unwrap_or_default();

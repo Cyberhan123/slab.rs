@@ -15,13 +15,12 @@ use uuid::Uuid;
 pub static X_TRACE_ID: &str = "x-trace-id";
 
 pub async fn trace_middleware(
-    State(_state): State<Arc<AppState>>, // 自动获取 State
+    State(_state): State<Arc<AppState>>,
     req: Request<Body>,
     next: Next,
 ) -> Response {
     let start_time = Instant::now();
 
-    // 1. 提取或生成 Trace ID
     let trace_id = req
         .headers()
         .get(X_TRACE_ID)
@@ -31,22 +30,27 @@ pub async fn trace_middleware(
 
     let method = req.method().clone();
     let path = req.uri().path().to_string();
+    let skip_logging = path == "/v1/system/gpu";
 
-    // 2. 创建 Tracing Span
-    let span = info_span!(
-        "http_request",
-        trace_id = %trace_id,
-        method = %method,
-        path = %path,
-    );
+    let span = if skip_logging {
+        tracing::Span::none()
+    } else {
+        info_span!(
+            "http_request",
+            trace_id = %trace_id,
+            method = %method,
+            path = %path,
+        )
+    };
 
-    // 在 Span 范围内执行逻辑
     async move {
-        info!("→ request started");
+        if !skip_logging {
+            info!("→ request started");
+        }
         let (parts, body) = req.into_parts();
 
         let req_bytes =
-            buffer_and_log("request", &trace_id.to_string(), &parts.headers, body).await;
+            buffer_and_log("request", &trace_id.to_string(), &parts.headers, body, skip_logging).await;
         let mut req = Request::from_parts(parts, Body::from(req_bytes));
 
         // SAFETY: UUID strings consist only of ASCII hex digits and hyphens,
@@ -63,14 +67,16 @@ pub async fn trace_middleware(
 
         // Do not buffer SSE responses; preserve streaming semantics.
         let mut response = if content_type.contains("text/event-stream") {
-            info!(
-                id = %trace_id,
-                "response Body: [Skipped: Type=text/event-stream, streaming passthrough]"
-            );
+            if !skip_logging {
+                info!(
+                    id = %trace_id,
+                    "response Body: [Skipped: Type=text/event-stream, streaming passthrough]"
+                );
+            }
             Response::from_parts(parts, body)
         } else {
             let res_bytes =
-                buffer_and_log("response", &trace_id.to_string(), &parts.headers, body).await;
+                buffer_and_log("response", &trace_id.to_string(), &parts.headers, body, skip_logging).await;
             Response::from_parts(parts, Body::from(res_bytes))
         };
 
@@ -78,11 +84,13 @@ pub async fn trace_middleware(
 
         response.headers_mut().insert(X_TRACE_ID, trace_id_value);
 
-        info!(
-            status = response.status().as_u16(),
-            latency_ms = latency.as_millis(),
-            "← response finished"
-        );
+        if !skip_logging {
+            info!(
+                status = response.status().as_u16(),
+                latency_ms = latency.as_millis(),
+                "← response finished"
+            );
+        }
 
         response
     }
@@ -90,12 +98,12 @@ pub async fn trace_middleware(
     .await
 }
 
-/// 辅助函数：根据类型和大小决定是否打印 Body
 async fn buffer_and_log(
     direction: &str,
     trace_id: &str,
     headers: &header::HeaderMap,
     body: Body,
+    skip_logging: bool,
 ) -> Bytes {
     let content_type =
         headers.get(header::CONTENT_TYPE).and_then(|v| v.to_str().ok()).unwrap_or("");
@@ -106,12 +114,14 @@ async fn buffer_and_log(
         Err(_) => return Bytes::new(),
     };
 
-    if is_json && bytes.len() < 1024 {
-        if let Ok(text) = std::str::from_utf8(&bytes) {
-            info!(id = %trace_id, "{} Body: {}", direction, text);
+    if !skip_logging {
+        if is_json && bytes.len() < 1024 {
+            if let Ok(text) = std::str::from_utf8(&bytes) {
+                info!(id = %trace_id, "{} Body: {}", direction, text);
+            }
+        } else if !bytes.is_empty() {
+            info!(id = %trace_id, "{} Body: [Skipped: Type={}, Size={}]", direction, content_type, bytes.len());
         }
-    } else if !bytes.is_empty() {
-        info!(id = %trace_id, "{} Body: [Skipped: Type={}, Size={}]", direction, content_type, bytes.len());
     }
 
     bytes

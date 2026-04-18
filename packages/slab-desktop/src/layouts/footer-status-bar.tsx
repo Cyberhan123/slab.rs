@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 
 type GpuStatusResponse = components["schemas"]["GpuStatusResponse"]
 
-const POLL_INTERVAL_MS = 5000
+const POLL_INTERVAL_MS = 30000
 
 function formatGiB(bytes: number): string {
   const gib = bytes / 1024 ** 3

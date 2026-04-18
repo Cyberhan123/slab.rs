@@ -61,6 +61,7 @@ impl SettingsV2PmidCatalog {
             self.runtime.ggml.endpoint.ipc_path(),
             self.runtime.ggml.backends.llama.enabled(),
             self.runtime.ggml.backends.llama.context_length(),
+            self.runtime.ggml.backends.llama.flash_attn(),
             self.runtime.ggml.backends.llama.source.version(),
             self.runtime.ggml.backends.llama.source.artifact(),
             self.runtime.ggml.backends.llama.logging.level(),
@@ -71,6 +72,7 @@ impl SettingsV2PmidCatalog {
             self.runtime.ggml.backends.llama.endpoint.http_address(),
             self.runtime.ggml.backends.llama.endpoint.ipc_path(),
             self.runtime.ggml.backends.whisper.enabled(),
+            self.runtime.ggml.backends.whisper.flash_attn(),
             self.runtime.ggml.backends.whisper.source.version(),
             self.runtime.ggml.backends.whisper.source.artifact(),
             self.runtime.ggml.backends.whisper.logging.level(),
@@ -81,6 +83,7 @@ impl SettingsV2PmidCatalog {
             self.runtime.ggml.backends.whisper.endpoint.http_address(),
             self.runtime.ggml.backends.whisper.endpoint.ipc_path(),
             self.runtime.ggml.backends.diffusion.enabled(),
+            self.runtime.ggml.backends.diffusion.flash_attn(),
             self.runtime.ggml.backends.diffusion.source.version(),
             self.runtime.ggml.backends.diffusion.source.artifact(),
             self.runtime.ggml.backends.diffusion.logging.level(),
@@ -433,6 +436,10 @@ impl RuntimeBackendLeafPmids {
     pub fn enabled(self) -> SettingPmid {
         SettingPmid::from_path(format!("{}.enabled", self.prefix))
     }
+
+    pub fn flash_attn(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.flash_attn", self.prefix))
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -461,6 +468,10 @@ impl LlamaRuntimePmids {
 
     pub fn context_length(self) -> SettingPmid {
         SettingPmid::from_path(format!("{}.context_length", self.prefix))
+    }
+
+    pub fn flash_attn(self) -> SettingPmid {
+        SettingPmid::from_path(format!("{}.flash_attn", self.prefix))
     }
 }
 
@@ -650,6 +661,9 @@ mod tests {
         assert_eq!(all.len(), unique.len());
         assert!(unique.contains("general.language"));
         assert!(unique.contains("runtime.ggml.backends.llama.context_length"));
+        assert!(unique.contains("runtime.ggml.backends.llama.flash_attn"));
+        assert!(unique.contains("runtime.ggml.backends.whisper.flash_attn"));
+        assert!(unique.contains("runtime.ggml.backends.diffusion.flash_attn"));
         assert!(unique.contains("providers.registry"));
         assert!(unique.contains("server.cloud_http_trace"));
     }

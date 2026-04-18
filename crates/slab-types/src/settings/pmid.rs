@@ -81,7 +81,9 @@ impl PmidCatalog {
             self.runtime.model_cache_dir(),
             self.runtime.llama.num_workers(),
             self.runtime.llama.context_length(),
+            self.runtime.llama.flash_attn(),
             self.runtime.whisper.num_workers(),
+            self.runtime.whisper.flash_attn(),
             self.runtime.diffusion.num_workers(),
             self.runtime.model_auto_unload.enabled(),
             self.runtime.model_auto_unload.idle_minutes(),
@@ -223,6 +225,10 @@ impl RuntimeLlamaPmids {
     pub fn context_length(self) -> SettingPmid {
         SettingPmid::from_segments(["runtime", "llama", "context_length"])
     }
+
+    pub fn flash_attn(self) -> SettingPmid {
+        SettingPmid::from_segments(["runtime", "llama", "flash_attn"])
+    }
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -237,6 +243,10 @@ impl RuntimeWorkerPmids {
 
     pub fn num_workers(self) -> SettingPmid {
         SettingPmid::from_segments(["runtime", self.backend, "num_workers"])
+    }
+
+    pub fn flash_attn(self) -> SettingPmid {
+        SettingPmid::from_segments(["runtime", self.backend, "flash_attn"])
     }
 }
 

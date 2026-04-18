@@ -356,7 +356,7 @@ fn build_diffusion_load_defaults(
         clip_l_path: materialized_source.and_then(|source| artifact_path(source, "clip_l")),
         clip_g_path: materialized_source.and_then(|source| artifact_path(source, "clip_g")),
         t5xxl_path: materialized_source.and_then(|source| artifact_path(source, "t5xxl")),
-        flash_attn: options.get("flash_attn").and_then(Value::as_bool).unwrap_or(false),
+        flash_attn: options.get("flash_attn").and_then(Value::as_bool).unwrap_or(true),
         vae_device: options.get("vae_device").and_then(as_string).unwrap_or_default(),
         clip_device: options.get("clip_device").and_then(as_string).unwrap_or_default(),
         offload_params_to_cpu: options

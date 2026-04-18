@@ -180,6 +180,16 @@ pub(super) async fn resolve_llama_context_length(
     Ok((context_length, "settings"))
 }
 
+fn resolve_backend_flash_attn(state: &ModelState, backend_id: RuntimeBackendId) -> bool {
+    let config = state.pmid().config();
+    match backend_id {
+        RuntimeBackendId::GgmlLlama => config.runtime.llama.flash_attn,
+        RuntimeBackendId::GgmlWhisper => config.runtime.whisper.flash_attn,
+        RuntimeBackendId::GgmlDiffusion => config.diffusion.performance.flash_attn,
+        _ => true,
+    }
+}
+
 pub(super) async fn resolve_diffusion_context_params(
     state: &ModelState,
     backend_id: RuntimeBackendId,
@@ -270,6 +280,7 @@ async fn load_model_with_state(
     };
     let (context_length, context_source) =
         resolve_llama_context_length(&state, resolved_target.backend_id).await?;
+    let flash_attn = resolve_backend_flash_attn(&state, resolved_target.backend_id);
     let diffusion = if let Some(defaults) = resolved_target.pack_load_defaults.as_ref() {
         model_packs::merge_diffusion_load_defaults(
             defaults.diffusion.clone(),
@@ -287,6 +298,7 @@ async fn load_model_with_state(
         worker_source = worker_source,
         context_length = context_length,
         context_source = context_source,
+        flash_attn = flash_attn,
         "{log_message}"
     );
 
@@ -303,6 +315,7 @@ async fn load_model_with_state(
             .pack_load_defaults
             .as_ref()
             .and_then(|defaults| defaults.gbnf_source.clone()),
+        flash_attn,
         diffusion,
     )?;
     let grpc_req = build_model_load_request(&load_spec);
@@ -328,6 +341,7 @@ fn build_backend_load_spec(
     context_length: u32,
     chat_template: Option<String>,
     gbnf: Option<String>,
+    flash_attn: bool,
     diffusion: Option<DiffusionLoadOptions>,
 ) -> Result<RuntimeBackendLoadSpec, AppCoreError> {
     let model_path = PathBuf::from(model_path);
@@ -341,11 +355,15 @@ fn build_backend_load_spec(
                 ))
             })?,
             context_length: (context_length > 0).then_some(context_length),
+            flash_attn,
             chat_template,
             gbnf,
         })),
         RuntimeBackendId::GgmlWhisper => {
-            Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path }))
+            Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {
+                model_path,
+                flash_attn,
+            }))
         }
         RuntimeBackendId::GgmlDiffusion => {
             let diffusion = diffusion.unwrap_or_default();

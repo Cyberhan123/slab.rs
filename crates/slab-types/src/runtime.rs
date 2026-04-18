@@ -199,8 +199,12 @@ const fn default_num_workers() -> u32 {
     1
 }
 
+const fn default_flash_attn_enabled() -> bool {
+    true
+}
+
 /// Diffusion-specific model load options carried alongside the primary model path.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq, Eq)]
 pub struct DiffusionLoadOptions {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diffusion_model_path: Option<PathBuf>,
@@ -216,7 +220,7 @@ pub struct DiffusionLoadOptions {
     pub clip_g_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub t5xxl_path: Option<PathBuf>,
-    #[serde(default)]
+    #[serde(default = "default_flash_attn_enabled")]
     pub flash_attn: bool,
     #[serde(default)]
     pub vae_device: String,
@@ -224,6 +228,24 @@ pub struct DiffusionLoadOptions {
     pub clip_device: String,
     #[serde(default)]
     pub offload_params_to_cpu: bool,
+}
+
+impl Default for DiffusionLoadOptions {
+    fn default() -> Self {
+        Self {
+            diffusion_model_path: None,
+            vae_path: None,
+            taesd_path: None,
+            lora_model_dir: None,
+            clip_l_path: None,
+            clip_g_path: None,
+            t5xxl_path: None,
+            flash_attn: true,
+            vae_device: String::new(),
+            clip_device: String::new(),
+            offload_params_to_cpu: false,
+        }
+    }
 }
 
 /// Semantic model load specification shared between server/runtime and core/runtime.

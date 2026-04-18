@@ -11,9 +11,12 @@ message GgmlLlamaLoadParams {
   optional uint32 context_length = 2;
   optional string chat_template = 3;
   optional string gbnf = 4;
+  optional bool flash_attn = 5;
 }
 
-message GgmlWhisperLoadParams {}
+message GgmlWhisperLoadParams {
+  optional bool flash_attn = 1;
+}
 
 message GgmlDiffusionLoadParams {
   optional string diffusion_model_path = 1;
@@ -24,7 +27,7 @@ message GgmlDiffusionLoadParams {
   optional string t5xxl_path = 6;
   optional string clip_vision_path = 7;
   optional string control_net_path = 8;
-  bool flash_attn = 9;
+  optional bool flash_attn = 9;
   optional string vae_device = 10;
   optional string clip_device = 11;
   bool offload_params_to_cpu = 12;
