@@ -8,7 +8,7 @@
 //! |------------------|---------------|------------------------------------------------|
 //! | `"model.load"`   | `LoadModel`   | Load Whisper model weights from disk.          |
 //! | `"model.unload"` | `UnloadModel` | Drop model weights from memory.                |
-//! | `"inference"`    | `Inference`   | Transcribe f32 PCM audio; returns SRT-style.   |
+//! | `"inference"`    | `Inference`   | Transcribe f32 PCM audio; returns raw text.    |
 //!
 //! ### `model.load` input payload
 //! Uses a typed [`slab_types::CandleWhisperLoadConfig`] payload inside `slab-core`.

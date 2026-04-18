@@ -4,28 +4,13 @@ package slab.ipc.v1;
 
 import "slab/ipc/v1/common.proto";
 
-service WhisperService {
-  rpc Transcribe(TranscribeRequest) returns (TranscribeResponse);
-  rpc LoadModel(ModelLoadRequest) returns (ModelStatusResponse);
+service GgmlWhisperService {
+  rpc Transcribe(GgmlWhisperTranscribeRequest) returns (GgmlWhisperTranscribeResponse);
+  rpc LoadModel(GgmlWhisperLoadRequest) returns (ModelStatusResponse);
   rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
 }
 
-message TranscribeRequest {
-  string path = 1;
-  optional string language = 2;
-  optional string prompt = 3;
-  optional bool detect_language = 4;
-  TranscribeVadOptions vad = 5;
-  TranscribeDecodeOptions decode = 6;
-}
-
-message TranscribeVadOptions {
-  bool enabled = 1;
-  string model_path = 2;
-  TranscribeVadParams params = 3;
-}
-
-message TranscribeVadParams {
+message GgmlWhisperVadParams {
   optional float threshold = 1;
   optional int32 min_speech_duration_ms = 2;
   optional int32 min_silence_duration_ms = 3;
@@ -34,7 +19,13 @@ message TranscribeVadParams {
   optional float samples_overlap = 6;
 }
 
-message TranscribeDecodeOptions {
+message GgmlWhisperVadOptions {
+  optional bool enabled = 1;
+  optional string model_path = 2;
+  GgmlWhisperVadParams params = 3;
+}
+
+message GgmlWhisperDecodeOptions {
   optional int32 offset_ms = 1;
   optional int32 duration_ms = 2;
   optional bool no_context = 3;
@@ -53,6 +44,20 @@ message TranscribeDecodeOptions {
   optional bool tdrz_enable = 16;
 }
 
-message TranscribeResponse {
-  string text = 1;
+message GgmlWhisperLoadRequest {
+  optional string model_path = 1;
+  optional bool flash_attn = 2;
+}
+
+message GgmlWhisperTranscribeRequest {
+  optional string path = 1;
+  optional string language = 2;
+  optional string prompt = 3;
+  optional bool detect_language = 4;
+  GgmlWhisperVadOptions vad = 5;
+  GgmlWhisperDecodeOptions decode = 6;
+}
+
+message GgmlWhisperTranscribeResponse {
+  WhisperTranscription transcription = 1;
 }

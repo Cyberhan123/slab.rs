@@ -1,0 +1,53 @@
+syntax = "proto3";
+
+package slab.ipc.v1;
+
+import "slab/ipc/v1/common.proto";
+
+service GgmlLlamaService {
+  rpc Chat(GgmlLlamaChatRequest) returns (GgmlLlamaChatResponse);
+  rpc ChatStream(GgmlLlamaChatRequest) returns (stream GgmlLlamaChatStreamChunk);
+  rpc LoadModel(GgmlLlamaLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
+}
+
+message GgmlLlamaLoadRequest {
+  optional string model_path = 1;
+  optional uint32 num_workers = 2;
+  optional uint32 context_length = 3;
+  optional string chat_template = 4;
+  optional string gbnf = 5;
+  optional bool flash_attn = 6;
+}
+
+message GgmlLlamaChatRequest {
+  optional string prompt = 1;
+  optional uint32 max_tokens = 2;
+  optional float temperature = 3;
+  optional float top_p = 4;
+  optional int32 top_k = 5;
+  optional float min_p = 6;
+  optional float presence_penalty = 7;
+  optional float repetition_penalty = 8;
+  optional string session_key = 9;
+  optional string gbnf = 10;
+  StringList stop_sequences = 11;
+  optional bool ignore_eos = 12;
+  optional bytes logit_bias_json = 13;
+}
+
+message GgmlLlamaChatResponse {
+  optional string text = 1;
+  optional string finish_reason = 2;
+  optional uint32 tokens_used = 3;
+  Usage usage = 4;
+  optional string reasoning_content = 5;
+}
+
+message GgmlLlamaChatStreamChunk {
+  optional string delta = 1;
+  optional bool done = 2;
+  optional string finish_reason = 3;
+  Usage usage = 4;
+  optional string reasoning_content = 5;
+}

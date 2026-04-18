@@ -1,1222 +1,840 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use base64::Engine as _;
-use image::GenericImageView;
-use serde::{Deserialize, Serialize};
-use serde_json::Value;
-use slab_types::backend::RuntimeBackendId;
-use slab_types::diffusion::{
-    DiffusionImageBackend, DiffusionImageRequest, DiffusionImageResponse, DiffusionRequestCommon,
-    DiffusionVideoBackend, DiffusionVideoRequest, DiffusionVideoResponse, GgmlDiffusionImageParams,
-    GgmlDiffusionVideoParams,
-};
-use slab_types::inference::{
-    ImageGenerationResponse, TextGenerationChunk, TextGenerationRequest, TextGenerationResponse,
-    TextGenerationUsage, TextPromptTokensDetails,
-};
-use slab_types::media::{GeneratedFrame, GeneratedImage, RawImageInput};
-use slab_types::runtime::RuntimeModelStatus;
-use slab_types::{
-    CandleDiffusionLoadConfig, CandleLlamaLoadConfig, CandleWhisperLoadConfig,
-    GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig, OnnxLoadConfig,
-    RuntimeBackendLoadSpec,
-};
 use thiserror::Error;
 
 use crate::slab::ipc::v1 as pb;
 
-const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
+pub mod dto {
+    use std::path::PathBuf;
 
-fn reasoning_content_from_metadata(metadata: &slab_types::inference::JsonOptions) -> String {
-    metadata
-        .get(REASONING_CONTENT_METADATA_KEY)
-        .and_then(Value::as_str)
-        .unwrap_or_default()
-        .to_owned()
-}
-
-fn insert_reasoning_content_metadata(
-    metadata: &mut slab_types::inference::JsonOptions,
-    reasoning_content: &str,
-) {
-    if reasoning_content.is_empty() {
-        return;
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct ModelStatus {
+        pub backend: String,
+        pub status: String,
     }
-    metadata.insert(
-        REASONING_CONTENT_METADATA_KEY.to_owned(),
-        Value::String(reasoning_content.to_owned()),
-    );
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct BinaryPayload {
+        pub data: Vec<u8>,
+        pub mime_type: Option<String>,
+        pub file_name: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct Usage {
+        pub prompt_tokens: Option<u32>,
+        pub completion_tokens: Option<u32>,
+        pub total_tokens: Option<u32>,
+        pub prompt_cached_tokens: Option<u32>,
+        pub estimated: Option<bool>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct RawImage {
+        pub data: Vec<u8>,
+        pub width: Option<u32>,
+        pub height: Option<u32>,
+        pub channels: Option<u32>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct RawTensor {
+        pub name: Option<String>,
+        pub shape: Vec<i64>,
+        pub dtype: Option<String>,
+        pub data: Vec<u8>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct WhisperSegment {
+        pub start_ms: Option<u64>,
+        pub end_ms: Option<u64>,
+        pub text: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct WhisperTranscription {
+        pub raw_text: Option<String>,
+        pub language: Option<String>,
+        pub segments: Vec<WhisperSegment>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct LlamaChatResponse {
+        pub text: Option<String>,
+        pub finish_reason: Option<String>,
+        pub tokens_used: Option<u32>,
+        pub usage: Option<Usage>,
+        pub reasoning_content: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct LlamaChatStreamChunk {
+        pub delta: Option<String>,
+        pub done: Option<bool>,
+        pub finish_reason: Option<String>,
+        pub usage: Option<Usage>,
+        pub reasoning_content: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlLlamaLoadRequest {
+        pub model_path: Option<PathBuf>,
+        pub num_workers: Option<u32>,
+        pub context_length: Option<u32>,
+        pub chat_template: Option<String>,
+        pub gbnf: Option<String>,
+        pub flash_attn: Option<bool>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlLlamaChatRequest {
+        pub prompt: Option<String>,
+        pub max_tokens: Option<u32>,
+        pub temperature: Option<f32>,
+        pub top_p: Option<f32>,
+        pub top_k: Option<i32>,
+        pub min_p: Option<f32>,
+        pub presence_penalty: Option<f32>,
+        pub repetition_penalty: Option<f32>,
+        pub session_key: Option<String>,
+        pub gbnf: Option<String>,
+        pub stop_sequences: Option<Vec<String>>,
+        pub ignore_eos: Option<bool>,
+        pub logit_bias_json: Option<Vec<u8>>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlWhisperVadParams {
+        pub threshold: Option<f32>,
+        pub min_speech_duration_ms: Option<i32>,
+        pub min_silence_duration_ms: Option<i32>,
+        pub max_speech_duration_s: Option<f32>,
+        pub speech_pad_ms: Option<i32>,
+        pub samples_overlap: Option<f32>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlWhisperVadOptions {
+        pub enabled: Option<bool>,
+        pub model_path: Option<PathBuf>,
+        pub params: Option<GgmlWhisperVadParams>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlWhisperDecodeOptions {
+        pub offset_ms: Option<i32>,
+        pub duration_ms: Option<i32>,
+        pub no_context: Option<bool>,
+        pub no_timestamps: Option<bool>,
+        pub token_timestamps: Option<bool>,
+        pub split_on_word: Option<bool>,
+        pub suppress_nst: Option<bool>,
+        pub word_thold: Option<f32>,
+        pub max_len: Option<i32>,
+        pub max_tokens: Option<i32>,
+        pub temperature: Option<f32>,
+        pub temperature_inc: Option<f32>,
+        pub entropy_thold: Option<f32>,
+        pub logprob_thold: Option<f32>,
+        pub no_speech_thold: Option<f32>,
+        pub tdrz_enable: Option<bool>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlWhisperLoadRequest {
+        pub model_path: Option<PathBuf>,
+        pub flash_attn: Option<bool>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlWhisperTranscribeRequest {
+        pub path: Option<PathBuf>,
+        pub language: Option<String>,
+        pub prompt: Option<String>,
+        pub detect_language: Option<bool>,
+        pub vad: Option<GgmlWhisperVadOptions>,
+        pub decode: Option<GgmlWhisperDecodeOptions>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlWhisperTranscribeResponse {
+        pub transcription: WhisperTranscription,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlDiffusionLoadRequest {
+        pub model_path: Option<PathBuf>,
+        pub diffusion_model_path: Option<PathBuf>,
+        pub vae_path: Option<PathBuf>,
+        pub taesd_path: Option<PathBuf>,
+        pub clip_l_path: Option<PathBuf>,
+        pub clip_g_path: Option<PathBuf>,
+        pub t5xxl_path: Option<PathBuf>,
+        pub clip_vision_path: Option<PathBuf>,
+        pub control_net_path: Option<PathBuf>,
+        pub flash_attn: Option<bool>,
+        pub vae_device: Option<String>,
+        pub clip_device: Option<String>,
+        pub offload_params_to_cpu: Option<bool>,
+        pub enable_mmap: Option<bool>,
+        pub n_threads: Option<i32>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlDiffusionGenerateImageRequest {
+        pub prompt: Option<String>,
+        pub negative_prompt: Option<String>,
+        pub width: Option<u32>,
+        pub height: Option<u32>,
+        pub init_image: Option<RawImage>,
+        pub count: Option<u32>,
+        pub cfg_scale: Option<f32>,
+        pub guidance: Option<f32>,
+        pub sample_steps: Option<i32>,
+        pub seed: Option<i64>,
+        pub sample_method: Option<String>,
+        pub scheduler: Option<String>,
+        pub clip_skip: Option<i32>,
+        pub strength: Option<f32>,
+        pub eta: Option<f32>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlDiffusionGenerateImageResponse {
+        pub images: Vec<RawImage>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlDiffusionGenerateVideoRequest {
+        pub prompt: Option<String>,
+        pub negative_prompt: Option<String>,
+        pub width: Option<u32>,
+        pub height: Option<u32>,
+        pub init_image: Option<RawImage>,
+        pub video_frames: Option<u32>,
+        pub fps: Option<f32>,
+        pub cfg_scale: Option<f32>,
+        pub guidance: Option<f32>,
+        pub sample_steps: Option<i32>,
+        pub seed: Option<i64>,
+        pub sample_method: Option<String>,
+        pub scheduler: Option<String>,
+        pub strength: Option<f32>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct GgmlDiffusionGenerateVideoResponse {
+        pub frames: Vec<RawImage>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct CandleLlamaLoadRequest {
+        pub model_path: Option<PathBuf>,
+        pub tokenizer_path: Option<PathBuf>,
+        pub seed: Option<u64>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct CandleChatRequest {
+        pub prompt: Option<String>,
+        pub max_tokens: Option<u32>,
+        pub session_key: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct CandleWhisperLoadRequest {
+        pub model_path: Option<PathBuf>,
+        pub tokenizer_path: Option<PathBuf>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct CandleWhisperTranscribeRequest {
+        pub path: Option<PathBuf>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct CandleWhisperTranscribeResponse {
+        pub transcription: WhisperTranscription,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct CandleDiffusionLoadRequest {
+        pub model_path: Option<PathBuf>,
+        pub vae_path: Option<PathBuf>,
+        pub sd_version: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct CandleDiffusionGenerateImageRequest {
+        pub prompt: Option<String>,
+        pub negative_prompt: Option<String>,
+        pub width: Option<u32>,
+        pub height: Option<u32>,
+        pub batch_count: Option<u32>,
+        pub sample_steps: Option<i32>,
+        pub guidance_scale: Option<f32>,
+        pub seed: Option<i64>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct CandleDiffusionGenerateImageResponse {
+        pub images: Vec<RawImage>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct OnnxTextLoadRequest {
+        pub model_path: Option<PathBuf>,
+        pub execution_providers: Option<Vec<String>>,
+        pub intra_op_num_threads: Option<u32>,
+        pub inter_op_num_threads: Option<u32>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct OnnxTextRequest {
+        pub inputs: Vec<RawTensor>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct OnnxTextResponse {
+        pub outputs: Vec<RawTensor>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct OnnxEmbeddingLoadRequest {
+        pub model_path: Option<PathBuf>,
+        pub execution_providers: Option<Vec<String>>,
+        pub intra_op_num_threads: Option<u32>,
+        pub inter_op_num_threads: Option<u32>,
+        pub input_tensor_name: Option<String>,
+        pub output_tensor_name: Option<String>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct OnnxEmbeddingRequest {
+        pub image: Option<BinaryPayload>,
+    }
+
+    #[derive(Clone, Debug, Default, PartialEq)]
+    pub struct OnnxEmbeddingResponse {
+        pub output: Option<RawTensor>,
+    }
 }
 
 #[derive(Debug, Error)]
 pub enum ProtoConversionError {
-    #[error("{field} must not be empty")]
-    EmptyField { field: &'static str },
-    #[error("{field} is missing")]
+    #[error("missing required field `{field}`")]
     MissingField { field: &'static str },
-    #[error("{field} must be at least {minimum}")]
-    BelowMinimum { field: &'static str, minimum: i64 },
-    #[error("{field} exceeds supported range")]
-    OutOfRange { field: &'static str },
-    #[error("unknown runtime backend id: {0}")]
-    UnknownBackend(String),
-    #[error("failed to parse {field} JSON: {source}")]
-    Json {
-        field: &'static str,
-        #[source]
-        source: serde_json::Error,
-    },
-    #[error("failed to decode {field} as base64: {source}")]
-    Base64 {
-        field: &'static str,
-        #[source]
-        source: base64::DecodeError,
-    },
-    #[error("failed to decode {field} image bytes: {source}")]
-    Image {
-        field: &'static str,
-        #[source]
-        source: image::ImageError,
-    },
+    #[error("invalid field `{field}`: {message}")]
+    InvalidField { field: &'static str, message: String },
 }
 
-pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> pb::ModelLoadRequest {
-    use pb::model_load_request::BackendParams;
-
-    let common =
-        pb::ModelLoadCommon { model_path: path_to_string(model_path_from_backend_load_spec(spec)) };
-
-    let backend_params = match spec {
-        RuntimeBackendLoadSpec::GgmlLlama(config) => {
-            Some(BackendParams::GgmlLlama(pb::GgmlLlamaLoadParams {
-                num_workers: usize_to_u32(config.num_workers),
-                context_length: config.context_length.filter(|value| *value != 0),
-                chat_template: non_empty_string(config.chat_template.as_deref()),
-                gbnf: non_empty_string(config.gbnf.as_deref()),
-                flash_attn: Some(config.flash_attn),
-            }))
-        }
-        RuntimeBackendLoadSpec::GgmlWhisper(config) => {
-            Some(BackendParams::GgmlWhisper(pb::GgmlWhisperLoadParams {
-                flash_attn: Some(config.flash_attn),
-            }))
-        }
-        RuntimeBackendLoadSpec::GgmlDiffusion(config) => {
-            Some(BackendParams::GgmlDiffusion(pb::GgmlDiffusionLoadParams {
-                diffusion_model_path: opt_path_to_string(config.diffusion_model_path.as_deref()),
-                vae_path: opt_path_to_string(config.vae_path.as_deref()),
-                taesd_path: opt_path_to_string(config.taesd_path.as_deref()),
-                clip_l_path: opt_path_to_string(config.clip_l_path.as_deref()),
-                clip_g_path: opt_path_to_string(config.clip_g_path.as_deref()),
-                t5xxl_path: opt_path_to_string(config.t5xxl_path.as_deref()),
-                clip_vision_path: opt_path_to_string(config.clip_vision_path.as_deref()),
-                control_net_path: opt_path_to_string(config.control_net_path.as_deref()),
-                flash_attn: Some(config.flash_attn),
-                vae_device: non_empty_string(config.vae_device.as_deref()),
-                clip_device: non_empty_string(config.clip_device.as_deref()),
-                offload_params_to_cpu: config.offload_params_to_cpu,
-                enable_mmap: config.enable_mmap,
-                n_threads: config.n_threads.filter(|value| *value != 0),
-            }))
-        }
-        RuntimeBackendLoadSpec::CandleLlama(config) => {
-            Some(BackendParams::CandleLlama(pb::CandleLlamaLoadParams {
-                tokenizer_path: opt_path_to_string(config.tokenizer_path.as_deref()),
-                seed: config.seed,
-            }))
-        }
-        RuntimeBackendLoadSpec::CandleWhisper(config) => {
-            Some(BackendParams::CandleWhisper(pb::CandleWhisperLoadParams {
-                tokenizer_path: opt_path_to_string(config.tokenizer_path.as_deref()),
-            }))
-        }
-        RuntimeBackendLoadSpec::CandleDiffusion(config) => {
-            Some(BackendParams::CandleDiffusion(pb::CandleDiffusionLoadParams {
-                vae_path: opt_path_to_string(config.vae_path.as_deref()),
-                sd_version: config.sd_version.clone(),
-            }))
-        }
-        RuntimeBackendLoadSpec::Onnx(config) => Some(BackendParams::Onnx(pb::OnnxLoadParams {
-            execution_providers: config.execution_providers.clone(),
-            intra_op_num_threads: config.intra_op_num_threads.map(usize_to_u32),
-            inter_op_num_threads: config.inter_op_num_threads.map(usize_to_u32),
-        })),
-    };
-
-    pb::ModelLoadRequest { common: Some(common), backend_params }
-}
-
-pub fn decode_model_load_request(
-    request: &pb::ModelLoadRequest,
-) -> Result<RuntimeBackendLoadSpec, ProtoConversionError> {
-    use pb::model_load_request::BackendParams;
-
-    let model_path = model_path_from_model_load_request(request)?;
-    let backend_params = request
-        .backend_params
-        .as_ref()
-        .ok_or(ProtoConversionError::MissingField { field: "backend_params" })?;
-
-    match backend_params {
-        BackendParams::GgmlLlama(config) => {
-            ensure_u32_at_least(config.num_workers, 1, "ggml_llama.num_workers")?;
-
-            Ok(RuntimeBackendLoadSpec::GgmlLlama(GgmlLlamaLoadConfig {
-                model_path,
-                num_workers: u32_to_usize(config.num_workers, "ggml_llama.num_workers")?,
-                context_length: config.context_length.filter(|value| *value != 0),
-                flash_attn: config.flash_attn.unwrap_or(true),
-                chat_template: non_empty_string(config.chat_template.as_deref()),
-                gbnf: non_empty_string(config.gbnf.as_deref()),
-            }))
-        }
-        BackendParams::GgmlWhisper(config) => {
-            Ok(RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {
-                model_path,
-                flash_attn: config.flash_attn.unwrap_or(true),
-            }))
-        }
-        BackendParams::GgmlDiffusion(config) => {
-            Ok(RuntimeBackendLoadSpec::GgmlDiffusion(Box::new(GgmlDiffusionLoadConfig {
-                model_path,
-                diffusion_model_path: non_empty_path(config.diffusion_model_path.as_deref()),
-                vae_path: non_empty_path(config.vae_path.as_deref()),
-                taesd_path: non_empty_path(config.taesd_path.as_deref()),
-                clip_l_path: non_empty_path(config.clip_l_path.as_deref()),
-                clip_g_path: non_empty_path(config.clip_g_path.as_deref()),
-                t5xxl_path: non_empty_path(config.t5xxl_path.as_deref()),
-                clip_vision_path: non_empty_path(config.clip_vision_path.as_deref()),
-                control_net_path: non_empty_path(config.control_net_path.as_deref()),
-                flash_attn: config.flash_attn.unwrap_or(true),
-                vae_device: non_empty_string(config.vae_device.as_deref()),
-                clip_device: non_empty_string(config.clip_device.as_deref()),
-                offload_params_to_cpu: config.offload_params_to_cpu,
-                enable_mmap: config.enable_mmap,
-                n_threads: config.n_threads.filter(|value| *value != 0),
-            })))
-        }
-        BackendParams::CandleLlama(config) => {
-            Ok(RuntimeBackendLoadSpec::CandleLlama(CandleLlamaLoadConfig {
-                model_path,
-                tokenizer_path: non_empty_path(config.tokenizer_path.as_deref()),
-                seed: config.seed,
-            }))
-        }
-        BackendParams::CandleWhisper(config) => {
-            Ok(RuntimeBackendLoadSpec::CandleWhisper(CandleWhisperLoadConfig {
-                model_path,
-                tokenizer_path: non_empty_path(config.tokenizer_path.as_deref()),
-            }))
-        }
-        BackendParams::CandleDiffusion(config) => {
-            ensure_non_empty(&config.sd_version, "candle_diffusion.sd_version")?;
-
-            Ok(RuntimeBackendLoadSpec::CandleDiffusion(CandleDiffusionLoadConfig {
-                model_path,
-                vae_path: non_empty_path(config.vae_path.as_deref()),
-                sd_version: config.sd_version.clone(),
-            }))
-        }
-        BackendParams::Onnx(config) => Ok(RuntimeBackendLoadSpec::Onnx(OnnxLoadConfig {
-            model_path,
-            execution_providers: config.execution_providers.clone(),
-            intra_op_num_threads: config
-                .intra_op_num_threads
-                .filter(|value| *value != 0)
-                .map(|value| u32_to_usize(value, "onnx.intra_op_num_threads"))
-                .transpose()?,
-            inter_op_num_threads: config
-                .inter_op_num_threads
-                .filter(|value| *value != 0)
-                .map(|value| u32_to_usize(value, "onnx.inter_op_num_threads"))
-                .transpose()?,
-        })),
-    }
-}
-
-pub fn encode_model_status_response(status: &RuntimeModelStatus) -> pb::ModelStatusResponse {
-    pb::ModelStatusResponse { backend: status.backend.to_string(), status: status.status.clone() }
-}
-
-pub fn decode_model_status_response(
-    response: &pb::ModelStatusResponse,
-) -> Result<RuntimeModelStatus, ProtoConversionError> {
-    let backend = response
-        .backend
-        .parse::<RuntimeBackendId>()
-        .map_err(|_| ProtoConversionError::UnknownBackend(response.backend.clone()))?;
-
-    Ok(RuntimeModelStatus { backend, status: response.status.clone() })
-}
-
-pub fn encode_chat_request(
-    model: impl Into<String>,
-    request: &TextGenerationRequest,
-) -> pb::ChatRequest {
-    // The prompt field always carries the pre-rendered fallback.  Preserve the
-    // legacy behavior of prefixing `system_prompt` when present, even when
-    // using structured messages for template application.
-    let prompt = match request.system_prompt.as_deref() {
-        Some(system_prompt) if !system_prompt.is_empty() => {
-            format!("{system_prompt}\n\n{}", request.prompt)
-        }
-        _ => request.prompt.clone(),
-    };
-
-    pb::ChatRequest {
-        prompt,
-        model: model.into(),
-        max_tokens: request.max_tokens.unwrap_or_default(),
-        temperature: request.temperature.unwrap_or_default(),
-        top_p: request.top_p.unwrap_or_default(),
-        top_k: request.top_k,
-        min_p: request.min_p,
-        presence_penalty: request.presence_penalty,
-        repetition_penalty: request.repetition_penalty,
-        session_key: request.session_key.clone().unwrap_or_default(),
-        gbnf: request.gbnf.clone().unwrap_or_default(),
-        stop_sequences: request.stop_sequences.clone(),
-    }
-}
-
-pub fn decode_chat_request(
-    request: &pb::ChatRequest,
-    stream: bool,
-) -> Result<TextGenerationRequest, ProtoConversionError> {
-    if request.prompt.trim().is_empty() {
-        return Err(ProtoConversionError::EmptyField { field: "prompt" });
-    }
-
-    Ok(TextGenerationRequest {
-        prompt: request.prompt.clone(),
-        system_prompt: None,
-        max_tokens: (request.max_tokens > 0).then_some(request.max_tokens),
-        temperature: (request.temperature > 0.0).then_some(request.temperature),
-        top_p: (request.top_p > 0.0).then_some(request.top_p),
-        top_k: request.top_k,
-        min_p: request.min_p,
-        presence_penalty: request.presence_penalty,
-        repetition_penalty: request.repetition_penalty,
-        session_key: (!request.session_key.is_empty()).then_some(request.session_key.clone()),
-        stream,
-        gbnf: (!request.gbnf.is_empty()).then_some(request.gbnf.clone()),
-        stop_sequences: request.stop_sequences.clone(),
-        ..Default::default()
+pub fn decode_ggml_llama_load_request(
+    request: &pb::GgmlLlamaLoadRequest,
+) -> Result<dto::GgmlLlamaLoadRequest, ProtoConversionError> {
+    Ok(dto::GgmlLlamaLoadRequest {
+        model_path: decode_optional_path(request.model_path.as_ref()),
+        num_workers: request.num_workers,
+        context_length: request.context_length,
+        chat_template: request.chat_template.clone(),
+        gbnf: request.gbnf.clone(),
+        flash_attn: request.flash_attn,
     })
 }
 
-pub fn encode_chat_response(response: &TextGenerationResponse) -> pb::ChatResponse {
-    pb::ChatResponse {
+pub fn decode_ggml_llama_chat_request(
+    request: &pb::GgmlLlamaChatRequest,
+) -> Result<dto::GgmlLlamaChatRequest, ProtoConversionError> {
+    Ok(dto::GgmlLlamaChatRequest {
+        prompt: request.prompt.clone(),
+        max_tokens: request.max_tokens,
+        temperature: request.temperature,
+        top_p: request.top_p,
+        top_k: request.top_k,
+        min_p: request.min_p,
+        presence_penalty: request.presence_penalty,
+        repetition_penalty: request.repetition_penalty,
+        session_key: request.session_key.clone(),
+        gbnf: request.gbnf.clone(),
+        stop_sequences: decode_optional_string_list(request.stop_sequences.as_ref()),
+        ignore_eos: request.ignore_eos,
+        logit_bias_json: request.logit_bias_json.clone(),
+    })
+}
+
+pub fn encode_ggml_llama_chat_response(
+    response: &dto::LlamaChatResponse,
+) -> pb::GgmlLlamaChatResponse {
+    pb::GgmlLlamaChatResponse {
         text: response.text.clone(),
-        finish_reason: response.finish_reason.clone().unwrap_or_default(),
-        tokens_used: response.tokens_used.unwrap_or_default(),
+        finish_reason: response.finish_reason.clone(),
+        tokens_used: response.tokens_used,
         usage: response.usage.as_ref().map(encode_usage),
-        reasoning_content: reasoning_content_from_metadata(&response.metadata),
+        reasoning_content: response.reasoning_content.clone(),
     }
 }
 
-pub fn decode_chat_response(response: &pb::ChatResponse) -> TextGenerationResponse {
-    let mut metadata = slab_types::inference::JsonOptions::default();
-    insert_reasoning_content_metadata(&mut metadata, &response.reasoning_content);
-
-    TextGenerationResponse {
-        text: response.text.clone(),
-        finish_reason: (!response.finish_reason.is_empty())
-            .then_some(response.finish_reason.clone()),
-        tokens_used: (response.tokens_used > 0).then_some(response.tokens_used),
-        usage: response.usage.as_ref().map(decode_usage),
-        metadata,
-    }
-}
-
-pub fn encode_chat_stream_chunk(chunk: &TextGenerationChunk) -> pb::ChatStreamChunk {
-    pb::ChatStreamChunk {
-        token: chunk.delta.clone(),
-        error: String::new(),
+pub fn encode_ggml_llama_chat_stream_chunk(
+    chunk: &dto::LlamaChatStreamChunk,
+) -> pb::GgmlLlamaChatStreamChunk {
+    pb::GgmlLlamaChatStreamChunk {
+        delta: chunk.delta.clone(),
         done: chunk.done,
-        finish_reason: chunk.finish_reason.clone().unwrap_or_default(),
+        finish_reason: chunk.finish_reason.clone(),
         usage: chunk.usage.as_ref().map(encode_usage),
-        reasoning_content: reasoning_content_from_metadata(&chunk.metadata),
+        reasoning_content: chunk.reasoning_content.clone(),
     }
 }
 
-pub fn decode_chat_stream_chunk(chunk: &pb::ChatStreamChunk) -> TextGenerationChunk {
-    let mut metadata = slab_types::inference::JsonOptions::default();
-    insert_reasoning_content_metadata(&mut metadata, &chunk.reasoning_content);
+pub fn decode_ggml_whisper_load_request(
+    request: &pb::GgmlWhisperLoadRequest,
+) -> Result<dto::GgmlWhisperLoadRequest, ProtoConversionError> {
+    Ok(dto::GgmlWhisperLoadRequest {
+        model_path: decode_optional_path(request.model_path.as_ref()),
+        flash_attn: request.flash_attn,
+    })
+}
 
-    TextGenerationChunk {
-        delta: chunk.token.clone(),
+pub fn decode_ggml_whisper_transcribe_request(
+    request: &pb::GgmlWhisperTranscribeRequest,
+) -> Result<dto::GgmlWhisperTranscribeRequest, ProtoConversionError> {
+    Ok(dto::GgmlWhisperTranscribeRequest {
+        path: decode_optional_path(request.path.as_ref()),
+        language: request.language.clone(),
+        prompt: request.prompt.clone(),
+        detect_language: request.detect_language,
+        vad: request.vad.as_ref().map(decode_ggml_whisper_vad_options),
+        decode: request.decode.as_ref().map(decode_ggml_whisper_decode_options),
+    })
+}
+
+pub fn encode_ggml_whisper_transcribe_response(
+    response: &dto::GgmlWhisperTranscribeResponse,
+) -> pb::GgmlWhisperTranscribeResponse {
+    pb::GgmlWhisperTranscribeResponse {
+        transcription: Some(encode_whisper_transcription(&response.transcription)),
+    }
+}
+
+pub fn decode_ggml_diffusion_load_request(
+    request: &pb::GgmlDiffusionLoadRequest,
+) -> Result<dto::GgmlDiffusionLoadRequest, ProtoConversionError> {
+    Ok(dto::GgmlDiffusionLoadRequest {
+        model_path: decode_optional_path(request.model_path.as_ref()),
+        diffusion_model_path: decode_optional_path(request.diffusion_model_path.as_ref()),
+        vae_path: decode_optional_path(request.vae_path.as_ref()),
+        taesd_path: decode_optional_path(request.taesd_path.as_ref()),
+        clip_l_path: decode_optional_path(request.clip_l_path.as_ref()),
+        clip_g_path: decode_optional_path(request.clip_g_path.as_ref()),
+        t5xxl_path: decode_optional_path(request.t5xxl_path.as_ref()),
+        clip_vision_path: decode_optional_path(request.clip_vision_path.as_ref()),
+        control_net_path: decode_optional_path(request.control_net_path.as_ref()),
+        flash_attn: request.flash_attn,
+        vae_device: request.vae_device.clone(),
+        clip_device: request.clip_device.clone(),
+        offload_params_to_cpu: request.offload_params_to_cpu,
+        enable_mmap: request.enable_mmap,
+        n_threads: request.n_threads,
+    })
+}
+
+pub fn decode_ggml_diffusion_generate_image_request(
+    request: &pb::GgmlDiffusionGenerateImageRequest,
+) -> Result<dto::GgmlDiffusionGenerateImageRequest, ProtoConversionError> {
+    Ok(dto::GgmlDiffusionGenerateImageRequest {
+        prompt: request.prompt.clone(),
+        negative_prompt: request.negative_prompt.clone(),
+        width: request.width,
+        height: request.height,
+        init_image: request.init_image.as_ref().map(decode_raw_image),
+        count: request.count,
+        cfg_scale: request.cfg_scale,
+        guidance: request.guidance,
+        sample_steps: request.sample_steps,
+        seed: request.seed,
+        sample_method: request.sample_method.clone(),
+        scheduler: request.scheduler.clone(),
+        clip_skip: request.clip_skip,
+        strength: request.strength,
+        eta: request.eta,
+    })
+}
+
+pub fn encode_ggml_diffusion_generate_image_response(
+    response: &dto::GgmlDiffusionGenerateImageResponse,
+) -> pb::GgmlDiffusionGenerateImageResponse {
+    pb::GgmlDiffusionGenerateImageResponse {
+        images: response.images.iter().map(encode_raw_image).collect(),
+    }
+}
+
+pub fn decode_ggml_diffusion_generate_video_request(
+    request: &pb::GgmlDiffusionGenerateVideoRequest,
+) -> Result<dto::GgmlDiffusionGenerateVideoRequest, ProtoConversionError> {
+    Ok(dto::GgmlDiffusionGenerateVideoRequest {
+        prompt: request.prompt.clone(),
+        negative_prompt: request.negative_prompt.clone(),
+        width: request.width,
+        height: request.height,
+        init_image: request.init_image.as_ref().map(decode_raw_image),
+        video_frames: request.video_frames,
+        fps: request.fps,
+        cfg_scale: request.cfg_scale,
+        guidance: request.guidance,
+        sample_steps: request.sample_steps,
+        seed: request.seed,
+        sample_method: request.sample_method.clone(),
+        scheduler: request.scheduler.clone(),
+        strength: request.strength,
+    })
+}
+
+pub fn encode_ggml_diffusion_generate_video_response(
+    response: &dto::GgmlDiffusionGenerateVideoResponse,
+) -> pb::GgmlDiffusionGenerateVideoResponse {
+    pb::GgmlDiffusionGenerateVideoResponse {
+        frames: response.frames.iter().map(encode_raw_image).collect(),
+    }
+}
+
+pub fn decode_candle_llama_load_request(
+    request: &pb::CandleLlamaLoadRequest,
+) -> Result<dto::CandleLlamaLoadRequest, ProtoConversionError> {
+    Ok(dto::CandleLlamaLoadRequest {
+        model_path: decode_optional_path(request.model_path.as_ref()),
+        tokenizer_path: decode_optional_path(request.tokenizer_path.as_ref()),
+        seed: request.seed,
+    })
+}
+
+pub fn decode_candle_chat_request(
+    request: &pb::CandleChatRequest,
+) -> Result<dto::CandleChatRequest, ProtoConversionError> {
+    Ok(dto::CandleChatRequest {
+        prompt: request.prompt.clone(),
+        max_tokens: request.max_tokens,
+        session_key: request.session_key.clone(),
+    })
+}
+
+pub fn encode_candle_chat_response(response: &dto::LlamaChatResponse) -> pb::CandleChatResponse {
+    pb::CandleChatResponse {
+        text: response.text.clone(),
+        finish_reason: response.finish_reason.clone(),
+        tokens_used: response.tokens_used,
+        usage: response.usage.as_ref().map(encode_usage),
+        reasoning_content: response.reasoning_content.clone(),
+    }
+}
+
+pub fn encode_candle_chat_stream_chunk(
+    chunk: &dto::LlamaChatStreamChunk,
+) -> pb::CandleChatStreamChunk {
+    pb::CandleChatStreamChunk {
+        delta: chunk.delta.clone(),
         done: chunk.done,
-        finish_reason: (!chunk.finish_reason.is_empty()).then_some(chunk.finish_reason.clone()),
-        usage: chunk.usage.as_ref().map(decode_usage),
-        metadata,
+        finish_reason: chunk.finish_reason.clone(),
+        usage: chunk.usage.as_ref().map(encode_usage),
+        reasoning_content: chunk.reasoning_content.clone(),
     }
 }
 
-fn encode_usage(usage: &TextGenerationUsage) -> pb::Usage {
+pub fn decode_candle_whisper_load_request(
+    request: &pb::CandleWhisperLoadRequest,
+) -> Result<dto::CandleWhisperLoadRequest, ProtoConversionError> {
+    Ok(dto::CandleWhisperLoadRequest {
+        model_path: decode_optional_path(request.model_path.as_ref()),
+        tokenizer_path: decode_optional_path(request.tokenizer_path.as_ref()),
+    })
+}
+
+pub fn decode_candle_whisper_transcribe_request(
+    request: &pb::CandleWhisperTranscribeRequest,
+) -> Result<dto::CandleWhisperTranscribeRequest, ProtoConversionError> {
+    Ok(dto::CandleWhisperTranscribeRequest { path: decode_optional_path(request.path.as_ref()) })
+}
+
+pub fn encode_candle_whisper_transcribe_response(
+    response: &dto::CandleWhisperTranscribeResponse,
+) -> pb::CandleWhisperTranscribeResponse {
+    pb::CandleWhisperTranscribeResponse {
+        transcription: Some(encode_whisper_transcription(&response.transcription)),
+    }
+}
+
+pub fn decode_candle_diffusion_load_request(
+    request: &pb::CandleDiffusionLoadRequest,
+) -> Result<dto::CandleDiffusionLoadRequest, ProtoConversionError> {
+    Ok(dto::CandleDiffusionLoadRequest {
+        model_path: decode_optional_path(request.model_path.as_ref()),
+        vae_path: decode_optional_path(request.vae_path.as_ref()),
+        sd_version: request.sd_version.clone(),
+    })
+}
+
+pub fn decode_candle_diffusion_generate_image_request(
+    request: &pb::CandleDiffusionGenerateImageRequest,
+) -> Result<dto::CandleDiffusionGenerateImageRequest, ProtoConversionError> {
+    Ok(dto::CandleDiffusionGenerateImageRequest {
+        prompt: request.prompt.clone(),
+        negative_prompt: request.negative_prompt.clone(),
+        width: request.width,
+        height: request.height,
+        batch_count: request.batch_count,
+        sample_steps: request.sample_steps,
+        guidance_scale: request.guidance_scale,
+        seed: request.seed,
+    })
+}
+
+pub fn encode_candle_diffusion_generate_image_response(
+    response: &dto::CandleDiffusionGenerateImageResponse,
+) -> pb::CandleDiffusionGenerateImageResponse {
+    pb::CandleDiffusionGenerateImageResponse {
+        images: response.images.iter().map(encode_raw_image).collect(),
+    }
+}
+
+pub fn decode_onnx_text_load_request(
+    request: &pb::OnnxTextLoadRequest,
+) -> Result<dto::OnnxTextLoadRequest, ProtoConversionError> {
+    Ok(dto::OnnxTextLoadRequest {
+        model_path: decode_optional_path(request.model_path.as_ref()),
+        execution_providers: decode_optional_string_list(request.execution_providers.as_ref()),
+        intra_op_num_threads: request.intra_op_num_threads,
+        inter_op_num_threads: request.inter_op_num_threads,
+    })
+}
+
+pub fn decode_onnx_text_request(
+    request: &pb::OnnxTextRequest,
+) -> Result<dto::OnnxTextRequest, ProtoConversionError> {
+    Ok(dto::OnnxTextRequest { inputs: request.inputs.iter().map(decode_raw_tensor).collect() })
+}
+
+pub fn encode_onnx_text_response(response: &dto::OnnxTextResponse) -> pb::OnnxTextResponse {
+    pb::OnnxTextResponse { outputs: response.outputs.iter().map(encode_raw_tensor).collect() }
+}
+
+pub fn decode_onnx_embedding_load_request(
+    request: &pb::OnnxEmbeddingLoadRequest,
+) -> Result<dto::OnnxEmbeddingLoadRequest, ProtoConversionError> {
+    Ok(dto::OnnxEmbeddingLoadRequest {
+        model_path: decode_optional_path(request.model_path.as_ref()),
+        execution_providers: decode_optional_string_list(request.execution_providers.as_ref()),
+        intra_op_num_threads: request.intra_op_num_threads,
+        inter_op_num_threads: request.inter_op_num_threads,
+        input_tensor_name: request.input_tensor_name.clone(),
+        output_tensor_name: request.output_tensor_name.clone(),
+    })
+}
+
+pub fn decode_onnx_embedding_request(
+    request: &pb::OnnxEmbeddingRequest,
+) -> Result<dto::OnnxEmbeddingRequest, ProtoConversionError> {
+    Ok(dto::OnnxEmbeddingRequest { image: request.image.as_ref().map(decode_binary_payload) })
+}
+
+pub fn encode_onnx_embedding_response(
+    response: &dto::OnnxEmbeddingResponse,
+) -> pb::OnnxEmbeddingResponse {
+    pb::OnnxEmbeddingResponse { output: response.output.as_ref().map(encode_raw_tensor) }
+}
+
+pub fn encode_model_status_response(status: &dto::ModelStatus) -> pb::ModelStatusResponse {
+    pb::ModelStatusResponse { backend: status.backend.clone(), status: status.status.clone() }
+}
+
+fn decode_optional_path(value: Option<&String>) -> Option<PathBuf> {
+    value.map(PathBuf::from)
+}
+
+fn decode_optional_string_list(value: Option<&pb::StringList>) -> Option<Vec<String>> {
+    value.map(|list| list.values.clone())
+}
+
+fn encode_usage(usage: &dto::Usage) -> pb::Usage {
     pb::Usage {
         prompt_tokens: usage.prompt_tokens,
         completion_tokens: usage.completion_tokens,
         total_tokens: usage.total_tokens,
-        prompt_cached_tokens: usage.prompt_tokens_details.cached_tokens,
+        prompt_cached_tokens: usage.prompt_cached_tokens,
         estimated: usage.estimated,
     }
 }
 
-fn decode_usage(usage: &pb::Usage) -> TextGenerationUsage {
-    TextGenerationUsage {
-        prompt_tokens: usage.prompt_tokens,
-        completion_tokens: usage.completion_tokens,
-        total_tokens: usage.total_tokens,
-        prompt_tokens_details: TextPromptTokensDetails {
-            cached_tokens: usage.prompt_cached_tokens,
-        },
-        estimated: usage.estimated,
-    }
-}
-
-pub fn decode_diffusion_image_request(
-    request: &pb::ImageRequest,
-) -> Result<DiffusionImageRequest, ProtoConversionError> {
-    use pb::image_request::BackendParams;
-
-    let common =
-        request.common.as_ref().ok_or(ProtoConversionError::MissingField { field: "common" })?;
-    let backend = request
-        .backend_params
-        .as_ref()
-        .ok_or(ProtoConversionError::MissingField { field: "backend_params" })?;
-
-    Ok(DiffusionImageRequest {
-        common: decode_diffusion_request_common(common)?,
-        backend: match backend {
-            BackendParams::Ggml(params) => {
-                ensure_optional_u32_at_least(params.n, 1, "backend_params.ggml.n")?;
-                ensure_optional_i32_at_least(
-                    params.sample_steps,
-                    1,
-                    "backend_params.ggml.sample_steps",
-                )?;
-
-                DiffusionImageBackend::Ggml(GgmlDiffusionImageParams {
-                    count: params.n,
-                    cfg_scale: params.cfg_scale,
-                    guidance: params.guidance,
-                    steps: params.sample_steps,
-                    seed: params.seed,
-                    sample_method: optional_non_empty_owned(params.sample_method.as_ref()),
-                    scheduler: optional_non_empty_owned(params.scheduler.as_ref()),
-                    clip_skip: params.clip_skip,
-                    strength: params.strength,
-                    eta: params.eta,
-                })
-            }
-        },
-    })
-}
-
-pub fn encode_diffusion_image_request(
-    model: impl Into<String>,
-    request: &DiffusionImageRequest,
-) -> pb::ImageRequest {
-    use pb::image_request::BackendParams;
-
-    let backend_params = match &request.backend {
-        DiffusionImageBackend::Ggml(params) => {
-            Some(BackendParams::Ggml(pb::GgmlDiffusionImageParams {
-                n: params.count,
-                cfg_scale: params.cfg_scale,
-                guidance: params.guidance,
-                sample_steps: params.steps,
-                seed: params.seed,
-                sample_method: non_empty_string(params.sample_method.as_deref()),
-                scheduler: non_empty_string(params.scheduler.as_deref()),
-                clip_skip: params.clip_skip,
-                strength: params.strength,
-                eta: params.eta,
-            }))
-        }
-    };
-
-    pb::ImageRequest {
-        model: model.into(),
-        common: Some(encode_diffusion_request_common(&request.common)),
-        backend_params,
-    }
-}
-
-pub fn decode_diffusion_video_request(
-    request: &pb::VideoRequest,
-) -> Result<DiffusionVideoRequest, ProtoConversionError> {
-    use pb::video_request::BackendParams;
-
-    let common =
-        request.common.as_ref().ok_or(ProtoConversionError::MissingField { field: "common" })?;
-    let backend = request
-        .backend_params
-        .as_ref()
-        .ok_or(ProtoConversionError::MissingField { field: "backend_params" })?;
-
-    Ok(DiffusionVideoRequest {
-        common: decode_diffusion_request_common(common)?,
-        backend: match backend {
-            BackendParams::Ggml(params) => {
-                ensure_optional_i32_at_least(
-                    params.video_frames,
-                    1,
-                    "backend_params.ggml.video_frames",
-                )?;
-                ensure_optional_i32_at_least(
-                    params.sample_steps,
-                    1,
-                    "backend_params.ggml.sample_steps",
-                )?;
-
-                DiffusionVideoBackend::Ggml(GgmlDiffusionVideoParams {
-                    video_frames: params.video_frames,
-                    fps: params.fps,
-                    cfg_scale: params.cfg_scale,
-                    guidance: params.guidance,
-                    steps: params.sample_steps,
-                    seed: params.seed,
-                    sample_method: optional_non_empty_owned(params.sample_method.as_ref()),
-                    scheduler: optional_non_empty_owned(params.scheduler.as_ref()),
-                    strength: params.strength,
-                })
-            }
-        },
-    })
-}
-
-pub fn encode_diffusion_video_request(
-    model: impl Into<String>,
-    request: &DiffusionVideoRequest,
-) -> pb::VideoRequest {
-    use pb::video_request::BackendParams;
-
-    let backend_params = match &request.backend {
-        DiffusionVideoBackend::Ggml(params) => {
-            Some(BackendParams::Ggml(pb::GgmlDiffusionVideoParams {
-                video_frames: params.video_frames,
-                fps: params.fps,
-                cfg_scale: params.cfg_scale,
-                guidance: params.guidance,
-                sample_steps: params.steps,
-                seed: params.seed,
-                sample_method: non_empty_string(params.sample_method.as_deref()),
-                scheduler: non_empty_string(params.scheduler.as_deref()),
-                strength: params.strength,
-            }))
-        }
-    };
-
-    pb::VideoRequest {
-        model: model.into(),
-        common: Some(encode_diffusion_request_common(&request.common)),
-        backend_params,
-    }
-}
-
-pub fn diffusion_image_response_from_generated(
-    response: &ImageGenerationResponse,
-) -> Result<DiffusionImageResponse, ProtoConversionError> {
-    let images = response
-        .images
-        .iter()
-        .map(|image_bytes| {
-            let metadata = image_metadata_from_bytes(image_bytes)?;
-
-            Ok(GeneratedImage {
-                bytes: image_bytes.clone(),
-                width: metadata.width,
-                height: metadata.height,
-                channels: metadata.channels,
-            })
-        })
-        .collect::<Result<Vec<_>, ProtoConversionError>>()?;
-
-    Ok(DiffusionImageResponse { images, metadata: response.metadata.clone() })
-}
-
-pub fn encode_generated_image_response(
-    response: &ImageGenerationResponse,
-) -> Result<pb::ImageResponse, ProtoConversionError> {
-    let response = diffusion_image_response_from_generated(response)?;
-    encode_diffusion_image_response(&response)
-}
-
-pub fn encode_diffusion_image_response(
-    response: &DiffusionImageResponse,
-) -> Result<pb::ImageResponse, ProtoConversionError> {
-    let images = response
-        .images
-        .iter()
-        .map(|image| {
-            let metadata = if image.width == 0 || image.height == 0 || image.channels == 0 {
-                Some(image_metadata_from_bytes(&image.bytes)?)
-            } else {
-                None
-            };
-
-            Ok(ProtoImageEntry {
-                image: base64::engine::general_purpose::STANDARD.encode(&image.bytes),
-                width: image.width.max(metadata.map_or(0, |value| value.width)),
-                height: image.height.max(metadata.map_or(0, |value| value.height)),
-                channels: max_channels(image.channels, metadata.map_or(0, |value| value.channels)),
-            })
-        })
-        .collect::<Result<Vec<_>, ProtoConversionError>>()?;
-
-    let images_json = serde_json::to_vec(&ProtoImagePayload { images })
-        .map_err(|source| ProtoConversionError::Json { field: "image_response", source })?;
-
-    Ok(pb::ImageResponse { images_json })
-}
-
-pub fn decode_diffusion_image_response(
-    response: &pb::ImageResponse,
-) -> Result<DiffusionImageResponse, ProtoConversionError> {
-    let payload: ProtoImagePayload = serde_json::from_slice(&response.images_json)
-        .map_err(|source| ProtoConversionError::Json { field: "images_json", source })?;
-
-    let images = payload
-        .images
-        .into_iter()
-        .map(|image| {
-            let bytes = base64::engine::general_purpose::STANDARD.decode(image.image).map_err(
-                |source| ProtoConversionError::Base64 {
-                    field: "images_json.images[].image",
-                    source,
-                },
-            )?;
-
-            let metadata = image_metadata_from_bytes(&bytes)?;
-            Ok(GeneratedImage {
-                bytes,
-                width: metadata.width,
-                height: metadata.height,
-                channels: metadata.channels,
-            })
-        })
-        .collect::<Result<Vec<_>, ProtoConversionError>>()?;
-
-    Ok(DiffusionImageResponse { images, metadata: Default::default() })
-}
-
-pub fn diffusion_video_response_from_generated(
-    response: &ImageGenerationResponse,
-) -> Result<DiffusionVideoResponse, ProtoConversionError> {
-    let frames = response
-        .images
-        .iter()
-        .map(|image_bytes| {
-            let decoded = image::load_from_memory(image_bytes).map_err(|source| {
-                ProtoConversionError::Image { field: "generated_frame", source }
-            })?;
-            let (width, height) = decoded.dimensions();
-
-            let (data, channels) = if decoded.color().channel_count() == 4 {
-                (decoded.to_rgba8().into_raw(), 4u8)
-            } else {
-                (decoded.to_rgb8().into_raw(), 3u8)
-            };
-
-            Ok(GeneratedFrame { data, width, height, channels })
-        })
-        .collect::<Result<Vec<_>, ProtoConversionError>>()?;
-
-    Ok(DiffusionVideoResponse { frames, metadata: response.metadata.clone() })
-}
-
-pub fn encode_generated_video_response(
-    response: &ImageGenerationResponse,
-) -> Result<pb::VideoResponse, ProtoConversionError> {
-    let response = diffusion_video_response_from_generated(response)?;
-    encode_diffusion_video_response(&response)
-}
-
-pub fn encode_diffusion_video_response(
-    response: &DiffusionVideoResponse,
-) -> Result<pb::VideoResponse, ProtoConversionError> {
-    let frames = response
-        .frames
-        .iter()
-        .map(|frame| {
-            Ok(ProtoFrameEntry {
-                b64: base64::engine::general_purpose::STANDARD.encode(&frame.data),
-                width: frame.width,
-                height: frame.height,
-                channels: frame.channels.max(1),
-            })
-        })
-        .collect::<Result<Vec<_>, ProtoConversionError>>()?;
-
-    let frames_json = serde_json::to_vec(&frames)
-        .map_err(|source| ProtoConversionError::Json { field: "frames_json", source })?;
-
-    Ok(pb::VideoResponse { frames_json })
-}
-
-pub fn decode_diffusion_video_response(
-    response: &pb::VideoResponse,
-) -> Result<DiffusionVideoResponse, ProtoConversionError> {
-    let frames: Vec<ProtoFrameEntry> = serde_json::from_slice(&response.frames_json)
-        .map_err(|source| ProtoConversionError::Json { field: "frames_json", source })?;
-
-    let frames = frames
-        .into_iter()
-        .map(|frame| {
-            let data =
-                base64::engine::general_purpose::STANDARD.decode(frame.b64).map_err(|source| {
-                    ProtoConversionError::Base64 { field: "frames_json[].b64", source }
-                })?;
-
-            Ok(GeneratedFrame {
-                data,
-                width: frame.width,
-                height: frame.height,
-                channels: frame.channels.max(1),
-            })
-        })
-        .collect::<Result<Vec<_>, ProtoConversionError>>()?;
-
-    Ok(DiffusionVideoResponse { frames, metadata: Default::default() })
-}
-
-fn decode_diffusion_request_common(
-    common: &pb::DiffusionRequestCommon,
-) -> Result<DiffusionRequestCommon, ProtoConversionError> {
-    ensure_non_empty(&common.prompt, "common.prompt")?;
-    ensure_u32_at_least(common.width, 1, "common.width")?;
-    ensure_u32_at_least(common.height, 1, "common.height")?;
-
-    Ok(DiffusionRequestCommon {
-        prompt: common.prompt.clone(),
-        negative_prompt: optional_non_empty_owned(common.negative_prompt.as_ref()),
-        width: common.width,
-        height: common.height,
-        init_image: raw_image_input_from_proto(common.init_image.as_ref())?,
-        options: Default::default(),
-    })
-}
-
-fn encode_diffusion_request_common(common: &DiffusionRequestCommon) -> pb::DiffusionRequestCommon {
-    pb::DiffusionRequestCommon {
-        prompt: common.prompt.clone(),
-        negative_prompt: non_empty_string(common.negative_prompt.as_deref()),
-        width: common.width,
-        height: common.height,
-        init_image: raw_image_input_to_proto(common.init_image.as_ref()),
-    }
-}
-
-fn raw_image_input_from_proto(
-    init_image: Option<&pb::RawImageInput>,
-) -> Result<Option<RawImageInput>, ProtoConversionError> {
-    let Some(image) = init_image else {
-        return Ok(None);
-    };
-
-    Ok(Some(RawImageInput {
+fn decode_raw_image(image: &pb::RawImage) -> dto::RawImage {
+    dto::RawImage {
         data: image.data.clone(),
         width: image.width,
         height: image.height,
-        channels: u8::try_from(image.channels).map_err(|_| ProtoConversionError::OutOfRange {
-            field: "common.init_image.channels",
-        })?,
-    }))
+        channels: image.channels,
+    }
 }
 
-fn raw_image_input_to_proto(init_image: Option<&RawImageInput>) -> Option<pb::RawImageInput> {
-    init_image.map(|image| pb::RawImageInput {
+fn encode_raw_image(image: &dto::RawImage) -> pb::RawImage {
+    pb::RawImage {
         data: image.data.clone(),
         width: image.width,
         height: image.height,
-        channels: u32::from(image.channels),
-    })
-}
-
-fn image_metadata_from_bytes(bytes: &[u8]) -> Result<ImageMetadata, ProtoConversionError> {
-    let decoded = image::load_from_memory(bytes)
-        .map_err(|source| ProtoConversionError::Image { field: "generated_image", source })?;
-    let (width, height) = decoded.dimensions();
-
-    Ok(ImageMetadata { width, height, channels: decoded.color().channel_count() })
-}
-
-fn ensure_non_empty(value: &str, field: &'static str) -> Result<(), ProtoConversionError> {
-    if value.trim().is_empty() {
-        return Err(ProtoConversionError::EmptyField { field });
-    }
-    Ok(())
-}
-
-fn ensure_u32_at_least(
-    value: u32,
-    minimum: u32,
-    field: &'static str,
-) -> Result<(), ProtoConversionError> {
-    if value < minimum {
-        return Err(ProtoConversionError::BelowMinimum { field, minimum: i64::from(minimum) });
-    }
-    Ok(())
-}
-
-fn ensure_i32_at_least(
-    value: i32,
-    minimum: i32,
-    field: &'static str,
-) -> Result<(), ProtoConversionError> {
-    if value < minimum {
-        return Err(ProtoConversionError::BelowMinimum { field, minimum: i64::from(minimum) });
-    }
-    Ok(())
-}
-
-fn ensure_optional_u32_at_least(
-    value: Option<u32>,
-    minimum: u32,
-    field: &'static str,
-) -> Result<(), ProtoConversionError> {
-    if let Some(value) = value {
-        ensure_u32_at_least(value, minimum, field)?;
-    }
-    Ok(())
-}
-
-fn ensure_optional_i32_at_least(
-    value: Option<i32>,
-    minimum: i32,
-    field: &'static str,
-) -> Result<(), ProtoConversionError> {
-    if let Some(value) = value {
-        ensure_i32_at_least(value, minimum, field)?;
-    }
-    Ok(())
-}
-
-fn model_path_from_model_load_request(
-    request: &pb::ModelLoadRequest,
-) -> Result<PathBuf, ProtoConversionError> {
-    let common =
-        request.common.as_ref().ok_or(ProtoConversionError::MissingField { field: "common" })?;
-    ensure_non_empty(&common.model_path, "common.model_path")?;
-    Ok(PathBuf::from(&common.model_path))
-}
-
-fn model_path_from_backend_load_spec(spec: &RuntimeBackendLoadSpec) -> &Path {
-    match spec {
-        RuntimeBackendLoadSpec::GgmlLlama(config) => config.model_path.as_path(),
-        RuntimeBackendLoadSpec::GgmlWhisper(config) => config.model_path.as_path(),
-        RuntimeBackendLoadSpec::GgmlDiffusion(config) => config.model_path.as_path(),
-        RuntimeBackendLoadSpec::CandleLlama(config) => config.model_path.as_path(),
-        RuntimeBackendLoadSpec::CandleWhisper(config) => config.model_path.as_path(),
-        RuntimeBackendLoadSpec::CandleDiffusion(config) => config.model_path.as_path(),
-        RuntimeBackendLoadSpec::Onnx(config) => config.model_path.as_path(),
+        channels: image.channels,
     }
 }
 
-fn non_empty_string(value: Option<&str>) -> Option<String> {
-    value.filter(|value| !value.trim().is_empty()).map(ToOwned::to_owned)
+fn decode_raw_tensor(tensor: &pb::RawTensor) -> dto::RawTensor {
+    dto::RawTensor {
+        name: tensor.name.clone(),
+        shape: tensor.shape.clone(),
+        dtype: tensor.dtype.clone(),
+        data: tensor.data.clone(),
+    }
 }
 
-fn optional_non_empty_owned(value: Option<&String>) -> Option<String> {
-    value.and_then(|value| non_empty_string(Some(value.as_str())))
+fn encode_raw_tensor(tensor: &dto::RawTensor) -> pb::RawTensor {
+    pb::RawTensor {
+        name: tensor.name.clone(),
+        shape: tensor.shape.clone(),
+        dtype: tensor.dtype.clone(),
+        data: tensor.data.clone(),
+    }
 }
 
-fn non_empty_path(value: Option<&str>) -> Option<PathBuf> {
-    value.filter(|value| !value.trim().is_empty()).map(PathBuf::from)
+fn decode_binary_payload(payload: &pb::BinaryPayload) -> dto::BinaryPayload {
+    dto::BinaryPayload {
+        data: payload.data.clone(),
+        mime_type: payload.mime_type.clone(),
+        file_name: payload.file_name.clone(),
+    }
 }
 
-fn path_to_string(path: &Path) -> String {
-    path.to_string_lossy().into_owned()
+fn encode_whisper_transcription(
+    transcription: &dto::WhisperTranscription,
+) -> pb::WhisperTranscription {
+    pb::WhisperTranscription {
+        raw_text: transcription.raw_text.clone(),
+        language: transcription.language.clone(),
+        segments: transcription.segments.iter().map(encode_whisper_segment).collect(),
+    }
 }
 
-fn opt_path_to_string(path: Option<&Path>) -> Option<String> {
-    path.map(path_to_string)
+fn encode_whisper_segment(segment: &dto::WhisperSegment) -> pb::WhisperSegment {
+    pb::WhisperSegment {
+        start_ms: segment.start_ms,
+        end_ms: segment.end_ms,
+        text: segment.text.clone(),
+    }
 }
 
-fn usize_to_u32(value: usize) -> u32 {
-    u32::try_from(value).unwrap_or(u32::MAX)
+fn decode_ggml_whisper_vad_options(
+    value: &pb::GgmlWhisperVadOptions,
+) -> dto::GgmlWhisperVadOptions {
+    dto::GgmlWhisperVadOptions {
+        enabled: value.enabled,
+        model_path: decode_optional_path(value.model_path.as_ref()),
+        params: value.params.as_ref().map(decode_ggml_whisper_vad_params),
+    }
 }
 
-fn u32_to_usize(value: u32, field: &'static str) -> Result<usize, ProtoConversionError> {
-    usize::try_from(value).map_err(|_| ProtoConversionError::OutOfRange { field })
+fn decode_ggml_whisper_vad_params(value: &pb::GgmlWhisperVadParams) -> dto::GgmlWhisperVadParams {
+    dto::GgmlWhisperVadParams {
+        threshold: value.threshold,
+        min_speech_duration_ms: value.min_speech_duration_ms,
+        min_silence_duration_ms: value.min_silence_duration_ms,
+        max_speech_duration_s: value.max_speech_duration_s,
+        speech_pad_ms: value.speech_pad_ms,
+        samples_overlap: value.samples_overlap,
+    }
 }
 
-fn max_channels(lhs: u8, rhs: u8) -> u8 {
-    lhs.max(rhs).max(1)
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ImageMetadata {
-    width: u32,
-    height: u32,
-    channels: u8,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ProtoImagePayload {
-    #[serde(default)]
-    images: Vec<ProtoImageEntry>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ProtoImageEntry {
-    image: String,
-    #[serde(default)]
-    width: u32,
-    #[serde(default)]
-    height: u32,
-    #[serde(default)]
-    channels: u8,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct ProtoFrameEntry {
-    b64: String,
-    width: u32,
-    height: u32,
-    channels: u8,
+fn decode_ggml_whisper_decode_options(
+    value: &pb::GgmlWhisperDecodeOptions,
+) -> dto::GgmlWhisperDecodeOptions {
+    dto::GgmlWhisperDecodeOptions {
+        offset_ms: value.offset_ms,
+        duration_ms: value.duration_ms,
+        no_context: value.no_context,
+        no_timestamps: value.no_timestamps,
+        token_timestamps: value.token_timestamps,
+        split_on_word: value.split_on_word,
+        suppress_nst: value.suppress_nst,
+        word_thold: value.word_thold,
+        max_len: value.max_len,
+        max_tokens: value.max_tokens,
+        temperature: value.temperature,
+        temperature_inc: value.temperature_inc,
+        entropy_thold: value.entropy_thold,
+        logprob_thold: value.logprob_thold,
+        no_speech_thold: value.no_speech_thold,
+        tdrz_enable: value.tdrz_enable,
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use image::{DynamicImage, ImageFormat, RgbImage};
-    use std::io::Cursor;
+    use super::{decode_ggml_llama_chat_request, decode_onnx_embedding_request, dto};
+    use crate::slab::ipc::v1 as pb;
 
     #[test]
-    fn model_load_spec_round_trips_diffusion_backend_fields() {
-        let spec = RuntimeBackendLoadSpec::GgmlDiffusion(Box::new(GgmlDiffusionLoadConfig {
-            model_path: PathBuf::from("C:/models/model.gguf"),
-            diffusion_model_path: Some(PathBuf::from("C:/models/diffusion.safetensors")),
-            vae_path: Some(PathBuf::from("C:/models/vae.safetensors")),
-            taesd_path: None,
-            clip_l_path: None,
-            clip_g_path: Some(PathBuf::from("C:/models/clip-g.safetensors")),
-            t5xxl_path: None,
-            clip_vision_path: Some(PathBuf::from("C:/models/clip-vision.safetensors")),
-            control_net_path: Some(PathBuf::from("C:/models/controlnet.safetensors")),
-            flash_attn: true,
-            vae_device: Some(String::from("cpu")),
-            clip_device: None,
-            offload_params_to_cpu: true,
-            enable_mmap: true,
-            n_threads: Some(8),
-        }));
+    fn ggml_llama_request_preserves_zero_false_and_empty_values() {
+        let decoded = decode_ggml_llama_chat_request(&pb::GgmlLlamaChatRequest {
+            prompt: Some(String::new()),
+            max_tokens: Some(0),
+            temperature: Some(0.0),
+            top_p: Some(0.0),
+            top_k: Some(0),
+            min_p: Some(0.0),
+            presence_penalty: Some(0.0),
+            repetition_penalty: Some(0.0),
+            session_key: Some(String::new()),
+            gbnf: Some(String::new()),
+            stop_sequences: Some(pb::StringList { values: Vec::new() }),
+            ignore_eos: Some(false),
+            logit_bias_json: Some(Vec::new()),
+        })
+        .expect("decode should succeed");
 
-        let request = encode_model_load_request(&spec);
-        let roundtrip = decode_model_load_request(&request).unwrap();
-
-        assert_eq!(roundtrip, spec);
+        assert_eq!(decoded.prompt, Some(String::new()));
+        assert_eq!(decoded.max_tokens, Some(0));
+        assert_eq!(decoded.temperature, Some(0.0));
+        assert_eq!(decoded.top_p, Some(0.0));
+        assert_eq!(decoded.top_k, Some(0));
+        assert_eq!(decoded.min_p, Some(0.0));
+        assert_eq!(decoded.ignore_eos, Some(false));
+        assert_eq!(decoded.stop_sequences, Some(Vec::new()));
+        assert_eq!(decoded.logit_bias_json, Some(Vec::new()));
     }
 
     #[test]
-    fn model_load_spec_round_trips_ggml_llama_fields() {
-        let spec = RuntimeBackendLoadSpec::GgmlLlama(GgmlLlamaLoadConfig {
-            model_path: PathBuf::from("C:/models/model.gguf"),
-            num_workers: 2,
-            context_length: Some(8192),
-            flash_attn: true,
-            chat_template: Some(
-                "{% for message in messages %}{{ message['content'] }}{% endfor %}".to_owned(),
-            ),
-            gbnf: Some("root ::= object".to_owned()),
-        });
+    fn onnx_embedding_request_preserves_empty_binary_payload() {
+        let decoded = decode_onnx_embedding_request(&pb::OnnxEmbeddingRequest {
+            image: Some(pb::BinaryPayload {
+                data: Vec::new(),
+                mime_type: Some(String::new()),
+                file_name: Some(String::new()),
+            }),
+        })
+        .expect("decode should succeed");
 
-        let request = encode_model_load_request(&spec);
-        let roundtrip = decode_model_load_request(&request).unwrap();
-
-        assert_eq!(roundtrip, spec);
-    }
-
-    #[test]
-    fn model_load_spec_round_trips_ggml_whisper_fields() {
-        let spec = RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig {
-            model_path: PathBuf::from("C:/models/model.bin"),
-            flash_attn: false,
-        });
-
-        let request = encode_model_load_request(&spec);
-        let roundtrip = decode_model_load_request(&request).unwrap();
-
-        assert_eq!(roundtrip, spec);
-    }
-
-    #[test]
-    fn model_load_spec_round_trips_onnx_fields() {
-        let spec = RuntimeBackendLoadSpec::Onnx(OnnxLoadConfig {
-            model_path: PathBuf::from("C:/models/encoder.onnx"),
-            execution_providers: vec!["CPU".to_owned(), "CUDA".to_owned()],
-            intra_op_num_threads: Some(4),
-            inter_op_num_threads: Some(2),
-        });
-
-        let request = encode_model_load_request(&spec);
-        let roundtrip = decode_model_load_request(&request).unwrap();
-
-        assert_eq!(roundtrip, spec);
-    }
-
-    #[test]
-    fn decode_model_load_request_treats_legacy_zero_sentinels_as_unset() {
-        let ggml_llama_request = pb::ModelLoadRequest {
-            common: Some(pb::ModelLoadCommon { model_path: "C:/models/model.gguf".to_owned() }),
-            backend_params: Some(pb::model_load_request::BackendParams::GgmlLlama(
-                pb::GgmlLlamaLoadParams {
-                    num_workers: 1,
-                    context_length: Some(0),
-                    chat_template: None,
-                    gbnf: None,
-                    flash_attn: Some(true),
-                },
-            )),
-        };
-        let ggml_diffusion_request = pb::ModelLoadRequest {
-            common: Some(pb::ModelLoadCommon { model_path: "C:/models/model.gguf".to_owned() }),
-            backend_params: Some(pb::model_load_request::BackendParams::GgmlDiffusion(
-                pb::GgmlDiffusionLoadParams {
-                    diffusion_model_path: None,
-                    vae_path: None,
-                    taesd_path: None,
-                    clip_l_path: None,
-                    clip_g_path: None,
-                    t5xxl_path: None,
-                    clip_vision_path: None,
-                    control_net_path: None,
-                    flash_attn: Some(true),
-                    vae_device: None,
-                    clip_device: None,
-                    offload_params_to_cpu: false,
-                    enable_mmap: false,
-                    n_threads: Some(0),
-                },
-            )),
-        };
-        let onnx_request = pb::ModelLoadRequest {
-            common: Some(pb::ModelLoadCommon { model_path: "C:/models/model.onnx".to_owned() }),
-            backend_params: Some(pb::model_load_request::BackendParams::Onnx(pb::OnnxLoadParams {
-                execution_providers: vec!["CPU".to_owned()],
-                intra_op_num_threads: Some(0),
-                inter_op_num_threads: Some(0),
-            })),
-        };
-
-        let ggml_llama = decode_model_load_request(&ggml_llama_request).unwrap();
-        let ggml_diffusion = decode_model_load_request(&ggml_diffusion_request).unwrap();
-        let onnx = decode_model_load_request(&onnx_request).unwrap();
-
-        match ggml_llama {
-            RuntimeBackendLoadSpec::GgmlLlama(config) => assert_eq!(config.context_length, None),
-            other => panic!("expected ggml llama config, got {other:?}"),
-        }
-
-        match ggml_diffusion {
-            RuntimeBackendLoadSpec::GgmlDiffusion(config) => assert_eq!(config.n_threads, None),
-            other => panic!("expected ggml diffusion config, got {other:?}"),
-        }
-
-        match onnx {
-            RuntimeBackendLoadSpec::Onnx(config) => {
-                assert_eq!(config.intra_op_num_threads, None);
-                assert_eq!(config.inter_op_num_threads, None);
+        assert_eq!(
+            decoded,
+            dto::OnnxEmbeddingRequest {
+                image: Some(dto::BinaryPayload {
+                    data: Vec::new(),
+                    mime_type: Some(String::new()),
+                    file_name: Some(String::new()),
+                }),
             }
-            other => panic!("expected onnx config, got {other:?}"),
-        }
+        );
     }
 
     #[test]
-    fn model_load_request_rejects_missing_common_model_path() {
-        let request = pb::ModelLoadRequest {
-            common: Some(pb::ModelLoadCommon { model_path: String::new() }),
-            backend_params: Some(pb::model_load_request::BackendParams::GgmlDiffusion(
-                pb::GgmlDiffusionLoadParams {
-                    diffusion_model_path: Some(
-                        PathBuf::from("C:/models/diffusion.safetensors")
-                            .to_string_lossy()
-                            .into_owned(),
-                    ),
-                    vae_path: Some(
-                        PathBuf::from("C:/models/vae.safetensors").to_string_lossy().into_owned(),
-                    ),
-                    taesd_path: None,
-                    clip_l_path: None,
-                    clip_g_path: None,
-                    t5xxl_path: None,
-                    clip_vision_path: None,
-                    control_net_path: None,
-                    flash_attn: Some(false),
-                    vae_device: None,
-                    clip_device: None,
-                    offload_params_to_cpu: false,
-                    enable_mmap: false,
-                    n_threads: None,
-                },
-            )),
-        };
+    fn model_status_encode_is_lossless_for_strings() {
+        let encoded = super::encode_model_status_response(&dto::ModelStatus {
+            backend: "onnx.text".to_owned(),
+            status: "loaded".to_owned(),
+        });
 
-        let error = decode_model_load_request(&request).unwrap_err();
-
-        assert!(matches!(error, ProtoConversionError::EmptyField { field: "common.model_path" }));
-    }
-
-    #[test]
-    fn diffusion_image_request_round_trips_init_image() {
-        let request = DiffusionImageRequest {
-            common: DiffusionRequestCommon {
-                prompt: "test".to_owned(),
-                negative_prompt: Some("bad".to_owned()),
-                width: 640,
-                height: 480,
-                init_image: Some(RawImageInput {
-                    data: vec![1, 2, 3, 4, 5, 6],
-                    width: 1,
-                    height: 2,
-                    channels: 3,
-                }),
-                options: Default::default(),
-            },
-            backend: DiffusionImageBackend::Ggml(GgmlDiffusionImageParams {
-                count: Some(2),
-                cfg_scale: Some(6.5),
-                guidance: Some(3.0),
-                steps: Some(30),
-                seed: Some(7),
-                sample_method: Some("euler".to_owned()),
-                scheduler: Some("normal".to_owned()),
-                clip_skip: Some(1),
-                strength: Some(0.8),
-                eta: Some(0.2),
-            }),
-        };
-
-        let proto = encode_diffusion_image_request("demo-model", &request);
-        let roundtrip = decode_diffusion_image_request(&proto).unwrap();
-
-        assert_eq!(roundtrip, request);
-    }
-
-    #[test]
-    fn diffusion_image_request_preserves_unset_clip_skip_as_none() {
-        let request = DiffusionImageRequest {
-            common: DiffusionRequestCommon {
-                prompt: "test".to_owned(),
-                width: 512,
-                height: 512,
-                ..Default::default()
-            },
-            backend: DiffusionImageBackend::Ggml(GgmlDiffusionImageParams {
-                clip_skip: None,
-                ..Default::default()
-            }),
-        };
-
-        let proto = encode_diffusion_image_request("demo-model", &request);
-        assert!(matches!(
-            proto.backend_params.as_ref(),
-            Some(pb::image_request::BackendParams::Ggml(params)) if params.clip_skip.is_none()
-        ));
-
-        let roundtrip = decode_diffusion_image_request(&proto).unwrap();
-        assert_eq!(roundtrip.backend.as_ggml().clip_skip, None);
-    }
-
-    #[test]
-    fn diffusion_video_request_round_trips_backend_params() {
-        let request = DiffusionVideoRequest {
-            common: DiffusionRequestCommon {
-                prompt: "animate".to_owned(),
-                negative_prompt: Some("artifact".to_owned()),
-                width: 512,
-                height: 512,
-                init_image: Some(RawImageInput {
-                    data: vec![7, 8, 9, 10, 11, 12],
-                    width: 1,
-                    height: 2,
-                    channels: 3,
-                }),
-                options: Default::default(),
-            },
-            backend: DiffusionVideoBackend::Ggml(GgmlDiffusionVideoParams {
-                video_frames: Some(24),
-                fps: Some(12.0),
-                cfg_scale: Some(7.5),
-                guidance: Some(4.0),
-                steps: Some(32),
-                seed: Some(99),
-                sample_method: Some("euler".to_owned()),
-                scheduler: Some("normal".to_owned()),
-                strength: Some(0.65),
-            }),
-        };
-
-        let proto = encode_diffusion_video_request("demo-model", &request);
-        let roundtrip = decode_diffusion_video_request(&proto).unwrap();
-
-        assert_eq!(roundtrip, request);
-    }
-
-    #[test]
-    fn generated_images_round_trip_through_proto_payload() {
-        let png = make_png_bytes();
-        let response =
-            ImageGenerationResponse { images: vec![png.clone()], metadata: Default::default() };
-
-        let proto = encode_generated_image_response(&response).unwrap();
-        let roundtrip = decode_diffusion_image_response(&proto).unwrap();
-
-        assert_eq!(roundtrip.images.len(), 1);
-        assert_eq!(roundtrip.images[0].bytes, png);
-        assert_eq!(roundtrip.images[0].width, 2);
-        assert_eq!(roundtrip.images[0].height, 1);
-        assert_eq!(roundtrip.images[0].channels, 3);
-    }
-
-    #[test]
-    fn diffusion_image_decode_prefers_actual_image_metadata() {
-        let png = make_png_bytes();
-        let proto = pb::ImageResponse {
-            images_json: serde_json::to_vec(&ProtoImagePayload {
-                images: vec![ProtoImageEntry {
-                    image: base64::engine::general_purpose::STANDARD.encode(&png),
-                    width: 999,
-                    height: 888,
-                    channels: 4,
-                }],
-            })
-            .unwrap(),
-        };
-
-        let roundtrip = decode_diffusion_image_response(&proto).unwrap();
-
-        assert_eq!(roundtrip.images[0].width, 2);
-        assert_eq!(roundtrip.images[0].height, 1);
-        assert_eq!(roundtrip.images[0].channels, 3);
-    }
-
-    #[test]
-    fn generated_frames_round_trip_through_proto_payload() {
-        let response = ImageGenerationResponse {
-            images: vec![make_png_bytes()],
-            metadata: Default::default(),
-        };
-
-        let proto = encode_generated_video_response(&response).unwrap();
-        let roundtrip = decode_diffusion_video_response(&proto).unwrap();
-
-        assert_eq!(roundtrip.frames.len(), 1);
-        assert_eq!(roundtrip.frames[0].width, 2);
-        assert_eq!(roundtrip.frames[0].height, 1);
-        assert_eq!(roundtrip.frames[0].channels, 3);
-        assert_eq!(roundtrip.frames[0].data.len(), 6);
-    }
-
-    fn make_png_bytes() -> Vec<u8> {
-        let image = RgbImage::from_raw(2, 1, vec![255, 0, 0, 0, 255, 0]).unwrap();
-        let dynamic = DynamicImage::ImageRgb8(image);
-        let mut cursor = Cursor::new(Vec::new());
-        dynamic.write_to(&mut cursor, ImageFormat::Png).unwrap();
-        cursor.into_inner()
+        assert_eq!(encoded.backend, "onnx.text");
+        assert_eq!(encoded.status, "loaded");
     }
 }
