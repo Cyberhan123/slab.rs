@@ -12,6 +12,10 @@ use crate::{
     LlamaBatch, LlamaContext, LlamaContextParams, LlamaError, LlamaModel, LlamaSeqId, LlamaToken,
 };
 
+const fn default_flash_attn_enabled() -> bool {
+    true
+}
+
 pub type SessionId = u64;
 
 #[derive(Debug, Clone)]
@@ -26,6 +30,8 @@ pub struct LlamaLoadConfig {
     pub model_path: PathBuf,
     pub num_workers: usize,
     pub context_length: Option<u32>,
+    #[serde(default = "default_flash_attn_enabled")]
+    pub flash_attn: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub chat_template: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

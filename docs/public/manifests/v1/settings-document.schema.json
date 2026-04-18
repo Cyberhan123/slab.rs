@@ -165,6 +165,7 @@
               "http": {},
               "ipc": {}
             },
+            "flash_attn": true,
             "logging": {},
             "source": {}
           }
@@ -179,6 +180,7 @@
               "http": {},
               "ipc": {}
             },
+            "flash_attn": true,
             "logging": {},
             "source": {}
           }
@@ -192,6 +194,7 @@
               "http": {},
               "ipc": {}
             },
+            "flash_attn": true,
             "logging": {},
             "source": {}
           }
@@ -212,6 +215,7 @@
                 "http": {},
                 "ipc": {}
               },
+              "flash_attn": true,
               "logging": {},
               "source": {}
             },
@@ -223,6 +227,7 @@
                 "http": {},
                 "ipc": {}
               },
+              "flash_attn": true,
               "logging": {},
               "source": {}
             },
@@ -233,6 +238,7 @@
                 "http": {},
                 "ipc": {}
               },
+              "flash_attn": true,
               "logging": {},
               "source": {}
             }
@@ -329,6 +335,11 @@
             "http": {},
             "ipc": {}
           }
+        },
+        "flash_attn": {
+          "default": true,
+          "description": "Whether Flash Attention is enabled for llama contexts.",
+          "type": "boolean"
         },
         "logging": {
           "$ref": "#/$defs/LoggingOverrideConfig",
@@ -567,6 +578,7 @@
                   "http": {},
                   "ipc": {}
                 },
+                "flash_attn": true,
                 "logging": {},
                 "source": {}
               },
@@ -578,6 +590,7 @@
                   "http": {},
                   "ipc": {}
                 },
+                "flash_attn": true,
                 "logging": {},
                 "source": {}
               },
@@ -588,6 +601,7 @@
                   "http": {},
                   "ipc": {}
                 },
+                "flash_attn": true,
                 "logging": {},
                 "source": {}
               }
@@ -651,6 +665,11 @@
             "http": {},
             "ipc": {}
           }
+        },
+        "flash_attn": {
+          "default": true,
+          "description": "Whether Flash Attention is enabled for this backend when supported.",
+          "type": "boolean"
         },
         "logging": {
           "$ref": "#/$defs/LoggingOverrideConfig",
@@ -888,6 +907,7 @@
                 "http": {},
                 "ipc": {}
               },
+              "flash_attn": true,
               "logging": {},
               "source": {}
             },
@@ -899,6 +919,7 @@
                 "http": {},
                 "ipc": {}
               },
+              "flash_attn": true,
               "logging": {},
               "source": {}
             },
@@ -909,6 +930,7 @@
                 "http": {},
                 "ipc": {}
               },
+              "flash_attn": true,
               "logging": {},
               "source": {}
             }

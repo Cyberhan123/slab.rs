@@ -9,6 +9,10 @@ use crate::Diffusion;
 use crate::params::support::{c_string_ptr, new_c_string, sync_embedding_views};
 use crate::params::{Embedding, LoraApplyMode, Prediction, RngType, WeightType};
 
+const fn default_flash_attn_enabled_option() -> Option<bool> {
+    Some(true)
+}
+
 /// Stable Rust-native context parameters shared across the runtime chain.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ContextParams {
@@ -62,7 +66,10 @@ pub struct ContextParams {
     pub offload_params_to_cpu: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub enable_mmap: Option<bool>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default = "default_flash_attn_enabled_option",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub flash_attn: Option<bool>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diffusion_flash_attn: Option<bool>,

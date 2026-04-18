@@ -325,6 +325,7 @@ mod tests {
         assert_eq!(config.model_path, Some(PathBuf::from("model.gguf")));
         assert_eq!(config.diffusion_model_path, Some(PathBuf::from("diffusion.gguf")));
         assert_eq!(config.vae_path, Some(PathBuf::from("vae.gguf")));
+        assert_eq!(config.flash_attn, Some(true));
         assert_eq!(config.vae_device.as_deref(), Some("cpu"));
         assert_eq!(config.n_threads, Some(8));
     }

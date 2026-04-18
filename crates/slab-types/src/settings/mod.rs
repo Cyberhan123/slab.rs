@@ -7,8 +7,8 @@ mod v2;
 pub use config::{
     ChatConfig, CloudProviderConfig, DiffusionConfig, DiffusionPathsConfig,
     DiffusionPerformanceConfig, PmidConfig, RuntimeConfig, RuntimeLlamaConfig,
-    RuntimeModelAutoUnloadConfig, RuntimeWorkerConfig, SetupBackendsConfig, SetupConfig,
-    SetupFfmpegConfig,
+    RuntimeModelAutoUnloadConfig, RuntimeWhisperConfig, RuntimeWorkerConfig, SetupBackendsConfig,
+    SetupConfig, SetupFfmpegConfig,
 };
 pub use launch::{
     DesktopLaunchProfileConfig, LaunchBackendConfig, LaunchBackendsConfig, LaunchConfig,

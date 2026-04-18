@@ -796,6 +796,7 @@ pub(crate) fn settings_document_v2_to_json_value(
                     "llama": {
                         "enabled": document.runtime.ggml.backends.llama.enabled,
                         "context_length": document.runtime.ggml.backends.llama.context_length,
+                        "flash_attn": document.runtime.ggml.backends.llama.flash_attn,
                         "source": {
                             "version": document.runtime.ggml.backends.llama.source.version,
                             "artifact": document.runtime.ggml.backends.llama.source.artifact,
@@ -820,6 +821,7 @@ pub(crate) fn settings_document_v2_to_json_value(
                     },
                     "whisper": {
                         "enabled": document.runtime.ggml.backends.whisper.enabled,
+                        "flash_attn": document.runtime.ggml.backends.whisper.flash_attn,
                         "source": {
                             "version": document.runtime.ggml.backends.whisper.source.version,
                             "artifact": document.runtime.ggml.backends.whisper.source.artifact,
@@ -844,6 +846,7 @@ pub(crate) fn settings_document_v2_to_json_value(
                     },
                     "diffusion": {
                         "enabled": document.runtime.ggml.backends.diffusion.enabled,
+                        "flash_attn": document.runtime.ggml.backends.diffusion.flash_attn,
                         "source": {
                             "version": document.runtime.ggml.backends.diffusion.source.version,
                             "artifact": document.runtime.ggml.backends.diffusion.source.artifact,

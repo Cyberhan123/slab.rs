@@ -313,6 +313,12 @@ fn legacy_settings_schema() -> RawSettingsSchema {
                                 None,
                                 20,
                             ),
+                            legacy_bool_property(
+                                PMID.runtime.llama.flash_attn().into_string(),
+                                "Llama Flash Attention",
+                                true,
+                                30,
+                            ),
                         ],
                     ),
                     legacy_subsection(
@@ -320,14 +326,22 @@ fn legacy_settings_schema() -> RawSettingsSchema {
                         "Whisper",
                         "Settings for the ggml.whisper runtime.",
                         30,
-                        vec![legacy_integer_property(
-                            PMID.runtime.whisper.num_workers().into_string(),
-                            "Whisper Workers",
-                            json!(1),
-                            Some(1),
-                            None,
-                            10,
-                        )],
+                        vec![
+                            legacy_integer_property(
+                                PMID.runtime.whisper.num_workers().into_string(),
+                                "Whisper Workers",
+                                json!(1),
+                                Some(1),
+                                None,
+                                10,
+                            ),
+                            legacy_bool_property(
+                                PMID.runtime.whisper.flash_attn().into_string(),
+                                "Whisper Flash Attention",
+                                true,
+                                20,
+                            ),
+                        ],
                     ),
                     legacy_subsection(
                         "diffusion_runtime",
@@ -563,7 +577,7 @@ fn legacy_settings_schema() -> RawSettingsSchema {
                             legacy_bool_property(
                                 PMID.diffusion.performance.flash_attn().into_string(),
                                 "Diffusion Flash Attention",
-                                false,
+                                true,
                                 10,
                             ),
                             legacy_string_property(
@@ -1296,6 +1310,20 @@ mod tests {
             schema.property(PMID.runtime.llama.context_length().as_str()).expect("context length");
 
         assert_eq!(definition.default_value(), &json!(2048));
+    }
+
+    #[test]
+    fn flash_attention_defaults_to_enabled() {
+        let schema = embedded_settings_schema().expect("schema");
+
+        for pmid in [
+            PMID.runtime.llama.flash_attn(),
+            PMID.runtime.whisper.flash_attn(),
+            PMID.diffusion.performance.flash_attn(),
+        ] {
+            let definition = schema.property(pmid.as_str()).expect("flash attention setting");
+            assert_eq!(definition.default_value(), &json!(true));
+        }
     }
 
     #[test]

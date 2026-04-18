@@ -33,7 +33,7 @@ impl Default for LlamaContextParams {
             n_threads: 4,
             n_threads_batch: 4,
             offload_kqv: true,
-            flash_attn: false,
+            flash_attn: true,
             no_perf: false,
             // Our runtime batches multiple seq_ids inside one context and expects
             // `n_ctx` to behave like the per-sequence window.

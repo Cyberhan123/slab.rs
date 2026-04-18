@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 
 use super::launch::LaunchConfig;
 
+const fn default_flash_attn_enabled() -> bool {
+    true
+}
+
 /// A configured cloud/remote AI provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct CloudProviderConfig {
@@ -72,19 +76,42 @@ pub struct RuntimeConfig {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub model_cache_dir: Option<String>,
     pub llama: RuntimeLlamaConfig,
-    pub whisper: RuntimeWorkerConfig,
+    pub whisper: RuntimeWhisperConfig,
     pub diffusion: RuntimeWorkerConfig,
     pub model_auto_unload: RuntimeModelAutoUnloadConfig,
 }
 
 /// Llama runtime settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RuntimeLlamaConfig {
     /// Number of parallel llama workers.
     pub num_workers: u32,
     /// Context window length in tokens.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
+    #[serde(default = "default_flash_attn_enabled")]
+    pub flash_attn: bool,
+}
+
+impl Default for RuntimeLlamaConfig {
+    fn default() -> Self {
+        Self { num_workers: 0, context_length: None, flash_attn: true }
+    }
+}
+
+/// Whisper runtime settings.
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
+pub struct RuntimeWhisperConfig {
+    /// Number of parallel workers for this backend.
+    pub num_workers: u32,
+    #[serde(default = "default_flash_attn_enabled")]
+    pub flash_attn: bool,
+}
+
+impl Default for RuntimeWhisperConfig {
+    fn default() -> Self {
+        Self { num_workers: 0, flash_attn: true }
+    }
 }
 
 /// Generic single-backend worker settings.
@@ -146,10 +173,22 @@ pub struct DiffusionPathsConfig {
 }
 
 /// Diffusion performance tuning settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct DiffusionPerformanceConfig {
+    #[serde(default = "default_flash_attn_enabled")]
     pub flash_attn: bool,
     pub vae_device: String,
     pub clip_device: String,
     pub offload_params_to_cpu: bool,
+}
+
+impl Default for DiffusionPerformanceConfig {
+    fn default() -> Self {
+        Self {
+            flash_attn: true,
+            vae_device: String::new(),
+            clip_device: String::new(),
+            offload_params_to_cpu: false,
+        }
+    }
 }

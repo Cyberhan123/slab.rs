@@ -162,7 +162,7 @@ impl pb::diffusion_service_server::DiffusionService for GrpcServiceImpl {
                     || params.control_net_path.is_some()
                     || params.vae_device.is_some()
                     || params.clip_device.is_some()
-                    || params.flash_attn
+                    || matches!(params.flash_attn, Some(false))
                     || params.offload_params_to_cpu
                     || params.enable_mmap
                     || params.n_threads.is_some()

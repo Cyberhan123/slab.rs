@@ -57,7 +57,7 @@ impl ModelLifecycleService {
 fn build_model_spec(backend: BackendKind, load_spec: &RuntimeBackendLoadSpec) -> ModelSpec {
     let model_path = match load_spec {
         RuntimeBackendLoadSpec::GgmlLlama(GgmlLlamaLoadConfig { model_path, .. })
-        | RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path }) => {
+        | RuntimeBackendLoadSpec::GgmlWhisper(GgmlWhisperLoadConfig { model_path, .. }) => {
             model_path.clone()
         }
         RuntimeBackendLoadSpec::GgmlDiffusion(config) => config.model_path.clone(),
@@ -78,10 +78,18 @@ fn build_model_spec(backend: BackendKind, load_spec: &RuntimeBackendLoadSpec) ->
                     "context_length".to_owned(),
                     serde_json::json!(load_config.context_length.unwrap_or(0)),
                 );
+                spec.load_options
+                    .insert("flash_attn".to_owned(), serde_json::json!(load_config.flash_attn));
                 if let Some(chat_template) = &load_config.chat_template {
                     spec.load_options
                         .insert("chat_template".to_owned(), serde_json::json!(chat_template));
                 }
+            }
+        }
+        BackendKind::Whisper => {
+            if let RuntimeBackendLoadSpec::GgmlWhisper(load_config) = load_spec {
+                spec.load_options
+                    .insert("flash_attn".to_owned(), serde_json::json!(load_config.flash_attn));
             }
         }
         BackendKind::Diffusion => {
@@ -123,7 +131,6 @@ fn build_model_spec(backend: BackendKind, load_spec: &RuntimeBackendLoadSpec) ->
                 }
             }
         }
-        BackendKind::Whisper => {}
     }
 
     spec

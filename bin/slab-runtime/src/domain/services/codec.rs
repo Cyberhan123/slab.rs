@@ -52,6 +52,7 @@ fn encode_ggml_llama_load_payload(spec: &ModelSpec) -> Result<Payload, CoreError
         model_path: primary_model_path_buf(spec)?,
         num_workers: usize_option(spec, "num_workers").unwrap_or(1),
         context_length: optional_nonzero_u32_option(spec, "context_length")?,
+        flash_attn: bool_option(spec, "flash_attn").unwrap_or(true),
         chat_template: optional_nonempty_string_option(spec, "chat_template"),
         gbnf: optional_nonempty_string_option(spec, "gbnf"),
     }))
@@ -97,7 +98,7 @@ fn encode_ggml_diffusion_load_payload(spec: &ModelSpec) -> Result<Payload, CoreE
         t5xxl_path: artifact_or_option_path(spec, "t5xxl", "t5xxl_path"),
         clip_vision_path: artifact_or_option_path(spec, "clip_vision", "clip_vision_path"),
         control_net_path: artifact_or_option_path(spec, "control_net", "control_net_path"),
-        flash_attn: bool_option(spec, "flash_attn"),
+        flash_attn: Some(bool_option(spec, "flash_attn").unwrap_or(true)),
         vae_device: optional_nonempty_string_option(spec, "vae_device"),
         clip_device: optional_nonempty_string_option(spec, "clip_device"),
         offload_params_to_cpu: bool_option(spec, "offload_params_to_cpu"),
@@ -290,7 +291,7 @@ pub(crate) fn build_ggml_whisper_context_params(
     Ok(WhisperContextParams {
         model_path: Some(primary_model_path_buf(spec)?),
         use_gpu: bool_option(spec, "use_gpu"),
-        flash_attn: bool_option(spec, "flash_attn"),
+        flash_attn: Some(bool_option(spec, "flash_attn").unwrap_or(true)),
         gpu_device: i32_option(spec, "gpu_device"),
         ..Default::default()
     })

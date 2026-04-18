@@ -7,9 +7,9 @@ use slab_types::settings::{
     DiffusionPathsConfig, DiffusionPerformanceConfig, LaunchBackendConfig, LaunchBackendsConfig,
     LaunchConfig, LaunchProfilesConfig, ModelDownloadSourcePreference, PmidConfig,
     ProviderRegistryEntry, RuntimeConfig, RuntimeLlamaConfig, RuntimeModelAutoUnloadConfig,
-    RuntimeTransportMode, RuntimeWorkerConfig, ServerLaunchProfileConfig, SettingsDocumentV2,
-    SetupBackendsConfig, SetupConfig, SetupFfmpegConfig, V2_PMID, provider_registry_json_schema,
-    string_list_json_schema,
+    RuntimeTransportMode, RuntimeWhisperConfig, RuntimeWorkerConfig, ServerLaunchProfileConfig,
+    SettingsDocumentV2, SetupBackendsConfig, SetupConfig, SetupFfmpegConfig, V2_PMID,
+    provider_registry_json_schema, string_list_json_schema,
 };
 
 use crate::domain::models::{
@@ -195,9 +195,11 @@ async fn load_legacy_config(settings: &SettingsProvider) -> Result<PmidConfig, A
                 context_length: settings
                     .get_optional_u32(PMID.runtime.llama.context_length())
                     .await?,
+                flash_attn: settings.get_bool(PMID.runtime.llama.flash_attn()).await?,
             },
-            whisper: RuntimeWorkerConfig {
+            whisper: RuntimeWhisperConfig {
                 num_workers: required_u32(settings, PMID.runtime.whisper.num_workers()).await?,
+                flash_attn: settings.get_bool(PMID.runtime.whisper.flash_attn()).await?,
             },
             diffusion: RuntimeWorkerConfig {
                 num_workers: required_u32(settings, PMID.runtime.diffusion.num_workers()).await?,
@@ -305,9 +307,11 @@ fn load_v2_config(settings: &SettingsDocumentV2) -> PmidConfig {
             llama: RuntimeLlamaConfig {
                 num_workers: resolve_v2_backend_concurrency(settings, V2Backend::Llama),
                 context_length: settings.runtime.ggml.backends.llama.context_length,
+                flash_attn: settings.runtime.ggml.backends.llama.flash_attn,
             },
-            whisper: RuntimeWorkerConfig {
+            whisper: RuntimeWhisperConfig {
                 num_workers: resolve_v2_backend_concurrency(settings, V2Backend::Whisper),
+                flash_attn: settings.runtime.ggml.backends.whisper.flash_attn,
             },
             diffusion: RuntimeWorkerConfig {
                 num_workers: resolve_v2_backend_concurrency(settings, V2Backend::Diffusion),
@@ -356,7 +360,13 @@ fn load_v2_config(settings: &SettingsDocumentV2) -> PmidConfig {
                 .map(provider_registry_entry_to_cloud_provider)
                 .collect(),
         },
-        diffusion: DiffusionConfig::default(),
+        diffusion: DiffusionConfig {
+            performance: DiffusionPerformanceConfig {
+                flash_attn: settings.runtime.ggml.backends.diffusion.flash_attn,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
     }
 }
 
@@ -666,6 +676,7 @@ fn v2_value_type(path: &str, effective: &Value, default: &Value) -> SettingValue
     if path.ends_with(".enabled")
         || path.ends_with(".json")
         || path.ends_with(".auto_download")
+        || path.ends_with(".flash_attn")
         || path == "server.cloud_http_trace"
     {
         return SettingValueType::Boolean;
@@ -746,6 +757,7 @@ fn v2_property_label(path: &str) -> String {
         "runtime.mode" => "Runtime Mode".to_owned(),
         "runtime.transport" => "Transport".to_owned(),
         "runtime.sessions.state_dir" => "Session State Directory".to_owned(),
+        _ if path.ends_with(".flash_attn") => "Flash Attention".to_owned(),
         "providers.registry" => "Provider Registry".to_owned(),
         "models.cache_dir" => "Model Cache Directory".to_owned(),
         "models.config_dir" => "Model Config Directory".to_owned(),
@@ -785,6 +797,9 @@ fn v2_property_description(path: &str) -> String {
         "server.swagger.enabled" => "Expose the OpenAPI document and Swagger UI.".to_owned(),
         "server.cloud_http_trace" => "Log redacted cloud request and response payloads for debugging.".to_owned(),
         _ if path.ends_with(".enabled") => "Enable or disable this component-specific override.".to_owned(),
+        _ if path.ends_with(".flash_attn") => {
+            "Enable Flash Attention when the backend supports it.".to_owned()
+        }
         _ if path.ends_with(".install_dir") => "Optional install directory override.".to_owned(),
         _ if path.ends_with(".level") => "Override the inherited log level for this scope.".to_owned(),
         _ if path.ends_with(".json") => "Override whether logs are emitted in JSON format for this scope.".to_owned(),

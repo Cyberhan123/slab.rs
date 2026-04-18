@@ -48,6 +48,10 @@ const fn default_disabled() -> bool {
     false
 }
 
+const fn default_flash_attn_enabled() -> bool {
+    true
+}
+
 /// Frontend interface language preference stored in settings.json.
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, JsonSchema, PartialEq, Eq, Default)]
 pub enum InterfaceLanguagePreference {
@@ -362,6 +366,9 @@ pub struct RuntimeLeafConfig {
     /// Whether the leaf backend is enabled.
     #[serde(default = "default_enabled")]
     pub enabled: bool,
+    /// Whether Flash Attention is enabled for this backend when supported.
+    #[serde(default = "default_flash_attn_enabled")]
+    pub flash_attn: bool,
     #[serde(default)]
     pub source: SourceConfig,
     #[serde(default)]
@@ -376,6 +383,7 @@ impl Default for RuntimeLeafConfig {
     fn default() -> Self {
         Self {
             enabled: true,
+            flash_attn: true,
             source: SourceConfig::default(),
             logging: LoggingOverrideConfig::default(),
             capacity: CapacityOverrideConfig::default(),
@@ -393,6 +401,9 @@ pub struct LlamaRuntimeLeafConfig {
     /// Optional context length override.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_length: Option<u32>,
+    /// Whether Flash Attention is enabled for llama contexts.
+    #[serde(default = "default_flash_attn_enabled")]
+    pub flash_attn: bool,
     #[serde(default)]
     pub source: SourceConfig,
     #[serde(default)]
@@ -408,6 +419,7 @@ impl Default for LlamaRuntimeLeafConfig {
         Self {
             enabled: true,
             context_length: Some(2048),
+            flash_attn: true,
             source: SourceConfig::default(),
             logging: LoggingOverrideConfig::default(),
             capacity: CapacityOverrideConfig::default(),
@@ -752,6 +764,9 @@ mod tests {
 
         assert!(settings.runtime.ggml.backends.llama.enabled);
         assert!(settings.runtime.ggml.backends.whisper.enabled);
+        assert!(settings.runtime.ggml.backends.llama.flash_attn);
+        assert!(settings.runtime.ggml.backends.whisper.flash_attn);
+        assert!(settings.runtime.ggml.backends.diffusion.flash_attn);
         assert!(!settings.runtime.candle.enabled);
         assert!(settings.runtime.ggml.backends.llama.capacity.concurrent_requests.is_none());
         assert_eq!(settings.runtime.capacity.concurrent_requests, 4);
