@@ -645,7 +645,7 @@ export function ImageWorkbench({
                     <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
                       {images.map((image, index) => (
                         <figure
-                          key={image.src}
+                          key={`${image.src}-${index}`}
                           className="group overflow-hidden rounded-[24px] border border-border/60 bg-[var(--surface-soft)] shadow-[0_18px_32px_-28px_color-mix(in_oklab,var(--foreground)_28%,transparent)]"
                         >
                           <div className="relative overflow-hidden bg-[var(--shell-card)]">

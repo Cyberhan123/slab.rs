@@ -1,18 +1,42 @@
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-const baseUrl = process.env.SLAB_SERVER_BASE_URL ?? "http://127.0.0.1:3000";
+import {
+  startSlabServerHarness,
+  type SlabServerTestHarness
+} from "../support/slab-server";
+
+const externalBaseUrl = process.env.SLAB_SERVER_BASE_URL?.trim();
+
+async function requestHealth(server: SlabServerTestHarness | undefined): Promise<Response> {
+  if (!externalBaseUrl) {
+    return server!.request("/health");
+  }
+
+  try {
+    return await fetch(`${externalBaseUrl}/health`);
+  } catch (error) {
+    throw new Error(
+      `Cannot reach slab-server at ${externalBaseUrl}. Start the server first or unset SLAB_SERVER_BASE_URL to use the local test harness.`,
+      { cause: error }
+    );
+  }
+}
 
 describe("slab-server integration", () => {
-  it("responds to GET /health", async () => {
-    let response: Response;
-    try {
-      response = await fetch(`${baseUrl}/health`);
-    } catch (error) {
-      throw new Error(
-        `Cannot reach slab-server at ${baseUrl}. Start the server first or set SLAB_SERVER_BASE_URL to a reachable endpoint.`,
-        { cause: error }
-      );
+  let server: SlabServerTestHarness | undefined;
+
+  beforeAll(async () => {
+    if (!externalBaseUrl) {
+      server = await startSlabServerHarness();
     }
+  });
+
+  afterAll(async () => {
+    await server?.stop();
+  });
+
+  it("responds to GET /health", async () => {
+    const response = await requestHealth(server);
 
     expect(response.ok).toBe(true);
 

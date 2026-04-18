@@ -9,9 +9,6 @@ export default defineProject({
     ],
     testTimeout: 120000,
     hookTimeout: 120000,
-    fileParallelism: false,
-    env: {
-      SLAB_SERVER_BASE_URL: "http://127.0.0.1:3000"
-    }
+    fileParallelism: false
   }
 });
