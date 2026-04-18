@@ -6,7 +6,7 @@ import type { PluginInfo } from '@/lib/plugin-sdk';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockIsTauri } = vi.hoisted(() => ({
-  mockIsTauri: vi.fn<() => void>(),
+  mockIsTauri: vi.fn<() => boolean>(),
 }));
 
 vi.mock('@/hooks/use-tauri', () => ({
@@ -19,13 +19,13 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 vi.mock('@/lib/plugin-sdk', () => ({
-  pluginList: vi.fn<() => void>().mockResolvedValue([]),
-  pluginCall: vi.fn<() => void>().mockResolvedValue({ outputText: '{}' }),
-  pluginApiRequest: vi.fn<() => void>().mockResolvedValue({ status: 200, data: {} }),
-  pluginMountView: vi.fn<() => void>().mockResolvedValue(undefined),
-  pluginUnmountView: vi.fn<() => void>().mockResolvedValue(undefined),
-  pluginUpdateViewBounds: vi.fn<() => void>().mockResolvedValue(undefined),
-  pluginOnEvent: vi.fn<() => void>().mockResolvedValue(() => () => {}),
+  pluginList: vi.fn().mockResolvedValue([]),
+  pluginCall: vi.fn().mockResolvedValue({ outputText: '{}', outputBase64: '' }),
+  pluginApiRequest: vi.fn().mockResolvedValue({ status: 200, headers: {}, body: '{}' }),
+  pluginMountView: vi.fn().mockResolvedValue(undefined),
+  pluginUnmountView: vi.fn().mockResolvedValue(undefined),
+  pluginUpdateViewBounds: vi.fn().mockResolvedValue(undefined),
+  pluginOnEvent: vi.fn().mockResolvedValue(() => {}),
 }));
 
 function createMockPlugin(overrides: Partial<PluginInfo> = {}): PluginInfo {
@@ -35,6 +35,8 @@ function createMockPlugin(overrides: Partial<PluginInfo> = {}): PluginInfo {
     version: '1.0.0',
     valid: true,
     error: null,
+    networkMode: 'blocked',
+    allowHosts: [],
     ...overrides,
   };
 }

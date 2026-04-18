@@ -6,11 +6,7 @@ import type { GeneratedImage } from '@/pages/image/const';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseImageGeneration } = vi.hoisted(() => ({
-  mockUseImageGeneration: vi.fn<
-    () => Partial<
-      ReturnType<typeof import('@/pages/image/hooks/use-image-generation').useImageGeneration>
-    >
-  >(),
+  mockUseImageGeneration: vi.fn<() => unknown>(),
 }));
 
 vi.mock('@/pages/image/hooks/use-image-generation', () => ({
@@ -18,14 +14,14 @@ vi.mock('@/pages/image/hooks/use-image-generation', () => ({
 }));
 
 vi.mock('@/pages/image/hooks/use-image-generation-controls', () => ({
-  useImageGenerationControls: vi.fn<() => void>(() => ({
-    activeDimensionPreset: '512x512',
+  useImageGenerationControls: vi.fn(() => ({
+    activeDimensionPreset: '1:1',
     advancedOpen: false,
     cfgScale: 7,
     clipSkip: 0,
     eta: 0,
     guidance: 3.5,
-    handleDimensionPreset: vi.fn<() => void>(),
+    handleDimensionPreset: vi.fn(),
     heightStr: '512',
     isResolvingModelState: false,
     mode: 'txt2img',
@@ -35,20 +31,20 @@ vi.mock('@/pages/image/hooks/use-image-generation-controls', () => ({
     sampleMethod: 'euler_a',
     scheduler: 'normal',
     seed: -1,
-    setAdvancedOpen: vi.fn<() => void>(),
-    setCfgScale: vi.fn<() => void>(),
-    setClipSkip: vi.fn<() => void>(),
-    setEta: vi.fn<() => void>(),
-    setGuidance: vi.fn<() => void>(),
-    setHeightStr: vi.fn<() => void>(),
-    setMode: vi.fn<() => void>(),
-    setNumImages: vi.fn<() => void>(),
-    setSampleMethod: vi.fn<() => void>(),
-    setScheduler: vi.fn<() => void>(),
-    setSeed: vi.fn<() => void>(),
-    setSteps: vi.fn<() => void>(),
-    setStrength: vi.fn<() => void>(),
-    setWidthStr: vi.fn<() => void>(),
+    setAdvancedOpen: vi.fn(),
+    setCfgScale: vi.fn(),
+    setClipSkip: vi.fn(),
+    setEta: vi.fn(),
+    setGuidance: vi.fn(),
+    setHeightStr: vi.fn(),
+    setMode: vi.fn(),
+    setNumImages: vi.fn(),
+    setSampleMethod: vi.fn(),
+    setScheduler: vi.fn(),
+    setSeed: vi.fn(),
+    setSteps: vi.fn(),
+    setStrength: vi.fn(),
+    setWidthStr: vi.fn(),
     steps: 20,
     strength: 0.75,
     widthStr: '512',
@@ -56,15 +52,15 @@ vi.mock('@/pages/image/hooks/use-image-generation-controls', () => ({
 }));
 
 vi.mock('@/pages/image/hooks/use-image-model-preparation', () => ({
-  useImageModelPreparation: vi.fn<() => void>(() => ({
+  useImageModelPreparation: vi.fn(() => ({
     catalogLoading: false,
     isPreparingModel: false,
     modelOptions: [
       { id: 'model-1', label: 'Stable Diffusion 1.5', downloaded: true, local_path: '/path/to/model' },
     ],
-    prepareSelectedModel: vi.fn<() => void>().mockResolvedValue('/path/to/model'),
+    prepareSelectedModel: vi.fn().mockResolvedValue('/path/to/model'),
     selectedModelId: 'model-1',
-    setSelectedModelId: vi.fn<() => void>(),
+    setSelectedModelId: vi.fn(),
   })),
 }));
 
@@ -75,17 +71,17 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 
 function createImageViewModel(overrides = {}) {
   return {
-    activeDimensionPreset: '512x512',
+    activeDimensionPreset: '1:1',
     advancedOpen: false,
     cfgScale: 7,
     clipSkip: 0,
     eta: 0,
     guidance: 3.5,
-    handleCancel: vi.fn<() => void>().mockResolvedValue(undefined),
-    handleDimensionPreset: vi.fn<() => void>(),
-    handleDownload: vi.fn<() => void>(),
-    handleInitImageChange: vi.fn<() => void>(),
-    handleSubmit: vi.fn<() => void>().mockResolvedValue(undefined),
+    handleCancel: vi.fn().mockResolvedValue(undefined),
+    handleDimensionPreset: vi.fn(),
+    handleDownload: vi.fn(),
+    handleInitImageChange: vi.fn(),
+    handleSubmit: vi.fn().mockResolvedValue(undefined),
     heightStr: '512',
     images: [] as GeneratedImage[],
     initImageDataUri: null,
@@ -104,24 +100,24 @@ function createImageViewModel(overrides = {}) {
     scheduler: 'normal',
     seed: -1,
     selectedModelId: 'model-1',
-    setAdvancedOpen: vi.fn<() => void>(),
-    setCfgScale: vi.fn<() => void>(),
-    setClipSkip: vi.fn<() => void>(),
-    setEta: vi.fn<() => void>(),
-    setGuidance: vi.fn<() => void>(),
-    setHeightStr: vi.fn<() => void>(),
-    setInitImageDataUri: vi.fn<() => void>(),
-    setMode: vi.fn<() => void>(),
-    setNegativePrompt: vi.fn<() => void>(),
-    setNumImages: vi.fn<() => void>(),
-    setPrompt: vi.fn<() => void>(),
-    setSampleMethod: vi.fn<() => void>(),
-    setScheduler: vi.fn<() => void>(),
-    setSeed: vi.fn<() => void>(),
-    setSteps: vi.fn<() => void>(),
-    setStrength: vi.fn<() => void>(),
-    setWidthStr: vi.fn<() => void>(),
-    setZoomedImage: vi.fn<() => void>(),
+    setAdvancedOpen: vi.fn(),
+    setCfgScale: vi.fn(),
+    setClipSkip: vi.fn(),
+    setEta: vi.fn(),
+    setGuidance: vi.fn(),
+    setHeightStr: vi.fn(),
+    setInitImageDataUri: vi.fn(),
+    setMode: vi.fn(),
+    setNegativePrompt: vi.fn(),
+    setNumImages: vi.fn(),
+    setPrompt: vi.fn(),
+    setSampleMethod: vi.fn(),
+    setScheduler: vi.fn(),
+    setSeed: vi.fn(),
+    setSteps: vi.fn(),
+    setStrength: vi.fn(),
+    setWidthStr: vi.fn(),
+    setZoomedImage: vi.fn(),
     steps: 20,
     strength: 0.75,
     widthStr: '512',

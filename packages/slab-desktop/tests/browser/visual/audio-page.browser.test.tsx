@@ -1,14 +1,13 @@
 import { page } from 'vitest/browser';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChangeEvent } from 'react';
 
 import AudioPage from '@/pages/audio';
 import type { SelectedFile } from '@/hooks/use-file';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseAudio } = vi.hoisted(() => ({
-  mockUseAudio: vi.fn<
-    () => Partial<ReturnType<typeof import('@/pages/audio/hooks/use-audio').useAudio>>
-  >(),
+  mockUseAudio: vi.fn<() => unknown>(),
 }));
 
 vi.mock('@/pages/audio/hooks/use-audio', () => ({
@@ -21,7 +20,7 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 vi.mock('@/hooks/use-persisted-header-select', () => ({
-  usePersistedHeaderSelect: vi.fn<() => void>(() => ({ value: 'model-1', setValue: vi.fn<() => void>() })),
+  usePersistedHeaderSelect: vi.fn(() => ({ value: 'model-1', setValue: vi.fn() })),
 }));
 
 function createAudioViewModel(overrides = {}) {
@@ -48,14 +47,14 @@ function createAudioViewModel(overrides = {}) {
     decodeWordThold: '',
     enableVad: false,
     file: null as SelectedFile | null,
-    handleFileChange: vi.fn<() => void>(),
-    handleTauriFileSelect: vi.fn<() => void>(),
-    handleTranscribe: vi.fn<() => void>().mockResolvedValue(undefined),
+    handleFileChange: vi.fn(async (_e: ChangeEvent<HTMLInputElement>) => undefined),
+    handleTauriFileSelect: vi.fn(async () => undefined),
+    handleTranscribe: vi.fn(async () => undefined),
     hasBundledVad: true,
     isBusy: false,
     isTauri: true,
     isUsingBundledVad: false,
-    navigate: vi.fn<() => void>(),
+    navigate: vi.fn(),
     preparingStage: null as string | null,
     previewRows: [
       {
@@ -85,36 +84,36 @@ function createAudioViewModel(overrides = {}) {
     ],
     selectedVadModel: undefined,
     selectedVadModelId: '',
-    setDecodeEntropyThold: vi.fn<() => void>(),
-    setDecodeDurationMs: vi.fn<() => void>(),
-    setDecodeLogprobThold: vi.fn<() => void>(),
-    setDecodeMaxLen: vi.fn<() => void>(),
-    setDecodeMaxTokens: vi.fn<() => void>(),
-    setDecodeNoContext: vi.fn<() => void>(),
-    setDecodeNoSpeechThold: vi.fn<() => void>(),
-    setDecodeNoTimestamps: vi.fn<() => void>(),
-    setDecodeOffsetMs: vi.fn<() => void>(),
-    setDecodeSplitOnWord: vi.fn<() => void>(),
-    setDecodeSuppressNst: vi.fn<() => void>(),
-    setDecodeTdrzEnable: vi.fn<() => void>(),
-    setDecodeTemperature: vi.fn<() => void>(),
-    setDecodeTemperatureInc: vi.fn<() => void>(),
-    setDecodeTokenTimestamps: vi.fn<() => void>(),
-    setDecodeWordThold: vi.fn<() => void>(),
-    setEnableVad: vi.fn<() => void>(),
-    setSelectedVadModelId: vi.fn<() => void>(),
-    setShowDecodeOptions: vi.fn<() => void>(),
-    setVadMaxSpeechDurationS: vi.fn<() => void>(),
-    setVadMinSilenceDurationMs: vi.fn<() => void>(),
-    setVadMinSpeechDurationMs: vi.fn<() => void>(),
-    setVadSamplesOverlap: vi.fn<() => void>(),
-    setVadSpeechPadMs: vi.fn<() => void>(),
-    setVadThreshold: vi.fn<() => void>(),
+    setDecodeEntropyThold: vi.fn(),
+    setDecodeDurationMs: vi.fn(),
+    setDecodeLogprobThold: vi.fn(),
+    setDecodeMaxLen: vi.fn(),
+    setDecodeMaxTokens: vi.fn(),
+    setDecodeNoContext: vi.fn(),
+    setDecodeNoSpeechThold: vi.fn(),
+    setDecodeNoTimestamps: vi.fn(),
+    setDecodeOffsetMs: vi.fn(),
+    setDecodeSplitOnWord: vi.fn(),
+    setDecodeSuppressNst: vi.fn(),
+    setDecodeTdrzEnable: vi.fn(),
+    setDecodeTemperature: vi.fn(),
+    setDecodeTemperatureInc: vi.fn(),
+    setDecodeTokenTimestamps: vi.fn(),
+    setDecodeWordThold: vi.fn(),
+    setEnableVad: vi.fn(),
+    setSelectedVadModelId: vi.fn(),
+    setShowDecodeOptions: vi.fn(),
+    setVadMaxSpeechDurationS: vi.fn(),
+    setVadMinSilenceDurationMs: vi.fn(),
+    setVadMinSpeechDurationMs: vi.fn(),
+    setVadSamplesOverlap: vi.fn(),
+    setVadSpeechPadMs: vi.fn(),
+    setVadThreshold: vi.fn(),
     showDecodeOptions: false,
     taskId: null,
     transcribe: {
       isPending: false,
-      handleTranscribe: vi.fn<() => void>(),
+      handleTranscribe: vi.fn(),
     },
     vadMaxSpeechDurationS: '',
     vadMinSilenceDurationMs: '',
