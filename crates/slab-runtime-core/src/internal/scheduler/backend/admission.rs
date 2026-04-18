@@ -117,16 +117,29 @@ impl ResourceManager {
         spawn_backend(Arc::clone(&shared_ingress_rx), control_tx.clone());
 
         let key = backend_id.into();
-        self.backends.write().expect("backend map poisoned").insert(
-            key,
-            BackendHandle::new(self.config.backend_capacity, Some(ingress_tx), Some(control_tx)),
-        );
+        match self.backends.write() {
+            Ok(mut backends) => {
+                backends.insert(
+                    key,
+                    BackendHandle::new(self.config.backend_capacity, Some(ingress_tx), Some(control_tx)),
+                );
+            }
+            Err(_) => {
+                tracing::error!("backend map poisoned during registration");
+                // If the map is poisoned, the runtime is in an unrecoverable state.
+                // We panic here to surface the issue immediately rather than continuing
+                // with a broken state.
+                panic!("backend map poisoned");
+            }
+        }
     }
 
     fn handle(&self, backend_id: &str) -> Result<BackendHandle, CoreError> {
         self.backends
             .read()
-            .expect("backend map poisoned")
+            .map_err(|_| CoreError::InternalPoisoned {
+                lock_name: "backends".to_string(),
+            })?
             .get(backend_id)
             .cloned()
             .ok_or_else(|| CoreError::DriverNotRegistered { driver_id: backend_id.to_owned() })
@@ -135,8 +148,15 @@ impl ResourceManager {
     /// List registered backends in deterministic order.
     #[cfg_attr(not(test), allow(dead_code))]
     pub fn backend_ids(&self) -> Vec<String> {
-        let mut ids: Vec<String> =
-            self.backends.read().expect("backend map poisoned").keys().cloned().collect();
+        let mut ids: Vec<String> = match self.backends.read() {
+            Ok(backends) => backends.keys().cloned().collect(),
+            Err(_) => {
+                tracing::error!("backend map poisoned while listing backends");
+                // Return empty list rather than crashing - the runtime may still be
+                // able to recover if the poison is from a non-critical operation
+                return Vec::new();
+            }
+        };
         ids.sort();
         ids
     }

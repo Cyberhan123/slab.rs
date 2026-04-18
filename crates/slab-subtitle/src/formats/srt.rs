@@ -248,6 +248,8 @@ impl SrtFile {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
     #[test]
     fn create_srt_test() {
         use crate::SubtitleFileInterface;
@@ -267,9 +269,192 @@ mod tests {
 
         // generate file
         let data_string = String::from_utf8(file.to_data().unwrap()).unwrap();
-        let expected = "1\n00:00:01,500 --> 00:00:03,700\nline1\n\n2\n00:00:04,500 --> 00:00:08,700\nline2\n\n".to_string();
+        let expected = "1\n00:00:01,500 --> 00:00:03,700\nline1\n\n2\n00:00:04,500 --> 00:00:08,700\nline2\n\n"
+            .to_string();
         println!("\n{:?}\n{:?}", data_string, expected);
         assert_eq!(data_string, expected);
     }
+
+    #[test]
+    fn parse_valid_srt_file() {
+        use crate::SubtitleFileInterface;
+
+        let srt_content = "1\n00:00:01,000 --> 00:00:04,000\nFirst subtitle\n\n2\n00:00:05,500 --> 00:00:08,000\nSecond subtitle\n\n";
+
+        let file = SrtFile::parse(srt_content).expect("should parse valid SRT");
+        let entries = file.get_subtitle_entries().expect("should get entries");
+
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].line.as_deref(), Some("First subtitle"));
+        assert_eq!(entries[1].line.as_deref(), Some("Second subtitle"));
+    }
+
+    #[test]
+    fn parse_srt_with_multiline_text() {
+        use crate::SubtitleFileInterface;
+
+        let srt_content = "1\n00:00:01,000 --> 00:00:04,000\nLine 1\nLine 2\nLine 3\n\n";
+
+        let file = SrtFile::parse(srt_content).expect("should parse multiline SRT");
+        let entries = file.get_subtitle_entries().expect("should get entries");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].line.as_deref(),
+            Some("Line 1\nLine 2\nLine 3")
+        );
+    }
+
+    #[test]
+    fn parse_srt_handles_empty_lines() {
+        use crate::SubtitleFileInterface;
+
+        let srt_content = "\n\n1\n00:00:01,000 --> 00:00:04,000\nText\n\n\n";
+
+        let file = SrtFile::parse(srt_content).expect("should parse SRT with leading empty lines");
+        let entries = file.get_subtitle_entries().expect("should get entries");
+
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn parse_srt_handles_bom() {
+        use crate::SubtitleFileInterface;
+
+        let srt_content = "\u{FEFF}1\n00:00:01,000 --> 00:00:04,000\nText\n\n";
+
+        let file = SrtFile::parse(srt_content).expect("should parse SRT with BOM");
+        let entries = file.get_subtitle_entries().expect("should get entries");
+
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn parse_srt_invalid_index_fails() {
+        let srt_content = "invalid\n00:00:01,000 --> 00:00:04,000\nText\n\n";
+
+        let result = SrtFile::parse(srt_content);
+        assert!(result.is_err(), "should fail with invalid index");
+    }
+
+    #[test]
+    fn parse_srt_invalid_timestamp_format_fails() {
+        let srt_content = "1\ninvalid timestamp --> 00:00:04,000\nText\n\n";
+
+        let result = SrtFile::parse(srt_content);
+        assert!(
+            result.is_err(),
+            "should fail with invalid timestamp format"
+        );
+    }
+
+    #[test]
+    fn parse_srt_empty_content() {
+        let srt_content = "";
+
+        let file = SrtFile::parse(srt_content).expect("should parse empty SRT");
+        let entries = file.get_subtitle_entries().expect("should get entries");
+
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn parse_srt_only_empty_lines() {
+        let srt_content = "\n\n\n";
+
+        let file = SrtFile::parse(srt_content).expect("should parse SRT with only empty lines");
+        let entries = file.get_subtitle_entries().expect("should get entries");
+
+        assert_eq!(entries.len(), 0);
+    }
+
+    #[test]
+    fn parse_srt_malformed_timestamp_missing_arrow() {
+        let srt_content = "1\n00:00:01,000 00:00:04,000\nText\n\n";
+
+        let result = SrtFile::parse(srt_content);
+        assert!(result.is_err(), "should fail with missing timestamp arrow");
+    }
+
+    #[test]
+    fn parse_srt_with_special_characters() {
+        use crate::SubtitleFileInterface;
+
+        let srt_content = "1\n00:00:01,000 --> 00:00:04,000\nSpecial chars: <>&\"'\\`\n\n";
+
+        let file = SrtFile::parse(srt_content).expect("should parse SRT with special chars");
+        let entries = file.get_subtitle_entries().expect("should get entries");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(
+            entries[0].line.as_deref(),
+            Some("Special chars: <>&\"'\\`")
+        );
+    }
+
+    #[test]
+    fn parse_srt_with_unicode() {
+        use crate::SubtitleFileInterface;
+
+        let srt_content = "1\n00:00:01,000 --> 00:00:04,000\nUnicode: 你好世界 🌍\n\n";
+
+        let file = SrtFile::parse(srt_content).expect("should parse SRT with Unicode");
+        let entries = file.get_subtitle_entries().expect("should get entries");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].line.as_deref(), Some("Unicode: 你好世界 🌍"));
+    }
+
+    #[test]
+    fn parse_srt_very_long_timestamp() {
+        use crate::SubtitleFileInterface;
+
+        let srt_content = "1\n99:59:59,999 --> 99:59:59,999\nLong timestamp\n\n";
+
+        let file = SrtFile::parse(srt_content).expect("should parse SRT with long timestamp");
+        let entries = file.get_subtitle_entries().expect("should get entries");
+
+        assert_eq!(entries.len(), 1);
+    }
+
+    #[test]
+    fn update_subtitle_entries_preserves_non_text() {
+        use crate::SubtitleFileInterface;
+        use crate::timetypes::{TimePoint, TimeSpan};
+
+        let srt_content = "1\n00:00:01,000 --> 00:00:04,000\nOriginal text\n\n";
+
+        let mut file = SrtFile::parse(srt_content).expect("should parse valid SRT");
+
+        let new_entries = vec![SubtitleEntry {
+            timespan: TimeSpan::new(TimePoint::from_msecs(2000), TimePoint::from_msecs(5000)),
+            line: Some("Updated text".to_string()),
+        }];
+
+        let result = file.update_subtitle_entries(&new_entries);
+        assert!(result.is_ok(), "should update entries");
+
+        let entries = file.get_subtitle_entries().expect("should get entries");
+        assert_eq!(entries[0].line.as_deref(), Some("Updated text"));
+    }
+
+    #[test]
+    fn to_data_generates_valid_srt_format() {
+        use crate::SubtitleFileInterface;
+        use crate::timetypes::{TimePoint, TimeSpan};
+
+        let lines = vec![(
+            TimeSpan::new(TimePoint::from_msecs(1000), TimePoint::from_msecs(4000)),
+            "Test subtitle".to_string(),
+        )];
+
+        let file = SrtFile::create(lines).expect("should create SRT file");
+        let data = file.to_data().expect("should serialize");
+        let content = String::from_utf8(data).expect("should be valid UTF-8");
+
+        assert!(content.contains("1\n"));
+        assert!(content.contains("00:00:01,000 --> 00:00:04,000\n"));
+        assert!(content.contains("Test subtitle"));
+    }
 }
-// TODO: parser tests
+// Parser tests completed

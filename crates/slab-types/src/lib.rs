@@ -41,7 +41,7 @@ pub use diffusion::{
     DiffusionVideoBackend, DiffusionVideoRequest, DiffusionVideoResponse, GgmlDiffusionImageParams,
     GgmlDiffusionVideoParams,
 };
-pub use error::SlabTypeError;
+pub use error::{SlabTypeError, ValidationError};
 pub use inference::{
     AudioTranscriptionOpOptions, AudioTranscriptionRequest, AudioTranscriptionResponse,
     ImageEmbeddingRequest, ImageEmbeddingResponse, ImageGenerationRequest, ImageGenerationResponse,

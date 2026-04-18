@@ -30,6 +30,8 @@ use crate::domain::models::{
 use slab_types::inference::TextGenerationUsage;
 
 const MAX_PROMPT_BYTES: usize = 128 * 1024;
+const MAX_MESSAGES: usize = 256;
+const MAX_CONTINUE_GENERATION_TOKENS: u32 = 16384;
 
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -905,6 +907,17 @@ fn validate_chat_completion_request(
     }
     validate_structured_output(request.response_format.as_ref(), request.json_schema.as_ref())?;
 
+    if request.messages.len() > MAX_MESSAGES {
+        return Err(validation_error(
+            "messages_too_many",
+            &format!(
+                "messages array too large ({} messages); maximum is {} messages",
+                request.messages.len(),
+                MAX_MESSAGES
+            ),
+        ));
+    }
+
     let Some(user_message) = request
         .messages
         .iter()
@@ -931,6 +944,19 @@ fn validate_chat_completion_request(
     }
 
     if request.continue_generation {
+        if let Some(max_tokens) = request.max_tokens {
+            if max_tokens > MAX_CONTINUE_GENERATION_TOKENS {
+                return Err(validation_error(
+                    "max_tokens_too_large",
+                    &format!(
+                        "max_tokens ({}) is too large for continue_generation; maximum is {}",
+                        max_tokens,
+                        MAX_CONTINUE_GENERATION_TOKENS
+                    ),
+                ));
+            }
+        }
+
         let Some(last_message) =
             request.messages.iter().rev().find(|message| message.has_meaningful_payload())
         else {

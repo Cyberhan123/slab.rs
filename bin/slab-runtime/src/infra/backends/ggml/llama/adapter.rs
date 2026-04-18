@@ -143,10 +143,30 @@ pub struct GGMLLlamaEngine {
     session_bindings: Mutex<HashMap<String, SessionBinding>>,
 }
 
-// SAFETY: GGMLLlamaEngine is always owned through Arc<GGMLLlamaEngine> by backend workers.
-// The `instance: Arc<Llama>` field wraps a dynamically loaded library handle which is
-// immutable after creation. Mutable lifecycle state (loaded engine handle)
-// is guarded by the `inference_engine: RwLock<...>` field.
+// # Safety
+//
+// `GGMLLlamaEngine` is `Send` and `Sync` because all mutable state is guarded by
+// interior mutability primitives that provide thread-safe access:
+//
+// 1. **`instance: Arc<Llama>`** - The underlying `Llama` wraps a dlopen2-generated
+//    handle that holds a read-only table of function pointers loaded once at startup.
+//    The function pointer table is never mutated after creation, making concurrent
+//    reads from multiple threads safe.
+//
+// 2. **`inference_engine: RwLock<Option<LlamaRuntime>>`** - The runtime engine
+//    handle is protected by a `RwLock`, allowing multiple concurrent readers or
+//    exclusive writer access. The `LlamaRuntime` type itself is not `Send + Sync`,
+//    but the `RwLock` ensures that only one thread can access it mutably at a time.
+//
+// 3. **`loaded_model: RwLock<Option<Arc<LlamaModel>>>`** - Similar to the inference
+//    engine, the loaded model handle is protected by a `RwLock`.
+//
+// 4. **`session_bindings: Mutex<HashMap<...>>`** - Session bindings are protected
+//    by a `Mutex`, providing exclusive access during mutations.
+//
+// The combination of these interior mutability primitives ensures that all accesses
+// to the mutable state are properly synchronized, allowing `GGMLLlamaEngine` to be
+// safely shared across threads.
 unsafe impl Send for GGMLLlamaEngine {}
 unsafe impl Sync for GGMLLlamaEngine {}
 

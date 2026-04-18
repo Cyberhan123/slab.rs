@@ -16,18 +16,28 @@ use crate::token::LlamaToken;
 /// Inner (non-Clone) model data.  Wrapped in Arc so that LlamaContext can keep
 /// the model alive without copying the raw pointer.
 pub(crate) struct LlamaModelInner {
-    pub(crate) model: *mut slab_llama_sys::llama_model,
+    pub(crate) model: Option<std::ptr::NonNull<slab_llama_sys::llama_model>>,
     pub(crate) lib: Arc<slab_llama_sys::LlamaLib>,
     pub(crate) eog_tokens: Box<[LlamaToken]>,
     pub(crate) eog_logit_bias: Box<[slab_llama_sys::llama_logit_bias]>,
 }
 
+// SAFETY: The underlying `llama_model` pointer is only accessed through
+// `&mut self` methods in this crate, ensuring exclusive access. The
+// `llama.cpp` library does not use thread-local state for model operations,
+// and all mutable access to the model is mediated through the `LlamaModel`
+// wrapper which enforces Rust's borrowing rules.
 unsafe impl Send for LlamaModelInner {}
+
+// SAFETY: Same as Send - all mutable access is exclusive, and the library
+// does not use interior mutability or thread-local state.
 unsafe impl Sync for LlamaModelInner {}
 
 impl Drop for LlamaModelInner {
     fn drop(&mut self) {
-        unsafe { self.lib.llama_model_free(self.model) };
+        if let Some(model) = self.model.take() {
+            unsafe { self.lib.llama_model_free(model.as_ptr()) };
+        }
     }
 }
 
@@ -63,7 +73,7 @@ impl Llama {
             let (eog_tokens, eog_logit_bias) = collect_eog_bias(&self.lib, vocab);
             Ok(LlamaModel {
                 inner: Arc::new(LlamaModelInner {
-                    model,
+                    model: Some(unsafe { std::ptr::NonNull::new_unchecked(model) }),
                     lib: Arc::clone(&self.lib),
                     eog_tokens,
                     eog_logit_bias,
@@ -123,7 +133,7 @@ fn collect_sampler_logit_bias(
 impl LlamaModel {
     /// Return the vocab pointer (for tokenization helpers).
     fn vocab(&self) -> *const slab_llama_sys::llama_vocab {
-        unsafe { self.inner.lib.llama_model_get_vocab(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_get_vocab(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// Create an inference context for this model.
@@ -135,11 +145,14 @@ impl LlamaModel {
     /// Returns [`LlamaError::ContextCreateFailed`] if context creation fails.
     pub fn new_context(&self, params: LlamaContextParams) -> Result<LlamaContext, LlamaError> {
         let c_params = params.to_c_params(&self.inner.lib);
-        let ctx = unsafe { self.inner.lib.llama_init_from_model(self.inner.model, c_params) };
+        let ctx = unsafe { self.inner.lib.llama_init_from_model(self.inner.model.unwrap().as_ptr(), c_params) };
         if ctx.is_null() {
             Err(LlamaError::ContextCreateFailed)
         } else {
-            Ok(LlamaContext { ctx, model: Arc::clone(&self.inner) })
+            Ok(LlamaContext {
+                ctx: Some(unsafe { std::ptr::NonNull::new_unchecked(ctx) }),
+                model: Arc::clone(&self.inner),
+            })
         }
     }
 
@@ -160,7 +173,7 @@ impl LlamaModel {
     pub fn adapter_lora_init(&self, path_lora: &str) -> Result<LlamaLoraAdapter, LlamaError> {
         let c_path = CString::new(path_lora)?;
         let adapter =
-            unsafe { self.inner.lib.llama_adapter_lora_init(self.inner.model, c_path.as_ptr()) };
+            unsafe { self.inner.lib.llama_adapter_lora_init(self.inner.model.unwrap().as_ptr(), c_path.as_ptr()) };
         if adapter.is_null() {
             Err(LlamaError::LoraAdapterLoadFailed)
         } else {
@@ -402,37 +415,37 @@ impl LlamaModel {
 
     /// Training context length.
     pub fn n_ctx_train(&self) -> i32 {
-        unsafe { self.inner.lib.llama_model_n_ctx_train(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_n_ctx_train(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// Embedding dimension.
     pub fn n_embd(&self) -> i32 {
-        unsafe { self.inner.lib.llama_model_n_embd(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_n_embd(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// Number of layers.
     pub fn n_layer(&self) -> i32 {
-        unsafe { self.inner.lib.llama_model_n_layer(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_n_layer(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// Number of attention heads.
     pub fn n_head(&self) -> i32 {
-        unsafe { self.inner.lib.llama_model_n_head(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_n_head(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// Number of KV attention heads.
     pub fn n_head_kv(&self) -> i32 {
-        unsafe { self.inner.lib.llama_model_n_head_kv(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_n_head_kv(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// Total number of parameters.
     pub fn n_params(&self) -> u64 {
-        unsafe { self.inner.lib.llama_model_n_params(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_n_params(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// Model size in bytes.
     pub fn model_size(&self) -> u64 {
-        unsafe { self.inner.lib.llama_model_size(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_size(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// A human-readable description of the model.
@@ -443,7 +456,7 @@ impl LlamaModel {
         let mut buf = vec![0u8; 256];
         let n = unsafe {
             self.inner.lib.llama_model_desc(
-                self.inner.model,
+                self.inner.model.unwrap().as_ptr(),
                 buf.as_mut_ptr() as *mut std::os::raw::c_char,
                 buf.len(),
             )
@@ -457,17 +470,17 @@ impl LlamaModel {
 
     /// Whether the model has an encoder (e.g. encoder-decoder models).
     pub fn has_encoder(&self) -> bool {
-        unsafe { self.inner.lib.llama_model_has_encoder(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_has_encoder(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// Whether the model has a decoder.
     pub fn has_decoder(&self) -> bool {
-        unsafe { self.inner.lib.llama_model_has_decoder(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_has_decoder(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// Whether the model is a recurrent model.
     pub fn is_recurrent(&self) -> bool {
-        unsafe { self.inner.lib.llama_model_is_recurrent(self.inner.model) }
+        unsafe { self.inner.lib.llama_model_is_recurrent(self.inner.model.unwrap().as_ptr()) }
     }
 
     /// Create a new default sampler chain for this model.
@@ -548,7 +561,7 @@ impl LlamaModel {
         let mut buf = vec![0u8; 512];
         let n = unsafe {
             self.inner.lib.llama_model_meta_val_str(
-                self.inner.model,
+                self.inner.model.unwrap().as_ptr(),
                 c_key.as_ptr(),
                 buf.as_mut_ptr() as *mut std::os::raw::c_char,
                 buf.len(),

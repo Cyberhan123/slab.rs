@@ -8,6 +8,8 @@ use serde::Deserialize;
 use utoipa::{OpenApi, ToSchema};
 use validator::Validate;
 
+const MAX_MODEL_PACK_SIZE: usize = 10 * 1024 * 1024 * 1024; // 10GB
+
 use crate::api::v1::models::schema::{
     CreateModelRequest, DownloadModelRequest, ListAvailableQuery, ListModelsQuery,
     LoadModelRequest, ModelConfigDocumentResponse, ModelStatusResponse, SwitchModelRequest,
@@ -132,8 +134,17 @@ async fn import_model_pack(
         let bytes = field.bytes().await.map_err(|error| {
             ServerError::BadRequest(format!("failed to read model pack bytes: {error}"))
         })?;
+
         if bytes.is_empty() {
             return Err(ServerError::BadRequest("uploaded model pack is empty".into()));
+        }
+
+        if bytes.len() > MAX_MODEL_PACK_SIZE {
+            return Err(ServerError::BadRequest(format!(
+                "uploaded model pack is too large ({} bytes); maximum size is {} bytes (10GB)",
+                bytes.len(),
+                MAX_MODEL_PACK_SIZE
+            )));
         }
 
         return Ok(Json(service.import_model_pack_bytes(bytes.as_ref()).await?.into()));

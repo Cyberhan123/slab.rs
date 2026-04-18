@@ -449,13 +449,18 @@ impl WhisperInnerContext {
 
 impl Drop for WhisperInnerContext {
     fn drop(&mut self) {
-        unsafe { self.instance.lib.whisper_free(self.ctx) };
+        if !self.ctx.is_null() {
+            unsafe { self.instance.lib.whisper_free(self.ctx) };
+        }
     }
 }
 
-// following implementations are safe
-// see https://github.com/ggerganov/whisper.cpp/issues/32#issuecomment-1272790388
+// SAFETY: The underlying `whisper_context` pointer is only accessed through
+// `&self`/`&mut self` methods, and the whisper.cpp library supports multi-threaded
+// use where each context is used from one thread at a time.
+// See: https://github.com/ggerganov/whisper.cpp/issues/32#issuecomment-1272790388
 unsafe impl Send for WhisperInnerContext {}
+// SAFETY: Same as Send - all mutable access is exclusive through Rust's borrowing rules.
 unsafe impl Sync for WhisperInnerContext {}
 #[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq)]
 pub struct WhisperTimings {

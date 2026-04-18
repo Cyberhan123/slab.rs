@@ -192,7 +192,15 @@ fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngi
             }
             let data: Vec<$ty> = raw
                 .chunks_exact(elem_size)
-                .map(|b| <$ty>::from_le_bytes(b.try_into().unwrap()))
+                .map(|b| {
+                    // SAFETY: `chunks_exact(elem_size)` guarantees each chunk has exactly
+                    // `elem_size` bytes, which matches the size of `$ty`. The `try_into()`
+                    // conversion from a slice to a fixed-size array will always succeed.
+                    <$ty>::from_le_bytes(
+                        b.try_into()
+                            .expect("chunks_exact guarantees correct array size"),
+                    )
+                })
                 .collect();
             Tensor::<$ty>::from_array((shape, data)).map(|t| t.into_dyn()).map_err(|e| {
                 OnnxEngineError::TensorDecode { name: name.to_string(), reason: e.to_string() }

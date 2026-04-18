@@ -19,14 +19,18 @@ pub struct WhisperState {
     ptr: *mut slab_whisper_sys::whisper_state,
 }
 
+// SAFETY: The state pointer is only accessed through `&self`/`&mut self` methods.
+// The whisper.cpp library does not use thread-local state for state operations.
 unsafe impl Send for WhisperState {}
-
+// SAFETY: Same as Send - all mutable access is exclusive through Rust's borrowing rules.
 unsafe impl Sync for WhisperState {}
 
 impl Drop for WhisperState {
     fn drop(&mut self) {
-        unsafe {
-            self.ctx.instance.lib.whisper_free_state(self.ptr);
+        if !self.ptr.is_null() {
+            unsafe {
+                self.ctx.instance.lib.whisper_free_state(self.ptr);
+            }
         }
     }
 }
