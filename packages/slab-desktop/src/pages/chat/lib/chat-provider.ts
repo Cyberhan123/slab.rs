@@ -71,7 +71,7 @@ class SlabChatProvider extends DeepSeekChatProvider<
     this.pendingReasoningContent = ''
 
     return {
-      ...(options?.params || {}),
+      ...options?.params,
       ...requestParams,
       messages: toChatRequestMessages(requestMessages),
     }

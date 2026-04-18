@@ -14,6 +14,9 @@ Vitest-based migration tests.
 - Unit migration tests: `unit/**/*.unit.test.ts`
 - Integration tests: `integration/**/*.integration.test.ts`
 - Unit tests self-start an isolated `slab-server` with temp settings/db/model dirs
+- The unit-test harness writes a minimal V2 `settings.json` that binds the HTTP server
+  to the test-selected port and disables managed runtime backends, so route-level tests
+  do not spend startup time launching local GGML children
 - Integration tests target `http://127.0.0.1:3000` by default
 - Override integration target base URL with `SLAB_SERVER_BASE_URL`
 

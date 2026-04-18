@@ -4,6 +4,10 @@
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
+  "scripts": {
+    "lint": "oxlint src",
+    "lint:fix": "oxlint --fix src"
+  },
   "exports": {
     ".": "./src/index.ts"
   },

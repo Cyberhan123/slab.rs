@@ -199,10 +199,14 @@ function allocatePackName(
 }
 
 function sanitizePackName(value: string) {
+  const withoutControlCharacters = Array.from(value.trim(), (character) => {
+    const codePoint = character.codePointAt(0) ?? 0;
+    return codePoint < 0x20 ? "-" : character;
+  }).join("");
+
   return (
-    value
-      .trim()
-      .replace(/[<>:"/\\|?*\u0000-\u001f]+/g, "-")
+    withoutControlCharacters
+      .replace(/[<>:"/\\|?*]+/g, "-")
       .replace(/\s+/g, "-")
       .replace(/-+/g, "-")
       .replace(/^\.+|\.+$/g, "")

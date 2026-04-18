@@ -1,5 +1,5 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { createServer } from "node:net";
@@ -8,6 +8,8 @@ import { fileURLToPath } from "node:url";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
 const runtimeLibDir = resolve(repoRoot, "bin/slab-app/src-tauri/resources/libs");
 const startupTimeoutMs = 120_000;
+const serverBinaryName = globalThis.process.platform === "win32" ? "slab-server.exe" : "slab-server";
+const serverBinaryPath = resolve(repoRoot, "target", "debug", serverBinaryName);
 
 function sqliteUrlForPath(path: string): string {
   const normalized = path.replaceAll("\\", "/");
@@ -41,6 +43,37 @@ async function findFreePort(): Promise<number> {
 
 function splitLines(chunk: string): string[] {
   return chunk.split(/\r?\n/).filter((line) => line.trim().length > 0);
+}
+
+function canUsePrebuiltBinary(): boolean {
+  try {
+    execFileSync(serverBinaryPath, ["--version"], { stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function writeTestSettings(path: string, bindAddress: string): void {
+  const settings = {
+    $schema: "https://slab.reorgix.com/manifests/v1/settings-document.schema.json",
+    schema_version: 2,
+    runtime: {
+      mode: "managed_children",
+      ggml: {
+        backends: {
+          llama: { enabled: false },
+          whisper: { enabled: false },
+          diffusion: { enabled: false },
+        },
+      },
+    },
+    server: {
+      address: bindAddress,
+    },
+  };
+
+  writeFileSync(path, `${JSON.stringify(settings, null, 2)}\n`, "utf8");
 }
 
 async function killProcessTree(child: ChildProcessWithoutNullStreams): Promise<void> {
@@ -83,38 +116,49 @@ export async function startSlabServerHarness(
   const databasePath = join(rootDir, "slab.db");
   const databaseUrl = sqliteUrlForPath(databasePath);
   const baseUrl = `http://127.0.0.1:${port}`;
+  const bindAddress = `127.0.0.1:${port}`;
   const logLines: string[] = [];
 
   mkdirSync(modelConfigDir, { recursive: true });
+  writeTestSettings(settingsPath, bindAddress);
 
-  const child = spawn(
-    "cargo",
-    [
-      "run",
-      "--bin",
-      "slab-server",
-      "--",
-      "--settings-path",
-      settingsPath,
-      "--database-url",
-      databaseUrl,
-      "--model-config-dir",
-      modelConfigDir
-    ],
-    {
-      cwd: repoRoot,
-      env: {
-        ...process.env,
-        SLAB_BIND: `127.0.0.1:${port}`,
-        SLAB_ADMIN_TOKEN: options.adminToken,
-        SLAB_LIB_DIR: runtimeLibDir,
-        SLAB_LOG: process.env.SLAB_LOG ?? "warn",
-        SLAB_ENABLE_SWAGGER: "true",
-        NO_COLOR: "1"
-      },
-      stdio: "pipe"
-    }
-  );
+  const prebuiltBinary = canUsePrebuiltBinary();
+  const command = prebuiltBinary ? serverBinaryPath : "cargo";
+  const args = prebuiltBinary
+    ? [
+        "--settings-path",
+        settingsPath,
+        "--database-url",
+        databaseUrl,
+        "--model-config-dir",
+        modelConfigDir
+      ]
+    : [
+        "run",
+        "--bin",
+        "slab-server",
+        "--",
+        "--settings-path",
+        settingsPath,
+        "--database-url",
+        databaseUrl,
+        "--model-config-dir",
+        modelConfigDir
+      ];
+
+  const child = spawn(command, args, {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      SLAB_BIND: bindAddress,
+      SLAB_ADMIN_TOKEN: options.adminToken,
+      SLAB_LIB_DIR: runtimeLibDir,
+      SLAB_LOG: process.env.SLAB_LOG ?? "warn",
+      SLAB_ENABLE_SWAGGER: "true",
+      NO_COLOR: "1"
+    },
+    stdio: "pipe"
+  });
 
   const rememberOutput = (chunk: Buffer) => {
     for (const line of splitLines(chunk.toString("utf8"))) {
