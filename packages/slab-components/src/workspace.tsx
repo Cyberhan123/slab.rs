@@ -1,10 +1,10 @@
 import type { ComponentProps, ComponentType, ReactNode } from "react"
 import { UploadCloud } from "lucide-react"
 
+import { Badge } from "./badge"
+import { Button } from "./button"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./card"
 import { cn } from "./lib/utils"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
 export function SoftPanel({
   className,

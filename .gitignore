@@ -40,3 +40,5 @@ docs/.vitepress/.temp/
 
 setup.inf
 setup.rpt
+
+.vitest-attachments/

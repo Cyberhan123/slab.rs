@@ -54,6 +54,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `packages/slab-desktop` is the React 19 + Vite + React Router 7 frontend application for the Tauri desktop host. It imports UI components from `packages/slab-components` and i18n from `packages/slab-i18n`.
 - `packages/slab-components` is the shared shadcn/ui-based React component library (Radix UI + Tailwind CSS). It can be consumed by both `slab-desktop` and future mobile packages.
 - `packages/slab-i18n` is the shared internationalization package (i18next + react-i18next) with locale definitions.
+- `packages/vitest-rust-reporter` is a workspace helper package that adapts `cargo test` and optional `cargo llvm-cov` output into a Vitest project so Rust results appear in `vitest --ui`.
 - `bin/slab-server` is the thin HTTP gateway and headless host (axum). It depends on `crates/slab-app-core` for all domain/infra logic, adds axum `FromRef` extractors (`state_extractors.rs`) and `ServerError` → HTTP response conversion, and launches `bin/slab-runtime` through the same shared supervisor using a `tokio::process` adapter. Runtime crashes restart per backend; the HTTP host stays up unless the gateway itself fails. It exposes `/v1` plus `/api-docs/openapi.json`.
 - `crates/slab-app-core` is the HTTP-free business logic library: `context/`, `domain/`, `infra/`, `config`, `model_auto_unload`, and `runtime_supervisor`. It is the shared domain/runtime layer behind `bin/slab-server`. SQLx migrations live in `crates/slab-app-core/migrations/`.
 - `bin/slab-runtime` is the standalone gRPC worker that can serve TCP or IPC transports. It is the only backend composition root: it owns driver resolution, load/inference codecs, task submission, and now keeps its DDD-style `api/`, `application/`, `domain/`, and `infra/` layers in-package, with the gRPC bootstrap in `src/api/server.rs`, application orchestration in `src/application/services/`, and flattened GGML, Candle, and ONNX backend implementations under `src/infra/backends/`.
@@ -82,6 +83,7 @@ crates/slab-runtime-core (scheduler, backend protocol, worker runner)
 - `packages/slab-desktop/src/lib/plugin-sdk.ts`: frontend bridge to Tauri plugin commands and events.
 - `packages/slab-components/src`: shared UI component library (shadcn/ui, Radix UI, Tailwind CSS).
 - `packages/slab-i18n/src`: shared i18n setup and locale files.
+- `packages/vitest-rust-reporter/src`: Vitest-side Rust test and coverage projection helpers for the workspace test UI.
 - `bin/slab-app/src-tauri`: Tauri host, sidecar startup, plugin runtime, capabilities, permissions, and security boundaries.
 - `docs`: public VitePress site source.
 - `docs/development`: internal planning, audits, engineering notes, AI maintenance docs, and contributor-only references.
