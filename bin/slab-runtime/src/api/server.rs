@@ -338,13 +338,24 @@ async fn serve_grpc(
             .map(|stream| stream.map(IpcIo::new));
 
         tonic::transport::Server::builder()
-            .add_service(pb::llama_service_server::LlamaServiceServer::new(grpc_service.clone()))
-            .add_service(pb::whisper_service_server::WhisperServiceServer::new(
+            .add_service(pb::ggml_llama_service_server::GgmlLlamaServiceServer::new(
                 grpc_service.clone(),
             ))
-            .add_service(pb::diffusion_service_server::DiffusionServiceServer::new(
+            .add_service(pb::ggml_whisper_service_server::GgmlWhisperServiceServer::new(
                 grpc_service.clone(),
             ))
+            .add_service(pb::ggml_diffusion_service_server::GgmlDiffusionServiceServer::new(
+                grpc_service.clone(),
+            ))
+            .add_service(
+                pb::candle_transformers_service_server::CandleTransformersServiceServer::new(
+                    grpc_service.clone(),
+                ),
+            )
+            .add_service(pb::candle_diffusion_service_server::CandleDiffusionServiceServer::new(
+                grpc_service.clone(),
+            ))
+            .add_service(pb::onnx_service_server::OnnxServiceServer::new(grpc_service.clone()))
             .serve_with_incoming_shutdown(incoming, shutdown_signal(shutdown_on_stdin_close))
             .await?;
         info!(transport = "ipc", path = %ipc_path, "slab-runtime gRPC server stopped");
@@ -356,9 +367,22 @@ async fn serve_grpc(
         .with_context(|| format!("invalid TCP gRPC bind address '{grpc_bind}'"))?;
     info!(transport = "http", %addr, "slab-runtime gRPC listening");
     tonic::transport::Server::builder()
-        .add_service(pb::llama_service_server::LlamaServiceServer::new(grpc_service.clone()))
-        .add_service(pb::whisper_service_server::WhisperServiceServer::new(grpc_service.clone()))
-        .add_service(pb::diffusion_service_server::DiffusionServiceServer::new(grpc_service))
+        .add_service(pb::ggml_llama_service_server::GgmlLlamaServiceServer::new(
+            grpc_service.clone(),
+        ))
+        .add_service(pb::ggml_whisper_service_server::GgmlWhisperServiceServer::new(
+            grpc_service.clone(),
+        ))
+        .add_service(pb::ggml_diffusion_service_server::GgmlDiffusionServiceServer::new(
+            grpc_service.clone(),
+        ))
+        .add_service(pb::candle_transformers_service_server::CandleTransformersServiceServer::new(
+            grpc_service.clone(),
+        ))
+        .add_service(pb::candle_diffusion_service_server::CandleDiffusionServiceServer::new(
+            grpc_service.clone(),
+        ))
+        .add_service(pb::onnx_service_server::OnnxServiceServer::new(grpc_service))
         .serve_with_shutdown(addr, shutdown_signal(shutdown_on_stdin_close))
         .await?;
     info!(transport = "http", %addr, "slab-runtime gRPC server stopped");

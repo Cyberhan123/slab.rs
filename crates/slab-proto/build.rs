@@ -1,9 +1,12 @@
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protos = [
         "proto/slab/ipc/v1/common.proto",
-        "proto/slab/ipc/v1/llama.proto",
-        "proto/slab/ipc/v1/whisper.proto",
-        "proto/slab/ipc/v1/diffusion.proto",
+        "proto/slab/ipc/v1/ggml/llama.proto",
+        "proto/slab/ipc/v1/ggml/whisper.proto",
+        "proto/slab/ipc/v1/ggml/diffusion.proto",
+        "proto/slab/ipc/v1/candle/transformers.proto",
+        "proto/slab/ipc/v1/candle/diffusion.proto",
+        "proto/slab/ipc/v1/onnx.proto",
     ];
     for proto in protos {
         println!("cargo:rerun-if-changed={proto}");
@@ -16,14 +19,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
     tonic_prost_build::configure()
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
-        .type_attribute(
-            "slab.ipc.v1.ModelLoadRequest.backend_params",
-            "#[allow(clippy::large_enum_variant)]",
-        )
-        .type_attribute(
-            "slab.ipc.v1.ModelLoadRequest.BackendParams",
-            "#[allow(clippy::large_enum_variant)]",
-        )
         .build_server(true)
         .build_client(true)
         .compile_protos(&protos, &["proto"])?;

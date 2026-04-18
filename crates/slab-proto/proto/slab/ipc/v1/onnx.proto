@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+package slab.ipc.v1;
+
+import "slab/ipc/v1/common.proto";
+
+service OnnxService {
+  rpc RunText(OnnxTextRequest) returns (OnnxTextResponse);
+  rpc RunEmbedding(OnnxEmbeddingRequest) returns (OnnxEmbeddingResponse);
+  rpc LoadTextModel(OnnxTextLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadTextModel(ModelUnloadRequest) returns (ModelStatusResponse);
+  rpc LoadEmbeddingModel(OnnxEmbeddingLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadEmbeddingModel(ModelUnloadRequest) returns (ModelStatusResponse);
+}
+
+message OnnxTextLoadRequest {
+  optional string model_path = 1;
+  StringList execution_providers = 2;
+  optional uint32 intra_op_num_threads = 3;
+  optional uint32 inter_op_num_threads = 4;
+}
+
+message OnnxTextRequest {
+  repeated RawTensor inputs = 1;
+}
+
+message OnnxTextResponse {
+  repeated RawTensor outputs = 1;
+}
+
+message OnnxEmbeddingLoadRequest {
+  optional string model_path = 1;
+  StringList execution_providers = 2;
+  optional uint32 intra_op_num_threads = 3;
+  optional uint32 inter_op_num_threads = 4;
+  optional string input_tensor_name = 5;
+  optional string output_tensor_name = 6;
+}
+
+message OnnxEmbeddingRequest {
+  BinaryPayload image = 1;
+}
+
+message OnnxEmbeddingResponse {
+  RawTensor output = 1;
+}

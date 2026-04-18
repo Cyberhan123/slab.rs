@@ -11,14 +11,12 @@
 //! | `"inference"`      | `Inference`      | Transcribe audio; input is packed `f32` PCM.       |
 //!
 //! ### `model.load` input payload
-//! Prefers typed [`slab_whisper::ContextParams`] payloads inside `slab-core`,
-//! with legacy `GgmlWhisperLoadConfig` JSON/typed deserialization kept as a compatibility fallback.
+//! Expects typed [`slab_whisper::ContextParams`] payloads inside `slab-core`.
 
 use std::sync::Arc;
 
 use tokio::sync::broadcast;
 
-use crate::domain::services::codec::build_ggml_whisper_full_params_from_legacy;
 use crate::infra::backends::ggml::whisper::adapter::GGMLWhisperEngine;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
@@ -26,7 +24,6 @@ use slab_runtime_core::backend::{
     SyncMessage, WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
-use slab_types::{AudioTranscriptionOpOptions, GgmlWhisperLoadConfig};
 use slab_whisper::{ContextParams as WhisperContextParams, FullParams as WhisperFullParams};
 
 // ── Worker ────────────────────────────────────────────────────────────────────
@@ -56,34 +53,11 @@ pub struct WhisperWorker {
 }
 
 fn parse_context_payload(raw: &Payload) -> Result<WhisperContextParams, String> {
-    if let Ok(params) = raw.to_typed::<WhisperContextParams>() {
-        return Ok(params);
-    }
-
-    let legacy: GgmlWhisperLoadConfig =
-        raw.to_typed().map_err(|e| format!("invalid model.load config: {e}"))?;
-    Ok(WhisperContextParams {
-        model_path: Some(legacy.model_path),
-        flash_attn: Some(legacy.flash_attn),
-        ..Default::default()
-    })
+    raw.to_typed().map_err(|e| format!("invalid model.load config: {e}"))
 }
 
 fn parse_inference_options(raw: &Payload) -> Result<WhisperFullParams, String> {
-    if let Ok(params) = raw.to_typed::<WhisperFullParams>() {
-        return Ok(params);
-    }
-
-    let opts: AudioTranscriptionOpOptions =
-        raw.to_typed().map_err(|e| format!("invalid whisper inference options: {e}"))?;
-    build_ggml_whisper_full_params_from_legacy(
-        opts.language,
-        opts.prompt,
-        opts.detect_language,
-        opts.vad,
-        opts.decode,
-    )
-    .map_err(|error| error.to_string())
+    raw.to_typed().map_err(|e| format!("invalid whisper inference options: {e}"))
 }
 
 #[backend_handler]
@@ -389,20 +363,5 @@ mod tests {
 
         assert_eq!(config.model_path, Some(PathBuf::from("model.bin")));
         assert_eq!(config.flash_attn, Some(true));
-    }
-
-    #[test]
-    fn deployment_snapshot_typed_model_config_falls_back_to_json() {
-        let snapshot = DeploymentSnapshot::with_model(
-            8,
-            Payload::json(serde_json::json!({ "model_path": "legacy-model.bin" })),
-        );
-
-        let config = snapshot
-            .typed_model_config::<GgmlWhisperLoadConfig>()
-            .expect("json deployment snapshot should still decode through typed helper");
-
-        assert_eq!(config.model_path, PathBuf::from("legacy-model.bin"));
-        assert!(config.flash_attn);
     }
 }

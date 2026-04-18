@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package slab.ipc.v1;
+
+import "slab/ipc/v1/common.proto";
+
+service GgmlDiffusionService {
+  rpc GenerateImage(GgmlDiffusionGenerateImageRequest) returns (GgmlDiffusionGenerateImageResponse);
+  rpc GenerateVideo(GgmlDiffusionGenerateVideoRequest) returns (GgmlDiffusionGenerateVideoResponse);
+  rpc LoadModel(GgmlDiffusionLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
+}
+
+message GgmlDiffusionLoadRequest {
+  optional string model_path = 1;
+  optional string diffusion_model_path = 2;
+  optional string vae_path = 3;
+  optional string taesd_path = 4;
+  optional string clip_l_path = 5;
+  optional string clip_g_path = 6;
+  optional string t5xxl_path = 7;
+  optional string clip_vision_path = 8;
+  optional string control_net_path = 9;
+  optional bool flash_attn = 10;
+  optional string vae_device = 11;
+  optional string clip_device = 12;
+  optional bool offload_params_to_cpu = 13;
+  optional bool enable_mmap = 14;
+  optional int32 n_threads = 15;
+}
+
+message GgmlDiffusionGenerateImageRequest {
+  optional string prompt = 1;
+  optional string negative_prompt = 2;
+  optional uint32 width = 3;
+  optional uint32 height = 4;
+  RawImage init_image = 5;
+  optional uint32 count = 6;
+  optional float cfg_scale = 7;
+  optional float guidance = 8;
+  optional int32 sample_steps = 9;
+  optional int64 seed = 10;
+  optional string sample_method = 11;
+  optional string scheduler = 12;
+  optional int32 clip_skip = 13;
+  optional float strength = 14;
+  optional float eta = 15;
+}
+
+message GgmlDiffusionGenerateImageResponse {
+  repeated RawImage images = 1;
+}
+
+message GgmlDiffusionGenerateVideoRequest {
+  optional string prompt = 1;
+  optional string negative_prompt = 2;
+  optional uint32 width = 3;
+  optional uint32 height = 4;
+  RawImage init_image = 5;
+  optional uint32 video_frames = 6;
+  optional float fps = 7;
+  optional float cfg_scale = 8;
+  optional float guidance = 9;
+  optional int32 sample_steps = 10;
+  optional int64 seed = 11;
+  optional string sample_method = 12;
+  optional string scheduler = 13;
+  optional float strength = 14;
+}
+
+message GgmlDiffusionGenerateVideoResponse {
+  repeated RawImage frames = 1;
+}

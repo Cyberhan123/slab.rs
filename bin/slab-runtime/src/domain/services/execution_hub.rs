@@ -1,9 +1,7 @@
 use std::sync::Arc;
 
 use slab_runtime_core::scheduler::Orchestrator;
-use slab_types::ModelSpec;
 
-use super::backend_session::BackendSession;
 use crate::domain::models::BackendCatalog;
 
 #[derive(Clone)]
@@ -20,14 +18,6 @@ pub(crate) struct ExecutionState {
 impl ExecutionHub {
     pub(crate) fn new(orchestrator: Orchestrator, catalog: BackendCatalog) -> Self {
         Self { inner: Arc::new(ExecutionState { orchestrator, catalog }) }
-    }
-
-    pub fn session_for_backend(
-        &self,
-        spec: ModelSpec,
-        backend_target: impl Into<String>,
-    ) -> Result<BackendSession, slab_runtime_core::CoreError> {
-        BackendSession::new_for_backend(self.clone(), spec, backend_target)
     }
 
     pub(crate) fn orchestrator(&self) -> Orchestrator {

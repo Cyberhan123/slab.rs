@@ -1,14 +1,24 @@
-use slab_proto::{convert, slab::ipc::v1 as pb};
+//! gRPC handlers are a strict transport boundary.
+//!
+//! They only perform `pb -> dto -> application -> dto -> pb` forwarding.
+//! Compatibility aggregation intentionally does not live here anymore:
+//! `<think>` parsing, usage estimation, stop trimming, OpenAI/SSE chunk shaping,
+//! whisper plain-text compatibility assembly, and legacy `slab_types` family
+//! request/response construction belong to the server/app-core boundary above
+//! runtime.
+
+use slab_proto::convert;
 use slab_runtime_core::CoreError;
 use tonic::Status;
-use tracing::instrument;
 
-use crate::application::services::{BackendKind, RuntimeApplication, RuntimeApplicationError};
-use crate::domain::services::BackendSession;
+use crate::application::services::{RuntimeApplication, RuntimeApplicationError};
 
-mod diffusion;
-mod llama;
-mod whisper;
+mod candle_diffusion;
+mod candle_transformers;
+mod ggml_diffusion;
+mod ggml_llama;
+mod ggml_whisper;
+mod onnx;
 
 #[derive(Clone)]
 pub struct GrpcServiceImpl {
@@ -19,60 +29,10 @@ impl GrpcServiceImpl {
     pub fn new(application: RuntimeApplication) -> Self {
         Self { application }
     }
-
-    pub(super) async fn session_for_backend(
-        &self,
-        backend: BackendKind,
-    ) -> Result<BackendSession, Status> {
-        self.application.session_for_backend(backend).await.map_err(application_to_status)
-    }
-
-    #[instrument(skip_all, fields(backend = backend.canonical_id()))]
-    pub(super) async fn load_model_for_backend(
-        &self,
-        backend: BackendKind,
-        request: pb::ModelLoadRequest,
-    ) -> Result<pb::ModelStatusResponse, Status> {
-        let typed_load_spec =
-            convert::decode_model_load_request(&request).map_err(proto_to_status)?;
-        let expected_backend = backend.runtime_backend_id();
-        let actual_backend = typed_load_spec.backend();
-        if actual_backend != expected_backend {
-            return Err(Status::invalid_argument(format!(
-                "model load payload targets backend '{}' but request was sent to '{}'",
-                actual_backend.canonical_id(),
-                expected_backend.canonical_id()
-            )));
-        }
-        let status = self
-            .application
-            .load_model_for_backend(backend, typed_load_spec)
-            .await
-            .map_err(application_to_status)?;
-
-        Ok(convert::encode_model_status_response(&status))
-    }
-
-    #[instrument(skip_all, fields(backend = backend.canonical_id()))]
-    pub(super) async fn unload_model_for_backend(
-        &self,
-        backend: BackendKind,
-    ) -> Result<pb::ModelStatusResponse, Status> {
-        let status = self
-            .application
-            .unload_model_for_backend(backend)
-            .await
-            .map_err(application_to_status)?;
-
-        Ok(convert::encode_model_status_response(&status))
-    }
 }
 
 fn application_to_status(err: RuntimeApplicationError) -> Status {
     match err {
-        RuntimeApplicationError::BackendDisabled(backend) => {
-            Status::unavailable(format!("{} backend is disabled", backend.canonical_id()))
-        }
         RuntimeApplicationError::Runtime(error) => runtime_to_status(error),
     }
 }

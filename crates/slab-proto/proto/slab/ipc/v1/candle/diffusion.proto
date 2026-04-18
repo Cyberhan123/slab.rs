@@ -1,0 +1,32 @@
+syntax = "proto3";
+
+package slab.ipc.v1;
+
+import "slab/ipc/v1/common.proto";
+
+service CandleDiffusionService {
+  rpc GenerateImage(CandleDiffusionGenerateImageRequest) returns (CandleDiffusionGenerateImageResponse);
+  rpc LoadModel(CandleDiffusionLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadModel(ModelUnloadRequest) returns (ModelStatusResponse);
+}
+
+message CandleDiffusionLoadRequest {
+  optional string model_path = 1;
+  optional string vae_path = 2;
+  optional string sd_version = 3;
+}
+
+message CandleDiffusionGenerateImageRequest {
+  optional string prompt = 1;
+  optional string negative_prompt = 2;
+  optional uint32 width = 3;
+  optional uint32 height = 4;
+  optional uint32 batch_count = 5;
+  optional int32 sample_steps = 6;
+  optional float guidance_scale = 7;
+  optional int64 seed = 8;
+}
+
+message CandleDiffusionGenerateImageResponse {
+  repeated RawImage images = 1;
+}
