@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "api": "bunx openapi-typescript http://127.0.0.1:3000/api-docs/openapi.json -o src/lib/api/v1.d.ts",
     "color:oklch": "bun ./scripts/figma-color-to-oklch.ts",
+    "lint": "oxlint .",
+    "lint:fix": "oxlint --fix .",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage"

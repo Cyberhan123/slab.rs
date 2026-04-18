@@ -127,6 +127,12 @@ Frontend and Tauri:
 # From repo root (bun workspace)
 bun install
 
+# Run frontend/workspace lint from the repo root
+bun run lint
+
+# Apply Oxlint autofixes where available
+bun run lint:fix
+
 # Run all Vitest projects from the repo root
 bun run test:run
 

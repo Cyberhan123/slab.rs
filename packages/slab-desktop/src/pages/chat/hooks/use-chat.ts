@@ -122,7 +122,7 @@ export const useChat = (
   const withRequestDefaults = (
     requestParams?: Partial<ChatRequestParams>
   ): Partial<ChatRequestParams> => ({
-    ...(requestParams ?? {}),
+    ...requestParams,
     model,
     ...buildThinkingParams(),
     ...buildRuntimePresetParams(),
@@ -149,7 +149,7 @@ export const useChat = (
         ...buildRuntimePresetParams(),
       })
       setActiveConversation(resolvedConversationKey)
-    } catch (_e) {
+    } catch {
       // beforeRequest should handle its own user-facing errors.
     }
   }
@@ -180,7 +180,7 @@ export const useChat = (
       rawOnReload(
         id,
         withRequestDefaults({
-          ...(requestParams ?? {}),
+          ...requestParams,
           continue_generation: true,
           messages: snapshot,
           userAction: requestParams?.userAction ?? 'continue',

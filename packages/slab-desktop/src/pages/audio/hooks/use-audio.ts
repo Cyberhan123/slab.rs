@@ -167,7 +167,7 @@ export function useAudio() {
     () =>
       normalizeAudioTranscriptionControls({
         ...selectedModelPresetControls,
-        ...(controlOverrides ?? {}),
+        ...controlOverrides,
       }),
     [controlOverrides, selectedModelPresetControls],
   );
@@ -294,7 +294,7 @@ export function useAudio() {
         return;
       }
 
-      const nextOverrides = { ...(controlOverrides ?? {}) };
+      const nextOverrides = { ...controlOverrides };
       if (
         areAudioTranscriptionControlValuesEqual(
           normalizedValue,
@@ -723,13 +723,13 @@ export function useAudio() {
 
       if (enableVad) {
         const preparedVad = await prepareVadSettings(refreshedModelConfigDocument);
-        transcribeOptions = { ...(transcribeOptions ?? {}), vad: preparedVad.settings };
+        transcribeOptions = { ...transcribeOptions, vad: preparedVad.settings };
         vadDescription = t('pages.audio.summary.vadOn', { model: preparedVad.modelName });
       }
 
       const decodeOptions = prepareDecodeOptions();
       if (decodeOptions) {
-        transcribeOptions = { ...(transcribeOptions ?? {}), decode: decodeOptions };
+        transcribeOptions = { ...transcribeOptions, decode: decodeOptions };
         decodeDescription = t('pages.audio.summary.decodeCustom');
       }
 
