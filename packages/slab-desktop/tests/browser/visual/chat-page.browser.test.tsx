@@ -1,5 +1,5 @@
 import { page } from 'vitest/browser';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import ChatPage from '@/pages/chat';
 import type { ChatMessageRecord } from '@/pages/chat/chat-context';
@@ -81,8 +81,8 @@ vi.mock('@/lib/api', () => ({
       mutateAsync: vi.fn<() => void>().mockResolvedValue(undefined),
     })),
   },
-  getErrorMessage: vi.fn<() => void>((err: Error) => err.message),
-  isApiError: vi.fn<() => void>(() => false),
+  getErrorMessage: vi.fn<() => string>((err: Error) => err.message),
+  isApiError: vi.fn<() => boolean>(() => false),
   queryClient: {},
 }));
 
@@ -143,6 +143,7 @@ function createChatSessionsViewModel(overrides = {}) {
 describe('ChatPage browser visual regression', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.spyOn(Date.prototype, 'getHours').mockReturnValue(15);
     mockUseChatLocale.mockReturnValue({
       requestFailed: 'Request failed',
       requestAborted: 'Request aborted',
@@ -153,6 +154,10 @@ describe('ChatPage browser visual regression', () => {
       copied: 'Copied',
     });
     mockUseMarkdownTheme.mockReturnValue(['markdown-theme-dark']);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('captures the chat page empty state', async () => {

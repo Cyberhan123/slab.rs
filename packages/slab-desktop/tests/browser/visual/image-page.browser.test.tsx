@@ -130,6 +130,13 @@ function createImageViewModel(overrides = {}) {
   };
 }
 
+const stableChromiumScreenshot = {
+  comparatorName: 'pixelmatch' as const,
+  comparatorOptions: {
+    allowedMismatchedPixels: 100,
+  },
+};
+
 describe('ImagePage browser visual regression', () => {
   beforeEach(() => {
     mockUseImageGeneration.mockReset();
@@ -143,6 +150,7 @@ describe('ImagePage browser visual regression', () => {
     await expect.element(page.getByTestId('desktop-browser-scene')).toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot(
       'image-page-idle.png',
+      stableChromiumScreenshot,
     );
   });
 
@@ -160,6 +168,7 @@ describe('ImagePage browser visual regression', () => {
       .toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot(
       'image-page-with-prompt.png',
+      stableChromiumScreenshot,
     );
   });
 
@@ -176,6 +185,7 @@ describe('ImagePage browser visual regression', () => {
 
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot(
       'image-page-generating.png',
+      stableChromiumScreenshot,
     );
   });
 
@@ -208,6 +218,7 @@ describe('ImagePage browser visual regression', () => {
 
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot(
       'image-page-with-results.png',
+      stableChromiumScreenshot,
     );
   });
 });

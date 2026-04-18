@@ -44,4 +44,10 @@ export default defineConfig(async () => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  test: {
+    typecheck: {
+      enabled: true,
+      tsconfig: './tsconfig.json',
+    },
+  },
 }));

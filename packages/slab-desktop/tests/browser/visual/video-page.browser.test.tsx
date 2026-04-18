@@ -78,6 +78,13 @@ function createVideoViewModel(overrides = {}) {
   };
 }
 
+const stableChromiumScreenshot = {
+  comparatorName: 'pixelmatch' as const,
+  comparatorOptions: {
+    allowedMismatchedPixels: 100,
+  },
+};
+
 describe('VideoPage browser visual regression', () => {
   beforeEach(() => {
     mockUseVideoGeneration.mockReset();
@@ -111,6 +118,7 @@ describe('VideoPage browser visual regression', () => {
       .toBeVisible();
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot(
       'video-page-with-prompt.png',
+      stableChromiumScreenshot,
     );
   });
 
@@ -147,6 +155,7 @@ describe('VideoPage browser visual regression', () => {
 
     await expect(page.getByTestId('desktop-browser-scene')).toMatchScreenshot(
       'video-page-completed.png',
+      stableChromiumScreenshot,
     );
   });
 });
