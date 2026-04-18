@@ -740,6 +740,11 @@ export interface components {
             /** @description Conversation history; the last user message is used as the prompt. */
             messages: components["schemas"]["ChatMessage"][];
             /**
+             * Format: float
+             * @description Min-p sampling threshold for local llama backends.
+             */
+            min_p?: number | null;
+            /**
              * @description Unified model identifier from `/v1/models`.
              *     `GET /v1/chat/models` remains a compatibility wrapper that reuses the same ids.
              */
@@ -749,7 +754,17 @@ export interface components {
              * @description Number of completions to generate.
              */
             n?: number | null;
+            /**
+             * Format: float
+             * @description Presence penalty for local llama backends.
+             */
+            presence_penalty?: number | null;
             reasoning_effort?: null | components["schemas"]["ChatReasoningEffort"];
+            /**
+             * Format: float
+             * @description Repetition penalty for local llama backends.
+             */
+            repetition_penalty?: number | null;
             response_format?: null | components["schemas"]["ChatResponseFormat"];
             stop?: null | components["schemas"]["StopSequences"];
             /** @description When `true`, the response is streamed token-by-token using SSE. */
@@ -762,27 +777,15 @@ export interface components {
             temperature?: number | null;
             thinking?: null | components["schemas"]["ChatThinkingConfig"];
             /**
+             * Format: int32
+             * @description Top-k sampling limit for local llama backends.
+             */
+            top_k?: number | null;
+            /**
              * Format: float
              * @description Nucleus sampling threshold in (0, 1].
              */
             top_p?: number | null;
-            /** @description Top-k sampling limit for local llama backends. */
-            top_k?: number | null;
-            /**
-             * Format: float
-             * @description Min-p sampling threshold for local llama backends.
-             */
-            min_p?: number | null;
-            /**
-             * Format: float
-             * @description Presence penalty for local llama backends.
-             */
-            presence_penalty?: number | null;
-            /**
-             * Format: float
-             * @description Repetition penalty for local llama backends.
-             */
-            repetition_penalty?: number | null;
             verbosity?: null | components["schemas"]["ChatVerbosity"];
         };
         /** @description Response body for `POST /v1/chat/completions`. */
@@ -972,6 +975,11 @@ export interface components {
              */
             max_tokens?: number | null;
             /**
+             * Format: float
+             * @description Min-p sampling threshold for local llama backends.
+             */
+            min_p?: number | null;
+            /**
              * @description Unified model identifier from `/v1/models`.
              *     When omitted, the first available chat-compatible model is used.
              */
@@ -981,8 +989,18 @@ export interface components {
              * @description Number of completions to generate.
              */
             n?: number | null;
+            /**
+             * Format: float
+             * @description Presence penalty for local llama backends.
+             */
+            presence_penalty?: number | null;
             /** @description Raw prompt for completion-style generation. */
             prompt: string;
+            /**
+             * Format: float
+             * @description Repetition penalty for local llama backends.
+             */
+            repetition_penalty?: number | null;
             response_format?: null | components["schemas"]["ChatResponseFormat"];
             stop?: null | components["schemas"]["StopSequences"];
             /** @description Stream the result using SSE. */
@@ -993,27 +1011,15 @@ export interface components {
              */
             temperature?: number | null;
             /**
+             * Format: int32
+             * @description Top-k sampling limit for local llama backends.
+             */
+            top_k?: number | null;
+            /**
              * Format: float
              * @description Nucleus sampling threshold in (0, 1].
              */
             top_p?: number | null;
-            /** @description Top-k sampling limit for local llama backends. */
-            top_k?: number | null;
-            /**
-             * Format: float
-             * @description Min-p sampling threshold for local llama backends.
-             */
-            min_p?: number | null;
-            /**
-             * Format: float
-             * @description Presence penalty for local llama backends.
-             */
-            presence_penalty?: number | null;
-            /**
-             * Format: float
-             * @description Repetition penalty for local llama backends.
-             */
-            repetition_penalty?: number | null;
         };
         /** @description Response body for `POST /v1/completions`. */
         CompletionResponse: {
@@ -1401,21 +1407,6 @@ export interface components {
             max_tokens?: number | null;
             /**
              * Format: float
-             * @description Sampling temperature.
-             */
-            temperature?: number | null;
-            /**
-             * Format: float
-             * @description Top-p nucleus sampling probability.
-             */
-            top_p?: number | null;
-            /**
-             * Format: int32
-             * @description Top-k sampling limit.
-             */
-            top_k?: number | null;
-            /**
-             * Format: float
              * @description Min-p sampling threshold.
              */
             min_p?: number | null;
@@ -1429,23 +1420,38 @@ export interface components {
              * @description Repetition penalty.
              */
             repetition_penalty?: number | null;
+            /**
+             * Format: float
+             * @description Sampling temperature.
+             */
+            temperature?: number | null;
+            /**
+             * Format: int32
+             * @description Top-k sampling limit.
+             */
+            top_k?: number | null;
+            /**
+             * Format: float
+             * @description Top-p nucleus sampling probability.
+             */
+            top_p?: number | null;
         };
         /** @description Default runtime parameters (response). */
         RuntimePresetsResponse: {
             /** Format: int32 */
             max_tokens?: number | null;
             /** Format: float */
-            temperature?: number | null;
-            /** Format: float */
-            top_p?: number | null;
-            /** Format: int32 */
-            top_k?: number | null;
-            /** Format: float */
             min_p?: number | null;
             /** Format: float */
             presence_penalty?: number | null;
             /** Format: float */
             repetition_penalty?: number | null;
+            /** Format: float */
+            temperature?: number | null;
+            /** Format: int32 */
+            top_k?: number | null;
+            /** Format: float */
+            top_p?: number | null;
         };
         /** @description Response for a single chat session. */
         SessionResponse: {
