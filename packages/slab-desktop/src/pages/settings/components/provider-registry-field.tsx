@@ -100,7 +100,7 @@ export function ProviderRegistryField({
 
           return (
             <section
-              key={`${entry.id}-${index}`}
+              key={entry.id}
               className={cn(
                 'space-y-5 rounded-[24px] border border-border/70 bg-background/85 p-5 shadow-[0_16px_40px_-34px_color-mix(in_oklab,var(--foreground)_28%,transparent)]',
                 entryHasError && 'border-destructive/60 bg-destructive/5',

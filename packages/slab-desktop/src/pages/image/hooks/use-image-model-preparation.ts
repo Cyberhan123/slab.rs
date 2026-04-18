@@ -82,6 +82,7 @@ export function useImageModelPreparation() {
     const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS;
 
     while (Date.now() < deadline) {
+      // eslint-disable-next-line no-await-in-loop
       const task = (await getTaskMutation.mutateAsync({
         params: { path: { id: taskId } },
       })) as { status: string; error_msg?: string | null };
@@ -100,6 +101,7 @@ export function useImageModelPreparation() {
         );
       }
 
+      // eslint-disable-next-line no-await-in-loop
       await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS);
     }
 

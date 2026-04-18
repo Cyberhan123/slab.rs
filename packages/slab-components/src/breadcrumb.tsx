@@ -53,6 +53,7 @@ function BreadcrumbPage({ className, ...props }: React.ComponentProps<"span">) {
   return (
     <span
       data-slot="breadcrumb-page"
+      // eslint-disable-next-line jsx-a11y/prefer-tag-over-role -- shadcn/ui: visual-only current-page indicator, not a navigable link
       role="link"
       aria-disabled="true"
       aria-current="page"

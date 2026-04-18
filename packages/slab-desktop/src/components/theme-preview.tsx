@@ -776,6 +776,7 @@ export function ThemePreview() {
               <CardContent className="pt-6">
                 <ScrollArea className="h-40 rounded-lg border border-border p-4">
                   {Array.from({ length: 20 }).map((_, i) => (
+                    // eslint-disable-next-line react/no-array-index-key
                     <div key={i} className="py-2 border-b border-border/50 last:border-0 text-sm text-foreground">
                       {`对话 ${i + 1}: 这是一条模拟的对话记录`}
                     </div>

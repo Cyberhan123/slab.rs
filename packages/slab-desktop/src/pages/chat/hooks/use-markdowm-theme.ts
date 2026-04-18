@@ -17,6 +17,7 @@ export const mockFetch = async (fullContent: string, onFinish?: () => void) => {
         try {
           await new Promise((resolve) => setTimeout(resolve, 100));
           for (const chunk of chunks) {
+            // eslint-disable-next-line no-await-in-loop
             await new Promise((resolve) => setTimeout(resolve, 100));
             if (!controller.desiredSize) {
             

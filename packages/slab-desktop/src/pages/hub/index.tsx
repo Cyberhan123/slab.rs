@@ -72,7 +72,7 @@ export default function Hub() {
 
     observer.observe(target);
     return () => observer.disconnect();
-  }, [hub.hasMore, hub.isLoading, hub.loadMore]);
+  }, [hub.hasMore, hub.isLoading, hub.loadMore, hub]);
 
   return (
     <div ref={scrollRef} className="h-full w-full overflow-y-auto">

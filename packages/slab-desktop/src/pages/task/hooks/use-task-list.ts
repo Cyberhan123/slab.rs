@@ -67,7 +67,7 @@ export function useTaskList() {
 
   const successSparkline = useMemo(() => {
     const recentTasks = [...allTasks]
-      .sort((left, right) => Date.parse(left.updated_at) - Date.parse(right.updated_at))
+      .toSorted((left, right) => Date.parse(left.updated_at) - Date.parse(right.updated_at))
       .slice(-7);
 
     if (recentTasks.length === 0) {
@@ -79,7 +79,7 @@ export function useTaskList() {
 
   const durationSparkline = useMemo(() => {
     const samples = [...settledTasks]
-      .sort((left, right) => Date.parse(left.updated_at) - Date.parse(right.updated_at))
+      .toSorted((left, right) => Date.parse(left.updated_at) - Date.parse(right.updated_at))
       .slice(-5)
       .map((task) => getTaskDurationMs(task));
 
@@ -219,7 +219,7 @@ export function useTaskList() {
     }, 3000);
 
     return () => clearInterval(interval);
-  }, [selectedTask?.status, selectedTask?.id, fetchTaskDetail]);
+  }, [selectedTask, fetchTaskDetail]);
 
   return {
     allTasks,

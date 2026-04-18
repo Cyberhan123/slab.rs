@@ -4,9 +4,9 @@ import { useAudioUiStore } from '../useAudioUiStore';
 // Mock the UI state storage
 vi.mock('../ui-state-storage', () => ({
   createUiStateStorage: () => ({
-    getItem: vi.fn(async () => null),
-    setItem: vi.fn(async () => {}),
-    removeItem: vi.fn(async () => {}),
+    getItem: vi.fn<() => Promise<null>>(async () => null),
+    setItem: vi.fn<() => Promise<void>>(async () => {}),
+    removeItem: vi.fn<() => Promise<void>>(async () => {}),
   }),
 }));
 

@@ -114,6 +114,21 @@ function getGreeting(date: Date, t: (key: string) => string) {
   return t("pages.chat.greeting.evening")
 }
 
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
+
+const extractTaskId = (payload: unknown): string | null => {
+  if (typeof payload !== "object" || payload === null) return null
+
+  const taskId =
+    (payload as { operation_id?: unknown }).operation_id ??
+    (payload as { task_id?: unknown }).task_id
+
+  if (typeof taskId !== "string") return null
+
+  const trimmed = taskId.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
 function Chat() {
   const navigate = useNavigate()
   const [markdownThemeClassName] = useMarkdownTheme()
@@ -201,25 +216,11 @@ function Chat() {
     [modelOptions, pendingModelSwitchId]
   )
 
-  const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
-
-  const extractTaskId = (payload: unknown): string | null => {
-    if (typeof payload !== "object" || payload === null) return null
-
-    const taskId =
-      (payload as { operation_id?: unknown }).operation_id ??
-      (payload as { task_id?: unknown }).task_id
-
-    if (typeof taskId !== "string") return null
-
-    const trimmed = taskId.trim()
-    return trimmed.length > 0 ? trimmed : null
-  }
-
   const waitForTaskToFinish = async (taskId: string) => {
     const deadline = Date.now() + MODEL_DOWNLOAD_TIMEOUT_MS
 
     while (Date.now() < deadline) {
+      // eslint-disable-next-line no-await-in-loop
       const task = (await getTaskMutation.mutateAsync({
         params: { path: { id: taskId } },
       })) as { status: string; error_msg?: string | null }
@@ -236,6 +237,7 @@ function Chat() {
         throw new Error(task.error_msg ?? `Task ${taskId} ended with status: ${task.status}`)
       }
 
+      // eslint-disable-next-line no-await-in-loop
       await sleep(MODEL_DOWNLOAD_POLL_INTERVAL_MS)
     }
 
@@ -400,7 +402,7 @@ function Chat() {
   const isSessionBusy = isRequesting || isPreparingModel || isHistoryLoading || isSessionMutating
   const isSessionBootstrapping = (sessionsLoading || isCreatingSession) && conversationList.length === 0
 
-  const safeMessages: ChatMessageRecord[] = messages ?? []
+  const safeMessages = useMemo<ChatMessageRecord[]>(() => messages ?? [], [messages])
   const latestMessage = safeMessages[safeMessages.length - 1]
   const latestContinuableMessageId =
     latestMessage?.message.role === "assistant" && latestMessage.status === "abort"
@@ -415,11 +417,11 @@ function Chat() {
     if (selectedModel && !selectedModel.capabilities.reasoning_controls && deepThink) {
       setDeepThink(false)
     }
-  }, [deepThink, selectedModel])
+  }, [deepThink, selectedModel, setDeepThink])
 
   const latestUserMessage = safeMessages
     .slice()
-    .reverse()
+    .toReversed()
     .find((item) => item.message.role === "user")
   const currentConversationLabel =
     conversationList.find((item) => item.key === curConversation)?.label?.trim() ||
@@ -525,7 +527,7 @@ function Chat() {
 
     setSelectedModelId(pendingModelSwitchId)
     setPendingModelSwitchId(null)
-  }, [pendingModelSwitchId])
+  }, [pendingModelSwitchId, setSelectedModelId])
 
   const handleCreateSessionOnModelSwitch = useCallback(async () => {
     if (!pendingModelSwitchId) {
@@ -541,7 +543,7 @@ function Chat() {
 
     setSelectedModelId(nextModelId)
     setPendingModelSwitchId(null)
-  }, [createEmptySession, pendingModelSwitchId])
+  }, [createEmptySession, pendingModelSwitchId, setSelectedModelId])
 
   const headerModelPicker = useMemo(
     () => ({
