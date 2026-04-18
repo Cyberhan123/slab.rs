@@ -6,23 +6,6 @@ export type ChatApiError = components['schemas']['OpenAiError']
 export type ChatApiErrorResponse = components['schemas']['OpenAiErrorResponse']
 export type SessionMessageResponse = components['schemas']['MessageResponse']
 
-export type SessionMessagesApiClient = {
-  GET: (
-    path: '/v1/sessions/{id}/messages',
-    init: {
-      params: {
-        path: {
-          id: string
-        }
-      }
-    }
-  ) => Promise<{
-    data?: SessionMessageResponse[]
-    error?: { message?: string }
-    response: Response
-  }>
-}
-
 export type ChatRequestErrorType = ChatApiError['type']
 
 export type ChatUiMessage = XModelMessage & {

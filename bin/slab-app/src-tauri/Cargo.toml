@@ -34,6 +34,7 @@ reqwest = { workspace = true, features = ["blocking"] }
 tokio = { workspace = true }
 tauri-plugin-shell = "2"
 log = { workspace = true }
+slab-types = { workspace = true }
 extism = "1.21.0"
 sha2 = "0.11"
 hex = "0.4"

@@ -121,7 +121,11 @@ impl ResourceManager {
             Ok(mut backends) => {
                 backends.insert(
                     key,
-                    BackendHandle::new(self.config.backend_capacity, Some(ingress_tx), Some(control_tx)),
+                    BackendHandle::new(
+                        self.config.backend_capacity,
+                        Some(ingress_tx),
+                        Some(control_tx),
+                    ),
                 );
             }
             Err(_) => {
@@ -137,9 +141,7 @@ impl ResourceManager {
     fn handle(&self, backend_id: &str) -> Result<BackendHandle, CoreError> {
         self.backends
             .read()
-            .map_err(|_| CoreError::InternalPoisoned {
-                lock_name: "backends".to_string(),
-            })?
+            .map_err(|_| CoreError::InternalPoisoned { lock_name: "backends".to_string() })?
             .get(backend_id)
             .cloned()
             .ok_or_else(|| CoreError::DriverNotRegistered { driver_id: backend_id.to_owned() })

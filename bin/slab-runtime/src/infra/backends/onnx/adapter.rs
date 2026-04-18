@@ -197,8 +197,7 @@ fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngi
                     // `elem_size` bytes, which matches the size of `$ty`. The `try_into()`
                     // conversion from a slice to a fixed-size array will always succeed.
                     <$ty>::from_le_bytes(
-                        b.try_into()
-                            .expect("chunks_exact guarantees correct array size"),
+                        b.try_into().expect("chunks_exact guarantees correct array size"),
                     )
                 })
                 .collect();

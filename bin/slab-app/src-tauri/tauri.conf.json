@@ -14,7 +14,7 @@
     "security": {
       "csp": {
         "default-src": "'self' asset:",
-        "script-src": "'self' asset: http://127.0.0.1:3000 blob: 'unsafe-eval'",
+        "script-src": "'self' asset: http://127.0.0.1:3000 blob:",
         "connect-src": [
           "'self'",
           "http://127.0.0.1:3000"

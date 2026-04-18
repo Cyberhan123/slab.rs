@@ -319,10 +319,7 @@ mod tests {
     #[test]
     fn normalize_relative_path_accepts_mixed_formats() {
         assert_eq!(normalize_relative_path(Path::new("file.txt")).unwrap(), "file.txt");
-        assert_eq!(
-            normalize_relative_path(Path::new("dir/file.txt")).unwrap(),
-            "dir/file.txt"
-        );
+        assert_eq!(normalize_relative_path(Path::new("dir/file.txt")).unwrap(), "dir/file.txt");
         assert_eq!(
             normalize_relative_path(Path::new("a/b/c/d/file.ext")).unwrap(),
             "a/b/c/d/file.ext"

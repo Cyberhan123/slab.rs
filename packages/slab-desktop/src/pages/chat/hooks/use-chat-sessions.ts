@@ -78,11 +78,7 @@ export function useChatSessions() {
     "/v1/sessions"
   )
   const createSessionMutation = api.useMutation("post", "/v1/sessions")
-  // Generated types currently drop the DELETE path param for this endpoint.
-  const deleteSessionMutation = api.useMutation("delete", "/v1/sessions/{id}") as unknown as {
-    isPending: boolean
-    mutateAsync: (options: { params: { path: { id: string } } }) => Promise<unknown>
-  }
+  const deleteSessionMutation = api.useMutation("delete", "/v1/sessions/{id}")
 
   const sessionRecords = useMemo(() => toSessionRecords(sessionData), [sessionData])
   const localizedDefaults = useMemo(

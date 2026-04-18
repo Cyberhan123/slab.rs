@@ -17,8 +17,6 @@ import { useImageGenerationControls } from './use-image-generation-controls';
 import { useImageModelPreparation } from './use-image-model-preparation';
 
 type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
-type ImageGenerationRequest = components['schemas']['ImageGenerationRequest'];
-type OperationAcceptedResponse = components['schemas']['OperationAcceptedResponse'];
 type TaskResponse = components['schemas']['TaskResponse'];
 type TaskResultPayload = components['schemas']['TaskResultPayload'];
 
@@ -90,9 +88,7 @@ export function useImageGeneration() {
     widthStr,
   } = useImageGenerationControls(selectedModelId);
 
-  const generateImagesMutation = api.useMutation('post', '/v1/images/generations') as unknown as {
-    mutateAsync: (options: { body: ImageGenerationRequest }) => Promise<OperationAcceptedResponse>;
-  };
+  const generateImagesMutation = api.useMutation('post', '/v1/images/generations');
   const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
 
   const isPolling = generationPhase === 'polling';

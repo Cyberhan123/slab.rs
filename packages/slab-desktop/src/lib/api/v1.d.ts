@@ -1453,6 +1453,9 @@ export interface components {
             /** Format: float */
             top_p?: number | null;
         };
+        SessionIdPath: {
+            id: string;
+        };
         /** @description Response for a single chat session. */
         SessionResponse: {
             created_at: string;
@@ -2875,7 +2878,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;
@@ -2909,7 +2914,9 @@ export interface operations {
         parameters: {
             query?: never;
             header?: never;
-            path?: never;
+            path: {
+                id: string;
+            };
             cookie?: never;
         };
         requestBody?: never;

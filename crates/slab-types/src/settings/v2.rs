@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use super::launch::RuntimeTransportMode;
+use crate::DESKTOP_API_BIND;
 
 pub const PUBLIC_SETTINGS_DOCUMENT_SCHEMA_URL: &str =
     "https://slab.reorgix.com/manifests/v1/settings-document.schema.json";
@@ -579,7 +580,7 @@ pub struct ServerConfigV2 {
 impl Default for ServerConfigV2 {
     fn default() -> Self {
         Self {
-            address: "127.0.0.1:3000".to_owned(),
+            address: DESKTOP_API_BIND.to_owned(),
             logging: LoggingOverrideConfig::default(),
             cors: CorsConfig::default(),
             admin: AdminConfig::default(),
@@ -754,7 +755,7 @@ mod tests {
         assert_eq!(settings.schema_version, 2);
         assert_eq!(settings.general.language, InterfaceLanguagePreference::Auto);
         assert_eq!(settings.runtime.transport, RuntimeTransportMode::Ipc);
-        assert_eq!(settings.server.address, "127.0.0.1:3000");
+        assert_eq!(settings.server.address, DESKTOP_API_BIND);
         assert!(settings.runtime.logging.level.is_none());
     }
 
