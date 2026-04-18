@@ -11,6 +11,11 @@
     "build:desktop": "bun run --filter @slab/desktop build",
     "dev:desktop": "bun run --filter @slab/desktop dev",
     "api:desktop": "bun run --filter @slab/desktop api",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "test:desktop": "vitest run --project desktop",
+    "test:server": "vitest run --project slab-server-tests",
     "docs:schemas": "cargo run -p slab-model-pack --bin generate_manifest_schema && cargo run -p slab-types --bin generate_settings_document_schema",
     "docs:dev": "bun run docs:schemas && vitepress dev docs",
     "docs:build": "bun run docs:schemas && vitepress build docs",
@@ -29,8 +34,10 @@
     "@tailwindcss/vite": "^4.2.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
+    "@vitest/coverage-v8": "^4.1.4",
     "tailwindcss": "^4.2.2",
     "typescript": "~5.9.3",
+    "vitest": "^4.1.4",
     "vitepress": "^2.0.0-alpha.17"
   },
   "license": "AGPL-3.0-only"

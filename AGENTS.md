@@ -127,6 +127,16 @@ Frontend and Tauri:
 # From repo root (bun workspace)
 bun install
 
+# Run all Vitest projects from the repo root
+bun run test:run
+
+# Run Vitest coverage across all configured projects
+bun run test:coverage
+
+# Run a single Vitest project from the repo root
+bun run test:desktop
+bun run test:server
+
 # Type-check the desktop frontend
 cd packages/slab-desktop
 bun run build
