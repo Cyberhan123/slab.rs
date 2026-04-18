@@ -3,11 +3,11 @@ use std::sync::Arc;
 use axum::extract::{Path, State};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
 use utoipa::OpenApi;
-use validator::Validate;
 
-use crate::api::v1::session::schema::{CreateSessionRequest, MessageResponse, SessionResponse};
+use crate::api::v1::session::schema::{
+    CreateSessionRequest, MessageResponse, SessionIdPath, SessionResponse,
+};
 use crate::api::validation::{ValidatedJson, validate};
 use crate::error::ServerError;
 use slab_app_core::context::AppState;
@@ -16,7 +16,7 @@ use slab_app_core::domain::services::SessionService;
 #[derive(OpenApi)]
 #[openapi(
     paths(create_session, list_sessions, delete_session, list_session_messages),
-    components(schemas(CreateSessionRequest, SessionResponse, MessageResponse))
+    components(schemas(CreateSessionRequest, SessionResponse, MessageResponse, SessionIdPath))
 )]
 pub struct SessionApi;
 
@@ -66,6 +66,7 @@ async fn list_sessions(
     delete,
     path = "/v1/sessions/{id}",
     tag = "sessions",
+    params(SessionIdPath),
     responses(
         (status = 200, description = "Session deleted", body = serde_json::Value),
         (status = 400, description = "Bad request"),
@@ -84,6 +85,7 @@ async fn delete_session(
     get,
     path = "/v1/sessions/{id}/messages",
     tag = "sessions",
+    params(SessionIdPath),
     responses(
         (status = 200, description = "Session messages retrieved", body = Vec<MessageResponse>),
         (status = 400, description = "Bad request"),
@@ -100,11 +102,30 @@ async fn list_session_messages(
     Ok(Json(messages))
 }
 
-#[derive(Debug, Deserialize, Validate)]
-struct SessionIdPath {
-    #[validate(custom(
-        function = "crate::api::validation::validate_non_blank",
-        message = "id must not be empty"
-    ))]
-    id: String,
+#[cfg(test)]
+mod tests {
+    use serde_json::Value;
+    use utoipa::OpenApi;
+
+    use super::SessionApi;
+
+    fn operation_parameters<'a>(openapi: &'a Value, path: &str, method: &str) -> &'a Vec<Value> {
+        openapi["paths"][path][method]["parameters"].as_array().expect("operation parameters")
+    }
+
+    #[test]
+    fn session_routes_publish_path_id_parameter_in_openapi() {
+        let openapi =
+            serde_json::to_value(SessionApi::openapi()).expect("serialize session openapi");
+
+        for (path, method) in
+            [("/v1/sessions/{id}", "delete"), ("/v1/sessions/{id}/messages", "get")]
+        {
+            let parameters = operation_parameters(&openapi, path, method);
+            assert!(parameters.iter().any(|parameter| {
+                parameter["name"] == Value::String("id".to_owned())
+                    && parameter["in"] == Value::String("path".to_owned())
+            }));
+        }
+    }
 }

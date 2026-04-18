@@ -7,7 +7,6 @@ import {
   isRecord,
   type ChatUiMessage,
   type SessionMessageResponse,
-  type SessionMessagesApiClient,
 } from './chat-types'
 
 const isSessionMessageResponse = (value: unknown): value is SessionMessageResponse => {
@@ -164,30 +163,16 @@ const fetchSessionMessages = async (conversationKey?: string): Promise<SessionMe
   }
 
   try {
-    const { data, error, response } = await (apiClient as unknown as SessionMessagesApiClient).GET(
-      '/v1/sessions/{id}/messages',
-      {
-        params: {
-          path: {
-            id: conversationKey ?? '',
-          },
+    const { data, response } = await apiClient.GET('/v1/sessions/{id}/messages', {
+      params: {
+        path: {
+          id: conversationKey ?? '',
         },
-      }
-    )
+      },
+    })
 
     if (response.status === 404) {
       return []
-    }
-
-    if (!response.ok) {
-      const detail =
-        typeof error === 'object' &&
-        error !== null &&
-        'message' in error &&
-        typeof (error as { message?: unknown }).message === 'string'
-          ? (error as { message: string }).message
-          : `${response.status} ${response.statusText}`.trim()
-      throw new Error(`failed to load session messages: ${detail}`)
     }
 
     return Array.isArray(data)

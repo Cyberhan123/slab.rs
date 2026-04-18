@@ -53,11 +53,8 @@ fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
         };
         // No <think found — treat all text as content.
         let stable_content = &raw[..stable_end];
-        let stable_content = if complete || !stable_content.trim().is_empty() {
-            stable_content
-        } else {
-            ""
-        };
+        let stable_content =
+            if complete || !stable_content.trim().is_empty() { stable_content } else { "" };
         return ParsedThinkingOutput {
             content: stable_content.to_owned(),
             reasoning: String::new(),

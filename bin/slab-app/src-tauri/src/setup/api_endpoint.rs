@@ -1,3 +1,5 @@
+use slab_types::{DESKTOP_API_BIND, DESKTOP_API_ORIGIN};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ApiEndpointConfig {
     pub gateway_bind: String,
@@ -7,9 +9,9 @@ pub struct ApiEndpointConfig {
 
 impl ApiEndpointConfig {
     pub fn desktop() -> Self {
-        let api_origin = "http://127.0.0.1:3000".to_owned();
+        let api_origin = DESKTOP_API_ORIGIN.to_owned();
         Self {
-            gateway_bind: "127.0.0.1:3000".to_owned(),
+            gateway_bind: DESKTOP_API_BIND.to_owned(),
             connect_src: vec!["'self'".to_owned(), api_origin.clone()],
             api_origin,
         }
@@ -34,18 +36,16 @@ impl Default for ApiEndpointConfig {
 #[cfg(test)]
 mod tests {
     use super::ApiEndpointConfig;
+    use slab_types::{DESKTOP_API_BIND, DESKTOP_API_ORIGIN};
 
     #[test]
     fn desktop_endpoint_config_is_stable() {
         let config = ApiEndpointConfig::desktop();
 
-        assert_eq!(config.gateway_bind, "127.0.0.1:3000");
-        assert_eq!(config.api_origin, "http://127.0.0.1:3000");
-        assert_eq!(config.api_base_url(), "http://127.0.0.1:3000/");
-        assert_eq!(config.health_url(), "http://127.0.0.1:3000/health");
-        assert_eq!(
-            config.connect_src,
-            vec!["'self'".to_owned(), "http://127.0.0.1:3000".to_owned()]
-        );
+        assert_eq!(config.gateway_bind, DESKTOP_API_BIND);
+        assert_eq!(config.api_origin, DESKTOP_API_ORIGIN);
+        assert_eq!(config.api_base_url(), format!("{DESKTOP_API_ORIGIN}/"));
+        assert_eq!(config.health_url(), format!("{DESKTOP_API_ORIGIN}/health"));
+        assert_eq!(config.connect_src, vec!["'self'".to_owned(), DESKTOP_API_ORIGIN.to_owned()]);
     }
 }

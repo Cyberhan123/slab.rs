@@ -1,10 +1,19 @@
 //! Request / response types for the session API (`/v1/sessions/...`).
 
 use serde::{Deserialize, Serialize};
-use utoipa::ToSchema;
+use utoipa::{IntoParams, ToSchema};
 use validator::Validate;
 
 use crate::domain::models::{CreateSessionCommand, SessionMessageView, SessionView};
+
+#[derive(Debug, Clone, Deserialize, ToSchema, IntoParams, Validate)]
+pub struct SessionIdPath {
+    #[validate(custom(
+        function = "crate::schemas::validation::validate_non_blank",
+        message = "id must not be empty"
+    ))]
+    pub id: String,
+}
 
 /// Request body for `POST /v1/sessions`.
 #[derive(Debug, Clone, Serialize, Deserialize, ToSchema, Validate)]

@@ -593,9 +593,9 @@ pub fn decode_diffusion_image_response(
             let metadata = image_metadata_from_bytes(&bytes)?;
             Ok(GeneratedImage {
                 bytes,
-                width: image.width.max(metadata.width),
-                height: image.height.max(metadata.height),
-                channels: max_channels(image.channels, metadata.channels),
+                width: metadata.width,
+                height: metadata.height,
+                channels: metadata.channels,
             })
         })
         .collect::<Result<Vec<_>, ProtoConversionError>>()?;
@@ -960,6 +960,73 @@ mod tests {
     }
 
     #[test]
+    fn decode_model_load_request_treats_legacy_zero_sentinels_as_unset() {
+        let ggml_llama_request = pb::ModelLoadRequest {
+            common: Some(pb::ModelLoadCommon { model_path: "C:/models/model.gguf".to_owned() }),
+            backend_params: Some(pb::model_load_request::BackendParams::GgmlLlama(
+                pb::GgmlLlamaLoadParams {
+                    num_workers: 1,
+                    context_length: Some(0),
+                    chat_template: None,
+                    gbnf: None,
+                    flash_attn: Some(true),
+                },
+            )),
+        };
+        let ggml_diffusion_request = pb::ModelLoadRequest {
+            common: Some(pb::ModelLoadCommon { model_path: "C:/models/model.gguf".to_owned() }),
+            backend_params: Some(pb::model_load_request::BackendParams::GgmlDiffusion(
+                pb::GgmlDiffusionLoadParams {
+                    diffusion_model_path: None,
+                    vae_path: None,
+                    taesd_path: None,
+                    clip_l_path: None,
+                    clip_g_path: None,
+                    t5xxl_path: None,
+                    clip_vision_path: None,
+                    control_net_path: None,
+                    flash_attn: Some(true),
+                    vae_device: None,
+                    clip_device: None,
+                    offload_params_to_cpu: false,
+                    enable_mmap: false,
+                    n_threads: Some(0),
+                },
+            )),
+        };
+        let onnx_request = pb::ModelLoadRequest {
+            common: Some(pb::ModelLoadCommon { model_path: "C:/models/model.onnx".to_owned() }),
+            backend_params: Some(pb::model_load_request::BackendParams::Onnx(pb::OnnxLoadParams {
+                execution_providers: vec!["CPU".to_owned()],
+                intra_op_num_threads: Some(0),
+                inter_op_num_threads: Some(0),
+            })),
+        };
+
+        let ggml_llama = decode_model_load_request(&ggml_llama_request).unwrap();
+        let ggml_diffusion = decode_model_load_request(&ggml_diffusion_request).unwrap();
+        let onnx = decode_model_load_request(&onnx_request).unwrap();
+
+        match ggml_llama {
+            RuntimeBackendLoadSpec::GgmlLlama(config) => assert_eq!(config.context_length, None),
+            other => panic!("expected ggml llama config, got {other:?}"),
+        }
+
+        match ggml_diffusion {
+            RuntimeBackendLoadSpec::GgmlDiffusion(config) => assert_eq!(config.n_threads, None),
+            other => panic!("expected ggml diffusion config, got {other:?}"),
+        }
+
+        match onnx {
+            RuntimeBackendLoadSpec::Onnx(config) => {
+                assert_eq!(config.intra_op_num_threads, None);
+                assert_eq!(config.inter_op_num_threads, None);
+            }
+            other => panic!("expected onnx config, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn model_load_request_rejects_missing_common_model_path() {
         let request = pb::ModelLoadRequest {
             common: Some(pb::ModelLoadCommon { model_path: String::new() }),
@@ -1101,6 +1168,28 @@ mod tests {
 
         assert_eq!(roundtrip.images.len(), 1);
         assert_eq!(roundtrip.images[0].bytes, png);
+        assert_eq!(roundtrip.images[0].width, 2);
+        assert_eq!(roundtrip.images[0].height, 1);
+        assert_eq!(roundtrip.images[0].channels, 3);
+    }
+
+    #[test]
+    fn diffusion_image_decode_prefers_actual_image_metadata() {
+        let png = make_png_bytes();
+        let proto = pb::ImageResponse {
+            images_json: serde_json::to_vec(&ProtoImagePayload {
+                images: vec![ProtoImageEntry {
+                    image: base64::engine::general_purpose::STANDARD.encode(&png),
+                    width: 999,
+                    height: 888,
+                    channels: 4,
+                }],
+            })
+            .unwrap(),
+        };
+
+        let roundtrip = decode_diffusion_image_response(&proto).unwrap();
+
         assert_eq!(roundtrip.images[0].width, 2);
         assert_eq!(roundtrip.images[0].height, 1);
         assert_eq!(roundtrip.images[0].channels, 3);

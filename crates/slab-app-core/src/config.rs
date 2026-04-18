@@ -1,6 +1,7 @@
 //! Server configuration, loaded from environment variables at startup.
 
 use dirs_next::config_dir;
+use slab_types::DESKTOP_API_BIND;
 use std::path::{Path, PathBuf};
 
 /// Runtime configuration for slab-server.
@@ -9,7 +10,7 @@ use std::path::{Path, PathBuf};
 /// without any environment variables set.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// TCP address to bind (default: `"0.0.0.0:3000"`).
+    /// TCP address to bind (default: `"127.0.0.1:3000"`).
     pub bind_address: String,
 
     /// SQLite (or other) database URL.
@@ -50,10 +51,7 @@ pub struct Config {
 
     /// Comma-separated list of allowed CORS origins, e.g.
     /// `"https://app.example.com,https://admin.example.com"`.
-    /// When `None` (default), all origins are allowed (`*`).
-    ///
-    /// **Security note:** The wildcard default is convenient for development
-    /// but should be restricted to trusted origins in production.
+    /// When `None`, slab-server falls back to the built-in desktop/dev allowlist.
     pub cors_allowed_origins: Option<String>,
 
     /// Optional bearer token required for management endpoints (`/v1/settings*`, `/v1/backends/*`).
@@ -106,7 +104,7 @@ impl Config {
             .unwrap_or_else(|| default_model_config_dir_for_settings_path(&settings_path));
 
         Self {
-            bind_address: env_or("SLAB_BIND", "localhost:3000"),
+            bind_address: env_or("SLAB_BIND", DESKTOP_API_BIND),
             database_url: std::env::var("SLAB_DATABASE_URL")
                 .unwrap_or_else(|_| default_database_url()),
             log_level: env_or("SLAB_LOG", "info"),
@@ -191,4 +189,53 @@ pub fn sqlite_url_for_path(path: &Path) -> String {
     let normalized = path.to_string_lossy().replace('\\', "/");
     let prefix = if normalized.starts_with('/') { "sqlite://" } else { "sqlite:///" };
     format!("{prefix}{normalized}?mode=rwc")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Config;
+    use slab_types::DESKTOP_API_BIND;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    struct EnvGuard {
+        key: &'static str,
+        value: Option<String>,
+    }
+
+    impl EnvGuard {
+        fn capture(key: &'static str) -> Self {
+            Self { key, value: std::env::var(key).ok() }
+        }
+    }
+
+    impl Drop for EnvGuard {
+        fn drop(&mut self) {
+            match &self.value {
+                Some(value) => unsafe { std::env::set_var(self.key, value) },
+                None => unsafe { std::env::remove_var(self.key) },
+            }
+        }
+    }
+
+    #[test]
+    fn from_env_uses_desktop_api_bind_by_default() {
+        let _lock = env_lock().lock().unwrap();
+        let _bind = EnvGuard::capture("SLAB_BIND");
+        let _settings = EnvGuard::capture("SLAB_SETTINGS_PATH");
+        let _model_config = EnvGuard::capture("SLAB_MODEL_CONFIG_DIR");
+
+        unsafe {
+            std::env::remove_var("SLAB_BIND");
+            std::env::remove_var("SLAB_SETTINGS_PATH");
+            std::env::remove_var("SLAB_MODEL_CONFIG_DIR");
+        }
+
+        let config = Config::from_env();
+        assert_eq!(config.bind_address, DESKTOP_API_BIND);
+    }
 }

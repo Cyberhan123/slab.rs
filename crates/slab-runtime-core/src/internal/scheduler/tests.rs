@@ -1,6 +1,6 @@
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -1053,18 +1053,15 @@ async fn backend_worker_failure_detected_on_request() {
         .expect("submit should succeed");
 
     // Wait for completion
-    let result1 = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        async {
-            loop {
-                let view = orchestrator.get_status(task_id1).await.expect("task should exist");
-                if matches!(view.status, TaskStatus::Succeeded { .. } | TaskStatus::Failed { .. }) {
-                    break view.status;
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
+    let result1 = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let view = orchestrator.get_status(task_id1).await.expect("task should exist");
+            if matches!(view.status, TaskStatus::Succeeded { .. } | TaskStatus::Failed { .. }) {
+                break view.status;
             }
-        },
-    )
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
     .await;
 
     assert!(
@@ -1087,18 +1084,15 @@ async fn backend_worker_failure_detected_on_request() {
         .expect("submit should succeed");
 
     // Wait for failure
-    let result2 = tokio::time::timeout(
-        std::time::Duration::from_secs(2),
-        async {
-            loop {
-                let view = orchestrator.get_status(task_id2).await.expect("task should exist");
-                if matches!(view.status, TaskStatus::Failed { .. }) {
-                    break view.status.clone();
-                }
-                tokio::time::sleep(Duration::from_millis(10)).await;
+    let result2 = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+        loop {
+            let view = orchestrator.get_status(task_id2).await.expect("task should exist");
+            if matches!(view.status, TaskStatus::Failed { .. }) {
+                break view.status.clone();
             }
-        },
-    )
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
     .await;
 
     assert!(
@@ -1114,8 +1108,8 @@ async fn backend_worker_failure_detected_on_request() {
 #[tokio::test]
 async fn admission_control_waits_for_available_permits() {
     use std::sync::Arc;
-    use tokio::sync::Notify;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use tokio::sync::Notify;
 
     const CAPACITY: usize = 2;
     let active_count = Arc::new(AtomicUsize::new(0));
@@ -1160,25 +1154,22 @@ async fn admission_control_waits_for_available_permits() {
     // Submit tasks up to capacity
     let mut task_ids = Vec::new();
     for i in 0..CAPACITY {
-        let task_id = PipelineBuilder::new(orchestrator.clone(), text_payload(&format!("task{}", i)))
-            .gpu(
-                &format!("stage{}", i),
-                "limited-backend",
-                BackendOp { name: "test".into(), options: Payload::default() },
-            )
-            .run()
-            .await
-            .expect("submit should succeed");
+        let task_id =
+            PipelineBuilder::new(orchestrator.clone(), text_payload(&format!("task{}", i)))
+                .gpu(
+                    &format!("stage{}", i),
+                    "limited-backend",
+                    BackendOp { name: "test".into(), options: Payload::default() },
+                )
+                .run()
+                .await
+                .expect("submit should succeed");
         task_ids.push(task_id);
     }
 
     // Wait for all permits to be acquired
     tokio::time::sleep(Duration::from_millis(50)).await;
-    assert_eq!(
-        active_count.load(Ordering::SeqCst),
-        CAPACITY,
-        "all permits should be acquired"
-    );
+    assert_eq!(active_count.load(Ordering::SeqCst), CAPACITY, "all permits should be acquired");
 
     // Submit one more task that should wait for a permit
     let extra_task_id = PipelineBuilder::new(orchestrator.clone(), text_payload("extra"))
@@ -1196,7 +1187,8 @@ async fn admission_control_waits_for_available_permits() {
     let status = orchestrator.get_status(extra_task_id).await.expect("task should exist");
     assert!(
         matches!(status.status, TaskStatus::Pending | TaskStatus::Running { .. }),
-        "extra task should be waiting for permit, got {:?}", status.status
+        "extra task should be waiting for permit, got {:?}",
+        status.status
     );
 
     // Release one permit by signaling completion
@@ -1206,7 +1198,10 @@ async fn admission_control_waits_for_available_permits() {
     tokio::time::sleep(Duration::from_millis(50)).await;
     let status = orchestrator.get_status(extra_task_id).await.expect("task should exist");
     assert!(
-        matches!(status.status, TaskStatus::Pending | TaskStatus::Running { .. } | TaskStatus::Succeeded { .. }),
+        matches!(
+            status.status,
+            TaskStatus::Pending | TaskStatus::Running { .. } | TaskStatus::Succeeded { .. }
+        ),
         "extra task should have progressed"
     );
 }

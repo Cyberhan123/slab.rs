@@ -145,7 +145,9 @@ impl LlamaModel {
     /// Returns [`LlamaError::ContextCreateFailed`] if context creation fails.
     pub fn new_context(&self, params: LlamaContextParams) -> Result<LlamaContext, LlamaError> {
         let c_params = params.to_c_params(&self.inner.lib);
-        let ctx = unsafe { self.inner.lib.llama_init_from_model(self.inner.model.unwrap().as_ptr(), c_params) };
+        let ctx = unsafe {
+            self.inner.lib.llama_init_from_model(self.inner.model.unwrap().as_ptr(), c_params)
+        };
         if ctx.is_null() {
             Err(LlamaError::ContextCreateFailed)
         } else {
@@ -172,8 +174,11 @@ impl LlamaModel {
     /// Returns [`LlamaError::LoraAdapterLoadFailed`] if loading fails.
     pub fn adapter_lora_init(&self, path_lora: &str) -> Result<LlamaLoraAdapter, LlamaError> {
         let c_path = CString::new(path_lora)?;
-        let adapter =
-            unsafe { self.inner.lib.llama_adapter_lora_init(self.inner.model.unwrap().as_ptr(), c_path.as_ptr()) };
+        let adapter = unsafe {
+            self.inner
+                .lib
+                .llama_adapter_lora_init(self.inner.model.unwrap().as_ptr(), c_path.as_ptr())
+        };
         if adapter.is_null() {
             Err(LlamaError::LoraAdapterLoadFailed)
         } else {

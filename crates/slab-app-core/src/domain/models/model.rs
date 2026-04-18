@@ -332,9 +332,7 @@ fn upgrade_stored_model_config_schema(
     Ok(upgraded)
 }
 
-fn upgrade_stored_model_config_schema_v1_to_v2(
-    mut config: StoredModelConfig,
-) -> StoredModelConfig {
+fn upgrade_stored_model_config_schema_v1_to_v2(mut config: StoredModelConfig) -> StoredModelConfig {
     config.schema_version = 2;
     config
 }

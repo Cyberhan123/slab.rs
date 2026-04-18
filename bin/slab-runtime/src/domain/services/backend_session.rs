@@ -466,9 +466,7 @@ mod concurrent_tests {
         ModelSpec::new(
             ModelFamily::Llama,
             Capability::TextGeneration,
-            ModelSource::LocalPath {
-                path: PathBuf::from(format!("{name}.gguf")),
-            },
+            ModelSource::LocalPath { path: PathBuf::from(format!("{name}.gguf")) },
         )
         .named(name)
     }
@@ -543,10 +541,8 @@ mod concurrent_tests {
         });
 
         let orchestrator = Orchestrator::start(rm, 64);
-        let execution = ExecutionHub::new(
-            orchestrator.clone(),
-            test_backend_catalog("test-backend"),
-        );
+        let execution =
+            ExecutionHub::new(orchestrator.clone(), test_backend_catalog("test-backend"));
         let session = BackendSession::new_for_backend(
             execution,
             test_model_spec("test-model"),
@@ -557,9 +553,7 @@ mod concurrent_tests {
         let handles: Vec<_> = (0..3)
             .map(|_| {
                 let session = session.clone();
-                tokio::spawn(async move {
-                    session.load().await
-                })
+                tokio::spawn(async move { session.load().await })
             })
             .collect();
 
@@ -584,19 +578,13 @@ mod concurrent_tests {
         rm.register_backend("test-backend", |_shared_rx, _control_tx| {});
 
         let orchestrator = Orchestrator::start(rm, 64);
-        let execution = ExecutionHub::new(
-            orchestrator,
-            test_backend_catalog("test-backend"),
-        );
+        let execution = ExecutionHub::new(orchestrator, test_backend_catalog("test-backend"));
 
         let spec_text = test_model_spec("test-model");
 
-        let session1 = BackendSession::new_for_backend(
-            execution.clone(),
-            spec_text.clone(),
-            "test-backend",
-        )
-        .expect("session creation should succeed");
+        let session1 =
+            BackendSession::new_for_backend(execution.clone(), spec_text.clone(), "test-backend")
+                .expect("session creation should succeed");
 
         // First session loads successfully
         // (We can't actually test this without a real backend, but the pattern is correct)
@@ -657,9 +645,7 @@ mod concurrent_tests {
         let handles: Vec<_> = (0..10)
             .map(|_| {
                 let session = session.clone();
-                tokio::spawn(async move {
-                    session.load().await
-                })
+                tokio::spawn(async move { session.load().await })
             })
             .collect();
 
