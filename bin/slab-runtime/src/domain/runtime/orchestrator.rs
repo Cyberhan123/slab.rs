@@ -2,8 +2,7 @@ use std::time::Duration;
 
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
-    BackendOp, BackendReply, BackendRequest, BackendRequestKind, ManagementEvent, ResourceManager,
-    StreamHandle,
+    BackendReply, BackendRequest, ManagementEvent, ResourceManager, StreamHandle,
 };
 use tokio::sync::mpsc;
 use tracing::info;
@@ -44,21 +43,11 @@ impl Orchestrator {
         event: ManagementEvent,
         op_name: &str,
         input: Payload,
-    ) -> Result<Payload, CoreError> {
+    ) -> Result<(), CoreError> {
         let _mgmt_lease = self.resource_manager.acquire_management_lease(backend_id).await?;
         let seq = self.resource_manager.next_seq(backend_id)?;
-        let (watch_tx, watch_rx) = tokio::sync::watch::channel(false);
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
-        drop(watch_tx);
-
-        let request = BackendRequest {
-            kind: BackendRequestKind::Management(event),
-            op: BackendOp { name: op_name.to_owned(), options: Payload::default() },
-            input,
-            cancel_rx: watch_rx,
-            broadcast_seq: Some(seq),
-            reply_tx,
-        };
+        let request = BackendRequest::management(event, op_name, input, seq, reply_tx);
 
         let ingress_tx = self.resource_manager.ingress_tx(backend_id)?;
         ingress_tx.try_send(request).map_err(|error| {
@@ -73,7 +62,7 @@ impl Orchestrator {
 
         let reply = reply_rx.await.map_err(|_| CoreError::BackendShutdown)?;
         match reply {
-            BackendReply::Value(payload) => Ok(payload),
+            BackendReply::Ack | BackendReply::Value(_) => Ok(()),
             BackendReply::Error(message) => {
                 Err(CoreError::GpuStageFailed { stage_name: op_name.to_owned(), message })
             }
@@ -267,7 +256,6 @@ impl Orchestrator {
             input,
         )
         .await
-        .map(|_| ())
     }
 
     pub async fn unload_model_backend(&self, backend_id: &str) -> Result<(), CoreError> {
@@ -278,7 +266,6 @@ impl Orchestrator {
             Payload::default(),
         )
         .await
-        .map(|_| ())
     }
 
     pub async fn get_status(&self, task_id: TaskId) -> Result<TaskStatus, CoreError> {

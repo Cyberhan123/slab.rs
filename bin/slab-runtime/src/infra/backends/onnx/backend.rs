@@ -40,8 +40,6 @@
 //! }
 //! ```
 
-use std::sync::Arc;
-
 use tokio::sync::broadcast;
 use tracing::warn;
 
@@ -168,8 +166,7 @@ impl OnnxWorker {
                     sync: SyncMessage::Deployment(deployment),
                     sender_id: self.worker_id,
                 }));
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Ack);
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -191,7 +188,7 @@ impl OnnxWorker {
             sync: SyncMessage::Generation { generation: seq_id },
             sender_id: self.worker_id,
         }));
-        let _ = reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+        let _ = reply_tx.send(BackendReply::Ack);
     }
 
     // ── inference ─────────────────────────────────────────────────────────────

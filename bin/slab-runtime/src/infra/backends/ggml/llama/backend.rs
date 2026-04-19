@@ -230,8 +230,7 @@ impl LlamaWorker {
 
         match result {
             Ok(()) => {
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Ack);
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -252,8 +251,7 @@ impl LlamaWorker {
 
         match engine.unload() {
             Ok(()) => {
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Ack);
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));

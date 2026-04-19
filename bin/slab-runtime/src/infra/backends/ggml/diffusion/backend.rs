@@ -12,7 +12,6 @@
 //! ### `model.load` input payload
 //! Uses a typed [`slab_diffusion::ContextParams`] payload inside `slab-core`.
 
-use std::sync::Arc;
 use std::time::Instant;
 
 use slab_diffusion::{ContextParams as DiffusionContextParams, ImgParams as DiffusionImgParams};
@@ -151,8 +150,7 @@ impl DiffusionWorker {
                     elapsed_ms = started_at.elapsed().as_millis(),
                     "diffusion model.load completed"
                 );
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Ack);
             }
             Err(e) => {
                 tracing::error!(
@@ -184,8 +182,7 @@ impl DiffusionWorker {
                     sync: SyncMessage::Generation { generation: seq_id },
                     sender_id: self.worker_id,
                 }));
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Ack);
             }
             None => {
                 let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));

@@ -170,8 +170,7 @@ impl CandleLlamaWorker {
                 // Clear stale sessions from any previously loaded model.
                 self.sessions.clear();
                 self.engine = Some(engine);
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Ack);
             }
             Err(e) => {
                 let _ = reply_tx.send(BackendReply::Error(e.to_string()));
@@ -185,8 +184,7 @@ impl CandleLlamaWorker {
                 let _ = engine.unload();
                 self.engine = None;
                 self.sessions.clear();
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from([] as [u8; 0]))));
+                let _ = reply_tx.send(BackendReply::Ack);
             }
             None => {
                 let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));

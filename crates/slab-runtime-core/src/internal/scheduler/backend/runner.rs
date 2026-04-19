@@ -17,29 +17,6 @@ pub fn shared_ingress(rx: Receiver<BackendRequest>) -> SharedIngressRx {
     rx
 }
 
-/// Backend implementation-facing contract for runtime-managed worker loops.
-#[async_trait]
-pub trait RuntimeWorkerHandler: Send + 'static {
-    /// Handle a request consumed from backend ingress queue.
-    async fn handle_request(&mut self, req: BackendRequest);
-
-    /// Handle a peer synchronization command after runtime filtering.
-    ///
-    /// Runtime runner guarantees this callback is invoked only for commands that:
-    /// - have strictly increasing `seq_id` per worker, and
-    /// - are not self-echoed (`sender_id != worker_id`).
-    async fn handle_peer_control(&mut self, cmd: PeerWorkerCommand);
-
-    /// Handle a runtime-issued global control signal.
-    async fn handle_runtime_control(&mut self, signal: RuntimeControlSignal);
-
-    /// Handle control-bus lag (`broadcast::RecvError::Lagged`).
-    ///
-    /// Default is no-op; implementations can override with safe cleanup
-    /// (for example, unloading model context to avoid stale state).
-    async fn handle_control_lagged(&mut self) {}
-}
-
 /// Boxed future used by macro-generated thin dispatch shims.
 pub type HandlerFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
 /// Request-dispatch function pointer (`&mut handler`, `BackendRequest`) -> async unit.
@@ -69,6 +46,97 @@ pub struct PeerRoute<T> {
     pub handle: PeerDispatchFn<T>,
 }
 
+/// Backend implementation-facing contract for runtime-managed worker loops.
+#[async_trait]
+pub trait RuntimeWorkerHandler: Send + 'static {
+    /// Return typed request routes for this worker.
+    ///
+    /// Macro-based workers usually expose these via generated `routes()` accessors and
+    /// delegate this method to them. Hand-written workers can override directly.
+    fn request_routes() -> &'static [RequestRouteMatcher<Self>]
+    where
+        Self: Sized,
+    {
+        &[]
+    }
+
+    /// Return runtime-control routes for this worker.
+    fn runtime_control_routes() -> &'static [RuntimeRoute<Self>]
+    where
+        Self: Sized,
+    {
+        &[]
+    }
+
+    /// Return peer-control routes for this worker.
+    fn peer_control_routes() -> &'static [PeerRoute<Self>]
+    where
+        Self: Sized,
+    {
+        &[]
+    }
+
+    /// Return an optional peer-control fallback route.
+    fn peer_control_fallback() -> Option<PeerDispatchFn<Self>>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
+    /// Return an optional lagged-control cleanup route.
+    fn control_lagged_route() -> Option<LaggedDispatchFn<Self>>
+    where
+        Self: Sized,
+    {
+        None
+    }
+
+    /// Handle a request consumed from backend ingress queue.
+    async fn handle_request(&mut self, req: BackendRequest)
+    where
+        Self: Sized,
+    {
+        dispatch_backend_request(self, req, Self::request_routes()).await;
+    }
+
+    /// Handle a peer synchronization command after runtime filtering.
+    ///
+    /// Runtime runner guarantees this callback is invoked only for commands that:
+    /// - have strictly increasing `seq_id` per worker, and
+    /// - are not self-echoed (`sender_id != worker_id`).
+    async fn handle_peer_control(&mut self, cmd: PeerWorkerCommand)
+    where
+        Self: Sized,
+    {
+        dispatch_peer_control(
+            self,
+            cmd,
+            Self::peer_control_fallback(),
+            Self::peer_control_routes(),
+        )
+        .await;
+    }
+
+    /// Handle a runtime-issued global control signal.
+    async fn handle_runtime_control(&mut self, signal: RuntimeControlSignal)
+    where
+        Self: Sized,
+    {
+        dispatch_runtime_control(self, signal, Self::runtime_control_routes()).await;
+    }
+
+    /// Handle control-bus lag (`broadcast::RecvError::Lagged`).
+    ///
+    /// Default dispatches to the optional lagged route.
+    async fn handle_control_lagged(&mut self)
+    where
+        Self: Sized,
+    {
+        dispatch_control_lagged(self, Self::control_lagged_route()).await;
+    }
+}
+
 /// Dispatch request by typed request route using a macro-provided route table.
 pub async fn dispatch_backend_request<T>(
     handler: &mut T,
@@ -86,11 +154,11 @@ pub async fn dispatch_backend_request<T>(
                 }
             }
             let op_name = req.op.name.clone();
-            let _ = req.reply_tx.send(BackendReply::Error(format!("unknown op: {}", op_name)));
+            let _ = req.reply_tx.send(BackendReply::error(format!("unknown op: {}", op_name)));
         }
         Err(_) => {
             let op_name = req.op.name.clone();
-            let _ = req.reply_tx.send(BackendReply::Error(format!("unknown op: {}", op_name)));
+            let _ = req.reply_tx.send(BackendReply::error(format!("unknown op: {}", op_name)));
         }
     }
 }
@@ -288,8 +356,8 @@ mod tests {
 
     use crate::Payload;
     use crate::internal::scheduler::backend::protocol::{
-        BackendOp, BackendReply, BackendRequest, BackendRequestKind, PeerWorkerCommand,
-        RuntimeControlSignal, SyncMessage, WorkerCommand,
+        BackendOp, BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal,
+        SyncMessage, WorkerCommand,
     };
     use crate::internal::scheduler::backend::runner::{
         RuntimeWorkerHandler, shared_ingress, spawn_runtime_worker,
@@ -392,14 +460,12 @@ mod tests {
         drop(cancel_tx);
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         ingress_tx
-            .send_async(BackendRequest {
-                kind: BackendRequestKind::Inference,
-                op: BackendOp { name: "test.op".to_owned(), options: Payload::default() },
-                input: Payload::default(),
+            .send_async(BackendRequest::inference(
+                BackendOp::new("test.op", Payload::default()),
+                Payload::default(),
                 cancel_rx,
-                broadcast_seq: None,
                 reply_tx,
-            })
+            ))
             .await
             .expect("ingress send should succeed");
 
