@@ -1,18 +1,18 @@
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use slab_runtime_core::Payload;
-use slab_types::{CandleLlamaLoadConfig, Capability, ModelFamily, TextGenerationOpOptions};
+use slab_runtime_core::backend::RequestRoute;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::application::dtos as dto;
+use crate::domain::models::{CandleLlamaLoadConfig, TextGenerationOpOptions};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    decode_text_response, decode_text_stream_chunk, invalid_model, model_spec, required_path,
-    required_string,
+    decode_text_response, decode_text_stream_chunk, invalid_model, required_path, required_string,
 };
 
 #[derive(Clone, Debug)]
@@ -35,14 +35,7 @@ impl CandleLlamaService {
             seed,
         });
 
-        Ok(Self {
-            runtime: DriverRuntime::new(
-                execution,
-                model_spec(ModelFamily::Llama, Capability::TextGeneration, model_path),
-                "candle.llama",
-                load_payload,
-            ),
-        })
+        Ok(Self { runtime: DriverRuntime::new(execution, "candle.llama", load_payload) })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -61,8 +54,7 @@ impl CandleLlamaService {
         let payload = self
             .runtime
             .submit(
-                Capability::TextGeneration,
-                false,
+                RequestRoute::Inference,
                 Payload::text(prompt),
                 Vec::new(),
                 Payload::typed(TextGenerationOpOptions {
@@ -86,8 +78,7 @@ impl CandleLlamaService {
         let handle = self
             .runtime
             .submit(
-                Capability::TextGeneration,
-                true,
+                RequestRoute::InferenceStream,
                 Payload::text(prompt),
                 Vec::new(),
                 Payload::typed(TextGenerationOpOptions {

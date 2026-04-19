@@ -1,5 +1,5 @@
 use slab_runtime_core::Payload;
-use slab_types::{Capability, ModelFamily};
+use slab_runtime_core::backend::RequestRoute;
 use slab_whisper::{
     ContextParams as WhisperContextParams, FullParams as WhisperFullParams,
     SamplingStrategy as WhisperSamplingStrategy, WhisperVadParams as CanonicalWhisperVadParams,
@@ -11,7 +11,7 @@ use crate::domain::runtime::CoreError;
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    audio_decode_stage, decode_utf8_payload, invalid_model, model_spec, required_path,
+    audio_decode_stage, decode_utf8_payload, invalid_model, required_path,
     whisper_transcription_from_raw,
 };
 
@@ -32,14 +32,7 @@ impl GgmlWhisperService {
             ..Default::default()
         });
 
-        Ok(Self {
-            runtime: DriverRuntime::new(
-                execution,
-                model_spec(ModelFamily::Whisper, Capability::AudioTranscription, model_path),
-                "ggml.whisper",
-                load_payload,
-            ),
-        })
+        Ok(Self { runtime: DriverRuntime::new(execution, "ggml.whisper", load_payload) })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -59,8 +52,7 @@ impl GgmlWhisperService {
         let payload = self
             .runtime
             .submit(
-                Capability::AudioTranscription,
-                false,
+                RequestRoute::Inference,
                 Payload::None,
                 vec![audio_decode_stage(audio_path)],
                 Payload::typed(build_full_params(request)?),

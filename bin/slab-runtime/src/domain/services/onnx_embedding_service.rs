@@ -1,14 +1,15 @@
 use slab_runtime_core::Payload;
-use slab_types::{Capability, ModelFamily, OnnxLoadConfig};
+use slab_runtime_core::backend::RequestRoute;
 
 use crate::application::dtos as dto;
+use crate::domain::models::OnnxLoadConfig;
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    embedding_image_to_tensor, invalid_model, model_spec, onnx_named_output_from_payload,
-    onnx_tensors_to_json, required_path, required_string,
+    embedding_image_to_tensor, invalid_model, onnx_named_output_from_payload, onnx_tensors_to_json,
+    required_path, required_string,
 };
 
 #[derive(Clone, Debug)]
@@ -48,12 +49,7 @@ impl OnnxEmbeddingService {
         });
 
         Ok(Self {
-            runtime: DriverRuntime::new(
-                execution,
-                model_spec(ModelFamily::Onnx, Capability::ImageEmbedding, model_path),
-                "onnx",
-                load_payload,
-            ),
+            runtime: DriverRuntime::new(execution, "onnx", load_payload),
             input_tensor_name,
             output_tensor_name,
         })
@@ -78,8 +74,7 @@ impl OnnxEmbeddingService {
         let payload = self
             .runtime
             .submit(
-                Capability::ImageEmbedding,
-                false,
+                RequestRoute::Inference,
                 Payload::Json(onnx_tensors_to_json(&[input_tensor])?),
                 Vec::new(),
                 Payload::None,

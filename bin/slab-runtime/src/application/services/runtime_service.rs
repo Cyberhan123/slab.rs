@@ -1,5 +1,4 @@
-use slab_types::DriverDescriptor;
-
+use crate::domain::models::EnabledBackends;
 use crate::domain::runtime::CoreError;
 use crate::domain::services::ExecutionHub;
 
@@ -21,22 +20,17 @@ struct RuntimeServiceAvailability {
 }
 
 impl RuntimeServiceAvailability {
-    fn from_descriptors(descriptors: &[DriverDescriptor]) -> Self {
-        let mut availability = Self::default();
-        for descriptor in descriptors {
-            match descriptor.driver_id.as_str() {
-                "ggml.llama" => availability.ggml_llama = true,
-                "ggml.whisper" => availability.ggml_whisper = true,
-                "ggml.diffusion" => availability.ggml_diffusion = true,
-                "candle.llama" => availability.candle_llama = true,
-                "candle.whisper" => availability.candle_whisper = true,
-                "candle.diffusion" => availability.candle_diffusion = true,
-                "onnx.text" => availability.onnx_text = true,
-                "onnx.embedding" => availability.onnx_embedding = true,
-                _ => {}
-            }
+    fn from_enabled_backends(backends: &EnabledBackends) -> Self {
+        Self {
+            ggml_llama: backends.contains("ggml.llama"),
+            ggml_whisper: backends.contains("ggml.whisper"),
+            ggml_diffusion: backends.contains("ggml.diffusion"),
+            candle_llama: backends.contains("candle.llama"),
+            candle_whisper: backends.contains("candle.whisper"),
+            candle_diffusion: backends.contains("candle.diffusion"),
+            onnx_text: backends.contains("onnx.text"),
+            onnx_embedding: backends.contains("onnx.embedding"),
         }
-        availability
     }
 }
 
@@ -53,7 +47,8 @@ pub struct RuntimeApplication {
 
 impl RuntimeApplication {
     pub fn new(execution: ExecutionHub) -> Self {
-        let availability = RuntimeServiceAvailability::from_descriptors(execution.catalog().descriptors());
+        let availability =
+            RuntimeServiceAvailability::from_enabled_backends(execution.enabled_backends());
         Self {
             availability,
             ggml_llama: GgmlLlamaService::new(execution.clone()),

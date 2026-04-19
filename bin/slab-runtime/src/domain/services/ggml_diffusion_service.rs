@@ -6,7 +6,7 @@ use slab_diffusion::{
     SampleParams as DiffusionSampleParams, Scheduler as DiffusionScheduler, SlgParams,
 };
 use slab_runtime_core::Payload;
-use slab_types::{Capability, ModelFamily};
+use slab_runtime_core::backend::RequestRoute;
 
 use crate::application::dtos as dto;
 use crate::domain::runtime::CoreError;
@@ -14,7 +14,7 @@ use crate::domain::runtime::CoreError;
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    decode_images_payload, invalid_model, model_spec, raw_image_to_diffusion_image, required_path,
+    decode_images_payload, invalid_model, raw_image_to_diffusion_image, required_path,
     required_string,
 };
 
@@ -48,14 +48,7 @@ impl GgmlDiffusionService {
             ..Default::default()
         });
 
-        Ok(Self {
-            runtime: DriverRuntime::new(
-                execution,
-                model_spec(ModelFamily::Diffusion, Capability::ImageGeneration, model_path),
-                "ggml.diffusion",
-                load_payload,
-            ),
-        })
+        Ok(Self { runtime: DriverRuntime::new(execution, "ggml.diffusion", load_payload) })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -73,8 +66,7 @@ impl GgmlDiffusionService {
         let payload = self
             .runtime
             .submit(
-                Capability::ImageGeneration,
-                false,
+                RequestRoute::InferenceImage,
                 Payload::typed(build_image_params(request)?),
                 Vec::new(),
                 Payload::None,
@@ -94,8 +86,7 @@ impl GgmlDiffusionService {
         let payload = self
             .runtime
             .submit(
-                Capability::ImageGeneration,
-                false,
+                RequestRoute::InferenceImage,
                 Payload::typed(build_video_as_image_params(request)?),
                 Vec::new(),
                 Payload::None,

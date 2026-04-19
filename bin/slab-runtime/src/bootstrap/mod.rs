@@ -11,7 +11,7 @@ use tracing::info;
 
 use crate::api::handlers::GrpcServiceImpl;
 use crate::application::services::RuntimeApplication;
-use crate::domain::models::BackendCatalog;
+use crate::domain::models::EnabledBackends;
 use crate::domain::runtime::Orchestrator;
 use crate::domain::services::ExecutionHub;
 use crate::infra::backends;
@@ -45,7 +45,7 @@ fn build_grpc_service(config: Arc<RuntimeConfig>) -> anyhow::Result<GrpcServiceI
 
     let execution = ExecutionHub::new(
         Orchestrator::start(resource_manager, config.queue_capacity),
-        BackendCatalog::new(backends::descriptors(&drivers)),
+        EnabledBackends::new(backends::service_ids(&drivers)),
     );
     let application = RuntimeApplication::new(execution);
     Ok(GrpcServiceImpl::new(application))

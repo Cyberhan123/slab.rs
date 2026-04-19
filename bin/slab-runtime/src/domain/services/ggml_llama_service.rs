@@ -2,7 +2,7 @@ use futures::StreamExt;
 use futures::stream::BoxStream;
 use slab_llama::{LlamaInferenceParams, LlamaLoadConfig};
 use slab_runtime_core::Payload;
-use slab_types::{Capability, ModelFamily};
+use slab_runtime_core::backend::RequestRoute;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
@@ -12,8 +12,7 @@ use crate::domain::runtime::CoreError;
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    decode_text_response, decode_text_stream_chunk, invalid_model, model_spec, required_path,
-    required_string,
+    decode_text_response, decode_text_stream_chunk, invalid_model, required_path, required_string,
 };
 
 #[derive(Clone, Debug)]
@@ -47,14 +46,7 @@ impl GgmlLlamaService {
             gbnf: request.gbnf,
         });
 
-        Ok(Self {
-            runtime: DriverRuntime::new(
-                execution,
-                model_spec(ModelFamily::Llama, Capability::TextGeneration, model_path),
-                "ggml.llama",
-                load_payload,
-            ),
-        })
+        Ok(Self { runtime: DriverRuntime::new(execution, "ggml.llama", load_payload) })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -73,8 +65,7 @@ impl GgmlLlamaService {
         let payload = self
             .runtime
             .submit(
-                Capability::TextGeneration,
-                false,
+                RequestRoute::Inference,
                 Payload::text(prompt),
                 Vec::new(),
                 Payload::typed(build_inference_params(request)?),
@@ -93,8 +84,7 @@ impl GgmlLlamaService {
         let handle = self
             .runtime
             .submit(
-                Capability::TextGeneration,
-                true,
+                RequestRoute::InferenceStream,
                 Payload::text(prompt),
                 Vec::new(),
                 Payload::typed(build_inference_params(request)?),

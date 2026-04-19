@@ -2,7 +2,6 @@ use std::path::PathBuf;
 
 use slab_runtime_core::CoreError;
 use slab_runtime_core::backend::ResourceManager;
-use slab_types::DriverDescriptor;
 
 use crate::infra::config::RuntimeConfig;
 
@@ -13,8 +12,9 @@ pub(crate) mod ggml;
 #[cfg(feature = "onnx")]
 pub(crate) mod onnx;
 
+#[cfg_attr(not(any(feature = "ggml", feature = "candle", feature = "onnx")), allow(dead_code))]
 #[derive(Debug, Clone, Default)]
-pub struct RuntimeDriversConfig {
+pub(crate) struct RuntimeDriversConfig {
     pub llama_lib_dir: Option<PathBuf>,
     pub whisper_lib_dir: Option<PathBuf>,
     pub diffusion_lib_dir: Option<PathBuf>,
@@ -38,32 +38,32 @@ impl From<&RuntimeConfig> for RuntimeDriversConfig {
     }
 }
 
-pub fn descriptors(_config: &RuntimeDriversConfig) -> Vec<DriverDescriptor> {
+pub(crate) fn service_ids(_config: &RuntimeDriversConfig) -> Vec<&'static str> {
     #[allow(unused_mut)]
-    let mut descriptors = Vec::new();
+    let mut service_ids = Vec::new();
 
     #[cfg(feature = "ggml")]
-    descriptors.extend(ggml::descriptors(&ggml::GgmlBackendConfig {
+    service_ids.extend(ggml::service_ids(&ggml::GgmlBackendConfig {
         llama_lib_dir: _config.llama_lib_dir.clone(),
         whisper_lib_dir: _config.whisper_lib_dir.clone(),
         diffusion_lib_dir: _config.diffusion_lib_dir.clone(),
     }));
 
     #[cfg(feature = "candle")]
-    descriptors.extend(candle::descriptors(&candle::CandleBackendConfig {
+    service_ids.extend(candle::service_ids(&candle::CandleBackendConfig {
         enable_llama: _config.enable_candle_llama,
         enable_whisper: _config.enable_candle_whisper,
         enable_diffusion: _config.enable_candle_diffusion,
     }));
 
     #[cfg(feature = "onnx")]
-    descriptors
-        .extend(onnx::descriptors(&onnx::OnnxBackendConfig { enabled: _config.onnx_enabled }));
+    service_ids
+        .extend(onnx::service_ids(&onnx::OnnxBackendConfig { enabled: _config.onnx_enabled }));
 
-    descriptors
+    service_ids
 }
 
-pub fn register_backends(
+pub(crate) fn register_backends(
     _config: &RuntimeDriversConfig,
     _resource_manager: &mut ResourceManager,
     _worker_count: usize,

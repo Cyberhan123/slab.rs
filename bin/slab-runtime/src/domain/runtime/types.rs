@@ -7,7 +7,7 @@ pub type TaskId = u64;
 #[derive(Debug, Clone)]
 pub enum TaskStatus {
     Pending,
-    Running { stage_index: usize, stage_name: String },
+    Running,
     Succeeded { result: Payload },
     ResultConsumed,
     SucceededStreaming,

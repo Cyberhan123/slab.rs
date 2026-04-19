@@ -19,6 +19,18 @@ pub enum RequestRoute {
     InferenceImage,
 }
 
+impl RequestRoute {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LoadModel => "model.load",
+            Self::UnloadModel => "model.unload",
+            Self::Inference => "inference",
+            Self::InferenceStream => "inference.stream",
+            Self::InferenceImage => "inference.image",
+        }
+    }
+}
+
 impl FromStr for RequestRoute {
     type Err = String;
 
@@ -228,4 +240,23 @@ pub enum BackendReply {
     Stream(StreamHandle),
     /// The backend encountered an error.
     Error(String),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RequestRoute;
+    use std::str::FromStr;
+
+    #[test]
+    fn request_route_string_mapping_is_lossless() {
+        for route in [
+            RequestRoute::LoadModel,
+            RequestRoute::UnloadModel,
+            RequestRoute::Inference,
+            RequestRoute::InferenceStream,
+            RequestRoute::InferenceImage,
+        ] {
+            assert_eq!(RequestRoute::from_str(route.as_str()), Ok(route));
+        }
+    }
 }

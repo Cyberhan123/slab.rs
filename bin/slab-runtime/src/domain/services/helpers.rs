@@ -8,13 +8,12 @@ use serde_json::{Map, Value, json};
 use slab_diffusion::Image as DiffusionImage;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::StreamChunk;
-use slab_types::{Capability, ModelFamily, ModelSource, ModelSpec};
 
 use crate::application::dtos as dto;
 use crate::domain::runtime::{CoreError, CpuStage};
 
 pub(crate) fn invalid_model(field: &'static str, message: impl Into<String>) -> CoreError {
-    CoreError::InvalidModelSpec { message: format!("{field}: {}", message.into()) }
+    CoreError::InvalidRequestPayload { message: format!("{field}: {}", message.into()) }
 }
 
 pub(crate) fn required_path(
@@ -38,14 +37,6 @@ pub(crate) fn required_string(
         return Err(invalid_model(field, "missing required string"));
     };
     Ok(value)
-}
-
-pub(crate) fn model_spec(
-    family: ModelFamily,
-    capability: Capability,
-    model_path: PathBuf,
-) -> ModelSpec {
-    ModelSpec::new(family, capability, ModelSource::LocalPath { path: model_path })
 }
 
 pub(crate) fn decode_text_response(

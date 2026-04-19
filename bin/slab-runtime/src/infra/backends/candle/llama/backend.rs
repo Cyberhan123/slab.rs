@@ -13,14 +13,14 @@
 //! | `"inference.stream"` | `InferenceStream` | Streaming text generation.                      |
 //!
 //! ### `model.load` input payload
-//! Uses a typed [`slab_types::CandleLlamaLoadConfig`] payload inside `slab-core`.
+//! Uses typed runtime-owned payloads inside `slab-runtime`.
 
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use slab_types::{CandleLlamaLoadConfig, TextGenerationOpOptions};
 use tokio::sync::mpsc;
 
+use crate::domain::models::{CandleLlamaLoadConfig, TextGenerationOpOptions};
 use crate::infra::backends::candle::llama::adapter::CandleLlamaEngine;
 use crate::infra::backends::candle::llama::errors::SessionId;
 use slab_runtime_core::Payload;

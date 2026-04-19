@@ -16,16 +16,6 @@ pub enum Stage {
     GpuStream(GpuStreamStage),
 }
 
-impl Stage {
-    pub fn name(&self) -> &str {
-        match self {
-            Stage::Cpu(stage) => &stage.name,
-            Stage::Gpu(stage) => &stage.name,
-            Stage::GpuStream(stage) => &stage.name,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct CpuStage {
     pub name: String,

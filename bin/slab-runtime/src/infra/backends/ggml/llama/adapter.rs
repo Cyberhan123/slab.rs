@@ -6,13 +6,14 @@ use slab_llama::{
 use slab_runtime_core::backend::{
     StreamChunk as BaseStreamChunk, StreamHandle as BaseStreamHandle,
 };
-use slab_types::inference::{JsonOptions, TextGenerationUsage, TextPromptTokensDetails};
 use slab_utils::loader::load_library_from_dir;
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, RwLock};
 use tokio::sync::{Mutex, mpsc, watch};
 use tracing::{info, warn};
+
+use crate::domain::models::{JsonOptions, TextGenerationUsage, TextPromptTokensDetails};
 
 use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 
