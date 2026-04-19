@@ -24,8 +24,13 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
 
         let dto =
             dto::decode_ggml_llama_chat_request(&request.into_inner()).map_err(proto_to_status)?;
-        let response =
-            self.application.ggml_llama().chat(dto).await.map_err(application_to_status)?;
+        let response = self
+            .application
+            .ggml_llama()
+            .map_err(application_to_status)?
+            .chat(dto)
+            .await
+            .map_err(application_to_status)?;
         Ok(Response::new(dto::encode_ggml_llama_chat_response(&response)))
     }
 
@@ -41,8 +46,13 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
 
         let dto =
             dto::decode_ggml_llama_chat_request(&request.into_inner()).map_err(proto_to_status)?;
-        let stream =
-            self.application.ggml_llama().chat_stream(dto).await.map_err(application_to_status)?;
+        let stream = self
+            .application
+            .ggml_llama()
+            .map_err(application_to_status)?
+            .chat_stream(dto)
+            .await
+            .map_err(application_to_status)?;
 
         let (tx, rx) = mpsc::channel::<Result<pb::GgmlLlamaChatStreamChunk, Status>>(32);
         tokio::spawn(async move {
@@ -75,8 +85,13 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
 
         let dto =
             dto::decode_ggml_llama_load_request(&request.into_inner()).map_err(proto_to_status)?;
-        let status =
-            self.application.ggml_llama().load_model(dto).await.map_err(application_to_status)?;
+        let status = self
+            .application
+            .ggml_llama()
+            .map_err(application_to_status)?
+            .load_model(dto)
+            .await
+            .map_err(application_to_status)?;
         Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
@@ -89,8 +104,13 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
         let _ = request.into_inner();
 
-        let status =
-            self.application.ggml_llama().unload_model().await.map_err(application_to_status)?;
+        let status = self
+            .application
+            .ggml_llama()
+            .map_err(application_to_status)?
+            .unload_model()
+            .await
+            .map_err(application_to_status)?;
         Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 }

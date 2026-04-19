@@ -47,6 +47,6 @@ fn build_grpc_service(config: Arc<RuntimeConfig>) -> anyhow::Result<GrpcServiceI
         Orchestrator::start(resource_manager, config.queue_capacity),
         BackendCatalog::new(backends::descriptors(&drivers)),
     );
-    let application = RuntimeApplication::new(execution, config.enabled_backends);
+    let application = RuntimeApplication::new(execution);
     Ok(GrpcServiceImpl::new(application))
 }

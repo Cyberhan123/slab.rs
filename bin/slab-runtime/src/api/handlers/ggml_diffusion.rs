@@ -22,6 +22,7 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
         let response = self
             .application
             .ggml_diffusion()
+            .map_err(application_to_status)?
             .generate_image(dto)
             .await
             .map_err(application_to_status)?;
@@ -41,6 +42,7 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
         let response = self
             .application
             .ggml_diffusion()
+            .map_err(application_to_status)?
             .generate_video(dto)
             .await
             .map_err(application_to_status)?;
@@ -60,6 +62,7 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
         let status = self
             .application
             .ggml_diffusion()
+            .map_err(application_to_status)?
             .load_model(dto)
             .await
             .map_err(application_to_status)?;
@@ -78,6 +81,7 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
         let status = self
             .application
             .ggml_diffusion()
+            .map_err(application_to_status)?
             .unload_model()
             .await
             .map_err(application_to_status)?;
