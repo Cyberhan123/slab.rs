@@ -147,7 +147,7 @@
 | `ResultStorage` | `Arc<RwLock<HashMap<TaskId, TaskRecord>>>` |
 | `ResourceManager` | `Arc<RwLock<HashMap<...>>>` + `OwnedSemaphorePermit` |
 | `TaskHandle<R,C>` | `Clone` 可跨线程持有，`codec` 为 `Arc<dyn TaskCodec>` |
-| backend workers | `Mutex<mpsc::Receiver<BackendRequest>>` 竞争消费 |
+| backend workers | `SharedIngressRx (= flume::Receiver<BackendRequest>)` 竞争消费 |
 | management 操作 | `OwnedRwLockWriteGuard` 独占锁，inference 持 read lock |
 
 ---

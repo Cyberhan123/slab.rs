@@ -23,7 +23,7 @@ use tokio::sync::broadcast;
 use crate::infra::backends::ggml::diffusion::adapter::GGMLDiffusionEngine;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
-    BroadcastSeq, DeploymentSnapshot, Input, PeerWorkerCommand, RuntimeControlSignal,
+    BroadcastSeq, ControlOpId, DeploymentSnapshot, Input, PeerWorkerCommand,
     SyncMessage, Typed, WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
@@ -195,17 +195,11 @@ impl DiffusionWorker {
     }
 
     #[on_peer_control(LoadModel)]
-    async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
-        let Some(snapshot) = cmd.deployment() else {
-            return;
-        };
-        let config: DiffusionContextParams = match snapshot.typed_model_config() {
-            Ok(config) => config,
-            Err(error) => {
-                tracing::warn!(error = %error, "diffusion worker: invalid model deployment snapshot");
-                return;
-            }
-        };
+    async fn on_peer_load_model(
+        &mut self,
+        config: Input<DiffusionContextParams>,
+    ) -> Result<(), String> {
+        let config = config.0;
         let model_path = config.model_path.clone();
         if let Some(engine) = self.engine.as_mut()
             && !engine.is_model_loaded()
@@ -219,45 +213,37 @@ impl DiffusionWorker {
                 );
             }
         }
-        self.last_model_config = snapshot.model.clone();
+        self.last_model_config = Some(Payload::typed(config));
+        Ok(())
     }
 
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) {
+    async fn on_peer_unload(&mut self) -> Result<(), String> {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
         self.last_model_config = None;
+        Ok(())
     }
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, signal: RuntimeControlSignal) {
-        match signal {
-            RuntimeControlSignal::GlobalUnload { op_id } => {
-                tracing::debug!(op_id, "diffusion runtime global unload");
-                if let Some(engine) = self.engine.as_mut() {
-                    engine.unload();
-                }
-                self.last_model_config = None;
-            }
-            RuntimeControlSignal::GlobalLoad { op_id, payload } => {
-                let _ = payload;
-                tracing::debug!(op_id, "diffusion runtime global load pre-cleanup");
-                if let Some(engine) = self.engine.as_mut() {
-                    engine.unload();
-                }
-                self.last_model_config = None;
-            }
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+        tracing::debug!(op_id = op_id.0, "diffusion runtime control pre-cleanup");
+        if let Some(engine) = self.engine.as_mut() {
+            engine.unload();
         }
+        self.last_model_config = None;
+        Ok(())
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged(&mut self) {
+    async fn on_control_lagged(&mut self) -> Result<(), String> {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
         self.last_model_config = None;
+        Ok(())
     }
 }
 

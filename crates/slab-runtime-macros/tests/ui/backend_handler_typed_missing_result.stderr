@@ -1,4 +1,4 @@
-error: typed event handlers must return Result<Success, Error>
+error: typed event handlers must return Result<Success, Error> so the macro can send a BackendReply
  --> tests/ui/backend_handler_typed_missing_result.rs:7:1
   |
 7 | #[backend_handler]

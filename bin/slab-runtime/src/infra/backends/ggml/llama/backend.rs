@@ -1,7 +1,8 @@
 //! Backend worker adapter for `ggml.llama`.
 //!
 //! Provides [`spawn_backend`] and [`spawn_backend_with_path`] which start a
-//! Tokio task translating [`BackendRequest`] messages into llama inference calls.
+//! Tokio worker whose `#[backend_handler]` routes translate typed event and
+//! control handlers into llama inference calls.
 //!
 //! # Supported ops
 //!
@@ -18,6 +19,10 @@
 //! ### `inference` / `inference.stream` options payload
 //! Uses a typed [`slab_llama::LlamaInferenceParams`] payload. Grammar and chat
 //! message normalization are resolved before the backend receives the request.
+//!
+//! Runtime and peer control hooks are also routed through typed extractor
+//! arguments, but remain fire-and-forget because the control bus has no reply
+//! channel.
 
 use std::sync::Arc;
 
@@ -29,7 +34,7 @@ use crate::infra::backends::ggml::llama::adapter::{
     GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest,
 };
 use slab_runtime_core::backend::{
-    CancelRx, Input, Options, RuntimeControlSignal, StreamHandle, WorkerCommand,
+    CancelRx, ControlOpId, Input, Options, StreamHandle, WorkerCommand,
 };
 use slab_runtime_core::backend::{SharedIngressRx, spawn_runtime_worker};
 use slab_runtime_macros::backend_handler;
@@ -125,25 +130,18 @@ impl LlamaWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, signal: RuntimeControlSignal) {
-        match signal {
-            RuntimeControlSignal::GlobalUnload { op_id } => {
-                tracing::debug!(op_id, "llama runtime global unload");
-                self.cleanup_runtime_state();
-            }
-            RuntimeControlSignal::GlobalLoad { op_id, payload } => {
-                let _ = payload;
-                tracing::debug!(op_id, "llama runtime global load pre-cleanup");
-                // Runtime-level GlobalLoad is treated as a pre-load cleanup signal.
-                // The actual model.load request is still driven by the management path.
-                self.cleanup_runtime_state();
-            }
-        }
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+        tracing::debug!(op_id = op_id.0, "llama runtime control pre-cleanup");
+        // Runtime-level GlobalLoad is treated as a pre-load cleanup signal.
+        // The actual model.load request is still driven by the management path.
+        self.cleanup_runtime_state();
+        Ok(())
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged_cleanup(&mut self) {
+    async fn on_control_lagged_cleanup(&mut self) -> Result<(), String> {
         self.cleanup_runtime_state();
+        Ok(())
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
@@ -330,8 +328,7 @@ pub fn spawn_backend_with_engine(
 mod tests {
     use super::{InferenceOptions, LlamaWorker};
     use slab_llama::LlamaInferenceParams;
-    use slab_runtime_core::Payload;
-    use slab_runtime_core::backend::RuntimeControlSignal;
+    use slab_runtime_core::backend::ControlOpId;
 
     // ── infer_add_assistant_prompt ────────────────────────────────────────────
 
@@ -341,7 +338,7 @@ mod tests {
     async fn runtime_global_unload_is_safe_without_engine() {
         let mut worker = LlamaWorker::new(None);
 
-        worker.apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 }).await;
+        worker.apply_runtime_control(ControlOpId(1)).await.expect("control cleanup should succeed");
 
         assert!(worker.engine.is_none(), "global unload should remain safe without an engine");
     }
@@ -350,15 +347,7 @@ mod tests {
     async fn runtime_global_load_is_safe_without_engine() {
         let mut worker = LlamaWorker::new(None);
 
-        worker
-            .apply_runtime_control(RuntimeControlSignal::GlobalLoad {
-                op_id: 2,
-                payload: Payload::Json(serde_json::json!({
-                    "model_path": "/tmp/model.gguf",
-                    "num_workers": 1
-                })),
-            })
-            .await;
+        worker.apply_runtime_control(ControlOpId(2)).await.expect("control cleanup should succeed");
 
         assert!(worker.engine.is_none(), "global load pre-cleanup should remain safe");
     }

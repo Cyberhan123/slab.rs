@@ -17,18 +17,18 @@ pub fn shared_ingress(rx: Receiver<BackendRequest>) -> SharedIngressRx {
     rx
 }
 
-/// Boxed future used by macro-generated thin dispatch shims.
+/// Boxed future used by macro-generated typed dispatch shims.
 pub type HandlerFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-/// Request-dispatch function pointer (`&mut handler`, `BackendRequest`) -> async unit.
+/// Event-dispatch function pointer (`&mut handler`, `BackendRequest`) -> async unit.
 pub type RequestDispatchFn<T> = for<'a> fn(&'a mut T, BackendRequest) -> HandlerFuture<'a>;
-/// Runtime-control-dispatch function pointer.
+/// Runtime-control-dispatch function pointer for `#[on_runtime_control(...)]`.
 pub type RuntimeDispatchFn<T> = for<'a> fn(&'a mut T, RuntimeControlSignal) -> HandlerFuture<'a>;
-/// Peer-control-dispatch function pointer.
+/// Peer-control-dispatch function pointer for `#[on_peer_control(...)]`.
 pub type PeerDispatchFn<T> = for<'a> fn(&'a mut T, PeerWorkerCommand) -> HandlerFuture<'a>;
-/// Control-lagged-dispatch function pointer.
+/// Control-lagged-dispatch function pointer for `#[on_control_lagged]`.
 pub type LaggedDispatchFn<T> = for<'a> fn(&'a mut T) -> HandlerFuture<'a>;
 
-/// Thin request route entry used by macro-generated `#[backend_handler]` code.
+/// Thin event route entry used by macro-generated `#[backend_handler]` code.
 pub struct RequestRouteMatcher<T> {
     pub matches: fn(RequestRoute) -> bool,
     pub handle: RequestDispatchFn<T>,
@@ -47,6 +47,9 @@ pub struct PeerRoute<T> {
 }
 
 /// Explicit route table returned by workers or macro-generated adapters.
+///
+/// Event routes can extract typed inputs/options and send replies. Control
+/// routes extract typed metadata too, but stay fire-and-forget.
 #[derive(Clone, Copy)]
 pub struct WorkerRouteTable<T: 'static> {
     pub request_routes: &'static [RequestRouteMatcher<T>],
@@ -74,6 +77,8 @@ pub trait RuntimeWorkerHandler: Send + 'static {
     /// Return the explicit route table for this worker.
     ///
     /// Macro-based workers usually expose this via generated `route_table()` helpers.
+    /// The table can mix legacy `BackendRequest` event handlers with typed
+    /// event/control handlers.
     /// Hand-written workers can override directly and build capability-dependent tables.
     fn route_table(&self) -> WorkerRouteTable<Self>
     where
@@ -96,6 +101,9 @@ pub trait RuntimeWorkerHandler: Send + 'static {
     /// Runtime runner guarantees this callback is invoked only for commands that:
     /// - have strictly increasing `seq_id` per worker, and
     /// - are not self-echoed (`sender_id != worker_id`).
+    ///
+    /// Macro-generated routes support typed extractors here, but there is no
+    /// reply channel on the control bus.
     async fn handle_peer_control(&mut self, cmd: PeerWorkerCommand)
     where
         Self: Sized,
@@ -111,6 +119,9 @@ pub trait RuntimeWorkerHandler: Send + 'static {
     }
 
     /// Handle a runtime-issued global control signal.
+    ///
+    /// Macro-generated routes support typed extractors here, but there is no
+    /// reply channel on the control bus.
     async fn handle_runtime_control(&mut self, signal: RuntimeControlSignal)
     where
         Self: Sized,

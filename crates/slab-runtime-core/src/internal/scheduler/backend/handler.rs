@@ -5,29 +5,42 @@ use serde::{Serialize, de::DeserializeOwned};
 
 use crate::base::types::Payload;
 
-use super::protocol::{BackendReply, BackendRequest, StreamHandle};
+use super::protocol::{BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal, StreamHandle};
 
-/// Typed input extracted from [`BackendRequest::input`].
+/// Typed input extracted by macro-generated worker handlers.
+///
+/// `#[on_event(...)]` reads from [`BackendRequest::input`], while typed control
+/// handlers decode from the control payload carried by the matched signal.
 #[derive(Debug, Clone)]
 pub struct Input<T>(pub T);
 
-/// Typed options extracted from [`BackendRequest::op.options`].
+/// Typed options extracted from [`BackendRequest::op.options`] for event handlers.
 #[derive(Debug, Clone)]
 pub struct Options<T>(pub T);
 
-/// Cancellation receiver extracted from [`BackendRequest::cancel_rx`].
+/// Cancellation receiver extracted from [`BackendRequest::cancel_rx`] for event handlers.
 #[derive(Debug, Clone)]
 pub struct CancelRx(pub tokio::sync::watch::Receiver<bool>);
 
-/// Broadcast sequence extracted from [`BackendRequest::broadcast_seq`].
+/// Broadcast sequence extracted from event or peer-control metadata.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct BroadcastSeq(pub u64);
 
+/// Runtime control operation id extracted from [`RuntimeControlSignal`].
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ControlOpId(pub u64);
+
 /// Structured JSON response wrapper for typed event handlers.
+///
+/// Control handlers do not emit transport replies, so they always use `()` or
+/// `Result<(), E>` instead of `Json<T>`.
 #[derive(Debug, Clone)]
 pub struct Json<T>(pub T);
 
 /// Structured typed-payload response wrapper for typed event handlers.
+///
+/// Control handlers do not emit transport replies, so they always use `()` or
+/// `Result<(), E>` instead of `Typed<T>`.
 #[derive(Debug, Clone)]
 pub struct Typed<T>(pub T);
 
@@ -118,6 +131,10 @@ where
 }
 
 /// Collapse a typed event handler result into the transport reply expected by the runner.
+///
+/// Only `#[on_event(...)]` handlers flow through this adapter because they own a
+/// request reply channel. Typed control handlers are fire-and-forget and are
+/// limited to `()` / `Result<(), E>`.
 pub fn backend_reply_from_event_result<T, E>(result: Result<T, E>) -> BackendReply
 where
     T: IntoBackendReply,
@@ -170,4 +187,53 @@ pub fn extract_event_cancel_rx(req: &BackendRequest) -> Result<CancelRx, String>
 
 pub fn extract_event_broadcast_seq(req: &BackendRequest) -> Result<BroadcastSeq, String> {
     Ok(BroadcastSeq(req.broadcast_seq.unwrap_or(0)))
+}
+
+/// Extract typed metadata from a matched runtime control signal.
+pub fn extract_runtime_control_op_id(signal: &RuntimeControlSignal) -> Result<ControlOpId, String> {
+    let op_id = match signal {
+        RuntimeControlSignal::GlobalLoad { op_id, .. }
+        | RuntimeControlSignal::GlobalUnload { op_id } => *op_id,
+    };
+    Ok(ControlOpId(op_id))
+}
+
+pub fn extract_runtime_control_payload(signal: &RuntimeControlSignal) -> Result<Payload, String> {
+    match signal {
+        RuntimeControlSignal::GlobalLoad { payload, .. } => Ok(payload.clone()),
+        RuntimeControlSignal::GlobalUnload { .. } => {
+            Err("runtime control payload unavailable for GlobalUnload".to_owned())
+        }
+    }
+}
+
+pub fn extract_runtime_control_input<T>(signal: &RuntimeControlSignal) -> Result<Input<T>, String>
+where
+    T: DeserializeOwned + Clone + Send + Sync + 'static,
+{
+    extract_runtime_control_payload(signal)?
+        .to_typed::<T>()
+        .map(Input)
+        .map_err(|error| format!("invalid runtime control input: {error}"))
+}
+
+/// Extract typed metadata from a matched peer control command.
+pub fn extract_peer_control_payload(cmd: &PeerWorkerCommand) -> Result<Payload, String> {
+    cmd.deployment()
+        .and_then(|snapshot| snapshot.model.clone())
+        .ok_or_else(|| "peer control payload unavailable for this command".to_owned())
+}
+
+pub fn extract_peer_control_input<T>(cmd: &PeerWorkerCommand) -> Result<Input<T>, String>
+where
+    T: DeserializeOwned + Clone + Send + Sync + 'static,
+{
+    extract_peer_control_payload(cmd)?
+        .to_typed::<T>()
+        .map(Input)
+        .map_err(|error| format!("invalid peer control input: {error}"))
+}
+
+pub fn extract_peer_control_broadcast_seq(cmd: &PeerWorkerCommand) -> Result<BroadcastSeq, String> {
+    Ok(BroadcastSeq(cmd.seq_id()))
 }

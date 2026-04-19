@@ -819,23 +819,6 @@ impl GGMLLlamaEngine {
         Ok(stream_rx)
     }
 
-    /// Create a new session on the underlying llama runtime.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub async fn create_session(&self) -> Result<SessionId, ggml::EngineError> {
-        let engine = self.require_engine()?;
-        engine.create_session().await.map_err(GGMLLlamaEngineError::from).map_err(Into::into)
-    }
-
-    /// Create a new session with an optional raw GBNF constraint.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub async fn create_session_with_gbnf(
-        &self,
-        gbnf: Option<String>,
-    ) -> Result<SessionId, ggml::EngineError> {
-        self.create_session_with_options(gbnf, None, None, None, None, None, None, false, vec![])
-            .await
-    }
-
     /// Create a new session with optional GBNF and sampling overrides.
     pub async fn create_session_with_options(
         &self,

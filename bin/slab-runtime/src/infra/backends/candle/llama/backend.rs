@@ -24,7 +24,7 @@ use crate::domain::models::{CandleLlamaLoadConfig, TextGenerationOpOptions};
 use crate::infra::backends::candle::llama::adapter::CandleLlamaEngine;
 use crate::infra::backends::candle::llama::errors::SessionId;
 use slab_runtime_core::backend::{
-    Input, Options, RuntimeControlSignal, StreamChunk, StreamHandle, WorkerCommand,
+    ControlOpId, Input, Options, StreamChunk, StreamHandle, WorkerCommand,
 };
 use slab_runtime_core::backend::{SharedIngressRx, spawn_runtime_worker};
 use slab_runtime_macros::backend_handler;
@@ -92,23 +92,16 @@ impl CandleLlamaWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, signal: RuntimeControlSignal) {
-        match signal {
-            RuntimeControlSignal::GlobalUnload { op_id } => {
-                tracing::debug!(op_id, "candle.llama runtime global unload");
-                self.cleanup_runtime_state();
-            }
-            RuntimeControlSignal::GlobalLoad { op_id, payload } => {
-                let _ = payload;
-                tracing::debug!(op_id, "candle.llama runtime global load pre-cleanup");
-                self.cleanup_runtime_state();
-            }
-        }
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+        tracing::debug!(op_id = op_id.0, "candle.llama runtime control pre-cleanup");
+        self.cleanup_runtime_state();
+        Ok(())
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged_cleanup(&mut self) {
+    async fn on_control_lagged_cleanup(&mut self) -> Result<(), String> {
         self.cleanup_runtime_state();
+        Ok(())
     }
 
     // ── Handler helpers ───────────────────────────────────────────────────────
@@ -278,28 +271,22 @@ pub fn spawn_backend_with_engine(
 #[cfg(test)]
 mod tests {
     use super::CandleLlamaWorker;
-    use slab_runtime_core::backend::RuntimeControlSignal;
+    use slab_runtime_core::backend::ControlOpId;
 
     #[tokio::test]
     async fn runtime_global_unload_clears_engine() {
         let mut worker = CandleLlamaWorker::new(None);
-        worker.apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 }).await;
+        worker.apply_runtime_control(ControlOpId(1)).await.expect("control cleanup should succeed");
         assert!(worker.engine.is_none(), "global unload should leave engine cleared");
     }
 
     #[tokio::test]
     async fn runtime_global_load_runs_pre_cleanup() {
         let mut worker = CandleLlamaWorker::new(None);
-        use slab_runtime_core::Payload;
         worker
-            .apply_runtime_control(RuntimeControlSignal::GlobalLoad {
-                op_id: 2,
-                payload: Payload::Json(serde_json::json!({
-                    "model_path": "/tmp/model.gguf",
-                    "num_workers": 1
-                })),
-            })
-            .await;
+            .apply_runtime_control(ControlOpId(2))
+            .await
+            .expect("control cleanup should succeed");
         // Engine stays None (no model was actually loaded).
         assert!(worker.engine.is_none());
     }

@@ -58,6 +58,9 @@ pub mod backend {
     #[derive(Clone, Copy, Default)]
     pub struct BroadcastSeq(pub u64);
 
+    #[derive(Clone, Copy, Default)]
+    pub struct ControlOpId(pub u64);
+
     #[derive(Clone)]
     pub struct Json<T>(pub T);
 
@@ -125,6 +128,38 @@ pub mod backend {
     }
 
     pub fn extract_event_broadcast_seq(_req: &BackendRequest) -> Result<BroadcastSeq, String> {
+        Ok(BroadcastSeq(0))
+    }
+
+    pub fn extract_runtime_control_op_id(
+        _signal: &RuntimeControlSignal,
+    ) -> Result<ControlOpId, String> {
+        Ok(ControlOpId(0))
+    }
+
+    pub fn extract_runtime_control_payload(
+        _signal: &RuntimeControlSignal,
+    ) -> Result<Payload, String> {
+        Ok(Payload::None)
+    }
+
+    pub fn extract_runtime_control_input<T>(
+        _signal: &RuntimeControlSignal,
+    ) -> Result<Input<T>, String> {
+        Err("unsupported in fixture".to_owned())
+    }
+
+    pub fn extract_peer_control_payload(_cmd: &PeerWorkerCommand) -> Result<Payload, String> {
+        Ok(Payload::None)
+    }
+
+    pub fn extract_peer_control_input<T>(_cmd: &PeerWorkerCommand) -> Result<Input<T>, String> {
+        Err("unsupported in fixture".to_owned())
+    }
+
+    pub fn extract_peer_control_broadcast_seq(
+        _cmd: &PeerWorkerCommand,
+    ) -> Result<BroadcastSeq, String> {
         Ok(BroadcastSeq(0))
     }
 
@@ -261,6 +296,6 @@ pub mod backend {
 }
 
 use crate::backend::{
-    BackendRequest, BroadcastSeq, CancelRx, Input, Json, Options, Payload, PeerWorkerCommand,
-    RuntimeControlSignal, Typed,
+    BackendRequest, BroadcastSeq, CancelRx, ControlOpId, Input, Json, Options, Payload,
+    PeerWorkerCommand, RuntimeControlSignal, Typed,
 };

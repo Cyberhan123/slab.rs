@@ -20,8 +20,8 @@ use crate::infra::backends::candle::whisper::adapter::CandleWhisperEngine;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
-    BroadcastSeq, DeploymentSnapshot, Input, PeerWorkerCommand, RuntimeControlSignal,
-    SyncMessage, WorkerCommand,
+    BroadcastSeq, ControlOpId, DeploymentSnapshot, Input, PeerWorkerCommand, SyncMessage,
+    WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
 
@@ -65,22 +65,13 @@ impl CandleWhisperWorker {
     // ── Runtime / peer control ────────────────────────────────────────────────
 
     #[on_peer_control(LoadModel)]
-    async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
-        let Some(snapshot) = cmd.deployment() else {
-            return;
-        };
-        let config: CandleWhisperLoadConfig = match snapshot.typed_model_config() {
-            Ok(config) => config,
-            Err(error) => {
-                tracing::warn!(error = %error, "candle.whisper worker: invalid deployment snapshot");
-                return;
-            }
-        };
+    async fn on_peer_load_model(
+        &mut self,
+        config: Input<CandleWhisperLoadConfig>,
+    ) -> Result<(), String> {
+        let config = config.0;
         let model_path = config.model_path;
         let tokenizer_path = config.tokenizer_path;
-        let PeerWorkerCommand::LoadModel { .. } = cmd else {
-            return;
-        };
         if let Some(engine) = self.engine.as_ref()
             && !engine.is_model_loaded()
         {
@@ -96,40 +87,33 @@ impl CandleWhisperWorker {
                 );
             }
         }
+        Ok(())
     }
 
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) {
+    async fn on_peer_unload(&mut self) -> Result<(), String> {
         if let Some(e) = self.engine.as_ref() {
             e.unload();
         }
+        Ok(())
     }
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, signal: RuntimeControlSignal) {
-        match signal {
-            RuntimeControlSignal::GlobalUnload { op_id } => {
-                tracing::debug!(op_id, "candle.whisper runtime global unload");
-                if let Some(e) = self.engine.as_ref() {
-                    e.unload();
-                }
-            }
-            RuntimeControlSignal::GlobalLoad { op_id, payload } => {
-                let _ = payload;
-                tracing::debug!(op_id, "candle.whisper runtime global load pre-cleanup");
-                if let Some(e) = self.engine.as_ref() {
-                    e.unload();
-                }
-            }
-        }
-    }
-
-    #[on_control_lagged]
-    async fn on_control_lagged(&mut self) {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+        tracing::debug!(op_id = op_id.0, "candle.whisper runtime control pre-cleanup");
         if let Some(e) = self.engine.as_ref() {
             e.unload();
         }
+        Ok(())
+    }
+
+    #[on_control_lagged]
+    async fn on_control_lagged(&mut self) -> Result<(), String> {
+        if let Some(e) = self.engine.as_ref() {
+            e.unload();
+        }
+        Ok(())
     }
 
     // ── Handler helpers ───────────────────────────────────────────────────────
@@ -228,9 +212,7 @@ mod tests {
     use super::CandleWhisperWorker;
     use crate::domain::models::CandleWhisperLoadConfig;
     use slab_runtime_core::Payload;
-    use slab_runtime_core::backend::DeploymentSnapshot;
-    use slab_runtime_core::backend::RuntimeControlSignal;
-    use slab_runtime_core::backend::WorkerCommand;
+    use slab_runtime_core::backend::{ControlOpId, DeploymentSnapshot, WorkerCommand};
     use tokio::sync::broadcast;
 
     fn make_worker() -> CandleWhisperWorker {
@@ -259,7 +241,7 @@ mod tests {
     #[tokio::test]
     async fn global_unload_is_safe_without_engine() {
         let mut worker = make_worker();
-        worker.apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 }).await;
+        worker.apply_runtime_control(ControlOpId(1)).await.expect("control cleanup should succeed");
         // No panic – test passes.
     }
 }

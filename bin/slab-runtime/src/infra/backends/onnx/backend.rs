@@ -48,8 +48,8 @@ use crate::infra::backends::onnx::adapter::OnnxEngine;
 use crate::infra::backends::onnx::config::OnnxInferenceInput;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
-    BroadcastSeq, DeploymentSnapshot, Input, PeerWorkerCommand, RuntimeControlSignal,
-    SyncMessage, WorkerCommand,
+    BroadcastSeq, ControlOpId, DeploymentSnapshot, Input, PeerWorkerCommand, SyncMessage,
+    WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
 
@@ -204,24 +204,15 @@ impl OnnxWorker {
     /// replaced.  If it already has the **same** model loaded, the call is a
     /// no-op to avoid unnecessary session teardown.
     #[on_peer_control(LoadModel)]
-    async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
-        let Some(snapshot) = cmd.deployment() else {
-            return;
-        };
-        let config: OnnxLoadConfig = match snapshot.typed_model_config() {
-            Ok(config) => config,
-            Err(error) => {
-                warn!(error = %error, "ONNX worker: invalid deployment snapshot");
-                return;
-            }
-        };
+    async fn on_peer_load_model(&mut self, config: Input<OnnxLoadConfig>) -> Result<(), String> {
+        let config = config.0;
         let model_path = config.model_path.clone();
 
         // Short-circuit: same model already loaded.
         if let Some(cfg) = &self.current_config
             && cfg.model_path == model_path
         {
-            return;
+            return Ok(());
         }
 
         self.engine.unload();
@@ -239,40 +230,34 @@ impl OnnxWorker {
                 );
             }
         }
+        Ok(())
     }
 
     /// When another worker unloads the model, drop the session in this worker.
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) {
+    async fn on_peer_unload(&mut self) -> Result<(), String> {
         self.engine.unload();
         self.current_config = None;
+        Ok(())
     }
 
     // ── global runtime control ────────────────────────────────────────────────
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, signal: RuntimeControlSignal) {
-        match signal {
-            RuntimeControlSignal::GlobalUnload { op_id } => {
-                tracing::debug!(op_id, "ONNX runtime global unload");
-                self.engine.unload();
-                self.current_config = None;
-            }
-            RuntimeControlSignal::GlobalLoad { op_id, payload } => {
-                let _ = payload;
-                tracing::debug!(op_id, "ONNX runtime global load pre-cleanup");
-                self.engine.unload();
-                self.current_config = None;
-            }
-        }
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+        tracing::debug!(op_id = op_id.0, "ONNX runtime control pre-cleanup");
+        self.engine.unload();
+        self.current_config = None;
+        Ok(())
     }
 
     /// Conservative unload when broadcast channel lags – avoid running stale
     /// inference on a model that peers may have already replaced.
     #[on_control_lagged]
-    async fn on_control_lagged(&mut self) {
+    async fn on_control_lagged(&mut self) -> Result<(), String> {
         self.engine.unload();
         self.current_config = None;
+        Ok(())
     }
 }
