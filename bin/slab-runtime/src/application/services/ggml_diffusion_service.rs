@@ -1,6 +1,5 @@
-use slab_runtime_core::CoreError;
-
 use crate::application::dtos as dto;
+use crate::domain::runtime::CoreError;
 use crate::domain::services::{ExecutionHub, GgmlDiffusionService as DomainGgmlDiffusionService};
 
 use super::{

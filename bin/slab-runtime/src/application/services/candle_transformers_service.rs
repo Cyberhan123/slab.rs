@@ -1,7 +1,7 @@
 use futures::stream::BoxStream;
-use slab_runtime_core::CoreError;
 
 use crate::application::dtos as dto;
+use crate::domain::runtime::CoreError;
 use crate::domain::services::{
     CandleLlamaService as DomainCandleLlamaService,
     CandleWhisperService as DomainCandleWhisperService, ExecutionHub,
@@ -60,7 +60,7 @@ impl CandleTransformersService {
         &self,
         request: dto::CandleChatRequest,
     ) -> Result<
-        BoxStream<'static, Result<dto::LlamaChatStreamChunk, slab_runtime_core::CoreError>>,
+        BoxStream<'static, Result<dto::LlamaChatStreamChunk, CoreError>>,
         RuntimeApplicationError,
     > {
         clone_loaded(&self.llama).await?.chat_stream(request).await.map_err(Into::into)

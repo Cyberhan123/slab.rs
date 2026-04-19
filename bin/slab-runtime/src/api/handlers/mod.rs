@@ -7,13 +7,13 @@
 //! request/response construction belong to the server/app-core boundary above
 //! runtime.
 
-use slab_runtime_core::CoreError;
 use tonic::Status;
 
 use crate::application::{
     dtos as dto,
     services::{RuntimeApplication, RuntimeApplicationError},
 };
+use crate::domain::runtime::CoreError;
 
 mod candle_diffusion;
 mod candle_transformers;
@@ -102,24 +102,23 @@ pub(super) fn extract_request_id(metadata: &tonic::metadata::MetadataMap) -> Str
 #[cfg(test)]
 mod tests {
     use super::runtime_to_status;
+    use crate::domain::runtime::CoreError;
     use tonic::Code;
 
     #[test]
     fn engine_errors_map_to_internal_status() {
-        let engine_io =
-            runtime_to_status(slab_runtime_core::CoreError::EngineIo("disk offline".into()));
+        let engine_io = runtime_to_status(CoreError::EngineIo("disk offline".into()));
         assert_eq!(engine_io.code(), Code::Internal);
         assert!(engine_io.message().contains("engine I/O error"));
 
-        let ggml =
-            runtime_to_status(slab_runtime_core::CoreError::GGMLEngine("session not found".into()));
+        let ggml = runtime_to_status(CoreError::GGMLEngine("session not found".into()));
         assert_eq!(ggml.code(), Code::Internal);
         assert!(ggml.message().contains("GGML engine error"));
     }
 
     #[test]
     fn cancelled_error_maps_to_cancelled_status() {
-        let status = runtime_to_status(slab_runtime_core::CoreError::Cancelled);
+        let status = runtime_to_status(CoreError::Cancelled);
         assert_eq!(status.code(), Code::Cancelled);
         assert!(status.message().contains("task cancelled"));
     }

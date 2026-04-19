@@ -1,8 +1,7 @@
 use std::sync::Arc;
 
-use slab_runtime_core::scheduler::Orchestrator;
-
 use crate::domain::models::BackendCatalog;
+use crate::domain::runtime::Orchestrator;
 
 #[derive(Clone)]
 pub struct ExecutionHub {

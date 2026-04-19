@@ -1,7 +1,8 @@
-use slab_runtime_core::{CoreError, Payload};
+use slab_runtime_core::Payload;
 use slab_types::{Capability, ModelFamily, OnnxLoadConfig};
 
 use crate::application::dtos as dto;
+use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;

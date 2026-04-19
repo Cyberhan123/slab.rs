@@ -274,3 +274,64 @@ impl Default for ResourceManager {
         Self::new()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{ResourceManager, ResourceManagerConfig};
+    use crate::base::error::CoreError;
+
+    #[tokio::test]
+    async fn inference_lease_waits_for_available_capacity() {
+        let mut manager = ResourceManager::with_config(ResourceManagerConfig {
+            backend_capacity: 1,
+            ..ResourceManagerConfig::default()
+        });
+        manager.register_backend("serial-backend", |_shared_rx, _control_tx| {});
+
+        let lease = manager
+            .acquire_inference_lease("serial-backend", std::time::Duration::from_secs(1))
+            .await
+            .expect("first lease should succeed");
+
+        let clone = manager.clone();
+        let waiter = tokio::spawn(async move {
+            clone
+                .acquire_inference_lease("serial-backend", std::time::Duration::from_secs(1))
+                .await
+        });
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        drop(lease);
+
+        let second = waiter
+            .await
+            .expect("waiter task should not panic")
+            .expect("second lease should succeed after the first is released");
+        drop(second);
+    }
+
+    #[tokio::test]
+    async fn unknown_backend_returns_driver_not_registered() {
+        let manager = ResourceManager::new();
+        let err = manager
+            .acquire_inference_lease("missing-backend", std::time::Duration::from_millis(10))
+            .await
+            .expect_err("missing backend should fail");
+
+        assert!(matches!(err, CoreError::DriverNotRegistered { .. }));
+    }
+
+    #[tokio::test]
+    async fn inconsistent_global_state_blocks_inference() {
+        let mut manager = ResourceManager::new();
+        manager.register_backend("gate-backend", |_shared_rx, _control_tx| {});
+
+        manager.mark_global_inconsistent(42).await;
+        let err = manager
+            .acquire_inference_lease("gate-backend", std::time::Duration::from_millis(10))
+            .await
+            .expect_err("inference should be blocked while inconsistent");
+
+        assert!(matches!(err, CoreError::GlobalStateInconsistent { op_id: 42 }));
+    }
+}

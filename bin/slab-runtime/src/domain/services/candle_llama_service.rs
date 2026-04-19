@@ -1,11 +1,12 @@
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use slab_runtime_core::{CoreError, Payload};
+use slab_runtime_core::Payload;
 use slab_types::{CandleLlamaLoadConfig, Capability, ModelFamily, TextGenerationOpOptions};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::application::dtos as dto;
+use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
