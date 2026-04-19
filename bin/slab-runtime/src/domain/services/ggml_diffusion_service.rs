@@ -5,10 +5,11 @@ use slab_diffusion::{
     ImgParams as DiffusionImgParams, SampleMethod as DiffusionSampleMethod,
     SampleParams as DiffusionSampleParams, Scheduler as DiffusionScheduler, SlgParams,
 };
-use slab_runtime_core::{CoreError, Payload};
+use slab_runtime_core::Payload;
 use slab_types::{Capability, ModelFamily};
 
 use crate::application::dtos as dto;
+use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;

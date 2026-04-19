@@ -7,12 +7,12 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use slab_runtime_core::backend::{ResourceManager, ResourceManagerConfig};
-use slab_runtime_core::scheduler::Orchestrator;
 use tracing::info;
 
 use crate::api::handlers::GrpcServiceImpl;
 use crate::application::services::RuntimeApplication;
 use crate::domain::models::BackendCatalog;
+use crate::domain::runtime::Orchestrator;
 use crate::domain::services::ExecutionHub;
 use crate::infra::backends;
 use crate::infra::config::RuntimeConfig;

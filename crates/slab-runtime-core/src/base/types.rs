@@ -2,15 +2,10 @@ use std::any::Any;
 use std::fmt;
 use std::sync::Arc;
 
-use crate::base::error::CoreError;
-
-/// Unique identifier for a submitted pipeline task.
-pub type TaskId = u64;
-
 /// Stage-to-stage data transfer type.
 ///
 /// All variants use `Arc` or value types so that moving a `Payload` between
-/// stages never copies large buffers.
+/// backend-adjacent stages never copies large buffers.
 #[derive(Clone, Default)]
 pub enum Payload {
     #[default]
@@ -21,7 +16,7 @@ pub enum Payload {
     F32(Arc<[f32]>),
     /// UTF-8 text.
     Text(Arc<str>),
-    /// Structured JSON metadata.  Not zero-copy but allowed for small objects.
+    /// Structured JSON metadata. Not zero-copy but allowed for small objects.
     Json(serde_json::Value),
     /// Type-erased in-process payload for typed internal handoff.
     Typed(TypedPayload),
@@ -246,63 +241,10 @@ mod tests {
     }
 }
 
-/// High-level lifecycle state of a task managed by the [`Orchestrator`].
-///
-/// [`Orchestrator`]: crate::internal::scheduler::orchestrator::Orchestrator
-#[derive(Debug, Clone)]
-pub enum TaskStatus {
-    /// Task has been accepted but not yet started.
-    Pending,
-    /// Task is actively executing the named stage.
-    Running { stage_index: usize, stage_name: String },
-    /// Task completed successfully; result is available.
-    Succeeded { result: Payload },
-    /// Task completed successfully and its result payload has been consumed
-    /// by a caller via [`Orchestrator::get_result`].  The task is still
-    /// in a terminal (succeeded) state but the inline payload is gone.
-    ResultConsumed,
-    /// Task completed with a streaming terminal stage; handle is available.
-    SucceededStreaming,
-    /// Task failed with an error.
-    Failed { error: CoreError },
-    /// Task was cancelled before completing.
-    Cancelled,
-}
-
-impl TaskStatus {
-    /// Returns `true` if the task has reached a terminal state (success,
-    /// streaming-success, result-consumed, failure, or cancellation).
-    ///
-    /// Callers that poll status until the task is done should use this method
-    /// rather than matching individual variants so that new terminal states
-    /// (e.g. [`TaskStatus::ResultConsumed`]) are handled automatically.
-    pub fn is_terminal(&self) -> bool {
-        matches!(
-            self,
-            TaskStatus::Succeeded { .. }
-                | TaskStatus::ResultConsumed
-                | TaskStatus::SucceededStreaming
-                | TaskStatus::Failed { .. }
-                | TaskStatus::Cancelled
-        )
-    }
-}
-
-/// Fine-grained execution status of a single pipeline stage.
-#[derive(Debug, Clone)]
-pub enum StageStatus {
-    Pending,
-    Running,
-    Completed,
-    Failed,
-    Cancelled,
-}
-
 /// A single chunk emitted by a streaming backend.
 ///
-/// Defined here in `base` so that the `ports` interface layer and the
-/// scheduler layer can both reference it without a scheduler→ports or
-/// ports→scheduler dependency.
+/// Defined here in `base` so backend protocol and worker implementations can
+/// share stream chunks without depending on higher-level runtime layers.
 #[derive(Debug, Clone)]
 pub enum StreamChunk {
     /// A piece of generated output (e.g. a token string).
@@ -315,12 +257,12 @@ pub enum StreamChunk {
     Json(serde_json::Value),
     /// A generated image (placeholder for now).
     #[allow(dead_code)]
-    Image(bytes::Bytes), //TODO: A generated image.
+    Image(bytes::Bytes),
 }
 
 /// A handle to a streaming inference response.
 ///
 /// The receiver yields [`StreamChunk`] items as they are produced by the
-/// backend worker.  The stream ends with [`StreamChunk::Done`] or
+/// backend worker. The stream ends with [`StreamChunk::Done`] or
 /// [`StreamChunk::Error`].
 pub type StreamHandle = tokio::sync::mpsc::Receiver<StreamChunk>;

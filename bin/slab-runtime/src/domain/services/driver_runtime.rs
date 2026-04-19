@@ -1,14 +1,13 @@
 use std::sync::Arc;
 
+use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{BackendOp, StreamChunk};
-use slab_runtime_core::scheduler::CpuStage;
-use slab_runtime_core::scheduler::PipelineBuilder;
-use slab_runtime_core::{CoreError, Payload};
 use slab_types::{Capability, ModelSpec};
 use tokio::sync::Mutex;
 
 use super::ExecutionHub;
 use crate::domain::models::{InvocationPlan, ResolvedBackend, TaskCodec, TaskHandle};
+use crate::domain::runtime::{CoreError, CpuStage, PipelineBuilder};
 
 #[derive(Clone, Debug)]
 pub(crate) struct DriverRuntime {

@@ -6,12 +6,12 @@ use bytemuck::cast_slice;
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
 use serde_json::{Map, Value, json};
 use slab_diffusion::Image as DiffusionImage;
+use slab_runtime_core::Payload;
 use slab_runtime_core::backend::StreamChunk;
-use slab_runtime_core::scheduler::CpuStage;
-use slab_runtime_core::{CoreError, Payload};
 use slab_types::{Capability, ModelFamily, ModelSource, ModelSpec};
 
 use crate::application::dtos as dto;
+use crate::domain::runtime::{CoreError, CpuStage};
 
 pub(crate) fn invalid_model(field: &'static str, message: impl Into<String>) -> CoreError {
     CoreError::InvalidModelSpec { message: format!("{field}: {}", message.into()) }

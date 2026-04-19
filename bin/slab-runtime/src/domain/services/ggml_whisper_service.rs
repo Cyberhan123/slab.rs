@@ -1,4 +1,4 @@
-use slab_runtime_core::{CoreError, Payload};
+use slab_runtime_core::Payload;
 use slab_types::{Capability, ModelFamily};
 use slab_whisper::{
     ContextParams as WhisperContextParams, FullParams as WhisperFullParams,
@@ -6,6 +6,7 @@ use slab_whisper::{
 };
 
 use crate::application::dtos as dto;
+use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;

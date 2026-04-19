@@ -3,12 +3,14 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
+use slab_runtime_core::Payload;
 use slab_runtime_core::backend::StreamChunk;
-use slab_runtime_core::scheduler::{
-    DEFAULT_WAIT_TIMEOUT, Orchestrator, STREAM_INIT_TIMEOUT, TaskId, TaskStatus, TaskStatusView,
-};
-use slab_runtime_core::{CoreError, Payload};
 use slab_types::Capability;
+
+use crate::domain::runtime::{
+    CoreError, DEFAULT_WAIT_TIMEOUT, Orchestrator, STREAM_INIT_TIMEOUT, TaskId, TaskStatus,
+    TaskStatusView,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TaskState {

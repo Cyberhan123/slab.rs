@@ -1,7 +1,7 @@
 use futures::stream::BoxStream;
-use slab_runtime_core::CoreError;
 
 use crate::application::dtos as dto;
+use crate::domain::runtime::CoreError;
 use crate::domain::services::{ExecutionHub, GgmlLlamaService as DomainGgmlLlamaService};
 
 use super::{
@@ -54,7 +54,7 @@ impl GgmlLlamaService {
         &self,
         request: dto::GgmlLlamaChatRequest,
     ) -> Result<
-        BoxStream<'static, Result<dto::LlamaChatStreamChunk, slab_runtime_core::CoreError>>,
+        BoxStream<'static, Result<dto::LlamaChatStreamChunk, CoreError>>,
         RuntimeApplicationError,
     > {
         clone_loaded(&self.loaded).await?.chat_stream(request).await.map_err(Into::into)

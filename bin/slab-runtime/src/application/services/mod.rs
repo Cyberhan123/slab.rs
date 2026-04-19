@@ -8,10 +8,10 @@ mod runtime_service;
 
 use std::sync::Arc;
 
-use slab_runtime_core::CoreError;
 use tokio::sync::RwLock;
 
 use crate::application::dtos as dto;
+use crate::domain::runtime::CoreError;
 
 pub(crate) use candle_diffusion_service::CandleDiffusionService;
 pub(crate) use candle_transformers_service::CandleTransformersService;

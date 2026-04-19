@@ -1,10 +1,10 @@
-use slab_runtime_core::scheduler::CpuStage;
-use slab_runtime_core::{CoreError, Payload};
+use slab_runtime_core::Payload;
 use slab_types::{
     Capability, DriverDescriptor, DriverLoadStyle, ModelFamily, ModelSource, ModelSourceKind,
     ModelSpec,
 };
 
+use crate::domain::runtime::{CoreError, CpuStage};
 #[derive(Debug, Clone)]
 pub(crate) struct ResolvedBackend {
     pub driver_id: String,

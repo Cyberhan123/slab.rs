@@ -9,7 +9,6 @@ categories.workspace = true
 license.workspace = true
 
 [dependencies]
-slab-types = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 serde_json = { workspace = true }
