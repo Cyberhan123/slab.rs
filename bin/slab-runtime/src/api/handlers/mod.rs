@@ -53,7 +53,9 @@ fn format_error_chain(err: &dyn std::error::Error) -> String {
 pub(super) fn runtime_to_status(err: CoreError) -> Status {
     let msg = format_error_chain(&err);
     match err {
-        CoreError::NotInitialized | CoreError::ModelNotLoaded => Status::failed_precondition(msg),
+        CoreError::NotInitialized
+        | CoreError::ModelNotLoaded
+        | CoreError::BackendDisabled { .. } => Status::failed_precondition(msg),
         CoreError::QueueFull { .. }
         | CoreError::OrchestratorQueueFull { .. }
         | CoreError::Busy { .. } => Status::resource_exhausted(msg),
@@ -120,5 +122,14 @@ mod tests {
         let status = runtime_to_status(CoreError::Cancelled);
         assert_eq!(status.code(), Code::Cancelled);
         assert!(status.message().contains("task cancelled"));
+    }
+
+    #[test]
+    fn disabled_backend_maps_to_failed_precondition_status() {
+        let status = runtime_to_status(CoreError::BackendDisabled {
+            backend: "ggml.llama".into(),
+        });
+        assert_eq!(status.code(), Code::FailedPrecondition);
+        assert!(status.message().contains("disabled"));
     }
 }

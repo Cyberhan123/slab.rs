@@ -18,8 +18,13 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
 
         let dto = dto::decode_onnx_text_request(&request.into_inner()).map_err(proto_to_status)?;
-        let response =
-            self.application.onnx().run_text(dto).await.map_err(application_to_status)?;
+        let response = self
+            .application
+            .onnx_text()
+            .map_err(application_to_status)?
+            .run_text(dto)
+            .await
+            .map_err(application_to_status)?;
         Ok(Response::new(dto::encode_onnx_text_response(&response)))
     }
 
@@ -33,8 +38,13 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
 
         let dto =
             dto::decode_onnx_embedding_request(&request.into_inner()).map_err(proto_to_status)?;
-        let response =
-            self.application.onnx().run_embedding(dto).await.map_err(application_to_status)?;
+        let response = self
+            .application
+            .onnx_embedding()
+            .map_err(application_to_status)?
+            .run_embedding(dto)
+            .await
+            .map_err(application_to_status)?;
         Ok(Response::new(dto::encode_onnx_embedding_response(&response)))
     }
 
@@ -48,8 +58,13 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
 
         let dto =
             dto::decode_onnx_text_load_request(&request.into_inner()).map_err(proto_to_status)?;
-        let status =
-            self.application.onnx().load_text_model(dto).await.map_err(application_to_status)?;
+        let status = self
+            .application
+            .onnx_text()
+            .map_err(application_to_status)?
+            .load_text_model(dto)
+            .await
+            .map_err(application_to_status)?;
         Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
@@ -62,8 +77,13 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
         let _ = request.into_inner();
 
-        let status =
-            self.application.onnx().unload_text_model().await.map_err(application_to_status)?;
+        let status = self
+            .application
+            .onnx_text()
+            .map_err(application_to_status)?
+            .unload_text_model()
+            .await
+            .map_err(application_to_status)?;
         Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
@@ -79,7 +99,8 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
             .map_err(proto_to_status)?;
         let status = self
             .application
-            .onnx()
+            .onnx_embedding()
+            .map_err(application_to_status)?
             .load_embedding_model(dto)
             .await
             .map_err(application_to_status)?;
@@ -97,7 +118,8 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
 
         let status = self
             .application
-            .onnx()
+            .onnx_embedding()
+            .map_err(application_to_status)?
             .unload_embedding_model()
             .await
             .map_err(application_to_status)?;

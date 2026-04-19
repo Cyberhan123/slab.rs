@@ -19,8 +19,13 @@ impl pb::ggml_whisper_service_server::GgmlWhisperService for GrpcServiceImpl {
 
         let dto = dto::decode_ggml_whisper_transcribe_request(&request.into_inner())
             .map_err(proto_to_status)?;
-        let response =
-            self.application.ggml_whisper().transcribe(dto).await.map_err(application_to_status)?;
+        let response = self
+            .application
+            .ggml_whisper()
+            .map_err(application_to_status)?
+            .transcribe(dto)
+            .await
+            .map_err(application_to_status)?;
         Ok(Response::new(dto::encode_ggml_whisper_transcribe_response(&response)))
     }
 
@@ -34,8 +39,13 @@ impl pb::ggml_whisper_service_server::GgmlWhisperService for GrpcServiceImpl {
 
         let dto = dto::decode_ggml_whisper_load_request(&request.into_inner())
             .map_err(proto_to_status)?;
-        let status =
-            self.application.ggml_whisper().load_model(dto).await.map_err(application_to_status)?;
+        let status = self
+            .application
+            .ggml_whisper()
+            .map_err(application_to_status)?
+            .load_model(dto)
+            .await
+            .map_err(application_to_status)?;
         Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
@@ -48,8 +58,13 @@ impl pb::ggml_whisper_service_server::GgmlWhisperService for GrpcServiceImpl {
         tracing::Span::current().record("request_id", &request_id);
         let _ = request.into_inner();
 
-        let status =
-            self.application.ggml_whisper().unload_model().await.map_err(application_to_status)?;
+        let status = self
+            .application
+            .ggml_whisper()
+            .map_err(application_to_status)?
+            .unload_model()
+            .await
+            .map_err(application_to_status)?;
         Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 }

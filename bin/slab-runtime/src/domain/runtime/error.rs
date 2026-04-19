@@ -61,6 +61,9 @@ pub enum RuntimeError {
     #[error("driver not registered: {driver_id}")]
     DriverNotRegistered { driver_id: String },
 
+    #[error("backend '{backend}' is disabled in this runtime process")]
+    BackendDisabled { backend: String },
+
     #[error("deployment failed for driver '{driver_id}': {message}")]
     DeploymentFailed { driver_id: String, message: String },
 

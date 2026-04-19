@@ -26,7 +26,8 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
             dto::decode_candle_chat_request(&request.into_inner()).map_err(proto_to_status)?;
         let response = self
             .application
-            .candle_transformers()
+            .candle_llama()
+            .map_err(application_to_status)?
             .chat(dto)
             .await
             .map_err(application_to_status)?;
@@ -47,7 +48,8 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
             dto::decode_candle_chat_request(&request.into_inner()).map_err(proto_to_status)?;
         let stream = self
             .application
-            .candle_transformers()
+            .candle_llama()
+            .map_err(application_to_status)?
             .chat_stream(dto)
             .await
             .map_err(application_to_status)?;
@@ -85,7 +87,8 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
             .map_err(proto_to_status)?;
         let response = self
             .application
-            .candle_transformers()
+            .candle_whisper()
+            .map_err(application_to_status)?
             .transcribe(dto)
             .await
             .map_err(application_to_status)?;
@@ -104,7 +107,8 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
             .map_err(proto_to_status)?;
         let status = self
             .application
-            .candle_transformers()
+            .candle_llama()
+            .map_err(application_to_status)?
             .load_llama_model(dto)
             .await
             .map_err(application_to_status)?;
@@ -122,7 +126,8 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
 
         let status = self
             .application
-            .candle_transformers()
+            .candle_llama()
+            .map_err(application_to_status)?
             .unload_llama_model()
             .await
             .map_err(application_to_status)?;
@@ -141,7 +146,8 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
             .map_err(proto_to_status)?;
         let status = self
             .application
-            .candle_transformers()
+            .candle_whisper()
+            .map_err(application_to_status)?
             .load_whisper_model(dto)
             .await
             .map_err(application_to_status)?;
@@ -159,7 +165,8 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
 
         let status = self
             .application
-            .candle_transformers()
+            .candle_whisper()
+            .map_err(application_to_status)?
             .unload_whisper_model()
             .await
             .map_err(application_to_status)?;

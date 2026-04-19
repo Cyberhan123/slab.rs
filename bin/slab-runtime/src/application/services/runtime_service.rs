@@ -1,13 +1,48 @@
+use slab_types::DriverDescriptor;
+
+use crate::domain::runtime::CoreError;
 use crate::domain::services::ExecutionHub;
-use crate::infra::config::EnabledBackends;
 
 use super::{
     CandleDiffusionService, CandleTransformersService, GgmlDiffusionService, GgmlLlamaService,
-    GgmlWhisperService, OnnxService,
+    GgmlWhisperService, OnnxService, RuntimeApplicationError,
 };
+
+#[derive(Clone, Copy, Debug, Default)]
+struct RuntimeServiceAvailability {
+    ggml_llama: bool,
+    ggml_whisper: bool,
+    ggml_diffusion: bool,
+    candle_llama: bool,
+    candle_whisper: bool,
+    candle_diffusion: bool,
+    onnx_text: bool,
+    onnx_embedding: bool,
+}
+
+impl RuntimeServiceAvailability {
+    fn from_descriptors(descriptors: &[DriverDescriptor]) -> Self {
+        let mut availability = Self::default();
+        for descriptor in descriptors {
+            match descriptor.driver_id.as_str() {
+                "ggml.llama" => availability.ggml_llama = true,
+                "ggml.whisper" => availability.ggml_whisper = true,
+                "ggml.diffusion" => availability.ggml_diffusion = true,
+                "candle.llama" => availability.candle_llama = true,
+                "candle.whisper" => availability.candle_whisper = true,
+                "candle.diffusion" => availability.candle_diffusion = true,
+                "onnx.text" => availability.onnx_text = true,
+                "onnx.embedding" => availability.onnx_embedding = true,
+                _ => {}
+            }
+        }
+        availability
+    }
+}
 
 #[derive(Clone)]
 pub struct RuntimeApplication {
+    availability: RuntimeServiceAvailability,
     ggml_llama: GgmlLlamaService,
     ggml_whisper: GgmlWhisperService,
     ggml_diffusion: GgmlDiffusionService,
@@ -17,8 +52,10 @@ pub struct RuntimeApplication {
 }
 
 impl RuntimeApplication {
-    pub fn new(execution: ExecutionHub, _enabled_backends: EnabledBackends) -> Self {
+    pub fn new(execution: ExecutionHub) -> Self {
+        let availability = RuntimeServiceAvailability::from_descriptors(execution.catalog().descriptors());
         Self {
+            availability,
             ggml_llama: GgmlLlamaService::new(execution.clone()),
             ggml_whisper: GgmlWhisperService::new(execution.clone()),
             ggml_diffusion: GgmlDiffusionService::new(execution.clone()),
@@ -28,27 +65,63 @@ impl RuntimeApplication {
         }
     }
 
-    pub(crate) fn ggml_llama(&self) -> &GgmlLlamaService {
-        &self.ggml_llama
+    fn require_backend(
+        &self,
+        enabled: bool,
+        backend: &'static str,
+    ) -> Result<(), RuntimeApplicationError> {
+        if enabled {
+            return Ok(());
+        }
+
+        Err(RuntimeApplicationError::Runtime(CoreError::BackendDisabled {
+            backend: backend.to_owned(),
+        }))
     }
 
-    pub(crate) fn ggml_whisper(&self) -> &GgmlWhisperService {
-        &self.ggml_whisper
+    pub(crate) fn ggml_llama(&self) -> Result<&GgmlLlamaService, RuntimeApplicationError> {
+        self.require_backend(self.availability.ggml_llama, "ggml.llama")?;
+        Ok(&self.ggml_llama)
     }
 
-    pub(crate) fn ggml_diffusion(&self) -> &GgmlDiffusionService {
-        &self.ggml_diffusion
+    pub(crate) fn ggml_whisper(&self) -> Result<&GgmlWhisperService, RuntimeApplicationError> {
+        self.require_backend(self.availability.ggml_whisper, "ggml.whisper")?;
+        Ok(&self.ggml_whisper)
     }
 
-    pub(crate) fn candle_transformers(&self) -> &CandleTransformersService {
-        &self.candle_transformers
+    pub(crate) fn ggml_diffusion(&self) -> Result<&GgmlDiffusionService, RuntimeApplicationError> {
+        self.require_backend(self.availability.ggml_diffusion, "ggml.diffusion")?;
+        Ok(&self.ggml_diffusion)
     }
 
-    pub(crate) fn candle_diffusion(&self) -> &CandleDiffusionService {
-        &self.candle_diffusion
+    pub(crate) fn candle_llama(
+        &self,
+    ) -> Result<&CandleTransformersService, RuntimeApplicationError> {
+        self.require_backend(self.availability.candle_llama, "candle.llama")?;
+        Ok(&self.candle_transformers)
     }
 
-    pub(crate) fn onnx(&self) -> &OnnxService {
-        &self.onnx
+    pub(crate) fn candle_whisper(
+        &self,
+    ) -> Result<&CandleTransformersService, RuntimeApplicationError> {
+        self.require_backend(self.availability.candle_whisper, "candle.whisper")?;
+        Ok(&self.candle_transformers)
+    }
+
+    pub(crate) fn candle_diffusion(
+        &self,
+    ) -> Result<&CandleDiffusionService, RuntimeApplicationError> {
+        self.require_backend(self.availability.candle_diffusion, "candle.diffusion")?;
+        Ok(&self.candle_diffusion)
+    }
+
+    pub(crate) fn onnx_text(&self) -> Result<&OnnxService, RuntimeApplicationError> {
+        self.require_backend(self.availability.onnx_text, "onnx.text")?;
+        Ok(&self.onnx)
+    }
+
+    pub(crate) fn onnx_embedding(&self) -> Result<&OnnxService, RuntimeApplicationError> {
+        self.require_backend(self.availability.onnx_embedding, "onnx.embedding")?;
+        Ok(&self.onnx)
     }
 }

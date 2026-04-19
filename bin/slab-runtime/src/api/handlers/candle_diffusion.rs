@@ -22,6 +22,7 @@ impl pb::candle_diffusion_service_server::CandleDiffusionService for GrpcService
         let response = self
             .application
             .candle_diffusion()
+            .map_err(application_to_status)?
             .generate_image(dto)
             .await
             .map_err(application_to_status)?;
@@ -41,6 +42,7 @@ impl pb::candle_diffusion_service_server::CandleDiffusionService for GrpcService
         let status = self
             .application
             .candle_diffusion()
+            .map_err(application_to_status)?
             .load_model(dto)
             .await
             .map_err(application_to_status)?;
@@ -59,6 +61,7 @@ impl pb::candle_diffusion_service_server::CandleDiffusionService for GrpcService
         let status = self
             .application
             .candle_diffusion()
+            .map_err(application_to_status)?
             .unload_model()
             .await
             .map_err(application_to_status)?;
