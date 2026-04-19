@@ -52,59 +52,54 @@ pub mod backend {
         pub handle: PeerDispatchFn<T>,
     }
 
+    #[derive(Clone, Copy)]
+    pub struct WorkerRouteTable<T: 'static> {
+        pub request_routes: &'static [RequestRouteMatcher<T>],
+        pub runtime_control_routes: &'static [RuntimeRoute<T>],
+        pub peer_control_routes: &'static [PeerRoute<T>],
+        pub peer_control_fallback: Option<PeerDispatchFn<T>>,
+        pub control_lagged_route: Option<LaggedDispatchFn<T>>,
+    }
+
+    impl<T: 'static> Default for WorkerRouteTable<T> {
+        fn default() -> Self {
+            Self {
+                request_routes: &[],
+                runtime_control_routes: &[],
+                peer_control_routes: &[],
+                peer_control_fallback: None,
+                control_lagged_route: None,
+            }
+        }
+    }
+
     #[async_trait::async_trait]
     pub trait RuntimeWorkerHandler: Send + 'static {
-        fn request_routes() -> &'static [RequestRouteMatcher<Self>]
+        fn route_table(&self) -> WorkerRouteTable<Self>
         where
             Self: Sized,
         {
-            &[]
-        }
-
-        fn runtime_control_routes() -> &'static [RuntimeRoute<Self>]
-        where
-            Self: Sized,
-        {
-            &[]
-        }
-
-        fn peer_control_routes() -> &'static [PeerRoute<Self>]
-        where
-            Self: Sized,
-        {
-            &[]
-        }
-
-        fn peer_control_fallback() -> Option<PeerDispatchFn<Self>>
-        where
-            Self: Sized,
-        {
-            None
-        }
-
-        fn control_lagged_route() -> Option<LaggedDispatchFn<Self>>
-        where
-            Self: Sized,
-        {
-            None
+            WorkerRouteTable::default()
         }
 
         async fn handle_request(&mut self, req: BackendRequest)
         where
             Self: Sized,
         {
-            dispatch_backend_request(self, req, Self::request_routes()).await;
+            let route_table = self.route_table();
+            dispatch_backend_request(self, req, route_table.request_routes).await;
         }
 
         async fn handle_peer_control(&mut self, cmd: PeerWorkerCommand)
         where
             Self: Sized,
         {
+            let route_table = self.route_table();
             dispatch_peer_control(
                 self,
                 cmd,
-                Self::peer_control_fallback(),
-                Self::peer_control_routes(),
+                route_table.peer_control_fallback,
+                route_table.peer_control_routes,
             )
             .await;
         }
@@ -113,14 +108,16 @@ pub mod backend {
         where
             Self: Sized,
         {
-            dispatch_runtime_control(self, signal, Self::runtime_control_routes()).await;
+            let route_table = self.route_table();
+            dispatch_runtime_control(self, signal, route_table.runtime_control_routes).await;
         }
 
         async fn handle_control_lagged(&mut self)
         where
             Self: Sized,
         {
-            dispatch_control_lagged(self, Self::control_lagged_route()).await;
+            let route_table = self.route_table();
+            dispatch_control_lagged(self, route_table.control_lagged_route).await;
         }
     }
 

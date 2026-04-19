@@ -27,9 +27,5 @@ impl Worker {
 }
 
 fn main() {
-    let _ = Worker::routes();
-    let _ = Worker::runtime_routes();
-    let _ = Worker::peer_routes();
-    let _ = Worker::peer_fallback_route();
-    let _ = Worker::lagged_route();
+    let _ = Worker::route_table();
 }
