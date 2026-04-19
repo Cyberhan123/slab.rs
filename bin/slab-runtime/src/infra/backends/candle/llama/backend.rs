@@ -23,9 +23,8 @@ use tokio::sync::mpsc;
 use crate::domain::models::{CandleLlamaLoadConfig, TextGenerationOpOptions};
 use crate::infra::backends::candle::llama::adapter::CandleLlamaEngine;
 use crate::infra::backends::candle::llama::errors::SessionId;
-use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
-    BackendReply, BackendRequest, RuntimeControlSignal, StreamChunk, WorkerCommand,
+    Input, Options, RuntimeControlSignal, StreamChunk, StreamHandle, WorkerCommand,
 };
 use slab_runtime_core::backend::{SharedIngressRx, spawn_runtime_worker};
 use slab_runtime_macros::backend_handler;
@@ -49,63 +48,37 @@ impl CandleLlamaWorker {
     // ── Event handlers ────────────────────────────────────────────────────────
 
     #[on_event(LoadModel)]
-    async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest { input, reply_tx, .. } = req;
-        self.handle_load_model(input, reply_tx).await;
+    async fn on_load_model(&mut self, config: Input<CandleLlamaLoadConfig>) -> Result<(), String> {
+        self.handle_load_model(config.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, req: BackendRequest) {
-        let BackendRequest { reply_tx, .. } = req;
-        self.handle_unload_model(reply_tx).await;
+    async fn on_unload_model(&mut self) -> Result<(), String> {
+        self.handle_unload_model().await
     }
 
     #[on_event(Inference)]
-    async fn on_inference(&mut self, req: BackendRequest) {
-        let invocation = match req.invocation() {
-            Ok(invocation) => invocation,
-            Err(error) => {
-                let _ = req.reply_tx.send(BackendReply::Error(error));
-                return;
-            }
-        };
-        let BackendRequest { input, reply_tx, .. } = req;
-        let opts: TextGenerationOpOptions = match invocation.options.to_typed() {
-            Ok(options) => options,
-            Err(error) => {
-                let _ = reply_tx
-                    .send(BackendReply::Error(format!("invalid text-generation options: {error}")));
-                return;
-            }
-        };
+    async fn on_inference(
+        &mut self,
+        prompt: String,
+        options: Options<TextGenerationOpOptions>,
+    ) -> Result<String, String> {
         let max_tokens =
-            opts.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
-        let session_key = opts.session_key;
-        self.handle_inference(input, max_tokens, session_key, reply_tx).await;
+            options.0.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
+        let session_key = options.0.session_key;
+        self.handle_inference(prompt, max_tokens, session_key).await
     }
 
     #[on_event(InferenceStream)]
-    async fn on_inference_stream(&mut self, req: BackendRequest) {
-        let invocation = match req.invocation() {
-            Ok(invocation) => invocation,
-            Err(error) => {
-                let _ = req.reply_tx.send(BackendReply::Error(error));
-                return;
-            }
-        };
-        let BackendRequest { input, reply_tx, .. } = req;
-        let opts: TextGenerationOpOptions = match invocation.options.to_typed() {
-            Ok(options) => options,
-            Err(error) => {
-                let _ = reply_tx
-                    .send(BackendReply::Error(format!("invalid text-generation options: {error}")));
-                return;
-            }
-        };
+    async fn on_inference_stream(
+        &mut self,
+        prompt: String,
+        options: Options<TextGenerationOpOptions>,
+    ) -> Result<StreamHandle, String> {
         let max_tokens =
-            opts.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
-        let session_key = opts.session_key;
-        self.handle_inference_stream(input, max_tokens, session_key, reply_tx).await;
+            options.0.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
+        let session_key = options.0.session_key;
+        self.handle_inference_stream(prompt, max_tokens, session_key).await
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -142,18 +115,8 @@ impl CandleLlamaWorker {
 
     async fn handle_load_model(
         &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
-        let config: CandleLlamaLoadConfig = match input.to_typed() {
-            Ok(c) => c,
-            Err(e) => {
-                let _ =
-                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
-                return;
-            }
-        };
-
+        config: CandleLlamaLoadConfig,
+    ) -> Result<(), String> {
         let engine = Arc::new(CandleLlamaEngine::new(config.seed));
 
         let tokenizer_path = config.tokenizer_path;
@@ -170,49 +133,33 @@ impl CandleLlamaWorker {
                 // Clear stale sessions from any previously loaded model.
                 self.sessions.clear();
                 self.engine = Some(engine);
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
+            Err(e) => Err(e.to_string()),
         }
     }
 
-    async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
+    async fn handle_unload_model(&mut self) -> Result<(), String> {
         match self.engine.as_ref() {
             Some(engine) => {
                 let _ = engine.unload();
                 self.engine = None;
                 self.sessions.clear();
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
-            None => {
-                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
-            }
+            None => Err("model not loaded".to_owned()),
         }
     }
 
     async fn handle_inference(
         &mut self,
-        input: Payload,
+        prompt: String,
         max_tokens: usize,
         session_key: Option<String>,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
+    ) -> Result<String, String> {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
-            None => {
-                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
-                return;
-            }
-        };
-
-        let prompt = match input.to_str() {
-            Ok(s) => s.to_owned(),
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("prompt not str: {e}")));
-                return;
-            }
+            None => return Err("model not loaded".to_owned()),
         };
 
         // Resolve or create a session for KV-cache reuse.
@@ -224,11 +171,7 @@ impl CandleLlamaWorker {
                         self.sessions.insert(key.clone(), sid);
                         Some(sid)
                     }
-                    Err(e) => {
-                        let _ = reply_tx
-                            .send(BackendReply::Error(format!("failed to create session: {e}")));
-                        return;
-                    }
+                    Err(e) => return Err(format!("failed to create session: {e}")),
                 },
             }
         } else {
@@ -236,41 +179,26 @@ impl CandleLlamaWorker {
         };
 
         match engine.inference(&prompt, max_tokens, session_id).await {
-            Ok(text) => {
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(text.as_bytes()))));
-            }
+            Ok(text) => Ok(text),
             Err(e) => {
                 // Drop the session on error so the next request starts fresh.
                 if let Some(key) = session_key {
                     self.sessions.remove(&key);
                 }
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+                Err(e.to_string())
             }
         }
     }
 
     async fn handle_inference_stream(
         &mut self,
-        input: Payload,
+        prompt: String,
         max_tokens: usize,
         session_key: Option<String>,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
+    ) -> Result<StreamHandle, String> {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
-            None => {
-                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
-                return;
-            }
-        };
-
-        let prompt = match input.to_str() {
-            Ok(s) => s.to_owned(),
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("prompt not str: {e}")));
-                return;
-            }
+            None => return Err("model not loaded".to_owned()),
         };
 
         // Resolve or create a session for KV-cache reuse.
@@ -282,11 +210,7 @@ impl CandleLlamaWorker {
                         self.sessions.insert(key.clone(), sid);
                         Some(sid)
                     }
-                    Err(e) => {
-                        let _ = reply_tx
-                            .send(BackendReply::Error(format!("failed to create session: {e}")));
-                        return;
-                    }
+                    Err(e) => return Err(format!("failed to create session: {e}")),
                 },
             }
         } else {
@@ -294,7 +218,6 @@ impl CandleLlamaWorker {
         };
 
         let (proto_tx, proto_rx) = mpsc::channel::<StreamChunk>(64);
-        let _ = reply_tx.send(BackendReply::Stream(proto_rx));
 
         tokio::spawn(async move {
             use crate::infra::backends::candle::llama::errors::StreamChunk as CandleChunk;
@@ -332,6 +255,8 @@ impl CandleLlamaWorker {
                 }
             }
         });
+
+        Ok(proto_rx)
     }
 }
 

@@ -13,8 +13,6 @@
 //! ### `model.load` input payload
 //! Uses a typed runtime-owned `CandleWhisperLoadConfig` payload inside `slab-runtime`.
 
-use std::sync::Arc;
-
 use tokio::sync::broadcast;
 
 use crate::domain::models::CandleWhisperLoadConfig;
@@ -22,7 +20,7 @@ use crate::infra::backends::candle::whisper::adapter::CandleWhisperEngine;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
-    BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
+    BroadcastSeq, DeploymentSnapshot, Input, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
@@ -46,23 +44,22 @@ impl CandleWhisperWorker {
     }
 
     #[on_event(LoadModel)]
-    async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest { input, broadcast_seq, reply_tx, .. } = req;
-        let seq_id = broadcast_seq.unwrap_or(0);
-        self.handle_load_model(input, reply_tx, seq_id).await;
+    async fn on_load_model(
+        &mut self,
+        config: Input<CandleWhisperLoadConfig>,
+        seq: BroadcastSeq,
+    ) -> Result<(), String> {
+        self.handle_load_model(config.0, seq.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, req: BackendRequest) {
-        let BackendRequest { broadcast_seq, reply_tx, .. } = req;
-        let seq_id = broadcast_seq.unwrap_or(0);
-        self.handle_unload_model(reply_tx, seq_id).await;
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), String> {
+        self.handle_unload_model(seq.0).await
     }
 
     #[on_event(Inference)]
-    async fn on_inference(&mut self, req: BackendRequest) {
-        let BackendRequest { input, reply_tx, .. } = req;
-        self.handle_inference(input, reply_tx).await;
+    async fn on_inference(&mut self, input: Payload) -> Result<String, String> {
+        self.handle_inference(input).await
     }
 
     // ── Runtime / peer control ────────────────────────────────────────────────
@@ -139,20 +136,10 @@ impl CandleWhisperWorker {
 
     async fn handle_load_model(
         &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+        config: CandleWhisperLoadConfig,
         seq_id: u64,
-    ) {
-        let deployment = DeploymentSnapshot::with_model(seq_id, input.clone());
-        let config: CandleWhisperLoadConfig = match input.to_typed() {
-            Ok(c) => c,
-            Err(e) => {
-                let _ =
-                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
-                return;
-            }
-        };
-
+    ) -> Result<(), String> {
+        let deployment = DeploymentSnapshot::with_model(seq_id, Payload::typed(config.clone()));
         let engine = self.engine.get_or_insert_with(CandleWhisperEngine::new);
         let tokenizer_path = config.tokenizer_path;
         let model_path = config.model_path;
@@ -168,19 +155,13 @@ impl CandleWhisperWorker {
                     sync: SyncMessage::Deployment(deployment),
                     sender_id: self.worker_id,
                 }));
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
+            Err(e) => Err(e.to_string()),
         }
     }
 
-    async fn handle_unload_model(
-        &mut self,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-        seq_id: u64,
-    ) {
+    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), String> {
         match self.engine.as_ref() {
             Some(engine) => {
                 engine.unload();
@@ -188,57 +169,41 @@ impl CandleWhisperWorker {
                     sync: SyncMessage::Generation { generation: seq_id },
                     sender_id: self.worker_id,
                 }));
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
-            None => {
-                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
-            }
+            None => Err("model not loaded".to_owned()),
         }
     }
 
-    async fn handle_inference(
-        &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
+    async fn handle_inference(&mut self, input: Payload) -> Result<String, String> {
         let engine = match self.engine.as_ref() {
             Some(e) => e.clone(),
             None => {
-                let _ = reply_tx.send(BackendReply::Error(
+                return Err(
                     "candle.whisper backend not ready: model not loaded. Call model.load first"
-                        .into(),
-                ));
-                return;
+                        .to_owned(),
+                );
             }
         };
 
         let samples = match input.to_f32_arc() {
             Ok(s) => s,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
+                return Err(format!(
                     "invalid input: expected f32 PCM audio samples, got: {e}"
-                )));
-                return;
+                ));
             }
         };
 
         if samples.is_empty() {
-            let _ =
-                reply_tx.send(BackendReply::Error("invalid input: audio samples are empty".into()));
-            return;
+            return Err("invalid input: audio samples are empty".to_owned());
         }
 
         let result = tokio::task::block_in_place(|| engine.inference(&samples));
 
         match result {
-            Ok(text) => {
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(text.as_bytes()))));
-            }
-            Err(e) => {
-                let _ = reply_tx
-                    .send(BackendReply::Error(format!("candle.whisper inference failed: {e}")));
-            }
+            Ok(text) => Ok(text),
+            Err(e) => Err(format!("candle.whisper inference failed: {e}")),
         }
     }
 }

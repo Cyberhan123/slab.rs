@@ -22,8 +22,8 @@ use crate::infra::backends::candle::diffusion::adapter::{CandleDiffusionEngine, 
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
-    BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
-    SyncMessage, WorkerCommand,
+    BroadcastSeq, DeploymentSnapshot, Input, PeerWorkerCommand, RuntimeControlSignal,
+    SyncMessage, Typed, WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
 
@@ -110,23 +110,25 @@ impl CandleDiffusionWorker {
     }
 
     #[on_event(LoadModel)]
-    async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest { input, broadcast_seq, reply_tx, .. } = req;
-        let seq_id = broadcast_seq.unwrap_or(0);
-        self.handle_load_model(input, reply_tx, seq_id).await;
+    async fn on_load_model(
+        &mut self,
+        config: Input<CandleDiffusionLoadConfig>,
+        seq: BroadcastSeq,
+    ) -> Result<(), String> {
+        self.handle_load_model(config.0, seq.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, req: BackendRequest) {
-        let BackendRequest { broadcast_seq, reply_tx, .. } = req;
-        let seq_id = broadcast_seq.unwrap_or(0);
-        self.handle_unload_model(reply_tx, seq_id).await;
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), String> {
+        self.handle_unload_model(seq.0).await
     }
 
     #[on_event(InferenceImage)]
-    async fn on_inference_image(&mut self, req: BackendRequest) {
-        let BackendRequest { input, reply_tx, .. } = req;
-        self.handle_inference_image(input, reply_tx).await;
+    async fn on_inference_image(
+        &mut self,
+        raw: Input<DiffusionImgParams>,
+    ) -> Result<Typed<Vec<DiffusionImage>>, String> {
+        self.handle_inference_image(raw.0).await
     }
 
     // ── Runtime / peer control ────────────────────────────────────────────────
@@ -204,20 +206,10 @@ impl CandleDiffusionWorker {
 
     async fn handle_load_model(
         &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+        config: CandleDiffusionLoadConfig,
         seq_id: u64,
-    ) {
-        let deployment = DeploymentSnapshot::with_model(seq_id, input.clone());
-        let config: CandleDiffusionLoadConfig = match input.to_typed() {
-            Ok(c) => c,
-            Err(e) => {
-                let _ =
-                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
-                return;
-            }
-        };
-
+    ) -> Result<(), String> {
+        let deployment = DeploymentSnapshot::with_model(seq_id, Payload::typed(config.clone()));
         let engine = self.engine.get_or_insert_with(CandleDiffusionEngine::new).clone();
         let model_path = config.model_path.clone();
         let vae_path = config.vae_path.clone();
@@ -233,19 +225,13 @@ impl CandleDiffusionWorker {
                     sync: SyncMessage::Deployment(deployment),
                     sender_id: self.worker_id,
                 }));
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
+            Err(e) => Err(e.to_string()),
         }
     }
 
-    async fn handle_unload_model(
-        &mut self,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-        seq_id: u64,
-    ) {
+    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), String> {
         match self.engine.as_ref() {
             Some(engine) => {
                 engine.unload();
@@ -253,44 +239,26 @@ impl CandleDiffusionWorker {
                     sync: SyncMessage::Generation { generation: seq_id },
                     sender_id: self.worker_id,
                 }));
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
-            None => {
-                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
-            }
+            None => Err("model not loaded".to_owned()),
         }
     }
 
     async fn handle_inference_image(
         &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
+        raw: DiffusionImgParams,
+    ) -> Result<Typed<Vec<DiffusionImage>>, String> {
         let engine = match self.engine.as_ref() {
             Some(e) => e.clone(),
             None => {
-                let _ = reply_tx.send(BackendReply::Error(
-                    "candle.diffusion backend not ready: model not loaded".into(),
-                ));
-                return;
-            }
-        };
-
-        let raw: DiffusionImgParams = match input.to_typed() {
-            Ok(v) => v,
-            Err(e) => {
-                let _ = reply_tx
-                    .send(BackendReply::Error(format!("invalid inference.image params: {e}")));
-                return;
+                return Err("candle.diffusion backend not ready: model not loaded".to_owned());
             }
         };
 
         let (params, count) = match build_gen_image_params(&raw) {
             Ok(params) => params,
-            Err(error) => {
-                let _ = reply_tx.send(BackendReply::Error(error));
-                return;
-            }
+            Err(error) => return Err(error),
         };
 
         let result = tokio::task::block_in_place(move || {
@@ -307,13 +275,8 @@ impl CandleDiffusionWorker {
         });
 
         match result {
-            Ok(images) => {
-                let _ = reply_tx.send(BackendReply::Value(Payload::typed(images)));
-            }
-            Err(e) => {
-                let _ = reply_tx
-                    .send(BackendReply::Error(format!("candle.diffusion inference failed: {e}")));
-            }
+            Ok(images) => Ok(Typed(images)),
+            Err(e) => Err(format!("candle.diffusion inference failed: {e}")),
         }
     }
 }

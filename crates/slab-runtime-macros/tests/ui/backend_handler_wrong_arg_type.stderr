@@ -1,4 +1,4 @@
-error: event handlers must take BackendRequest as their only non-self argument
+error: unsupported event handler argument type; use BackendRequest, String, Payload, Input<T>, Options<T>, CancelRx, or BroadcastSeq
   --> tests/ui/backend_handler_wrong_arg_type.rs:14:44
    |
 14 |     async fn on_inference(&mut self, _req: RuntimeControlSignal) {}

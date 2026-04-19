@@ -23,14 +23,13 @@ use std::sync::Arc;
 
 use serde_json::json;
 use slab_llama::{LlamaInferenceParams, LlamaLoadConfig};
-use tokio::sync::{broadcast, watch};
+use tokio::sync::broadcast;
 
 use crate::infra::backends::ggml::llama::adapter::{
     GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest,
 };
-use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
-    BackendReply, BackendRequest, RuntimeControlSignal, WorkerCommand,
+    CancelRx, Input, Options, RuntimeControlSignal, StreamHandle, WorkerCommand,
 };
 use slab_runtime_core::backend::{SharedIngressRx, spawn_runtime_worker};
 use slab_runtime_macros::backend_handler;
@@ -88,59 +87,34 @@ impl LlamaWorker {
     }
 
     #[on_event(LoadModel)]
-    async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest { input, reply_tx, .. } = req;
-        self.handle_load_model(input, reply_tx).await;
+    async fn on_load_model(&mut self, config: Input<LlamaLoadConfig>) -> Result<(), String> {
+        self.handle_load_model(config.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, req: BackendRequest) {
-        let BackendRequest { reply_tx, .. } = req;
-        self.handle_unload_model(reply_tx).await;
+    async fn on_unload_model(&mut self) -> Result<(), String> {
+        self.handle_unload_model().await
     }
 
     #[on_event(Inference)]
-    async fn on_inference(&mut self, req: BackendRequest) {
-        let invocation = match req.invocation() {
-            Ok(invocation) => invocation,
-            Err(error) => {
-                let _ = req.reply_tx.send(BackendReply::Error(error));
-                return;
-            }
-        };
-        let BackendRequest { input, reply_tx, .. } = req;
-        let raw_options: LlamaInferenceParams = match invocation.options.to_typed() {
-            Ok(options) => options,
-            Err(error) => {
-                let _ = reply_tx
-                    .send(BackendReply::Error(format!("invalid text-generation options: {error}")));
-                return;
-            }
-        };
-        let options = InferenceOptions::from_params(raw_options);
-        self.handle_inference(input, options, reply_tx).await;
+    async fn on_inference(
+        &mut self,
+        prompt: String,
+        options: Options<LlamaInferenceParams>,
+    ) -> Result<serde_json::Value, String> {
+        let options = InferenceOptions::from_params(options.0);
+        self.handle_inference(prompt, options).await
     }
 
     #[on_event(InferenceStream)]
-    async fn on_inference_stream(&mut self, req: BackendRequest) {
-        let invocation = match req.invocation() {
-            Ok(invocation) => invocation,
-            Err(error) => {
-                let _ = req.reply_tx.send(BackendReply::Error(error));
-                return;
-            }
-        };
-        let BackendRequest { input, cancel_rx, reply_tx, .. } = req;
-        let raw_options: LlamaInferenceParams = match invocation.options.to_typed() {
-            Ok(options) => options,
-            Err(error) => {
-                let _ = reply_tx
-                    .send(BackendReply::Error(format!("invalid text-generation options: {error}")));
-                return;
-            }
-        };
-        let options = InferenceOptions::from_params(raw_options);
-        self.handle_inference_stream(input, options, cancel_rx, reply_tx).await;
+    async fn on_inference_stream(
+        &mut self,
+        prompt: String,
+        options: Options<LlamaInferenceParams>,
+        cancel: CancelRx,
+    ) -> Result<StreamHandle, String> {
+        let options = InferenceOptions::from_params(options.0);
+        self.handle_inference_stream(prompt, options, cancel).await
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -176,29 +150,17 @@ impl LlamaWorker {
 
     async fn handle_load_model(
         &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
+        config: LlamaLoadConfig,
+    ) -> Result<(), String> {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
-                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
-                return;
-            }
-        };
-
-        let config: LlamaLoadConfig = match input.to_typed() {
-            Ok(c) => c,
-            Err(e) => {
-                let _ =
-                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
-                return;
+                return Err("engine not initialized".to_owned());
             }
         };
 
         if config.num_workers == 0 {
-            let _ = reply_tx.send(BackendReply::Error("num_workers must be > 0".into()));
-            return;
+            return Err("num_workers must be > 0".to_owned());
         }
 
         // Model loading is CPU/blocking; use block_in_place to avoid stalling
@@ -228,34 +190,22 @@ impl LlamaWorker {
             )
         });
 
-        match result {
-            Ok(()) => {
-                let _ = reply_tx.send(BackendReply::Ack);
-            }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
-        }
+        result.map_err(|error| error.to_string())
     }
 
     // ── model.unload ──────────────────────────────────────────────────────────
 
-    async fn handle_unload_model(&mut self, reply_tx: tokio::sync::oneshot::Sender<BackendReply>) {
+    async fn handle_unload_model(&mut self) -> Result<(), String> {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
-                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
-                return;
+                return Err("engine not initialized".to_owned());
             }
         };
 
         match engine.unload() {
-            Ok(()) => {
-                let _ = reply_tx.send(BackendReply::Ack);
-            }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
+            Ok(()) => Ok(()),
+            Err(e) => Err(e.to_string()),
         }
     }
 
@@ -263,10 +213,9 @@ impl LlamaWorker {
 
     async fn handle_inference(
         &mut self,
-        input: Payload,
+        prompt: String,
         options: InferenceOptions,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
+    ) -> Result<serde_json::Value, String> {
         let InferenceOptions {
             max_tokens,
             session_key,
@@ -281,21 +230,11 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
         } = options;
-        let engine = match self.engine.as_ref() {
-            Some(e) => Arc::clone(e),
-            None => {
-                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
-                return;
-            }
-        };
-
-        let prompt = match input.to_str() {
-            Ok(s) => s.to_owned(),
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("prompt not str: {e}")));
-                return;
-            }
-        };
+        let engine = self
+            .engine
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| "model not loaded".to_owned())?;
         let request = LlamaDispatchRequest {
             prompt,
             max_tokens,
@@ -311,33 +250,26 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
         };
-
-        match engine.dispatch_inference(request).await {
-            Ok(LlamaDispatchOutput { text, usage, finish_reason, metadata }) => {
-                let tokens_used = usage.as_ref().map(|usage| usage.completion_tokens);
-                let _ = reply_tx.send(BackendReply::Value(Payload::Json(json!({
-                    "text": text,
-                    "tokens_used": tokens_used,
-                    "usage": usage,
-                    "finish_reason": finish_reason,
-                    "metadata": metadata,
-                }))));
-            }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
-        }
+        let LlamaDispatchOutput { text, usage, finish_reason, metadata } =
+            engine.dispatch_inference(request).await.map_err(|error| error.to_string())?;
+        let tokens_used = usage.as_ref().map(|usage| usage.completion_tokens);
+        Ok(json!({
+            "text": text,
+            "tokens_used": tokens_used,
+            "usage": usage,
+            "finish_reason": finish_reason,
+            "metadata": metadata,
+        }))
     }
 
     // ── inference.stream ──────────────────────────────────────────────────────
 
     async fn handle_inference_stream(
         &mut self,
-        input: Payload,
+        prompt: String,
         options: InferenceOptions,
-        cancel_rx: watch::Receiver<bool>,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
+        cancel: CancelRx,
+    ) -> Result<StreamHandle, String> {
         let InferenceOptions {
             max_tokens,
             session_key,
@@ -352,23 +284,13 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
         } = options;
-        let engine = match self.engine.as_ref() {
-            Some(e) => Arc::clone(e),
-            None => {
-                let _ = reply_tx.send(BackendReply::Error("model not loaded".into()));
-                return;
-            }
-        };
-
-        let prompt = match input.to_str_arc() {
-            Ok(s) => s,
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!("prompt not str: {e}")));
-                return;
-            }
-        };
+        let engine = self
+            .engine
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| "model not loaded".to_owned())?;
         let request = LlamaDispatchRequest {
-            prompt: prompt.as_ref().to_owned(),
+            prompt,
             max_tokens,
             session_key,
             gbnf,
@@ -382,16 +304,10 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
         };
-
-        match engine.dispatch_inference_stream(request, cancel_rx).await {
-            Ok(stream) => {
-                let _ = reply_tx.send(BackendReply::Stream(stream));
-            }
-            Err(error) => {
-                let error: crate::infra::backends::ggml::EngineError = error;
-                let _ = reply_tx.send(BackendReply::Error(error.to_string()));
-            }
-        }
+        engine
+            .dispatch_inference_stream(request, cancel.0)
+            .await
+            .map_err(|error: crate::infra::backends::ggml::EngineError| error.to_string())
     }
 }
 
