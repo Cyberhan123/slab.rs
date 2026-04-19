@@ -11,13 +11,13 @@
 //! | `"inference"`    | `Inference`   | Transcribe f32 PCM audio; returns raw text.    |
 //!
 //! ### `model.load` input payload
-//! Uses a typed [`slab_types::CandleWhisperLoadConfig`] payload inside `slab-core`.
+//! Uses a typed runtime-owned `CandleWhisperLoadConfig` payload inside `slab-runtime`.
 
 use std::sync::Arc;
 
-use slab_types::CandleWhisperLoadConfig;
 use tokio::sync::broadcast;
 
+use crate::domain::models::CandleWhisperLoadConfig;
 use crate::infra::backends::candle::whisper::adapter::CandleWhisperEngine;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
@@ -263,11 +263,11 @@ mod tests {
     use std::path::PathBuf;
 
     use super::CandleWhisperWorker;
+    use crate::domain::models::CandleWhisperLoadConfig;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::DeploymentSnapshot;
     use slab_runtime_core::backend::RuntimeControlSignal;
     use slab_runtime_core::backend::WorkerCommand;
-    use slab_types::CandleWhisperLoadConfig;
     use tokio::sync::broadcast;
 
     fn make_worker() -> CandleWhisperWorker {

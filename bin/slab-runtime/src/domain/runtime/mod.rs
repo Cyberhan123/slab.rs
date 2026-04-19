@@ -5,9 +5,8 @@ mod stage;
 mod storage;
 mod types;
 
-pub use error::{RuntimeError, RuntimeError as CoreError};
-pub use orchestrator::{DEFAULT_WAIT_TIMEOUT, Orchestrator, STREAM_INIT_TIMEOUT};
-pub use pipeline::{HasStream, NoStream, PipelineBuilder};
-pub use stage::{CpuFn, CpuStage, GpuStage, GpuStreamStage, Stage};
-pub use storage::TaskStatusView;
-pub use types::{StageStatus, TaskId, TaskStatus};
+pub(crate) use error::RuntimeError as CoreError;
+pub(crate) use orchestrator::{DEFAULT_WAIT_TIMEOUT, Orchestrator, STREAM_INIT_TIMEOUT};
+pub(crate) use pipeline::PipelineBuilder;
+pub(crate) use stage::CpuStage;
+pub(crate) use types::TaskId;

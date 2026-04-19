@@ -11,15 +11,15 @@
 //! | `"inference.image"` | `InferenceImage` | Generate an image from typed diffusion params. |
 //!
 //! ### `model.load` input payload
-//! Uses a typed [`slab_types::CandleDiffusionLoadConfig`] payload inside `slab-core`.
+//! Uses a typed runtime-owned `CandleDiffusionLoadConfig` payload inside `slab-runtime`.
 //!
 use std::sync::Arc;
 
 use image::GenericImageView;
 use slab_diffusion::{Image as DiffusionImage, ImgParams as DiffusionImgParams};
-use slab_types::CandleDiffusionLoadConfig;
 use tokio::sync::broadcast;
 
+use crate::domain::models::CandleDiffusionLoadConfig;
 use crate::infra::backends::candle::diffusion::adapter::{CandleDiffusionEngine, GenImageParams};
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
@@ -340,9 +340,9 @@ mod tests {
     use std::path::PathBuf;
 
     use super::CandleDiffusionWorker;
+    use crate::domain::models::CandleDiffusionLoadConfig;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::{DeploymentSnapshot, RuntimeControlSignal, WorkerCommand};
-    use slab_types::CandleDiffusionLoadConfig;
     use tokio::sync::broadcast;
 
     fn make_worker() -> CandleDiffusionWorker {

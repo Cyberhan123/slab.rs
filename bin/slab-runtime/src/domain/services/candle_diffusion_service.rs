@@ -3,16 +3,15 @@ use slab_diffusion::{
     SampleParams as DiffusionSampleParams, SlgParams,
 };
 use slab_runtime_core::Payload;
-use slab_types::{CandleDiffusionLoadConfig, Capability, ModelFamily};
+use slab_runtime_core::backend::RequestRoute;
 
 use crate::application::dtos as dto;
+use crate::domain::models::CandleDiffusionLoadConfig;
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
-use super::helpers::{
-    decode_images_payload, invalid_model, model_spec, required_path, required_string,
-};
+use super::helpers::{decode_images_payload, invalid_model, required_path, required_string};
 
 #[derive(Clone, Debug)]
 pub(crate) struct CandleDiffusionService {
@@ -32,14 +31,7 @@ impl CandleDiffusionService {
             sd_version,
         });
 
-        Ok(Self {
-            runtime: DriverRuntime::new(
-                execution,
-                model_spec(ModelFamily::Diffusion, Capability::ImageGeneration, model_path),
-                "candle.diffusion",
-                load_payload,
-            ),
-        })
+        Ok(Self { runtime: DriverRuntime::new(execution, "candle.diffusion", load_payload) })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -57,8 +49,7 @@ impl CandleDiffusionService {
         let payload = self
             .runtime
             .submit(
-                Capability::ImageGeneration,
-                false,
+                RequestRoute::InferenceImage,
                 Payload::typed(build_image_params(request)?),
                 Vec::new(),
                 Payload::None,

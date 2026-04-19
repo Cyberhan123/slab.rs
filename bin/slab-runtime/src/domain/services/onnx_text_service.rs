@@ -1,13 +1,14 @@
 use slab_runtime_core::Payload;
-use slab_types::{Capability, ModelFamily, OnnxLoadConfig};
+use slab_runtime_core::backend::RequestRoute;
 
 use crate::application::dtos as dto;
+use crate::domain::models::OnnxLoadConfig;
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    invalid_model, model_spec, onnx_outputs_from_payload, onnx_tensors_to_json, required_path,
+    invalid_model, onnx_outputs_from_payload, onnx_tensors_to_json, required_path,
 };
 
 #[derive(Clone, Debug)]
@@ -40,14 +41,7 @@ impl OnnxTextService {
                 })?,
         });
 
-        Ok(Self {
-            runtime: DriverRuntime::new(
-                execution,
-                model_spec(ModelFamily::Onnx, Capability::TextGeneration, model_path),
-                "onnx",
-                load_payload,
-            ),
-        })
+        Ok(Self { runtime: DriverRuntime::new(execution, "onnx", load_payload) })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -65,8 +59,7 @@ impl OnnxTextService {
         let payload = self
             .runtime
             .submit(
-                Capability::TextGeneration,
-                false,
+                RequestRoute::Inference,
                 Payload::Json(onnx_tensors_to_json(&request.inputs)?),
                 Vec::new(),
                 Payload::None,

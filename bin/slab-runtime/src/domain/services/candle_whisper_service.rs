@@ -1,14 +1,14 @@
 use slab_runtime_core::Payload;
-use slab_types::{CandleWhisperLoadConfig, Capability, ModelFamily};
+use slab_runtime_core::backend::RequestRoute;
 
 use crate::application::dtos as dto;
+use crate::domain::models::CandleWhisperLoadConfig;
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    audio_decode_stage, decode_utf8_payload, model_spec, required_path,
-    whisper_transcription_from_raw,
+    audio_decode_stage, decode_utf8_payload, required_path, whisper_transcription_from_raw,
 };
 
 #[derive(Clone, Debug)]
@@ -27,14 +27,7 @@ impl CandleWhisperService {
             tokenizer_path: request.tokenizer_path,
         });
 
-        Ok(Self {
-            runtime: DriverRuntime::new(
-                execution,
-                model_spec(ModelFamily::Whisper, Capability::AudioTranscription, model_path),
-                "candle.whisper",
-                load_payload,
-            ),
-        })
+        Ok(Self { runtime: DriverRuntime::new(execution, "candle.whisper", load_payload) })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -53,8 +46,7 @@ impl CandleWhisperService {
         let payload = self
             .runtime
             .submit(
-                Capability::AudioTranscription,
-                false,
+                RequestRoute::Inference,
                 Payload::None,
                 vec![audio_decode_stage(audio_path)],
                 Payload::None,

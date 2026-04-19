@@ -74,10 +74,10 @@ impl ResultStorage {
         self.inner.read().await.get(&task_id).map(|record| Arc::clone(&record.cancel_tx))
     }
 
-    pub async fn get_status(&self, task_id: TaskId) -> Option<TaskStatusView> {
+    pub async fn get_status(&self, task_id: TaskId) -> Option<TaskStatus> {
         let guard = self.inner.read().await;
         let record = guard.get(&task_id)?;
-        Some(TaskStatusView { task_id, status: record.status.clone() })
+        Some(record.status.clone())
     }
 
     pub async fn take_result(&self, task_id: TaskId) -> Option<Payload> {
@@ -102,10 +102,4 @@ impl ResultStorage {
     pub fn submit_tx(&self) -> mpsc::Sender<OrchestratorCommand> {
         self.submit_tx.clone()
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct TaskStatusView {
-    pub task_id: TaskId,
-    pub status: TaskStatus,
 }

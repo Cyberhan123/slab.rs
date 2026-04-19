@@ -3,7 +3,7 @@
 //! They only perform `pb -> dto -> application -> dto -> pb` forwarding.
 //! Compatibility aggregation intentionally does not live here anymore:
 //! `<think>` parsing, usage estimation, stop trimming, OpenAI/SSE chunk shaping,
-//! whisper plain-text compatibility assembly, and legacy `slab_types` family
+//! whisper plain-text compatibility assembly, and legacy product-contract
 //! request/response construction belong to the server/app-core boundary above
 //! runtime.
 
@@ -53,32 +53,21 @@ fn format_error_chain(err: &dyn std::error::Error) -> String {
 pub(super) fn runtime_to_status(err: CoreError) -> Status {
     let msg = format_error_chain(&err);
     match err {
-        CoreError::NotInitialized
-        | CoreError::ModelNotLoaded
-        | CoreError::BackendDisabled { .. } => Status::failed_precondition(msg),
+        CoreError::ModelNotLoaded | CoreError::BackendDisabled { .. } => {
+            Status::failed_precondition(msg)
+        }
         CoreError::QueueFull { .. }
         | CoreError::OrchestratorQueueFull { .. }
         | CoreError::Busy { .. } => Status::resource_exhausted(msg),
-        CoreError::TaskNotFound { .. } | CoreError::NoFailedGlobalOperation => {
-            Status::not_found(msg)
-        }
-        CoreError::Timeout | CoreError::BroadcastAckTimeout => Status::deadline_exceeded(msg),
+        CoreError::TaskNotFound { .. } => Status::not_found(msg),
+        CoreError::Timeout => Status::deadline_exceeded(msg),
         CoreError::Cancelled => Status::cancelled(msg),
-        CoreError::BackendShutdown | CoreError::LibraryLoadFailed { .. } => {
-            Status::unavailable(msg)
-        }
-        CoreError::UnsupportedOperation { .. } | CoreError::UnsupportedCapability { .. } => {
-            Status::unimplemented(msg)
-        }
-        CoreError::InvalidModelSpec { .. } | CoreError::SourceResolveFailed { .. } => {
-            Status::invalid_argument(msg)
-        }
-        CoreError::NoViableDriver { .. } | CoreError::DriverNotRegistered { .. } => {
-            Status::failed_precondition(msg)
-        }
+        CoreError::BackendShutdown => Status::unavailable(msg),
+        CoreError::UnsupportedOperation { .. } => Status::unimplemented(msg),
+        CoreError::InvalidRequestPayload { .. } => Status::invalid_argument(msg),
+        CoreError::DriverNotRegistered { .. } => Status::failed_precondition(msg),
         CoreError::CpuStageFailed { .. }
         | CoreError::GpuStageFailed { .. }
-        | CoreError::DeploymentFailed { .. }
         | CoreError::ResultDecodeFailed { .. }
         | CoreError::EngineIo(_)
         | CoreError::GGMLEngine(_)
@@ -126,9 +115,7 @@ mod tests {
 
     #[test]
     fn disabled_backend_maps_to_failed_precondition_status() {
-        let status = runtime_to_status(CoreError::BackendDisabled {
-            backend: "ggml.llama".into(),
-        });
+        let status = runtime_to_status(CoreError::BackendDisabled { backend: "ggml.llama".into() });
         assert_eq!(status.code(), Code::FailedPrecondition);
         assert!(status.message().contains("disabled"));
     }

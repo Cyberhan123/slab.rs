@@ -25,47 +25,23 @@ pub enum RuntimeError {
     #[error("orchestrator queue full (capacity {capacity})")]
     OrchestratorQueueFull { capacity: usize },
 
-    #[error("runtime not initialized")]
-    NotInitialized,
-
     #[error("operation timed out")]
     Timeout,
 
     #[error("task cancelled")]
     Cancelled,
 
-    #[error("library load failed for backend '{backend}': {message}")]
-    LibraryLoadFailed { backend: String, message: String },
-
-    #[error("broadcast acknowledgement timed out")]
-    BroadcastAckTimeout,
-
     #[error("unsupported operation '{op}' for backend '{backend}'")]
     UnsupportedOperation { backend: String, op: String },
 
-    #[error("no failed global operation to retry")]
-    NoFailedGlobalOperation,
-
-    #[error("invalid model spec: {message}")]
-    InvalidModelSpec { message: String },
-
-    #[error("model source resolution failed: {message}")]
-    SourceResolveFailed { message: String },
-
-    #[error("no viable driver for family '{family}' and capability '{capability}'")]
-    NoViableDriver { family: String, capability: String },
-
-    #[error("model family '{family}' does not support capability '{capability}'")]
-    UnsupportedCapability { family: String, capability: String },
+    #[error("invalid request payload: {message}")]
+    InvalidRequestPayload { message: String },
 
     #[error("driver not registered: {driver_id}")]
     DriverNotRegistered { driver_id: String },
 
     #[error("backend '{backend}' is disabled in this runtime process")]
     BackendDisabled { backend: String },
-
-    #[error("deployment failed for driver '{driver_id}': {message}")]
-    DeploymentFailed { driver_id: String, message: String },
 
     #[error("internal lock poisoned: {lock_name}")]
     InternalPoisoned { lock_name: String },

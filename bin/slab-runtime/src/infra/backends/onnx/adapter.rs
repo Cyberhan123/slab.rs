@@ -7,6 +7,7 @@
 
 use std::collections::HashMap;
 
+use crate::domain::models::OnnxLoadConfig;
 use base64::Engine as _;
 use ort::{
     ep::ExecutionProviderDispatch,
@@ -14,7 +15,6 @@ use ort::{
     value::{DynValue, Tensor, TensorElementType, ValueType},
 };
 use serde_json::{Value as JsonValue, json};
-use slab_types::OnnxLoadConfig;
 use tracing::{info, warn};
 
 use super::{

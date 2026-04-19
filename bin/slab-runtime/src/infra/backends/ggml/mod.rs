@@ -9,7 +9,6 @@ use std::sync::Arc;
 
 use slab_runtime_core::CoreError;
 use slab_runtime_core::backend::{ResourceManager, spawn_dedicated_workers, spawn_workers};
-use slab_types::{Capability, DriverDescriptor, DriverLoadStyle, ModelFamily, ModelSourceKind};
 use thiserror::Error;
 
 use crate::infra::backends::ggml::diffusion::{DiffusionWorker, GGMLDiffusionEngine};
@@ -61,46 +60,22 @@ pub struct GgmlBackendConfig {
     pub diffusion_lib_dir: Option<PathBuf>,
 }
 
-pub fn descriptors(config: &GgmlBackendConfig) -> Vec<DriverDescriptor> {
-    let mut descriptors = Vec::new();
+pub fn service_ids(config: &GgmlBackendConfig) -> Vec<&'static str> {
+    let mut service_ids = Vec::new();
 
     if config.llama_lib_dir.is_some() {
-        descriptors.push(driver_descriptor(
-            "ggml.llama",
-            "ggml.llama",
-            ModelFamily::Llama,
-            Capability::TextGeneration,
-            true,
-            DriverLoadStyle::DynamicLibraryThenModel,
-            20,
-        ));
+        service_ids.push("ggml.llama");
     }
 
     if config.whisper_lib_dir.is_some() {
-        descriptors.push(driver_descriptor(
-            "ggml.whisper",
-            "ggml.whisper",
-            ModelFamily::Whisper,
-            Capability::AudioTranscription,
-            false,
-            DriverLoadStyle::DynamicLibraryThenModel,
-            20,
-        ));
+        service_ids.push("ggml.whisper");
     }
 
     if config.diffusion_lib_dir.is_some() {
-        descriptors.push(driver_descriptor(
-            "ggml.diffusion",
-            "ggml.diffusion",
-            ModelFamily::Diffusion,
-            Capability::ImageGeneration,
-            false,
-            DriverLoadStyle::DynamicLibraryThenModel,
-            20,
-        ));
+        service_ids.push("ggml.diffusion");
     }
 
-    descriptors
+    service_ids
 }
 
 pub fn register(
@@ -146,31 +121,6 @@ pub fn register(
     }
 
     Ok(())
-}
-
-fn driver_descriptor(
-    driver_id: &str,
-    backend_id: &str,
-    family: ModelFamily,
-    capability: Capability,
-    supports_streaming: bool,
-    load_style: DriverLoadStyle,
-    priority: i32,
-) -> DriverDescriptor {
-    DriverDescriptor {
-        driver_id: driver_id.to_owned(),
-        backend_id: backend_id.to_owned(),
-        family,
-        capability,
-        supported_sources: vec![
-            ModelSourceKind::LocalPath,
-            ModelSourceKind::LocalArtifacts,
-            ModelSourceKind::HuggingFace,
-        ],
-        supports_streaming,
-        load_style,
-        priority,
-    }
 }
 
 fn load_llama_engine(path: &Path) -> Result<Arc<GGMLLlamaEngine>, CoreError> {

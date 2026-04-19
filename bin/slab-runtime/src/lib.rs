@@ -1,5 +1,5 @@
-pub mod api;
-pub mod application;
+mod api;
+mod application;
 pub mod bootstrap;
-pub mod domain;
-pub mod infra;
+mod domain;
+mod infra;

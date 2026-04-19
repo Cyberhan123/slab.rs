@@ -12,7 +12,7 @@
 //! | `"inference"`    | `Inference`    | Run a forward pass; input and output are JSON.     |
 //!
 //! ### `model.load` input payload
-//! Uses a typed [`slab_types::OnnxLoadConfig`] payload inside `slab-core`.
+//! Uses a typed runtime-owned `OnnxLoadConfig` payload inside `slab-runtime`.
 //!
 //! ### `inference` input JSON
 //! ```json
@@ -42,10 +42,10 @@
 
 use std::sync::Arc;
 
-use slab_types::OnnxLoadConfig;
 use tokio::sync::broadcast;
 use tracing::warn;
 
+use crate::domain::models::OnnxLoadConfig;
 use crate::infra::backends::onnx::adapter::OnnxEngine;
 use crate::infra::backends::onnx::config::OnnxInferenceInput;
 use slab_runtime_core::Payload;

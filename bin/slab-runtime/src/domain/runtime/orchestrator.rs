@@ -6,11 +6,11 @@ use slab_runtime_core::backend::{
     StreamHandle,
 };
 use tokio::sync::mpsc;
-use tracing::{info, warn};
+use tracing::info;
 
 use super::error::RuntimeError as CoreError;
 use super::stage::Stage;
-use super::storage::{ResultStorage, TaskStatusView};
+use super::storage::ResultStorage;
 use super::types::{StageStatus, TaskId, TaskStatus};
 
 pub const DEFAULT_WAIT_TIMEOUT: Duration = Duration::from_secs(300);
@@ -28,9 +28,6 @@ pub enum OrchestratorCommand {
         stages: Vec<Stage>,
         initial_payload: Payload,
         reply_tx: tokio::sync::oneshot::Sender<TaskId>,
-    },
-    Cancel {
-        task_id: TaskId,
     },
 }
 
@@ -119,15 +116,6 @@ impl Orchestrator {
                             .await;
                     });
                 }
-                OrchestratorCommand::Cancel { task_id } => {
-                    match storage.get_cancel_tx(task_id).await {
-                        Some(cancel_tx) => {
-                            let _ = cancel_tx.send(true);
-                            info!(task_id, "cancellation requested");
-                        }
-                        None => warn!(task_id, "cancel: task not found"),
-                    }
-                }
             }
         }
     }
@@ -154,12 +142,7 @@ impl Orchestrator {
                 return;
             }
 
-            storage
-                .set_status(
-                    task_id,
-                    TaskStatus::Running { stage_index: index, stage_name: stage.name().to_owned() },
-                )
-                .await;
+            storage.set_status(task_id, TaskStatus::Running).await;
             storage.set_stage_status(task_id, index, StageStatus::Running).await;
 
             match stage {
@@ -265,10 +248,6 @@ impl Orchestrator {
         reply_rx.await.map_err(|_| CoreError::BackendShutdown)
     }
 
-    pub fn cancel(&self, task_id: TaskId) {
-        let _ = self.storage.submit_tx().try_send(OrchestratorCommand::Cancel { task_id });
-    }
-
     pub async fn cancel_and_purge(&self, task_id: TaskId) {
         if let Some(cancel_tx) = self.storage.get_cancel_tx(task_id).await {
             let _ = cancel_tx.send(true);
@@ -302,7 +281,7 @@ impl Orchestrator {
         .map(|_| ())
     }
 
-    pub async fn get_status(&self, task_id: TaskId) -> Result<TaskStatusView, CoreError> {
+    pub async fn get_status(&self, task_id: TaskId) -> Result<TaskStatus, CoreError> {
         self.storage.get_status(task_id).await.ok_or(CoreError::TaskNotFound { task_id })
     }
 
@@ -325,8 +304,8 @@ impl Orchestrator {
     ) -> Result<TaskStatus, CoreError> {
         let wait_result = tokio::time::timeout(timeout, async {
             loop {
-                let view = self.get_status(task_id).await?;
-                match view.status.clone() {
+                let status = self.get_status(task_id).await?;
+                match status {
                     status if status.is_terminal() => return Ok(status),
                     _ => tokio::time::sleep(Duration::from_millis(5)).await,
                 }
@@ -362,7 +341,7 @@ impl Orchestrator {
                 stage_name: "result".into(),
                 message: "streaming task has no unary result".into(),
             }),
-            TaskStatus::Pending | TaskStatus::Running { .. } => Err(CoreError::Timeout),
+            TaskStatus::Pending | TaskStatus::Running => Err(CoreError::Timeout),
         }
     }
 
@@ -373,8 +352,8 @@ impl Orchestrator {
     ) -> Result<StreamHandle, CoreError> {
         let wait_result = tokio::time::timeout(timeout, async {
             loop {
-                let view = self.get_status(task_id).await?;
-                match view.status {
+                let status = self.get_status(task_id).await?;
+                match status {
                     TaskStatus::SucceededStreaming => return Ok(()),
                     TaskStatus::Succeeded { .. } | TaskStatus::ResultConsumed => {
                         return Err(CoreError::GpuStageFailed {
