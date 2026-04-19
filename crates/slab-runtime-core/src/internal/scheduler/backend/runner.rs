@@ -1,8 +1,8 @@
-use std::sync::Arc;
 use std::{future::Future, pin::Pin};
 
 use async_trait::async_trait;
-use tokio::sync::{Mutex, broadcast, mpsc};
+use flume::Receiver;
+use tokio::sync::broadcast;
 
 use crate::internal::scheduler::backend::protocol::BackendReply;
 use crate::internal::scheduler::backend::protocol::{
@@ -10,11 +10,11 @@ use crate::internal::scheduler::backend::protocol::{
 };
 
 /// Shared ingress receiver consumed competitively by multiple worker runners.
-pub type SharedIngressRx = Arc<Mutex<mpsc::Receiver<BackendRequest>>>;
+pub type SharedIngressRx = Receiver<BackendRequest>;
 
 /// Wrap an ingress receiver for competitive multi-worker consumption.
-pub fn shared_ingress(rx: mpsc::Receiver<BackendRequest>) -> SharedIngressRx {
-    Arc::new(Mutex::new(rx))
+pub fn shared_ingress(rx: Receiver<BackendRequest>) -> SharedIngressRx {
+    rx
 }
 
 /// Backend implementation-facing contract for runtime-managed worker loops.
@@ -176,13 +176,10 @@ async fn runtime_worker_loop<H>(
                 }
             }
 
-            req = async {
-                let mut lock = shared_ingress.lock().await;
-                lock.recv().await
-            } => {
+            req = shared_ingress.recv_async() => {
                 match req {
-                    Some(req) => handler.handle_request(req).await,
-                    None => break,
+                    Ok(req) => handler.handle_request(req).await,
+                    Err(flume::RecvError::Disconnected) => break,
                 }
             }
         }
@@ -255,12 +252,7 @@ pub fn spawn_workers<H, F>(
     let worker_count = worker_count.max(1);
     for worker_id in 0..worker_count {
         let handler = make_handler(worker_id, control_tx.clone());
-        spawn_runtime_worker(
-            Arc::clone(&shared_ingress),
-            control_tx.subscribe(),
-            worker_id,
-            handler,
-        );
+        spawn_runtime_worker(shared_ingress.clone(), control_tx.subscribe(), worker_id, handler);
     }
 }
 
@@ -278,7 +270,7 @@ pub fn spawn_dedicated_workers<H, F>(
     for worker_id in 0..worker_count {
         let handler = make_handler(worker_id, control_tx.clone());
         spawn_dedicated_runtime_worker(
-            Arc::clone(&shared_ingress),
+            shared_ingress.clone(),
             control_tx.clone(),
             worker_id,
             handler,
@@ -292,8 +284,9 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
-    use tokio::sync::{Mutex, broadcast, mpsc, watch};
+    use tokio::sync::{Mutex, broadcast, watch};
 
+    use crate::Payload;
     use crate::internal::scheduler::backend::protocol::{
         BackendOp, BackendReply, BackendRequest, BackendRequestKind, PeerWorkerCommand,
         RuntimeControlSignal, SyncMessage, WorkerCommand,
@@ -301,7 +294,6 @@ mod tests {
     use crate::internal::scheduler::backend::runner::{
         RuntimeWorkerHandler, shared_ingress, spawn_runtime_worker,
     };
-    use crate::Payload;
 
     #[derive(Clone, Default)]
     struct Observed {
@@ -336,7 +328,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_filters_self_echo_and_stale_peer_sequences() {
-        let (ingress_tx, ingress_rx) = mpsc::channel::<BackendRequest>(8);
+        let (ingress_tx, ingress_rx) = flume::bounded::<BackendRequest>(8);
         let (control_tx, control_rx) = broadcast::channel::<WorkerCommand>(8);
         let observed = Observed::default();
         let join = spawn_runtime_worker(
@@ -385,7 +377,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_dispatches_ingress_and_runtime_commands() {
-        let (ingress_tx, ingress_rx) = mpsc::channel::<BackendRequest>(8);
+        let (ingress_tx, ingress_rx) = flume::bounded::<BackendRequest>(8);
         let (control_tx, control_rx) = broadcast::channel::<WorkerCommand>(8);
         let observed = Observed::default();
 
@@ -400,7 +392,7 @@ mod tests {
         drop(cancel_tx);
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         ingress_tx
-            .send(BackendRequest {
+            .send_async(BackendRequest {
                 kind: BackendRequestKind::Inference,
                 op: BackendOp { name: "test.op".to_owned(), options: Payload::default() },
                 input: Payload::default(),

@@ -62,12 +62,12 @@ impl Orchestrator {
 
         let ingress_tx = self.resource_manager.ingress_tx(backend_id)?;
         ingress_tx.try_send(request).map_err(|error| {
-            let capacity = ingress_tx.max_capacity();
+            let capacity = ingress_tx.capacity().unwrap_or(0);
             match error {
-                mpsc::error::TrySendError::Full(_) => {
+                flume::TrySendError::Full(_) => {
                     CoreError::QueueFull { queue: backend_id.to_owned(), capacity }
                 }
-                mpsc::error::TrySendError::Closed(_) => CoreError::BackendShutdown,
+                flume::TrySendError::Disconnected(_) => CoreError::BackendShutdown,
             }
         })?;
 

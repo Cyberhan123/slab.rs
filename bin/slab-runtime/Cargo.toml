@@ -37,6 +37,7 @@ slab-whisper = { workspace = true }
 slab-utils = { workspace = true, optional = true }
 slab-subtitle = { workspace = true, optional = true }
 tokio = { workspace = true }
+flume = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
