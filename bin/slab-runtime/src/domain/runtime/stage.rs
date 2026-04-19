@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
-    BackendOp, BackendReply, BackendRequest, BackendRequestKind, ResourceManager, StreamHandle,
+    BackendOp, BackendReply, BackendRequest, ResourceManager, StreamHandle,
 };
 
 use super::error::RuntimeError as CoreError;
@@ -69,14 +69,7 @@ impl GpuStage {
     ) -> Result<Payload, CoreError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let ingress_tx = rm.ingress_tx(&self.backend_id)?;
-        let req = BackendRequest {
-            kind: BackendRequestKind::Inference,
-            op: self.op.clone(),
-            input,
-            cancel_rx,
-            broadcast_seq: None,
-            reply_tx,
-        };
+        let req = BackendRequest::inference(self.op.clone(), input, cancel_rx, reply_tx);
 
         ingress_tx.try_send(req).map_err(|error| {
             let capacity = ingress_tx.capacity().unwrap_or(0);
@@ -91,6 +84,10 @@ impl GpuStage {
         let reply = reply_rx.await.map_err(|_| CoreError::BackendShutdown)?;
         match reply {
             BackendReply::Value(payload) => Ok(payload),
+            BackendReply::Ack => Err(CoreError::GpuStageFailed {
+                stage_name: self.name.clone(),
+                message: "unexpected ack reply on non-management stage".into(),
+            }),
             BackendReply::Error(message) => {
                 Err(CoreError::GpuStageFailed { stage_name: self.name.clone(), message })
             }
@@ -118,14 +115,7 @@ impl GpuStreamStage {
     ) -> Result<StreamHandle, CoreError> {
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         let ingress_tx = rm.ingress_tx(&self.backend_id)?;
-        let req = BackendRequest {
-            kind: BackendRequestKind::Inference,
-            op: self.op.clone(),
-            input,
-            cancel_rx,
-            broadcast_seq: None,
-            reply_tx,
-        };
+        let req = BackendRequest::inference(self.op.clone(), input, cancel_rx, reply_tx);
 
         ingress_tx.try_send(req).map_err(|error| {
             let capacity = ingress_tx.capacity().unwrap_or(0);
@@ -140,6 +130,10 @@ impl GpuStreamStage {
         let reply = reply_rx.await.map_err(|_| CoreError::BackendShutdown)?;
         match reply {
             BackendReply::Stream(handle) => Ok(handle),
+            BackendReply::Ack => Err(CoreError::GpuStageFailed {
+                stage_name: self.name.clone(),
+                message: "unexpected ack reply on streaming stage".into(),
+            }),
             BackendReply::Error(message) => {
                 Err(CoreError::GpuStageFailed { stage_name: self.name.clone(), message })
             }

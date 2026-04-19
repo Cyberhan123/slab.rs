@@ -26,4 +26,10 @@ impl Worker {
     async fn on_lagged(&mut self) {}
 }
 
-fn main() {}
+fn main() {
+    let _ = Worker::routes();
+    let _ = Worker::runtime_routes();
+    let _ = Worker::peer_routes();
+    let _ = Worker::peer_fallback_route();
+    let _ = Worker::lagged_route();
+}

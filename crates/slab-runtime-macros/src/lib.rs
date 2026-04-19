@@ -492,43 +492,58 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
             #(#peer_variant_generated)*
             #peer_fallback_generated
             #lagged_generated
+
+            pub(crate) fn routes(
+            ) -> &'static [::slab_runtime_core::backend::RequestRouteMatcher<Self>] {
+                &[#(#event_table_entries),*]
+            }
+
+            pub(crate) fn runtime_routes(
+            ) -> &'static [::slab_runtime_core::backend::RuntimeRoute<Self>] {
+                &[#(#runtime_table_entries),*]
+            }
+
+            pub(crate) fn peer_routes(
+            ) -> &'static [::slab_runtime_core::backend::PeerRoute<Self>] {
+                &[#(#peer_table_entries),*]
+            }
+
+            pub(crate) fn peer_fallback_route(
+            ) -> Option<::slab_runtime_core::backend::PeerDispatchFn<Self>> {
+                #peer_fallback_route
+            }
+
+            pub(crate) fn lagged_route(
+            ) -> Option<::slab_runtime_core::backend::LaggedDispatchFn<Self>> {
+                #lagged_route
+            }
         }
 
         #[async_trait::async_trait]
         impl #impl_generics ::slab_runtime_core::backend::RuntimeWorkerHandler for #self_ty #where_clause {
-            async fn handle_request(&mut self, req: ::slab_runtime_core::backend::BackendRequest) {
-                ::slab_runtime_core::backend::dispatch_backend_request(
-                    self,
-                    req,
-                    &[#(#event_table_entries),*],
-                ).await;
+            fn request_routes(
+            ) -> &'static [::slab_runtime_core::backend::RequestRouteMatcher<Self>] {
+                Self::routes()
             }
 
-            async fn handle_peer_control(
-                &mut self,
-                cmd: ::slab_runtime_core::backend::PeerWorkerCommand,
-            ) {
-                ::slab_runtime_core::backend::dispatch_peer_control(
-                    self,
-                    cmd,
-                    #peer_fallback_route,
-                    &[#(#peer_table_entries),*],
-                ).await;
+            fn runtime_control_routes(
+            ) -> &'static [::slab_runtime_core::backend::RuntimeRoute<Self>] {
+                Self::runtime_routes()
             }
 
-            async fn handle_runtime_control(
-                &mut self,
-                signal: ::slab_runtime_core::backend::RuntimeControlSignal,
-            ) {
-                ::slab_runtime_core::backend::dispatch_runtime_control(
-                    self,
-                    signal,
-                    &[#(#runtime_table_entries),*],
-                ).await;
+            fn peer_control_routes(
+            ) -> &'static [::slab_runtime_core::backend::PeerRoute<Self>] {
+                Self::peer_routes()
             }
 
-            async fn handle_control_lagged(&mut self) {
-                ::slab_runtime_core::backend::dispatch_control_lagged(self, #lagged_route).await;
+            fn peer_control_fallback(
+            ) -> Option<::slab_runtime_core::backend::PeerDispatchFn<Self>> {
+                Self::peer_fallback_route()
+            }
+
+            fn control_lagged_route(
+            ) -> Option<::slab_runtime_core::backend::LaggedDispatchFn<Self>> {
+                Self::lagged_route()
             }
         }
     };

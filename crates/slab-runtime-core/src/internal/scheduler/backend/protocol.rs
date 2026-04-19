@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 
 use crate::base::types::Payload;
 pub use crate::base::types::StreamHandle;
@@ -168,6 +168,12 @@ pub struct BackendOp {
     pub options: Payload,
 }
 
+impl BackendOp {
+    pub fn new(name: impl Into<String>, options: Payload) -> Self {
+        Self { name: name.into(), options }
+    }
+}
+
 /// Request type used by runtime dispatch to separate management from inference.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BackendRequestKind {
@@ -201,6 +207,46 @@ pub struct BackendRequest {
 }
 
 impl BackendRequest {
+    pub fn new(
+        kind: BackendRequestKind,
+        op: BackendOp,
+        input: Payload,
+        cancel_rx: watch::Receiver<bool>,
+        broadcast_seq: Option<u64>,
+        reply_tx: oneshot::Sender<BackendReply>,
+    ) -> Self {
+        Self { kind, op, input, cancel_rx, broadcast_seq, reply_tx }
+    }
+
+    pub fn inference(
+        op: BackendOp,
+        input: Payload,
+        cancel_rx: watch::Receiver<bool>,
+        reply_tx: oneshot::Sender<BackendReply>,
+    ) -> Self {
+        Self::new(BackendRequestKind::Inference, op, input, cancel_rx, None, reply_tx)
+    }
+
+    pub fn management(
+        event: ManagementEvent,
+        op_name: impl Into<String>,
+        input: Payload,
+        broadcast_seq: u64,
+        reply_tx: oneshot::Sender<BackendReply>,
+    ) -> Self {
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        drop(cancel_tx);
+
+        Self::new(
+            BackendRequestKind::Management(event),
+            BackendOp::new(op_name, Payload::default()),
+            input,
+            cancel_rx,
+            Some(broadcast_seq),
+            reply_tx,
+        )
+    }
+
     pub fn route(&self) -> Result<RequestRoute, String> {
         RequestRoute::from_str(&self.op.name)
     }
@@ -234,12 +280,32 @@ impl BackendRequest {
 /// Reply sent back from a backend worker to the orchestrator.
 #[derive(Debug)]
 pub enum BackendReply {
+    /// Management operation completed successfully without a payload body.
+    Ack,
     /// A single complete output payload (non-streaming).
     Value(Payload),
     /// A streaming output handle (terminal stage only).
     Stream(StreamHandle),
     /// The backend encountered an error.
     Error(String),
+}
+
+impl BackendReply {
+    pub const fn ack() -> Self {
+        Self::Ack
+    }
+
+    pub fn value(payload: Payload) -> Self {
+        Self::Value(payload)
+    }
+
+    pub fn stream(handle: StreamHandle) -> Self {
+        Self::Stream(handle)
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self::Error(message.into())
+    }
 }
 
 #[cfg(test)]
