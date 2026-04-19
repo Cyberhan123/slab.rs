@@ -3,8 +3,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+use flume::Sender;
 use tokio::sync::{
-    OwnedRwLockReadGuard, OwnedRwLockWriteGuard, OwnedSemaphorePermit, Semaphore, broadcast, mpsc,
+    OwnedRwLockReadGuard, OwnedRwLockWriteGuard, OwnedSemaphorePermit, Semaphore, broadcast,
 };
 
 use crate::base::error::CoreError;
@@ -40,7 +41,7 @@ impl std::fmt::Debug for ManagementLease {
 #[derive(Debug, Clone)]
 struct BackendHandle {
     semaphore: Arc<Semaphore>,
-    ingress_tx: Option<mpsc::Sender<BackendRequest>>,
+    ingress_tx: Option<Sender<BackendRequest>>,
     #[cfg_attr(not(test), allow(dead_code))]
     control_tx: Option<broadcast::Sender<WorkerCommand>>,
     management_lock: Arc<tokio::sync::RwLock<()>>,
@@ -50,7 +51,7 @@ struct BackendHandle {
 impl BackendHandle {
     fn new(
         capacity: usize,
-        ingress_tx: Option<mpsc::Sender<BackendRequest>>,
+        ingress_tx: Option<Sender<BackendRequest>>,
         control_tx: Option<broadcast::Sender<WorkerCommand>>,
     ) -> Self {
         Self {
@@ -99,11 +100,11 @@ impl ResourceManager {
         F: FnOnce(SharedIngressRx, broadcast::Sender<WorkerCommand>),
     {
         let (ingress_tx, ingress_rx) =
-            mpsc::channel::<BackendRequest>(self.config.ingress_channel_capacity);
+            flume::bounded::<BackendRequest>(self.config.ingress_channel_capacity);
         let (control_tx, _) =
             broadcast::channel::<WorkerCommand>(self.config.control_channel_capacity);
         let shared_ingress_rx = shared_ingress(ingress_rx);
-        spawn_backend(Arc::clone(&shared_ingress_rx), control_tx.clone());
+        spawn_backend(shared_ingress_rx, control_tx.clone());
 
         let key = backend_id.into();
         match self.backends.write() {
@@ -153,7 +154,7 @@ impl ResourceManager {
     }
 
     /// Clone backend ingress sender.
-    pub fn ingress_tx(&self, backend_id: &str) -> Result<mpsc::Sender<BackendRequest>, CoreError> {
+    pub fn ingress_tx(&self, backend_id: &str) -> Result<Sender<BackendRequest>, CoreError> {
         let handle = self.handle(backend_id)?;
         handle.ingress_tx.ok_or_else(|| CoreError::Busy { backend_id: backend_id.to_owned() })
     }
@@ -236,9 +237,7 @@ mod tests {
 
         let clone = manager.clone();
         let waiter = tokio::spawn(async move {
-            clone
-                .acquire_inference_lease("serial-backend", std::time::Duration::from_secs(1))
-                .await
+            clone.acquire_inference_lease("serial-backend", std::time::Duration::from_secs(1)).await
         });
 
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;

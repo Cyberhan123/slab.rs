@@ -79,12 +79,12 @@ impl GpuStage {
         };
 
         ingress_tx.try_send(req).map_err(|error| {
-            let capacity = ingress_tx.max_capacity();
+            let capacity = ingress_tx.capacity().unwrap_or(0);
             match error {
-                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                flume::TrySendError::Full(_) => {
                     CoreError::QueueFull { queue: self.backend_id.clone(), capacity }
                 }
-                tokio::sync::mpsc::error::TrySendError::Closed(_) => CoreError::BackendShutdown,
+                flume::TrySendError::Disconnected(_) => CoreError::BackendShutdown,
             }
         })?;
 
@@ -128,12 +128,12 @@ impl GpuStreamStage {
         };
 
         ingress_tx.try_send(req).map_err(|error| {
-            let capacity = ingress_tx.max_capacity();
+            let capacity = ingress_tx.capacity().unwrap_or(0);
             match error {
-                tokio::sync::mpsc::error::TrySendError::Full(_) => {
+                flume::TrySendError::Full(_) => {
                     CoreError::QueueFull { queue: self.backend_id.clone(), capacity }
                 }
-                tokio::sync::mpsc::error::TrySendError::Closed(_) => CoreError::BackendShutdown,
+                flume::TrySendError::Disconnected(_) => CoreError::BackendShutdown,
             }
         })?;
 
