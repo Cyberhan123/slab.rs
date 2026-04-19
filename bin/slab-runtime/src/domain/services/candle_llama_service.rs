@@ -5,7 +5,7 @@ use slab_types::{CandleLlamaLoadConfig, Capability, ModelFamily, TextGenerationO
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use slab_proto::convert::dto;
+use crate::application::dtos as dto;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;

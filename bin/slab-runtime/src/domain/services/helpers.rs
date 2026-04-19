@@ -11,7 +11,7 @@ use slab_runtime_core::scheduler::CpuStage;
 use slab_runtime_core::{CoreError, Payload};
 use slab_types::{Capability, ModelFamily, ModelSource, ModelSpec};
 
-use slab_proto::convert::dto;
+use crate::application::dtos as dto;
 
 pub(crate) fn invalid_model(field: &'static str, message: impl Into<String>) -> CoreError {
     CoreError::InvalidModelSpec { message: format!("{field}: {}", message.into()) }

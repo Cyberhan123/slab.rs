@@ -7,11 +7,13 @@
 //! request/response construction belong to the server/app-core boundary above
 //! runtime.
 
-use slab_proto::convert;
 use slab_runtime_core::CoreError;
 use tonic::Status;
 
-use crate::application::services::{RuntimeApplication, RuntimeApplicationError};
+use crate::application::{
+    dtos as dto,
+    services::{RuntimeApplication, RuntimeApplicationError},
+};
 
 mod candle_diffusion;
 mod candle_transformers;
@@ -85,7 +87,7 @@ pub(super) fn runtime_to_status(err: CoreError) -> Status {
     }
 }
 
-pub(super) fn proto_to_status(err: convert::ProtoConversionError) -> Status {
+pub(super) fn proto_to_status(err: dto::ProtoConversionError) -> Status {
     Status::invalid_argument(err.to_string())
 }
 

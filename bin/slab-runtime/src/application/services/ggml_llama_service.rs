@@ -1,8 +1,7 @@
 use futures::stream::BoxStream;
 use slab_runtime_core::CoreError;
 
-use slab_proto::convert::dto;
-
+use crate::application::dtos as dto;
 use crate::domain::services::{ExecutionHub, GgmlLlamaService as DomainGgmlLlamaService};
 
 use super::{

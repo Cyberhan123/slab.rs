@@ -6,7 +6,7 @@ use slab_types::{Capability, ModelFamily};
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
-use slab_proto::convert::dto;
+use crate::application::dtos as dto;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;

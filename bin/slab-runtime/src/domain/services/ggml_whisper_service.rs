@@ -5,7 +5,7 @@ use slab_whisper::{
     SamplingStrategy as WhisperSamplingStrategy, WhisperVadParams as CanonicalWhisperVadParams,
 };
 
-use slab_proto::convert::dto;
+use crate::application::dtos as dto;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;

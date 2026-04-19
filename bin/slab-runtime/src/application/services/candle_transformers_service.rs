@@ -1,10 +1,8 @@
 use futures::stream::BoxStream;
 use slab_runtime_core::CoreError;
 
-use slab_proto::convert::dto;
-
+use crate::application::dtos as dto;
 use crate::domain::services::{
-    CandleDiffusionService as DomainCandleDiffusionService,
     CandleLlamaService as DomainCandleLlamaService,
     CandleWhisperService as DomainCandleWhisperService, ExecutionHub,
 };
@@ -15,16 +13,15 @@ use super::{
 };
 
 #[derive(Clone)]
-pub(crate) struct CandleService {
+pub(crate) struct CandleTransformersService {
     execution: ExecutionHub,
     llama: LoadedService<DomainCandleLlamaService>,
     whisper: LoadedService<DomainCandleWhisperService>,
-    diffusion: LoadedService<DomainCandleDiffusionService>,
 }
 
-impl CandleService {
+impl CandleTransformersService {
     pub(crate) fn new(execution: ExecutionHub) -> Self {
-        Self { execution, llama: empty_slot(), whisper: empty_slot(), diffusion: empty_slot() }
+        Self { execution, llama: empty_slot(), whisper: empty_slot() }
     }
 
     pub(crate) async fn load_llama_model(
@@ -99,37 +96,5 @@ impl CandleService {
         request: dto::CandleWhisperTranscribeRequest,
     ) -> Result<dto::CandleWhisperTranscribeResponse, RuntimeApplicationError> {
         clone_loaded(&self.whisper).await?.transcribe(request).await.map_err(Into::into)
-    }
-
-    pub(crate) async fn load_diffusion_model(
-        &self,
-        request: dto::CandleDiffusionLoadRequest,
-    ) -> Result<dto::ModelStatus, RuntimeApplicationError> {
-        if let Some(previous) = take_loaded(&self.diffusion).await {
-            previous.unload().await?;
-        }
-
-        let service = DomainCandleDiffusionService::new(self.execution.clone(), request)?;
-        service.load().await?;
-        store_loaded(&self.diffusion, service).await;
-        Ok(model_status("candle.diffusion", "loaded"))
-    }
-
-    pub(crate) async fn unload_diffusion_model(
-        &self,
-    ) -> Result<dto::ModelStatus, RuntimeApplicationError> {
-        let service = take_loaded(&self.diffusion)
-            .await
-            .ok_or(CoreError::ModelNotLoaded)
-            .map_err(RuntimeApplicationError::Runtime)?;
-        service.unload().await?;
-        Ok(model_status("candle.diffusion", "unloaded"))
-    }
-
-    pub(crate) async fn generate_image(
-        &self,
-        request: dto::CandleDiffusionGenerateImageRequest,
-    ) -> Result<dto::CandleDiffusionGenerateImageResponse, RuntimeApplicationError> {
-        clone_loaded(&self.diffusion).await?.generate_image(request).await.map_err(Into::into)
     }
 }

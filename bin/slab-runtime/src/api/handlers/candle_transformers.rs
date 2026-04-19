@@ -4,7 +4,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, instrument};
 
-use slab_proto::{convert, slab::ipc::v1 as pb};
+use slab_proto::slab::ipc::v1 as pb;
+
+use crate::application::dtos as dto;
 
 use super::{
     GrpcServiceImpl, application_to_status, extract_request_id, proto_to_status, runtime_to_status,
@@ -21,9 +23,14 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
         tracing::Span::current().record("request_id", &request_id);
 
         let dto =
-            convert::decode_candle_chat_request(&request.into_inner()).map_err(proto_to_status)?;
-        let response = self.application.candle().chat(dto).await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_candle_chat_response(&response)))
+            dto::decode_candle_chat_request(&request.into_inner()).map_err(proto_to_status)?;
+        let response = self
+            .application
+            .candle_transformers()
+            .chat(dto)
+            .await
+            .map_err(application_to_status)?;
+        Ok(Response::new(dto::encode_candle_chat_response(&response)))
     }
 
     type ChatStreamStream = ReceiverStream<Result<pb::CandleChatStreamChunk, Status>>;
@@ -37,16 +44,20 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
         tracing::Span::current().record("request_id", &request_id);
 
         let dto =
-            convert::decode_candle_chat_request(&request.into_inner()).map_err(proto_to_status)?;
-        let stream =
-            self.application.candle().chat_stream(dto).await.map_err(application_to_status)?;
+            dto::decode_candle_chat_request(&request.into_inner()).map_err(proto_to_status)?;
+        let stream = self
+            .application
+            .candle_transformers()
+            .chat_stream(dto)
+            .await
+            .map_err(application_to_status)?;
 
         let (tx, rx) = mpsc::channel::<Result<pb::CandleChatStreamChunk, Status>>(32);
         tokio::spawn(async move {
             tokio::pin!(stream);
             while let Some(chunk) = stream.next().await {
                 let message = match chunk {
-                    Ok(chunk) => Ok(convert::encode_candle_chat_stream_chunk(&chunk)),
+                    Ok(chunk) => Ok(dto::encode_candle_chat_stream_chunk(&chunk)),
                     Err(error) => {
                         error!(error = %error, "candle llama stream failed");
                         Err(runtime_to_status(error))
@@ -70,11 +81,15 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_candle_whisper_transcribe_request(&request.into_inner())
+        let dto = dto::decode_candle_whisper_transcribe_request(&request.into_inner())
             .map_err(proto_to_status)?;
-        let response =
-            self.application.candle().transcribe(dto).await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_candle_whisper_transcribe_response(&response)))
+        let response = self
+            .application
+            .candle_transformers()
+            .transcribe(dto)
+            .await
+            .map_err(application_to_status)?;
+        Ok(Response::new(dto::encode_candle_whisper_transcribe_response(&response)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "candle.llama"))]
@@ -85,11 +100,15 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_candle_llama_load_request(&request.into_inner())
+        let dto = dto::decode_candle_llama_load_request(&request.into_inner())
             .map_err(proto_to_status)?;
-        let status =
-            self.application.candle().load_llama_model(dto).await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        let status = self
+            .application
+            .candle_transformers()
+            .load_llama_model(dto)
+            .await
+            .map_err(application_to_status)?;
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "candle.llama"))]
@@ -101,9 +120,13 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
         tracing::Span::current().record("request_id", &request_id);
         let _ = request.into_inner();
 
-        let status =
-            self.application.candle().unload_llama_model().await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        let status = self
+            .application
+            .candle_transformers()
+            .unload_llama_model()
+            .await
+            .map_err(application_to_status)?;
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "candle.whisper"))]
@@ -114,15 +137,15 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_candle_whisper_load_request(&request.into_inner())
+        let dto = dto::decode_candle_whisper_load_request(&request.into_inner())
             .map_err(proto_to_status)?;
         let status = self
             .application
-            .candle()
+            .candle_transformers()
             .load_whisper_model(dto)
             .await
             .map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "candle.whisper"))]
@@ -136,10 +159,10 @@ impl pb::candle_transformers_service_server::CandleTransformersService for GrpcS
 
         let status = self
             .application
-            .candle()
+            .candle_transformers()
             .unload_whisper_model()
             .await
             .map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 }

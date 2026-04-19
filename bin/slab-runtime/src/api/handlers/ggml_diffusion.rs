@@ -1,7 +1,9 @@
 use tonic::{Request, Response, Status};
 use tracing::instrument;
 
-use slab_proto::{convert, slab::ipc::v1 as pb};
+use slab_proto::slab::ipc::v1 as pb;
+
+use crate::application::dtos as dto;
 
 use super::{GrpcServiceImpl, application_to_status, extract_request_id, proto_to_status};
 
@@ -15,7 +17,7 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_ggml_diffusion_generate_image_request(&request.into_inner())
+        let dto = dto::decode_ggml_diffusion_generate_image_request(&request.into_inner())
             .map_err(proto_to_status)?;
         let response = self
             .application
@@ -23,7 +25,7 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
             .generate_image(dto)
             .await
             .map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_ggml_diffusion_generate_image_response(&response)))
+        Ok(Response::new(dto::encode_ggml_diffusion_generate_image_response(&response)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "ggml.diffusion"))]
@@ -34,7 +36,7 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_ggml_diffusion_generate_video_request(&request.into_inner())
+        let dto = dto::decode_ggml_diffusion_generate_video_request(&request.into_inner())
             .map_err(proto_to_status)?;
         let response = self
             .application
@@ -42,7 +44,7 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
             .generate_video(dto)
             .await
             .map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_ggml_diffusion_generate_video_response(&response)))
+        Ok(Response::new(dto::encode_ggml_diffusion_generate_video_response(&response)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "ggml.diffusion"))]
@@ -53,7 +55,7 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_ggml_diffusion_load_request(&request.into_inner())
+        let dto = dto::decode_ggml_diffusion_load_request(&request.into_inner())
             .map_err(proto_to_status)?;
         let status = self
             .application
@@ -61,7 +63,7 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
             .load_model(dto)
             .await
             .map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "ggml.diffusion"))]
@@ -79,6 +81,6 @@ impl pb::ggml_diffusion_service_server::GgmlDiffusionService for GrpcServiceImpl
             .unload_model()
             .await
             .map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 }

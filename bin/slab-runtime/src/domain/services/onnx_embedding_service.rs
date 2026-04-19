@@ -1,7 +1,7 @@
 use slab_runtime_core::{CoreError, Payload};
 use slab_types::{Capability, ModelFamily, OnnxLoadConfig};
 
-use slab_proto::convert::dto;
+use crate::application::dtos as dto;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
