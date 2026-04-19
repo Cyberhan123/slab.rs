@@ -1,7 +1,9 @@
 use tonic::{Request, Response, Status};
 use tracing::instrument;
 
-use slab_proto::{convert, slab::ipc::v1 as pb};
+use slab_proto::slab::ipc::v1 as pb;
+
+use crate::application::dtos as dto;
 
 use super::{GrpcServiceImpl, application_to_status, extract_request_id, proto_to_status};
 
@@ -15,11 +17,10 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto =
-            convert::decode_onnx_text_request(&request.into_inner()).map_err(proto_to_status)?;
+        let dto = dto::decode_onnx_text_request(&request.into_inner()).map_err(proto_to_status)?;
         let response =
             self.application.onnx().run_text(dto).await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_onnx_text_response(&response)))
+        Ok(Response::new(dto::encode_onnx_text_response(&response)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "onnx.embedding"))]
@@ -30,11 +31,11 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_onnx_embedding_request(&request.into_inner())
-            .map_err(proto_to_status)?;
+        let dto =
+            dto::decode_onnx_embedding_request(&request.into_inner()).map_err(proto_to_status)?;
         let response =
             self.application.onnx().run_embedding(dto).await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_onnx_embedding_response(&response)))
+        Ok(Response::new(dto::encode_onnx_embedding_response(&response)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "onnx.text"))]
@@ -45,11 +46,11 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_onnx_text_load_request(&request.into_inner())
-            .map_err(proto_to_status)?;
+        let dto =
+            dto::decode_onnx_text_load_request(&request.into_inner()).map_err(proto_to_status)?;
         let status =
             self.application.onnx().load_text_model(dto).await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "onnx.text"))]
@@ -63,7 +64,7 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
 
         let status =
             self.application.onnx().unload_text_model().await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "onnx.embedding"))]
@@ -74,7 +75,7 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_onnx_embedding_load_request(&request.into_inner())
+        let dto = dto::decode_onnx_embedding_load_request(&request.into_inner())
             .map_err(proto_to_status)?;
         let status = self
             .application
@@ -82,7 +83,7 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
             .load_embedding_model(dto)
             .await
             .map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "onnx.embedding"))]
@@ -100,6 +101,6 @@ impl pb::onnx_service_server::OnnxService for GrpcServiceImpl {
             .unload_embedding_model()
             .await
             .map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 }

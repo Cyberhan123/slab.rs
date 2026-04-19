@@ -1,4 +1,5 @@
-mod candle_service;
+mod candle_diffusion_service;
+mod candle_transformers_service;
 mod ggml_diffusion_service;
 mod ggml_llama_service;
 mod ggml_whisper_service;
@@ -10,9 +11,10 @@ use std::sync::Arc;
 use slab_runtime_core::CoreError;
 use tokio::sync::RwLock;
 
-use slab_proto::convert::dto;
+use crate::application::dtos as dto;
 
-pub(crate) use candle_service::CandleService;
+pub(crate) use candle_diffusion_service::CandleDiffusionService;
+pub(crate) use candle_transformers_service::CandleTransformersService;
 pub(crate) use ggml_diffusion_service::GgmlDiffusionService;
 pub(crate) use ggml_llama_service::GgmlLlamaService;
 pub(crate) use ggml_whisper_service::GgmlWhisperService;

@@ -20,4 +20,3 @@ tonic = { workspace = true }
 tonic-prost = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
-thiserror = { workspace = true }

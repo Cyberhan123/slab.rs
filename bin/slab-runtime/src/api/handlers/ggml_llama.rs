@@ -4,7 +4,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status};
 use tracing::{debug, error, instrument};
 
-use slab_proto::{convert, slab::ipc::v1 as pb};
+use slab_proto::slab::ipc::v1 as pb;
+
+use crate::application::dtos as dto;
 
 use super::{
     GrpcServiceImpl, application_to_status, extract_request_id, proto_to_status, runtime_to_status,
@@ -20,11 +22,11 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_ggml_llama_chat_request(&request.into_inner())
-            .map_err(proto_to_status)?;
+        let dto =
+            dto::decode_ggml_llama_chat_request(&request.into_inner()).map_err(proto_to_status)?;
         let response =
             self.application.ggml_llama().chat(dto).await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_ggml_llama_chat_response(&response)))
+        Ok(Response::new(dto::encode_ggml_llama_chat_response(&response)))
     }
 
     type ChatStreamStream = ReceiverStream<Result<pb::GgmlLlamaChatStreamChunk, Status>>;
@@ -37,8 +39,8 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_ggml_llama_chat_request(&request.into_inner())
-            .map_err(proto_to_status)?;
+        let dto =
+            dto::decode_ggml_llama_chat_request(&request.into_inner()).map_err(proto_to_status)?;
         let stream =
             self.application.ggml_llama().chat_stream(dto).await.map_err(application_to_status)?;
 
@@ -47,7 +49,7 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
             tokio::pin!(stream);
             while let Some(chunk) = stream.next().await {
                 let message = match chunk {
-                    Ok(chunk) => Ok(convert::encode_ggml_llama_chat_stream_chunk(&chunk)),
+                    Ok(chunk) => Ok(dto::encode_ggml_llama_chat_stream_chunk(&chunk)),
                     Err(error) => {
                         error!(error = %error, "ggml llama stream failed");
                         Err(runtime_to_status(error))
@@ -71,11 +73,11 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_ggml_llama_load_request(&request.into_inner())
-            .map_err(proto_to_status)?;
+        let dto =
+            dto::decode_ggml_llama_load_request(&request.into_inner()).map_err(proto_to_status)?;
         let status =
             self.application.ggml_llama().load_model(dto).await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "ggml.llama"))]
@@ -89,6 +91,6 @@ impl pb::ggml_llama_service_server::GgmlLlamaService for GrpcServiceImpl {
 
         let status =
             self.application.ggml_llama().unload_model().await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 }

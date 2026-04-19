@@ -1,7 +1,9 @@
 use tonic::{Request, Response, Status};
 use tracing::instrument;
 
-use slab_proto::{convert, slab::ipc::v1 as pb};
+use slab_proto::slab::ipc::v1 as pb;
+
+use crate::application::dtos as dto;
 
 use super::{GrpcServiceImpl, application_to_status, extract_request_id, proto_to_status};
 
@@ -15,11 +17,15 @@ impl pb::candle_diffusion_service_server::CandleDiffusionService for GrpcService
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_candle_diffusion_generate_image_request(&request.into_inner())
+        let dto = dto::decode_candle_diffusion_generate_image_request(&request.into_inner())
             .map_err(proto_to_status)?;
-        let response =
-            self.application.candle().generate_image(dto).await.map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_candle_diffusion_generate_image_response(&response)))
+        let response = self
+            .application
+            .candle_diffusion()
+            .generate_image(dto)
+            .await
+            .map_err(application_to_status)?;
+        Ok(Response::new(dto::encode_candle_diffusion_generate_image_response(&response)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "candle.diffusion"))]
@@ -30,15 +36,15 @@ impl pb::candle_diffusion_service_server::CandleDiffusionService for GrpcService
         let request_id = extract_request_id(request.metadata());
         tracing::Span::current().record("request_id", &request_id);
 
-        let dto = convert::decode_candle_diffusion_load_request(&request.into_inner())
+        let dto = dto::decode_candle_diffusion_load_request(&request.into_inner())
             .map_err(proto_to_status)?;
         let status = self
             .application
-            .candle()
-            .load_diffusion_model(dto)
+            .candle_diffusion()
+            .load_model(dto)
             .await
             .map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 
     #[instrument(skip_all, fields(request_id, backend = "candle.diffusion"))]
@@ -52,10 +58,10 @@ impl pb::candle_diffusion_service_server::CandleDiffusionService for GrpcService
 
         let status = self
             .application
-            .candle()
-            .unload_diffusion_model()
+            .candle_diffusion()
+            .unload_model()
             .await
             .map_err(application_to_status)?;
-        Ok(Response::new(convert::encode_model_status_response(&status)))
+        Ok(Response::new(dto::encode_model_status_response(&status)))
     }
 }

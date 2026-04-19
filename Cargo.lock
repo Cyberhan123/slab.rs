@@ -8832,7 +8832,6 @@ dependencies = [
  "prost 0.14.3",
  "protoc-bin-vendored",
  "serde",
- "thiserror 2.0.18",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
