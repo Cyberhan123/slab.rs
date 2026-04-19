@@ -46,50 +46,40 @@ pub struct PeerRoute<T> {
     pub handle: PeerDispatchFn<T>,
 }
 
+/// Explicit route table returned by workers or macro-generated adapters.
+#[derive(Clone, Copy)]
+pub struct WorkerRouteTable<T: 'static> {
+    pub request_routes: &'static [RequestRouteMatcher<T>],
+    pub runtime_control_routes: &'static [RuntimeRoute<T>],
+    pub peer_control_routes: &'static [PeerRoute<T>],
+    pub peer_control_fallback: Option<PeerDispatchFn<T>>,
+    pub control_lagged_route: Option<LaggedDispatchFn<T>>,
+}
+
+impl<T: 'static> Default for WorkerRouteTable<T> {
+    fn default() -> Self {
+        Self {
+            request_routes: &[],
+            runtime_control_routes: &[],
+            peer_control_routes: &[],
+            peer_control_fallback: None,
+            control_lagged_route: None,
+        }
+    }
+}
+
 /// Backend implementation-facing contract for runtime-managed worker loops.
 #[async_trait]
 pub trait RuntimeWorkerHandler: Send + 'static {
-    /// Return typed request routes for this worker.
+    /// Return the explicit route table for this worker.
     ///
-    /// Macro-based workers usually expose these via generated `routes()` accessors and
-    /// delegate this method to them. Hand-written workers can override directly.
-    fn request_routes() -> &'static [RequestRouteMatcher<Self>]
+    /// Macro-based workers usually expose this via generated `route_table()` helpers.
+    /// Hand-written workers can override directly and build capability-dependent tables.
+    fn route_table(&self) -> WorkerRouteTable<Self>
     where
         Self: Sized,
     {
-        &[]
-    }
-
-    /// Return runtime-control routes for this worker.
-    fn runtime_control_routes() -> &'static [RuntimeRoute<Self>]
-    where
-        Self: Sized,
-    {
-        &[]
-    }
-
-    /// Return peer-control routes for this worker.
-    fn peer_control_routes() -> &'static [PeerRoute<Self>]
-    where
-        Self: Sized,
-    {
-        &[]
-    }
-
-    /// Return an optional peer-control fallback route.
-    fn peer_control_fallback() -> Option<PeerDispatchFn<Self>>
-    where
-        Self: Sized,
-    {
-        None
-    }
-
-    /// Return an optional lagged-control cleanup route.
-    fn control_lagged_route() -> Option<LaggedDispatchFn<Self>>
-    where
-        Self: Sized,
-    {
-        None
+        WorkerRouteTable::default()
     }
 
     /// Handle a request consumed from backend ingress queue.
@@ -97,7 +87,8 @@ pub trait RuntimeWorkerHandler: Send + 'static {
     where
         Self: Sized,
     {
-        dispatch_backend_request(self, req, Self::request_routes()).await;
+        let route_table = self.route_table();
+        dispatch_backend_request(self, req, route_table.request_routes).await;
     }
 
     /// Handle a peer synchronization command after runtime filtering.
@@ -109,11 +100,12 @@ pub trait RuntimeWorkerHandler: Send + 'static {
     where
         Self: Sized,
     {
+        let route_table = self.route_table();
         dispatch_peer_control(
             self,
             cmd,
-            Self::peer_control_fallback(),
-            Self::peer_control_routes(),
+            route_table.peer_control_fallback,
+            route_table.peer_control_routes,
         )
         .await;
     }
@@ -123,7 +115,8 @@ pub trait RuntimeWorkerHandler: Send + 'static {
     where
         Self: Sized,
     {
-        dispatch_runtime_control(self, signal, Self::runtime_control_routes()).await;
+        let route_table = self.route_table();
+        dispatch_runtime_control(self, signal, route_table.runtime_control_routes).await;
     }
 
     /// Handle control-bus lag (`broadcast::RecvError::Lagged`).
@@ -133,7 +126,8 @@ pub trait RuntimeWorkerHandler: Send + 'static {
     where
         Self: Sized,
     {
-        dispatch_control_lagged(self, Self::control_lagged_route()).await;
+        let route_table = self.route_table();
+        dispatch_control_lagged(self, route_table.control_lagged_route).await;
     }
 }
 
