@@ -73,7 +73,7 @@ The tree below is a high-level view distilled from the current repository. It is
 |   |-- slab-agent/                    Agent and orchestration logic
 |   |-- slab-hub/                      Model hub abstraction
 |   |-- slab-proto/                    Shared protocol definitions
-|   |-- slab-runtime-core/             Runtime scheduling and task core
+|   |-- slab-runtime-core/             Backend worker substrate and admission core
 |   |-- slab-types/                    Shared data contracts and settings types
 |   `-- ...                            Engine bindings and supporting crates
 |-- packages/

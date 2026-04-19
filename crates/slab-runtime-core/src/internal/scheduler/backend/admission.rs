@@ -6,11 +6,10 @@ use std::time::Duration;
 use tokio::sync::{
     OwnedRwLockReadGuard, OwnedRwLockWriteGuard, OwnedSemaphorePermit, Semaphore, broadcast, mpsc,
 };
-use tracing::warn;
 
+use crate::base::error::CoreError;
 use crate::internal::scheduler::backend::protocol::{BackendRequest, WorkerCommand};
 use crate::internal::scheduler::backend::runner::{SharedIngressRx, shared_ingress};
-use crate::internal::scheduler::types::{BackendLifecycleState, CoreError, GlobalConsistencyState};
 
 /// Inference lease: blocks management mutations and holds compute quota.
 pub struct InferenceLease {
@@ -45,7 +44,6 @@ struct BackendHandle {
     #[cfg_attr(not(test), allow(dead_code))]
     control_tx: Option<broadcast::Sender<WorkerCommand>>,
     management_lock: Arc<tokio::sync::RwLock<()>>,
-    lifecycle: Arc<tokio::sync::RwLock<BackendLifecycleState>>,
     next_seq: Arc<AtomicU64>,
 }
 
@@ -60,20 +58,16 @@ impl BackendHandle {
             ingress_tx,
             control_tx,
             management_lock: Arc::new(tokio::sync::RwLock::new(())),
-            lifecycle: Arc::new(tokio::sync::RwLock::new(BackendLifecycleState::Uninitialized)),
             next_seq: Arc::new(AtomicU64::new(1)),
         }
     }
 }
 
-/// Manages backend admission, queue handles, management locks and consistency state.
+/// Manages backend admission, queue handles, and per-backend management locks.
 #[derive(Debug, Clone)]
 pub struct ResourceManager {
     config: ResourceManagerConfig,
     backends: Arc<RwLock<HashMap<String, BackendHandle>>>,
-    global_state: Arc<tokio::sync::RwLock<GlobalConsistencyState>>,
-    #[cfg_attr(not(test), allow(dead_code))]
-    next_global_op_id: Arc<AtomicU64>,
 }
 
 #[derive(Debug, Clone)]
@@ -96,12 +90,7 @@ impl ResourceManager {
     }
 
     pub fn with_config(config: ResourceManagerConfig) -> Self {
-        Self {
-            config,
-            backends: Arc::new(RwLock::new(HashMap::new())),
-            global_state: Arc::new(tokio::sync::RwLock::new(GlobalConsistencyState::Consistent)),
-            next_global_op_id: Arc::new(AtomicU64::new(1)),
-        }
+        Self { config, backends: Arc::new(RwLock::new(HashMap::new())) }
     }
 
     /// Register a backend using runtime-owned channels and bootstrap callback.
@@ -203,7 +192,6 @@ impl ResourceManager {
         backend_id: &str,
         timeout: Duration,
     ) -> Result<InferenceLease, CoreError> {
-        self.ensure_inference_allowed().await?;
         let handle = self.handle(backend_id)?;
         let compute_permit = self.acquire_compute_permit(&handle, backend_id, timeout).await?;
         let mgmt_guard = Arc::clone(&handle.management_lock).read_owned().await;
@@ -219,53 +207,6 @@ impl ResourceManager {
         let handle = self.handle(backend_id)?;
         let mgmt_guard = Arc::clone(&handle.management_lock).write_owned().await;
         Ok(ManagementLease { mgmt_guard })
-    }
-
-    /// Set backend lifecycle state.
-    pub async fn set_backend_state(
-        &self,
-        backend_id: &str,
-        state: BackendLifecycleState,
-    ) -> Result<(), CoreError> {
-        let handle = self.handle(backend_id)?;
-        *handle.lifecycle.write().await = state;
-        Ok(())
-    }
-
-    /// If inconsistent, reject inference submission.
-    pub async fn ensure_inference_allowed(&self) -> Result<(), CoreError> {
-        let guard = self.global_state.read().await;
-        if let GlobalConsistencyState::Inconsistent { op_id } = *guard {
-            return Err(CoreError::GlobalStateInconsistent { op_id });
-        }
-        Ok(())
-    }
-
-    /// Transition to reconciling state and return operation id.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub async fn begin_global_reconcile(&self) -> u64 {
-        let op_id = self.next_global_op_id.fetch_add(1, Ordering::Relaxed);
-        *self.global_state.write().await = GlobalConsistencyState::Reconciling;
-        op_id
-    }
-
-    /// Mark system globally consistent.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub async fn mark_global_consistent(&self) {
-        *self.global_state.write().await = GlobalConsistencyState::Consistent;
-    }
-
-    /// Mark system inconsistent so test submissions are rejected.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub async fn mark_global_inconsistent(&self, op_id: u64) {
-        *self.global_state.write().await = GlobalConsistencyState::Inconsistent { op_id };
-    }
-
-    /// Operator override to recover from inconsistent state.
-    #[cfg_attr(not(test), allow(dead_code))]
-    pub async fn manual_mark_consistent(&self, reason: &str) {
-        warn!(%reason, "manual global consistency override requested");
-        self.mark_global_consistent().await;
     }
 }
 
@@ -319,19 +260,5 @@ mod tests {
             .expect_err("missing backend should fail");
 
         assert!(matches!(err, CoreError::DriverNotRegistered { .. }));
-    }
-
-    #[tokio::test]
-    async fn inconsistent_global_state_blocks_inference() {
-        let mut manager = ResourceManager::new();
-        manager.register_backend("gate-backend", |_shared_rx, _control_tx| {});
-
-        manager.mark_global_inconsistent(42).await;
-        let err = manager
-            .acquire_inference_lease("gate-backend", std::time::Duration::from_millis(10))
-            .await
-            .expect_err("inference should be blocked while inconsistent");
-
-        assert!(matches!(err, CoreError::GlobalStateInconsistent { op_id: 42 }));
     }
 }

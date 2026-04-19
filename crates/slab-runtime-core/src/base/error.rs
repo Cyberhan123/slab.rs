@@ -24,10 +24,6 @@ pub enum CoreError {
     #[error("operation timed out")]
     Timeout,
 
-    /// The runtime detected split-brain risk after a failed global operation.
-    #[error("global state is inconsistent (failed operation {op_id})")]
-    GlobalStateInconsistent { op_id: u64 },
-
     /// Requested operation is not implemented for a backend.
     #[error("unsupported operation '{op}' for backend '{backend}'")]
     UnsupportedOperation { backend: String, op: String },

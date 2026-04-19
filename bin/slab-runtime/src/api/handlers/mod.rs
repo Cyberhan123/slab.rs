@@ -74,8 +74,7 @@ pub(super) fn runtime_to_status(err: CoreError) -> Status {
         CoreError::NoViableDriver { .. } | CoreError::DriverNotRegistered { .. } => {
             Status::failed_precondition(msg)
         }
-        CoreError::GlobalStateInconsistent { .. }
-        | CoreError::CpuStageFailed { .. }
+        CoreError::CpuStageFailed { .. }
         | CoreError::GpuStageFailed { .. }
         | CoreError::DeploymentFailed { .. }
         | CoreError::ResultDecodeFailed { .. }

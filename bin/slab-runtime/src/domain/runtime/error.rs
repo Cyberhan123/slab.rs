@@ -37,9 +37,6 @@ pub enum RuntimeError {
     #[error("library load failed for backend '{backend}': {message}")]
     LibraryLoadFailed { backend: String, message: String },
 
-    #[error("global state is inconsistent (failed operation {op_id})")]
-    GlobalStateInconsistent { op_id: u64 },
-
     #[error("broadcast acknowledgement timed out")]
     BroadcastAckTimeout,
 
@@ -98,9 +95,6 @@ impl From<slab_runtime_core::CoreError> for RuntimeError {
             slab_runtime_core::CoreError::Busy { backend_id } => Self::Busy { backend_id },
             slab_runtime_core::CoreError::BackendShutdown => Self::BackendShutdown,
             slab_runtime_core::CoreError::Timeout => Self::Timeout,
-            slab_runtime_core::CoreError::GlobalStateInconsistent { op_id } => {
-                Self::GlobalStateInconsistent { op_id }
-            }
             slab_runtime_core::CoreError::UnsupportedOperation { backend, op } => {
                 Self::UnsupportedOperation { backend, op }
             }
