@@ -22,7 +22,7 @@ use crate::infra::backends::candle::diffusion::adapter::{CandleDiffusionEngine, 
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
-    BroadcastSeq, DeploymentSnapshot, Input, PeerWorkerCommand, RuntimeControlSignal,
+    BroadcastSeq, ControlOpId, DeploymentSnapshot, Input, PeerWorkerCommand,
     SyncMessage, Typed, WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
@@ -134,23 +134,14 @@ impl CandleDiffusionWorker {
     // ── Runtime / peer control ────────────────────────────────────────────────
 
     #[on_peer_control(LoadModel)]
-    async fn on_peer_load_model(&mut self, cmd: PeerWorkerCommand) {
-        let Some(snapshot) = cmd.deployment() else {
-            return;
-        };
-        let config: CandleDiffusionLoadConfig = match snapshot.typed_model_config() {
-            Ok(config) => config,
-            Err(error) => {
-                tracing::warn!(error = %error, "candle.diffusion worker: invalid deployment snapshot");
-                return;
-            }
-        };
+    async fn on_peer_load_model(
+        &mut self,
+        config: Input<CandleDiffusionLoadConfig>,
+    ) -> Result<(), String> {
+        let config = config.0;
         let model_path = config.model_path;
         let vae_path = config.vae_path;
         let sd_version = config.sd_version;
-        let PeerWorkerCommand::LoadModel { .. } = cmd else {
-            return;
-        };
         if let Some(engine) = self.engine.as_ref()
             && !engine.is_model_loaded()
         {
@@ -166,40 +157,33 @@ impl CandleDiffusionWorker {
                 );
             }
         }
+        Ok(())
     }
 
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) {
+    async fn on_peer_unload(&mut self) -> Result<(), String> {
         if let Some(e) = self.engine.as_ref() {
             e.unload();
         }
+        Ok(())
     }
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, signal: RuntimeControlSignal) {
-        match signal {
-            RuntimeControlSignal::GlobalUnload { op_id } => {
-                tracing::debug!(op_id, "candle.diffusion runtime global unload");
-                if let Some(e) = self.engine.as_ref() {
-                    e.unload();
-                }
-            }
-            RuntimeControlSignal::GlobalLoad { op_id, payload } => {
-                let _ = payload;
-                tracing::debug!(op_id, "candle.diffusion runtime global load pre-cleanup");
-                if let Some(e) = self.engine.as_ref() {
-                    e.unload();
-                }
-            }
-        }
-    }
-
-    #[on_control_lagged]
-    async fn on_control_lagged(&mut self) {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+        tracing::debug!(op_id = op_id.0, "candle.diffusion runtime control pre-cleanup");
         if let Some(e) = self.engine.as_ref() {
             e.unload();
         }
+        Ok(())
+    }
+
+    #[on_control_lagged]
+    async fn on_control_lagged(&mut self) -> Result<(), String> {
+        if let Some(e) = self.engine.as_ref() {
+            e.unload();
+        }
+        Ok(())
     }
 
     // ── Handler helpers ───────────────────────────────────────────────────────
@@ -301,7 +285,7 @@ mod tests {
     use super::CandleDiffusionWorker;
     use crate::domain::models::CandleDiffusionLoadConfig;
     use slab_runtime_core::Payload;
-    use slab_runtime_core::backend::{DeploymentSnapshot, RuntimeControlSignal, WorkerCommand};
+    use slab_runtime_core::backend::{ControlOpId, DeploymentSnapshot, WorkerCommand};
     use tokio::sync::broadcast;
 
     fn make_worker() -> CandleDiffusionWorker {
@@ -312,7 +296,7 @@ mod tests {
     #[tokio::test]
     async fn global_unload_is_safe_without_engine() {
         let mut worker = make_worker();
-        worker.apply_runtime_control(RuntimeControlSignal::GlobalUnload { op_id: 1 }).await;
+        worker.apply_runtime_control(ControlOpId(1)).await.expect("control cleanup should succeed");
         // No panic – test passes.
     }
 

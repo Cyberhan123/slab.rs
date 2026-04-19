@@ -6,6 +6,8 @@
 - 其它层继续引用 `Orchestrator`、`PipelineBuilder`、task 状态、domain/application 错误等 API 的地方会被有意打破，并作为后续迁移清单记录。
 
 ## Key Changes
+- `slab-runtime-core::backend` should continue to expose the typed handler surface used by `#[backend_handler]`: `Input`, `Options`, `BroadcastSeq`, `ControlOpId`, route-table types, and the event/runtime/peer extractor helpers.
+- `slab-runtime-macros` should keep `#[backend_handler]` stable while supporting `#[on_event]`, `#[on_runtime_control]`, `#[on_peer_control]`, and `#[on_control_lagged]` with typed extractors. Only event handlers are reply-producing; control handlers stay `()` / `Result<(), E>`.
 - `slab-runtime-core` 公开面保留 `backend` facade，并确保现有 backend worker 可继续使用这些类型：`BackendRequest`、`BackendReply`、`BackendOp`、`RequestRoute`、`RuntimeControlSignal`、`PeerWorkerCommand`、`WorkerCommand`、`SyncMessage`、`DeploymentSnapshot`、`StreamChunk`、`StreamHandle`、`SharedIngressRx`、`RuntimeWorkerHandler`、`spawn_runtime_worker`、`spawn_workers`、`spawn_dedicated_workers`、`ResourceManager`、`ResourceManagerConfig`。
 - 保留根级 `Payload` 和 `CoreError` re-export，作为 backend-facing 兼容入口；同时在 crate README 和代码注释中明确它们不是 runtime domain/application 通用错误或 DTO。
 - 移除或不再公开 `scheduler` facade：`Orchestrator`、`PipelineBuilder`、`CpuStage`、`GpuStage`、`GpuStreamStage`、`Stage`、`TaskId`、`TaskStatus`、`StageStatus`、`TaskStatusView`、`ResultStorage` 不再属于 `slab-runtime-core` 的公共 API。

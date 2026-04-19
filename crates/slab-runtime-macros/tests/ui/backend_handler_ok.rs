@@ -39,16 +39,32 @@ impl Worker {
     }
 
     #[on_runtime_control(GlobalLoad)]
-    async fn on_global_load(&mut self, _signal: RuntimeControlSignal) {}
+    async fn on_global_load(
+        &mut self,
+        _op_id: ControlOpId,
+        _input: Input<String>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
 
     #[on_peer_control(LoadModel)]
-    async fn on_peer_load(&mut self, _cmd: PeerWorkerCommand) {}
+    async fn on_peer_load(
+        &mut self,
+        _seq: BroadcastSeq,
+        _input: Input<String>,
+    ) -> Result<(), String> {
+        Ok(())
+    }
 
     #[on_peer_control]
-    async fn on_peer_any(&mut self, _cmd: PeerWorkerCommand) {}
+    async fn on_peer_any(&mut self, _cmd: PeerWorkerCommand) -> Result<(), String> {
+        Ok(())
+    }
 
     #[on_control_lagged]
-    async fn on_lagged(&mut self) {}
+    async fn on_lagged(&mut self) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 fn main() {
