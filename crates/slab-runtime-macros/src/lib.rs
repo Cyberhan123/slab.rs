@@ -1,10 +1,19 @@
 use std::collections::HashSet;
 
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
 use syn::parse_quote;
 use syn::spanned::Spanned;
-use syn::{Attribute, FnArg, ImplItem, ImplItemFn, ItemImpl, Path, Result, Type, Visibility};
+use syn::{
+    Attribute, FnArg, ImplItem, ImplItemFn, ItemImpl, Path, Result, ReturnType, Type, Visibility,
+};
+
+#[derive(Clone)]
+enum EventHandlerKind {
+    Legacy,
+    Typed { extractors: Vec<TokenStream2> },
+}
 
 #[proc_macro_attribute]
 pub fn backend_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
@@ -17,6 +26,7 @@ pub fn backend_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
 struct EventRoute {
     pattern: Path,
     method: syn::Ident,
+    kind: EventHandlerKind,
 }
 
 struct RuntimeRoute {
@@ -82,6 +92,83 @@ fn non_receiver_arg_count(method: &ImplItemFn) -> usize {
 
 fn first_non_receiver_arg(method: &ImplItemFn) -> Option<&FnArg> {
     method.sig.inputs.iter().find(|arg| !matches!(arg, FnArg::Receiver(_)))
+}
+
+fn type_last_ident(ty: &Type) -> Option<&syn::Ident> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+    type_path.path.segments.last().map(|segment| &segment.ident)
+}
+
+fn is_type_ident(ty: &Type, expected_ident: &str) -> bool {
+    type_last_ident(ty).is_some_and(|ident| ident == expected_ident)
+}
+
+fn is_backend_request_arg(arg: &FnArg) -> bool {
+    let FnArg::Typed(arg) = arg else {
+        return false;
+    };
+    is_type_ident(arg.ty.as_ref(), "BackendRequest")
+}
+
+fn single_generic_type_arg(ty: &Type, wrapper_ident: &str) -> Option<Type> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+    let segment = type_path.path.segments.last()?;
+    if segment.ident != wrapper_ident {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    if args.args.len() != 1 {
+        return None;
+    }
+    match args.args.first()? {
+        syn::GenericArgument::Type(inner) => Some(inner.clone()),
+        _ => None,
+    }
+}
+
+fn typed_event_handler_returns_result(method: &ImplItemFn) -> bool {
+    match &method.sig.output {
+        ReturnType::Type(_, ty) => is_type_ident(ty.as_ref(), "Result"),
+        ReturnType::Default => false,
+    }
+}
+
+fn event_arg_extractor(arg: &FnArg) -> Result<TokenStream2> {
+    let FnArg::Typed(arg) = arg else {
+        return Err(syn::Error::new(
+            arg.span(),
+            "event handlers may only use typed non-self arguments",
+        ));
+    };
+    let ty = arg.ty.as_ref();
+    if let Some(inner) = single_generic_type_arg(ty, "Input") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_input::<#inner>(&req) });
+    }
+    if let Some(inner) = single_generic_type_arg(ty, "Options") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_options::<#inner>(&req) });
+    }
+    if is_type_ident(ty, "String") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_text(&req) });
+    }
+    if is_type_ident(ty, "Payload") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_payload(&req) });
+    }
+    if is_type_ident(ty, "CancelRx") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_cancel_rx(&req) });
+    }
+    if is_type_ident(ty, "BroadcastSeq") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_broadcast_seq(&req) });
+    }
+    Err(syn::Error::new(
+        ty.span(),
+        "unsupported event handler argument type; use BackendRequest, String, Payload, Input<T>, Options<T>, CancelRx, or BroadcastSeq",
+    ))
 }
 
 fn require_arg_type(method: &ImplItemFn, expected_ident: &str, message: &str) -> Result<()> {
@@ -180,20 +267,41 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
             ));
         }
 
-        if !event_args.is_empty() && non_receiver_arg_count(method) != 1 {
-            return Err(syn::Error::new(
-                method.sig.inputs.span(),
-                "event handlers must take exactly one non-self argument (BackendRequest)",
-            ));
-        }
-
-        if !event_args.is_empty() {
-            require_arg_type(
-                method,
-                "BackendRequest",
-                "event handlers must take BackendRequest as their only non-self argument",
-            )?;
-        }
+        let event_handler_kind = if !event_args.is_empty() {
+            let event_non_receiver_args: Vec<_> = method
+                .sig
+                .inputs
+                .iter()
+                .filter(|arg| !matches!(arg, FnArg::Receiver(_)))
+                .collect();
+            let legacy_event_handler = event_non_receiver_args.len() == 1
+                && event_non_receiver_args.first().is_some_and(|arg| is_backend_request_arg(arg));
+            if event_non_receiver_args.iter().any(|arg| is_backend_request_arg(arg))
+                && !legacy_event_handler
+            {
+                return Err(syn::Error::new(
+                    method.sig.inputs.span(),
+                    "event handlers taking BackendRequest must not take additional non-self arguments",
+                ));
+            }
+            if legacy_event_handler {
+                EventHandlerKind::Legacy
+            } else {
+                let extractors = event_non_receiver_args
+                    .iter()
+                    .map(|arg| event_arg_extractor(arg))
+                    .collect::<Result<Vec<_>>>()?;
+                if !typed_event_handler_returns_result(method) {
+                    return Err(syn::Error::new(
+                        method.sig.output.span(),
+                        "typed event handlers must return Result<Success, Error>",
+                    ));
+                }
+                EventHandlerKind::Typed { extractors }
+            }
+        } else {
+            EventHandlerKind::Typed { extractors: Vec::new() }
+        };
 
         if !runtime_args.is_empty() {
             let count = non_receiver_arg_count(method);
@@ -237,7 +345,11 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                     format!("duplicate event handler for `{key}`"),
                 ));
             }
-            event_routes.push(EventRoute { pattern, method: method_ident.clone() });
+            event_routes.push(EventRoute {
+                pattern,
+                method: method_ident.clone(),
+                kind: event_handler_kind.clone(),
+            });
         }
 
         if !peer_args.is_empty() {
@@ -336,17 +448,60 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let caller = format_ident!("__backend_handler_call_event_{}", idx);
         let pattern = &route.pattern;
         let method = &route.method;
-        quote! {
-            fn #matcher(route: ::slab_runtime_core::backend::RequestRoute) -> bool {
-                matches!(route, #pattern)
+        match &route.kind {
+            EventHandlerKind::Legacy => {
+                quote! {
+                    fn #matcher(route: ::slab_runtime_core::backend::RequestRoute) -> bool {
+                        matches!(route, #pattern)
+                    }
+                    fn #caller<'a>(
+                        &'a mut self,
+                        req: ::slab_runtime_core::backend::BackendRequest,
+                    ) -> ::slab_runtime_core::backend::HandlerFuture<'a> {
+                        Box::pin(async move {
+                            self.#method(req).await;
+                        })
+                    }
+                }
             }
-            fn #caller<'a>(
-                &'a mut self,
-                req: ::slab_runtime_core::backend::BackendRequest,
-            ) -> ::slab_runtime_core::backend::HandlerFuture<'a> {
-                Box::pin(async move {
-                    self.#method(req).await;
-                })
+            EventHandlerKind::Typed { extractors } => {
+                let call_args = (0..extractors.len())
+                    .map(|arg_idx| format_ident!("__backend_handler_arg_{}_{}", idx, arg_idx))
+                    .collect::<Vec<_>>();
+                let extraction_stmts = extractors.iter().zip(call_args.iter()).map(
+                    |(extractor, binding)| {
+                        quote! {
+                            let #binding = match #extractor {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    let _ = req
+                                        .reply_tx
+                                        .send(::slab_runtime_core::backend::BackendReply::error(error));
+                                    return;
+                                }
+                            };
+                        }
+                    },
+                );
+                quote! {
+                    fn #matcher(route: ::slab_runtime_core::backend::RequestRoute) -> bool {
+                        matches!(route, #pattern)
+                    }
+                    fn #caller<'a>(
+                        &'a mut self,
+                        req: ::slab_runtime_core::backend::BackendRequest,
+                    ) -> ::slab_runtime_core::backend::HandlerFuture<'a> {
+                        Box::pin(async move {
+                            #(#extraction_stmts)*
+                            let __result = self.#method(#(#call_args),*).await;
+                            let _ = req.reply_tx.send(
+                                ::slab_runtime_core::backend::backend_reply_from_event_result(
+                                    __result,
+                                ),
+                            );
+                        })
+                    }
+                }
             }
         }
     });

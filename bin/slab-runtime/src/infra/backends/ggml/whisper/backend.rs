@@ -13,14 +13,12 @@
 //! ### `model.load` input payload
 //! Expects typed [`slab_whisper::ContextParams`] payloads inside `slab-core`.
 
-use std::sync::Arc;
-
 use tokio::sync::broadcast;
 
 use crate::infra::backends::ggml::whisper::adapter::GGMLWhisperEngine;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
-    BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
+    BroadcastSeq, DeploymentSnapshot, Input, Options, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
@@ -56,10 +54,6 @@ fn parse_context_payload(raw: &Payload) -> Result<WhisperContextParams, String> 
     raw.to_typed().map_err(|e| format!("invalid model.load config: {e}"))
 }
 
-fn parse_inference_options(raw: &Payload) -> Result<WhisperFullParams, String> {
-    raw.to_typed().map_err(|e| format!("invalid whisper inference options: {e}"))
-}
-
 #[backend_handler]
 impl WhisperWorker {
     pub fn new(
@@ -71,91 +65,64 @@ impl WhisperWorker {
     }
 
     #[on_event(LoadModel)]
-    async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest { input, broadcast_seq, reply_tx, .. } = req;
-        let seq_id = broadcast_seq.unwrap_or(0);
-        self.handle_load_model(input, reply_tx, seq_id).await;
+    async fn on_load_model(
+        &mut self,
+        params: Input<WhisperContextParams>,
+        seq: BroadcastSeq,
+    ) -> Result<(), String> {
+        self.handle_load_model(params.0, seq.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, req: BackendRequest) {
-        let BackendRequest { broadcast_seq, reply_tx, .. } = req;
-        let seq_id = broadcast_seq.unwrap_or(0);
-        self.handle_unload_model(reply_tx, seq_id).await;
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), String> {
+        self.handle_unload_model(seq.0).await
     }
 
     #[on_event(Inference)]
-    async fn on_inference(&mut self, req: BackendRequest) {
-        let invocation = match req.invocation() {
-            Ok(invocation) => invocation,
-            Err(error) => {
-                let _ = req.reply_tx.send(BackendReply::Error(error));
-                return;
-            }
-        };
-        let BackendRequest { input, reply_tx, .. } = req;
-        let params = match parse_inference_options(&invocation.options) {
-            Ok(options) => options,
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e));
-                return;
-            }
-        };
-        self.handle_inference(input, params, reply_tx).await;
+    async fn on_inference(
+        &mut self,
+        input: Payload,
+        options: Options<WhisperFullParams>,
+    ) -> Result<String, String> {
+        self.handle_inference(input, options.0).await
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
 
     async fn handle_load_model(
         &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+        params: WhisperContextParams,
         seq_id: u64,
-    ) {
+    ) -> Result<(), String> {
         let engine = match self.engine.as_mut() {
             Some(e) => e,
             None => {
-                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
-                return;
+                return Err("engine not initialized".to_owned());
             }
         };
-
-        let params = match parse_context_payload(&input) {
-            Ok(c) => c,
-            Err(e) => {
-                let _ =
-                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
-                return;
-            }
-        };
+        let model_payload = Payload::typed(params.clone());
 
         // Model loading is CPU/I-O bound; use block_in_place on this thread.
         let result = tokio::task::block_in_place(|| engine.new_context(params.clone()));
 
         match result {
             Ok(()) => {
-                self.last_model_config = Some(input.clone());
-                let deployment = DeploymentSnapshot::with_model(seq_id, input);
+                self.last_model_config = Some(model_payload.clone());
+                let deployment = DeploymentSnapshot::with_model(seq_id, model_payload);
                 // Broadcast so peer workers also load the same model.
                 let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
                     sync: SyncMessage::Deployment(deployment),
                     sender_id: self.worker_id,
                 }));
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
+            Err(e) => Err(e.to_string()),
         }
     }
 
     // ── model.unload ──────────────────────────────────────────────────────────
 
-    async fn handle_unload_model(
-        &mut self,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-        seq_id: u64,
-    ) {
+    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), String> {
         match self.engine.as_mut() {
             Some(e) => {
                 e.unload();
@@ -166,11 +133,9 @@ impl WhisperWorker {
                     sync: SyncMessage::Generation { generation: seq_id },
                     sender_id: self.worker_id,
                 }));
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
-            None => {
-                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
-            }
+            None => Err("engine not initialized".to_owned()),
         }
     }
 
@@ -180,33 +145,28 @@ impl WhisperWorker {
         &mut self,
         input: Payload,
         params: WhisperFullParams,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
+    ) -> Result<String, String> {
         let engine = match self.engine.as_ref() {
             Some(e) => e,
             None => {
-                let _ = reply_tx.send(BackendReply::Error(
-                    "whisper backend not ready: model not loaded. Call model.load first".into(),
-                ));
-                return;
+                return Err(
+                    "whisper backend not ready: model not loaded. Call model.load first"
+                        .to_owned(),
+                );
             }
         };
 
         let samples = match input.to_f32_arc() {
             Ok(b) => b,
             Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(format!(
+                return Err(format!(
                     "invalid input for whisper inference: expected f32 PCM audio samples, got: {e}"
-                )));
-                return;
+                ));
             }
         };
 
         if samples.is_empty() {
-            let _ = reply_tx.send(BackendReply::Error(
-                "invalid input for whisper inference: audio samples are empty".into(),
-            ));
-            return;
+            return Err("invalid input for whisper inference: audio samples are empty".to_owned());
         }
 
         // Whisper inference is CPU/GPU-bound; use block_in_place so the engine
@@ -244,8 +204,7 @@ impl WhisperWorker {
         match result {
             Err(e) => {
                 tracing::error!(error = %e, "whisper inference failed");
-                let _ =
-                    reply_tx.send(BackendReply::Error(format!("whisper inference failed: {e}")));
+                Err(format!("whisper inference failed: {e}"))
             }
             Ok(entries) => {
                 tracing::debug!(segment_count = entries.len(), "whisper inference succeeded");
@@ -261,8 +220,7 @@ impl WhisperWorker {
                         ));
                     }
                 }
-                let _ =
-                    reply_tx.send(BackendReply::Value(Payload::Bytes(Arc::from(out.as_bytes()))));
+                Ok(out)
             }
         }
     }

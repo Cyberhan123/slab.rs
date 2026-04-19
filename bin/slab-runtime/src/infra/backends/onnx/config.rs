@@ -4,7 +4,7 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 /// A single named input tensor in the wire format.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct TensorInput {
     pub shape: Vec<i64>,
     pub dtype: String,
@@ -12,7 +12,7 @@ pub(crate) struct TensorInput {
 }
 
 /// Input payload for the `inference` operation.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(crate) struct OnnxInferenceInput {
     pub inputs: HashMap<String, TensorInput>,
 }

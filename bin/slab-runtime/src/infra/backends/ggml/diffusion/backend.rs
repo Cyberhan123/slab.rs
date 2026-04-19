@@ -14,14 +14,17 @@
 
 use std::time::Instant;
 
-use slab_diffusion::{ContextParams as DiffusionContextParams, ImgParams as DiffusionImgParams};
+use slab_diffusion::{
+    ContextParams as DiffusionContextParams, Image as DiffusionImage,
+    ImgParams as DiffusionImgParams,
+};
 use tokio::sync::broadcast;
 
 use crate::infra::backends::ggml::diffusion::adapter::GGMLDiffusionEngine;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
-    BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
-    SyncMessage, WorkerCommand,
+    BroadcastSeq, DeploymentSnapshot, Input, PeerWorkerCommand, RuntimeControlSignal,
+    SyncMessage, Typed, WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
 
@@ -64,55 +67,41 @@ impl DiffusionWorker {
     }
 
     #[on_event(LoadModel)]
-    async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest { input, broadcast_seq, reply_tx, .. } = req;
-        let seq_id = broadcast_seq.unwrap_or(0);
-        self.handle_load_model(input, reply_tx, seq_id).await;
+    async fn on_load_model(
+        &mut self,
+        config: Input<DiffusionContextParams>,
+        seq: BroadcastSeq,
+    ) -> Result<(), String> {
+        self.handle_load_model(config.0, seq.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, req: BackendRequest) {
-        let BackendRequest { broadcast_seq, reply_tx, .. } = req;
-        let seq_id = broadcast_seq.unwrap_or(0);
-        self.handle_unload_model(reply_tx, seq_id).await;
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), String> {
+        self.handle_unload_model(seq.0).await
     }
 
     #[on_event(InferenceImage)]
-    async fn on_inference_image(&mut self, req: BackendRequest) {
-        let BackendRequest { input, reply_tx, .. } = req;
-        self.handle_inference_image(input, reply_tx).await;
+    async fn on_inference_image(
+        &mut self,
+        image_params: Input<DiffusionImgParams>,
+    ) -> Result<Typed<Vec<DiffusionImage>>, String> {
+        self.handle_inference_image(image_params.0).await
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
 
     async fn handle_load_model(
         &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+        config: DiffusionContextParams,
         seq_id: u64,
-    ) {
+    ) -> Result<(), String> {
         let engine = match self.engine.as_mut() {
             Some(e) => e,
             None => {
-                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
-                return;
+                return Err("engine not initialized".to_owned());
             }
         };
-
-        let config: DiffusionContextParams = match input.to_typed() {
-            Ok(c) => c,
-            Err(e) => {
-                tracing::warn!(
-                    worker_id = self.worker_id,
-                    seq_id,
-                    error = %e,
-                    "diffusion model.load rejected: invalid typed config"
-                );
-                let _ =
-                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
-                return;
-            }
-        };
+        let config_payload = Payload::typed(config.clone());
 
         tracing::info!(
             worker_id = self.worker_id,
@@ -137,8 +126,8 @@ impl DiffusionWorker {
 
         match result {
             Ok(()) => {
-                self.last_model_config = Some(input.clone());
-                let deployment = DeploymentSnapshot::with_model(seq_id, input);
+                self.last_model_config = Some(config_payload.clone());
+                let deployment = DeploymentSnapshot::with_model(seq_id, config_payload);
                 // Broadcast so peer workers also load the same model.
                 let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
                     sync: SyncMessage::Deployment(deployment),
@@ -150,7 +139,7 @@ impl DiffusionWorker {
                     elapsed_ms = started_at.elapsed().as_millis(),
                     "diffusion model.load completed"
                 );
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
             Err(e) => {
                 tracing::error!(
@@ -160,18 +149,14 @@ impl DiffusionWorker {
                     error = %e,
                     "diffusion model.load failed"
                 );
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+                Err(e.to_string())
             }
         }
     }
 
     // ── model.unload ──────────────────────────────────────────────────────────
 
-    async fn handle_unload_model(
-        &mut self,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-        seq_id: u64,
-    ) {
+    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), String> {
         match self.engine.as_mut() {
             Some(e) => {
                 e.unload();
@@ -182,11 +167,9 @@ impl DiffusionWorker {
                     sync: SyncMessage::Generation { generation: seq_id },
                     sender_id: self.worker_id,
                 }));
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
-            None => {
-                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
-            }
+            None => Err("engine not initialized".to_owned()),
         }
     }
 
@@ -194,35 +177,20 @@ impl DiffusionWorker {
 
     async fn handle_inference_image(
         &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
+        image_params: DiffusionImgParams,
+    ) -> Result<Typed<Vec<DiffusionImage>>, String> {
         let engine = match self.engine.as_ref() {
             Some(e) => e,
             None => {
-                let _ = reply_tx.send(BackendReply::Error("engine not initialized".into()));
-                return;
-            }
-        };
-
-        let image_params: DiffusionImgParams = match input.to_typed() {
-            Ok(p) => p,
-            Err(e) => {
-                let _ = reply_tx
-                    .send(BackendReply::Error(format!("invalid inference.image params: {e}")));
-                return;
+                return Err("engine not initialized".to_owned());
             }
         };
 
         let result = engine.generate_image(image_params);
 
         match result {
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
-            Ok(images) => {
-                let _ = reply_tx.send(BackendReply::Value(Payload::typed(images)));
-            }
+            Err(e) => Err(e.to_string()),
+            Ok(images) => Ok(Typed(images)),
         }
     }
 

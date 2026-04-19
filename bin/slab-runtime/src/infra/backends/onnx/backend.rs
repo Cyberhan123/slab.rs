@@ -48,7 +48,7 @@ use crate::infra::backends::onnx::adapter::OnnxEngine;
 use crate::infra::backends::onnx::config::OnnxInferenceInput;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
-    BackendReply, BackendRequest, DeploymentSnapshot, PeerWorkerCommand, RuntimeControlSignal,
+    BroadcastSeq, DeploymentSnapshot, Input, PeerWorkerCommand, RuntimeControlSignal,
     SyncMessage, WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
@@ -117,43 +117,35 @@ impl OnnxWorker {
     // ── dispatch ──────────────────────────────────────────────────────────────
 
     #[on_event(LoadModel)]
-    async fn on_load_model(&mut self, req: BackendRequest) {
-        let BackendRequest { input, broadcast_seq, reply_tx, .. } = req;
-        let seq_id = broadcast_seq.unwrap_or(0);
-        self.handle_load_model(input, reply_tx, seq_id).await;
+    async fn on_load_model(
+        &mut self,
+        config: Input<OnnxLoadConfig>,
+        seq: BroadcastSeq,
+    ) -> Result<(), String> {
+        self.handle_load_model(config.0, seq.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, req: BackendRequest) {
-        let BackendRequest { broadcast_seq, reply_tx, .. } = req;
-        let seq_id = broadcast_seq.unwrap_or(0);
-        self.handle_unload_model(reply_tx, seq_id).await;
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), String> {
+        self.handle_unload_model(seq.0).await
     }
 
     #[on_event(Inference)]
-    async fn on_inference(&mut self, req: BackendRequest) {
-        let BackendRequest { input, reply_tx, .. } = req;
-        self.handle_inference(input, reply_tx).await;
+    async fn on_inference(
+        &mut self,
+        input: Input<OnnxInferenceInput>,
+    ) -> Result<serde_json::Value, String> {
+        self.handle_inference(input.0).await
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
 
     async fn handle_load_model(
         &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
+        config: OnnxLoadConfig,
         seq_id: u64,
-    ) {
-        let deployment = DeploymentSnapshot::with_model(seq_id, input.clone());
-        let config: OnnxLoadConfig = match input.to_typed() {
-            Ok(c) => c,
-            Err(e) => {
-                let _ =
-                    reply_tx.send(BackendReply::Error(format!("invalid model.load config: {e}")));
-                return;
-            }
-        };
-
+    ) -> Result<(), String> {
+        let deployment = DeploymentSnapshot::with_model(seq_id, Payload::typed(config.clone()));
         // Session creation is CPU / I/O-bound; run on the blocking thread pool.
         let result = tokio::task::block_in_place(|| self.engine.load_model(config.clone()));
 
@@ -166,21 +158,15 @@ impl OnnxWorker {
                     sync: SyncMessage::Deployment(deployment),
                     sender_id: self.worker_id,
                 }));
-                let _ = reply_tx.send(BackendReply::Ack);
+                Ok(())
             }
-            Err(e) => {
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
-            }
+            Err(e) => Err(e.to_string()),
         }
     }
 
     // ── model.unload ──────────────────────────────────────────────────────────
 
-    async fn handle_unload_model(
-        &mut self,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-        seq_id: u64,
-    ) {
+    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), String> {
         self.engine.unload();
         self.current_config = None;
         // Broadcast so peer workers also drop their sessions.
@@ -188,36 +174,23 @@ impl OnnxWorker {
             sync: SyncMessage::Generation { generation: seq_id },
             sender_id: self.worker_id,
         }));
-        let _ = reply_tx.send(BackendReply::Ack);
+        Ok(())
     }
 
     // ── inference ─────────────────────────────────────────────────────────────
 
     async fn handle_inference(
         &mut self,
-        input: Payload,
-        reply_tx: tokio::sync::oneshot::Sender<BackendReply>,
-    ) {
-        let inference_input: OnnxInferenceInput = match input.to_json() {
-            Ok(p) => p,
-            Err(e) => {
-                let _ =
-                    reply_tx.send(BackendReply::Error(format!("invalid inference payload: {e}")));
-                return;
-            }
-        };
-
+        input: OnnxInferenceInput,
+    ) -> Result<serde_json::Value, String> {
         // Inference is CPU-bound; run on the blocking thread pool.
-        let result = tokio::task::block_in_place(|| self.engine.inference(inference_input));
+        let result = tokio::task::block_in_place(|| self.engine.inference(input));
 
         match result {
-            Ok(json_output) => {
-                let payload = Payload::Json(json_output);
-                let _ = reply_tx.send(BackendReply::Value(payload));
-            }
+            Ok(json_output) => Ok(json_output),
             Err(e) => {
                 warn!(error = %e, "ONNX inference error");
-                let _ = reply_tx.send(BackendReply::Error(e.to_string()));
+                Err(e.to_string())
             }
         }
     }

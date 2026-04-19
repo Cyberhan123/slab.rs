@@ -10,8 +10,33 @@ impl Worker {
         Self
     }
 
+    #[on_event(LoadModel)]
+    async fn on_load_model(
+        &mut self,
+        _input: Input<String>,
+        _seq: BroadcastSeq,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+
     #[on_event(Inference)]
-    async fn on_inference(&mut self, _req: BackendRequest) {}
+    async fn on_inference(
+        &mut self,
+        _text: String,
+        _options: Options<String>,
+    ) -> Result<Json<String>, String> {
+        Ok(Json("ok".to_owned()))
+    }
+
+    #[on_event(UnloadModel)]
+    async fn on_unload_model(&mut self) -> Result<(), String> {
+        Ok(())
+    }
+
+    #[on_event(InferenceImage)]
+    async fn on_inference_image(&mut self, _input: Input<String>) -> Result<Typed<String>, String> {
+        Ok(Typed("typed".to_owned()))
+    }
 
     #[on_runtime_control(GlobalLoad)]
     async fn on_global_load(&mut self, _signal: RuntimeControlSignal) {}
