@@ -248,10 +248,6 @@ impl Orchestrator {
         stages: Vec<Stage>,
         initial_payload: Payload,
     ) -> Result<TaskId, CoreError> {
-        if stages.iter().any(|stage| matches!(stage, Stage::Gpu(_) | Stage::GpuStream(_))) {
-            self.resource_manager.ensure_inference_allowed().await?;
-        }
-
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         self.storage
             .submit_tx()

@@ -301,7 +301,7 @@ mod tests {
     use crate::internal::scheduler::backend::runner::{
         RuntimeWorkerHandler, shared_ingress, spawn_runtime_worker,
     };
-    use crate::internal::scheduler::types::Payload;
+    use crate::Payload;
 
     #[derive(Clone, Default)]
     struct Observed {
