@@ -45,6 +45,113 @@ pub(crate) struct LlamaDispatchOutput {
     pub metadata: TextGenerationMetadata,
 }
 
+const THINK_OPEN_MARKER: &str = "<think";
+const THINK_CLOSE_TAG: &str = "</think>";
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ParsedThinkingOutput {
+    content: String,
+    reasoning: String,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct ThinkingDelta {
+    content: String,
+    reasoning: String,
+}
+
+#[derive(Debug, Default)]
+struct ThinkingStreamState {
+    raw: String,
+    emitted_content_len: usize,
+    emitted_reasoning_len: usize,
+}
+
+fn trailing_partial_marker_len(raw: &str, marker: &str) -> usize {
+    let max = raw.len().min(marker.len().saturating_sub(1));
+    (1..=max).rev().find(|len| raw.ends_with(&marker[..*len])).unwrap_or(0)
+}
+
+fn normalize_thinking_content_prefix(prefix: &str) -> &str {
+    if prefix.trim().is_empty() { "" } else { prefix }
+}
+
+fn parse_thinking_output(raw: &str, complete: bool) -> ParsedThinkingOutput {
+    let Some(open_start) = raw.find(THINK_OPEN_MARKER) else {
+        if complete {
+            return ParsedThinkingOutput { content: raw.to_owned(), reasoning: String::new() };
+        }
+
+        let stable_end =
+            raw.len().saturating_sub(trailing_partial_marker_len(raw, THINK_OPEN_MARKER));
+        let stable_content = &raw[..stable_end];
+        return ParsedThinkingOutput {
+            content: if stable_content.trim().is_empty() {
+                String::new()
+            } else {
+                stable_content.to_owned()
+            },
+            reasoning: String::new(),
+        };
+    };
+
+    let content_prefix = normalize_thinking_content_prefix(&raw[..open_start]).to_owned();
+    let after_open_marker = &raw[open_start..];
+    let Some(open_end_rel) = after_open_marker.find('>') else {
+        return ParsedThinkingOutput {
+            content: if complete { raw.to_owned() } else { content_prefix },
+            reasoning: String::new(),
+        };
+    };
+
+    let reasoning_start = open_start + open_end_rel + 1;
+    let after_open = &raw[reasoning_start..];
+    if let Some(close_rel) = after_open.find(THINK_CLOSE_TAG) {
+        let close_start = reasoning_start + close_rel;
+        let close_end = close_start + THINK_CLOSE_TAG.len();
+        let mut content = content_prefix;
+        content.push_str(&raw[close_end..]);
+        return ParsedThinkingOutput {
+            content,
+            reasoning: raw[reasoning_start..close_start].to_owned(),
+        };
+    }
+
+    let stable_reasoning_end = if complete {
+        raw.len()
+    } else {
+        raw.len().saturating_sub(trailing_partial_marker_len(raw, THINK_CLOSE_TAG))
+    };
+    ParsedThinkingOutput {
+        content: content_prefix,
+        reasoning: raw[reasoning_start..stable_reasoning_end].to_owned(),
+    }
+}
+
+impl ThinkingStreamState {
+    fn ingest(&mut self, delta: &str) -> ThinkingDelta {
+        if delta.is_empty() {
+            return ThinkingDelta::default();
+        }
+        self.raw.push_str(delta);
+        self.emit(false)
+    }
+
+    fn finish(&mut self) -> ThinkingDelta {
+        self.emit(true)
+    }
+
+    fn emit(&mut self, complete: bool) -> ThinkingDelta {
+        let parsed = parse_thinking_output(&self.raw, complete);
+        let content = parsed.content.get(self.emitted_content_len..).unwrap_or_default().to_owned();
+        let reasoning =
+            parsed.reasoning.get(self.emitted_reasoning_len..).unwrap_or_default().to_owned();
+        self.emitted_content_len = parsed.content.len();
+        self.emitted_reasoning_len = parsed.reasoning.len();
+        ThinkingDelta { content, reasoning }
+    }
+}
+
 fn stop_info_to_metadata(stop: &LlamaStopInfo) -> TextGenerationMetadata {
     TextGenerationMetadata {
         stop: Some(TextStopMetadata {
@@ -567,7 +674,13 @@ impl GGMLLlamaEngine {
                 } else {
                     output.stop.as_ref().map(|stop| stop.finish_reason.clone())
                 };
-                let metadata = output.stop.as_ref().map(stop_info_to_metadata).unwrap_or_default();
+                let parsed = parse_thinking_output(&trimmed_text, true);
+                let mut metadata =
+                    output.stop.as_ref().map(stop_info_to_metadata).unwrap_or_default();
+                let reasoning = parsed.reasoning.trim();
+                if !reasoning.is_empty() {
+                    metadata.reasoning_content = Some(reasoning.to_owned());
+                }
                 if let Err(error) = self
                     .commit_managed_session(
                         prepared.key,
@@ -580,7 +693,7 @@ impl GGMLLlamaEngine {
                 {
                     warn!(error = %error, "failed to persist llama session snapshot after inference");
                 }
-                Ok(LlamaDispatchOutput { text: trimmed_text, usage, finish_reason, metadata })
+                Ok(LlamaDispatchOutput { text: parsed.content, usage, finish_reason, metadata })
             }
             Err(error) => {
                 self.drop_managed_session(prepared.key, prepared.sid).await;
@@ -648,6 +761,7 @@ impl GGMLLlamaEngine {
             let mut stop_matched = false;
             let mut terminal_finish_reason: Option<String> = None;
             let mut terminal_metadata = TextGenerationMetadata::default();
+            let mut thinking_state = ThinkingStreamState::default();
             // Tracks how many bytes of `generated` have been forwarded downstream.
             // When a stop sequence is partially accumulated we hold back the
             // uncertain tail so that we never forward text that may need to be
@@ -696,7 +810,13 @@ impl GGMLLlamaEngine {
                                         if safe_end > forwarded_len {
                                             let forward_text = generated[forwarded_len..safe_end].to_owned();
                                             forwarded_len = safe_end;
-                                            if stream_tx.send(BaseStreamChunk::Token(forward_text)).await.is_err() {
+                                            if forward_thinking_delta(
+                                                &stream_tx,
+                                                thinking_state.ingest(&forward_text),
+                                            )
+                                            .await
+                                            .is_err()
+                                            {
                                                 forward_failed = true;
                                             }
                                         }
@@ -720,7 +840,13 @@ impl GGMLLlamaEngine {
                                     if safe_end > forwarded_len {
                                         let forward_text = generated[forwarded_len..safe_end].to_owned();
                                         forwarded_len = safe_end;
-                                        if stream_tx.send(BaseStreamChunk::Token(forward_text)).await.is_err() {
+                                        if forward_thinking_delta(
+                                            &stream_tx,
+                                            thinking_state.ingest(&forward_text),
+                                        )
+                                        .await
+                                        .is_err()
+                                        {
                                             forward_failed = true;
                                             if !completed
                                                 && !stream_error
@@ -737,7 +863,10 @@ impl GGMLLlamaEngine {
                                     }
                                 } else {
                                     // No stop sequences — forward directly.
-                                    if stream_tx.send(BaseStreamChunk::Token(text)).await.is_err() {
+                                    if forward_thinking_delta(&stream_tx, thinking_state.ingest(&text))
+                                        .await
+                                        .is_err()
+                                    {
                                         forward_failed = true;
                                         if !completed
                                             && !stream_error
@@ -778,12 +907,18 @@ impl GGMLLlamaEngine {
             if !stop_matched && !forward_failed && !stream_error && forwarded_len < generated.len()
             {
                 let tail = generated[forwarded_len..].to_owned();
-                if stream_tx.send(BaseStreamChunk::Token(tail)).await.is_err() {
+                if forward_thinking_delta(&stream_tx, thinking_state.ingest(&tail)).await.is_err() {
                     forward_failed = true;
                 }
             }
 
             let effectively_completed = completed || stop_matched;
+
+            if effectively_completed && !forward_failed && !stream_error {
+                if forward_thinking_delta(&stream_tx, thinking_state.finish()).await.is_err() {
+                    forward_failed = true;
+                }
+            }
 
             if effectively_completed && !forward_failed && !stream_error && !cancelled {
                 let finish_reason = terminal_finish_reason
@@ -1146,9 +1281,36 @@ impl GGMLLlamaEngine {
     }
 }
 
+async fn forward_thinking_delta(
+    stream_tx: &mpsc::Sender<BaseStreamChunk>,
+    delta: ThinkingDelta,
+) -> Result<(), mpsc::error::SendError<BaseStreamChunk>> {
+    if !delta.reasoning.is_empty() {
+        stream_tx.send(BaseStreamChunk::Json(reasoning_event_payload(delta.reasoning))).await?;
+    }
+    if !delta.content.is_empty() {
+        stream_tx.send(BaseStreamChunk::Token(delta.content)).await?;
+    }
+    Ok(())
+}
+
+fn reasoning_event_payload(reasoning: String) -> serde_json::Value {
+    serde_json::to_value(TextGenerationStreamEvent {
+        metadata: Some(TextGenerationMetadata {
+            reasoning_content: Some(reasoning),
+            ..Default::default()
+        }),
+        ..Default::default()
+    })
+    .expect("llama stream reasoning event should serialize")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{SessionBinding, SessionReusePlan, plan_session_reuse};
+    use super::{
+        ParsedThinkingOutput, SessionBinding, SessionReusePlan, ThinkingDelta, ThinkingStreamState,
+        parse_thinking_output, plan_session_reuse,
+    };
     use slab_llama::LlamaSessionSnapshot;
     use std::sync::Arc;
 
@@ -1225,6 +1387,56 @@ mod tests {
                 panic!("expected fresh session when grammar changes")
             }
         }
+    }
+
+    #[test]
+    fn parse_thinking_output_extracts_reasoning_block() {
+        let parsed = parse_thinking_output("<think>step one</think>\n\nfinal answer", true);
+        assert_eq!(
+            parsed,
+            ParsedThinkingOutput {
+                content: "\n\nfinal answer".to_owned(),
+                reasoning: "step one".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_thinking_output_ignores_whitespace_prefix_before_think() {
+        let parsed = parse_thinking_output("\n\n<think>step one</think>\n\nfinal answer", true);
+        assert_eq!(
+            parsed,
+            ParsedThinkingOutput {
+                content: "\n\nfinal answer".to_owned(),
+                reasoning: "step one".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_thinking_output_holds_partial_open_marker_while_streaming() {
+        let parsed = parse_thinking_output("answer<th", false);
+        assert_eq!(
+            parsed,
+            ParsedThinkingOutput { content: "answer".to_owned(), reasoning: String::new() }
+        );
+    }
+
+    #[test]
+    fn thinking_stream_state_routes_reasoning_and_content() {
+        let mut state = ThinkingStreamState::default();
+
+        assert_eq!(state.ingest("\n\n<th"), ThinkingDelta::default());
+        assert_eq!(
+            state.ingest("ink>chain"),
+            ThinkingDelta { reasoning: "chain".to_owned(), content: String::new() }
+        );
+        assert_eq!(state.ingest("</th"), ThinkingDelta::default());
+        assert_eq!(
+            state.ingest("ink>\n\nanswer"),
+            ThinkingDelta { reasoning: String::new(), content: "\n\nanswer".to_owned() }
+        );
+        assert_eq!(state.finish(), ThinkingDelta::default());
     }
 }
 

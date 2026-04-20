@@ -3,8 +3,8 @@ use slab_proto::slab::ipc::v1 as pb;
 use super::{
     CandleChatRequest, CandleLlamaLoadRequest, CandleWhisperLoadRequest,
     CandleWhisperTranscribeRequest, CandleWhisperTranscribeResponse, LlamaChatResponse,
-    LlamaChatStreamChunk, ProtoConversionError, decode_optional_path, encode_usage,
-    encode_whisper_transcription,
+    LlamaChatStreamChunk, ProtoConversionError, decode_optional_path, encode_chat_metadata,
+    encode_usage, encode_whisper_transcription,
 };
 
 pub(crate) fn decode_candle_llama_load_request(
@@ -34,6 +34,7 @@ pub(crate) fn encode_candle_chat_response(response: &LlamaChatResponse) -> pb::C
         tokens_used: response.tokens_used,
         usage: response.usage.as_ref().map(encode_usage),
         reasoning_content: response.reasoning_content.clone(),
+        metadata: response.metadata.as_ref().map(encode_chat_metadata),
     }
 }
 
@@ -46,6 +47,7 @@ pub(crate) fn encode_candle_chat_stream_chunk(
         finish_reason: chunk.finish_reason.clone(),
         usage: chunk.usage.as_ref().map(encode_usage),
         reasoning_content: chunk.reasoning_content.clone(),
+        metadata: chunk.metadata.as_ref().map(encode_chat_metadata),
     }
 }
 

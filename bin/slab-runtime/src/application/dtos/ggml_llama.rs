@@ -2,7 +2,8 @@ use slab_proto::slab::ipc::v1 as pb;
 
 use super::{
     GgmlLlamaChatRequest, GgmlLlamaLoadRequest, LlamaChatResponse, LlamaChatStreamChunk,
-    ProtoConversionError, decode_optional_path, decode_optional_string_list, encode_usage,
+    ProtoConversionError, decode_optional_path, decode_optional_string_list, encode_chat_metadata,
+    encode_usage,
 };
 
 pub(crate) fn decode_ggml_llama_load_request(
@@ -47,6 +48,7 @@ pub(crate) fn encode_ggml_llama_chat_response(
         tokens_used: response.tokens_used,
         usage: response.usage.as_ref().map(encode_usage),
         reasoning_content: response.reasoning_content.clone(),
+        metadata: response.metadata.as_ref().map(encode_chat_metadata),
     }
 }
 
@@ -59,5 +61,6 @@ pub(crate) fn encode_ggml_llama_chat_stream_chunk(
         finish_reason: chunk.finish_reason.clone(),
         usage: chunk.usage.as_ref().map(encode_usage),
         reasoning_content: chunk.reasoning_content.clone(),
+        metadata: chunk.metadata.as_ref().map(encode_chat_metadata),
     }
 }

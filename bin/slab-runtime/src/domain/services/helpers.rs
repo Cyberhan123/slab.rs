@@ -9,8 +9,8 @@ use slab_runtime_core::backend::StreamChunk;
 
 use crate::application::dtos as dto;
 use crate::domain::models::{
-    GeneratedImage, OnnxInferenceRequest, OnnxTensor, TextGenerationResponse,
-    TextGenerationStreamEvent,
+    GeneratedImage, OnnxInferenceRequest, OnnxTensor, TextGenerationMetadata,
+    TextGenerationResponse, TextGenerationStreamEvent,
 };
 use crate::domain::runtime::{CoreError, CpuStage};
 
@@ -41,6 +41,49 @@ pub(crate) fn required_string(
     Ok(value)
 }
 
+fn dto_chat_metadata_from_contract(metadata: &TextGenerationMetadata) -> Option<dto::ChatMetadata> {
+    let extra_json =
+        if metadata.extra.is_empty() { None } else { serde_json::to_vec(&metadata.extra).ok() };
+    dto::optional_chat_metadata(dto::ChatMetadata {
+        reasoning_content: metadata.reasoning_content.clone(),
+        stop: metadata.stop.as_ref().map(|stop| dto::ChatStopMetadata {
+            token_id: stop.token_id,
+            token_text: stop.token_text.clone(),
+            token_kind: stop.token_kind.clone(),
+        }),
+        extra_json,
+    })
+}
+
+fn dto_chat_metadata_from_json(value: &Value) -> Option<dto::ChatMetadata> {
+    let metadata = value.get("metadata").and_then(Value::as_object);
+    let reasoning_content =
+        value.get("reasoning_content").and_then(Value::as_str).map(ToOwned::to_owned).or_else(
+            || {
+                metadata
+                    .and_then(|metadata| metadata.get("reasoning_content"))
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+            },
+        );
+    let stop =
+        metadata.and_then(|metadata| metadata.get("stop")).and_then(Value::as_object).map(|stop| {
+            dto::ChatStopMetadata {
+                token_id: stop
+                    .get("token_id")
+                    .and_then(Value::as_i64)
+                    .and_then(|value| i32::try_from(value).ok()),
+                token_text: stop.get("token_text").and_then(Value::as_str).map(ToOwned::to_owned),
+                token_kind: stop.get("token_kind").and_then(Value::as_str).map(ToOwned::to_owned),
+            }
+        });
+    let extra_json = metadata
+        .and_then(|metadata| metadata.get("extra"))
+        .and_then(|extra| serde_json::to_vec(extra).ok());
+
+    dto::optional_chat_metadata(dto::ChatMetadata { reasoning_content, stop, extra_json })
+}
+
 pub(crate) fn decode_text_response(
     payload: Payload,
     task_kind: &'static str,
@@ -52,12 +95,16 @@ pub(crate) fn decode_text_response(
                     task_kind: task_kind.to_owned(),
                     message: format!("invalid typed text response: {error}"),
                 })?;
+            let metadata = dto_chat_metadata_from_contract(&response.metadata);
             Ok(dto::LlamaChatResponse {
                 text: Some(response.text),
                 finish_reason: response.finish_reason,
                 tokens_used: response.usage.as_ref().map(|usage| usage.completion_tokens),
                 usage: response.usage.as_ref().map(decode_usage_contract),
-                reasoning_content: response.metadata.reasoning_content,
+                reasoning_content: metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.reasoning_content.clone()),
+                metadata,
             })
         }
         Payload::Bytes(bytes) => Ok(dto::LlamaChatResponse {
@@ -67,30 +114,25 @@ pub(crate) fn decode_text_response(
         Payload::Text(text) => {
             Ok(dto::LlamaChatResponse { text: Some(text.to_string()), ..Default::default() })
         }
-        Payload::Json(value) => Ok(dto::LlamaChatResponse {
-            text: value.get("text").and_then(Value::as_str).map(ToOwned::to_owned),
-            finish_reason: value
-                .get("finish_reason")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned),
-            tokens_used: value
-                .get("tokens_used")
-                .and_then(Value::as_u64)
-                .and_then(|value| u32::try_from(value).ok()),
-            usage: value.get("usage").map(decode_usage_value),
-            reasoning_content: value
-                .get("reasoning_content")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-                .or_else(|| {
-                    value
-                        .get("metadata")
-                        .and_then(Value::as_object)
-                        .and_then(|metadata| metadata.get("reasoning_content"))
-                        .and_then(Value::as_str)
-                        .map(ToOwned::to_owned)
-                }),
-        }),
+        Payload::Json(value) => {
+            let metadata = dto_chat_metadata_from_json(&value);
+            Ok(dto::LlamaChatResponse {
+                text: value.get("text").and_then(Value::as_str).map(ToOwned::to_owned),
+                finish_reason: value
+                    .get("finish_reason")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+                tokens_used: value
+                    .get("tokens_used")
+                    .and_then(Value::as_u64)
+                    .and_then(|value| u32::try_from(value).ok()),
+                usage: value.get("usage").map(decode_usage_value),
+                reasoning_content: metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.reasoning_content.clone()),
+                metadata,
+            })
+        }
         other => Err(CoreError::ResultDecodeFailed {
             task_kind: task_kind.to_owned(),
             message: format!("unsupported payload for text response: {other:?}"),
@@ -110,17 +152,20 @@ pub(crate) fn decode_text_stream_chunk(
         })),
         StreamChunk::Json(value) => {
             if let Ok(event) = serde_json::from_value::<TextGenerationStreamEvent>(value.clone()) {
+                let metadata = event.metadata.as_ref().and_then(dto_chat_metadata_from_contract);
                 return Ok(Some(dto::LlamaChatStreamChunk {
                     delta: event.delta,
                     done: event.done,
                     finish_reason: event.finish_reason,
                     usage: event.usage.as_ref().map(decode_usage_contract),
-                    reasoning_content: event
-                        .metadata
-                        .and_then(|metadata| metadata.reasoning_content),
+                    reasoning_content: metadata
+                        .as_ref()
+                        .and_then(|metadata| metadata.reasoning_content.clone()),
+                    metadata,
                 }));
             }
 
+            let metadata = dto_chat_metadata_from_json(&value);
             Ok(Some(dto::LlamaChatStreamChunk {
                 delta: value.get("delta").and_then(Value::as_str).map(ToOwned::to_owned),
                 done: value.get("done").and_then(Value::as_bool),
@@ -129,18 +174,10 @@ pub(crate) fn decode_text_stream_chunk(
                     .and_then(Value::as_str)
                     .map(ToOwned::to_owned),
                 usage: value.get("usage").map(decode_usage_value),
-                reasoning_content: value
-                    .get("reasoning_content")
-                    .and_then(Value::as_str)
-                    .map(ToOwned::to_owned)
-                    .or_else(|| {
-                        value
-                            .get("metadata")
-                            .and_then(Value::as_object)
-                            .and_then(|metadata| metadata.get("reasoning_content"))
-                            .and_then(Value::as_str)
-                            .map(ToOwned::to_owned)
-                    }),
+                reasoning_content: metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.reasoning_content.clone()),
+                metadata,
             }))
         }
         StreamChunk::Done => Ok(None),
