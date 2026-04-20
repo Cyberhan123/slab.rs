@@ -19,28 +19,20 @@ use crate::domain::models::CandleWhisperLoadConfig;
 use crate::infra::backends::candle::whisper::adapter::CandleWhisperEngine;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
-use slab_runtime_core::backend::{
-    BroadcastSeq, ControlOpId, DeploymentSnapshot, Input, PeerWorkerCommand, SyncMessage,
-    WorkerCommand,
-};
+use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, PeerControlBus, WorkerCommand};
 use slab_runtime_macros::backend_handler;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
 
 pub(crate) struct CandleWhisperWorker {
     engine: Option<CandleWhisperEngine>,
-    bc_tx: broadcast::Sender<WorkerCommand>,
-    worker_id: usize,
+    peer_bus: PeerControlBus,
 }
 
-#[backend_handler]
+#[backend_handler(peer_bus = peer_bus)]
 impl CandleWhisperWorker {
-    pub(crate) fn new(
-        engine: Option<CandleWhisperEngine>,
-        bc_tx: broadcast::Sender<WorkerCommand>,
-        worker_id: usize,
-    ) -> Self {
-        Self { engine, bc_tx, worker_id }
+    pub(crate) fn new(engine: Option<CandleWhisperEngine>, peer_bus: PeerControlBus) -> Self {
+        Self { engine, peer_bus }
     }
 
     #[on_event(LoadModel)]
@@ -48,18 +40,18 @@ impl CandleWhisperWorker {
         &mut self,
         config: Input<CandleWhisperLoadConfig>,
         seq: BroadcastSeq,
-    ) -> Result<(), String> {
-        self.handle_load_model(config.0, seq.0).await
+    ) -> Result<(), anyhow::Error> {
+        self.handle_load_model(config.0, seq.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), String> {
-        self.handle_unload_model(seq.0).await
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), anyhow::Error> {
+        self.handle_unload_model(seq.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(Inference)]
-    async fn on_inference(&mut self, input: Payload) -> Result<String, String> {
-        self.handle_inference(input).await
+    async fn on_inference(&mut self, input: Payload) -> Result<String, anyhow::Error> {
+        self.handle_inference(input).await.map_err(anyhow::Error::msg)
     }
 
     // ── Runtime / peer control ────────────────────────────────────────────────
@@ -68,7 +60,7 @@ impl CandleWhisperWorker {
     async fn on_peer_load_model(
         &mut self,
         config: Input<CandleWhisperLoadConfig>,
-    ) -> Result<(), String> {
+    ) -> Result<(), anyhow::Error> {
         let config = config.0;
         let model_path = config.model_path;
         let tokenizer_path = config.tokenizer_path;
@@ -91,7 +83,7 @@ impl CandleWhisperWorker {
     }
 
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) -> Result<(), String> {
+    async fn on_peer_unload(&mut self) -> Result<(), anyhow::Error> {
         if let Some(e) = self.engine.as_ref() {
             e.unload();
         }
@@ -100,7 +92,7 @@ impl CandleWhisperWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
         tracing::debug!(op_id = op_id.0, "candle.whisper runtime control pre-cleanup");
         if let Some(e) = self.engine.as_ref() {
             e.unload();
@@ -109,7 +101,7 @@ impl CandleWhisperWorker {
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged(&mut self) -> Result<(), String> {
+    async fn on_control_lagged(&mut self) -> Result<(), anyhow::Error> {
         if let Some(e) = self.engine.as_ref() {
             e.unload();
         }
@@ -123,7 +115,7 @@ impl CandleWhisperWorker {
         config: CandleWhisperLoadConfig,
         seq_id: u64,
     ) -> Result<(), String> {
-        let deployment = DeploymentSnapshot::with_model(seq_id, Payload::typed(config.clone()));
+        let model_payload = Payload::typed(config.clone());
         let engine = self.engine.get_or_insert_with(CandleWhisperEngine::new);
         let tokenizer_path = config.tokenizer_path;
         let model_path = config.model_path;
@@ -135,10 +127,7 @@ impl CandleWhisperWorker {
 
         match result {
             Ok(()) => {
-                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                    sync: SyncMessage::Deployment(deployment),
-                    sender_id: self.worker_id,
-                }));
+                self.emit_peer_load_model_deployment_payload(seq_id, model_payload);
                 Ok(())
             }
             Err(e) => Err(e.to_string()),
@@ -149,10 +138,7 @@ impl CandleWhisperWorker {
         match self.engine.as_ref() {
             Some(engine) => {
                 engine.unload();
-                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
-                    sync: SyncMessage::Generation { generation: seq_id },
-                    sender_id: self.worker_id,
-                }));
+                self.emit_peer_unload_generation(seq_id);
                 Ok(())
             }
             None => Err("model not loaded".to_owned()),
@@ -173,9 +159,7 @@ impl CandleWhisperWorker {
         let samples = match input.to_f32_arc() {
             Ok(s) => s,
             Err(e) => {
-                return Err(format!(
-                    "invalid input: expected f32 PCM audio samples, got: {e}"
-                ));
+                return Err(format!("invalid input: expected f32 PCM audio samples, got: {e}"));
             }
         };
 
@@ -200,8 +184,8 @@ pub fn spawn_backend(
     control_tx: broadcast::Sender<WorkerCommand>,
     count: usize,
 ) {
-    spawn_workers(shared_ingress_rx, control_tx, count.max(1), |worker_id, bc_tx| {
-        CandleWhisperWorker::new(Some(CandleWhisperEngine::new()), bc_tx, worker_id)
+    spawn_workers(shared_ingress_rx, control_tx, count.max(1), |peer_bus| {
+        CandleWhisperWorker::new(Some(CandleWhisperEngine::new()), peer_bus)
     });
 }
 
@@ -212,12 +196,14 @@ mod tests {
     use super::CandleWhisperWorker;
     use crate::domain::models::CandleWhisperLoadConfig;
     use slab_runtime_core::Payload;
-    use slab_runtime_core::backend::{ControlOpId, DeploymentSnapshot, WorkerCommand};
+    use slab_runtime_core::backend::{
+        ControlOpId, DeploymentSnapshot, PeerControlBus, WorkerCommand,
+    };
     use tokio::sync::broadcast;
 
     fn make_worker() -> CandleWhisperWorker {
         let (bc_tx, _bc_rx) = broadcast::channel::<WorkerCommand>(8);
-        CandleWhisperWorker::new(None, bc_tx, 0)
+        CandleWhisperWorker::new(None, PeerControlBus::new(bc_tx, 0))
     }
 
     #[test]

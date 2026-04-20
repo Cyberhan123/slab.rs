@@ -6,7 +6,8 @@ use tokio::sync::broadcast;
 
 use crate::internal::scheduler::backend::protocol::BackendReply;
 use crate::internal::scheduler::backend::protocol::{
-    BackendRequest, PeerWorkerCommand, RequestRoute, RuntimeControlSignal, WorkerCommand,
+    BackendRequest, PeerControlBus, PeerWorkerCommand, RequestRoute, RuntimeControlSignal,
+    WorkerCommand,
 };
 
 /// Shared ingress receiver consumed competitively by multiple worker runners.
@@ -320,11 +321,12 @@ pub fn spawn_workers<H, F>(
     mut make_handler: F,
 ) where
     H: RuntimeWorkerHandler,
-    F: FnMut(usize, broadcast::Sender<WorkerCommand>) -> H,
+    F: FnMut(PeerControlBus) -> H,
 {
     let worker_count = worker_count.max(1);
     for worker_id in 0..worker_count {
-        let handler = make_handler(worker_id, control_tx.clone());
+        let peer_bus = PeerControlBus::new(control_tx.clone(), worker_id);
+        let handler = make_handler(peer_bus);
         spawn_runtime_worker(shared_ingress.clone(), control_tx.subscribe(), worker_id, handler);
     }
 }
@@ -337,11 +339,12 @@ pub fn spawn_dedicated_workers<H, F>(
     mut make_handler: F,
 ) where
     H: RuntimeWorkerHandler,
-    F: FnMut(usize, broadcast::Sender<WorkerCommand>) -> H,
+    F: FnMut(PeerControlBus) -> H,
 {
     let worker_count = worker_count.max(1);
     for worker_id in 0..worker_count {
-        let handler = make_handler(worker_id, control_tx.clone());
+        let peer_bus = PeerControlBus::new(control_tx.clone(), worker_id);
+        let handler = make_handler(peer_bus);
         spawn_dedicated_runtime_worker(
             shared_ingress.clone(),
             control_tx.clone(),

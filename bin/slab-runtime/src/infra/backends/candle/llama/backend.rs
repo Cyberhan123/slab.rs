@@ -48,13 +48,16 @@ impl CandleLlamaWorker {
     // ── Event handlers ────────────────────────────────────────────────────────
 
     #[on_event(LoadModel)]
-    async fn on_load_model(&mut self, config: Input<CandleLlamaLoadConfig>) -> Result<(), String> {
-        self.handle_load_model(config.0).await
+    async fn on_load_model(
+        &mut self,
+        config: Input<CandleLlamaLoadConfig>,
+    ) -> Result<(), anyhow::Error> {
+        self.handle_load_model(config.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self) -> Result<(), String> {
-        self.handle_unload_model().await
+    async fn on_unload_model(&mut self) -> Result<(), anyhow::Error> {
+        self.handle_unload_model().await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(Inference)]
@@ -62,11 +65,11 @@ impl CandleLlamaWorker {
         &mut self,
         prompt: String,
         options: Options<TextGenerationOpOptions>,
-    ) -> Result<String, String> {
+    ) -> Result<String, anyhow::Error> {
         let max_tokens =
             options.0.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
         let session_key = options.0.session_key;
-        self.handle_inference(prompt, max_tokens, session_key).await
+        self.handle_inference(prompt, max_tokens, session_key).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(InferenceStream)]
@@ -74,11 +77,13 @@ impl CandleLlamaWorker {
         &mut self,
         prompt: String,
         options: Options<TextGenerationOpOptions>,
-    ) -> Result<StreamHandle, String> {
+    ) -> Result<StreamHandle, anyhow::Error> {
         let max_tokens =
             options.0.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
         let session_key = options.0.session_key;
-        self.handle_inference_stream(prompt, max_tokens, session_key).await
+        self.handle_inference_stream(prompt, max_tokens, session_key)
+            .await
+            .map_err(anyhow::Error::msg)
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -92,24 +97,21 @@ impl CandleLlamaWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
         tracing::debug!(op_id = op_id.0, "candle.llama runtime control pre-cleanup");
         self.cleanup_runtime_state();
         Ok(())
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged_cleanup(&mut self) -> Result<(), String> {
+    async fn on_control_lagged_cleanup(&mut self) -> Result<(), anyhow::Error> {
         self.cleanup_runtime_state();
         Ok(())
     }
 
     // ── Handler helpers ───────────────────────────────────────────────────────
 
-    async fn handle_load_model(
-        &mut self,
-        config: CandleLlamaLoadConfig,
-    ) -> Result<(), String> {
+    async fn handle_load_model(&mut self, config: CandleLlamaLoadConfig) -> Result<(), String> {
         let engine = Arc::new(CandleLlamaEngine::new(config.seed));
 
         let tokenizer_path = config.tokenizer_path;
@@ -283,10 +285,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_global_load_runs_pre_cleanup() {
         let mut worker = CandleLlamaWorker::new(None);
-        worker
-            .apply_runtime_control(ControlOpId(2))
-            .await
-            .expect("control cleanup should succeed");
+        worker.apply_runtime_control(ControlOpId(2)).await.expect("control cleanup should succeed");
         // Engine stays None (no model was actually loaded).
         assert!(worker.engine.is_none());
     }

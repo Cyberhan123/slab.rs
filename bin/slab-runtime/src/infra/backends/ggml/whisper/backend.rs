@@ -13,14 +13,9 @@
 //! ### `model.load` input payload
 //! Expects typed [`slab_whisper::ContextParams`] payloads inside `slab-core`.
 
-use tokio::sync::broadcast;
-
 use crate::infra::backends::ggml::whisper::adapter::GGMLWhisperEngine;
 use slab_runtime_core::Payload;
-use slab_runtime_core::backend::{
-    BroadcastSeq, ControlOpId, DeploymentSnapshot, Input, Options, PeerWorkerCommand, SyncMessage,
-    WorkerCommand,
-};
+use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, Options, PeerControlBus};
 use slab_runtime_macros::backend_handler;
 use slab_whisper::{ContextParams as WhisperContextParams, FullParams as WhisperFullParams};
 
@@ -42,22 +37,15 @@ pub struct WhisperWorker {
     /// - `Some(e)` where `e.ctx` is None → engine loaded, no model.
     /// - `Some(e)` where `e.ctx` is Some → engine + model loaded.
     engine: Option<GGMLWhisperEngine>,
-    /// Broadcast sender shared among all workers so that any worker can
-    /// propagate state-change commands (e.g. `Unload`) to all peers.
-    bc_tx: broadcast::Sender<WorkerCommand>,
-    /// Stable index used to populate `sender_id` when broadcasting.
-    worker_id: usize,
+    /// Peer synchronization emitter shared among workers.
+    peer_bus: PeerControlBus,
     last_model_config: Option<Payload>,
 }
 
-#[backend_handler]
+#[backend_handler(peer_bus = peer_bus)]
 impl WhisperWorker {
-    pub fn new(
-        engine: Option<GGMLWhisperEngine>,
-        bc_tx: broadcast::Sender<WorkerCommand>,
-        worker_id: usize,
-    ) -> Self {
-        Self { engine, bc_tx, worker_id, last_model_config: None }
+    pub fn new(engine: Option<GGMLWhisperEngine>, peer_bus: PeerControlBus) -> Self {
+        Self { engine, peer_bus, last_model_config: None }
     }
 
     #[on_event(LoadModel)]
@@ -65,13 +53,13 @@ impl WhisperWorker {
         &mut self,
         params: Input<WhisperContextParams>,
         seq: BroadcastSeq,
-    ) -> Result<(), String> {
-        self.handle_load_model(params.0, seq.0).await
+    ) -> Result<(), anyhow::Error> {
+        self.handle_load_model(params.0, seq.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), String> {
-        self.handle_unload_model(seq.0).await
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), anyhow::Error> {
+        self.handle_unload_model(seq.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(Inference)]
@@ -79,8 +67,8 @@ impl WhisperWorker {
         &mut self,
         input: Payload,
         options: Options<WhisperFullParams>,
-    ) -> Result<String, String> {
-        self.handle_inference(input, options.0).await
+    ) -> Result<String, anyhow::Error> {
+        self.handle_inference(input, options.0).await.map_err(anyhow::Error::msg)
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
@@ -104,12 +92,8 @@ impl WhisperWorker {
         match result {
             Ok(()) => {
                 self.last_model_config = Some(model_payload.clone());
-                let deployment = DeploymentSnapshot::with_model(seq_id, model_payload);
                 // Broadcast so peer workers also load the same model.
-                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                    sync: SyncMessage::Deployment(deployment),
-                    sender_id: self.worker_id,
-                }));
+                self.emit_peer_load_model_deployment_payload(seq_id, model_payload);
                 Ok(())
             }
             Err(e) => Err(e.to_string()),
@@ -124,11 +108,7 @@ impl WhisperWorker {
                 e.unload();
                 self.last_model_config = None;
                 // Broadcast so every peer worker also drops its context.
-                // Ignore errors: no receivers simply means no other workers.
-                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
-                    sync: SyncMessage::Generation { generation: seq_id },
-                    sender_id: self.worker_id,
-                }));
+                self.emit_peer_unload_generation(seq_id);
                 Ok(())
             }
             None => Err("engine not initialized".to_owned()),
@@ -146,8 +126,7 @@ impl WhisperWorker {
             Some(e) => e,
             None => {
                 return Err(
-                    "whisper backend not ready: model not loaded. Call model.load first"
-                        .to_owned(),
+                    "whisper backend not ready: model not loaded. Call model.load first".to_owned()
                 );
             }
         };
@@ -225,7 +204,7 @@ impl WhisperWorker {
     async fn on_peer_load_model(
         &mut self,
         params: Input<WhisperContextParams>,
-    ) -> Result<(), String> {
+    ) -> Result<(), anyhow::Error> {
         let params = params.0;
         let model_path =
             params.model_path.clone().map(|path| path.display().to_string()).unwrap_or_default();
@@ -246,7 +225,7 @@ impl WhisperWorker {
     }
 
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) -> Result<(), String> {
+    async fn on_peer_unload(&mut self) -> Result<(), anyhow::Error> {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
@@ -256,7 +235,7 @@ impl WhisperWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
         tracing::debug!(op_id = op_id.0, "whisper runtime control pre-cleanup");
         if let Some(engine) = self.engine.as_mut() {
             engine.unload();
@@ -266,7 +245,7 @@ impl WhisperWorker {
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged(&mut self) -> Result<(), String> {
+    async fn on_control_lagged(&mut self) -> Result<(), anyhow::Error> {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
@@ -280,6 +259,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use slab_runtime_core::backend::DeploymentSnapshot;
 
     #[test]
     fn deployment_snapshot_reads_typed_whisper_model_config() {

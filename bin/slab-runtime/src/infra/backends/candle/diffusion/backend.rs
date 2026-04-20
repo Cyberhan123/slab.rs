@@ -22,8 +22,7 @@ use crate::infra::backends::candle::diffusion::adapter::{CandleDiffusionEngine, 
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
-    BroadcastSeq, ControlOpId, DeploymentSnapshot, Input, PeerWorkerCommand,
-    SyncMessage, Typed, WorkerCommand,
+    BroadcastSeq, ControlOpId, Input, PeerControlBus, Typed, WorkerCommand,
 };
 use slab_runtime_macros::backend_handler;
 
@@ -95,18 +94,13 @@ fn decode_png_to_diffusion_image(png_bytes: Vec<u8>) -> Result<DiffusionImage, S
 
 pub(crate) struct CandleDiffusionWorker {
     engine: Option<CandleDiffusionEngine>,
-    bc_tx: broadcast::Sender<WorkerCommand>,
-    worker_id: usize,
+    peer_bus: PeerControlBus,
 }
 
-#[backend_handler]
+#[backend_handler(peer_bus = peer_bus)]
 impl CandleDiffusionWorker {
-    pub(crate) fn new(
-        engine: Option<CandleDiffusionEngine>,
-        bc_tx: broadcast::Sender<WorkerCommand>,
-        worker_id: usize,
-    ) -> Self {
-        Self { engine, bc_tx, worker_id }
+    pub(crate) fn new(engine: Option<CandleDiffusionEngine>, peer_bus: PeerControlBus) -> Self {
+        Self { engine, peer_bus }
     }
 
     #[on_event(LoadModel)]
@@ -114,21 +108,21 @@ impl CandleDiffusionWorker {
         &mut self,
         config: Input<CandleDiffusionLoadConfig>,
         seq: BroadcastSeq,
-    ) -> Result<(), String> {
-        self.handle_load_model(config.0, seq.0).await
+    ) -> Result<(), anyhow::Error> {
+        self.handle_load_model(config.0, seq.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), String> {
-        self.handle_unload_model(seq.0).await
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), anyhow::Error> {
+        self.handle_unload_model(seq.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(InferenceImage)]
     async fn on_inference_image(
         &mut self,
         raw: Input<DiffusionImgParams>,
-    ) -> Result<Typed<Vec<DiffusionImage>>, String> {
-        self.handle_inference_image(raw.0).await
+    ) -> Result<Typed<Vec<DiffusionImage>>, anyhow::Error> {
+        self.handle_inference_image(raw.0).await.map_err(anyhow::Error::msg)
     }
 
     // ── Runtime / peer control ────────────────────────────────────────────────
@@ -137,7 +131,7 @@ impl CandleDiffusionWorker {
     async fn on_peer_load_model(
         &mut self,
         config: Input<CandleDiffusionLoadConfig>,
-    ) -> Result<(), String> {
+    ) -> Result<(), anyhow::Error> {
         let config = config.0;
         let model_path = config.model_path;
         let vae_path = config.vae_path;
@@ -161,7 +155,7 @@ impl CandleDiffusionWorker {
     }
 
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) -> Result<(), String> {
+    async fn on_peer_unload(&mut self) -> Result<(), anyhow::Error> {
         if let Some(e) = self.engine.as_ref() {
             e.unload();
         }
@@ -170,7 +164,7 @@ impl CandleDiffusionWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
         tracing::debug!(op_id = op_id.0, "candle.diffusion runtime control pre-cleanup");
         if let Some(e) = self.engine.as_ref() {
             e.unload();
@@ -179,7 +173,7 @@ impl CandleDiffusionWorker {
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged(&mut self) -> Result<(), String> {
+    async fn on_control_lagged(&mut self) -> Result<(), anyhow::Error> {
         if let Some(e) = self.engine.as_ref() {
             e.unload();
         }
@@ -193,7 +187,7 @@ impl CandleDiffusionWorker {
         config: CandleDiffusionLoadConfig,
         seq_id: u64,
     ) -> Result<(), String> {
-        let deployment = DeploymentSnapshot::with_model(seq_id, Payload::typed(config.clone()));
+        let model_payload = Payload::typed(config.clone());
         let engine = self.engine.get_or_insert_with(CandleDiffusionEngine::new).clone();
         let model_path = config.model_path.clone();
         let vae_path = config.vae_path.clone();
@@ -205,10 +199,7 @@ impl CandleDiffusionWorker {
 
         match result {
             Ok(()) => {
-                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                    sync: SyncMessage::Deployment(deployment),
-                    sender_id: self.worker_id,
-                }));
+                self.emit_peer_load_model_deployment_payload(seq_id, model_payload);
                 Ok(())
             }
             Err(e) => Err(e.to_string()),
@@ -219,10 +210,7 @@ impl CandleDiffusionWorker {
         match self.engine.as_ref() {
             Some(engine) => {
                 engine.unload();
-                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
-                    sync: SyncMessage::Generation { generation: seq_id },
-                    sender_id: self.worker_id,
-                }));
+                self.emit_peer_unload_generation(seq_id);
                 Ok(())
             }
             None => Err("model not loaded".to_owned()),
@@ -273,8 +261,8 @@ pub fn spawn_backend(
     control_tx: broadcast::Sender<WorkerCommand>,
     count: usize,
 ) {
-    spawn_workers(shared_ingress_rx, control_tx, count.max(1), |worker_id, bc_tx| {
-        CandleDiffusionWorker::new(Some(CandleDiffusionEngine::new()), bc_tx, worker_id)
+    spawn_workers(shared_ingress_rx, control_tx, count.max(1), |peer_bus| {
+        CandleDiffusionWorker::new(Some(CandleDiffusionEngine::new()), peer_bus)
     });
 }
 
@@ -285,12 +273,14 @@ mod tests {
     use super::CandleDiffusionWorker;
     use crate::domain::models::CandleDiffusionLoadConfig;
     use slab_runtime_core::Payload;
-    use slab_runtime_core::backend::{ControlOpId, DeploymentSnapshot, WorkerCommand};
+    use slab_runtime_core::backend::{
+        ControlOpId, DeploymentSnapshot, PeerControlBus, WorkerCommand,
+    };
     use tokio::sync::broadcast;
 
     fn make_worker() -> CandleDiffusionWorker {
         let (bc_tx, _) = broadcast::channel::<WorkerCommand>(8);
-        CandleDiffusionWorker::new(None, bc_tx, 0)
+        CandleDiffusionWorker::new(None, PeerControlBus::new(bc_tx, 0))
     }
 
     #[tokio::test]
