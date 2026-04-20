@@ -12,7 +12,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "i18next": "^26.0.4",
+    "i18next": "^26.0.6",
     "react-i18next": "^17.0.4"
   },
   "license": "AGPL-3.0-only"
