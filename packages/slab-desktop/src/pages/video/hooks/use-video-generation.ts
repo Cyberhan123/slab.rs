@@ -16,10 +16,8 @@ import {
 } from '../const';
 
 type GenerationPhase = 'idle' | 'polling' | 'fetchingResult';
-type OperationAcceptedResponse = components['schemas']['OperationAcceptedResponse'];
 type TaskResponse = components['schemas']['TaskResponse'];
 type TaskResultPayload = components['schemas']['TaskResultPayload'];
-type VideoGenerationRequest = components['schemas']['VideoGenerationRequest'];
 
 async function fileToDataUri(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -100,9 +98,7 @@ export function useVideoGeneration() {
     () => modelOptions.find((model) => model.id === selectedModelId),
     [modelOptions, selectedModelId],
   );
-  const generateVideoMutation = api.useMutation('post', '/v1/video/generations') as unknown as {
-    mutateAsync: (options: { body: VideoGenerationRequest }) => Promise<OperationAcceptedResponse>;
-  };
+  const generateVideoMutation = api.useMutation('post', '/v1/video/generations');
   const cancelTaskMutation = api.useMutation('post', '/v1/tasks/{id}/cancel');
   const isPolling = generationPhase === 'polling';
   const isFetchingResult = generationPhase === 'fetchingResult';

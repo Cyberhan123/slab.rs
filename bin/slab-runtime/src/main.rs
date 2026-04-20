@@ -2,11 +2,9 @@
 // sidecar from the packaged desktop app on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-use clap::Parser;
-
-use slab_runtime::infra::config::Cli;
+use slab_runtime::bootstrap::{self, Cli};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    slab_runtime::api::server::run(Cli::parse()).await
+    bootstrap::run(Cli::parse()).await
 }

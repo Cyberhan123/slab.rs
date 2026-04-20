@@ -8,7 +8,7 @@ Standalone gRPC worker process for Slab inference backends.
 
 - Accepts gRPC requests from `bin/slab-server` over TCP or Unix IPC.
 - Acts as the backend composition root for GGML, Candle, and ONNX runtime registrations, which now live in-package under `src/infra/backends/`.
-- Uses `crates/slab-runtime-core` (package: `slab-runtime-core`) for runtime orchestration, scheduling, worker lifecycle, and dispatch contracts.
+- Uses `crates/slab-runtime-core` (package: `slab-runtime-core`) for backend worker protocol, admission, worker lifecycle helpers, and dispatch contracts.
 - Organizes its own worker logic into `config/`, `context/`, `domain/`, `infra/`, and `launch.rs`, with `src/main.rs` as a thin binary entrypoint.
 - Runs as a separate OS process, isolating model memory and native library state from the HTTP gateway.
 

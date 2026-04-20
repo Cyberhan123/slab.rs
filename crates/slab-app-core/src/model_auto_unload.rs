@@ -3,7 +3,6 @@ use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
-use slab_proto::convert;
 use slab_types::{RuntimeBackendId, RuntimeBackendLoadSpec};
 use tracing::{debug, info, warn};
 
@@ -310,7 +309,7 @@ impl ModelAutoUnloadManager {
 
         let req = build_model_load_request(&plan.load_spec);
 
-        match rpc::client::load_model(channel, backend, req).await {
+        match rpc::client::load_model(channel, req).await {
             Ok(_) => {
                 info!(
                     backend = %backend,
@@ -352,8 +351,10 @@ impl ModelAutoUnloadManager {
     }
 }
 
-pub(crate) fn build_model_load_request(spec: &RuntimeBackendLoadSpec) -> rpc::pb::ModelLoadRequest {
-    convert::encode_model_load_request(spec)
+pub(crate) fn build_model_load_request(
+    spec: &RuntimeBackendLoadSpec,
+) -> rpc::codec::ModelLoadRpcRequest {
+    rpc::codec::encode_model_load_request(spec)
 }
 
 fn load_spec_model_path(spec: &RuntimeBackendLoadSpec) -> &Path {

@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use tokio::sync::oneshot;
+use tokio::sync::{broadcast, oneshot, watch};
 
 use crate::base::types::Payload;
 pub use crate::base::types::StreamHandle;
@@ -17,6 +17,18 @@ pub enum RequestRoute {
     Inference,
     InferenceStream,
     InferenceImage,
+}
+
+impl RequestRoute {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LoadModel => "model.load",
+            Self::UnloadModel => "model.unload",
+            Self::Inference => "inference",
+            Self::InferenceStream => "inference.stream",
+            Self::InferenceImage => "inference.image",
+        }
+    }
 }
 
 impl FromStr for RequestRoute {
@@ -103,7 +115,41 @@ pub enum PeerWorkerCommand {
     Unload { sync: SyncMessage, sender_id: usize },
 }
 
+/// Discriminant for constructing peer-synchronization commands generically.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PeerWorkerCommandKind {
+    LoadModel,
+    Unload,
+}
+
+impl PeerWorkerCommandKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LoadModel => "LoadModel",
+            Self::Unload => "Unload",
+        }
+    }
+
+    pub fn into_command(self, sync: SyncMessage, sender_id: usize) -> PeerWorkerCommand {
+        match self {
+            Self::LoadModel => PeerWorkerCommand::LoadModel { sync, sender_id },
+            Self::Unload => PeerWorkerCommand::Unload { sync, sender_id },
+        }
+    }
+}
+
 impl PeerWorkerCommand {
+    pub fn from_kind(kind: PeerWorkerCommandKind, sync: SyncMessage, sender_id: usize) -> Self {
+        kind.into_command(sync, sender_id)
+    }
+
+    pub fn kind(&self) -> PeerWorkerCommandKind {
+        match self {
+            Self::LoadModel { .. } => PeerWorkerCommandKind::LoadModel,
+            Self::Unload { .. } => PeerWorkerCommandKind::Unload,
+        }
+    }
+
     /// Worker id that originally emitted this peer command.
     pub fn sender_id(&self) -> usize {
         match self {
@@ -147,6 +193,104 @@ pub enum WorkerCommand {
     Runtime(RuntimeControlSignal),
 }
 
+/// Worker-facing peer synchronization emitter.
+///
+/// Backend workers use this instead of constructing [`WorkerCommand`] values or
+/// touching the underlying broadcast channel directly.
+#[derive(Clone)]
+pub struct PeerControlBus {
+    tx: broadcast::Sender<WorkerCommand>,
+    sender_id: usize,
+}
+
+impl PeerControlBus {
+    pub fn new(tx: broadcast::Sender<WorkerCommand>, sender_id: usize) -> Self {
+        Self { tx, sender_id }
+    }
+
+    pub fn sender_id(&self) -> usize {
+        self.sender_id
+    }
+
+    pub fn broadcast_peer_deployment(
+        &self,
+        kind: PeerWorkerCommandKind,
+        generation: u64,
+        model: Payload,
+    ) {
+        let deployment = DeploymentSnapshot::with_model(generation, model);
+        self.broadcast_peer_sync(kind, SyncMessage::Deployment(deployment));
+    }
+
+    pub fn broadcast_peer_typed_deployment<T>(
+        &self,
+        kind: PeerWorkerCommandKind,
+        generation: u64,
+        model: T,
+    ) where
+        T: Send + Sync + 'static,
+    {
+        self.broadcast_peer_deployment(kind, generation, Payload::typed(model));
+    }
+
+    pub fn broadcast_peer_generation(&self, kind: PeerWorkerCommandKind, generation: u64) {
+        self.broadcast_peer_sync(kind, SyncMessage::Generation { generation });
+    }
+
+    pub fn broadcast_peer_sync(&self, kind: PeerWorkerCommandKind, sync: SyncMessage) {
+        self.send_peer(PeerWorkerCommand::from_kind(kind, sync, self.sender_id), kind.as_str());
+    }
+
+    pub fn broadcast_model_loaded(&self, generation: u64, model: Payload) {
+        self.broadcast_peer_deployment(PeerWorkerCommandKind::LoadModel, generation, model);
+    }
+
+    pub fn broadcast_typed_model_loaded<T>(&self, generation: u64, model: T)
+    where
+        T: Send + Sync + 'static,
+    {
+        self.broadcast_model_loaded(generation, Payload::typed(model));
+    }
+
+    pub fn broadcast_model_unloaded(&self, generation: u64) {
+        self.broadcast_peer_generation(PeerWorkerCommandKind::Unload, generation);
+    }
+
+    fn send_peer(&self, command: PeerWorkerCommand, action: &'static str) {
+        let generation = command.seq_id();
+        if self.tx.receiver_count() == 0 {
+            tracing::debug!(
+                sender_id = self.sender_id,
+                generation,
+                action,
+                "peer control broadcast skipped: no receivers"
+            );
+            return;
+        }
+
+        match self.tx.send(WorkerCommand::Peer(command)) {
+            Ok(receiver_count) => {
+                tracing::trace!(
+                    sender_id = self.sender_id,
+                    generation,
+                    action,
+                    receiver_count,
+                    "peer control broadcast sent"
+                );
+            }
+            Err(error) => {
+                tracing::debug!(
+                    sender_id = self.sender_id,
+                    generation,
+                    action,
+                    error = %error,
+                    "peer control broadcast dropped"
+                );
+            }
+        }
+    }
+}
+
 /// Operation identifier passed to a backend in a [`BackendRequest`].
 #[derive(Debug, Clone)]
 pub struct BackendOp {
@@ -154,6 +298,12 @@ pub struct BackendOp {
     pub name: String,
     /// Arbitrary Payload options forwarded to the backend.
     pub options: Payload,
+}
+
+impl BackendOp {
+    pub fn new(name: impl Into<String>, options: Payload) -> Self {
+        Self { name: name.into(), options }
+    }
 }
 
 /// Request type used by runtime dispatch to separate management from inference.
@@ -189,6 +339,46 @@ pub struct BackendRequest {
 }
 
 impl BackendRequest {
+    pub fn new(
+        kind: BackendRequestKind,
+        op: BackendOp,
+        input: Payload,
+        cancel_rx: watch::Receiver<bool>,
+        broadcast_seq: Option<u64>,
+        reply_tx: oneshot::Sender<BackendReply>,
+    ) -> Self {
+        Self { kind, op, input, cancel_rx, broadcast_seq, reply_tx }
+    }
+
+    pub fn inference(
+        op: BackendOp,
+        input: Payload,
+        cancel_rx: watch::Receiver<bool>,
+        reply_tx: oneshot::Sender<BackendReply>,
+    ) -> Self {
+        Self::new(BackendRequestKind::Inference, op, input, cancel_rx, None, reply_tx)
+    }
+
+    pub fn management(
+        event: ManagementEvent,
+        op_name: impl Into<String>,
+        input: Payload,
+        broadcast_seq: u64,
+        reply_tx: oneshot::Sender<BackendReply>,
+    ) -> Self {
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        drop(cancel_tx);
+
+        Self::new(
+            BackendRequestKind::Management(event),
+            BackendOp::new(op_name, Payload::default()),
+            input,
+            cancel_rx,
+            Some(broadcast_seq),
+            reply_tx,
+        )
+    }
+
     pub fn route(&self) -> Result<RequestRoute, String> {
         RequestRoute::from_str(&self.op.name)
     }
@@ -222,10 +412,49 @@ impl BackendRequest {
 /// Reply sent back from a backend worker to the orchestrator.
 #[derive(Debug)]
 pub enum BackendReply {
+    /// Management operation completed successfully without a payload body.
+    Ack,
     /// A single complete output payload (non-streaming).
     Value(Payload),
     /// A streaming output handle (terminal stage only).
     Stream(StreamHandle),
     /// The backend encountered an error.
     Error(String),
+}
+
+impl BackendReply {
+    pub const fn ack() -> Self {
+        Self::Ack
+    }
+
+    pub fn value(payload: Payload) -> Self {
+        Self::Value(payload)
+    }
+
+    pub fn stream(handle: StreamHandle) -> Self {
+        Self::Stream(handle)
+    }
+
+    pub fn error(message: impl Into<String>) -> Self {
+        Self::Error(message.into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RequestRoute;
+    use std::str::FromStr;
+
+    #[test]
+    fn request_route_string_mapping_is_lossless() {
+        for route in [
+            RequestRoute::LoadModel,
+            RequestRoute::UnloadModel,
+            RequestRoute::Inference,
+            RequestRoute::InferenceStream,
+            RequestRoute::InferenceImage,
+        ] {
+            assert_eq!(RequestRoute::from_str(route.as_str()), Ok(route));
+        }
+    }
 }

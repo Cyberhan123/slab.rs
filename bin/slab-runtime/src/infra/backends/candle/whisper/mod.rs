@@ -1,5 +1,7 @@
-mod adapter;
-mod backend;
+mod contract;
+mod engine;
+mod error;
+mod worker;
 
-pub use adapter::CandleWhisperEngineError;
-pub use backend::spawn_backend;
+pub(crate) use error::CandleWhisperEngineError;
+pub(crate) use worker::spawn_backend;

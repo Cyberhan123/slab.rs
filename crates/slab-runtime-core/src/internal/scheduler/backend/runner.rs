@@ -1,57 +1,35 @@
-use std::sync::Arc;
 use std::{future::Future, pin::Pin};
 
 use async_trait::async_trait;
-use tokio::sync::{Mutex, broadcast, mpsc};
+use flume::Receiver;
+use tokio::sync::broadcast;
 
 use crate::internal::scheduler::backend::protocol::BackendReply;
 use crate::internal::scheduler::backend::protocol::{
-    BackendRequest, PeerWorkerCommand, RequestRoute, RuntimeControlSignal, WorkerCommand,
+    BackendRequest, PeerControlBus, PeerWorkerCommand, RequestRoute, RuntimeControlSignal,
+    WorkerCommand,
 };
 
 /// Shared ingress receiver consumed competitively by multiple worker runners.
-pub type SharedIngressRx = Arc<Mutex<mpsc::Receiver<BackendRequest>>>;
+pub type SharedIngressRx = Receiver<BackendRequest>;
 
 /// Wrap an ingress receiver for competitive multi-worker consumption.
-pub fn shared_ingress(rx: mpsc::Receiver<BackendRequest>) -> SharedIngressRx {
-    Arc::new(Mutex::new(rx))
+pub fn shared_ingress(rx: Receiver<BackendRequest>) -> SharedIngressRx {
+    rx
 }
 
-/// Backend implementation-facing contract for runtime-managed worker loops.
-#[async_trait]
-pub trait RuntimeWorkerHandler: Send + 'static {
-    /// Handle a request consumed from backend ingress queue.
-    async fn handle_request(&mut self, req: BackendRequest);
-
-    /// Handle a peer synchronization command after runtime filtering.
-    ///
-    /// Runtime runner guarantees this callback is invoked only for commands that:
-    /// - have strictly increasing `seq_id` per worker, and
-    /// - are not self-echoed (`sender_id != worker_id`).
-    async fn handle_peer_control(&mut self, cmd: PeerWorkerCommand);
-
-    /// Handle a runtime-issued global control signal.
-    async fn handle_runtime_control(&mut self, signal: RuntimeControlSignal);
-
-    /// Handle control-bus lag (`broadcast::RecvError::Lagged`).
-    ///
-    /// Default is no-op; implementations can override with safe cleanup
-    /// (for example, unloading model context to avoid stale state).
-    async fn handle_control_lagged(&mut self) {}
-}
-
-/// Boxed future used by macro-generated thin dispatch shims.
+/// Boxed future used by macro-generated typed dispatch shims.
 pub type HandlerFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
-/// Request-dispatch function pointer (`&mut handler`, `BackendRequest`) -> async unit.
+/// Event-dispatch function pointer (`&mut handler`, `BackendRequest`) -> async unit.
 pub type RequestDispatchFn<T> = for<'a> fn(&'a mut T, BackendRequest) -> HandlerFuture<'a>;
-/// Runtime-control-dispatch function pointer.
+/// Runtime-control-dispatch function pointer for `#[on_runtime_control(...)]`.
 pub type RuntimeDispatchFn<T> = for<'a> fn(&'a mut T, RuntimeControlSignal) -> HandlerFuture<'a>;
-/// Peer-control-dispatch function pointer.
+/// Peer-control-dispatch function pointer for `#[on_peer_control(...)]`.
 pub type PeerDispatchFn<T> = for<'a> fn(&'a mut T, PeerWorkerCommand) -> HandlerFuture<'a>;
-/// Control-lagged-dispatch function pointer.
+/// Control-lagged-dispatch function pointer for `#[on_control_lagged]`.
 pub type LaggedDispatchFn<T> = for<'a> fn(&'a mut T) -> HandlerFuture<'a>;
 
-/// Thin request route entry used by macro-generated `#[backend_handler]` code.
+/// Thin event route entry used by macro-generated `#[backend_handler]` code.
 pub struct RequestRouteMatcher<T> {
     pub matches: fn(RequestRoute) -> bool,
     pub handle: RequestDispatchFn<T>,
@@ -67,6 +45,102 @@ pub struct RuntimeRoute<T> {
 pub struct PeerRoute<T> {
     pub matches: fn(&PeerWorkerCommand) -> bool,
     pub handle: PeerDispatchFn<T>,
+}
+
+/// Explicit route table returned by workers or macro-generated adapters.
+///
+/// Event routes can extract typed inputs/options and send replies. Control
+/// routes extract typed metadata too, but stay fire-and-forget.
+#[derive(Clone, Copy)]
+pub struct WorkerRouteTable<T: 'static> {
+    pub request_routes: &'static [RequestRouteMatcher<T>],
+    pub runtime_control_routes: &'static [RuntimeRoute<T>],
+    pub peer_control_routes: &'static [PeerRoute<T>],
+    pub peer_control_fallback: Option<PeerDispatchFn<T>>,
+    pub control_lagged_route: Option<LaggedDispatchFn<T>>,
+}
+
+impl<T: 'static> Default for WorkerRouteTable<T> {
+    fn default() -> Self {
+        Self {
+            request_routes: &[],
+            runtime_control_routes: &[],
+            peer_control_routes: &[],
+            peer_control_fallback: None,
+            control_lagged_route: None,
+        }
+    }
+}
+
+/// Backend implementation-facing contract for runtime-managed worker loops.
+#[async_trait]
+pub trait RuntimeWorkerHandler: Send + 'static {
+    /// Return the explicit route table for this worker.
+    ///
+    /// Macro-based workers usually expose this via generated `route_table()` helpers.
+    /// The table can mix legacy `BackendRequest` event handlers with typed
+    /// event/control handlers.
+    /// Hand-written workers can override directly and build capability-dependent tables.
+    fn route_table(&self) -> WorkerRouteTable<Self>
+    where
+        Self: Sized,
+    {
+        WorkerRouteTable::default()
+    }
+
+    /// Handle a request consumed from backend ingress queue.
+    async fn handle_request(&mut self, req: BackendRequest)
+    where
+        Self: Sized,
+    {
+        let route_table = self.route_table();
+        dispatch_backend_request(self, req, route_table.request_routes).await;
+    }
+
+    /// Handle a peer synchronization command after runtime filtering.
+    ///
+    /// Runtime runner guarantees this callback is invoked only for commands that:
+    /// - have strictly increasing `seq_id` per worker, and
+    /// - are not self-echoed (`sender_id != worker_id`).
+    ///
+    /// Macro-generated routes support typed extractors here, but there is no
+    /// reply channel on the control bus.
+    async fn handle_peer_control(&mut self, cmd: PeerWorkerCommand)
+    where
+        Self: Sized,
+    {
+        let route_table = self.route_table();
+        dispatch_peer_control(
+            self,
+            cmd,
+            route_table.peer_control_fallback,
+            route_table.peer_control_routes,
+        )
+        .await;
+    }
+
+    /// Handle a runtime-issued global control signal.
+    ///
+    /// Macro-generated routes support typed extractors here, but there is no
+    /// reply channel on the control bus.
+    async fn handle_runtime_control(&mut self, signal: RuntimeControlSignal)
+    where
+        Self: Sized,
+    {
+        let route_table = self.route_table();
+        dispatch_runtime_control(self, signal, route_table.runtime_control_routes).await;
+    }
+
+    /// Handle control-bus lag (`broadcast::RecvError::Lagged`).
+    ///
+    /// Default dispatches to the optional lagged route.
+    async fn handle_control_lagged(&mut self)
+    where
+        Self: Sized,
+    {
+        let route_table = self.route_table();
+        dispatch_control_lagged(self, route_table.control_lagged_route).await;
+    }
 }
 
 /// Dispatch request by typed request route using a macro-provided route table.
@@ -86,11 +160,11 @@ pub async fn dispatch_backend_request<T>(
                 }
             }
             let op_name = req.op.name.clone();
-            let _ = req.reply_tx.send(BackendReply::Error(format!("unknown op: {}", op_name)));
+            let _ = req.reply_tx.send(BackendReply::error(format!("unknown op: {}", op_name)));
         }
         Err(_) => {
             let op_name = req.op.name.clone();
-            let _ = req.reply_tx.send(BackendReply::Error(format!("unknown op: {}", op_name)));
+            let _ = req.reply_tx.send(BackendReply::error(format!("unknown op: {}", op_name)));
         }
     }
 }
@@ -176,13 +250,10 @@ async fn runtime_worker_loop<H>(
                 }
             }
 
-            req = async {
-                let mut lock = shared_ingress.lock().await;
-                lock.recv().await
-            } => {
+            req = shared_ingress.recv_async() => {
                 match req {
-                    Some(req) => handler.handle_request(req).await,
-                    None => break,
+                    Ok(req) => handler.handle_request(req).await,
+                    Err(flume::RecvError::Disconnected) => break,
                 }
             }
         }
@@ -250,17 +321,13 @@ pub fn spawn_workers<H, F>(
     mut make_handler: F,
 ) where
     H: RuntimeWorkerHandler,
-    F: FnMut(usize, broadcast::Sender<WorkerCommand>) -> H,
+    F: FnMut(PeerControlBus) -> H,
 {
     let worker_count = worker_count.max(1);
     for worker_id in 0..worker_count {
-        let handler = make_handler(worker_id, control_tx.clone());
-        spawn_runtime_worker(
-            Arc::clone(&shared_ingress),
-            control_tx.subscribe(),
-            worker_id,
-            handler,
-        );
+        let peer_bus = PeerControlBus::new(control_tx.clone(), worker_id);
+        let handler = make_handler(peer_bus);
+        spawn_runtime_worker(shared_ingress.clone(), control_tx.subscribe(), worker_id, handler);
     }
 }
 
@@ -272,13 +339,14 @@ pub fn spawn_dedicated_workers<H, F>(
     mut make_handler: F,
 ) where
     H: RuntimeWorkerHandler,
-    F: FnMut(usize, broadcast::Sender<WorkerCommand>) -> H,
+    F: FnMut(PeerControlBus) -> H,
 {
     let worker_count = worker_count.max(1);
     for worker_id in 0..worker_count {
-        let handler = make_handler(worker_id, control_tx.clone());
+        let peer_bus = PeerControlBus::new(control_tx.clone(), worker_id);
+        let handler = make_handler(peer_bus);
         spawn_dedicated_runtime_worker(
-            Arc::clone(&shared_ingress),
+            shared_ingress.clone(),
             control_tx.clone(),
             worker_id,
             handler,
@@ -292,16 +360,16 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use async_trait::async_trait;
-    use tokio::sync::{Mutex, broadcast, mpsc, watch};
+    use tokio::sync::{Mutex, broadcast, watch};
 
+    use crate::Payload;
     use crate::internal::scheduler::backend::protocol::{
-        BackendOp, BackendReply, BackendRequest, BackendRequestKind, PeerWorkerCommand,
-        RuntimeControlSignal, SyncMessage, WorkerCommand,
+        BackendOp, BackendReply, BackendRequest, PeerWorkerCommand, RuntimeControlSignal,
+        SyncMessage, WorkerCommand,
     };
     use crate::internal::scheduler::backend::runner::{
         RuntimeWorkerHandler, shared_ingress, spawn_runtime_worker,
     };
-    use crate::internal::scheduler::types::Payload;
 
     #[derive(Clone, Default)]
     struct Observed {
@@ -336,7 +404,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_filters_self_echo_and_stale_peer_sequences() {
-        let (ingress_tx, ingress_rx) = mpsc::channel::<BackendRequest>(8);
+        let (ingress_tx, ingress_rx) = flume::bounded::<BackendRequest>(8);
         let (control_tx, control_rx) = broadcast::channel::<WorkerCommand>(8);
         let observed = Observed::default();
         let join = spawn_runtime_worker(
@@ -385,7 +453,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_dispatches_ingress_and_runtime_commands() {
-        let (ingress_tx, ingress_rx) = mpsc::channel::<BackendRequest>(8);
+        let (ingress_tx, ingress_rx) = flume::bounded::<BackendRequest>(8);
         let (control_tx, control_rx) = broadcast::channel::<WorkerCommand>(8);
         let observed = Observed::default();
 
@@ -400,14 +468,12 @@ mod tests {
         drop(cancel_tx);
         let (reply_tx, reply_rx) = tokio::sync::oneshot::channel();
         ingress_tx
-            .send(BackendRequest {
-                kind: BackendRequestKind::Inference,
-                op: BackendOp { name: "test.op".to_owned(), options: Payload::default() },
-                input: Payload::default(),
+            .send_async(BackendRequest::inference(
+                BackendOp::new("test.op", Payload::default()),
+                Payload::default(),
                 cancel_rx,
-                broadcast_seq: None,
                 reply_tx,
-            })
+            ))
             .await
             .expect("ingress send should succeed");
 

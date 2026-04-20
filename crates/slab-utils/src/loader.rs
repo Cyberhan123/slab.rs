@@ -211,10 +211,7 @@ mod tests {
         )
         .expect("bundle helper should delegate success");
 
-        assert_eq!(
-            value.0,
-            Path::new("runtime").join(library_file_name("diffusion"))
-        );
+        assert_eq!(value.0, Path::new("runtime").join(library_file_name("diffusion")));
         assert_eq!(
             value.1.expect("sidecar path should be returned"),
             Path::new("runtime").join(library_file_name("ggml"))
@@ -223,9 +220,10 @@ mod tests {
 
     #[test]
     fn load_optional_library_from_dir_returns_none_when_closure_returns_none() {
-        let value = load_optional_library_from_dir("runtime", "nonexistent", |_lib_dir, _lib_path| {
-            None::<(PathBuf, PathBuf)>
-        });
+        let value =
+            load_optional_library_from_dir("runtime", "nonexistent", |_lib_dir, _lib_path| {
+                None::<(PathBuf, PathBuf)>
+            });
 
         assert!(value.is_none(), "should return None when closure returns None");
     }

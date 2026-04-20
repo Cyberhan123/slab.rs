@@ -1,3 +1,4 @@
+#[allow(dead_code)]
 pub mod audio_utils;
 pub mod diffusion;
 pub mod llama;
@@ -8,7 +9,6 @@ use std::sync::Arc;
 
 use slab_runtime_core::CoreError;
 use slab_runtime_core::backend::{ResourceManager, spawn_dedicated_workers, spawn_workers};
-use slab_types::{Capability, DriverDescriptor, DriverLoadStyle, ModelFamily, ModelSourceKind};
 use thiserror::Error;
 
 use crate::infra::backends::ggml::diffusion::{DiffusionWorker, GGMLDiffusionEngine};
@@ -60,46 +60,22 @@ pub struct GgmlBackendConfig {
     pub diffusion_lib_dir: Option<PathBuf>,
 }
 
-pub fn descriptors(config: &GgmlBackendConfig) -> Vec<DriverDescriptor> {
-    let mut descriptors = Vec::new();
+pub fn service_ids(config: &GgmlBackendConfig) -> Vec<&'static str> {
+    let mut service_ids = Vec::new();
 
     if config.llama_lib_dir.is_some() {
-        descriptors.push(driver_descriptor(
-            "ggml.llama",
-            "ggml.llama",
-            ModelFamily::Llama,
-            Capability::TextGeneration,
-            true,
-            DriverLoadStyle::DynamicLibraryThenModel,
-            20,
-        ));
+        service_ids.push("ggml.llama");
     }
 
     if config.whisper_lib_dir.is_some() {
-        descriptors.push(driver_descriptor(
-            "ggml.whisper",
-            "ggml.whisper",
-            ModelFamily::Whisper,
-            Capability::AudioTranscription,
-            false,
-            DriverLoadStyle::DynamicLibraryThenModel,
-            20,
-        ));
+        service_ids.push("ggml.whisper");
     }
 
     if config.diffusion_lib_dir.is_some() {
-        descriptors.push(driver_descriptor(
-            "ggml.diffusion",
-            "ggml.diffusion",
-            ModelFamily::Diffusion,
-            Capability::ImageGeneration,
-            false,
-            DriverLoadStyle::DynamicLibraryThenModel,
-            20,
-        ));
+        service_ids.push("ggml.diffusion");
     }
 
-    descriptors
+    service_ids
 }
 
 pub fn register(
@@ -122,9 +98,9 @@ pub fn register(
                 (1..count).map(|_| Some(whisper_engine.fork_library())).collect();
             worker_engines.insert(0, Some(whisper_engine));
             let mut worker_engines = worker_engines.into_iter();
-            spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+            spawn_workers(shared_rx, control_tx, count, move |peer_bus| {
                 let worker_engine = worker_engines.next().unwrap_or(None);
-                WhisperWorker::new(worker_engine, bc_tx, worker_id)
+                WhisperWorker::new(worker_engine, peer_bus)
             });
         });
     }
@@ -137,39 +113,14 @@ pub fn register(
                 (1..count).map(|_| Some(diffusion_engine.fork_library())).collect();
             worker_engines.insert(0, Some(diffusion_engine));
             let mut worker_engines = worker_engines.into_iter();
-            spawn_dedicated_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+            spawn_dedicated_workers(shared_rx, control_tx, count, move |peer_bus| {
                 let worker_engine = worker_engines.next().unwrap_or(None);
-                DiffusionWorker::new(worker_engine, bc_tx, worker_id)
+                DiffusionWorker::new(worker_engine, peer_bus)
             });
         });
     }
 
     Ok(())
-}
-
-fn driver_descriptor(
-    driver_id: &str,
-    backend_id: &str,
-    family: ModelFamily,
-    capability: Capability,
-    supports_streaming: bool,
-    load_style: DriverLoadStyle,
-    priority: i32,
-) -> DriverDescriptor {
-    DriverDescriptor {
-        driver_id: driver_id.to_owned(),
-        backend_id: backend_id.to_owned(),
-        family,
-        capability,
-        supported_sources: vec![
-            ModelSourceKind::LocalPath,
-            ModelSourceKind::LocalArtifacts,
-            ModelSourceKind::HuggingFace,
-        ],
-        supports_streaming,
-        load_style,
-        priority,
-    }
 }
 
 fn load_llama_engine(path: &Path) -> Result<Arc<GGMLLlamaEngine>, CoreError> {

@@ -32,7 +32,7 @@ function requestShutdown() {
 process.on("SIGINT", requestShutdown);
 process.on("SIGTERM", requestShutdown);
 
-child.on("exit", (code, signal) => {
+child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
   if (signal) {
     process.kill(process.pid, signal);
     return;

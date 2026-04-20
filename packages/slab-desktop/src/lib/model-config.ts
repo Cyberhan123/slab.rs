@@ -39,7 +39,7 @@ export function useModelConfigDocumentQuery(id: string | null, options?: { enabl
 }
 
 export function useUpdateModelConfigSelectionMutation() {
-  return api.useMutation('put', '/v1/models/{id}/config-selection') as unknown as {
+  return api.useMutation('put', '/v1/models/{id}/config-selection') as {
     isPending: boolean;
     mutateAsync: (options: {
       body: UpdateModelConfigSelectionRequest;

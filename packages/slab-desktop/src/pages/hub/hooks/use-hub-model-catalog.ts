@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { useTranslation } from '@slab/i18n';
 
-import api, { getErrorMessage } from '@/lib/api';
+import api, { ApiError, getErrorMessage } from '@/lib/api';
 import type { components } from '@/lib/api/v1.d.ts';
+import { SERVER_BASE_URL } from '@/lib/config';
 import {
   modelSupportsCapability,
   toCatalogModelList,
@@ -56,6 +57,31 @@ export type ModelItem = {
 
 type ImportedModelResponse = components['schemas']['UnifiedModelResponse'];
 
+async function parseErrorPayload(response: Response): Promise<unknown> {
+  try {
+    return await response.clone().json();
+  } catch {
+    try {
+      return await response.clone().text();
+    } catch {
+      return undefined;
+    }
+  }
+}
+
+async function importModelPack(body: FormData): Promise<ImportedModelResponse> {
+  const response = await fetch(`${SERVER_BASE_URL}/v1/models/import-pack`, {
+    body,
+    method: 'POST',
+  });
+
+  if (!response.ok) {
+    throw ApiError.fromResponse(response, await parseErrorPayload(response));
+  }
+
+  return (await response.json()) as ImportedModelResponse;
+}
+
 export function useHubModelCatalog() {
   const { t } = useTranslation();
   const [category, setCategory] = useState<ModelCategory>('all');
@@ -76,10 +102,6 @@ export function useHubModelCatalog() {
     isRefetching,
     refetch,
   } = api.useQuery('get', '/v1/models');
-  const importModelPackMutation = api.useMutation('post', '/v1/models/import-pack') as unknown as {
-    isPending: boolean;
-    mutateAsync: (options: { body: FormData }) => Promise<ImportedModelResponse>;
-  };
   const deleteModelMutation = api.useMutation('delete', '/v1/models/{id}');
 
   const models = useMemo<ModelItem[]>(
@@ -114,7 +136,7 @@ export function useHubModelCatalog() {
     [filteredModels, visibleCount],
   );
   const hasMore = visibleModels.length < filteredModels.length;
-  const canCreate = Boolean(createFile && !createModelPending && !importModelPackMutation.isPending);
+  const canCreate = Boolean(createFile && !createModelPending);
 
   useEffect(() => {
     setVisibleCount(DEFAULT_VISIBLE_COUNT);
@@ -162,9 +184,9 @@ export function useHubModelCatalog() {
 
     setCreateModelPending(true);
     try {
-      const created = await importModelPackMutation.mutateAsync({
-        body: buildImportModelPackBody(createFile, t('pages.hub.error.onlySlabPacks')),
-      });
+      const created = await importModelPack(
+        buildImportModelPackBody(createFile, t('pages.hub.error.onlySlabPacks')),
+      );
 
       toast.success(t('pages.hub.toast.imported'), {
         description:
@@ -325,7 +347,7 @@ export function useHubModelCatalog() {
     createModel,
     downloadModel,
     deleteModel,
-    createModelPending: createModelPending || importModelPackMutation.isPending,
+    createModelPending,
     deleteModelPending: deleteModelMutation.isPending,
   };
 }

@@ -406,10 +406,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::TemperatureOutOfRange(-0.1))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::TemperatureOutOfRange(-0.1))));
     }
 
     #[test]
@@ -420,10 +417,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::TemperatureOutOfRange(2.1))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::TemperatureOutOfRange(2.1))));
     }
 
     #[test]
@@ -452,10 +446,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::TopPOutOfRange(1.1))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::TopPOutOfRange(1.1))));
     }
 
     #[test]
@@ -466,10 +457,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::TopKOutOfRange(-1))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::TopKOutOfRange(-1))));
     }
 
     #[test]
@@ -480,10 +468,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::MinPOutOfRange(-0.1))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::MinPOutOfRange(-0.1))));
     }
 
     #[test]
@@ -494,10 +479,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::PresencePenaltyOutOfRange(2.1))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::PresencePenaltyOutOfRange(2.1))));
     }
 
     #[test]
@@ -522,10 +504,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::MaxTokensOutOfRange(0))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::MaxTokensOutOfRange(0))));
     }
 
     // ImageGenerationRequest validation tests
@@ -544,29 +523,17 @@ mod tests {
 
     #[test]
     fn image_generation_request_validate_rejects_empty_prompt() {
-        let request = ImageGenerationRequest {
-            prompt: "   ".to_string(),
-            ..Default::default()
-        };
+        let request = ImageGenerationRequest { prompt: "   ".to_string(), ..Default::default() };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::EmptyPrompt)
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::EmptyPrompt)));
     }
 
     #[test]
     fn image_generation_request_validate_rejects_width_too_small() {
-        let request = ImageGenerationRequest {
-            prompt: "Test".to_string(),
-            width: 63,
-            ..Default::default()
-        };
+        let request =
+            ImageGenerationRequest { prompt: "Test".to_string(), width: 63, ..Default::default() };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::WidthOutOfRange(63))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::WidthOutOfRange(63))));
     }
 
     #[test]
@@ -577,24 +544,15 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::WidthOutOfRange(4097))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::WidthOutOfRange(4097))));
     }
 
     #[test]
     fn image_generation_request_validate_rejects_height_too_small() {
-        let request = ImageGenerationRequest {
-            prompt: "Test".to_string(),
-            height: 63,
-            ..Default::default()
-        };
+        let request =
+            ImageGenerationRequest { prompt: "Test".to_string(), height: 63, ..Default::default() };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::HeightOutOfRange(63))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::HeightOutOfRange(63))));
     }
 
     #[test]
@@ -605,24 +563,15 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::HeightOutOfRange(4097))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::HeightOutOfRange(4097))));
     }
 
     #[test]
     fn image_generation_request_validate_rejects_zero_count() {
-        let request = ImageGenerationRequest {
-            prompt: "Test".to_string(),
-            count: 0,
-            ..Default::default()
-        };
+        let request =
+            ImageGenerationRequest { prompt: "Test".to_string(), count: 0, ..Default::default() };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::CountOutOfRange(0))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::CountOutOfRange(0))));
     }
 
     #[test]
@@ -676,10 +625,7 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(matches!(
-            request.validate(),
-            Err(ValidationError::InvalidIso639LanguageCode(_))
-        ));
+        assert!(matches!(request.validate(), Err(ValidationError::InvalidIso639LanguageCode(_))));
     }
 
     #[test]

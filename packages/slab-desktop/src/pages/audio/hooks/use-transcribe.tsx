@@ -1,6 +1,9 @@
-import api from "@/lib/api";
 import useIsTauri from "@/hooks/use-tauri";
+import api from "@/lib/api";
+import type { components } from "@/lib/api/v1.d.ts";
 import { useTranslation } from "@slab/i18n";
+
+type AudioTranscriptionRequest = components["schemas"]["AudioTranscriptionRequest"];
 
 export type TranscribeVadSettings = {
     enabled: true;
@@ -41,22 +44,7 @@ export type TranscribeOptions = {
 const useTranscribe = () => {
     const { t } = useTranslation();
     const isTauri = useIsTauri();
-    // Generated typings currently point this endpoint at CompletionRequest.
-    const { isPending, isError, error, mutateAsync } = api.useMutation('post', '/v1/audio/transcriptions') as unknown as {
-        isPending: boolean;
-        isError: boolean;
-        error: unknown;
-        mutateAsync: (options: {
-            body: {
-                path: string;
-                language?: string;
-                prompt?: string;
-                detect_language?: boolean;
-                vad?: TranscribeVadSettings;
-                decode?: TranscribeOptions["decode"];
-            };
-        }) => Promise<{ operation_id: string }>;
-    };
+    const { isPending, isError, error, mutateAsync } = api.useMutation('post', '/v1/audio/transcriptions');
 
     const handleTranscribe = async (
         value: File | string,
@@ -69,14 +57,7 @@ const useTranscribe = () => {
             throw new Error(t('pages.audio.error.invalidDesktopFilePath'));
         }
 
-        const body: {
-            path: string;
-            language?: string;
-            prompt?: string;
-            detect_language?: boolean;
-            vad?: TranscribeVadSettings;
-            decode?: TranscribeOptions["decode"];
-        } = { path: value };
+        const body: AudioTranscriptionRequest = { path: value };
 
         if (typeof options?.language === 'string' && options.language.trim()) {
             body.language = options.language.trim();
@@ -95,7 +76,7 @@ const useTranscribe = () => {
         }
 
         const response = await mutateAsync({
-            body
+            body,
         });
 
         return response;

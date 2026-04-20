@@ -5,11 +5,7 @@ import VideoPage from '@/pages/video';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseVideoGeneration } = vi.hoisted(() => ({
-  mockUseVideoGeneration: vi.fn<
-    () => Partial<
-      ReturnType<typeof import('@/pages/video/hooks/use-video-generation').useVideoGeneration>
-    >
-  >(),
+  mockUseVideoGeneration: vi.fn<() => unknown>(),
 }));
 
 vi.mock('@/pages/video/hooks/use-video-generation', () => ({
@@ -17,7 +13,7 @@ vi.mock('@/pages/video/hooks/use-video-generation', () => ({
 }));
 
 vi.mock('@/hooks/use-persisted-header-select', () => ({
-  usePersistedHeaderSelect: vi.fn<() => void>(() => ({ value: 'model-1', setValue: vi.fn<() => void>() })),
+  usePersistedHeaderSelect: vi.fn(() => ({ value: 'model-1', setValue: vi.fn() })),
 }));
 
 vi.mock('@/hooks/use-global-header-meta', () => ({
@@ -33,11 +29,11 @@ function createVideoViewModel(overrides = {}) {
     fps: 8,
     frames: 16,
     guidance: 3.5,
-    handleCancel: vi.fn<() => void>().mockResolvedValue(undefined),
-    handleDownload: vi.fn<() => void>(),
-    handleInitImageChange: vi.fn<() => void>(),
-    handleInitImageDrop: vi.fn<() => void>(),
-    handleSubmit: vi.fn<() => void>().mockResolvedValue(undefined),
+    handleCancel: vi.fn().mockResolvedValue(undefined),
+    handleDownload: vi.fn(),
+    handleInitImageChange: vi.fn(),
+    handleInitImageDrop: vi.fn(),
+    handleSubmit: vi.fn().mockResolvedValue(undefined),
     heightStr: '512',
     heightValue: 512,
     hasSelectedModel: true,
@@ -50,22 +46,22 @@ function createVideoViewModel(overrides = {}) {
     sampleMethod: 'euler_a',
     scheduler: 'normal',
     seed: -1,
-    setAdvancedOpen: vi.fn<() => void>(),
-    setCfgScale: vi.fn<() => void>(),
-    setFps: vi.fn<() => void>(),
-    setFrames: vi.fn<() => void>(),
-    setGuidance: vi.fn<() => void>(),
-    setHeightStr: vi.fn<() => void>(),
-    setImmersivePreview: vi.fn<() => void>(),
-    setInitImageDataUri: vi.fn<() => void>(),
-    setNegativePrompt: vi.fn<() => void>(),
-    setPrompt: vi.fn<() => void>(),
-    setSampleMethod: vi.fn<() => void>(),
-    setScheduler: vi.fn<() => void>(),
-    setSeed: vi.fn<() => void>(),
-    setSteps: vi.fn<() => void>(),
-    setStrength: vi.fn<() => void>(),
-    setWidthStr: vi.fn<() => void>(),
+    setAdvancedOpen: vi.fn(),
+    setCfgScale: vi.fn(),
+    setFps: vi.fn(),
+    setFrames: vi.fn(),
+    setGuidance: vi.fn(),
+    setHeightStr: vi.fn(),
+    setImmersivePreview: vi.fn(),
+    setInitImageDataUri: vi.fn(),
+    setNegativePrompt: vi.fn(),
+    setPrompt: vi.fn(),
+    setSampleMethod: vi.fn(),
+    setScheduler: vi.fn(),
+    setSeed: vi.fn(),
+    setSteps: vi.fn(),
+    setStrength: vi.fn(),
+    setWidthStr: vi.fn(),
     stageDescription: 'Enter a prompt to generate video',
     stageStatus: 'Awaiting prompt',
     stageTitle: 'Ready',

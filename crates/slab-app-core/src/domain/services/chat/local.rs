@@ -4,7 +4,6 @@ use std::sync::{Arc, Mutex};
 use chrono::Utc;
 use futures::{StreamExt, stream};
 use serde_json::Value;
-use slab_proto::convert;
 use slab_types::inference::{TextGenerationRequest, TextGenerationResponse, TextGenerationUsage};
 use uuid::Uuid;
 
@@ -15,7 +14,7 @@ use crate::domain::models::{
 };
 use crate::domain::services::model;
 use crate::error::AppCoreError;
-use crate::infra::rpc;
+use crate::infra::rpc::{self, codec};
 
 use super::GeneratedChatOutput;
 
@@ -406,7 +405,7 @@ pub(super) async fn create_chat_completion(
         stop_sequences: effective_stop.clone(),
         ..Default::default()
     };
-    let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
+    let grpc_request = codec::encode_chat_request(model.to_owned(), &request);
 
     let llama_channel = state.grpc().chat_channel().ok_or_else(|| {
         AppCoreError::BackendNotReady("llama gRPC endpoint is not configured".into())
@@ -466,12 +465,8 @@ pub(super) async fn create_chat_completion(
                 let trailing_stop_markers = trailing_stop_markers_for_tokens.clone();
                 async move {
                     match chunk {
-                        Ok(message) if !message.error.is_empty() => {
-                            error_flag.store(true, Ordering::SeqCst);
-                            vec![ChatStreamChunk::Data(super::build_error_chunk(&message.error))]
-                        }
                         Ok(message) => {
-                            let decoded = convert::decode_chat_stream_chunk(&message);
+                            let decoded = codec::decode_chat_stream_chunk(&message);
                             if decoded.done {
                                 let mut terminal = terminal_metadata
                                     .lock()
@@ -666,7 +661,7 @@ pub(super) async fn create_chat_completion(
     let generated = rpc::client::chat(llama_channel, grpc_request)
         .await
         .map_err(map_runtime_chat_error("chat"))?;
-    let mut response = convert::decode_chat_response(&generated);
+    let mut response = codec::decode_chat_response(&generated);
 
     let usage = response.usage.clone().unwrap_or_else(|| {
         super::build_estimated_usage(&prompt, &response.text, response.tokens_used)
@@ -720,7 +715,7 @@ pub(super) async fn create_text_completion(
         gbnf,
         ..Default::default()
     };
-    let grpc_request = convert::encode_chat_request(model.to_owned(), &request);
+    let grpc_request = codec::encode_chat_request(model.to_owned(), &request);
 
     let llama_channel = state.grpc().chat_channel().ok_or_else(|| {
         AppCoreError::BackendNotReady("llama gRPC endpoint is not configured".into())
@@ -734,7 +729,7 @@ pub(super) async fn create_text_completion(
     let generated = rpc::client::chat(llama_channel, grpc_request)
         .await
         .map_err(map_runtime_chat_error("chat"))?;
-    let mut response = convert::decode_chat_response(&generated);
+    let mut response = codec::decode_chat_response(&generated);
 
     let usage = response.usage.clone().unwrap_or_else(|| {
         super::build_estimated_usage(&prompt, &response.text, response.tokens_used)

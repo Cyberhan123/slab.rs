@@ -50,7 +50,8 @@ pub async fn trace_middleware(
         let (parts, body) = req.into_parts();
 
         let req_bytes =
-            buffer_and_log("request", &trace_id.to_string(), &parts.headers, body, skip_logging).await;
+            buffer_and_log("request", &trace_id.to_string(), &parts.headers, body, skip_logging)
+                .await;
         let mut req = Request::from_parts(parts, Body::from(req_bytes));
 
         // SAFETY: UUID strings consist only of ASCII hex digits and hyphens,
@@ -75,8 +76,14 @@ pub async fn trace_middleware(
             }
             Response::from_parts(parts, body)
         } else {
-            let res_bytes =
-                buffer_and_log("response", &trace_id.to_string(), &parts.headers, body, skip_logging).await;
+            let res_bytes = buffer_and_log(
+                "response",
+                &trace_id.to_string(),
+                &parts.headers,
+                body,
+                skip_logging,
+            )
+            .await;
             Response::from_parts(parts, Body::from(res_bytes))
         };
 

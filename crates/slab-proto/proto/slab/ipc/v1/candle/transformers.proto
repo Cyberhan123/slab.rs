@@ -1,0 +1,60 @@
+syntax = "proto3";
+
+package slab.ipc.v1;
+
+import "slab/ipc/v1/common.proto";
+
+service CandleTransformersService {
+  rpc Chat(CandleChatRequest) returns (CandleChatResponse);
+  rpc ChatStream(CandleChatRequest) returns (stream CandleChatStreamChunk);
+  rpc Transcribe(CandleWhisperTranscribeRequest) returns (CandleWhisperTranscribeResponse);
+  rpc LoadLlamaModel(CandleLlamaLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadLlamaModel(ModelUnloadRequest) returns (ModelStatusResponse);
+  rpc LoadWhisperModel(CandleWhisperLoadRequest) returns (ModelStatusResponse);
+  rpc UnloadWhisperModel(ModelUnloadRequest) returns (ModelStatusResponse);
+}
+
+message CandleLlamaLoadRequest {
+  optional string model_path = 1;
+  optional string tokenizer_path = 2;
+  optional uint64 seed = 3;
+}
+
+message CandleChatRequest {
+  optional string prompt = 1;
+  optional uint32 max_tokens = 2;
+  optional string session_key = 3;
+}
+
+message CandleChatResponse {
+  optional string text = 1;
+  optional string finish_reason = 2;
+  optional uint32 tokens_used = 3;
+  Usage usage = 4;
+  // Deprecated: use metadata.reasoning_content.
+  optional string reasoning_content = 5;
+  ChatMetadata metadata = 6;
+}
+
+message CandleChatStreamChunk {
+  optional string delta = 1;
+  optional bool done = 2;
+  optional string finish_reason = 3;
+  Usage usage = 4;
+  // Deprecated: use metadata.reasoning_content.
+  optional string reasoning_content = 5;
+  ChatMetadata metadata = 6;
+}
+
+message CandleWhisperLoadRequest {
+  optional string model_path = 1;
+  optional string tokenizer_path = 2;
+}
+
+message CandleWhisperTranscribeRequest {
+  optional string path = 1;
+}
+
+message CandleWhisperTranscribeResponse {
+  WhisperTranscription transcription = 1;
+}

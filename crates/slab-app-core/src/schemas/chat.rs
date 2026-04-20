@@ -950,8 +950,7 @@ fn validate_chat_completion_request(
                     "max_tokens_too_large",
                     &format!(
                         "max_tokens ({}) is too large for continue_generation; maximum is {}",
-                        max_tokens,
-                        MAX_CONTINUE_GENERATION_TOKENS
+                        max_tokens, MAX_CONTINUE_GENERATION_TOKENS
                     ),
                 ));
             }

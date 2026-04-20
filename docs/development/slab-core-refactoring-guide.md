@@ -29,7 +29,7 @@
 **改动：**
 - 从 `types.rs` 删除 `RuntimeError` 类型别名
 - 在 `stage.rs`、`kernel.rs`（已删除）、`pipeline.rs`（内部）、`orchestrator.rs`、`tests.rs`、`backend/admission.rs` 中将 `RuntimeError` 替换为 `CoreError`
-- 保留 `types.rs` 中其他有实质意义的类型：`BackendLifecycleState`、`GlobalConsistencyState`、`GlobalOperationKind`
+- 该阶段后来继续收口：`types.rs` 已整体移除，剩余引用直接改为使用 `crate::base::error::CoreError` 或 `crate::Payload`
 
 **收益：**
 - 错误类型统一为 `CoreError`，全链路一致
@@ -100,10 +100,6 @@
 | `api/runtime/registry.rs` | `Runtime` — 持有 `Orchestrator`、`DriverResolver`，并通过 `RuntimeBuilder` 注入已解析的 backend registrations |
 | `internal/dispatch/plan.rs` | `InvocationPlan`、`ResolvedDriver`、`op_name_for(Capability, streaming)` |
 | `internal/dispatch/planner.rs` | `DriverResolver::resolve(spec, capability, streaming)` |
-| `internal/scheduler/orchestrator.rs` | 调度核心：提交、执行、等待、取消、结果提取 |
-| `internal/scheduler/storage.rs` | `ResultStorage` — 任务状态的线程安全存储 |
-| `internal/scheduler/stage.rs` | `Stage` (Cpu/Gpu/GpuStream) — pipeline 阶段描述 |
-| `internal/scheduler/pipeline.rs` | 内部 `PipelineBuilder` — 类型状态 builder |
 | `internal/scheduler/backend/` | admission 控制、worker runner、protocol 类型 |
 | `internal/engine/*/backend.rs` | 各后端 worker（llama/whisper/diffusion/onnx × ggml/candle） |
 
@@ -111,13 +107,13 @@
 
 ## 待完成阶段 (Pending Phases)
 
-### Phase 5（可选）：压缩 `types.rs` 的 re-export 层
+### Phase 5（已完成）：移除 `types.rs` re-export 层
 
-当前 `internal/scheduler/types.rs` 仍保留了对 `base::types::*` 的 re-export，各后端 worker 通过 `scheduler::types::Payload` 间接导入。可以改为直接从 `crate::base::types` 导入，彻底消除 re-export 中间层。
+原先 `internal/scheduler/types.rs` 仍保留了对 `base::types::*` 的 re-export，各后端 worker 通过 `scheduler::types::Payload` 间接导入。现在已经改为直接使用 `crate::Payload` 或 `crate::base::error::CoreError`，中间层已删除。
 
-**影响范围：** 所有 `use crate::internal::scheduler::types::Payload;` 的文件（约 9 个）
+**影响范围：** 只涉及少量 backend/runner 与 admission 引用点，属于纯内部收口。
 
-**优先级：** 低（功能等价，仅减少一层路径）
+**结果：** `internal/scheduler` 现在只保留 `backend/` 子模块，`slab-runtime-core` 的职责进一步收敛到 backend substrate。
 
 ---
 
@@ -151,7 +147,7 @@
 | `ResultStorage` | `Arc<RwLock<HashMap<TaskId, TaskRecord>>>` |
 | `ResourceManager` | `Arc<RwLock<HashMap<...>>>` + `OwnedSemaphorePermit` |
 | `TaskHandle<R,C>` | `Clone` 可跨线程持有，`codec` 为 `Arc<dyn TaskCodec>` |
-| backend workers | `Mutex<mpsc::Receiver<BackendRequest>>` 竞争消费 |
+| backend workers | `SharedIngressRx (= flume::Receiver<BackendRequest>)` 竞争消费 |
 | management 操作 | `OwnedRwLockWriteGuard` 独占锁，inference 持 read lock |
 
 ---

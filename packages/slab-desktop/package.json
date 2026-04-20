@@ -29,8 +29,13 @@
     "@ant-design/x": "^2.5.0",
     "@ant-design/x-markdown": "^2.5.0",
     "@ant-design/x-sdk": "^2.5.0",
+<<<<<<< dependabot/bun/antd-6.3.6
     "antd": "^6.3.6",
     "@tanstack/react-query": "^5.99.0",
+=======
+    "antd": "^6.3.5",
+    "@tanstack/react-query": "^5.99.2",
+>>>>>>> main
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "~2.7.0",
     "@tauri-apps/plugin-opener": "^2.5.3",
@@ -58,10 +63,10 @@
     "@types/node": "^25.6.0",
     "@vitejs/plugin-react": "^6.0.1",
     "@vitest/coverage-v8": "^4.1.4",
-    "autoprefixer": "^10.4.27",
+    "autoprefixer": "^10.5.0",
     "cross-spawn": "^7.0.6",
     "culori": "^4.0.2",
-    "jsdom": "^25.0.1",
+    "jsdom": "^29.0.2",
     "openapi-typescript": "^7.13.0",
     "postcss": "^8.5.8",
     "vite": "^8.0.8",
