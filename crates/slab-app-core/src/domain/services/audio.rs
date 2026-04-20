@@ -8,7 +8,7 @@ use crate::domain::models::{
     AcceptedOperation, AudioTranscriptionCommand, TranscribeDecodeOptions, TranscribeVadOptions,
 };
 use crate::error::AppCoreError;
-use crate::infra::rpc::{self, pb};
+use crate::infra::rpc::{self, codec, pb};
 
 #[derive(Clone)]
 pub struct AudioService {
@@ -39,8 +39,8 @@ impl AudioService {
             AppCoreError::BackendNotReady("whisper gRPC endpoint is not configured".into())
         })?;
 
-        let grpc_req = pb::TranscribeRequest {
-            path: req.path.clone(),
+        let grpc_req = pb::GgmlWhisperTranscribeRequest {
+            path: Some(req.path.clone()),
             language: req.language.clone(),
             prompt: req.prompt.clone(),
             detect_language: req.detect_language,
@@ -79,7 +79,8 @@ impl AudioService {
                     }
 
                     match rpc_result {
-                        Ok(text) => {
+                        Ok(response) => {
+                            let text = codec::decode_whisper_transcription_text(&response);
                             let payload = serde_json::json!({ "text": text }).to_string();
                             if let Err(error) = operation.mark_succeeded(&payload).await {
                                 warn!(task_id = %operation_id, error = %error, "failed to update remote transcription result");
@@ -102,7 +103,7 @@ impl AudioService {
 
 fn build_vad_request(
     vad: Option<&TranscribeVadOptions>,
-) -> Result<Option<pb::TranscribeVadOptions>, AppCoreError> {
+) -> Result<Option<pb::GgmlWhisperVadOptions>, AppCoreError> {
     let Some(vad) = vad else {
         return Ok(None);
     };
@@ -124,7 +125,7 @@ fn build_vad_request(
         || vad.speech_pad_ms.is_some()
         || vad.samples_overlap.is_some();
 
-    let params = has_custom_params.then_some(pb::TranscribeVadParams {
+    let params = has_custom_params.then_some(pb::GgmlWhisperVadParams {
         threshold: vad.threshold,
         min_speech_duration_ms: vad.min_speech_duration_ms,
         min_silence_duration_ms: vad.min_silence_duration_ms,
@@ -133,12 +134,16 @@ fn build_vad_request(
         samples_overlap: vad.samples_overlap,
     });
 
-    Ok(Some(pb::TranscribeVadOptions { enabled: true, model_path: model_path.to_owned(), params }))
+    Ok(Some(pb::GgmlWhisperVadOptions {
+        enabled: Some(true),
+        model_path: Some(model_path.to_owned()),
+        params,
+    }))
 }
 
 fn build_decode_request(
     decode: Option<&TranscribeDecodeOptions>,
-) -> Result<Option<pb::TranscribeDecodeOptions>, AppCoreError> {
+) -> Result<Option<pb::GgmlWhisperDecodeOptions>, AppCoreError> {
     let Some(decode) = decode else {
         return Ok(None);
     };
@@ -164,7 +169,7 @@ fn build_decode_request(
         return Ok(None);
     }
 
-    Ok(Some(pb::TranscribeDecodeOptions {
+    Ok(Some(pb::GgmlWhisperDecodeOptions {
         offset_ms: decode.offset_ms,
         duration_ms: decode.duration_ms,
         no_context: decode.no_context,
