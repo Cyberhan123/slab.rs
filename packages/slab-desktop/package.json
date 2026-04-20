@@ -29,8 +29,13 @@
     "@ant-design/x": "^2.5.0",
     "@ant-design/x-markdown": "^2.5.0",
     "@ant-design/x-sdk": "^2.5.0",
+<<<<<<< dependabot/bun/antd-6.3.6
+    "antd": "^6.3.6",
+    "@tanstack/react-query": "^5.99.0",
+=======
     "antd": "^6.3.5",
     "@tanstack/react-query": "^5.99.2",
+>>>>>>> main
     "@tauri-apps/api": "^2.10.1",
     "@tauri-apps/plugin-dialog": "~2.7.0",
     "@tauri-apps/plugin-opener": "^2.5.3",
