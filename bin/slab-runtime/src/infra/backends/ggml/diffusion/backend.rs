@@ -18,14 +18,10 @@ use slab_diffusion::{
     ContextParams as DiffusionContextParams, Image as DiffusionImage,
     ImgParams as DiffusionImgParams,
 };
-use tokio::sync::broadcast;
 
 use crate::infra::backends::ggml::diffusion::adapter::GGMLDiffusionEngine;
 use slab_runtime_core::Payload;
-use slab_runtime_core::backend::{
-    BroadcastSeq, ControlOpId, DeploymentSnapshot, Input, PeerWorkerCommand,
-    SyncMessage, Typed, WorkerCommand,
-};
+use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, PeerControlBus, Typed};
 use slab_runtime_macros::backend_handler;
 
 // ── Configurations ────────────────────────────────────────────────────────────
@@ -48,22 +44,15 @@ pub struct DiffusionWorker {
     /// - `Some(e)` where `e.ctx` is None → engine loaded, no model.
     /// - `Some(e)` where `e.ctx` is Some → engine + model loaded.
     engine: Option<GGMLDiffusionEngine>,
-    /// Broadcast sender shared among all workers so that any worker can
-    /// propagate state-change commands (e.g. `Unload`) to all peers.
-    bc_tx: broadcast::Sender<WorkerCommand>,
-    /// Stable index used to populate `sender_id` when broadcasting.
-    worker_id: usize,
+    /// Peer synchronization emitter shared among workers.
+    peer_bus: PeerControlBus,
     last_model_config: Option<Payload>,
 }
 
-#[backend_handler]
+#[backend_handler(peer_bus = peer_bus)]
 impl DiffusionWorker {
-    pub fn new(
-        engine: Option<GGMLDiffusionEngine>,
-        bc_tx: broadcast::Sender<WorkerCommand>,
-        worker_id: usize,
-    ) -> Self {
-        Self { engine, bc_tx, worker_id, last_model_config: None }
+    pub fn new(engine: Option<GGMLDiffusionEngine>, peer_bus: PeerControlBus) -> Self {
+        Self { engine, peer_bus, last_model_config: None }
     }
 
     #[on_event(LoadModel)]
@@ -71,21 +60,21 @@ impl DiffusionWorker {
         &mut self,
         config: Input<DiffusionContextParams>,
         seq: BroadcastSeq,
-    ) -> Result<(), String> {
-        self.handle_load_model(config.0, seq.0).await
+    ) -> Result<(), anyhow::Error> {
+        self.handle_load_model(config.0, seq.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), String> {
-        self.handle_unload_model(seq.0).await
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), anyhow::Error> {
+        self.handle_unload_model(seq.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(InferenceImage)]
     async fn on_inference_image(
         &mut self,
         image_params: Input<DiffusionImgParams>,
-    ) -> Result<Typed<Vec<DiffusionImage>>, String> {
-        self.handle_inference_image(image_params.0).await
+    ) -> Result<Typed<Vec<DiffusionImage>>, anyhow::Error> {
+        self.handle_inference_image(image_params.0).await.map_err(anyhow::Error::msg)
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
@@ -95,6 +84,7 @@ impl DiffusionWorker {
         config: DiffusionContextParams,
         seq_id: u64,
     ) -> Result<(), String> {
+        let worker_id = self.peer_sender_id();
         let engine = match self.engine.as_mut() {
             Some(e) => e,
             None => {
@@ -104,7 +94,7 @@ impl DiffusionWorker {
         let config_payload = Payload::typed(config.clone());
 
         tracing::info!(
-            worker_id = self.worker_id,
+            worker_id,
             seq_id,
             model_path = ?config.model_path.as_ref().map(|path| path.display().to_string()),
             diffusion_model_path = ?config.diffusion_model_path.as_ref().map(|p| p.display().to_string()),
@@ -127,14 +117,10 @@ impl DiffusionWorker {
         match result {
             Ok(()) => {
                 self.last_model_config = Some(config_payload.clone());
-                let deployment = DeploymentSnapshot::with_model(seq_id, config_payload);
                 // Broadcast so peer workers also load the same model.
-                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                    sync: SyncMessage::Deployment(deployment),
-                    sender_id: self.worker_id,
-                }));
+                self.emit_peer_load_model_deployment_payload(seq_id, config_payload);
                 tracing::info!(
-                    worker_id = self.worker_id,
+                    worker_id,
                     seq_id,
                     elapsed_ms = started_at.elapsed().as_millis(),
                     "diffusion model.load completed"
@@ -143,7 +129,7 @@ impl DiffusionWorker {
             }
             Err(e) => {
                 tracing::error!(
-                    worker_id = self.worker_id,
+                    worker_id,
                     seq_id,
                     elapsed_ms = started_at.elapsed().as_millis(),
                     error = %e,
@@ -162,11 +148,7 @@ impl DiffusionWorker {
                 e.unload();
                 self.last_model_config = None;
                 // Broadcast so every peer worker also drops its context.
-                // Ignore errors: no receivers simply means no other workers.
-                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
-                    sync: SyncMessage::Generation { generation: seq_id },
-                    sender_id: self.worker_id,
-                }));
+                self.emit_peer_unload_generation(seq_id);
                 Ok(())
             }
             None => Err("engine not initialized".to_owned()),
@@ -198,7 +180,7 @@ impl DiffusionWorker {
     async fn on_peer_load_model(
         &mut self,
         config: Input<DiffusionContextParams>,
-    ) -> Result<(), String> {
+    ) -> Result<(), anyhow::Error> {
         let config = config.0;
         let model_path = config.model_path.clone();
         if let Some(engine) = self.engine.as_mut()
@@ -218,7 +200,7 @@ impl DiffusionWorker {
     }
 
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) -> Result<(), String> {
+    async fn on_peer_unload(&mut self) -> Result<(), anyhow::Error> {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
@@ -228,7 +210,7 @@ impl DiffusionWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
         tracing::debug!(op_id = op_id.0, "diffusion runtime control pre-cleanup");
         if let Some(engine) = self.engine.as_mut() {
             engine.unload();
@@ -238,7 +220,7 @@ impl DiffusionWorker {
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged(&mut self) -> Result<(), String> {
+    async fn on_control_lagged(&mut self) -> Result<(), anyhow::Error> {
         if let Some(e) = self.engine.as_mut() {
             e.unload();
         }
@@ -252,6 +234,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use slab_runtime_core::backend::DeploymentSnapshot;
 
     #[test]
     fn deployment_snapshot_reads_typed_ggml_diffusion_model_config() {

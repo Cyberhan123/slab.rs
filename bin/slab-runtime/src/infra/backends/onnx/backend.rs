@@ -40,17 +40,12 @@
 //! }
 //! ```
 
-use tokio::sync::broadcast;
 use tracing::warn;
 
 use crate::domain::models::OnnxLoadConfig;
 use crate::infra::backends::onnx::adapter::OnnxEngine;
 use crate::infra::backends::onnx::config::OnnxInferenceInput;
-use slab_runtime_core::Payload;
-use slab_runtime_core::backend::{
-    BroadcastSeq, ControlOpId, DeploymentSnapshot, Input, PeerWorkerCommand, SyncMessage,
-    WorkerCommand,
-};
+use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, PeerControlBus};
 use slab_runtime_macros::backend_handler;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
@@ -73,10 +68,8 @@ pub struct OnnxWorker {
     /// receiving a broadcast can reproduce the same session configuration
     /// (execution providers, thread counts, etc.).
     current_config: Option<OnnxLoadConfig>,
-    /// Broadcast sender shared among all workers.
-    bc_tx: broadcast::Sender<WorkerCommand>,
-    /// Stable index used to populate `sender_id` when broadcasting.
-    worker_id: usize,
+    /// Peer synchronization emitter shared among workers.
+    peer_bus: PeerControlBus,
 }
 
 #[cfg(test)]
@@ -84,6 +77,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
+    use slab_runtime_core::Payload;
+    use slab_runtime_core::backend::DeploymentSnapshot;
 
     #[test]
     fn deployment_snapshot_reads_typed_onnx_model_config() {
@@ -108,10 +103,10 @@ mod tests {
     }
 }
 
-#[backend_handler]
+#[backend_handler(peer_bus = peer_bus)]
 impl OnnxWorker {
-    pub fn new(bc_tx: broadcast::Sender<WorkerCommand>, worker_id: usize) -> Self {
-        Self { engine: OnnxEngine::new(), current_config: None, bc_tx, worker_id }
+    pub fn new(peer_bus: PeerControlBus) -> Self {
+        Self { engine: OnnxEngine::new(), current_config: None, peer_bus }
     }
 
     // ── dispatch ──────────────────────────────────────────────────────────────
@@ -121,21 +116,21 @@ impl OnnxWorker {
         &mut self,
         config: Input<OnnxLoadConfig>,
         seq: BroadcastSeq,
-    ) -> Result<(), String> {
-        self.handle_load_model(config.0, seq.0).await
+    ) -> Result<(), anyhow::Error> {
+        self.handle_load_model(config.0, seq.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), String> {
-        self.handle_unload_model(seq.0).await
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), anyhow::Error> {
+        self.handle_unload_model(seq.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(Inference)]
     async fn on_inference(
         &mut self,
         input: Input<OnnxInferenceInput>,
-    ) -> Result<serde_json::Value, String> {
-        self.handle_inference(input.0).await
+    ) -> Result<serde_json::Value, anyhow::Error> {
+        self.handle_inference(input.0).await.map_err(anyhow::Error::msg)
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
@@ -145,19 +140,15 @@ impl OnnxWorker {
         config: OnnxLoadConfig,
         seq_id: u64,
     ) -> Result<(), String> {
-        let deployment = DeploymentSnapshot::with_model(seq_id, Payload::typed(config.clone()));
         // Session creation is CPU / I/O-bound; run on the blocking thread pool.
         let result = tokio::task::block_in_place(|| self.engine.load_model(config.clone()));
 
         match result {
             Ok(()) => {
                 // Store the full config so peer workers can replicate it.
-                self.current_config = Some(config);
+                self.current_config = Some(config.clone());
                 // Broadcast so peer workers also load the same model.
-                let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::LoadModel {
-                    sync: SyncMessage::Deployment(deployment),
-                    sender_id: self.worker_id,
-                }));
+                self.emit_peer_load_model_deployment(seq_id, config);
                 Ok(())
             }
             Err(e) => Err(e.to_string()),
@@ -170,10 +161,7 @@ impl OnnxWorker {
         self.engine.unload();
         self.current_config = None;
         // Broadcast so peer workers also drop their sessions.
-        let _ = self.bc_tx.send(WorkerCommand::Peer(PeerWorkerCommand::Unload {
-            sync: SyncMessage::Generation { generation: seq_id },
-            sender_id: self.worker_id,
-        }));
+        self.emit_peer_unload_generation(seq_id);
         Ok(())
     }
 
@@ -204,7 +192,10 @@ impl OnnxWorker {
     /// replaced.  If it already has the **same** model loaded, the call is a
     /// no-op to avoid unnecessary session teardown.
     #[on_peer_control(LoadModel)]
-    async fn on_peer_load_model(&mut self, config: Input<OnnxLoadConfig>) -> Result<(), String> {
+    async fn on_peer_load_model(
+        &mut self,
+        config: Input<OnnxLoadConfig>,
+    ) -> Result<(), anyhow::Error> {
         let config = config.0;
         let model_path = config.model_path.clone();
 
@@ -235,7 +226,7 @@ impl OnnxWorker {
 
     /// When another worker unloads the model, drop the session in this worker.
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) -> Result<(), String> {
+    async fn on_peer_unload(&mut self) -> Result<(), anyhow::Error> {
         self.engine.unload();
         self.current_config = None;
         Ok(())
@@ -245,7 +236,7 @@ impl OnnxWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
         tracing::debug!(op_id = op_id.0, "ONNX runtime control pre-cleanup");
         self.engine.unload();
         self.current_config = None;
@@ -255,7 +246,7 @@ impl OnnxWorker {
     /// Conservative unload when broadcast channel lags – avoid running stale
     /// inference on a model that peers may have already replaced.
     #[on_control_lagged]
-    async fn on_control_lagged(&mut self) -> Result<(), String> {
+    async fn on_control_lagged(&mut self) -> Result<(), anyhow::Error> {
         self.engine.unload();
         self.current_config = None;
         Ok(())

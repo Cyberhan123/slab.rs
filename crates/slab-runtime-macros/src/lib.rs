@@ -3,10 +3,12 @@ use std::collections::HashSet;
 use proc_macro::TokenStream;
 use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
+use syn::parse::{Parse, ParseStream};
 use syn::parse_quote;
 use syn::spanned::Spanned;
 use syn::{
-    Attribute, FnArg, ImplItem, ImplItemFn, ItemImpl, Path, Result, ReturnType, Type, Visibility,
+    Attribute, FnArg, Ident, ImplItem, ImplItemFn, ItemImpl, Path, Result, ReturnType, Token, Type,
+    Visibility,
 };
 
 #[derive(Clone)]
@@ -16,10 +18,44 @@ enum EventHandlerKind {
 }
 
 #[proc_macro_attribute]
-pub fn backend_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    match expand_backend_handler(item) {
+pub fn backend_handler(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let config = match syn::parse::<BackendHandlerConfig>(attr) {
+        Ok(config) => config,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    match expand_backend_handler(config, item) {
         Ok(tokens) => tokens,
         Err(err) => err.to_compile_error().into(),
+    }
+}
+
+#[derive(Default)]
+struct BackendHandlerConfig {
+    peer_bus_field: Option<Ident>,
+}
+
+impl Parse for BackendHandlerConfig {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut config = Self::default();
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            if key != "peer_bus" {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "unsupported #[backend_handler] option; expected `peer_bus = <field>`",
+                ));
+            }
+            if config.peer_bus_field.is_some() {
+                return Err(syn::Error::new(key.span(), "`peer_bus` may only be specified once"));
+            }
+            input.parse::<Token![=]>()?;
+            config.peer_bus_field = Some(input.parse()?);
+            if input.is_empty() {
+                break;
+            }
+            input.parse::<Token![,]>()?;
+        }
+        Ok(config)
     }
 }
 
@@ -110,6 +146,28 @@ fn type_last_ident(ty: &Type) -> Option<&syn::Ident> {
 
 fn is_type_ident(ty: &Type, expected_ident: &str) -> bool {
     type_last_ident(ty).is_some_and(|ident| ident == expected_ident)
+}
+
+fn path_last_ident(path: &Path) -> Option<&syn::Ident> {
+    path.segments.last().map(|segment| &segment.ident)
+}
+
+fn ident_to_snake_case(ident: &syn::Ident) -> String {
+    let raw = ident.to_string();
+    let mut result = String::with_capacity(raw.len());
+    for (idx, ch) in raw.chars().enumerate() {
+        if ch.is_uppercase() {
+            if idx > 0 {
+                result.push('_');
+            }
+            for lower in ch.to_lowercase() {
+                result.push(lower);
+            }
+        } else {
+            result.push(ch);
+        }
+    }
+    result
 }
 
 fn is_backend_request_arg(arg: &FnArg) -> bool {
@@ -228,15 +286,17 @@ fn runtime_arg_extractor(arg: &FnArg) -> Result<TokenStream2> {
         );
     }
     if is_type_ident(ty, "Payload") {
-        return Ok(quote! { ::slab_runtime_core::backend::extract_runtime_control_payload(&signal) });
-    }
-    if is_type_ident(ty, "ControlOpId") {
         return Ok(
-            quote! { ::slab_runtime_core::backend::extract_runtime_control_op_id(&signal) },
+            quote! { ::slab_runtime_core::backend::extract_runtime_control_payload(&signal) },
         );
     }
+    if is_type_ident(ty, "ControlOpId") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_runtime_control_op_id(&signal) });
+    }
     if is_type_ident(ty, "RuntimeControlSignal") {
-        return Ok(quote! { Ok::<_, String>(signal.clone()) });
+        return Ok(quote! {
+            Ok::<_, ::slab_runtime_core::backend::BackendHandlerError>(signal.clone())
+        });
     }
     Err(syn::Error::new(
         ty.span(),
@@ -266,7 +326,9 @@ fn peer_arg_extractor(arg: &FnArg) -> Result<TokenStream2> {
         );
     }
     if is_type_ident(ty, "PeerWorkerCommand") {
-        return Ok(quote! { Ok::<_, String>(cmd.clone()) });
+        return Ok(quote! {
+            Ok::<_, ::slab_runtime_core::backend::BackendHandlerError>(cmd.clone())
+        });
     }
     Err(syn::Error::new(
         ty.span(),
@@ -279,7 +341,7 @@ fn is_associated_constructor_candidate(method: &ImplItemFn) -> bool {
         && non_receiver_arg_count(method) == method.sig.inputs.len()
 }
 
-fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
+fn expand_backend_handler(config: BackendHandlerConfig, item: TokenStream) -> Result<TokenStream> {
     let mut item_impl = syn::parse::<ItemImpl>(item)?;
     if item_impl.trait_.is_some() {
         return Err(syn::Error::new(
@@ -351,12 +413,8 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         }
 
         let event_handler_kind = if !event_args.is_empty() {
-            let event_non_receiver_args: Vec<_> = method
-                .sig
-                .inputs
-                .iter()
-                .filter(|arg| !matches!(arg, FnArg::Receiver(_)))
-                .collect();
+            let event_non_receiver_args: Vec<_> =
+                method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))).collect();
             let legacy_event_handler = event_non_receiver_args.len() == 1
                 && event_non_receiver_args.first().is_some_and(|arg| is_backend_request_arg(arg));
             if event_non_receiver_args.iter().any(|arg| is_backend_request_arg(arg))
@@ -387,12 +445,8 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         };
 
         if !runtime_args.is_empty() {
-            let runtime_non_receiver_args: Vec<_> = method
-                .sig
-                .inputs
-                .iter()
-                .filter(|arg| !matches!(arg, FnArg::Receiver(_)))
-                .collect();
+            let runtime_non_receiver_args: Vec<_> =
+                method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))).collect();
             let extractors = runtime_non_receiver_args
                 .iter()
                 .map(|arg| runtime_arg_extractor(arg))
@@ -401,8 +455,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                 method,
                 "runtime control handlers may only return () or Result<(), Error>; control signals do not carry reply channels",
             )?;
-            let handler =
-                ControlHandler { method: method_ident.clone(), extractors, return_kind };
+            let handler = ControlHandler { method: method_ident.clone(), extractors, return_kind };
             for raw in runtime_args {
                 let pattern = normalize_runtime_control_path(raw);
                 let key = quote!(#pattern).to_string();
@@ -412,10 +465,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                         format!("duplicate runtime control handler for `{key}`"),
                     ));
                 }
-                runtime_routes.push(RuntimeRoute {
-                    pattern,
-                    handler: handler.clone(),
-                });
+                runtime_routes.push(RuntimeRoute { pattern, handler: handler.clone() });
             }
         }
 
@@ -436,12 +486,8 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         }
 
         if !peer_args.is_empty() {
-            let peer_non_receiver_args: Vec<_> = method
-                .sig
-                .inputs
-                .iter()
-                .filter(|arg| !matches!(arg, FnArg::Receiver(_)))
-                .collect();
+            let peer_non_receiver_args: Vec<_> =
+                method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))).collect();
             let extractors = peer_non_receiver_args
                 .iter()
                 .map(|arg| peer_arg_extractor(arg))
@@ -450,8 +496,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                 method,
                 "peer control handlers may only return () or Result<(), Error>; peer control is fire-and-forget",
             )?;
-            let handler =
-                ControlHandler { method: method_ident.clone(), extractors, return_kind };
+            let handler = ControlHandler { method: method_ident.clone(), extractors, return_kind };
             for raw in peer_args {
                 if let Some(raw_path) = raw {
                     let pattern = normalize_peer_control_path(raw_path);
@@ -526,6 +571,43 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                 return Err(syn::Error::new(
                     item_impl.self_ty.span(),
                     "#[backend_handler] impl blocks must expose only one associated constructor named `new`",
+                ));
+            }
+        }
+    }
+
+    let mut peer_emitter_variants = Vec::<syn::Ident>::new();
+    let mut seen_peer_emitter_variants = HashSet::<String>::new();
+    for route in &peer_routes {
+        let Some(variant) = path_last_ident(&route.pattern) else {
+            continue;
+        };
+        let variant_key = variant.to_string();
+        if seen_peer_emitter_variants.insert(variant_key) {
+            peer_emitter_variants.push(variant.clone());
+        }
+    }
+
+    if config.peer_bus_field.is_some() {
+        let mut generated_names = vec!["peer_sender_id".to_owned()];
+        for variant in &peer_emitter_variants {
+            let stem = ident_to_snake_case(variant);
+            generated_names.push(format!("emit_peer_{stem}_deployment"));
+            generated_names.push(format!("emit_peer_{stem}_deployment_payload"));
+            generated_names.push(format!("emit_peer_{stem}_generation"));
+        }
+        for generated_name in generated_names {
+            if item_impl.items.iter().any(|item| {
+                matches!(
+                    item,
+                    ImplItem::Fn(method) if method.sig.ident == generated_name
+                )
+            }) {
+                return Err(syn::Error::new(
+                    item_impl.self_ty.span(),
+                    format!(
+                        "#[backend_handler(peer_bus = ...)] cannot generate `{generated_name}` because the impl already defines it"
+                    ),
                 ));
             }
         }
@@ -613,12 +695,8 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let call_args = (0..route.handler.extractors.len())
             .map(|arg_idx| format_ident!("__backend_handler_runtime_arg_{}_{}", idx, arg_idx))
             .collect::<Vec<_>>();
-        let extraction_stmts = route
-            .handler
-            .extractors
-            .iter()
-            .zip(call_args.iter())
-            .map(|(extractor, binding)| {
+        let extraction_stmts =
+            route.handler.extractors.iter().zip(call_args.iter()).map(|(extractor, binding)| {
                 quote! {
                     let #binding = match #extractor {
                         Ok(value) => value,
@@ -684,12 +762,8 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let call_args = (0..route.handler.extractors.len())
             .map(|arg_idx| format_ident!("__backend_handler_peer_arg_{}_{}", idx, arg_idx))
             .collect::<Vec<_>>();
-        let extraction_stmts = route
-            .handler
-            .extractors
-            .iter()
-            .zip(call_args.iter())
-            .map(|(extractor, binding)| {
+        let extraction_stmts =
+            route.handler.extractors.iter().zip(call_args.iter()).map(|(extractor, binding)| {
                 quote! {
                     let #binding = match #extractor {
                         Ok(value) => value,
@@ -752,11 +826,8 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let call_args = (0..handler.extractors.len())
             .map(|arg_idx| format_ident!("__backend_handler_peer_fallback_arg_{}", arg_idx))
             .collect::<Vec<_>>();
-        let extraction_stmts = handler
-            .extractors
-            .iter()
-            .zip(call_args.iter())
-            .map(|(extractor, binding)| {
+        let extraction_stmts =
+            handler.extractors.iter().zip(call_args.iter()).map(|(extractor, binding)| {
                 quote! {
                     let #binding = match #extractor {
                         Ok(value) => value,
@@ -844,6 +915,56 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         quote! { None }
     };
 
+    let peer_emitter_generated = if let Some(peer_bus_field) = config.peer_bus_field.as_ref() {
+        let peer_emitters = peer_emitter_variants.iter().map(|variant| {
+            let stem = ident_to_snake_case(variant);
+            let emit_deployment = format_ident!("emit_peer_{}_deployment", stem);
+            let emit_deployment_payload = format_ident!("emit_peer_{}_deployment_payload", stem);
+            let emit_generation = format_ident!("emit_peer_{}_generation", stem);
+            quote! {
+                fn #emit_deployment<T>(&self, generation: u64, payload: T)
+                where
+                    T: Send + Sync + 'static,
+                {
+                    self.#peer_bus_field.broadcast_peer_typed_deployment(
+                        ::slab_runtime_core::backend::PeerWorkerCommandKind::#variant,
+                        generation,
+                        payload,
+                    );
+                }
+
+                fn #emit_deployment_payload(
+                    &self,
+                    generation: u64,
+                    payload: ::slab_runtime_core::backend::Payload,
+                ) {
+                    self.#peer_bus_field.broadcast_peer_deployment(
+                        ::slab_runtime_core::backend::PeerWorkerCommandKind::#variant,
+                        generation,
+                        payload,
+                    );
+                }
+
+                fn #emit_generation(&self, generation: u64) {
+                    self.#peer_bus_field.broadcast_peer_generation(
+                        ::slab_runtime_core::backend::PeerWorkerCommandKind::#variant,
+                        generation,
+                    );
+                }
+            }
+        });
+
+        quote! {
+            fn peer_sender_id(&self) -> usize {
+                self.#peer_bus_field.sender_id()
+            }
+
+            #(#peer_emitters)*
+        }
+    } else {
+        quote! {}
+    };
+
     let self_ty = &item_impl.self_ty;
     let (impl_generics, _ty_generics, where_clause) = item_impl.generics.split_for_impl();
 
@@ -856,6 +977,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
             #(#peer_variant_generated)*
             #peer_fallback_generated
             #lagged_generated
+            #peer_emitter_generated
 
             pub(crate) fn route_table() -> ::slab_runtime_core::backend::WorkerRouteTable<Self> {
                 ::slab_runtime_core::backend::WorkerRouteTable {

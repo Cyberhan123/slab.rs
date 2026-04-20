@@ -6,6 +6,7 @@ pub mod backend {
     use std::fmt;
     use std::future::Future;
     use std::pin::Pin;
+    use std::{error::Error, fmt::Display};
 
     #[derive(Clone, Copy)]
     pub enum RequestRoute {
@@ -67,6 +68,79 @@ pub mod backend {
     #[derive(Clone)]
     pub struct Typed<T>(pub T);
 
+    #[derive(Clone, Default)]
+    pub struct PeerControlBus;
+
+    impl PeerControlBus {
+        pub fn sender_id(&self) -> usize {
+            0
+        }
+
+        pub fn broadcast_model_loaded(&self, _generation: u64, _model: Payload) {}
+
+        pub fn broadcast_typed_model_loaded<T>(&self, _generation: u64, _model: T)
+        where
+            T: Send + Sync + 'static,
+        {
+        }
+
+        pub fn broadcast_model_unloaded(&self, _generation: u64) {}
+
+        pub fn broadcast_peer_deployment(
+            &self,
+            _kind: PeerWorkerCommandKind,
+            _generation: u64,
+            _payload: Payload,
+        ) {
+        }
+
+        pub fn broadcast_peer_typed_deployment<T>(
+            &self,
+            _kind: PeerWorkerCommandKind,
+            _generation: u64,
+            _payload: T,
+        ) where
+            T: Send + Sync + 'static,
+        {
+        }
+
+        pub fn broadcast_peer_generation(
+            &self,
+            _kind: PeerWorkerCommandKind,
+            _generation: u64,
+        ) {
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct BackendHandlerError(String);
+
+    impl BackendHandlerError {
+        pub fn new(message: impl Into<String>) -> Self {
+            Self(message.into())
+        }
+    }
+
+    impl From<String> for BackendHandlerError {
+        fn from(value: String) -> Self {
+            Self(value)
+        }
+    }
+
+    impl From<BackendHandlerError> for String {
+        fn from(value: BackendHandlerError) -> Self {
+            value.0
+        }
+    }
+
+    impl Display for BackendHandlerError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.write_str(&self.0)
+        }
+    }
+
+    impl Error for BackendHandlerError {}
+
     pub enum BackendReply {
         Ack,
     }
@@ -78,23 +152,23 @@ pub mod backend {
     }
 
     pub trait IntoBackendReply {
-        fn into_backend_reply(self) -> Result<BackendReply, String>;
+        fn into_backend_reply(self) -> Result<BackendReply, BackendHandlerError>;
     }
 
     impl IntoBackendReply for () {
-        fn into_backend_reply(self) -> Result<BackendReply, String> {
+        fn into_backend_reply(self) -> Result<BackendReply, BackendHandlerError> {
             Ok(BackendReply::Ack)
         }
     }
 
     impl<T> IntoBackendReply for Json<T> {
-        fn into_backend_reply(self) -> Result<BackendReply, String> {
+        fn into_backend_reply(self) -> Result<BackendReply, BackendHandlerError> {
             Ok(BackendReply::Ack)
         }
     }
 
     impl<T> IntoBackendReply for Typed<T> {
-        fn into_backend_reply(self) -> Result<BackendReply, String> {
+        fn into_backend_reply(self) -> Result<BackendReply, BackendHandlerError> {
             Ok(BackendReply::Ack)
         }
     }
@@ -107,59 +181,67 @@ pub mod backend {
         BackendReply::Ack
     }
 
-    pub fn extract_event_text(_req: &BackendRequest) -> Result<String, String> {
+    pub fn extract_event_text(_req: &BackendRequest) -> Result<String, BackendHandlerError> {
         Ok(String::new())
     }
 
-    pub fn extract_event_payload(req: &BackendRequest) -> Result<Payload, String> {
+    pub fn extract_event_payload(req: &BackendRequest) -> Result<Payload, BackendHandlerError> {
         Ok(req.input.clone())
     }
 
-    pub fn extract_event_input<T>(_req: &BackendRequest) -> Result<Input<T>, String> {
-        Err("unsupported in fixture".to_owned())
+    pub fn extract_event_input<T>(_req: &BackendRequest) -> Result<Input<T>, BackendHandlerError> {
+        Err(BackendHandlerError::new("unsupported in fixture"))
     }
 
-    pub fn extract_event_options<T>(_req: &BackendRequest) -> Result<Options<T>, String> {
-        Err("unsupported in fixture".to_owned())
+    pub fn extract_event_options<T>(
+        _req: &BackendRequest,
+    ) -> Result<Options<T>, BackendHandlerError> {
+        Err(BackendHandlerError::new("unsupported in fixture"))
     }
 
-    pub fn extract_event_cancel_rx(req: &BackendRequest) -> Result<CancelRx, String> {
+    pub fn extract_event_cancel_rx(req: &BackendRequest) -> Result<CancelRx, BackendHandlerError> {
         Ok(CancelRx(req.cancel_rx.clone()))
     }
 
-    pub fn extract_event_broadcast_seq(_req: &BackendRequest) -> Result<BroadcastSeq, String> {
+    pub fn extract_event_broadcast_seq(
+        _req: &BackendRequest,
+    ) -> Result<BroadcastSeq, BackendHandlerError> {
         Ok(BroadcastSeq(0))
     }
 
     pub fn extract_runtime_control_op_id(
         _signal: &RuntimeControlSignal,
-    ) -> Result<ControlOpId, String> {
+    ) -> Result<ControlOpId, BackendHandlerError> {
         Ok(ControlOpId(0))
     }
 
     pub fn extract_runtime_control_payload(
         _signal: &RuntimeControlSignal,
-    ) -> Result<Payload, String> {
+    ) -> Result<Payload, BackendHandlerError> {
         Ok(Payload::None)
     }
 
     pub fn extract_runtime_control_input<T>(
         _signal: &RuntimeControlSignal,
-    ) -> Result<Input<T>, String> {
-        Err("unsupported in fixture".to_owned())
+    ) -> Result<Input<T>, BackendHandlerError> {
+        Err(BackendHandlerError::new("unsupported in fixture"))
     }
 
-    pub fn extract_peer_control_payload(_cmd: &PeerWorkerCommand) -> Result<Payload, String> {
+    pub fn extract_peer_control_payload(
+        _cmd: &PeerWorkerCommand,
+    ) -> Result<Payload, BackendHandlerError> {
         Ok(Payload::None)
     }
 
-    pub fn extract_peer_control_input<T>(_cmd: &PeerWorkerCommand) -> Result<Input<T>, String> {
-        Err("unsupported in fixture".to_owned())
+    pub fn extract_peer_control_input<T>(
+        _cmd: &PeerWorkerCommand,
+    ) -> Result<Input<T>, BackendHandlerError> {
+        Err(BackendHandlerError::new("unsupported in fixture"))
     }
 
     pub fn extract_peer_control_broadcast_seq(
         _cmd: &PeerWorkerCommand,
-    ) -> Result<BroadcastSeq, String> {
+    ) -> Result<BroadcastSeq, BackendHandlerError> {
         Ok(BroadcastSeq(0))
     }
 
@@ -173,6 +255,12 @@ pub mod backend {
     pub enum PeerWorkerCommand {
         LoadModel {},
         Unload {},
+    }
+
+    #[derive(Clone, Copy)]
+    pub enum PeerWorkerCommandKind {
+        LoadModel,
+        Unload,
     }
 
     pub type HandlerFuture<'a> = Pin<Box<dyn Future<Output = ()> + Send + 'a>>;
@@ -288,14 +376,11 @@ pub mod backend {
     ) {
     }
 
-    pub async fn dispatch_control_lagged<T>(
-        _handler: &mut T,
-        _route: Option<LaggedDispatchFn<T>>,
-    ) {
+    pub async fn dispatch_control_lagged<T>(_handler: &mut T, _route: Option<LaggedDispatchFn<T>>) {
     }
 }
 
 use crate::backend::{
     BackendRequest, BroadcastSeq, CancelRx, ControlOpId, Input, Json, Options, Payload,
-    PeerWorkerCommand, RuntimeControlSignal, Typed,
+    PeerControlBus, PeerWorkerCommand, PeerWorkerCommandKind, RuntimeControlSignal, Typed,
 };

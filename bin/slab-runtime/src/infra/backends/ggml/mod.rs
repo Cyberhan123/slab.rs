@@ -98,9 +98,9 @@ pub fn register(
                 (1..count).map(|_| Some(whisper_engine.fork_library())).collect();
             worker_engines.insert(0, Some(whisper_engine));
             let mut worker_engines = worker_engines.into_iter();
-            spawn_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+            spawn_workers(shared_rx, control_tx, count, move |peer_bus| {
                 let worker_engine = worker_engines.next().unwrap_or(None);
-                WhisperWorker::new(worker_engine, bc_tx, worker_id)
+                WhisperWorker::new(worker_engine, peer_bus)
             });
         });
     }
@@ -113,9 +113,9 @@ pub fn register(
                 (1..count).map(|_| Some(diffusion_engine.fork_library())).collect();
             worker_engines.insert(0, Some(diffusion_engine));
             let mut worker_engines = worker_engines.into_iter();
-            spawn_dedicated_workers(shared_rx, control_tx, count, move |worker_id, bc_tx| {
+            spawn_dedicated_workers(shared_rx, control_tx, count, move |peer_bus| {
                 let worker_engine = worker_engines.next().unwrap_or(None);
-                DiffusionWorker::new(worker_engine, bc_tx, worker_id)
+                DiffusionWorker::new(worker_engine, peer_bus)
             });
         });
     }

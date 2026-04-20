@@ -92,13 +92,13 @@ impl LlamaWorker {
     }
 
     #[on_event(LoadModel)]
-    async fn on_load_model(&mut self, config: Input<LlamaLoadConfig>) -> Result<(), String> {
-        self.handle_load_model(config.0).await
+    async fn on_load_model(&mut self, config: Input<LlamaLoadConfig>) -> Result<(), anyhow::Error> {
+        self.handle_load_model(config.0).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self) -> Result<(), String> {
-        self.handle_unload_model().await
+    async fn on_unload_model(&mut self) -> Result<(), anyhow::Error> {
+        self.handle_unload_model().await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(Inference)]
@@ -106,9 +106,9 @@ impl LlamaWorker {
         &mut self,
         prompt: String,
         options: Options<LlamaInferenceParams>,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<serde_json::Value, anyhow::Error> {
         let options = InferenceOptions::from_params(options.0);
-        self.handle_inference(prompt, options).await
+        self.handle_inference(prompt, options).await.map_err(anyhow::Error::msg)
     }
 
     #[on_event(InferenceStream)]
@@ -117,9 +117,9 @@ impl LlamaWorker {
         prompt: String,
         options: Options<LlamaInferenceParams>,
         cancel: CancelRx,
-    ) -> Result<StreamHandle, String> {
+    ) -> Result<StreamHandle, anyhow::Error> {
         let options = InferenceOptions::from_params(options.0);
-        self.handle_inference_stream(prompt, options, cancel).await
+        self.handle_inference_stream(prompt, options, cancel).await.map_err(anyhow::Error::msg)
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -130,7 +130,7 @@ impl LlamaWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), String> {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
         tracing::debug!(op_id = op_id.0, "llama runtime control pre-cleanup");
         // Runtime-level GlobalLoad is treated as a pre-load cleanup signal.
         // The actual model.load request is still driven by the management path.
@@ -139,17 +139,14 @@ impl LlamaWorker {
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged_cleanup(&mut self) -> Result<(), String> {
+    async fn on_control_lagged_cleanup(&mut self) -> Result<(), anyhow::Error> {
         self.cleanup_runtime_state();
         Ok(())
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
 
-    async fn handle_load_model(
-        &mut self,
-        config: LlamaLoadConfig,
-    ) -> Result<(), String> {
+    async fn handle_load_model(&mut self, config: LlamaLoadConfig) -> Result<(), String> {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
@@ -228,11 +225,8 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
         } = options;
-        let engine = self
-            .engine
-            .as_ref()
-            .map(Arc::clone)
-            .ok_or_else(|| "model not loaded".to_owned())?;
+        let engine =
+            self.engine.as_ref().map(Arc::clone).ok_or_else(|| "model not loaded".to_owned())?;
         let request = LlamaDispatchRequest {
             prompt,
             max_tokens,
@@ -282,11 +276,8 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
         } = options;
-        let engine = self
-            .engine
-            .as_ref()
-            .map(Arc::clone)
-            .ok_or_else(|| "model not loaded".to_owned())?;
+        let engine =
+            self.engine.as_ref().map(Arc::clone).ok_or_else(|| "model not loaded".to_owned())?;
         let request = LlamaDispatchRequest {
             prompt,
             max_tokens,

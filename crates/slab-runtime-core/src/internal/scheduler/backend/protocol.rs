@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use tokio::sync::{oneshot, watch};
+use tokio::sync::{broadcast, oneshot, watch};
 
 use crate::base::types::Payload;
 pub use crate::base::types::StreamHandle;
@@ -115,7 +115,41 @@ pub enum PeerWorkerCommand {
     Unload { sync: SyncMessage, sender_id: usize },
 }
 
+/// Discriminant for constructing peer-synchronization commands generically.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PeerWorkerCommandKind {
+    LoadModel,
+    Unload,
+}
+
+impl PeerWorkerCommandKind {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::LoadModel => "LoadModel",
+            Self::Unload => "Unload",
+        }
+    }
+
+    pub fn into_command(self, sync: SyncMessage, sender_id: usize) -> PeerWorkerCommand {
+        match self {
+            Self::LoadModel => PeerWorkerCommand::LoadModel { sync, sender_id },
+            Self::Unload => PeerWorkerCommand::Unload { sync, sender_id },
+        }
+    }
+}
+
 impl PeerWorkerCommand {
+    pub fn from_kind(kind: PeerWorkerCommandKind, sync: SyncMessage, sender_id: usize) -> Self {
+        kind.into_command(sync, sender_id)
+    }
+
+    pub fn kind(&self) -> PeerWorkerCommandKind {
+        match self {
+            Self::LoadModel { .. } => PeerWorkerCommandKind::LoadModel,
+            Self::Unload { .. } => PeerWorkerCommandKind::Unload,
+        }
+    }
+
     /// Worker id that originally emitted this peer command.
     pub fn sender_id(&self) -> usize {
         match self {
@@ -157,6 +191,104 @@ pub enum WorkerCommand {
     Peer(PeerWorkerCommand),
     #[cfg_attr(not(test), allow(dead_code))]
     Runtime(RuntimeControlSignal),
+}
+
+/// Worker-facing peer synchronization emitter.
+///
+/// Backend workers use this instead of constructing [`WorkerCommand`] values or
+/// touching the underlying broadcast channel directly.
+#[derive(Clone)]
+pub struct PeerControlBus {
+    tx: broadcast::Sender<WorkerCommand>,
+    sender_id: usize,
+}
+
+impl PeerControlBus {
+    pub fn new(tx: broadcast::Sender<WorkerCommand>, sender_id: usize) -> Self {
+        Self { tx, sender_id }
+    }
+
+    pub fn sender_id(&self) -> usize {
+        self.sender_id
+    }
+
+    pub fn broadcast_peer_deployment(
+        &self,
+        kind: PeerWorkerCommandKind,
+        generation: u64,
+        model: Payload,
+    ) {
+        let deployment = DeploymentSnapshot::with_model(generation, model);
+        self.broadcast_peer_sync(kind, SyncMessage::Deployment(deployment));
+    }
+
+    pub fn broadcast_peer_typed_deployment<T>(
+        &self,
+        kind: PeerWorkerCommandKind,
+        generation: u64,
+        model: T,
+    ) where
+        T: Send + Sync + 'static,
+    {
+        self.broadcast_peer_deployment(kind, generation, Payload::typed(model));
+    }
+
+    pub fn broadcast_peer_generation(&self, kind: PeerWorkerCommandKind, generation: u64) {
+        self.broadcast_peer_sync(kind, SyncMessage::Generation { generation });
+    }
+
+    pub fn broadcast_peer_sync(&self, kind: PeerWorkerCommandKind, sync: SyncMessage) {
+        self.send_peer(PeerWorkerCommand::from_kind(kind, sync, self.sender_id), kind.as_str());
+    }
+
+    pub fn broadcast_model_loaded(&self, generation: u64, model: Payload) {
+        self.broadcast_peer_deployment(PeerWorkerCommandKind::LoadModel, generation, model);
+    }
+
+    pub fn broadcast_typed_model_loaded<T>(&self, generation: u64, model: T)
+    where
+        T: Send + Sync + 'static,
+    {
+        self.broadcast_model_loaded(generation, Payload::typed(model));
+    }
+
+    pub fn broadcast_model_unloaded(&self, generation: u64) {
+        self.broadcast_peer_generation(PeerWorkerCommandKind::Unload, generation);
+    }
+
+    fn send_peer(&self, command: PeerWorkerCommand, action: &'static str) {
+        let generation = command.seq_id();
+        if self.tx.receiver_count() == 0 {
+            tracing::debug!(
+                sender_id = self.sender_id,
+                generation,
+                action,
+                "peer control broadcast skipped: no receivers"
+            );
+            return;
+        }
+
+        match self.tx.send(WorkerCommand::Peer(command)) {
+            Ok(receiver_count) => {
+                tracing::trace!(
+                    sender_id = self.sender_id,
+                    generation,
+                    action,
+                    receiver_count,
+                    "peer control broadcast sent"
+                );
+            }
+            Err(error) => {
+                tracing::debug!(
+                    sender_id = self.sender_id,
+                    generation,
+                    action,
+                    error = %error,
+                    "peer control broadcast dropped"
+                );
+            }
+        }
+    }
 }
 
 /// Operation identifier passed to a backend in a [`BackendRequest`].
