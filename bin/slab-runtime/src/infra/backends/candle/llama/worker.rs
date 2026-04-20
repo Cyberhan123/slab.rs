@@ -1,4 +1,4 @@
-//! Backend worker adapter for `candle.llama`.
+//! Backend worker for `candle.llama`.
 //!
 //! Unlike the GGML backend, the Candle backend does **not** load a dynamic
 //! library at runtime – Candle is a statically-linked Rust crate.
@@ -20,11 +20,13 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use crate::domain::models::{CandleLlamaLoadConfig, TextGenerationOpOptions};
-use crate::infra::backends::candle::llama::adapter::CandleLlamaEngine;
-use crate::infra::backends::candle::llama::errors::SessionId;
+use super::contract::{
+    CandleLlamaLoadConfig, TextGenerationOptions, TextGenerationResponse, TextGenerationStreamEvent,
+};
+use super::error::{CandleLlamaWorkerError, SessionId};
+use super::engine::CandleLlamaEngine;
 use slab_runtime_core::backend::{
-    ControlOpId, Input, Options, StreamChunk, StreamHandle, WorkerCommand,
+    ControlOpId, Input, Options, StreamChunk, StreamHandle, Typed, WorkerCommand,
 };
 use slab_runtime_core::backend::{SharedIngressRx, spawn_runtime_worker};
 use slab_runtime_macros::backend_handler;
@@ -51,39 +53,37 @@ impl CandleLlamaWorker {
     async fn on_load_model(
         &mut self,
         config: Input<CandleLlamaLoadConfig>,
-    ) -> Result<(), anyhow::Error> {
-        self.handle_load_model(config.0).await.map_err(anyhow::Error::msg)
+    ) -> Result<(), CandleLlamaWorkerError> {
+        self.handle_load_model(config.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self) -> Result<(), anyhow::Error> {
-        self.handle_unload_model().await.map_err(anyhow::Error::msg)
+    async fn on_unload_model(&mut self) -> Result<(), CandleLlamaWorkerError> {
+        self.handle_unload_model().await
     }
 
     #[on_event(Inference)]
     async fn on_inference(
         &mut self,
         prompt: String,
-        options: Options<TextGenerationOpOptions>,
-    ) -> Result<String, anyhow::Error> {
+        options: Options<TextGenerationOptions>,
+    ) -> Result<Typed<TextGenerationResponse>, CandleLlamaWorkerError> {
         let max_tokens =
             options.0.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
         let session_key = options.0.session_key;
-        self.handle_inference(prompt, max_tokens, session_key).await.map_err(anyhow::Error::msg)
+        self.handle_inference(prompt, max_tokens, session_key).await
     }
 
     #[on_event(InferenceStream)]
     async fn on_inference_stream(
         &mut self,
         prompt: String,
-        options: Options<TextGenerationOpOptions>,
-    ) -> Result<StreamHandle, anyhow::Error> {
+        options: Options<TextGenerationOptions>,
+    ) -> Result<StreamHandle, CandleLlamaWorkerError> {
         let max_tokens =
             options.0.max_tokens.and_then(|value| usize::try_from(value).ok()).unwrap_or(256);
         let session_key = options.0.session_key;
-        self.handle_inference_stream(prompt, max_tokens, session_key)
-            .await
-            .map_err(anyhow::Error::msg)
+        self.handle_inference_stream(prompt, max_tokens, session_key).await
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -97,21 +97,27 @@ impl CandleLlamaWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
+    async fn apply_runtime_control(
+        &mut self,
+        op_id: ControlOpId,
+    ) -> Result<(), CandleLlamaWorkerError> {
         tracing::debug!(op_id = op_id.0, "candle.llama runtime control pre-cleanup");
         self.cleanup_runtime_state();
         Ok(())
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged_cleanup(&mut self) -> Result<(), anyhow::Error> {
+    async fn on_control_lagged_cleanup(&mut self) -> Result<(), CandleLlamaWorkerError> {
         self.cleanup_runtime_state();
         Ok(())
     }
 
     // ── Handler helpers ───────────────────────────────────────────────────────
 
-    async fn handle_load_model(&mut self, config: CandleLlamaLoadConfig) -> Result<(), String> {
+    async fn handle_load_model(
+        &mut self,
+        config: CandleLlamaLoadConfig,
+    ) -> Result<(), CandleLlamaWorkerError> {
         let engine = Arc::new(CandleLlamaEngine::new(config.seed));
 
         let tokenizer_path = config.tokenizer_path;
@@ -130,11 +136,11 @@ impl CandleLlamaWorker {
                 self.engine = Some(engine);
                 Ok(())
             }
-            Err(e) => Err(e.to_string()),
+            Err(error) => Err(CandleLlamaWorkerError::load(error.to_string())),
         }
     }
 
-    async fn handle_unload_model(&mut self) -> Result<(), String> {
+    async fn handle_unload_model(&mut self) -> Result<(), CandleLlamaWorkerError> {
         match self.engine.as_ref() {
             Some(engine) => {
                 let _ = engine.unload();
@@ -142,7 +148,7 @@ impl CandleLlamaWorker {
                 self.sessions.clear();
                 Ok(())
             }
-            None => Err("model not loaded".to_owned()),
+            None => Err(CandleLlamaWorkerError::unload("model not loaded")),
         }
     }
 
@@ -151,10 +157,10 @@ impl CandleLlamaWorker {
         prompt: String,
         max_tokens: usize,
         session_key: Option<String>,
-    ) -> Result<String, String> {
+    ) -> Result<Typed<TextGenerationResponse>, CandleLlamaWorkerError> {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
-            None => return Err("model not loaded".to_owned()),
+            None => return Err(CandleLlamaWorkerError::inference("model not loaded")),
         };
 
         // Resolve or create a session for KV-cache reuse.
@@ -166,7 +172,11 @@ impl CandleLlamaWorker {
                         self.sessions.insert(key.clone(), sid);
                         Some(sid)
                     }
-                    Err(e) => return Err(format!("failed to create session: {e}")),
+                    Err(error) => {
+                        return Err(CandleLlamaWorkerError::inference(format!(
+                            "failed to create session: {error}"
+                        )));
+                    }
                 },
             }
         } else {
@@ -174,13 +184,17 @@ impl CandleLlamaWorker {
         };
 
         match engine.inference(&prompt, max_tokens, session_id).await {
-            Ok(text) => Ok(text),
+            Ok(text) => Ok(Typed(TextGenerationResponse {
+                text,
+                finish_reason: Some("stop".to_owned()),
+                ..Default::default()
+            })),
             Err(e) => {
                 // Drop the session on error so the next request starts fresh.
                 if let Some(key) = session_key {
                     self.sessions.remove(&key);
                 }
-                Err(e.to_string())
+                Err(CandleLlamaWorkerError::inference(e.to_string()))
             }
         }
     }
@@ -190,10 +204,10 @@ impl CandleLlamaWorker {
         prompt: String,
         max_tokens: usize,
         session_key: Option<String>,
-    ) -> Result<StreamHandle, String> {
+    ) -> Result<StreamHandle, CandleLlamaWorkerError> {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
-            None => return Err("model not loaded".to_owned()),
+            None => return Err(CandleLlamaWorkerError::inference("model not loaded")),
         };
 
         // Resolve or create a session for KV-cache reuse.
@@ -205,7 +219,11 @@ impl CandleLlamaWorker {
                         self.sessions.insert(key.clone(), sid);
                         Some(sid)
                     }
-                    Err(e) => return Err(format!("failed to create session: {e}")),
+                    Err(error) => {
+                        return Err(CandleLlamaWorkerError::inference(format!(
+                            "failed to create session: {error}"
+                        )));
+                    }
                 },
             }
         } else {
@@ -215,16 +233,23 @@ impl CandleLlamaWorker {
         let (proto_tx, proto_rx) = mpsc::channel::<StreamChunk>(64);
 
         tokio::spawn(async move {
-            use crate::infra::backends::candle::llama::errors::StreamChunk as CandleChunk;
+            use super::error::StreamChunk as CandleChunk;
             match engine.inference_stream(&prompt, max_tokens, existing_session_id).await {
                 Ok((mut llama_rx, sid)) => {
                     while let Some(chunk) = llama_rx.recv().await {
                         let mapped = match chunk {
                             CandleChunk::Token(t) => StreamChunk::Token(t),
-                            CandleChunk::Done => StreamChunk::Done,
+                            CandleChunk::Done => StreamChunk::Json(
+                                serde_json::to_value(TextGenerationStreamEvent {
+                                    done: Some(true),
+                                    finish_reason: Some("stop".to_owned()),
+                                    ..Default::default()
+                                })
+                                .expect("candle llama terminal stream event should serialize"),
+                            ),
                             CandleChunk::Error(e) => StreamChunk::Error(e),
                         };
-                        let done = matches!(mapped, StreamChunk::Done | StreamChunk::Error(_));
+                        let done = matches!(mapped, StreamChunk::Json(_) | StreamChunk::Error(_));
                         if proto_tx.send(mapped).await.is_err() {
                             break;
                         }
@@ -232,6 +257,7 @@ impl CandleLlamaWorker {
                             break;
                         }
                     }
+                    let _ = proto_tx.send(StreamChunk::Done).await;
                     // Only end the engine session when no session_key was provided
                     // (i.e., the session is ephemeral).  Keyed sessions persist for
                     // the lifetime of the worker so they can be reused on subsequent

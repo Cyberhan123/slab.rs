@@ -1,20 +1,21 @@
 use std::str::FromStr;
 
 use slab_diffusion::{
-    ContextParams as DiffusionContextParams, GuidanceParams as DiffusionGuidanceParams,
-    ImgParams as DiffusionImgParams, SampleMethod as DiffusionSampleMethod,
+    GuidanceParams as DiffusionGuidanceParams, SampleMethod as DiffusionSampleMethod,
     SampleParams as DiffusionSampleParams, Scheduler as DiffusionScheduler, SlgParams,
 };
-use slab_runtime_core::Payload;
 use slab_runtime_core::backend::RequestRoute;
 
 use crate::application::dtos as dto;
+use crate::domain::models::{
+    GgmlDiffusionLoadConfig, ImageGenerationRequest, ImageGenerationResponse,
+};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    decode_images_payload, invalid_model, raw_image_to_diffusion_image, required_path,
+    contract_image_to_raw_image, invalid_model, raw_image_to_generated_image, required_path,
     required_string,
 };
 
@@ -29,8 +30,8 @@ impl GgmlDiffusionService {
         request: dto::GgmlDiffusionLoadRequest,
     ) -> Result<Self, CoreError> {
         let model_path = required_path("ggml_diffusion.model_path", request.model_path)?;
-        let load_payload = Payload::typed(DiffusionContextParams {
-            model_path: Some(model_path.clone()),
+        let load_payload = GgmlDiffusionLoadConfig {
+            model_path: model_path.clone(),
             diffusion_model_path: request.diffusion_model_path,
             vae_path: request.vae_path,
             taesd_path: request.taesd_path,
@@ -45,10 +46,16 @@ impl GgmlDiffusionService {
             offload_params_to_cpu: request.offload_params_to_cpu,
             enable_mmap: request.enable_mmap,
             n_threads: request.n_threads,
-            ..Default::default()
-        });
+        };
 
-        Ok(Self { runtime: DriverRuntime::new(execution, "ggml.diffusion", load_payload) })
+        Ok(Self {
+            runtime: DriverRuntime::new_typed(
+                execution,
+                "ggml.diffusion",
+                "ggml.diffusion",
+                load_payload,
+            ),
+        })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -63,19 +70,16 @@ impl GgmlDiffusionService {
         &self,
         request: dto::GgmlDiffusionGenerateImageRequest,
     ) -> Result<dto::GgmlDiffusionGenerateImageResponse, CoreError> {
-        let payload = self
+        let response: ImageGenerationResponse = self
             .runtime
-            .submit(
+            .invoke_without_options(
                 RequestRoute::InferenceImage,
-                Payload::typed(build_image_params(request)?),
+                build_image_request(request)?,
                 Vec::new(),
-                Payload::None,
             )
-            .await?
-            .result()
             .await?;
         Ok(dto::GgmlDiffusionGenerateImageResponse {
-            images: decode_images_payload(payload, "ggml_diffusion_image")?,
+            images: response.images.iter().map(contract_image_to_raw_image).collect(),
         })
     }
 
@@ -83,26 +87,23 @@ impl GgmlDiffusionService {
         &self,
         request: dto::GgmlDiffusionGenerateVideoRequest,
     ) -> Result<dto::GgmlDiffusionGenerateVideoResponse, CoreError> {
-        let payload = self
+        let response: ImageGenerationResponse = self
             .runtime
-            .submit(
+            .invoke_without_options(
                 RequestRoute::InferenceImage,
-                Payload::typed(build_video_as_image_params(request)?),
+                build_video_as_image_request(request)?,
                 Vec::new(),
-                Payload::None,
             )
-            .await?
-            .result()
             .await?;
         Ok(dto::GgmlDiffusionGenerateVideoResponse {
-            frames: decode_images_payload(payload, "ggml_diffusion_video")?,
+            frames: response.images.iter().map(contract_image_to_raw_image).collect(),
         })
     }
 }
 
-fn build_image_params(
+fn build_image_request(
     request: dto::GgmlDiffusionGenerateImageRequest,
-) -> Result<DiffusionImgParams, CoreError> {
+) -> Result<ImageGenerationRequest, CoreError> {
     let prompt = required_string("ggml_diffusion.prompt", request.prompt)?;
     let width = request
         .width
@@ -113,12 +114,14 @@ fn build_image_params(
 
     let sample_method = request
         .sample_method
+        .clone()
         .as_deref()
         .map(DiffusionSampleMethod::from_str)
         .transpose()
         .map_err(|error| invalid_model("ggml_diffusion.sample_method", error))?;
     let scheduler = request
         .scheduler
+        .clone()
         .as_deref()
         .map(DiffusionScheduler::from_str)
         .transpose()
@@ -157,28 +160,41 @@ fn build_image_params(
     sample_params.sample_steps = request.sample_steps;
     sample_params.eta = request.eta;
 
-    Ok(DiffusionImgParams {
-        prompt: Some(prompt),
+    Ok(ImageGenerationRequest {
+        prompt,
         negative_prompt: request.negative_prompt,
         clip_skip: request.clip_skip,
         init_image: request
             .init_image
             .as_ref()
-            .map(|image| raw_image_to_diffusion_image(image, "ggml_diffusion_image"))
+            .map(|image| raw_image_to_generated_image(image, "ggml_diffusion_image"))
             .transpose()?,
         width: Some(width),
         height: Some(height),
-        sample_params: (sample_params != DiffusionSampleParams::default()).then_some(sample_params),
+        sample_method: request.sample_method,
+        scheduler: request.scheduler,
+        sample_steps: sample_params.sample_steps.and_then(|steps| u32::try_from(steps).ok()),
+        eta: sample_params.eta,
+        guidance_scale: sample_params.guidance.as_ref().map(|guidance| guidance.txt_cfg),
+        distilled_guidance: sample_params
+            .guidance
+            .as_ref()
+            .map(|guidance| guidance.distilled_guidance),
         strength: request.strength,
-        seed: request.seed,
-        batch_count: Some(request.count.unwrap_or(1)),
-        ..Default::default()
+        seed: request
+            .seed
+            .map(|value| {
+                u64::try_from(value)
+                    .map_err(|_| invalid_model("ggml_diffusion.seed", "must be >= 0"))
+            })
+            .transpose()?,
+        batch_count: request.count.unwrap_or(1),
     })
 }
 
-fn build_video_as_image_params(
+fn build_video_as_image_request(
     request: dto::GgmlDiffusionGenerateVideoRequest,
-) -> Result<DiffusionImgParams, CoreError> {
+) -> Result<ImageGenerationRequest, CoreError> {
     if request.fps.is_some() {
         return Err(invalid_model(
             "ggml_diffusion.fps",
@@ -197,12 +213,14 @@ fn build_video_as_image_params(
 
     let sample_method = request
         .sample_method
+        .clone()
         .as_deref()
         .map(DiffusionSampleMethod::from_str)
         .transpose()
         .map_err(|error| invalid_model("ggml_diffusion.sample_method", error))?;
     let scheduler = request
         .scheduler
+        .clone()
         .as_deref()
         .map(DiffusionScheduler::from_str)
         .transpose()
@@ -238,20 +256,95 @@ fn build_video_as_image_params(
     sample_params.scheduler = scheduler;
     sample_params.sample_steps = request.sample_steps;
 
-    Ok(DiffusionImgParams {
-        prompt: Some(prompt),
+    Ok(ImageGenerationRequest {
+        prompt,
         negative_prompt: request.negative_prompt,
+        clip_skip: None,
         init_image: request
             .init_image
             .as_ref()
-            .map(|image| raw_image_to_diffusion_image(image, "ggml_diffusion_video"))
+            .map(|image| raw_image_to_generated_image(image, "ggml_diffusion_video"))
             .transpose()?,
         width: Some(width),
         height: Some(height),
-        sample_params: (sample_params != DiffusionSampleParams::default()).then_some(sample_params),
+        sample_method: request.sample_method,
+        scheduler: request.scheduler,
+        sample_steps: sample_params.sample_steps.and_then(|steps| u32::try_from(steps).ok()),
+        eta: None,
+        guidance_scale: sample_params.guidance.as_ref().map(|guidance| guidance.txt_cfg),
+        distilled_guidance: sample_params
+            .guidance
+            .as_ref()
+            .map(|guidance| guidance.distilled_guidance),
         strength: request.strength,
-        seed: request.seed,
-        batch_count: Some(video_frames),
-        ..Default::default()
+        seed: request
+            .seed
+            .map(|value| {
+                u64::try_from(value)
+                    .map_err(|_| invalid_model("ggml_diffusion.seed", "must be >= 0"))
+            })
+            .transpose()?,
+        batch_count: video_frames,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{build_image_request, build_video_as_image_request};
+    use crate::application::dtos::{
+        GgmlDiffusionGenerateImageRequest, GgmlDiffusionGenerateVideoRequest,
+    };
+
+    #[test]
+    fn build_image_request_preserves_validated_runtime_contract_fields() {
+        let request = build_image_request(GgmlDiffusionGenerateImageRequest {
+            prompt: Some("cat".to_owned()),
+            width: Some(512),
+            height: Some(512),
+            count: Some(2),
+            sample_steps: Some(30),
+            seed: Some(7),
+            sample_method: Some("euler".to_owned()),
+            scheduler: Some("karras".to_owned()),
+            clip_skip: Some(1),
+            eta: Some(0.2),
+            guidance: Some(6.5),
+            strength: Some(0.8),
+            ..Default::default()
+        })
+        .expect("image request should map");
+
+        assert_eq!(request.prompt, "cat");
+        assert_eq!(request.sample_method.as_deref(), Some("euler"));
+        assert_eq!(request.scheduler.as_deref(), Some("karras"));
+        assert_eq!(request.sample_steps, Some(30));
+        assert_eq!(request.seed, Some(7));
+        assert_eq!(request.clip_skip, Some(1));
+        assert_eq!(request.eta, Some(0.2));
+        assert_eq!(request.batch_count, 2);
+    }
+
+    #[test]
+    fn build_video_request_sets_shared_runtime_defaults() {
+        let request = build_video_as_image_request(GgmlDiffusionGenerateVideoRequest {
+            prompt: Some("cat".to_owned()),
+            width: Some(640),
+            height: Some(480),
+            video_frames: Some(16),
+            sample_steps: Some(20),
+            seed: Some(9),
+            sample_method: Some("euler".to_owned()),
+            scheduler: Some("karras".to_owned()),
+            ..Default::default()
+        })
+        .expect("video request should map");
+
+        assert_eq!(request.sample_method.as_deref(), Some("euler"));
+        assert_eq!(request.scheduler.as_deref(), Some("karras"));
+        assert_eq!(request.sample_steps, Some(20));
+        assert_eq!(request.seed, Some(9));
+        assert_eq!(request.clip_skip, None);
+        assert_eq!(request.eta, None);
+        assert_eq!(request.batch_count, 16);
+    }
 }

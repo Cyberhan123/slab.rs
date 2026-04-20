@@ -7,20 +7,15 @@
 
 use std::collections::HashMap;
 
-use crate::domain::models::OnnxLoadConfig;
-use base64::Engine as _;
+use super::contract::{OnnxInferenceRequest, OnnxInferenceResponse, OnnxLoadConfig, OnnxTensor};
 use ort::{
     ep::ExecutionProviderDispatch,
     session::{Session, builder::GraphOptimizationLevel},
     value::{DynValue, Tensor, TensorElementType, ValueType},
 };
-use serde_json::{Value as JsonValue, json};
 use tracing::{info, warn};
 
-use super::{
-    OnnxEngineError,
-    config::{OnnxInferenceInput, TensorInput},
-};
+use super::error::OnnxEngineError;
 
 // ── OnnxEngine ────────────────────────────────────────────────────────────────
 
@@ -119,33 +114,30 @@ impl OnnxEngine {
 
     /// Run a synchronous inference pass.
     ///
-    /// `input` is an [`OnnxInferenceInput`] containing named tensors.
-    /// Returns a JSON object `{ "outputs": { name: { shape, dtype, data_b64 } } }`.
+    /// `input` is a typed ONNX inference request containing named tensors.
     pub(crate) fn inference(
         &mut self,
-        input: OnnxInferenceInput,
-    ) -> Result<JsonValue, OnnxEngineError> {
+        input: OnnxInferenceRequest,
+    ) -> Result<OnnxInferenceResponse, OnnxEngineError> {
         let session = self.session.as_mut().ok_or(OnnxEngineError::SessionNotLoaded)?;
 
         // Build the ort inputs map (HashMap is accepted by the session's Into<SessionInputs>).
         let mut ort_inputs: HashMap<String, DynValue> = HashMap::new();
-        for (name, ti) in input.inputs {
-            let dyn_val = tensor_input_to_ort(&name, ti)?;
+        for tensor in input.inputs {
+            let name = tensor.name.clone();
+            let dyn_val = tensor_input_to_ort(&tensor)?;
             ort_inputs.insert(name, dyn_val);
         }
 
         let outputs =
             session.run(ort_inputs).map_err(|e| OnnxEngineError::InferenceFailed { source: e })?;
 
-        // Serialise outputs to JSON wire format.
-        let mut result = serde_json::Map::new();
+        let mut result = Vec::with_capacity(outputs.len());
         for (name, value) in outputs.iter() {
-            // ValueRef<'_> derefs to Value; pass as &DynValue.
-            let wire = ort_value_to_json(name, &value)?;
-            result.insert(name.to_string(), wire);
+            result.push(ort_value_to_tensor(name, &value)?);
         }
 
-        Ok(json!({ "outputs": result }))
+        Ok(OnnxInferenceResponse { outputs: result })
     }
 }
 
@@ -170,16 +162,11 @@ fn validate_shape(name: &str, shape: &[i64]) -> Result<Vec<usize>, OnnxEngineErr
         .collect()
 }
 
-/// Decode a [`TensorInput`] into an `ort::DynValue`.
-fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngineError> {
-    let raw = base64::engine::general_purpose::STANDARD.decode(&ti.data_b64).map_err(|e| {
-        OnnxEngineError::TensorDecode {
-            name: name.to_string(),
-            reason: format!("base64 decode error: {e}"),
-        }
-    })?;
-
-    let shape = validate_shape(name, &ti.shape)?;
+/// Decode an [`OnnxTensor`] into an `ort::DynValue`.
+fn tensor_input_to_ort(tensor: &OnnxTensor) -> Result<DynValue, OnnxEngineError> {
+    let name = tensor.name.as_str();
+    let raw = tensor.data.clone();
+    let shape = validate_shape(name, &tensor.shape)?;
 
     macro_rules! make_tensor {
         ($ty:ty) => {{
@@ -207,7 +194,7 @@ fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngi
         }};
     }
 
-    match ti.dtype.as_str() {
+    match tensor.dtype.as_str() {
         "float32" | "f32" => make_tensor!(f32),
         "float64" | "f64" => make_tensor!(f64),
         "int32" | "i32" => make_tensor!(i32),
@@ -237,8 +224,8 @@ fn tensor_input_to_ort(name: &str, ti: TensorInput) -> Result<DynValue, OnnxEngi
     }
 }
 
-/// Serialise an `ort` output value to the JSON wire format.
-fn ort_value_to_json(name: &str, value: &DynValue) -> Result<JsonValue, OnnxEngineError> {
+/// Serialise an `ort` output value to the typed tensor response.
+fn ort_value_to_tensor(name: &str, value: &DynValue) -> Result<OnnxTensor, OnnxEngineError> {
     let encode_err =
         |reason: String| OnnxEngineError::TensorEncode { name: name.to_string(), reason };
 
@@ -248,25 +235,26 @@ fn ort_value_to_json(name: &str, value: &DynValue) -> Result<JsonValue, OnnxEngi
     match value_type {
         ValueType::Tensor { ty, shape, .. } => {
             let shape_vec: Vec<i64> = shape.to_vec();
-            let (dtype_str, data_b64) =
-                encode_tensor_to_base64(name, value, ty).map_err(|e| encode_err(e.to_string()))?;
+            let (dtype_str, data) =
+                encode_tensor_to_bytes(name, value, ty).map_err(|e| encode_err(e.to_string()))?;
 
-            Ok(json!({
-                "shape": shape_vec,
-                "dtype": dtype_str,
-                "data_b64": data_b64,
-            }))
+            Ok(OnnxTensor {
+                name: name.to_owned(),
+                shape: shape_vec,
+                dtype: dtype_str.to_owned(),
+                data,
+            })
         }
         other => Err(encode_err(format!("unsupported output value type: {other:?}"))),
     }
 }
 
-/// Encode a typed tensor's raw bytes to base64, returning `(dtype_str, base64)`.
-fn encode_tensor_to_base64(
+/// Encode a typed tensor's raw bytes, returning `(dtype_str, bytes)`.
+fn encode_tensor_to_bytes(
     name: &str,
     value: &DynValue,
     ty: TensorElementType,
-) -> Result<(&'static str, String), OnnxEngineError> {
+) -> Result<(&'static str, Vec<u8>), OnnxEngineError> {
     let encode_err =
         |reason: String| OnnxEngineError::TensorEncode { name: name.to_string(), reason };
 
@@ -275,7 +263,7 @@ fn encode_tensor_to_base64(
             let (_shape, data) =
                 value.try_extract_tensor::<$rust_ty>().map_err(|e| encode_err(e.to_string()))?;
             let bytes: Vec<u8> = data.iter().flat_map(|v| v.to_le_bytes()).collect();
-            ($dtype_str, base64::engine::general_purpose::STANDARD.encode(&bytes))
+            ($dtype_str, bytes)
         }};
     }
 
@@ -288,7 +276,7 @@ fn encode_tensor_to_base64(
             let (_shape, data) =
                 value.try_extract_tensor::<u8>().map_err(|e| encode_err(e.to_string()))?;
             let bytes: Vec<u8> = data.to_vec();
-            ("uint8", base64::engine::general_purpose::STANDARD.encode(&bytes))
+            ("uint8", bytes)
         }
         other => {
             return Err(encode_err(format!("unsupported output tensor element type: {other:?}")));

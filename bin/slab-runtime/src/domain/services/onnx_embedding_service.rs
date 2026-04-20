@@ -1,14 +1,13 @@
-use slab_runtime_core::Payload;
 use slab_runtime_core::backend::RequestRoute;
 
 use crate::application::dtos as dto;
-use crate::domain::models::OnnxLoadConfig;
+use crate::domain::models::{OnnxInferenceRequest, OnnxInferenceResponse, OnnxLoadConfig};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    embedding_image_to_tensor, invalid_model, onnx_named_output_from_payload, onnx_tensors_to_json,
+    contract_tensor_to_raw_tensor, embedding_image_to_contract_tensor, invalid_model,
     required_path, required_string,
 };
 
@@ -29,7 +28,7 @@ impl OnnxEmbeddingService {
             required_string("onnx_embedding.input_tensor_name", request.input_tensor_name)?;
         let output_tensor_name =
             required_string("onnx_embedding.output_tensor_name", request.output_tensor_name)?;
-        let load_payload = Payload::typed(OnnxLoadConfig {
+        let load_payload = OnnxLoadConfig {
             model_path: model_path.clone(),
             execution_providers: request.execution_providers.unwrap_or_default(),
             intra_op_num_threads: request
@@ -46,10 +45,10 @@ impl OnnxEmbeddingService {
                 .map_err(|_| {
                     invalid_model("onnx_embedding.inter_op_num_threads", "exceeds usize range")
                 })?,
-        });
+        };
 
         Ok(Self {
-            runtime: DriverRuntime::new(execution, "onnx", load_payload),
+            runtime: DriverRuntime::new_typed(execution, "onnx.embedding", "onnx", load_payload),
             input_tensor_name,
             output_tensor_name,
         })
@@ -70,21 +69,26 @@ impl OnnxEmbeddingService {
         let image = request
             .image
             .ok_or_else(|| invalid_model("onnx_embedding.image", "missing required payload"))?;
-        let input_tensor = embedding_image_to_tensor(&image.data, &self.input_tensor_name)?;
-        let payload = self
+        let input_tensor =
+            embedding_image_to_contract_tensor(&image.data, &self.input_tensor_name)?;
+        let response: OnnxInferenceResponse = self
             .runtime
-            .submit(
+            .invoke_without_options(
                 RequestRoute::Inference,
-                Payload::Json(onnx_tensors_to_json(&[input_tensor])?),
+                OnnxInferenceRequest { inputs: vec![input_tensor] },
                 Vec::new(),
-                Payload::None,
             )
-            .await?
-            .result()
             .await?;
 
-        Ok(dto::OnnxEmbeddingResponse {
-            output: Some(onnx_named_output_from_payload(payload, &self.output_tensor_name)?),
-        })
+        let output = response
+            .outputs
+            .into_iter()
+            .find(|tensor| tensor.name == self.output_tensor_name)
+            .ok_or_else(|| CoreError::ResultDecodeFailed {
+                task_kind: "onnx.embedding".to_owned(),
+                message: format!("ONNX output tensor `{}` not found", self.output_tensor_name),
+            })?;
+
+        Ok(dto::OnnxEmbeddingResponse { output: Some(contract_tensor_to_raw_tensor(output)) })
     }
 }

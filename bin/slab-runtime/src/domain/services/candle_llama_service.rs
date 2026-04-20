@@ -1,12 +1,11 @@
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use slab_runtime_core::Payload;
 use slab_runtime_core::backend::RequestRoute;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::application::dtos as dto;
-use crate::domain::models::{CandleLlamaLoadConfig, TextGenerationOpOptions};
+use crate::domain::models::{CandleLlamaLoadConfig, TextGenerationOptions};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
@@ -29,13 +28,20 @@ impl CandleLlamaService {
         let seed = request
             .seed
             .ok_or_else(|| invalid_model("candle_llama.seed", "missing required value"))?;
-        let load_payload = Payload::typed(CandleLlamaLoadConfig {
+        let load_payload = CandleLlamaLoadConfig {
             model_path: model_path.clone(),
             tokenizer_path: request.tokenizer_path,
             seed,
-        });
+        };
 
-        Ok(Self { runtime: DriverRuntime::new(execution, "candle.llama", load_payload) })
+        Ok(Self {
+            runtime: DriverRuntime::new_typed(
+                execution,
+                "candle.llama",
+                "candle.llama",
+                load_payload,
+            ),
+        })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -53,16 +59,16 @@ impl CandleLlamaService {
         let prompt = required_string("candle_llama.prompt", request.prompt)?;
         let payload = self
             .runtime
-            .submit(
+            .submit_payload(
                 RequestRoute::Inference,
-                Payload::text(prompt),
+                prompt,
                 Vec::new(),
-                Payload::typed(TextGenerationOpOptions {
+                TextGenerationOptions {
                     max_tokens: request.max_tokens,
                     session_key: request.session_key,
                     stream: false,
                     ..Default::default()
-                }),
+                },
             )
             .await?
             .result()
@@ -77,16 +83,16 @@ impl CandleLlamaService {
         let prompt = required_string("candle_llama.prompt", request.prompt)?;
         let handle = self
             .runtime
-            .submit(
+            .submit_payload(
                 RequestRoute::InferenceStream,
-                Payload::text(prompt),
+                prompt,
                 Vec::new(),
-                Payload::typed(TextGenerationOpOptions {
+                TextGenerationOptions {
                     max_tokens: request.max_tokens,
                     session_key: request.session_key,
                     stream: true,
                     ..Default::default()
-                }),
+                },
             )
             .await?;
         let raw_stream = match handle.take_stream().await {

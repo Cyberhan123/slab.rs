@@ -1,18 +1,16 @@
-use slab_runtime_core::Payload;
 use slab_runtime_core::backend::RequestRoute;
-use slab_whisper::{
-    ContextParams as WhisperContextParams, FullParams as WhisperFullParams,
-    SamplingStrategy as WhisperSamplingStrategy, WhisperVadParams as CanonicalWhisperVadParams,
-};
 
 use crate::application::dtos as dto;
+use crate::domain::models::{
+    AudioTranscriptionDecodeOptions, AudioTranscriptionOptions, AudioTranscriptionResponse,
+    AudioTranscriptionVadOptions, AudioTranscriptionVadParams, GgmlWhisperLoadConfig,
+};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    audio_decode_stage, decode_utf8_payload, invalid_model, required_path,
-    whisper_transcription_from_raw,
+    audio_decode_stage, invalid_model, required_path, whisper_transcription_from_raw,
 };
 
 #[derive(Clone, Debug)]
@@ -26,13 +24,19 @@ impl GgmlWhisperService {
         request: dto::GgmlWhisperLoadRequest,
     ) -> Result<Self, CoreError> {
         let model_path = required_path("ggml_whisper.model_path", request.model_path)?;
-        let load_payload = Payload::typed(WhisperContextParams {
-            model_path: Some(model_path.clone()),
+        let load_payload = GgmlWhisperLoadConfig {
+            model_path: model_path.clone(),
             flash_attn: request.flash_attn,
-            ..Default::default()
-        });
+        };
 
-        Ok(Self { runtime: DriverRuntime::new(execution, "ggml.whisper", load_payload) })
+        Ok(Self {
+            runtime: DriverRuntime::new_typed(
+                execution,
+                "ggml.whisper",
+                "ggml.whisper",
+                load_payload,
+            ),
+        })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -49,36 +53,29 @@ impl GgmlWhisperService {
     ) -> Result<dto::GgmlWhisperTranscribeResponse, CoreError> {
         let audio_path = required_path("ggml_whisper.path", request.path.clone())?;
         let language = request.language.clone();
-        let payload = self
+        let response: AudioTranscriptionResponse = self
             .runtime
-            .submit(
+            .invoke_preprocessed_typed(
                 RequestRoute::Inference,
-                Payload::None,
                 vec![audio_decode_stage(audio_path)],
-                Payload::typed(build_full_params(request)?),
+                build_transcription_options(request)?,
             )
-            .await?
-            .result()
             .await?;
 
-        let raw = decode_utf8_payload(payload, "ggml_whisper")?;
         Ok(dto::GgmlWhisperTranscribeResponse {
-            transcription: whisper_transcription_from_raw(raw, language),
+            transcription: whisper_transcription_from_raw(response.text, language),
         })
     }
 }
 
-fn build_full_params(
+fn build_transcription_options(
     request: dto::GgmlWhisperTranscribeRequest,
-) -> Result<WhisperFullParams, CoreError> {
+) -> Result<AudioTranscriptionOptions, CoreError> {
     let language = request.language.filter(|value| !value.trim().is_empty());
-    let mut params = WhisperFullParams {
-        strategy: WhisperSamplingStrategy::BeamSearch { beam_size: 5, patience: -1.0 },
-        language: language.clone(),
-        initial_prompt: request.prompt.filter(|value| !value.trim().is_empty()),
-        detect_language: language.is_none().then_some(request.detect_language).flatten(),
-        ..Default::default()
-    };
+    let prompt = request.prompt.filter(|value| !value.trim().is_empty());
+    let detect_language = language.is_none().then_some(request.detect_language).flatten();
+    let mut vad_options = None;
+    let mut decode_options = None;
 
     if let Some(vad) = request.vad
         && vad.enabled.unwrap_or(false)
@@ -90,8 +87,11 @@ fn build_full_params(
             return Err(invalid_model("ggml_whisper.vad.model_path", "path must not be empty"));
         }
 
-        params.vad = Some(true);
-        params.vad_model_path = Some(model_path);
+        let mut runtime_vad = AudioTranscriptionVadOptions {
+            enabled: true,
+            model_path: Some(model_path),
+            params: None,
+        };
 
         if let Some(vad_params) = vad.params {
             if let Some(threshold) = vad_params.threshold
@@ -125,7 +125,7 @@ fn build_full_params(
                 return Err(invalid_model("ggml_whisper.vad.samples_overlap", "must be >= 0.0"));
             }
 
-            params.vad_params = Some(CanonicalWhisperVadParams {
+            runtime_vad.params = Some(AudioTranscriptionVadParams {
                 threshold: vad_params.threshold,
                 min_speech_duration_ms: vad_params.min_speech_duration_ms,
                 min_silence_duration_ms: vad_params.min_silence_duration_ms,
@@ -134,6 +134,8 @@ fn build_full_params(
                 samples_overlap: vad_params.samples_overlap,
             });
         }
+
+        vad_options = Some(runtime_vad);
     }
 
     if let Some(decode) = request.decode {
@@ -164,23 +166,31 @@ fn build_full_params(
             }
         }
 
-        params.offset_ms = decode.offset_ms;
-        params.duration_ms = decode.duration_ms;
-        params.no_context = decode.no_context;
-        params.no_timestamps = decode.no_timestamps;
-        params.token_timestamps = decode.token_timestamps;
-        params.split_on_word = decode.split_on_word;
-        params.suppress_nst = decode.suppress_nst;
-        params.thold_pt = decode.word_thold;
-        params.max_len = decode.max_len;
-        params.max_tokens = decode.max_tokens;
-        params.temperature = decode.temperature;
-        params.temperature_inc = decode.temperature_inc;
-        params.entropy_thold = decode.entropy_thold;
-        params.logprob_thold = decode.logprob_thold;
-        params.no_speech_thold = decode.no_speech_thold;
-        params.tdrz_enable = decode.tdrz_enable;
+        decode_options = Some(AudioTranscriptionDecodeOptions {
+            offset_ms: decode.offset_ms,
+            duration_ms: decode.duration_ms,
+            no_context: decode.no_context,
+            no_timestamps: decode.no_timestamps,
+            token_timestamps: decode.token_timestamps,
+            split_on_word: decode.split_on_word,
+            suppress_nst: decode.suppress_nst,
+            word_thold: decode.word_thold,
+            max_len: decode.max_len,
+            max_tokens: decode.max_tokens,
+            temperature: decode.temperature,
+            temperature_inc: decode.temperature_inc,
+            entropy_thold: decode.entropy_thold,
+            logprob_thold: decode.logprob_thold,
+            no_speech_thold: decode.no_speech_thold,
+            tdrz_enable: decode.tdrz_enable,
+        });
     }
 
-    Ok(params)
+    Ok(AudioTranscriptionOptions {
+        language,
+        prompt,
+        detect_language,
+        vad: vad_options,
+        decode: decode_options,
+    })
 }

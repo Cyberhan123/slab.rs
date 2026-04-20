@@ -174,6 +174,12 @@ impl From<&str> for Payload {
     }
 }
 
+impl From<String> for Payload {
+    fn from(value: String) -> Self {
+        Payload::Text(Arc::from(value))
+    }
+}
+
 impl From<serde_json::Value> for Payload {
     fn from(v: serde_json::Value) -> Self {
         Payload::Json(v)

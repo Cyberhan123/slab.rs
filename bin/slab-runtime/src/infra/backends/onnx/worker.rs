@@ -1,4 +1,4 @@
-//! Backend worker adapter for `onnx`.
+//! Backend worker for `onnx`.
 //!
 //! Defines [`OnnxWorker`] – a backend handler driven by the slab-core
 //! scheduler.
@@ -9,43 +9,17 @@
 //! |------------------|----------------|----------------------------------------------------|
 //! | `"model.load"`   | `LoadModel`    | Load an ONNX model file and create a session.      |
 //! | `"model.unload"` | `UnloadModel`  | Drop the session and free model memory.            |
-//! | `"inference"`    | `Inference`    | Run a forward pass; input and output are JSON.     |
+//! | `"inference"`    | `Inference`    | Run a forward pass over typed ONNX tensors.        |
 //!
 //! ### `model.load` input payload
 //! Uses a typed runtime-owned `OnnxLoadConfig` payload inside `slab-runtime`.
 //!
-//! ### `inference` input JSON
-//! ```json
-//! {
-//!   "inputs": {
-//!     "pixel_values": {
-//!       "shape": [1, 3, 224, 224],
-//!       "dtype": "float32",
-//!       "data_b64": "<base64-encoded little-endian bytes>"
-//!     }
-//!   }
-//! }
-//! ```
-//!
-//! ### `inference` output JSON
-//! ```json
-//! {
-//!   "outputs": {
-//!     "logits": {
-//!       "shape": [1, 1000],
-//!       "dtype": "float32",
-//!       "data_b64": "<base64-encoded little-endian bytes>"
-//!     }
-//!   }
-//! }
-//! ```
-
 use tracing::warn;
 
-use crate::domain::models::OnnxLoadConfig;
-use crate::infra::backends::onnx::adapter::OnnxEngine;
-use crate::infra::backends::onnx::config::OnnxInferenceInput;
-use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, PeerControlBus};
+use super::contract::{OnnxInferenceRequest, OnnxInferenceResponse, OnnxLoadConfig};
+use super::error::OnnxWorkerError;
+use super::engine::OnnxEngine;
+use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, PeerControlBus, Typed};
 use slab_runtime_macros::backend_handler;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
@@ -116,21 +90,21 @@ impl OnnxWorker {
         &mut self,
         config: Input<OnnxLoadConfig>,
         seq: BroadcastSeq,
-    ) -> Result<(), anyhow::Error> {
-        self.handle_load_model(config.0, seq.0).await.map_err(anyhow::Error::msg)
+    ) -> Result<(), OnnxWorkerError> {
+        self.handle_load_model(config.0, seq.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), anyhow::Error> {
-        self.handle_unload_model(seq.0).await.map_err(anyhow::Error::msg)
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), OnnxWorkerError> {
+        self.handle_unload_model(seq.0).await
     }
 
     #[on_event(Inference)]
     async fn on_inference(
         &mut self,
-        input: Input<OnnxInferenceInput>,
-    ) -> Result<serde_json::Value, anyhow::Error> {
-        self.handle_inference(input.0).await.map_err(anyhow::Error::msg)
+        input: Input<OnnxInferenceRequest>,
+    ) -> Result<Typed<OnnxInferenceResponse>, OnnxWorkerError> {
+        self.handle_inference(input.0).await
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
@@ -139,7 +113,7 @@ impl OnnxWorker {
         &mut self,
         config: OnnxLoadConfig,
         seq_id: u64,
-    ) -> Result<(), String> {
+    ) -> Result<(), OnnxWorkerError> {
         // Session creation is CPU / I/O-bound; run on the blocking thread pool.
         let result = tokio::task::block_in_place(|| self.engine.load_model(config.clone()));
 
@@ -151,13 +125,13 @@ impl OnnxWorker {
                 self.emit_peer_load_model_deployment(seq_id, config);
                 Ok(())
             }
-            Err(e) => Err(e.to_string()),
+            Err(error) => Err(OnnxWorkerError::load(error.to_string())),
         }
     }
 
     // ── model.unload ──────────────────────────────────────────────────────────
 
-    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), String> {
+    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), OnnxWorkerError> {
         self.engine.unload();
         self.current_config = None;
         // Broadcast so peer workers also drop their sessions.
@@ -169,16 +143,16 @@ impl OnnxWorker {
 
     async fn handle_inference(
         &mut self,
-        input: OnnxInferenceInput,
-    ) -> Result<serde_json::Value, String> {
+        input: OnnxInferenceRequest,
+    ) -> Result<Typed<OnnxInferenceResponse>, OnnxWorkerError> {
         // Inference is CPU-bound; run on the blocking thread pool.
         let result = tokio::task::block_in_place(|| self.engine.inference(input));
 
         match result {
-            Ok(json_output) => Ok(json_output),
+            Ok(output) => Ok(Typed(output)),
             Err(e) => {
                 warn!(error = %e, "ONNX inference error");
-                Err(e.to_string())
+                Err(OnnxWorkerError::inference(e.to_string()))
             }
         }
     }
@@ -195,7 +169,7 @@ impl OnnxWorker {
     async fn on_peer_load_model(
         &mut self,
         config: Input<OnnxLoadConfig>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), OnnxWorkerError> {
         let config = config.0;
         let model_path = config.model_path.clone();
 
@@ -226,7 +200,7 @@ impl OnnxWorker {
 
     /// When another worker unloads the model, drop the session in this worker.
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) -> Result<(), anyhow::Error> {
+    async fn on_peer_unload(&mut self) -> Result<(), OnnxWorkerError> {
         self.engine.unload();
         self.current_config = None;
         Ok(())
@@ -236,7 +210,7 @@ impl OnnxWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), OnnxWorkerError> {
         tracing::debug!(op_id = op_id.0, "ONNX runtime control pre-cleanup");
         self.engine.unload();
         self.current_config = None;
@@ -246,7 +220,7 @@ impl OnnxWorker {
     /// Conservative unload when broadcast channel lags – avoid running stale
     /// inference on a model that peers may have already replaced.
     #[on_control_lagged]
-    async fn on_control_lagged(&mut self) -> Result<(), anyhow::Error> {
+    async fn on_control_lagged(&mut self) -> Result<(), OnnxWorkerError> {
         self.engine.unload();
         self.current_config = None;
         Ok(())

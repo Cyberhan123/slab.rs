@@ -245,6 +245,45 @@ pub mod backend {
         Ok(BroadcastSeq(0))
     }
 
+    pub fn log_runtime_control_extractor_failure(
+        _backend: &'static str,
+        _route: &'static str,
+        _signal: &RuntimeControlSignal,
+        _error: impl Display,
+    ) {
+    }
+
+    pub fn log_runtime_control_handler_failure(
+        _backend: &'static str,
+        _route: &'static str,
+        _signal: &RuntimeControlSignal,
+        _error: impl Display,
+    ) {
+    }
+
+    pub fn log_peer_control_extractor_failure(
+        _backend: &'static str,
+        _route: &'static str,
+        _cmd: &PeerWorkerCommand,
+        _error: impl Display,
+    ) {
+    }
+
+    pub fn log_peer_control_handler_failure(
+        _backend: &'static str,
+        _route: &'static str,
+        _cmd: &PeerWorkerCommand,
+        _error: impl Display,
+    ) {
+    }
+
+    pub fn log_lagged_control_handler_failure(
+        _backend: &'static str,
+        _route: &'static str,
+        _error: impl Display,
+    ) {
+    }
+
     #[derive(Clone)]
     pub enum RuntimeControlSignal {
         GlobalLoad {},
