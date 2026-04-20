@@ -13,7 +13,10 @@ use std::sync::{Arc, RwLock};
 use tokio::sync::{Mutex, mpsc, watch};
 use tracing::{info, warn};
 
-use crate::domain::models::{JsonOptions, TextGenerationUsage, TextPromptTokensDetails};
+use super::contract::{
+    GgmlLlamaLoadConfig, TextGenerationMetadata, TextGenerationStreamEvent, TextGenerationUsage,
+    TextPromptTokensDetails, TextStopMetadata,
+};
 
 use super::{GGMLLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 
@@ -39,21 +42,18 @@ pub(crate) struct LlamaDispatchOutput {
     pub text: String,
     pub usage: Option<TextGenerationUsage>,
     pub finish_reason: Option<String>,
-    pub metadata: JsonOptions,
+    pub metadata: TextGenerationMetadata,
 }
 
-fn stop_info_to_metadata(stop: &LlamaStopInfo) -> JsonOptions {
-    let mut metadata = JsonOptions::default();
-    if let Some(token_id) = stop.stop_token_id {
-        metadata.insert("llama_stop_token_id".into(), serde_json::json!(token_id));
+fn stop_info_to_metadata(stop: &LlamaStopInfo) -> TextGenerationMetadata {
+    TextGenerationMetadata {
+        stop: Some(TextStopMetadata {
+            token_id: stop.stop_token_id,
+            token_text: stop.stop_token_text.clone(),
+            token_kind: stop.stop_token_kind.clone(),
+        }),
+        ..Default::default()
     }
-    if let Some(token_text) = stop.stop_token_text.as_ref() {
-        metadata.insert("llama_stop_token_text".into(), serde_json::json!(token_text));
-    }
-    if let Some(token_kind) = stop.stop_token_kind.as_ref() {
-        metadata.insert("llama_stop_token_kind".into(), serde_json::json!(token_kind));
-    }
-    metadata
 }
 
 fn resolve_logit_bias_value(value: &serde_json::Value) -> Option<f32> {
@@ -244,6 +244,33 @@ impl GGMLLlamaEngine {
         *write_lock = Some(engine);
         *model_write_lock = Some(model);
         Ok(())
+    }
+
+    pub(crate) fn load_model_from_config(
+        &self,
+        config: &GgmlLlamaLoadConfig,
+    ) -> Result<(), ggml::EngineError> {
+        let mut ctx_params = LlamaContextParams {
+            kv_unified: true,
+            flash_attn: config.flash_attn,
+            ..Default::default()
+        };
+        if let Some(context_length) = config.context_length {
+            ctx_params.n_ctx = context_length;
+            if ctx_params.n_batch > context_length {
+                ctx_params.n_batch = context_length;
+            }
+            if ctx_params.n_ubatch > context_length {
+                ctx_params.n_ubatch = context_length;
+            }
+        }
+
+        self.load_model_with_workers(
+            &config.model_path,
+            LlamaModelParams::default(),
+            ctx_params,
+            config.engine_workers,
+        )
     }
 
     fn require_engine(&self) -> Result<LlamaRuntime, ggml::EngineError> {
@@ -620,7 +647,7 @@ impl GGMLLlamaEngine {
             let mut cancelled = false;
             let mut stop_matched = false;
             let mut terminal_finish_reason: Option<String> = None;
-            let mut terminal_metadata = JsonOptions::default();
+            let mut terminal_metadata = TextGenerationMetadata::default();
             // Tracks how many bytes of `generated` have been forwarded downstream.
             // When a stop sequence is partially accumulated we hold back the
             // uncertain tail so that we never forward text that may need to be
@@ -763,15 +790,16 @@ impl GGMLLlamaEngine {
                     .clone()
                     .or_else(|| stop_matched.then(|| "stop".to_owned()));
                 if let Some(finish_reason) = finish_reason {
-                    let mut payload = serde_json::json!({
-                        "delta": "",
-                        "done": true,
-                        "finish_reason": finish_reason,
-                    });
-                    if !terminal_metadata.is_empty() {
-                        payload["metadata"] = serde_json::to_value(&terminal_metadata)
-                            .expect("llama stop metadata should serialize");
-                    }
+                    let event = TextGenerationStreamEvent {
+                        delta: Some(String::new()),
+                        done: Some(true),
+                        finish_reason: Some(finish_reason),
+                        usage: None,
+                        metadata: (!terminal_metadata.is_empty())
+                            .then_some(terminal_metadata.clone()),
+                    };
+                    let payload = serde_json::to_value(event)
+                        .expect("llama stream terminal event should serialize");
                     if stream_tx.send(BaseStreamChunk::Json(payload)).await.is_err() {
                         forward_failed = true;
                     }
@@ -784,7 +812,13 @@ impl GGMLLlamaEngine {
                 && !cancelled
                 && let Some(usage) = engine.build_usage(&full_prompt, &generated, cached_tokens)
                 && stream_tx
-                    .send(BaseStreamChunk::Json(serde_json::json!({ "usage": usage })))
+                    .send(BaseStreamChunk::Json(
+                        serde_json::to_value(TextGenerationStreamEvent {
+                            usage: Some(usage),
+                            ..Default::default()
+                        })
+                        .expect("llama stream usage event should serialize"),
+                    ))
                     .await
                     .is_err()
             {

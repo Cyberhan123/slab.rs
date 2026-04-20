@@ -1,14 +1,13 @@
-use slab_runtime_core::Payload;
 use slab_runtime_core::backend::RequestRoute;
 
 use crate::application::dtos as dto;
-use crate::domain::models::OnnxLoadConfig;
+use crate::domain::models::{OnnxInferenceResponse, OnnxLoadConfig};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
 use super::helpers::{
-    invalid_model, onnx_outputs_from_payload, onnx_tensors_to_json, required_path,
+    contract_tensor_to_raw_tensor, invalid_model, onnx_tensors_to_request, required_path,
 };
 
 #[derive(Clone, Debug)]
@@ -22,7 +21,7 @@ impl OnnxTextService {
         request: dto::OnnxTextLoadRequest,
     ) -> Result<Self, CoreError> {
         let model_path = required_path("onnx_text.model_path", request.model_path)?;
-        let load_payload = Payload::typed(OnnxLoadConfig {
+        let load_payload = OnnxLoadConfig {
             model_path: model_path.clone(),
             execution_providers: request.execution_providers.unwrap_or_default(),
             intra_op_num_threads: request
@@ -39,9 +38,9 @@ impl OnnxTextService {
                 .map_err(|_| {
                     invalid_model("onnx_text.inter_op_num_threads", "exceeds usize range")
                 })?,
-        });
+        };
 
-        Ok(Self { runtime: DriverRuntime::new(execution, "onnx", load_payload) })
+        Ok(Self { runtime: DriverRuntime::new_typed(execution, "onnx.text", "onnx", load_payload) })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -56,17 +55,16 @@ impl OnnxTextService {
         &self,
         request: dto::OnnxTextRequest,
     ) -> Result<dto::OnnxTextResponse, CoreError> {
-        let payload = self
+        let response: OnnxInferenceResponse = self
             .runtime
-            .submit(
+            .invoke_without_options(
                 RequestRoute::Inference,
-                Payload::Json(onnx_tensors_to_json(&request.inputs)?),
+                onnx_tensors_to_request(&request.inputs)?,
                 Vec::new(),
-                Payload::None,
             )
-            .await?
-            .result()
             .await?;
-        Ok(dto::OnnxTextResponse { outputs: onnx_outputs_from_payload(payload)? })
+        Ok(dto::OnnxTextResponse {
+            outputs: response.outputs.into_iter().map(contract_tensor_to_raw_tensor).collect(),
+        })
     }
 }

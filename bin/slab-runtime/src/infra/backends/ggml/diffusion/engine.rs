@@ -1,7 +1,14 @@
+use super::contract::{
+    GeneratedImage, GgmlDiffusionLoadConfig, ImageGenerationRequest, ImageGenerationResponse,
+};
 use crate::infra::backends::ggml;
-use slab_diffusion::{Context, ContextParams, Diffusion, DiffusionError, Image, ImgParams};
+use slab_diffusion::{
+    Context, ContextParams, Diffusion, DiffusionError, GuidanceParams, Image, ImgParams,
+    SampleMethod, SampleParams, Scheduler, SlgParams,
+};
 use slab_utils::loader::load_library_from_dir;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 use thiserror::Error;
 use tracing::info;
@@ -103,6 +110,30 @@ impl GGMLDiffusionEngine {
         Ok(())
     }
 
+    pub(crate) fn new_context_from_config(
+        &mut self,
+        config: GgmlDiffusionLoadConfig,
+    ) -> Result<(), ggml::EngineError> {
+        self.new_context(ContextParams {
+            model_path: Some(config.model_path),
+            diffusion_model_path: config.diffusion_model_path,
+            vae_path: config.vae_path,
+            taesd_path: config.taesd_path,
+            clip_l_path: config.clip_l_path,
+            clip_g_path: config.clip_g_path,
+            t5xxl_path: config.t5xxl_path,
+            clip_vision_path: config.clip_vision_path,
+            control_net_path: config.control_net_path,
+            flash_attn: config.flash_attn.or(Some(true)),
+            vae_device: config.vae_device,
+            clip_device: config.clip_device,
+            offload_params_to_cpu: config.offload_params_to_cpu,
+            enable_mmap: config.enable_mmap,
+            n_threads: config.n_threads,
+            ..Default::default()
+        })
+    }
+
     /// Generate one or more images from the supplied parameters.
     ///
     /// The returned `Vec` contains exactly `params.batch_count` images.
@@ -120,6 +151,18 @@ impl GGMLDiffusionEngine {
 
         ctx.generate_image(params)
             .map_err(|source| GGMLDiffusionEngineError::InferenceFailed { source }.into())
+    }
+
+    pub(crate) fn generate_image_from_request(
+        &self,
+        request: ImageGenerationRequest,
+    ) -> Result<ImageGenerationResponse, ggml::EngineError> {
+        let params = image_params_from_request(request)
+            .map_err(|source| GGMLDiffusionEngineError::InferenceFailed { source })?;
+        let images = self.generate_image(params)?;
+        Ok(ImageGenerationResponse {
+            images: images.into_iter().map(raw_image_to_contract_image).collect(),
+        })
     }
 
     /// Unload the current context and release its resources.
@@ -141,6 +184,72 @@ impl GGMLDiffusionEngine {
     /// dynamic-library `Arc`.
     pub fn fork_library(&self) -> Self {
         Self { instance: Arc::clone(&self.instance), ctx: None }
+    }
+}
+
+fn image_params_from_request(request: ImageGenerationRequest) -> Result<ImgParams, DiffusionError> {
+    let sample_method = request
+        .sample_method
+        .as_deref()
+        .map(SampleMethod::from_str)
+        .transpose()
+        .map_err(DiffusionError::InvalidParameters)?;
+    let scheduler = request
+        .scheduler
+        .as_deref()
+        .map(Scheduler::from_str)
+        .transpose()
+        .map_err(DiffusionError::InvalidParameters)?;
+
+    let sample_params = if request.sample_steps.is_some()
+        || request.eta.is_some()
+        || sample_method.is_some()
+        || scheduler.is_some()
+        || request.guidance_scale.is_some()
+        || request.distilled_guidance.is_some()
+    {
+        Some(SampleParams {
+            guidance: request.guidance_scale.map(|guidance| GuidanceParams {
+                txt_cfg: guidance,
+                img_cfg: guidance,
+                distilled_guidance: request.distilled_guidance.unwrap_or(guidance),
+                slg: SlgParams::default(),
+            }),
+            scheduler,
+            sample_method,
+            sample_steps: request.sample_steps.and_then(|value| i32::try_from(value).ok()),
+            eta: request.eta,
+            ..Default::default()
+        })
+    } else {
+        None
+    };
+
+    Ok(ImgParams {
+        prompt: Some(request.prompt),
+        negative_prompt: request.negative_prompt,
+        clip_skip: request.clip_skip,
+        init_image: request.init_image.map(contract_image_to_raw_image),
+        width: request.width,
+        height: request.height,
+        sample_params,
+        strength: request.strength,
+        seed: request.seed.and_then(|value| i64::try_from(value).ok()),
+        batch_count: Some(request.batch_count),
+        ..Default::default()
+    })
+}
+
+fn contract_image_to_raw_image(image: GeneratedImage) -> Image {
+    Image { width: image.width, height: image.height, channel: image.channels, data: image.data }
+}
+
+fn raw_image_to_contract_image(image: Image) -> GeneratedImage {
+    GeneratedImage {
+        width: image.width,
+        height: image.height,
+        channels: image.channel,
+        data: image.data,
     }
 }
 

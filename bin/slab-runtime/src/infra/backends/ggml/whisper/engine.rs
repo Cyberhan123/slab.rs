@@ -1,10 +1,13 @@
+use super::contract::{AudioTranscriptionOptions, GgmlWhisperLoadConfig};
 use crate::infra::backends::ggml;
 use slab_subtitle::{
     SubtitleEntry,
     timetypes::{TimePoint, TimeSpan},
 };
 use slab_utils::loader::load_library_from_dir;
-use slab_whisper::{ContextParams, FullParams, Whisper, WhisperContext, WhisperError};
+use slab_whisper::{
+    ContextParams, FullParams, Whisper, WhisperContext, WhisperError, WhisperVadParams,
+};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
@@ -117,6 +120,17 @@ impl GGMLWhisperEngine {
         Ok(())
     }
 
+    pub(crate) fn new_context_from_config(
+        &mut self,
+        config: GgmlWhisperLoadConfig,
+    ) -> Result<(), ggml::EngineError> {
+        self.new_context(ContextParams {
+            model_path: Some(config.model_path),
+            flash_attn: config.flash_attn.or(Some(true)),
+            ..Default::default()
+        })
+    }
+
     /// Run Whisper inference on the provided audio samples.
     ///
     /// # Arguments
@@ -159,6 +173,14 @@ impl GGMLWhisperEngine {
         Ok(srt_entries)
     }
 
+    pub(crate) fn inference_with_options(
+        &self,
+        audio_data: &[f32],
+        options: &AudioTranscriptionOptions,
+    ) -> Result<Vec<SubtitleEntry>, ggml::EngineError> {
+        self.inference(audio_data, &full_params_from_options(options))
+    }
+
     // unload the model. free ctx
     pub fn unload(&mut self) {
         self.ctx = None;
@@ -178,4 +200,47 @@ impl GGMLWhisperEngine {
     pub fn fork_library(&self) -> Self {
         Self { instance: Arc::clone(&self.instance), ctx: None }
     }
+}
+
+fn full_params_from_options(options: &AudioTranscriptionOptions) -> FullParams {
+    let mut params = FullParams {
+        language: options.language.clone(),
+        detect_language: options.detect_language,
+        initial_prompt: options.prompt.clone(),
+        ..Default::default()
+    };
+
+    if let Some(decode) = options.decode.as_ref() {
+        params.offset_ms = decode.offset_ms;
+        params.duration_ms = decode.duration_ms;
+        params.no_context = decode.no_context;
+        params.no_timestamps = decode.no_timestamps;
+        params.token_timestamps = decode.token_timestamps;
+        params.split_on_word = decode.split_on_word;
+        params.suppress_nst = decode.suppress_nst;
+        params.thold_pt = decode.word_thold;
+        params.max_len = decode.max_len;
+        params.max_tokens = decode.max_tokens;
+        params.temperature = decode.temperature;
+        params.temperature_inc = decode.temperature_inc;
+        params.entropy_thold = decode.entropy_thold;
+        params.logprob_thold = decode.logprob_thold;
+        params.no_speech_thold = decode.no_speech_thold;
+        params.tdrz_enable = decode.tdrz_enable;
+    }
+
+    if let Some(vad) = options.vad.as_ref() {
+        params.vad = Some(vad.enabled);
+        params.vad_model_path = vad.model_path.clone();
+        params.vad_params = vad.params.as_ref().map(|value| WhisperVadParams {
+            threshold: value.threshold,
+            min_speech_duration_ms: value.min_speech_duration_ms,
+            min_silence_duration_ms: value.min_silence_duration_ms,
+            max_speech_duration_s: value.max_speech_duration_s,
+            speech_pad_ms: value.speech_pad_ms,
+            samples_overlap: value.samples_overlap,
+        });
+    }
+
+    params
 }

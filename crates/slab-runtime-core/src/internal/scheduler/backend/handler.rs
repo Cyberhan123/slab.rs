@@ -184,6 +184,94 @@ where
     }
 }
 
+pub fn log_runtime_control_extractor_failure(
+    backend: &'static str,
+    route: &'static str,
+    signal: &RuntimeControlSignal,
+    error: impl fmt::Display,
+) {
+    let (control_kind, op_id) = match signal {
+        RuntimeControlSignal::GlobalLoad { op_id, .. } => ("GlobalLoad", Some(*op_id)),
+        RuntimeControlSignal::GlobalUnload { op_id } => ("GlobalUnload", Some(*op_id)),
+    };
+    tracing::error!(
+        backend,
+        route,
+        control_kind,
+        op_id,
+        error = %error,
+        "backend runtime control extractor failed"
+    );
+}
+
+pub fn log_runtime_control_handler_failure(
+    backend: &'static str,
+    route: &'static str,
+    signal: &RuntimeControlSignal,
+    error: impl fmt::Display,
+) {
+    let (control_kind, op_id) = match signal {
+        RuntimeControlSignal::GlobalLoad { op_id, .. } => ("GlobalLoad", Some(*op_id)),
+        RuntimeControlSignal::GlobalUnload { op_id } => ("GlobalUnload", Some(*op_id)),
+    };
+    tracing::error!(
+        backend,
+        route,
+        control_kind,
+        op_id,
+        error = %error,
+        "backend runtime control handler failed"
+    );
+}
+
+pub fn log_peer_control_extractor_failure(
+    backend: &'static str,
+    route: &'static str,
+    cmd: &PeerWorkerCommand,
+    error: impl fmt::Display,
+) {
+    tracing::error!(
+        backend,
+        route,
+        control_kind = cmd.kind().as_str(),
+        seq_id = cmd.seq_id(),
+        sender_id = cmd.sender_id(),
+        error = %error,
+        "backend peer control extractor failed"
+    );
+}
+
+pub fn log_peer_control_handler_failure(
+    backend: &'static str,
+    route: &'static str,
+    cmd: &PeerWorkerCommand,
+    error: impl fmt::Display,
+) {
+    tracing::error!(
+        backend,
+        route,
+        control_kind = cmd.kind().as_str(),
+        seq_id = cmd.seq_id(),
+        sender_id = cmd.sender_id(),
+        error = %error,
+        "backend peer control handler failed"
+    );
+}
+
+pub fn log_lagged_control_handler_failure(
+    backend: &'static str,
+    route: &'static str,
+    error: impl fmt::Display,
+) {
+    tracing::error!(
+        backend,
+        route,
+        control_kind = "LaggedControl",
+        error = %error,
+        "backend lagged control handler failed"
+    );
+}
+
 pub fn extract_event_text(req: &BackendRequest) -> Result<String, BackendHandlerError> {
     req.input
         .to_str()

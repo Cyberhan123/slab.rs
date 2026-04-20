@@ -20,7 +20,7 @@ use candle_transformers::models::quantized_llama::ModelWeights;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use super::errors::{CandleLlamaEngineError, SessionId, StreamChunk, StreamHandle};
+use super::error::{CandleLlamaEngineError, SessionId, StreamChunk, StreamHandle};
 use crate::infra::backends::candle::EngineError;
 
 // ── Session state ─────────────────────────────────────────────────────────────

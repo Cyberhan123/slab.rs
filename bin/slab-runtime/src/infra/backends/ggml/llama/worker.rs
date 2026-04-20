@@ -1,4 +1,4 @@
-//! Backend worker adapter for `ggml.llama`.
+//! Backend worker for `ggml.llama`.
 //!
 //! Provides [`spawn_backend`] and [`spawn_backend_with_path`] which start a
 //! Tokio worker whose `#[backend_handler]` routes translate typed event and
@@ -14,10 +14,10 @@
 //! | `"inference.stream"` | `InferenceStream`| Streaming text generation.                     |
 //!
 //! ### `model.load` input payload
-//! Uses a typed [`slab_llama::LlamaLoadConfig`] payload.
+//! Uses a typed runtime-owned `GgmlLlamaLoadConfig` payload.
 //!
 //! ### `inference` / `inference.stream` options payload
-//! Uses a typed [`slab_llama::LlamaInferenceParams`] payload. Grammar and chat
+//! Uses a typed runtime-owned `TextGenerationOptions` payload. Grammar and chat
 //! message normalization are resolved before the backend receives the request.
 //!
 //! Runtime and peer control hooks are also routed through typed extractor
@@ -26,15 +26,13 @@
 
 use std::sync::Arc;
 
-use serde_json::json;
-use slab_llama::{LlamaInferenceParams, LlamaLoadConfig};
 use tokio::sync::broadcast;
 
-use crate::infra::backends::ggml::llama::adapter::{
-    GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest,
-};
+use super::contract::{GgmlLlamaLoadConfig, TextGenerationOptions, TextGenerationResponse};
+use super::error::GGMLLlamaWorkerError;
+use super::engine::{GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest};
 use slab_runtime_core::backend::{
-    CancelRx, ControlOpId, Input, Options, StreamHandle, WorkerCommand,
+    CancelRx, ControlOpId, Input, Options, StreamHandle, Typed, WorkerCommand,
 };
 use slab_runtime_core::backend::{SharedIngressRx, spawn_runtime_worker};
 use slab_runtime_macros::backend_handler;
@@ -57,9 +55,13 @@ struct InferenceOptions {
 }
 
 impl InferenceOptions {
-    fn from_params(params: LlamaInferenceParams) -> Self {
+    fn from_options(params: TextGenerationOptions) -> Self {
         Self {
-            max_tokens: if params.max_tokens == 0 { 256 } else { params.max_tokens },
+            max_tokens: params
+                .max_tokens
+                .and_then(|value| usize::try_from(value).ok())
+                .filter(|value| *value > 0)
+                .unwrap_or(256),
             session_key: params.session_key,
             gbnf: params.gbnf,
             temperature: params.temperature,
@@ -92,34 +94,37 @@ impl LlamaWorker {
     }
 
     #[on_event(LoadModel)]
-    async fn on_load_model(&mut self, config: Input<LlamaLoadConfig>) -> Result<(), anyhow::Error> {
-        self.handle_load_model(config.0).await.map_err(anyhow::Error::msg)
+    async fn on_load_model(
+        &mut self,
+        config: Input<GgmlLlamaLoadConfig>,
+    ) -> Result<(), GGMLLlamaWorkerError> {
+        self.handle_load_model(config.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self) -> Result<(), anyhow::Error> {
-        self.handle_unload_model().await.map_err(anyhow::Error::msg)
+    async fn on_unload_model(&mut self) -> Result<(), GGMLLlamaWorkerError> {
+        self.handle_unload_model().await
     }
 
     #[on_event(Inference)]
     async fn on_inference(
         &mut self,
         prompt: String,
-        options: Options<LlamaInferenceParams>,
-    ) -> Result<serde_json::Value, anyhow::Error> {
-        let options = InferenceOptions::from_params(options.0);
-        self.handle_inference(prompt, options).await.map_err(anyhow::Error::msg)
+        options: Options<TextGenerationOptions>,
+    ) -> Result<Typed<TextGenerationResponse>, GGMLLlamaWorkerError> {
+        let options = InferenceOptions::from_options(options.0);
+        self.handle_inference(prompt, options).await
     }
 
     #[on_event(InferenceStream)]
     async fn on_inference_stream(
         &mut self,
         prompt: String,
-        options: Options<LlamaInferenceParams>,
+        options: Options<TextGenerationOptions>,
         cancel: CancelRx,
-    ) -> Result<StreamHandle, anyhow::Error> {
-        let options = InferenceOptions::from_params(options.0);
-        self.handle_inference_stream(prompt, options, cancel).await.map_err(anyhow::Error::msg)
+    ) -> Result<StreamHandle, GGMLLlamaWorkerError> {
+        let options = InferenceOptions::from_options(options.0);
+        self.handle_inference_stream(prompt, options, cancel).await
     }
 
     fn cleanup_runtime_state(&mut self) {
@@ -130,7 +135,7 @@ impl LlamaWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
+    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), GGMLLlamaWorkerError> {
         tracing::debug!(op_id = op_id.0, "llama runtime control pre-cleanup");
         // Runtime-level GlobalLoad is treated as a pre-load cleanup signal.
         // The actual model.load request is still driven by the management path.
@@ -139,69 +144,46 @@ impl LlamaWorker {
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged_cleanup(&mut self) -> Result<(), anyhow::Error> {
+    async fn on_control_lagged_cleanup(&mut self) -> Result<(), GGMLLlamaWorkerError> {
         self.cleanup_runtime_state();
         Ok(())
     }
 
     // ── model.load ────────────────────────────────────────────────────────────
 
-    async fn handle_load_model(&mut self, config: LlamaLoadConfig) -> Result<(), String> {
+    async fn handle_load_model(
+        &mut self,
+        config: GgmlLlamaLoadConfig,
+    ) -> Result<(), GGMLLlamaWorkerError> {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
-                return Err("engine not initialized".to_owned());
+                return Err(GGMLLlamaWorkerError::load("engine not initialized"));
             }
         };
 
-        if config.num_workers == 0 {
-            return Err("num_workers must be > 0".to_owned());
+        if config.engine_workers == 0 {
+            return Err(GGMLLlamaWorkerError::contract("engine_workers must be > 0"));
         }
 
         // Model loading is CPU/blocking; use block_in_place to avoid stalling
         // the async runtime without the Send constraint of spawn_blocking.
-        let result = tokio::task::block_in_place(|| {
-            use slab_llama::{LlamaContextParams, LlamaModelParams};
-            let mut ctx_params = LlamaContextParams::default();
-            // This backend continuously batches multiple seq_ids inside a worker
-            // and callers treat `context_length` as the usable window per session.
-            ctx_params.kv_unified = true;
-            ctx_params.flash_attn = config.flash_attn;
-            if let Some(context_length) = config.context_length {
-                ctx_params.n_ctx = context_length;
-                if ctx_params.n_batch > context_length {
-                    ctx_params.n_batch = context_length;
-                }
-                if ctx_params.n_ubatch > context_length {
-                    ctx_params.n_ubatch = context_length;
-                }
-            }
+        let result = tokio::task::block_in_place(|| engine.load_model_from_config(&config));
 
-            engine.load_model_with_workers(
-                &config.model_path,
-                LlamaModelParams::default(),
-                ctx_params,
-                config.num_workers,
-            )
-        });
-
-        result.map_err(|error| error.to_string())
+        result.map_err(|error| GGMLLlamaWorkerError::load(error.to_string()))
     }
 
     // ── model.unload ──────────────────────────────────────────────────────────
 
-    async fn handle_unload_model(&mut self) -> Result<(), String> {
+    async fn handle_unload_model(&mut self) -> Result<(), GGMLLlamaWorkerError> {
         let engine = match self.engine.as_ref() {
             Some(e) => Arc::clone(e),
             None => {
-                return Err("engine not initialized".to_owned());
+                return Err(GGMLLlamaWorkerError::unload("engine not initialized"));
             }
         };
 
-        match engine.unload() {
-            Ok(()) => Ok(()),
-            Err(e) => Err(e.to_string()),
-        }
+        engine.unload().map_err(|error| GGMLLlamaWorkerError::unload(error.to_string()))
     }
 
     // ── inference ─────────────────────────────────────────────────────────────
@@ -210,7 +192,7 @@ impl LlamaWorker {
         &mut self,
         prompt: String,
         options: InferenceOptions,
-    ) -> Result<serde_json::Value, String> {
+    ) -> Result<Typed<TextGenerationResponse>, GGMLLlamaWorkerError> {
         let InferenceOptions {
             max_tokens,
             session_key,
@@ -225,8 +207,11 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
         } = options;
-        let engine =
-            self.engine.as_ref().map(Arc::clone).ok_or_else(|| "model not loaded".to_owned())?;
+        let engine = self
+            .engine
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| GGMLLlamaWorkerError::inference("model not loaded"))?;
         let request = LlamaDispatchRequest {
             prompt,
             max_tokens,
@@ -243,15 +228,11 @@ impl LlamaWorker {
             stop_sequences,
         };
         let LlamaDispatchOutput { text, usage, finish_reason, metadata } =
-            engine.dispatch_inference(request).await.map_err(|error| error.to_string())?;
-        let tokens_used = usage.as_ref().map(|usage| usage.completion_tokens);
-        Ok(json!({
-            "text": text,
-            "tokens_used": tokens_used,
-            "usage": usage,
-            "finish_reason": finish_reason,
-            "metadata": metadata,
-        }))
+            engine
+                .dispatch_inference(request)
+                .await
+                .map_err(|error| GGMLLlamaWorkerError::inference(error.to_string()))?;
+        Ok(Typed(TextGenerationResponse { text, finish_reason, usage, metadata }))
     }
 
     // ── inference.stream ──────────────────────────────────────────────────────
@@ -261,7 +242,7 @@ impl LlamaWorker {
         prompt: String,
         options: InferenceOptions,
         cancel: CancelRx,
-    ) -> Result<StreamHandle, String> {
+    ) -> Result<StreamHandle, GGMLLlamaWorkerError> {
         let InferenceOptions {
             max_tokens,
             session_key,
@@ -276,8 +257,11 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
         } = options;
-        let engine =
-            self.engine.as_ref().map(Arc::clone).ok_or_else(|| "model not loaded".to_owned())?;
+        let engine = self
+            .engine
+            .as_ref()
+            .map(Arc::clone)
+            .ok_or_else(|| GGMLLlamaWorkerError::inference("model not loaded"))?;
         let request = LlamaDispatchRequest {
             prompt,
             max_tokens,
@@ -296,7 +280,9 @@ impl LlamaWorker {
         engine
             .dispatch_inference_stream(request, cancel.0)
             .await
-            .map_err(|error: crate::infra::backends::ggml::EngineError| error.to_string())
+            .map_err(|error: crate::infra::backends::ggml::EngineError| {
+                GGMLLlamaWorkerError::inference(error.to_string())
+            })
     }
 }
 
@@ -318,7 +304,7 @@ pub fn spawn_backend_with_engine(
 #[cfg(test)]
 mod tests {
     use super::{InferenceOptions, LlamaWorker};
-    use slab_llama::LlamaInferenceParams;
+    use super::super::contract::TextGenerationOptions;
     use slab_runtime_core::backend::ControlOpId;
 
     // ── infer_add_assistant_prompt ────────────────────────────────────────────
@@ -345,8 +331,8 @@ mod tests {
 
     #[test]
     fn inference_options_preserve_ignore_eos_and_logit_bias() {
-        let options = InferenceOptions::from_params(LlamaInferenceParams {
-            max_tokens: 32,
+        let options = InferenceOptions::from_options(TextGenerationOptions {
+            max_tokens: Some(32),
             ignore_eos: true,
             logit_bias: Some(serde_json::json!({ "42": false })),
             ..Default::default()

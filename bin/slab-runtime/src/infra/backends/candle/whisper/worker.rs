@@ -15,11 +15,16 @@
 
 use tokio::sync::broadcast;
 
-use crate::domain::models::CandleWhisperLoadConfig;
-use crate::infra::backends::candle::whisper::adapter::CandleWhisperEngine;
+use super::contract::{
+    AudioTranscriptionOptions, AudioTranscriptionResponse, CandleWhisperLoadConfig,
+};
+use super::error::CandleWhisperWorkerError;
+use super::engine::CandleWhisperEngine;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
-use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, PeerControlBus, WorkerCommand};
+use slab_runtime_core::backend::{
+    BroadcastSeq, ControlOpId, Input, Options, PeerControlBus, Typed, WorkerCommand,
+};
 use slab_runtime_macros::backend_handler;
 
 // ── Worker ────────────────────────────────────────────────────────────────────
@@ -40,18 +45,22 @@ impl CandleWhisperWorker {
         &mut self,
         config: Input<CandleWhisperLoadConfig>,
         seq: BroadcastSeq,
-    ) -> Result<(), anyhow::Error> {
-        self.handle_load_model(config.0, seq.0).await.map_err(anyhow::Error::msg)
+    ) -> Result<(), CandleWhisperWorkerError> {
+        self.handle_load_model(config.0, seq.0).await
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), anyhow::Error> {
-        self.handle_unload_model(seq.0).await.map_err(anyhow::Error::msg)
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), CandleWhisperWorkerError> {
+        self.handle_unload_model(seq.0).await
     }
 
     #[on_event(Inference)]
-    async fn on_inference(&mut self, input: Payload) -> Result<String, anyhow::Error> {
-        self.handle_inference(input).await.map_err(anyhow::Error::msg)
+    async fn on_inference(
+        &mut self,
+        input: Payload,
+        _options: Options<AudioTranscriptionOptions>,
+    ) -> Result<Typed<AudioTranscriptionResponse>, CandleWhisperWorkerError> {
+        self.handle_inference(input).await
     }
 
     // ── Runtime / peer control ────────────────────────────────────────────────
@@ -60,7 +69,7 @@ impl CandleWhisperWorker {
     async fn on_peer_load_model(
         &mut self,
         config: Input<CandleWhisperLoadConfig>,
-    ) -> Result<(), anyhow::Error> {
+    ) -> Result<(), CandleWhisperWorkerError> {
         let config = config.0;
         let model_path = config.model_path;
         let tokenizer_path = config.tokenizer_path;
@@ -83,7 +92,7 @@ impl CandleWhisperWorker {
     }
 
     #[on_peer_control(Unload)]
-    async fn on_peer_unload(&mut self) -> Result<(), anyhow::Error> {
+    async fn on_peer_unload(&mut self) -> Result<(), CandleWhisperWorkerError> {
         if let Some(e) = self.engine.as_ref() {
             e.unload();
         }
@@ -92,7 +101,10 @@ impl CandleWhisperWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), anyhow::Error> {
+    async fn apply_runtime_control(
+        &mut self,
+        op_id: ControlOpId,
+    ) -> Result<(), CandleWhisperWorkerError> {
         tracing::debug!(op_id = op_id.0, "candle.whisper runtime control pre-cleanup");
         if let Some(e) = self.engine.as_ref() {
             e.unload();
@@ -101,7 +113,7 @@ impl CandleWhisperWorker {
     }
 
     #[on_control_lagged]
-    async fn on_control_lagged(&mut self) -> Result<(), anyhow::Error> {
+    async fn on_control_lagged(&mut self) -> Result<(), CandleWhisperWorkerError> {
         if let Some(e) = self.engine.as_ref() {
             e.unload();
         }
@@ -114,7 +126,7 @@ impl CandleWhisperWorker {
         &mut self,
         config: CandleWhisperLoadConfig,
         seq_id: u64,
-    ) -> Result<(), String> {
+    ) -> Result<(), CandleWhisperWorkerError> {
         let model_payload = Payload::typed(config.clone());
         let engine = self.engine.get_or_insert_with(CandleWhisperEngine::new);
         let tokenizer_path = config.tokenizer_path;
@@ -130,48 +142,57 @@ impl CandleWhisperWorker {
                 self.emit_peer_load_model_deployment_payload(seq_id, model_payload);
                 Ok(())
             }
-            Err(e) => Err(e.to_string()),
+            Err(error) => Err(CandleWhisperWorkerError::load(error.to_string())),
         }
     }
 
-    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), String> {
+    async fn handle_unload_model(
+        &mut self,
+        seq_id: u64,
+    ) -> Result<(), CandleWhisperWorkerError> {
         match self.engine.as_ref() {
             Some(engine) => {
                 engine.unload();
                 self.emit_peer_unload_generation(seq_id);
                 Ok(())
             }
-            None => Err("model not loaded".to_owned()),
+            None => Err(CandleWhisperWorkerError::unload("model not loaded")),
         }
     }
 
-    async fn handle_inference(&mut self, input: Payload) -> Result<String, String> {
+    async fn handle_inference(
+        &mut self,
+        input: Payload,
+    ) -> Result<Typed<AudioTranscriptionResponse>, CandleWhisperWorkerError> {
         let engine = match self.engine.as_ref() {
             Some(e) => e.clone(),
             None => {
-                return Err(
-                    "candle.whisper backend not ready: model not loaded. Call model.load first"
-                        .to_owned(),
-                );
+                return Err(CandleWhisperWorkerError::inference(
+                    "candle.whisper backend not ready: model not loaded. Call model.load first",
+                ));
             }
         };
 
         let samples = match input.to_f32_arc() {
             Ok(s) => s,
             Err(e) => {
-                return Err(format!("invalid input: expected f32 PCM audio samples, got: {e}"));
+                return Err(CandleWhisperWorkerError::contract(format!(
+                    "invalid input: expected f32 PCM audio samples, got: {e}"
+                )));
             }
         };
 
         if samples.is_empty() {
-            return Err("invalid input: audio samples are empty".to_owned());
+            return Err(CandleWhisperWorkerError::contract("invalid input: audio samples are empty"));
         }
 
         let result = tokio::task::block_in_place(|| engine.inference(&samples));
 
         match result {
-            Ok(text) => Ok(text),
-            Err(e) => Err(format!("candle.whisper inference failed: {e}")),
+            Ok(text) => Ok(Typed(AudioTranscriptionResponse { text })),
+            Err(error) => Err(CandleWhisperWorkerError::inference(format!(
+                "candle.whisper inference failed: {error}"
+            ))),
         }
     }
 }
@@ -194,7 +215,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::CandleWhisperWorker;
-    use crate::domain::models::CandleWhisperLoadConfig;
+    use super::super::contract::CandleWhisperLoadConfig;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::{
         ControlOpId, DeploymentSnapshot, PeerControlBus, WorkerCommand,

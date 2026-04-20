@@ -1,7 +1,8 @@
 use std::fs::OpenOptions;
+use std::io::Write;
 use std::path::Path;
 
-use tracing::{error, info};
+use tracing::{error, info, warn};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::util::SubscriberInitExt;
@@ -15,12 +16,15 @@ pub(super) fn init_tracing(
 ) -> anyhow::Result<Vec<WorkerGuard>> {
     use tracing_subscriber::Layer;
 
+    let mut bootstrap_warnings = Vec::new();
     let env_filter = match tracing_subscriber::EnvFilter::try_from_default_env() {
         Ok(filter) => filter,
         Err(_) => match log_level.parse::<tracing_subscriber::EnvFilter>() {
             Ok(filter) => filter,
             Err(error) => {
-                eprintln!("WARN: log level '{log_level}' is invalid ({error}); fallback to info");
+                bootstrap_warnings.push(format!(
+                    "log level '{log_level}' is invalid ({error}); fallback to info"
+                ));
                 tracing_subscriber::EnvFilter::new("info")
             }
         },
@@ -39,11 +43,11 @@ pub(super) fn init_tracing(
         if let Some(parent) = path.parent()
             && let Err(error) = std::fs::create_dir_all(parent)
         {
-            eprintln!(
-                "WARN: failed to create slab-runtime log directory '{}': {error}; continuing without file logging",
-                parent.display()
-            );
             registry.init();
+            emit_bootstrap_warnings(&mut bootstrap_warnings, Some(format!(
+                "failed to create slab-runtime log directory '{}': {error}; continuing without file logging",
+                parent.display()
+            )));
             return Ok(guards);
         }
 
@@ -74,11 +78,11 @@ pub(super) fn init_tracing(
                 registry.with(file_layer).init();
             }
             Err(error) => {
-                eprintln!(
-                    "WARN: failed to open slab-runtime log file '{}': {error}; continuing without file logging",
-                    path.display()
-                );
                 registry.init();
+                emit_bootstrap_warnings(&mut bootstrap_warnings, Some(format!(
+                    "failed to open slab-runtime log file '{}': {error}; continuing without file logging",
+                    path.display()
+                )));
                 return Ok(guards);
             }
         }
@@ -86,6 +90,7 @@ pub(super) fn init_tracing(
         registry.init();
     }
 
+    emit_bootstrap_warnings(&mut bootstrap_warnings, None::<String>);
     Ok(guards)
 }
 
@@ -105,9 +110,27 @@ pub(super) fn install_panic_hook() {
             "non-string panic payload".to_string()
         };
 
-        eprintln!("slab-runtime panic at {location}: {payload}");
+        write_bootstrap_stderr(&format!("slab-runtime panic at {location}: {payload}"));
         error!(location = %location, payload = %payload, "slab-runtime panicked");
     }));
+}
+
+fn emit_bootstrap_warnings<T>(warnings: &mut Vec<String>, extra: Option<T>)
+where
+    T: Into<String>,
+{
+    if let Some(extra_warning) = extra {
+        warnings.push(extra_warning.into());
+    }
+
+    for warning_message in warnings.drain(..) {
+        warn!(warning = %warning_message, "slab-runtime bootstrap warning");
+    }
+}
+
+fn write_bootstrap_stderr(message: &str) {
+    let mut stderr = std::io::stderr().lock();
+    let _ = writeln!(stderr, "{message}");
 }
 
 pub(super) fn log_startup(config: &RuntimeConfig) {

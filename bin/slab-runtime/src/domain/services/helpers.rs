@@ -1,15 +1,17 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use base64::Engine as _;
 use bytemuck::cast_slice;
 use image::{DynamicImage, GenericImageView, imageops::FilterType};
-use serde_json::{Map, Value, json};
-use slab_diffusion::Image as DiffusionImage;
+use serde_json::Value;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::StreamChunk;
 
 use crate::application::dtos as dto;
+use crate::domain::models::{
+    GeneratedImage, OnnxInferenceRequest, OnnxTensor, TextGenerationResponse,
+    TextGenerationStreamEvent,
+};
 use crate::domain::runtime::{CoreError, CpuStage};
 
 pub(crate) fn invalid_model(field: &'static str, message: impl Into<String>) -> CoreError {
@@ -44,6 +46,20 @@ pub(crate) fn decode_text_response(
     task_kind: &'static str,
 ) -> Result<dto::LlamaChatResponse, CoreError> {
     match payload {
+        typed_payload @ Payload::Typed(_) => {
+            let response: TextGenerationResponse =
+                typed_payload.to_typed().map_err(|error| CoreError::ResultDecodeFailed {
+                    task_kind: task_kind.to_owned(),
+                    message: format!("invalid typed text response: {error}"),
+                })?;
+            Ok(dto::LlamaChatResponse {
+                text: Some(response.text),
+                finish_reason: response.finish_reason,
+                tokens_used: response.usage.as_ref().map(|usage| usage.completion_tokens),
+                usage: response.usage.as_ref().map(decode_usage_contract),
+                reasoning_content: response.metadata.reasoning_content,
+            })
+        }
         Payload::Bytes(bytes) => Ok(dto::LlamaChatResponse {
             text: Some(String::from_utf8_lossy(&bytes).into_owned()),
             ..Default::default()
@@ -92,27 +108,41 @@ pub(crate) fn decode_text_stream_chunk(
             done: Some(false),
             ..Default::default()
         })),
-        StreamChunk::Json(value) => Ok(Some(dto::LlamaChatStreamChunk {
-            delta: value.get("delta").and_then(Value::as_str).map(ToOwned::to_owned),
-            done: value.get("done").and_then(Value::as_bool),
-            finish_reason: value
-                .get("finish_reason")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned),
-            usage: value.get("usage").map(decode_usage_value),
-            reasoning_content: value
-                .get("reasoning_content")
-                .and_then(Value::as_str)
-                .map(ToOwned::to_owned)
-                .or_else(|| {
-                    value
-                        .get("metadata")
-                        .and_then(Value::as_object)
-                        .and_then(|metadata| metadata.get("reasoning_content"))
-                        .and_then(Value::as_str)
-                        .map(ToOwned::to_owned)
-                }),
-        })),
+        StreamChunk::Json(value) => {
+            if let Ok(event) = serde_json::from_value::<TextGenerationStreamEvent>(value.clone()) {
+                return Ok(Some(dto::LlamaChatStreamChunk {
+                    delta: event.delta,
+                    done: event.done,
+                    finish_reason: event.finish_reason,
+                    usage: event.usage.as_ref().map(decode_usage_contract),
+                    reasoning_content: event
+                        .metadata
+                        .and_then(|metadata| metadata.reasoning_content),
+                }));
+            }
+
+            Ok(Some(dto::LlamaChatStreamChunk {
+                delta: value.get("delta").and_then(Value::as_str).map(ToOwned::to_owned),
+                done: value.get("done").and_then(Value::as_bool),
+                finish_reason: value
+                    .get("finish_reason")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned),
+                usage: value.get("usage").map(decode_usage_value),
+                reasoning_content: value
+                    .get("reasoning_content")
+                    .and_then(Value::as_str)
+                    .map(ToOwned::to_owned)
+                    .or_else(|| {
+                        value
+                            .get("metadata")
+                            .and_then(Value::as_object)
+                            .and_then(|metadata| metadata.get("reasoning_content"))
+                            .and_then(Value::as_str)
+                            .map(ToOwned::to_owned)
+                    }),
+            }))
+        }
         StreamChunk::Done => Ok(None),
         StreamChunk::Error(message) => {
             Err(CoreError::ResultDecodeFailed { task_kind: task_kind.to_owned(), message })
@@ -124,51 +154,10 @@ pub(crate) fn decode_text_stream_chunk(
     }
 }
 
-pub(crate) fn decode_utf8_payload(
-    payload: Payload,
-    task_kind: &'static str,
-) -> Result<String, CoreError> {
-    match payload {
-        Payload::Bytes(bytes) => Ok(String::from_utf8_lossy(&bytes).into_owned()),
-        Payload::Text(text) => Ok(text.to_string()),
-        Payload::Json(value) => {
-            serde_json::to_string(&value).map_err(|error| CoreError::ResultDecodeFailed {
-                task_kind: task_kind.to_owned(),
-                message: format!("failed to serialize JSON payload: {error}"),
-            })
-        }
-        other => Err(CoreError::ResultDecodeFailed {
-            task_kind: task_kind.to_owned(),
-            message: format!("unsupported payload for utf8 decode: {other:?}"),
-        }),
-    }
-}
-
-pub(crate) fn decode_images_payload(
-    payload: Payload,
-    task_kind: &'static str,
-) -> Result<Vec<dto::RawImage>, CoreError> {
-    let images: Vec<DiffusionImage> =
-        payload.to_typed().map_err(|error| CoreError::ResultDecodeFailed {
-            task_kind: task_kind.to_owned(),
-            message: format!("invalid diffusion image payload: {error}"),
-        })?;
-    Ok(images.iter().map(diffusion_image_to_raw_image).collect())
-}
-
-pub(crate) fn diffusion_image_to_raw_image(image: &DiffusionImage) -> dto::RawImage {
-    dto::RawImage {
-        data: image.data.clone(),
-        width: Some(image.width),
-        height: Some(image.height),
-        channels: Some(image.channel),
-    }
-}
-
-pub(crate) fn raw_image_to_diffusion_image(
+pub(crate) fn raw_image_to_generated_image(
     image: &dto::RawImage,
     task_kind: &'static str,
-) -> Result<DiffusionImage, CoreError> {
+) -> Result<GeneratedImage, CoreError> {
     let width = image.width.ok_or_else(|| CoreError::ResultDecodeFailed {
         task_kind: task_kind.to_owned(),
         message: "raw image width is required".to_owned(),
@@ -181,14 +170,17 @@ pub(crate) fn raw_image_to_diffusion_image(
         task_kind: task_kind.to_owned(),
         message: "raw image channels are required".to_owned(),
     })?;
-    if channels == 0 {
-        return Err(CoreError::ResultDecodeFailed {
-            task_kind: task_kind.to_owned(),
-            message: "raw image channels must be >= 1".to_owned(),
-        });
-    }
 
-    Ok(DiffusionImage { width, height, channel: channels, data: image.data.clone() })
+    Ok(GeneratedImage { data: image.data.clone(), width, height, channels })
+}
+
+pub(crate) fn contract_image_to_raw_image(image: &GeneratedImage) -> dto::RawImage {
+    dto::RawImage {
+        data: image.data.clone(),
+        width: Some(image.width),
+        height: Some(image.height),
+        channels: Some(image.channels),
+    }
 }
 
 pub(crate) fn audio_decode_stage(path: PathBuf) -> CpuStage {
@@ -206,66 +198,22 @@ pub(crate) fn whisper_transcription_from_raw(
     }
 }
 
-pub(crate) fn onnx_tensors_to_json(tensors: &[dto::RawTensor]) -> Result<Value, CoreError> {
+pub(crate) fn onnx_tensors_to_request(
+    tensors: &[dto::RawTensor],
+) -> Result<OnnxInferenceRequest, CoreError> {
     let inputs = tensors
         .iter()
         .map(|tensor| {
-            let name = required_string("onnx.inputs[].name", tensor.name.clone())?;
-            let dtype = required_string("onnx.inputs[].dtype", tensor.dtype.clone())?;
-            Ok((
-                name,
-                json!({
-                    "shape": tensor.shape,
-                    "dtype": dtype,
-                    "data_b64": base64::engine::general_purpose::STANDARD.encode(&tensor.data),
-                }),
-            ))
+            Ok(OnnxTensor {
+                name: required_string("onnx.inputs[].name", tensor.name.clone())?,
+                shape: tensor.shape.clone(),
+                dtype: required_string("onnx.inputs[].dtype", tensor.dtype.clone())?,
+                data: tensor.data.clone(),
+            })
         })
-        .collect::<Result<Map<String, Value>, CoreError>>()?;
+        .collect::<Result<Vec<_>, CoreError>>()?;
 
-    Ok(json!({ "inputs": inputs }))
-}
-
-pub(crate) fn onnx_outputs_from_payload(
-    payload: Payload,
-) -> Result<Vec<dto::RawTensor>, CoreError> {
-    let value = match payload {
-        Payload::Json(value) => value,
-        Payload::Bytes(bytes) => {
-            serde_json::from_slice(&bytes).map_err(|error| CoreError::ResultDecodeFailed {
-                task_kind: "onnx".to_owned(),
-                message: format!("failed to parse ONNX JSON output: {error}"),
-            })?
-        }
-        other => {
-            return Err(CoreError::ResultDecodeFailed {
-                task_kind: "onnx".to_owned(),
-                message: format!("unsupported ONNX output payload: {other:?}"),
-            });
-        }
-    };
-
-    let outputs = value.get("outputs").and_then(Value::as_object).ok_or_else(|| {
-        CoreError::ResultDecodeFailed {
-            task_kind: "onnx".to_owned(),
-            message: "ONNX output payload is missing `outputs`".to_owned(),
-        }
-    })?;
-
-    outputs.iter().map(|(name, tensor)| decode_onnx_tensor(name, tensor)).collect()
-}
-
-pub(crate) fn onnx_named_output_from_payload(
-    payload: Payload,
-    output_name: &str,
-) -> Result<dto::RawTensor, CoreError> {
-    let outputs = onnx_outputs_from_payload(payload)?;
-    outputs.into_iter().find(|tensor| tensor.name.as_deref() == Some(output_name)).ok_or_else(
-        || CoreError::ResultDecodeFailed {
-            task_kind: "onnx_embedding".to_owned(),
-            message: format!("ONNX output tensor `{output_name}` not found"),
-        },
-    )
+    Ok(OnnxInferenceRequest { inputs })
 }
 
 pub(crate) fn embedding_image_to_tensor(
@@ -298,6 +246,14 @@ pub(crate) fn embedding_image_to_tensor(
     })
 }
 
+pub(crate) fn embedding_image_to_contract_tensor(
+    image_bytes: &[u8],
+    input_name: &str,
+) -> Result<OnnxTensor, CoreError> {
+    let tensor = embedding_image_to_tensor(image_bytes, input_name)?;
+    raw_tensor_to_contract_tensor(&tensor)
+}
+
 fn decode_usage_value(value: &Value) -> dto::Usage {
     dto::Usage {
         prompt_tokens: value
@@ -319,6 +275,36 @@ fn decode_usage_value(value: &Value) -> dto::Usage {
             .and_then(Value::as_u64)
             .and_then(|value| u32::try_from(value).ok()),
         estimated: value.get("estimated").and_then(Value::as_bool),
+    }
+}
+
+fn decode_usage_contract(value: &crate::domain::models::TextGenerationUsage) -> dto::Usage {
+    dto::Usage {
+        prompt_tokens: Some(value.prompt_tokens),
+        completion_tokens: Some(value.completion_tokens),
+        total_tokens: Some(value.total_tokens),
+        prompt_cached_tokens: Some(value.prompt_tokens_details.cached_tokens),
+        estimated: Some(value.estimated),
+    }
+}
+
+pub(crate) fn raw_tensor_to_contract_tensor(
+    tensor: &dto::RawTensor,
+) -> Result<OnnxTensor, CoreError> {
+    Ok(OnnxTensor {
+        name: required_string("onnx.inputs[].name", tensor.name.clone())?,
+        shape: tensor.shape.clone(),
+        dtype: required_string("onnx.inputs[].dtype", tensor.dtype.clone())?,
+        data: tensor.data.clone(),
+    })
+}
+
+pub(crate) fn contract_tensor_to_raw_tensor(tensor: OnnxTensor) -> dto::RawTensor {
+    dto::RawTensor {
+        name: Some(tensor.name),
+        shape: tensor.shape,
+        dtype: Some(tensor.dtype),
+        data: tensor.data,
     }
 }
 
@@ -361,35 +347,71 @@ fn decode_audio_path(path: &Path) -> Result<Arc<[f32]>, CoreError> {
     Ok(Arc::from(samples))
 }
 
-fn decode_onnx_tensor(name: &str, value: &Value) -> Result<dto::RawTensor, CoreError> {
-    let shape = value
-        .get("shape")
-        .and_then(Value::as_array)
-        .ok_or_else(|| CoreError::ResultDecodeFailed {
-            task_kind: "onnx".to_owned(),
-            message: format!("tensor `{name}` is missing `shape`"),
-        })?
-        .iter()
-        .filter_map(Value::as_i64)
-        .collect::<Vec<_>>();
-    let dtype = value.get("dtype").and_then(Value::as_str).ok_or_else(|| {
-        CoreError::ResultDecodeFailed {
-            task_kind: "onnx".to_owned(),
-            message: format!("tensor `{name}` is missing `dtype`"),
-        }
-    })?;
-    let data_b64 = value.get("data_b64").and_then(Value::as_str).ok_or_else(|| {
-        CoreError::ResultDecodeFailed {
-            task_kind: "onnx".to_owned(),
-            message: format!("tensor `{name}` is missing `data_b64`"),
-        }
-    })?;
-    let data = base64::engine::general_purpose::STANDARD.decode(data_b64).map_err(|error| {
-        CoreError::ResultDecodeFailed {
-            task_kind: "onnx".to_owned(),
-            message: format!("failed to decode tensor `{name}` bytes: {error}"),
-        }
-    })?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::domain::models::{
+        TextGenerationMetadata, TextGenerationResponse, TextGenerationStreamEvent,
+        TextGenerationUsage, TextPromptTokensDetails,
+    };
 
-    Ok(dto::RawTensor { name: Some(name.to_owned()), shape, dtype: Some(dtype.to_owned()), data })
+    #[test]
+    fn decode_text_response_prefers_typed_contract() {
+        let payload = Payload::typed(TextGenerationResponse {
+            text: "hello".to_owned(),
+            finish_reason: Some("stop".to_owned()),
+            usage: Some(TextGenerationUsage {
+                prompt_tokens: 2,
+                completion_tokens: 3,
+                total_tokens: 5,
+                prompt_tokens_details: TextPromptTokensDetails { cached_tokens: 1 },
+                estimated: false,
+            }),
+            metadata: TextGenerationMetadata {
+                reasoning_content: Some("thinking".to_owned()),
+                ..Default::default()
+            },
+        });
+
+        let response = decode_text_response(payload, "ggml_llama").expect("typed response decodes");
+
+        assert_eq!(response.text.as_deref(), Some("hello"));
+        assert_eq!(response.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(response.tokens_used, Some(3));
+        assert_eq!(response.usage.as_ref().and_then(|usage| usage.prompt_cached_tokens), Some(1));
+        assert_eq!(response.reasoning_content.as_deref(), Some("thinking"));
+    }
+
+    #[test]
+    fn decode_text_stream_chunk_reads_contract_event() {
+        let chunk = StreamChunk::Json(
+            serde_json::to_value(TextGenerationStreamEvent {
+                delta: Some("he".to_owned()),
+                done: Some(true),
+                finish_reason: Some("stop".to_owned()),
+                usage: Some(TextGenerationUsage {
+                    prompt_tokens: 2,
+                    completion_tokens: 3,
+                    total_tokens: 5,
+                    prompt_tokens_details: TextPromptTokensDetails { cached_tokens: 1 },
+                    estimated: false,
+                }),
+                metadata: Some(TextGenerationMetadata {
+                    reasoning_content: Some("chain".to_owned()),
+                    ..Default::default()
+                }),
+            })
+            .expect("event serializes"),
+        );
+
+        let decoded = decode_text_stream_chunk(chunk, "ggml_llama")
+            .expect("stream event decodes")
+            .expect("stream chunk should be present");
+
+        assert_eq!(decoded.delta.as_deref(), Some("he"));
+        assert_eq!(decoded.done, Some(true));
+        assert_eq!(decoded.finish_reason.as_deref(), Some("stop"));
+        assert_eq!(decoded.usage.as_ref().and_then(|usage| usage.prompt_cached_tokens), Some(1));
+        assert_eq!(decoded.reasoning_content.as_deref(), Some("chain"));
+    }
 }

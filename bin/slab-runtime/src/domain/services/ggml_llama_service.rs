@@ -1,12 +1,11 @@
 use futures::StreamExt;
 use futures::stream::BoxStream;
-use slab_llama::{LlamaInferenceParams, LlamaLoadConfig};
-use slab_runtime_core::Payload;
 use slab_runtime_core::backend::RequestRoute;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::application::dtos as dto;
+use crate::domain::models::{GgmlLlamaLoadConfig, TextGenerationOptions};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
@@ -36,17 +35,19 @@ impl GgmlLlamaService {
             .flash_attn
             .ok_or_else(|| invalid_model("ggml_llama.flash_attn", "missing required value"))?;
 
-        let load_payload = Payload::typed(LlamaLoadConfig {
+        let load_payload = GgmlLlamaLoadConfig {
             model_path: model_path.clone(),
-            num_workers: usize::try_from(num_workers)
+            engine_workers: usize::try_from(num_workers)
                 .map_err(|_| invalid_model("ggml_llama.num_workers", "exceeds usize range"))?,
             context_length: request.context_length,
             flash_attn,
             chat_template: request.chat_template,
             gbnf: request.gbnf,
-        });
+        };
 
-        Ok(Self { runtime: DriverRuntime::new(execution, "ggml.llama", load_payload) })
+        Ok(Self {
+            runtime: DriverRuntime::new_typed(execution, "ggml.llama", "ggml.llama", load_payload),
+        })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -64,11 +65,11 @@ impl GgmlLlamaService {
         let prompt = required_string("ggml_llama.prompt", request.prompt.clone())?;
         let payload = self
             .runtime
-            .submit(
+            .submit_payload(
                 RequestRoute::Inference,
-                Payload::text(prompt),
+                prompt,
                 Vec::new(),
-                Payload::typed(build_inference_params(request)?),
+                build_inference_params(request)?,
             )
             .await?
             .result()
@@ -83,11 +84,11 @@ impl GgmlLlamaService {
         let prompt = required_string("ggml_llama.prompt", request.prompt.clone())?;
         let handle = self
             .runtime
-            .submit(
+            .submit_payload(
                 RequestRoute::InferenceStream,
-                Payload::text(prompt),
+                prompt,
                 Vec::new(),
-                Payload::typed(build_inference_params(request)?),
+                build_inference_params(request)?,
             )
             .await?;
         let raw_stream = match handle.take_stream().await {
@@ -127,7 +128,7 @@ impl GgmlLlamaService {
 
 fn build_inference_params(
     request: dto::GgmlLlamaChatRequest,
-) -> Result<LlamaInferenceParams, CoreError> {
+) -> Result<TextGenerationOptions, CoreError> {
     let logit_bias = match request.logit_bias_json {
         Some(bytes) => Some(serde_json::from_slice(&bytes).map_err(|error| {
             invalid_model("ggml_llama.logit_bias_json", format!("invalid JSON payload: {error}"))
@@ -135,13 +136,14 @@ fn build_inference_params(
         None => None,
     };
 
-    Ok(LlamaInferenceParams {
-        max_tokens: request
-            .max_tokens
-            .map(usize::try_from)
-            .transpose()
-            .map_err(|_| invalid_model("ggml_llama.max_tokens", "exceeds usize range"))?
-            .unwrap_or_default(),
+    if let Some(max_tokens) = request.max_tokens
+        && usize::try_from(max_tokens).is_err()
+    {
+        return Err(invalid_model("ggml_llama.max_tokens", "exceeds usize range"));
+    }
+
+    Ok(TextGenerationOptions {
+        max_tokens: request.max_tokens,
         session_key: request.session_key,
         gbnf: request.gbnf,
         temperature: request.temperature,
@@ -153,5 +155,30 @@ fn build_inference_params(
         ignore_eos: request.ignore_eos.unwrap_or(false),
         logit_bias,
         stop_sequences: request.stop_sequences.unwrap_or_default(),
+        stream: false,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_inference_params;
+    use crate::application::dtos::GgmlLlamaChatRequest;
+
+    #[test]
+    fn build_inference_params_preserves_logit_bias_and_stop_sequences() {
+        let options = build_inference_params(GgmlLlamaChatRequest {
+            prompt: Some("hello".to_owned()),
+            max_tokens: Some(32),
+            stop_sequences: Some(vec!["</think>".to_owned(), "###".to_owned()]),
+            ignore_eos: Some(true),
+            logit_bias_json: Some(br#"{"42":false,"hello":1.5}"#.to_vec()),
+            ..Default::default()
+        })
+        .expect("request should map");
+
+        assert_eq!(options.max_tokens, Some(32));
+        assert!(options.ignore_eos);
+        assert_eq!(options.stop_sequences, vec!["</think>".to_owned(), "###".to_owned()]);
+        assert_eq!(options.logit_bias, Some(serde_json::json!({ "42": false, "hello": 1.5 })));
+    }
 }

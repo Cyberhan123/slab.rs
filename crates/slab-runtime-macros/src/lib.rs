@@ -701,10 +701,11 @@ fn expand_backend_handler(config: BackendHandlerConfig, item: TokenStream) -> Re
                     let #binding = match #extractor {
                         Ok(value) => value,
                         Err(error) => {
-                            ::std::eprintln!(
-                                "backend runtime control extractor failed for `{}`: {}",
-                                stringify!(#method),
-                                error
+                            ::slab_runtime_core::backend::log_runtime_control_extractor_failure(
+                                ::std::any::type_name::<Self>(),
+                                stringify!(#pattern),
+                                &signal,
+                                error,
                             );
                             return;
                         }
@@ -718,10 +719,11 @@ fn expand_backend_handler(config: BackendHandlerConfig, item: TokenStream) -> Re
             ControlHandlerReturnKind::Result => {
                 quote! {
                     if let Err(error) = self.#method(#(#call_args),*).await {
-                        ::std::eprintln!(
-                            "backend runtime control handler `{}` failed: {}",
-                            stringify!(#method),
-                            error
+                        ::slab_runtime_core::backend::log_runtime_control_handler_failure(
+                            ::std::any::type_name::<Self>(),
+                            stringify!(#pattern),
+                            &signal,
+                            error,
                         );
                     }
                 }
@@ -768,10 +770,11 @@ fn expand_backend_handler(config: BackendHandlerConfig, item: TokenStream) -> Re
                     let #binding = match #extractor {
                         Ok(value) => value,
                         Err(error) => {
-                            ::std::eprintln!(
-                                "backend peer control extractor failed for `{}`: {}",
-                                stringify!(#method),
-                                error
+                            ::slab_runtime_core::backend::log_peer_control_extractor_failure(
+                                ::std::any::type_name::<Self>(),
+                                stringify!(#pattern),
+                                &cmd,
+                                error,
                             );
                             return;
                         }
@@ -785,10 +788,11 @@ fn expand_backend_handler(config: BackendHandlerConfig, item: TokenStream) -> Re
             ControlHandlerReturnKind::Result => {
                 quote! {
                     if let Err(error) = self.#method(#(#call_args),*).await {
-                        ::std::eprintln!(
-                            "backend peer control handler `{}` failed: {}",
-                            stringify!(#method),
-                            error
+                        ::slab_runtime_core::backend::log_peer_control_handler_failure(
+                            ::std::any::type_name::<Self>(),
+                            stringify!(#pattern),
+                            &cmd,
+                            error,
                         );
                     }
                 }
@@ -832,10 +836,11 @@ fn expand_backend_handler(config: BackendHandlerConfig, item: TokenStream) -> Re
                     let #binding = match #extractor {
                         Ok(value) => value,
                         Err(error) => {
-                            ::std::eprintln!(
-                                "backend peer control extractor failed for `{}`: {}",
+                            ::slab_runtime_core::backend::log_peer_control_extractor_failure(
+                                ::std::any::type_name::<Self>(),
                                 stringify!(#method),
-                                error
+                                &cmd,
+                                error,
                             );
                             return;
                         }
@@ -849,10 +854,11 @@ fn expand_backend_handler(config: BackendHandlerConfig, item: TokenStream) -> Re
             ControlHandlerReturnKind::Result => {
                 quote! {
                     if let Err(error) = self.#method(#(#call_args),*).await {
-                        ::std::eprintln!(
-                            "backend peer control handler `{}` failed: {}",
+                        ::slab_runtime_core::backend::log_peer_control_handler_failure(
+                            ::std::any::type_name::<Self>(),
                             stringify!(#method),
-                            error
+                            &cmd,
+                            error,
                         );
                     }
                 }
@@ -887,10 +893,10 @@ fn expand_backend_handler(config: BackendHandlerConfig, item: TokenStream) -> Re
             ControlHandlerReturnKind::Result => {
                 quote! {
                     if let Err(error) = self.#method().await {
-                        ::std::eprintln!(
-                            "backend lagged-control handler `{}` failed: {}",
+                        ::slab_runtime_core::backend::log_lagged_control_handler_failure(
+                            ::std::any::type_name::<Self>(),
                             stringify!(#method),
-                            error
+                            error,
                         );
                     }
                 }

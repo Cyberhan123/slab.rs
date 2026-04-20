@@ -1,17 +1,17 @@
 use slab_diffusion::{
-    GuidanceParams as DiffusionGuidanceParams, ImgParams as DiffusionImgParams,
-    SampleParams as DiffusionSampleParams, SlgParams,
+    GuidanceParams as DiffusionGuidanceParams, SampleParams as DiffusionSampleParams, SlgParams,
 };
-use slab_runtime_core::Payload;
 use slab_runtime_core::backend::RequestRoute;
 
 use crate::application::dtos as dto;
-use crate::domain::models::CandleDiffusionLoadConfig;
+use crate::domain::models::{
+    CandleDiffusionLoadConfig, ImageGenerationRequest, ImageGenerationResponse,
+};
 use crate::domain::runtime::CoreError;
 
 use super::ExecutionHub;
 use super::driver_runtime::DriverRuntime;
-use super::helpers::{decode_images_payload, invalid_model, required_path, required_string};
+use super::helpers::{contract_image_to_raw_image, invalid_model, required_path, required_string};
 
 #[derive(Clone, Debug)]
 pub(crate) struct CandleDiffusionService {
@@ -25,13 +25,20 @@ impl CandleDiffusionService {
     ) -> Result<Self, CoreError> {
         let model_path = required_path("candle_diffusion.model_path", request.model_path)?;
         let sd_version = required_string("candle_diffusion.sd_version", request.sd_version)?;
-        let load_payload = Payload::typed(CandleDiffusionLoadConfig {
+        let load_payload = CandleDiffusionLoadConfig {
             model_path: model_path.clone(),
             vae_path: request.vae_path,
             sd_version,
-        });
+        };
 
-        Ok(Self { runtime: DriverRuntime::new(execution, "candle.diffusion", load_payload) })
+        Ok(Self {
+            runtime: DriverRuntime::new_typed(
+                execution,
+                "candle.diffusion",
+                "candle.diffusion",
+                load_payload,
+            ),
+        })
     }
 
     pub(crate) async fn load(&self) -> Result<(), CoreError> {
@@ -46,27 +53,24 @@ impl CandleDiffusionService {
         &self,
         request: dto::CandleDiffusionGenerateImageRequest,
     ) -> Result<dto::CandleDiffusionGenerateImageResponse, CoreError> {
-        let payload = self
+        let response: ImageGenerationResponse = self
             .runtime
-            .submit(
+            .invoke_without_options(
                 RequestRoute::InferenceImage,
-                Payload::typed(build_image_params(request)?),
+                build_image_request(request)?,
                 Vec::new(),
-                Payload::None,
             )
-            .await?
-            .result()
             .await?;
 
         Ok(dto::CandleDiffusionGenerateImageResponse {
-            images: decode_images_payload(payload, "candle_diffusion")?,
+            images: response.images.iter().map(contract_image_to_raw_image).collect(),
         })
     }
 }
 
-fn build_image_params(
+fn build_image_request(
     request: dto::CandleDiffusionGenerateImageRequest,
-) -> Result<DiffusionImgParams, CoreError> {
+) -> Result<ImageGenerationRequest, CoreError> {
     if request.width.is_some_and(|value| value == 0) {
         return Err(invalid_model("candle_diffusion.width", "must be >= 1"));
     }
@@ -91,14 +95,48 @@ fn build_image_params(
     }
     sample_params.sample_steps = request.sample_steps;
 
-    Ok(DiffusionImgParams {
-        prompt: Some(required_string("candle_diffusion.prompt", request.prompt)?),
+    Ok(ImageGenerationRequest {
+        prompt: required_string("candle_diffusion.prompt", request.prompt)?,
         negative_prompt: request.negative_prompt,
         width: request.width,
         height: request.height,
-        sample_params: (sample_params != DiffusionSampleParams::default()).then_some(sample_params),
-        seed: request.seed,
-        batch_count: request.batch_count,
+        sample_steps: sample_params.sample_steps.and_then(|value| u32::try_from(value).ok()),
+        guidance_scale: sample_params.guidance.map(|guidance| guidance.txt_cfg),
+        seed: request
+            .seed
+            .map(|value| {
+                u64::try_from(value)
+                    .map_err(|_| invalid_model("candle_diffusion.seed", "must be >= 0"))
+            })
+            .transpose()?,
+        batch_count: request.batch_count.unwrap_or(1),
         ..Default::default()
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_image_request;
+    use crate::application::dtos::CandleDiffusionGenerateImageRequest;
+
+    #[test]
+    fn build_image_request_normalizes_seed_and_steps() {
+        let request = build_image_request(CandleDiffusionGenerateImageRequest {
+            prompt: Some("cat".to_owned()),
+            negative_prompt: None,
+            width: Some(512),
+            height: Some(512),
+            batch_count: Some(3),
+            sample_steps: Some(24),
+            guidance_scale: Some(7.0),
+            seed: Some(11),
+        })
+        .expect("request should map");
+
+        assert_eq!(request.prompt, "cat");
+        assert_eq!(request.sample_steps, Some(24));
+        assert_eq!(request.guidance_scale, Some(7.0));
+        assert_eq!(request.seed, Some(11));
+        assert_eq!(request.batch_count, 3);
+    }
 }

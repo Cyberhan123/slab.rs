@@ -6,7 +6,9 @@ pub use crate::internal::scheduler::backend::handler::{
     extract_event_cancel_rx, extract_event_input, extract_event_options, extract_event_payload,
     extract_event_text, extract_peer_control_broadcast_seq, extract_peer_control_input,
     extract_peer_control_payload, extract_runtime_control_input, extract_runtime_control_op_id,
-    extract_runtime_control_payload,
+    extract_runtime_control_payload, log_lagged_control_handler_failure,
+    log_peer_control_extractor_failure, log_peer_control_handler_failure,
+    log_runtime_control_extractor_failure, log_runtime_control_handler_failure,
 };
 #[cfg(test)]
 pub use crate::internal::scheduler::backend::protocol::DriverRequestKind;
