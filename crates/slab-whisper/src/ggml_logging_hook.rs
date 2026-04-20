@@ -13,8 +13,13 @@ use crate::Whisper;
 
 impl Whisper {
     pub(crate) fn install_ggml_logging_hook(&self) {
-        GGML_LOG_TRAMPOLINE_INSTALL.call_once(|| unsafe {
-            self.lib.ggml_log_set(Some(ggml_logging_trampoline), std::ptr::null_mut())
+        GGML_LOG_TRAMPOLINE_INSTALL.call_once(|| match self.lib.ggml_log_set.as_ref() {
+            Ok(ggml_log_set) => unsafe {
+                ggml_log_set(Some(ggml_logging_trampoline), std::ptr::null_mut());
+            },
+            Err(_error) => {
+                generic_debug!("whisper-local ggml log callback symbol is unavailable: {}", _error);
+            }
         });
     }
 }
@@ -26,6 +31,7 @@ unsafe extern "C" fn ggml_logging_trampoline(
 ) {
     if text.is_null() {
         generic_error!("ggml_logging_trampoline: text is nullptr");
+        return;
     }
     let level = GGMLLogLevel::from(level);
 

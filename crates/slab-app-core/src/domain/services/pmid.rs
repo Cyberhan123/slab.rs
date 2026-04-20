@@ -208,6 +208,21 @@ async fn load_legacy_config(settings: &SettingsProvider) -> Result<PmidConfig, A
                 enabled: settings.get_bool(PMID.runtime.model_auto_unload.enabled()).await?,
                 idle_minutes: required_u32(settings, PMID.runtime.model_auto_unload.idle_minutes())
                     .await?,
+                min_free_system_memory_bytes: required_u64(
+                    settings,
+                    PMID.runtime.model_auto_unload.min_free_system_memory_bytes(),
+                )
+                .await?,
+                min_free_gpu_memory_bytes: required_u64(
+                    settings,
+                    PMID.runtime.model_auto_unload.min_free_gpu_memory_bytes(),
+                )
+                .await?,
+                max_pressure_evictions_per_load: required_u32(
+                    settings,
+                    PMID.runtime.model_auto_unload.max_pressure_evictions_per_load(),
+                )
+                .await?,
             },
         },
         launch: LaunchConfig {
@@ -319,6 +334,15 @@ fn load_v2_config(settings: &SettingsDocumentV2) -> PmidConfig {
             model_auto_unload: RuntimeModelAutoUnloadConfig {
                 enabled: settings.models.auto_unload.enabled,
                 idle_minutes: settings.models.auto_unload.idle_minutes,
+                min_free_system_memory_bytes: settings
+                    .models
+                    .auto_unload
+                    .min_free_system_memory_bytes,
+                min_free_gpu_memory_bytes: settings.models.auto_unload.min_free_gpu_memory_bytes,
+                max_pressure_evictions_per_load: settings
+                    .models
+                    .auto_unload
+                    .max_pressure_evictions_per_load,
             },
         },
         launch: LaunchConfig {
@@ -791,6 +815,18 @@ fn v2_property_description(path: &str) -> String {
         "models.download_source" => "Preferred remote source used when downloading model artifacts. Auto follows the pack candidate order.".to_owned(),
         "models.auto_unload.enabled" => "Unload idle models automatically to reclaim memory.".to_owned(),
         "models.auto_unload.idle_minutes" => "Idle timeout in minutes before auto-unload triggers.".to_owned(),
+        "models.auto_unload.min_free_system_memory_bytes" => {
+            "Minimum free system memory to preserve before model loads stop evicting idle models."
+                .to_owned()
+        }
+        "models.auto_unload.min_free_gpu_memory_bytes" => {
+            "Minimum free GPU memory to preserve before model loads stop evicting idle models."
+                .to_owned()
+        }
+        "models.auto_unload.max_pressure_evictions_per_load" => {
+            "Maximum number of idle models evicted during a single load attempt under memory pressure."
+                .to_owned()
+        }
         "server.address" => "Bind address for the slab-server HTTP gateway.".to_owned(),
         "server.admin.token" => "Optional bearer token required for management endpoints.".to_owned(),
         "server.cors.allowed_origins" => "List of allowed browser origins for API requests.".to_owned(),
@@ -899,6 +935,17 @@ async fn required_u32(
     let pmid = pmid.as_ref();
     settings
         .get_optional_u32(pmid)
+        .await?
+        .ok_or_else(|| AppCoreError::Internal(format!("setting '{}' resolved to null", pmid)))
+}
+
+async fn required_u64(
+    settings: &SettingsProvider,
+    pmid: impl AsRef<str>,
+) -> Result<u64, AppCoreError> {
+    let pmid = pmid.as_ref();
+    settings
+        .get_optional_u64(pmid)
         .await?
         .ok_or_else(|| AppCoreError::Internal(format!("setting '{}' resolved to null", pmid)))
 }

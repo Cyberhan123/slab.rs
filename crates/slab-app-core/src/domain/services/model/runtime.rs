@@ -14,7 +14,7 @@ use crate::error::AppCoreError;
 use crate::infra::db::{ModelConfigStateStore, ModelStore};
 use crate::infra::model_packs;
 use crate::infra::rpc::{self, codec, pb};
-use crate::model_auto_unload::{ModelReplayPlan, build_model_load_request};
+use crate::model_auto_unload::ModelReplayPlan;
 
 use super::{ModelService, catalog, pack};
 
@@ -317,8 +317,9 @@ async fn load_model_with_state(
         flash_attn,
         diffusion,
     )?;
-    let grpc_req = build_model_load_request(&load_spec);
-    let response = rpc::client::load_model(channel, grpc_req)
+    let response = state
+        .auto_unload()
+        .load_model_with_pressure_control(channel, &load_spec)
         .await
         .map_err(|error| map_grpc_model_error(action, error))?;
     state

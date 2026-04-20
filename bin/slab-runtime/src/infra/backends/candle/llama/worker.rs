@@ -23,8 +23,8 @@ use tokio::sync::mpsc;
 use super::contract::{
     CandleLlamaLoadConfig, TextGenerationOptions, TextGenerationResponse, TextGenerationStreamEvent,
 };
-use super::error::{CandleLlamaWorkerError, SessionId};
 use super::engine::CandleLlamaEngine;
+use super::error::{CandleLlamaWorkerError, SessionId};
 use slab_runtime_core::backend::{
     ControlOpId, Input, Options, StreamChunk, StreamHandle, Typed, WorkerCommand,
 };

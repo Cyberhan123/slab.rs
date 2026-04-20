@@ -44,10 +44,13 @@ pub(super) fn init_tracing(
             && let Err(error) = std::fs::create_dir_all(parent)
         {
             registry.init();
-            emit_bootstrap_warnings(&mut bootstrap_warnings, Some(format!(
-                "failed to create slab-runtime log directory '{}': {error}; continuing without file logging",
-                parent.display()
-            )));
+            emit_bootstrap_warnings(
+                &mut bootstrap_warnings,
+                Some(format!(
+                    "failed to create slab-runtime log directory '{}': {error}; continuing without file logging",
+                    parent.display()
+                )),
+            );
             return Ok(guards);
         }
 
@@ -79,10 +82,13 @@ pub(super) fn init_tracing(
             }
             Err(error) => {
                 registry.init();
-                emit_bootstrap_warnings(&mut bootstrap_warnings, Some(format!(
-                    "failed to open slab-runtime log file '{}': {error}; continuing without file logging",
-                    path.display()
-                )));
+                emit_bootstrap_warnings(
+                    &mut bootstrap_warnings,
+                    Some(format!(
+                        "failed to open slab-runtime log file '{}': {error}; continuing without file logging",
+                        path.display()
+                    )),
+                );
                 return Ok(guards);
             }
         }

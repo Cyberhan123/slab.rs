@@ -30,7 +30,9 @@ pub fn register(
 
     resource_manager.register_backend("onnx", move |shared_rx, control_tx| {
         let count = worker_count.max(1);
-        spawn_workers(shared_rx, control_tx, count, move |peer_bus| worker::OnnxWorker::new(peer_bus));
+        spawn_workers(shared_rx, control_tx, count, move |peer_bus| {
+            worker::OnnxWorker::new(peer_bus)
+        });
     });
 
     Ok(())

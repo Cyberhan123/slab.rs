@@ -16,8 +16,8 @@
 use super::contract::{
     AudioTranscriptionOptions, AudioTranscriptionResponse, GgmlWhisperLoadConfig,
 };
-use super::error::GGMLWhisperWorkerError;
 use super::engine::GGMLWhisperEngine;
+use super::error::GGMLWhisperWorkerError;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{
     BroadcastSeq, ControlOpId, Input, Options, PeerControlBus, Typed,
@@ -107,10 +107,7 @@ impl WhisperWorker {
 
     // ── model.unload ──────────────────────────────────────────────────────────
 
-    async fn handle_unload_model(
-        &mut self,
-        seq_id: u64,
-    ) -> Result<(), GGMLWhisperWorkerError> {
+    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), GGMLWhisperWorkerError> {
         match self.engine.as_mut() {
             Some(e) => {
                 e.unload();
@@ -190,9 +187,7 @@ impl WhisperWorker {
         match result {
             Err(e) => {
                 tracing::error!(error = %e, "whisper inference failed");
-                Err(GGMLWhisperWorkerError::inference(format!(
-                    "whisper inference failed: {e}"
-                )))
+                Err(GGMLWhisperWorkerError::inference(format!("whisper inference failed: {e}")))
             }
             Ok(entries) => {
                 tracing::debug!(segment_count = entries.len(), "whisper inference succeeded");

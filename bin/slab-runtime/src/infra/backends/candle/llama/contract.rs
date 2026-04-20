@@ -1,4 +1,3 @@
 pub(crate) use crate::domain::models::{
-    CandleLlamaLoadConfig, TextGenerationOptions, TextGenerationResponse,
-    TextGenerationStreamEvent,
+    CandleLlamaLoadConfig, TextGenerationOptions, TextGenerationResponse, TextGenerationStreamEvent,
 };

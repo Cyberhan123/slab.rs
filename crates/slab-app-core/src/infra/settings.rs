@@ -217,6 +217,28 @@ impl SettingsProvider {
         }
     }
 
+    pub async fn get_optional_u64(
+        &self,
+        pmid: impl AsRef<str>,
+    ) -> Result<Option<u64>, AppCoreError> {
+        let pmid = pmid.as_ref();
+        let value = self.get_effective_value(pmid).await?;
+        match value {
+            serde_json::Value::Null => Ok(None),
+            serde_json::Value::Number(number) => number.as_u64().map(Some).ok_or_else(|| {
+                AppCoreError::Internal(format!(
+                    "settings '{}' expected a positive integer value",
+                    pmid
+                ))
+            }),
+            other => Err(AppCoreError::Internal(format!(
+                "settings '{}' expected integer value, found {}",
+                pmid,
+                describe_value_type(&other)
+            ))),
+        }
+    }
+
     pub async fn get_chat_providers(
         &self,
         pmid: impl AsRef<str>,
@@ -945,6 +967,9 @@ pub(crate) fn settings_document_v2_to_json_value(
             "auto_unload": {
                 "enabled": document.models.auto_unload.enabled,
                 "idle_minutes": document.models.auto_unload.idle_minutes,
+                "min_free_system_memory_bytes": document.models.auto_unload.min_free_system_memory_bytes,
+                "min_free_gpu_memory_bytes": document.models.auto_unload.min_free_gpu_memory_bytes,
+                "max_pressure_evictions_per_load": document.models.auto_unload.max_pressure_evictions_per_load,
             }
         },
         "server": {
