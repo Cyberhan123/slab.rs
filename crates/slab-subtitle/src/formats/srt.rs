@@ -299,10 +299,7 @@ mod tests {
         let entries = file.get_subtitle_entries().expect("should get entries");
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(
-            entries[0].line.as_deref(),
-            Some("Line 1\nLine 2\nLine 3")
-        );
+        assert_eq!(entries[0].line.as_deref(), Some("Line 1\nLine 2\nLine 3"));
     }
 
     #[test]
@@ -342,10 +339,7 @@ mod tests {
         let srt_content = "1\ninvalid timestamp --> 00:00:04,000\nText\n\n";
 
         let result = SrtFile::parse(srt_content);
-        assert!(
-            result.is_err(),
-            "should fail with invalid timestamp format"
-        );
+        assert!(result.is_err(), "should fail with invalid timestamp format");
     }
 
     #[test]
@@ -386,10 +380,7 @@ mod tests {
         let entries = file.get_subtitle_entries().expect("should get entries");
 
         assert_eq!(entries.len(), 1);
-        assert_eq!(
-            entries[0].line.as_deref(),
-            Some("Special chars: <>&\"'\\`")
-        );
+        assert_eq!(entries[0].line.as_deref(), Some("Special chars: <>&\"'\\`"));
     }
 
     #[test]

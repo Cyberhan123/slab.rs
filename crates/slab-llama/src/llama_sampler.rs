@@ -48,10 +48,7 @@ impl LlamaSampler {
         let params = unsafe { lib.llama_sampler_chain_default_params() };
         let sampler = unsafe { lib.llama_sampler_chain_init(params) };
         assert!(!sampler.is_null(), "llama_sampler_chain_init returned null");
-        Self {
-            sampler: Some(unsafe { std::ptr::NonNull::new_unchecked(sampler) }),
-            lib,
-        }
+        Self { sampler: Some(unsafe { std::ptr::NonNull::new_unchecked(sampler) }), lib }
     }
 
     /// Add a greedy (argmax) sampler to the chain.

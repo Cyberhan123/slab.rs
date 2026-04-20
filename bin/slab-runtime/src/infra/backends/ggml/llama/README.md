@@ -72,7 +72,7 @@ flowchart TB
 ┌─────────v───────────────────────────┐
 │  LlamaService (singleton)            │
 │  - load_model_with_workers(...)      │
-│  - create_session()                  │
+│  - create_session_with_options(...)  │
 │  - append_input()                    │
 │  - generate_stream()                 │
 │  - end_session()                     │
@@ -136,7 +136,7 @@ API Layer (5 Sessions)
 - Singleton lifecycle (`init`, `current`, `reload`).
 - Model loading via `load_model_with_workers(path, params, num_workers)`.
 - Public session API that delegates to engine:
-  - `create_session()` → `AppendInput` phase
+  - `create_session_with_options(...)` → `AppendInput` phase
   - `generate_stream()` → returns `StreamHandle` for async token stream
   - `end_session()`, `cancel_generate()` → cleanup
 
@@ -162,7 +162,7 @@ API Layer (5 Sessions)
 ## Session Lifecycle
 
 ```
-1. create_session()
+1. create_session_with_options(...)
    └─> Master assigns session to worker (round-robin)
    └─> Worker allocates seq_id + sampler
 

@@ -245,10 +245,7 @@ async fn tool_router_overwrites_existing_tool() {
             _ctx: &ToolContext,
             _arguments: &serde_json::Value,
         ) -> Result<crate::tool::ToolOutput, AgentError> {
-            Ok(crate::tool::ToolOutput {
-                content: "custom".to_string(),
-                metadata: None,
-            })
+            Ok(crate::tool::ToolOutput { content: "custom".to_string(), metadata: None })
         }
     }
 
@@ -294,11 +291,7 @@ async fn agent_control_enforces_thread_limit() {
     // Set max_threads to 1
     let control = Arc::new(AgentControl::new(llm, store, notify, router, 1, 4));
 
-    let config = AgentConfig {
-        model: "mock".into(),
-        max_turns: 1,
-        ..AgentConfig::default()
-    };
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
 
     let messages = vec![ConversationMessage {
         role: "user".into(),
@@ -335,11 +328,7 @@ async fn agent_control_enforces_depth_limit() {
     // Set max_depth to 0 (only root agents allowed)
     let control = Arc::new(AgentControl::new(llm.clone(), store, notify, router, 8, 0));
 
-    let config = AgentConfig {
-        model: "mock".into(),
-        max_turns: 1,
-        ..AgentConfig::default()
-    };
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
 
     let messages = vec![ConversationMessage {
         role: "user".into(),
@@ -350,18 +339,15 @@ async fn agent_control_enforces_depth_limit() {
     }];
 
     // Root agent at depth 0 should succeed
-    let result = control
-        .spawn("session-1".into(), config.clone(), messages.clone())
-        .await;
+    let result = control.spawn("session-1".into(), config.clone(), messages.clone()).await;
     assert!(result.is_ok(), "root agent at depth 0 should spawn");
 
     // Clean up
     let _ = control.shutdown(&result.unwrap()).await;
 
     // Child agent at depth 1 should fail
-    let result = control
-        .spawn_child("session-2".into(), "parent-1".into(), 1, config, messages)
-        .await;
+    let result =
+        control.spawn_child("session-2".into(), "parent-1".into(), 1, config, messages).await;
     assert!(
         matches!(result, Err(AgentError::DepthLimitExceeded { .. })),
         "child agent at depth 1 should exceed limit of 0"
@@ -394,11 +380,7 @@ async fn agent_propagates_llm_errors() {
 
     let control = Arc::new(AgentControl::new(llm, store, notify, router, 8, 4));
 
-    let config = AgentConfig {
-        model: "mock".into(),
-        max_turns: 1,
-        ..AgentConfig::default()
-    };
+    let config = AgentConfig { model: "mock".into(), max_turns: 1, ..AgentConfig::default() };
 
     let messages = vec![ConversationMessage {
         role: "user".into(),
@@ -408,10 +390,8 @@ async fn agent_propagates_llm_errors() {
         tool_calls: vec![],
     }];
 
-    let thread_id = control
-        .spawn("session-1".into(), config, messages)
-        .await
-        .expect("spawn should succeed");
+    let thread_id =
+        control.spawn("session-1".into(), config, messages).await.expect("spawn should succeed");
 
     // Wait for the thread to reach an error state
     let mut status_rx = control.subscribe(&thread_id).await.expect("subscribe should succeed");

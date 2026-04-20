@@ -1,6 +1,8 @@
-mod adapter;
-mod backend;
+mod contract;
+mod engine;
+mod error;
+mod worker;
 
-pub use adapter::GGMLDiffusionEngine;
-pub use adapter::GGMLDiffusionEngineError;
-pub use backend::DiffusionWorker;
+pub(crate) use engine::GGMLDiffusionEngine;
+pub(crate) use error::GGMLDiffusionEngineError;
+pub(crate) use worker::DiffusionWorker;

@@ -1,10 +1,7 @@
 use std::sync::Arc;
 
-use slab_runtime_core::scheduler::Orchestrator;
-use slab_types::ModelSpec;
-
-use super::backend_session::BackendSession;
-use crate::domain::models::BackendCatalog;
+use crate::domain::models::EnabledBackends;
+use crate::domain::runtime::Orchestrator;
 
 #[derive(Clone)]
 pub struct ExecutionHub {
@@ -14,35 +11,27 @@ pub struct ExecutionHub {
 #[derive(Debug)]
 pub(crate) struct ExecutionState {
     pub orchestrator: Orchestrator,
-    pub catalog: BackendCatalog,
+    pub enabled_backends: EnabledBackends,
 }
 
 impl ExecutionHub {
-    pub(crate) fn new(orchestrator: Orchestrator, catalog: BackendCatalog) -> Self {
-        Self { inner: Arc::new(ExecutionState { orchestrator, catalog }) }
-    }
-
-    pub fn session_for_backend(
-        &self,
-        spec: ModelSpec,
-        backend_target: impl Into<String>,
-    ) -> Result<BackendSession, slab_runtime_core::CoreError> {
-        BackendSession::new_for_backend(self.clone(), spec, backend_target)
+    pub(crate) fn new(orchestrator: Orchestrator, enabled_backends: EnabledBackends) -> Self {
+        Self { inner: Arc::new(ExecutionState { orchestrator, enabled_backends }) }
     }
 
     pub(crate) fn orchestrator(&self) -> Orchestrator {
         self.inner.orchestrator.clone()
     }
 
-    pub(crate) fn catalog(&self) -> &BackendCatalog {
-        &self.inner.catalog
+    pub(crate) fn enabled_backends(&self) -> &EnabledBackends {
+        &self.inner.enabled_backends
     }
 }
 
 impl std::fmt::Debug for ExecutionHub {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ExecutionHub")
-            .field("driver_count", &self.inner.catalog.descriptors().len())
+            .field("service_count", &self.inner.enabled_backends.len())
             .finish()
     }
 }

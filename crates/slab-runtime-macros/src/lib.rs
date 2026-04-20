@@ -1,34 +1,91 @@
 use std::collections::HashSet;
 
 use proc_macro::TokenStream;
+use proc_macro2::TokenStream as TokenStream2;
 use quote::{format_ident, quote};
+use syn::parse::{Parse, ParseStream};
 use syn::parse_quote;
 use syn::spanned::Spanned;
-use syn::{Attribute, FnArg, ImplItem, ImplItemFn, ItemImpl, Path, Result, Type, Visibility};
+use syn::{
+    Attribute, FnArg, Ident, ImplItem, ImplItemFn, ItemImpl, Path, Result, ReturnType, Token, Type,
+    Visibility,
+};
+
+#[derive(Clone)]
+enum EventHandlerKind {
+    Legacy,
+    Typed { extractors: Vec<TokenStream2> },
+}
 
 #[proc_macro_attribute]
-pub fn backend_handler(_attr: TokenStream, item: TokenStream) -> TokenStream {
-    match expand_backend_handler(item) {
+pub fn backend_handler(attr: TokenStream, item: TokenStream) -> TokenStream {
+    let config = match syn::parse::<BackendHandlerConfig>(attr) {
+        Ok(config) => config,
+        Err(err) => return err.to_compile_error().into(),
+    };
+    match expand_backend_handler(config, item) {
         Ok(tokens) => tokens,
         Err(err) => err.to_compile_error().into(),
+    }
+}
+
+#[derive(Default)]
+struct BackendHandlerConfig {
+    peer_bus_field: Option<Ident>,
+}
+
+impl Parse for BackendHandlerConfig {
+    fn parse(input: ParseStream<'_>) -> Result<Self> {
+        let mut config = Self::default();
+        while !input.is_empty() {
+            let key: Ident = input.parse()?;
+            if key != "peer_bus" {
+                return Err(syn::Error::new(
+                    key.span(),
+                    "unsupported #[backend_handler] option; expected `peer_bus = <field>`",
+                ));
+            }
+            if config.peer_bus_field.is_some() {
+                return Err(syn::Error::new(key.span(), "`peer_bus` may only be specified once"));
+            }
+            input.parse::<Token![=]>()?;
+            config.peer_bus_field = Some(input.parse()?);
+            if input.is_empty() {
+                break;
+            }
+            input.parse::<Token![,]>()?;
+        }
+        Ok(config)
     }
 }
 
 struct EventRoute {
     pattern: Path,
     method: syn::Ident,
+    kind: EventHandlerKind,
 }
 
 struct RuntimeRoute {
     pattern: Path,
-    method: syn::Ident,
-    pass_signal: bool,
+    handler: ControlHandler,
 }
 
 struct PeerRoute {
     pattern: Path,
+    handler: ControlHandler,
+}
+
+#[derive(Clone, Copy)]
+enum ControlHandlerReturnKind {
+    Unit,
+    Result,
+}
+
+#[derive(Clone)]
+struct ControlHandler {
     method: syn::Ident,
-    pass_cmd: bool,
+    extractors: Vec<TokenStream2>,
+    return_kind: ControlHandlerReturnKind,
 }
 
 fn helper_attr_name(attr: &Attribute) -> Option<&'static str> {
@@ -80,28 +137,203 @@ fn non_receiver_arg_count(method: &ImplItemFn) -> usize {
     method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))).count()
 }
 
-fn first_non_receiver_arg(method: &ImplItemFn) -> Option<&FnArg> {
-    method.sig.inputs.iter().find(|arg| !matches!(arg, FnArg::Receiver(_)))
+fn type_last_ident(ty: &Type) -> Option<&syn::Ident> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+    type_path.path.segments.last().map(|segment| &segment.ident)
 }
 
-fn require_arg_type(method: &ImplItemFn, expected_ident: &str, message: &str) -> Result<()> {
-    let Some(FnArg::Typed(arg)) = first_non_receiver_arg(method) else {
-        return Ok(());
-    };
+fn is_type_ident(ty: &Type, expected_ident: &str) -> bool {
+    type_last_ident(ty).is_some_and(|ident| ident == expected_ident)
+}
 
-    let Type::Path(type_path) = arg.ty.as_ref() else {
-        return Err(syn::Error::new(arg.ty.span(), message));
-    };
+fn path_last_ident(path: &Path) -> Option<&syn::Ident> {
+    path.segments.last().map(|segment| &segment.ident)
+}
 
-    let Some(segment) = type_path.path.segments.last() else {
-        return Err(syn::Error::new(type_path.path.span(), message));
-    };
-
-    if segment.ident != expected_ident {
-        return Err(syn::Error::new(type_path.path.span(), message));
+fn ident_to_snake_case(ident: &syn::Ident) -> String {
+    let raw = ident.to_string();
+    let mut result = String::with_capacity(raw.len());
+    for (idx, ch) in raw.chars().enumerate() {
+        if ch.is_uppercase() {
+            if idx > 0 {
+                result.push('_');
+            }
+            for lower in ch.to_lowercase() {
+                result.push(lower);
+            }
+        } else {
+            result.push(ch);
+        }
     }
+    result
+}
 
-    Ok(())
+fn is_backend_request_arg(arg: &FnArg) -> bool {
+    let FnArg::Typed(arg) = arg else {
+        return false;
+    };
+    is_type_ident(arg.ty.as_ref(), "BackendRequest")
+}
+
+fn single_generic_type_arg(ty: &Type, wrapper_ident: &str) -> Option<Type> {
+    let Type::Path(type_path) = ty else {
+        return None;
+    };
+    let segment = type_path.path.segments.last()?;
+    if segment.ident != wrapper_ident {
+        return None;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return None;
+    };
+    if args.args.len() != 1 {
+        return None;
+    }
+    match args.args.first()? {
+        syn::GenericArgument::Type(inner) => Some(inner.clone()),
+        _ => None,
+    }
+}
+
+fn typed_event_handler_returns_result(method: &ImplItemFn) -> bool {
+    match &method.sig.output {
+        ReturnType::Type(_, ty) => is_type_ident(ty.as_ref(), "Result"),
+        ReturnType::Default => false,
+    }
+}
+
+fn result_ok_type_is_unit(ty: &Type) -> bool {
+    let Type::Path(type_path) = ty else {
+        return false;
+    };
+    let Some(segment) = type_path.path.segments.last() else {
+        return false;
+    };
+    if segment.ident != "Result" {
+        return false;
+    }
+    let syn::PathArguments::AngleBracketed(args) = &segment.arguments else {
+        return false;
+    };
+    let Some(syn::GenericArgument::Type(ok_ty)) = args.args.first() else {
+        return false;
+    };
+    matches!(ok_ty, Type::Tuple(tuple) if tuple.elems.is_empty())
+}
+
+fn control_handler_return_kind(
+    method: &ImplItemFn,
+    message: &str,
+) -> Result<ControlHandlerReturnKind> {
+    match &method.sig.output {
+        ReturnType::Default => Ok(ControlHandlerReturnKind::Unit),
+        ReturnType::Type(_, ty) if is_type_ident(ty.as_ref(), "Result") => {
+            if result_ok_type_is_unit(ty.as_ref()) {
+                Ok(ControlHandlerReturnKind::Result)
+            } else {
+                Err(syn::Error::new(ty.span(), message))
+            }
+        }
+        ReturnType::Type(_, ty) => Err(syn::Error::new(ty.span(), message)),
+    }
+}
+
+fn event_arg_extractor(arg: &FnArg) -> Result<TokenStream2> {
+    let FnArg::Typed(arg) = arg else {
+        return Err(syn::Error::new(
+            arg.span(),
+            "event handlers may only use typed non-self arguments",
+        ));
+    };
+    let ty = arg.ty.as_ref();
+    if let Some(inner) = single_generic_type_arg(ty, "Input") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_input::<#inner>(&req) });
+    }
+    if let Some(inner) = single_generic_type_arg(ty, "Options") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_options::<#inner>(&req) });
+    }
+    if is_type_ident(ty, "String") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_text(&req) });
+    }
+    if is_type_ident(ty, "Payload") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_payload(&req) });
+    }
+    if is_type_ident(ty, "CancelRx") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_cancel_rx(&req) });
+    }
+    if is_type_ident(ty, "BroadcastSeq") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_event_broadcast_seq(&req) });
+    }
+    Err(syn::Error::new(
+        ty.span(),
+        "unsupported event handler argument type; use BackendRequest, String, Payload, Input<T>, Options<T>, CancelRx, or BroadcastSeq",
+    ))
+}
+
+fn runtime_arg_extractor(arg: &FnArg) -> Result<TokenStream2> {
+    let FnArg::Typed(arg) = arg else {
+        return Err(syn::Error::new(
+            arg.span(),
+            "runtime control handlers may only use typed non-self arguments extracted from the matched control signal",
+        ));
+    };
+    let ty = arg.ty.as_ref();
+    if let Some(inner) = single_generic_type_arg(ty, "Input") {
+        return Ok(
+            quote! { ::slab_runtime_core::backend::extract_runtime_control_input::<#inner>(&signal) },
+        );
+    }
+    if is_type_ident(ty, "Payload") {
+        return Ok(
+            quote! { ::slab_runtime_core::backend::extract_runtime_control_payload(&signal) },
+        );
+    }
+    if is_type_ident(ty, "ControlOpId") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_runtime_control_op_id(&signal) });
+    }
+    if is_type_ident(ty, "RuntimeControlSignal") {
+        return Ok(quote! {
+            Ok::<_, ::slab_runtime_core::backend::BackendHandlerError>(signal.clone())
+        });
+    }
+    Err(syn::Error::new(
+        ty.span(),
+        "unsupported runtime control handler argument type; use RuntimeControlSignal, ControlOpId, Payload, or Input<T>",
+    ))
+}
+
+fn peer_arg_extractor(arg: &FnArg) -> Result<TokenStream2> {
+    let FnArg::Typed(arg) = arg else {
+        return Err(syn::Error::new(
+            arg.span(),
+            "peer control handlers may only use typed non-self arguments extracted from the matched peer command",
+        ));
+    };
+    let ty = arg.ty.as_ref();
+    if let Some(inner) = single_generic_type_arg(ty, "Input") {
+        return Ok(
+            quote! { ::slab_runtime_core::backend::extract_peer_control_input::<#inner>(&cmd) },
+        );
+    }
+    if is_type_ident(ty, "Payload") {
+        return Ok(quote! { ::slab_runtime_core::backend::extract_peer_control_payload(&cmd) });
+    }
+    if is_type_ident(ty, "BroadcastSeq") {
+        return Ok(
+            quote! { ::slab_runtime_core::backend::extract_peer_control_broadcast_seq(&cmd) },
+        );
+    }
+    if is_type_ident(ty, "PeerWorkerCommand") {
+        return Ok(quote! {
+            Ok::<_, ::slab_runtime_core::backend::BackendHandlerError>(cmd.clone())
+        });
+    }
+    Err(syn::Error::new(
+        ty.span(),
+        "unsupported peer control handler argument type; use PeerWorkerCommand, BroadcastSeq, Payload, or Input<T>",
+    ))
 }
 
 fn is_associated_constructor_candidate(method: &ImplItemFn) -> bool {
@@ -109,7 +341,7 @@ fn is_associated_constructor_candidate(method: &ImplItemFn) -> bool {
         && non_receiver_arg_count(method) == method.sig.inputs.len()
 }
 
-fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
+fn expand_backend_handler(config: BackendHandlerConfig, item: TokenStream) -> Result<TokenStream> {
     let mut item_impl = syn::parse::<ItemImpl>(item)?;
     if item_impl.trait_.is_some() {
         return Err(syn::Error::new(
@@ -124,8 +356,8 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
     let mut seen_event_keys = HashSet::<String>::new();
     let mut seen_runtime_keys = HashSet::<String>::new();
     let mut seen_peer_keys = HashSet::<String>::new();
-    let mut peer_fallback_method: Option<(syn::Ident, bool)> = None;
-    let mut control_lagged_method: Option<syn::Ident> = None;
+    let mut peer_fallback_method: Option<ControlHandler> = None;
+    let mut control_lagged_method: Option<(syn::Ident, ControlHandlerReturnKind)> = None;
     let mut has_any_handler = false;
 
     for item in &mut item_impl.items {
@@ -180,37 +412,50 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
             ));
         }
 
-        if !event_args.is_empty() && non_receiver_arg_count(method) != 1 {
-            return Err(syn::Error::new(
-                method.sig.inputs.span(),
-                "event handlers must take exactly one non-self argument (BackendRequest)",
-            ));
-        }
-
-        if !event_args.is_empty() {
-            require_arg_type(
-                method,
-                "BackendRequest",
-                "event handlers must take BackendRequest as their only non-self argument",
-            )?;
-        }
-
-        if !runtime_args.is_empty() {
-            let count = non_receiver_arg_count(method);
-            if count > 1 {
+        let event_handler_kind = if !event_args.is_empty() {
+            let event_non_receiver_args: Vec<_> =
+                method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))).collect();
+            let legacy_event_handler = event_non_receiver_args.len() == 1
+                && event_non_receiver_args.first().is_some_and(|arg| is_backend_request_arg(arg));
+            if event_non_receiver_args.iter().any(|arg| is_backend_request_arg(arg))
+                && !legacy_event_handler
+            {
                 return Err(syn::Error::new(
                     method.sig.inputs.span(),
-                    "runtime control handlers may take zero or one non-self argument",
+                    "event handlers taking BackendRequest must not take additional non-self arguments",
                 ));
             }
-            if count == 1 {
-                require_arg_type(
-                    method,
-                    "RuntimeControlSignal",
-                    "runtime control handlers must take RuntimeControlSignal when they accept an argument",
-                )?;
+            if legacy_event_handler {
+                EventHandlerKind::Legacy
+            } else {
+                let extractors = event_non_receiver_args
+                    .iter()
+                    .map(|arg| event_arg_extractor(arg))
+                    .collect::<Result<Vec<_>>>()?;
+                if !typed_event_handler_returns_result(method) {
+                    return Err(syn::Error::new(
+                        method.sig.output.span(),
+                        "typed event handlers must return Result<Success, Error> so the macro can send a BackendReply",
+                    ));
+                }
+                EventHandlerKind::Typed { extractors }
             }
-            let pass_signal = count == 1;
+        } else {
+            EventHandlerKind::Typed { extractors: Vec::new() }
+        };
+
+        if !runtime_args.is_empty() {
+            let runtime_non_receiver_args: Vec<_> =
+                method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))).collect();
+            let extractors = runtime_non_receiver_args
+                .iter()
+                .map(|arg| runtime_arg_extractor(arg))
+                .collect::<Result<Vec<_>>>()?;
+            let return_kind = control_handler_return_kind(
+                method,
+                "runtime control handlers may only return () or Result<(), Error>; control signals do not carry reply channels",
+            )?;
+            let handler = ControlHandler { method: method_ident.clone(), extractors, return_kind };
             for raw in runtime_args {
                 let pattern = normalize_runtime_control_path(raw);
                 let key = quote!(#pattern).to_string();
@@ -220,11 +465,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                         format!("duplicate runtime control handler for `{key}`"),
                     ));
                 }
-                runtime_routes.push(RuntimeRoute {
-                    pattern,
-                    method: method_ident.clone(),
-                    pass_signal,
-                });
+                runtime_routes.push(RuntimeRoute { pattern, handler: handler.clone() });
             }
         }
 
@@ -237,25 +478,25 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                     format!("duplicate event handler for `{key}`"),
                 ));
             }
-            event_routes.push(EventRoute { pattern, method: method_ident.clone() });
+            event_routes.push(EventRoute {
+                pattern,
+                method: method_ident.clone(),
+                kind: event_handler_kind.clone(),
+            });
         }
 
         if !peer_args.is_empty() {
-            let count = non_receiver_arg_count(method);
-            if count > 1 {
-                return Err(syn::Error::new(
-                    method.sig.inputs.span(),
-                    "peer control handler may take zero or one non-self argument",
-                ));
-            }
-            if count == 1 {
-                require_arg_type(
-                    method,
-                    "PeerWorkerCommand",
-                    "peer control handlers must take PeerWorkerCommand when they accept an argument",
-                )?;
-            }
-            let pass_cmd = count == 1;
+            let peer_non_receiver_args: Vec<_> =
+                method.sig.inputs.iter().filter(|arg| !matches!(arg, FnArg::Receiver(_))).collect();
+            let extractors = peer_non_receiver_args
+                .iter()
+                .map(|arg| peer_arg_extractor(arg))
+                .collect::<Result<Vec<_>>>()?;
+            let return_kind = control_handler_return_kind(
+                method,
+                "peer control handlers may only return () or Result<(), Error>; peer control is fire-and-forget",
+            )?;
+            let handler = ControlHandler { method: method_ident.clone(), extractors, return_kind };
             for raw in peer_args {
                 if let Some(raw_path) = raw {
                     let pattern = normalize_peer_control_path(raw_path);
@@ -266,7 +507,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                             format!("duplicate peer control handler for `{key}`"),
                         ));
                     }
-                    peer_routes.push(PeerRoute { pattern, method: method_ident.clone(), pass_cmd });
+                    peer_routes.push(PeerRoute { pattern, handler: handler.clone() });
                 } else {
                     if peer_fallback_method.is_some() {
                         return Err(syn::Error::new(
@@ -274,7 +515,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                             "only one bare #[on_peer_control] fallback handler is allowed",
                         ));
                     }
-                    peer_fallback_method = Some((method_ident.clone(), pass_cmd));
+                    peer_fallback_method = Some(handler.clone());
                 }
             }
         }
@@ -292,7 +533,11 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                     "control lagged handler must not take non-self arguments",
                 ));
             }
-            control_lagged_method = Some(method_ident.clone());
+            let return_kind = control_handler_return_kind(
+                method,
+                "control lagged handlers may only return () or Result<(), Error>; lagged control recovery is fire-and-forget",
+            )?;
+            control_lagged_method = Some((method_ident.clone(), return_kind));
         }
     }
 
@@ -331,22 +576,102 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         }
     }
 
+    let mut peer_emitter_variants = Vec::<syn::Ident>::new();
+    let mut seen_peer_emitter_variants = HashSet::<String>::new();
+    for route in &peer_routes {
+        let Some(variant) = path_last_ident(&route.pattern) else {
+            continue;
+        };
+        let variant_key = variant.to_string();
+        if seen_peer_emitter_variants.insert(variant_key) {
+            peer_emitter_variants.push(variant.clone());
+        }
+    }
+
+    if config.peer_bus_field.is_some() {
+        let mut generated_names = vec!["peer_sender_id".to_owned()];
+        for variant in &peer_emitter_variants {
+            let stem = ident_to_snake_case(variant);
+            generated_names.push(format!("emit_peer_{stem}_deployment"));
+            generated_names.push(format!("emit_peer_{stem}_deployment_payload"));
+            generated_names.push(format!("emit_peer_{stem}_generation"));
+        }
+        for generated_name in generated_names {
+            if item_impl.items.iter().any(|item| {
+                matches!(
+                    item,
+                    ImplItem::Fn(method) if method.sig.ident == generated_name
+                )
+            }) {
+                return Err(syn::Error::new(
+                    item_impl.self_ty.span(),
+                    format!(
+                        "#[backend_handler(peer_bus = ...)] cannot generate `{generated_name}` because the impl already defines it"
+                    ),
+                ));
+            }
+        }
+    }
+
     let event_generated = event_routes.iter().enumerate().map(|(idx, route)| {
         let matcher = format_ident!("__backend_handler_match_event_{}", idx);
         let caller = format_ident!("__backend_handler_call_event_{}", idx);
         let pattern = &route.pattern;
         let method = &route.method;
-        quote! {
-            fn #matcher(route: ::slab_runtime_core::backend::RequestRoute) -> bool {
-                matches!(route, #pattern)
+        match &route.kind {
+            EventHandlerKind::Legacy => {
+                quote! {
+                    fn #matcher(route: ::slab_runtime_core::backend::RequestRoute) -> bool {
+                        matches!(route, #pattern)
+                    }
+                    fn #caller<'a>(
+                        &'a mut self,
+                        req: ::slab_runtime_core::backend::BackendRequest,
+                    ) -> ::slab_runtime_core::backend::HandlerFuture<'a> {
+                        Box::pin(async move {
+                            self.#method(req).await;
+                        })
+                    }
+                }
             }
-            fn #caller<'a>(
-                &'a mut self,
-                req: ::slab_runtime_core::backend::BackendRequest,
-            ) -> ::slab_runtime_core::backend::HandlerFuture<'a> {
-                Box::pin(async move {
-                    self.#method(req).await;
-                })
+            EventHandlerKind::Typed { extractors } => {
+                let call_args = (0..extractors.len())
+                    .map(|arg_idx| format_ident!("__backend_handler_arg_{}_{}", idx, arg_idx))
+                    .collect::<Vec<_>>();
+                let extraction_stmts = extractors.iter().zip(call_args.iter()).map(
+                    |(extractor, binding)| {
+                        quote! {
+                            let #binding = match #extractor {
+                                Ok(value) => value,
+                                Err(error) => {
+                                    let _ = req
+                                        .reply_tx
+                                        .send(::slab_runtime_core::backend::BackendReply::error(error));
+                                    return;
+                                }
+                            };
+                        }
+                    },
+                );
+                quote! {
+                    fn #matcher(route: ::slab_runtime_core::backend::RequestRoute) -> bool {
+                        matches!(route, #pattern)
+                    }
+                    fn #caller<'a>(
+                        &'a mut self,
+                        req: ::slab_runtime_core::backend::BackendRequest,
+                    ) -> ::slab_runtime_core::backend::HandlerFuture<'a> {
+                        Box::pin(async move {
+                            #(#extraction_stmts)*
+                            let __result = self.#method(#(#call_args),*).await;
+                            let _ = req.reply_tx.send(
+                                ::slab_runtime_core::backend::backend_reply_from_event_result(
+                                    __result,
+                                ),
+                            );
+                        })
+                    }
+                }
             }
         }
     });
@@ -366,11 +691,43 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let matcher = format_ident!("__backend_handler_match_runtime_{}", idx);
         let caller = format_ident!("__backend_handler_call_runtime_{}", idx);
         let pattern = &route.pattern;
-        let method = &route.method;
-        let call = if route.pass_signal {
-            quote! { self.#method(signal).await; }
-        } else {
-            quote! { self.#method().await; }
+        let method = &route.handler.method;
+        let call_args = (0..route.handler.extractors.len())
+            .map(|arg_idx| format_ident!("__backend_handler_runtime_arg_{}_{}", idx, arg_idx))
+            .collect::<Vec<_>>();
+        let extraction_stmts =
+            route.handler.extractors.iter().zip(call_args.iter()).map(|(extractor, binding)| {
+                quote! {
+                    let #binding = match #extractor {
+                        Ok(value) => value,
+                        Err(error) => {
+                            ::slab_runtime_core::backend::log_runtime_control_extractor_failure(
+                                ::std::any::type_name::<Self>(),
+                                stringify!(#pattern),
+                                &signal,
+                                error,
+                            );
+                            return;
+                        }
+                    };
+                }
+            });
+        let call = match route.handler.return_kind {
+            ControlHandlerReturnKind::Unit => {
+                quote! { self.#method(#(#call_args),*).await; }
+            }
+            ControlHandlerReturnKind::Result => {
+                quote! {
+                    if let Err(error) = self.#method(#(#call_args),*).await {
+                        ::slab_runtime_core::backend::log_runtime_control_handler_failure(
+                            ::std::any::type_name::<Self>(),
+                            stringify!(#pattern),
+                            &signal,
+                            error,
+                        );
+                    }
+                }
+            }
         };
         quote! {
             fn #matcher(sig: &::slab_runtime_core::backend::RuntimeControlSignal) -> bool {
@@ -381,6 +738,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                 signal: ::slab_runtime_core::backend::RuntimeControlSignal,
             ) -> ::slab_runtime_core::backend::HandlerFuture<'a> {
                 Box::pin(async move {
+                    #(#extraction_stmts)*
                     #call
                 })
             }
@@ -402,11 +760,43 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         let matcher = format_ident!("__backend_handler_match_peer_{}", idx);
         let caller = format_ident!("__backend_handler_call_peer_route_{}", idx);
         let pattern = &route.pattern;
-        let method = &route.method;
-        let call = if route.pass_cmd {
-            quote! { self.#method(cmd).await; }
-        } else {
-            quote! { self.#method().await; }
+        let method = &route.handler.method;
+        let call_args = (0..route.handler.extractors.len())
+            .map(|arg_idx| format_ident!("__backend_handler_peer_arg_{}_{}", idx, arg_idx))
+            .collect::<Vec<_>>();
+        let extraction_stmts =
+            route.handler.extractors.iter().zip(call_args.iter()).map(|(extractor, binding)| {
+                quote! {
+                    let #binding = match #extractor {
+                        Ok(value) => value,
+                        Err(error) => {
+                            ::slab_runtime_core::backend::log_peer_control_extractor_failure(
+                                ::std::any::type_name::<Self>(),
+                                stringify!(#pattern),
+                                &cmd,
+                                error,
+                            );
+                            return;
+                        }
+                    };
+                }
+            });
+        let call = match route.handler.return_kind {
+            ControlHandlerReturnKind::Unit => {
+                quote! { self.#method(#(#call_args),*).await; }
+            }
+            ControlHandlerReturnKind::Result => {
+                quote! {
+                    if let Err(error) = self.#method(#(#call_args),*).await {
+                        ::slab_runtime_core::backend::log_peer_control_handler_failure(
+                            ::std::any::type_name::<Self>(),
+                            stringify!(#pattern),
+                            &cmd,
+                            error,
+                        );
+                    }
+                }
+            }
         };
         quote! {
             fn #matcher(cmd: &::slab_runtime_core::backend::PeerWorkerCommand) -> bool {
@@ -417,6 +807,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                 cmd: ::slab_runtime_core::backend::PeerWorkerCommand,
             ) -> ::slab_runtime_core::backend::HandlerFuture<'a> {
                 Box::pin(async move {
+                    #(#extraction_stmts)*
                     #call
                 })
             }
@@ -434,11 +825,44 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         }
     });
 
-    let peer_fallback_generated = if let Some((method, pass_cmd)) = peer_fallback_method.as_ref() {
-        let call = if *pass_cmd {
-            quote! { self.#method(cmd).await; }
-        } else {
-            quote! { self.#method().await; }
+    let peer_fallback_generated = if let Some(handler) = peer_fallback_method.as_ref() {
+        let method = &handler.method;
+        let call_args = (0..handler.extractors.len())
+            .map(|arg_idx| format_ident!("__backend_handler_peer_fallback_arg_{}", arg_idx))
+            .collect::<Vec<_>>();
+        let extraction_stmts =
+            handler.extractors.iter().zip(call_args.iter()).map(|(extractor, binding)| {
+                quote! {
+                    let #binding = match #extractor {
+                        Ok(value) => value,
+                        Err(error) => {
+                            ::slab_runtime_core::backend::log_peer_control_extractor_failure(
+                                ::std::any::type_name::<Self>(),
+                                stringify!(#method),
+                                &cmd,
+                                error,
+                            );
+                            return;
+                        }
+                    };
+                }
+            });
+        let call = match handler.return_kind {
+            ControlHandlerReturnKind::Unit => {
+                quote! { self.#method(#(#call_args),*).await; }
+            }
+            ControlHandlerReturnKind::Result => {
+                quote! {
+                    if let Err(error) = self.#method(#(#call_args),*).await {
+                        ::slab_runtime_core::backend::log_peer_control_handler_failure(
+                            ::std::any::type_name::<Self>(),
+                            stringify!(#method),
+                            &cmd,
+                            error,
+                        );
+                    }
+                }
+            }
         };
         quote! {
             fn __backend_handler_call_peer<'a>(
@@ -446,6 +870,7 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
                 cmd: ::slab_runtime_core::backend::PeerWorkerCommand,
             ) -> ::slab_runtime_core::backend::HandlerFuture<'a> {
                 Box::pin(async move {
+                    #(#extraction_stmts)*
                     #call
                 })
             }
@@ -460,13 +885,29 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         quote! { None }
     };
 
-    let lagged_generated = if let Some(method) = &control_lagged_method {
+    let lagged_generated = if let Some((method, return_kind)) = &control_lagged_method {
+        let call = match return_kind {
+            ControlHandlerReturnKind::Unit => {
+                quote! { self.#method().await; }
+            }
+            ControlHandlerReturnKind::Result => {
+                quote! {
+                    if let Err(error) = self.#method().await {
+                        ::slab_runtime_core::backend::log_lagged_control_handler_failure(
+                            ::std::any::type_name::<Self>(),
+                            stringify!(#method),
+                            error,
+                        );
+                    }
+                }
+            }
+        };
         quote! {
             fn __backend_handler_call_lagged<'a>(
                 &'a mut self,
             ) -> ::slab_runtime_core::backend::HandlerFuture<'a> {
                 Box::pin(async move {
-                    self.#method().await;
+                    #call
                 })
             }
         }
@@ -478,6 +919,56 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
         quote! { Some(Self::__backend_handler_call_lagged as ::slab_runtime_core::backend::LaggedDispatchFn<Self>) }
     } else {
         quote! { None }
+    };
+
+    let peer_emitter_generated = if let Some(peer_bus_field) = config.peer_bus_field.as_ref() {
+        let peer_emitters = peer_emitter_variants.iter().map(|variant| {
+            let stem = ident_to_snake_case(variant);
+            let emit_deployment = format_ident!("emit_peer_{}_deployment", stem);
+            let emit_deployment_payload = format_ident!("emit_peer_{}_deployment_payload", stem);
+            let emit_generation = format_ident!("emit_peer_{}_generation", stem);
+            quote! {
+                fn #emit_deployment<T>(&self, generation: u64, payload: T)
+                where
+                    T: Send + Sync + 'static,
+                {
+                    self.#peer_bus_field.broadcast_peer_typed_deployment(
+                        ::slab_runtime_core::backend::PeerWorkerCommandKind::#variant,
+                        generation,
+                        payload,
+                    );
+                }
+
+                fn #emit_deployment_payload(
+                    &self,
+                    generation: u64,
+                    payload: ::slab_runtime_core::backend::Payload,
+                ) {
+                    self.#peer_bus_field.broadcast_peer_deployment(
+                        ::slab_runtime_core::backend::PeerWorkerCommandKind::#variant,
+                        generation,
+                        payload,
+                    );
+                }
+
+                fn #emit_generation(&self, generation: u64) {
+                    self.#peer_bus_field.broadcast_peer_generation(
+                        ::slab_runtime_core::backend::PeerWorkerCommandKind::#variant,
+                        generation,
+                    );
+                }
+            }
+        });
+
+        quote! {
+            fn peer_sender_id(&self) -> usize {
+                self.#peer_bus_field.sender_id()
+            }
+
+            #(#peer_emitters)*
+        }
+    } else {
+        quote! {}
     };
 
     let self_ty = &item_impl.self_ty;
@@ -492,43 +983,23 @@ fn expand_backend_handler(item: TokenStream) -> Result<TokenStream> {
             #(#peer_variant_generated)*
             #peer_fallback_generated
             #lagged_generated
+            #peer_emitter_generated
+
+            pub(crate) fn route_table() -> ::slab_runtime_core::backend::WorkerRouteTable<Self> {
+                ::slab_runtime_core::backend::WorkerRouteTable {
+                    request_routes: &[#(#event_table_entries),*],
+                    runtime_control_routes: &[#(#runtime_table_entries),*],
+                    peer_control_routes: &[#(#peer_table_entries),*],
+                    peer_control_fallback: #peer_fallback_route,
+                    control_lagged_route: #lagged_route,
+                }
+            }
         }
 
         #[async_trait::async_trait]
         impl #impl_generics ::slab_runtime_core::backend::RuntimeWorkerHandler for #self_ty #where_clause {
-            async fn handle_request(&mut self, req: ::slab_runtime_core::backend::BackendRequest) {
-                ::slab_runtime_core::backend::dispatch_backend_request(
-                    self,
-                    req,
-                    &[#(#event_table_entries),*],
-                ).await;
-            }
-
-            async fn handle_peer_control(
-                &mut self,
-                cmd: ::slab_runtime_core::backend::PeerWorkerCommand,
-            ) {
-                ::slab_runtime_core::backend::dispatch_peer_control(
-                    self,
-                    cmd,
-                    #peer_fallback_route,
-                    &[#(#peer_table_entries),*],
-                ).await;
-            }
-
-            async fn handle_runtime_control(
-                &mut self,
-                signal: ::slab_runtime_core::backend::RuntimeControlSignal,
-            ) {
-                ::slab_runtime_core::backend::dispatch_runtime_control(
-                    self,
-                    signal,
-                    &[#(#runtime_table_entries),*],
-                ).await;
-            }
-
-            async fn handle_control_lagged(&mut self) {
-                ::slab_runtime_core::backend::dispatch_control_lagged(self, #lagged_route).await;
+            fn route_table(&self) -> ::slab_runtime_core::backend::WorkerRouteTable<Self> {
+                Self::route_table()
             }
         }
     };

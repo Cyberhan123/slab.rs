@@ -31,14 +31,13 @@ onnx = ["dep:ort"]
 slab-runtime-core = { workspace = true }
 slab-runtime-macros = { workspace = true }
 slab-proto = { workspace = true }
-slab-types = { workspace = true }
-slab-model-pack = { workspace = true }
 slab-diffusion = { workspace = true }
 slab-llama = { workspace = true }
 slab-whisper = { workspace = true }
 slab-utils = { workspace = true, optional = true }
 slab-subtitle = { workspace = true, optional = true }
 tokio = { workspace = true }
+flume = { workspace = true }
 futures = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

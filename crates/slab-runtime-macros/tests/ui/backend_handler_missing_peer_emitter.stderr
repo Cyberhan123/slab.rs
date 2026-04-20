@@ -1,0 +1,14 @@
+error[E0599]: no method named `emit_peer_unload_generation` found for struct `Worker` in the current scope
+  --> tests/ui/backend_handler_missing_peer_emitter.rs:27:12
+   |
+ 5 | struct Worker {
+   | ------------- method `emit_peer_unload_generation` not found for this struct
+...
+27 |     worker.emit_peer_unload_generation(7);
+   |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+help: there is a method `emit_peer_load_model_generation` with a similar name
+   |
+27 -     worker.emit_peer_unload_generation(7);
+27 +     worker.emit_peer_load_model_generation(7);
+   |

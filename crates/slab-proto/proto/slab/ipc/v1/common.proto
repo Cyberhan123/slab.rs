@@ -2,71 +2,60 @@ syntax = "proto3";
 
 package slab.ipc.v1;
 
-message ModelLoadCommon {
-  string model_path = 1;
+message StringList {
+  repeated string values = 1;
 }
 
-message GgmlLlamaLoadParams {
-  uint32 num_workers = 1;
-  optional uint32 context_length = 2;
-  optional string chat_template = 3;
-  optional string gbnf = 4;
-  optional bool flash_attn = 5;
+message BinaryPayload {
+  bytes data = 1;
+  optional string mime_type = 2;
+  optional string file_name = 3;
 }
 
-message GgmlWhisperLoadParams {
-  optional bool flash_attn = 1;
+message Usage {
+  optional uint32 prompt_tokens = 1;
+  optional uint32 completion_tokens = 2;
+  optional uint32 total_tokens = 3;
+  optional uint32 prompt_cached_tokens = 4;
+  optional bool estimated = 5;
 }
 
-message GgmlDiffusionLoadParams {
-  optional string diffusion_model_path = 1;
-  optional string vae_path = 2;
-  optional string taesd_path = 3;
-  optional string clip_l_path = 4;
-  optional string clip_g_path = 5;
-  optional string t5xxl_path = 6;
-  optional string clip_vision_path = 7;
-  optional string control_net_path = 8;
-  optional bool flash_attn = 9;
-  optional string vae_device = 10;
-  optional string clip_device = 11;
-  bool offload_params_to_cpu = 12;
-  bool enable_mmap = 13;
-  optional int32 n_threads = 14;
+message ChatStopMetadata {
+  optional int32 token_id = 1;
+  optional string token_text = 2;
+  optional string token_kind = 3;
 }
 
-message CandleLlamaLoadParams {
-  optional string tokenizer_path = 1;
-  uint64 seed = 2;
+message ChatMetadata {
+  optional string reasoning_content = 1;
+  ChatStopMetadata stop = 2;
+  optional bytes extra_json = 3;
 }
 
-message CandleWhisperLoadParams {
-  optional string tokenizer_path = 1;
+message RawImage {
+  bytes data = 1;
+  optional uint32 width = 2;
+  optional uint32 height = 3;
+  optional uint32 channels = 4;
 }
 
-message CandleDiffusionLoadParams {
-  optional string vae_path = 1;
-  string sd_version = 2;
+message RawTensor {
+  optional string name = 1;
+  repeated int64 shape = 2;
+  optional string dtype = 3;
+  bytes data = 4;
 }
 
-message OnnxLoadParams {
-  repeated string execution_providers = 1;
-  optional uint32 intra_op_num_threads = 2;
-  optional uint32 inter_op_num_threads = 3;
+message WhisperSegment {
+  optional uint64 start_ms = 1;
+  optional uint64 end_ms = 2;
+  optional string text = 3;
 }
 
-message ModelLoadRequest {
-  ModelLoadCommon common = 1;
-
-  oneof backend_params {
-    GgmlLlamaLoadParams ggml_llama = 10;
-    GgmlWhisperLoadParams ggml_whisper = 11;
-    GgmlDiffusionLoadParams ggml_diffusion = 12;
-    CandleLlamaLoadParams candle_llama = 13;
-    CandleWhisperLoadParams candle_whisper = 14;
-    CandleDiffusionLoadParams candle_diffusion = 15;
-    OnnxLoadParams onnx = 16;
-  }
+message WhisperTranscription {
+  optional string raw_text = 1;
+  optional string language = 2;
+  repeated WhisperSegment segments = 3;
 }
 
 message ModelUnloadRequest {}

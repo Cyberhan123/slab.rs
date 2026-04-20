@@ -90,10 +90,9 @@ impl LlamaContext {
 
     fn n_vocab(&self) -> usize {
         unsafe {
-            self.model
-                .lib
-                .llama_vocab_n_tokens(self.model.lib.llama_model_get_vocab(self.model.model.unwrap().as_ptr()))
-                as usize
+            self.model.lib.llama_vocab_n_tokens(
+                self.model.lib.llama_model_get_vocab(self.model.model.unwrap().as_ptr()),
+            ) as usize
         }
     }
 
@@ -214,7 +213,12 @@ impl LlamaContext {
             scales.as_ptr() as *mut f32
         };
         let ret = unsafe {
-            self.model.lib.llama_set_adapters_lora(self.as_ptr(), adapters_ptr, ptrs.len(), scales_ptr)
+            self.model.lib.llama_set_adapters_lora(
+                self.as_ptr(),
+                adapters_ptr,
+                ptrs.len(),
+                scales_ptr,
+            )
         };
         if ret != 0 { Err(LlamaError::SetAdaptersFailed(ret)) } else { Ok(()) }
     }
@@ -236,8 +240,9 @@ impl LlamaContext {
     /// # Errors
     /// Returns [`LlamaError::StateFailed`] if 0 bytes were written.
     pub fn state_get_data(&self, dst: &mut [u8]) -> Result<usize, LlamaError> {
-        let n =
-            unsafe { self.model.lib.llama_state_get_data(self.as_ptr(), dst.as_mut_ptr(), dst.len()) };
+        let n = unsafe {
+            self.model.lib.llama_state_get_data(self.as_ptr(), dst.as_mut_ptr(), dst.len())
+        };
         if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 
@@ -249,7 +254,8 @@ impl LlamaContext {
     /// # Errors
     /// Returns [`LlamaError::StateFailed`] if 0 bytes were consumed.
     pub fn state_set_data(&mut self, src: &[u8]) -> Result<usize, LlamaError> {
-        let n = unsafe { self.model.lib.llama_state_set_data(self.as_ptr(), src.as_ptr(), src.len()) };
+        let n =
+            unsafe { self.model.lib.llama_state_set_data(self.as_ptr(), src.as_ptr(), src.len()) };
         if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
 
@@ -305,7 +311,12 @@ impl LlamaContext {
         let (tokens_ptr, tokens_len) =
             if tokens.is_empty() { (std::ptr::null(), 0) } else { (tokens.as_ptr(), tokens.len()) };
         let ok = unsafe {
-            self.model.lib.llama_state_save_file(self.as_ptr(), c_path.as_ptr(), tokens_ptr, tokens_len)
+            self.model.lib.llama_state_save_file(
+                self.as_ptr(),
+                c_path.as_ptr(),
+                tokens_ptr,
+                tokens_len,
+            )
         };
         if !ok { Err(LlamaError::StateFailed) } else { Ok(()) }
     }
@@ -330,7 +341,12 @@ impl LlamaContext {
         seq_id: LlamaSeqId,
     ) -> Result<usize, LlamaError> {
         let n = unsafe {
-            self.model.lib.llama_state_seq_get_data(self.as_ptr(), dst.as_mut_ptr(), dst.len(), seq_id)
+            self.model.lib.llama_state_seq_get_data(
+                self.as_ptr(),
+                dst.as_mut_ptr(),
+                dst.len(),
+                seq_id,
+            )
         };
         if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }
@@ -348,7 +364,12 @@ impl LlamaContext {
         dest_seq_id: LlamaSeqId,
     ) -> Result<usize, LlamaError> {
         let n = unsafe {
-            self.model.lib.llama_state_seq_set_data(self.as_ptr(), src.as_ptr(), src.len(), dest_seq_id)
+            self.model.lib.llama_state_seq_set_data(
+                self.as_ptr(),
+                src.as_ptr(),
+                src.len(),
+                dest_seq_id,
+            )
         };
         if n == 0 { Err(LlamaError::StateFailed) } else { Ok(n) }
     }

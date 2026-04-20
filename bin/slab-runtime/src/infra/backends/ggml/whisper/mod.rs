@@ -1,6 +1,8 @@
-mod adapter;
-mod backend;
+mod contract;
+mod engine;
+mod error;
+mod worker;
 
-pub use adapter::GGMLWhisperEngine;
-pub use adapter::GGMLWhisperEngineError;
-pub use backend::WhisperWorker;
+pub(crate) use engine::GGMLWhisperEngine;
+pub(crate) use error::GGMLWhisperEngineError;
+pub(crate) use worker::WhisperWorker;

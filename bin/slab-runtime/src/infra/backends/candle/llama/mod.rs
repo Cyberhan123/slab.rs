@@ -1,6 +1,7 @@
-mod adapter;
-mod backend;
-mod errors;
+mod contract;
+mod engine;
+mod error;
+mod worker;
 
-pub use backend::spawn_backend_with_engine;
-pub use errors::CandleLlamaEngineError;
+pub use error::CandleLlamaEngineError;
+pub use worker::spawn_backend_with_engine;

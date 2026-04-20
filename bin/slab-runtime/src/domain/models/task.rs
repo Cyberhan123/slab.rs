@@ -3,53 +3,15 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use futures::stream::{self, BoxStream};
-use slab_runtime_core::backend::StreamChunk;
-use slab_runtime_core::scheduler::{
-    DEFAULT_WAIT_TIMEOUT, Orchestrator, STREAM_INIT_TIMEOUT, TaskId, TaskStatus, TaskStatusView,
+use slab_runtime_core::Payload;
+use slab_runtime_core::backend::{RequestRoute, StreamChunk};
+
+use crate::domain::runtime::{
+    CoreError, DEFAULT_WAIT_TIMEOUT, Orchestrator, STREAM_INIT_TIMEOUT, TaskId,
 };
-use slab_runtime_core::{CoreError, Payload};
-use slab_types::Capability;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum TaskState {
-    Pending,
-    Running { stage_index: usize, stage_name: String },
-    Succeeded,
-    ResultConsumed,
-    SucceededStreaming,
-    Failed { message: String },
-    Cancelled,
-}
-
-#[derive(Debug, Clone)]
-pub struct TaskSnapshot {
-    pub task_id: TaskId,
-    pub capability: Capability,
-    pub status: TaskState,
-}
-
-impl TaskSnapshot {
-    pub(crate) fn from_view(capability: Capability, view: TaskStatusView) -> Self {
-        Self {
-            task_id: view.task_id,
-            capability,
-            status: match view.status {
-                TaskStatus::Pending => TaskState::Pending,
-                TaskStatus::Running { stage_index, stage_name } => {
-                    TaskState::Running { stage_index, stage_name }
-                }
-                TaskStatus::Succeeded { .. } => TaskState::Succeeded,
-                TaskStatus::ResultConsumed => TaskState::ResultConsumed,
-                TaskStatus::SucceededStreaming => TaskState::SucceededStreaming,
-                TaskStatus::Failed { error } => TaskState::Failed { message: error.to_string() },
-                TaskStatus::Cancelled => TaskState::Cancelled,
-            },
-        }
-    }
-}
 
 pub(crate) trait TaskCodec<R, C>: Send + Sync + 'static {
-    fn capability(&self) -> Capability;
+    fn route(&self) -> RequestRoute;
     fn decode_result(&self, payload: Payload) -> Result<R, CoreError>;
     fn decode_chunk(&self, chunk: StreamChunk) -> Result<Option<C>, CoreError>;
 }
@@ -66,7 +28,7 @@ impl<R: 'static, C: 'static> std::fmt::Debug for TaskHandle<R, C> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TaskHandle")
             .field("task_id", &self.task_id)
-            .field("capability", &self.codec.capability())
+            .field("route", &self.codec.route())
             .finish()
     }
 }
@@ -82,19 +44,6 @@ where
         codec: Arc<dyn TaskCodec<R, C>>,
     ) -> Self {
         Self { orchestrator, task_id, codec, _types: PhantomData }
-    }
-
-    pub fn task_id(&self) -> TaskId {
-        self.task_id
-    }
-
-    pub async fn status(&self) -> Result<TaskSnapshot, CoreError> {
-        let view = self.orchestrator.get_status(self.task_id).await?;
-        Ok(TaskSnapshot::from_view(self.codec.capability(), view))
-    }
-
-    pub fn cancel(&self) {
-        self.orchestrator.cancel(self.task_id);
     }
 
     pub async fn cancel_and_purge(&self) {

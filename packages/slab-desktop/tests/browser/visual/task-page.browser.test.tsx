@@ -6,9 +6,7 @@ import type { Task } from '@/pages/task/const';
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseTaskList } = vi.hoisted(() => ({
-  mockUseTaskList: vi.fn<
-    () => Partial<ReturnType<typeof import('@/pages/task/hooks/use-task-list').useTaskList>>
-  >(),
+  mockUseTaskList: vi.fn<() => unknown>(),
 }));
 
 vi.mock('@/pages/task/hooks/use-task-list', () => ({
@@ -21,8 +19,8 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 vi.mock('@slab/i18n', () => ({
-  useTranslation: vi.fn<() => void>(() => ({
-    t: vi.fn<() => void>((key: string) => key),
+  useTranslation: vi.fn(() => ({
+    t: vi.fn((key: string) => key),
     i18n: {
       resolvedLanguage: 'en',
       language: 'en',
@@ -63,22 +61,22 @@ function createTaskViewModel(overrides = {}) {
     paginatedTasks: [] as Task[],
     paginationLabel: 'pages.task.table.pagination.empty',
     selectedTask: null,
-    setSelectedTask: vi.fn<() => void>(),
+    setSelectedTask: vi.fn(),
     taskResult: null,
     tasksError: null,
     tasksLoading: false,
     cancelTaskMutation: {
       isPending: false,
-      mutateAsync: vi.fn<() => void>().mockResolvedValue(undefined),
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
     },
     restartTaskMutation: {
       isPending: false,
-      mutateAsync: vi.fn<() => void>().mockResolvedValue(undefined),
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
     },
-    fetchTaskDetail: vi.fn<() => void>().mockResolvedValue(undefined),
-    cancelTask: vi.fn<() => void>().mockResolvedValue(undefined),
-    restartTask: vi.fn<() => void>().mockResolvedValue(undefined),
-    setPage: vi.fn<() => void>(),
+    fetchTaskDetail: vi.fn().mockResolvedValue(undefined),
+    cancelTask: vi.fn().mockResolvedValue(undefined),
+    restartTask: vi.fn().mockResolvedValue(undefined),
+    setPage: vi.fn(),
     ...overrides,
   };
 }

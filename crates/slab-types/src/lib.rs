@@ -18,6 +18,7 @@ pub mod asset_ref;
 pub mod backend;
 pub mod chat;
 pub mod common;
+pub mod desktop_api;
 pub mod diffusion;
 pub mod error;
 pub mod inference;
@@ -36,6 +37,11 @@ pub use chat::{
     ConversationToolFunction,
 };
 pub use common::{Id, Timestamp};
+pub use desktop_api::{
+    DESKTOP_API_BIND, DESKTOP_API_HOST, DESKTOP_API_ORIGIN, DESKTOP_API_PORT,
+    DESKTOP_DEV_ALLOWED_ORIGINS, desktop_api_bind, desktop_api_host, desktop_api_origin,
+    desktop_api_port, desktop_dev_allowed_origins,
+};
 pub use diffusion::{
     DiffusionImageBackend, DiffusionImageRequest, DiffusionImageResponse, DiffusionRequestCommon,
     DiffusionVideoBackend, DiffusionVideoRequest, DiffusionVideoResponse, GgmlDiffusionImageParams,

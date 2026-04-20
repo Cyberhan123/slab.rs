@@ -7,19 +7,19 @@ import type { ChatConversationItem } from '@/pages/chat/hooks/use-chat-sessions'
 import { renderDesktopScene } from '../test-utils';
 
 const { mockUseChat } = vi.hoisted(() => ({
-  mockUseChat: vi.fn<() => void>(),
+  mockUseChat: vi.fn<() => unknown>(),
 }));
 
 const { mockUseChatSessions } = vi.hoisted(() => ({
-  mockUseChatSessions: vi.fn<() => void>(),
+  mockUseChatSessions: vi.fn<() => unknown>(),
 }));
 
 const { mockUseChatLocale } = vi.hoisted(() => ({
-  mockUseChatLocale: vi.fn<() => void>(),
+  mockUseChatLocale: vi.fn<() => unknown>(),
 }));
 
 const { mockUseMarkdownTheme } = vi.hoisted(() => ({
-  mockUseMarkdownTheme: vi.fn<() => void>(),
+  mockUseMarkdownTheme: vi.fn<() => unknown>(),
 }));
 
 vi.mock('@/pages/chat/hooks/use-chat', () => ({
@@ -44,20 +44,20 @@ vi.mock('@/hooks/use-global-header-meta', () => ({
 }));
 
 vi.mock('@/hooks/use-persisted-header-select', () => ({
-  usePersistedHeaderSelect: vi.fn<() => void>(() => ({ value: 'model-1', setValue: vi.fn<() => void>() })),
+  usePersistedHeaderSelect: vi.fn(() => ({ value: 'model-1', setValue: vi.fn() })),
 }));
 
 vi.mock('@/store/useChatUiStore', () => ({
-  useChatUiStore: vi.fn<() => void>((selector) => {
+  useChatUiStore: vi.fn((selector?: (state: Record<string, unknown>) => unknown) => {
     const state = {
       deepThink: false,
-      setDeepThink: vi.fn<() => void>(),
+      setDeepThink: vi.fn(),
       hasHydrated: true,
       currentSessionId: 'session-1',
-      setCurrentSessionId: vi.fn<() => void>(),
+      setCurrentSessionId: vi.fn(),
       sessionLabels: {},
-      setSessionLabel: vi.fn<() => void>(),
-      removeSessionLabel: vi.fn<() => void>(),
+      setSessionLabel: vi.fn(),
+      removeSessionLabel: vi.fn(),
     };
     return selector ? selector(state) : state;
   }),
@@ -65,32 +65,32 @@ vi.mock('@/store/useChatUiStore', () => ({
 
 vi.mock('@/lib/api', () => ({
   apiClient: {
-    GET: vi.fn<() => void>(),
-    POST: vi.fn<() => void>(),
-    PUT: vi.fn<() => void>(),
-    DELETE: vi.fn<() => void>(),
+    GET: vi.fn(),
+    POST: vi.fn(),
+    PUT: vi.fn(),
+    DELETE: vi.fn(),
   },
   default: {
-    useQuery: vi.fn<() => void>(() => ({
+    useQuery: vi.fn(() => ({
       data: null,
       isLoading: false,
-      refetch: vi.fn<() => void>().mockResolvedValue(undefined),
+      refetch: vi.fn().mockResolvedValue(undefined),
     })),
-    useMutation: vi.fn<() => void>(() => ({
+    useMutation: vi.fn(() => ({
       isPending: false,
-      mutateAsync: vi.fn<() => void>().mockResolvedValue(undefined),
+      mutateAsync: vi.fn().mockResolvedValue(undefined),
     })),
   },
-  getErrorMessage: vi.fn<() => string>((err: Error) => err.message),
-  isApiError: vi.fn<() => boolean>(() => false),
+  getErrorMessage: vi.fn((err: Error) => err.message),
+  isApiError: vi.fn(() => false),
   queryClient: {},
 }));
 
 vi.mock('@slab/i18n', () => ({
-  useTranslation: vi.fn<() => void>(() => ({
-    t: vi.fn<() => void>((key: string) => key),
+  useTranslation: vi.fn(() => ({
+    t: vi.fn((key: string) => key),
   })),
-  getResolvedAppLanguage: vi.fn<() => void>(() => 'en'),
+  getResolvedAppLanguage: vi.fn(() => 'en'),
   DEFAULT_CHAT_LABELS: ['New Chat'],
   LEGACY_DEFAULT_CHAT_LABELS: ['New Conversation'],
   Trans: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -104,7 +104,6 @@ function createMockMessage(overrides: Partial<ChatMessageRecord> = {}): ChatMess
       content: 'Hello, how are you?',
     },
     status: 'success',
-    timestamp: Date.now(),
     ...overrides,
   };
 }
@@ -114,12 +113,12 @@ function createChatViewModel(overrides = {}) {
     messages: [] as ChatMessageRecord[],
     isRequesting: false,
     isHistoryLoading: false,
-    abort: vi.fn<() => void>(),
-    onReload: vi.fn<() => void>(),
-    onContinue: vi.fn<() => void>(),
+    abort: vi.fn(),
+    onReload: vi.fn(),
+    onContinue: vi.fn(),
     activeConversation: 'session-1',
-    setActiveConversation: vi.fn<() => void>(),
-    handleSubmit: vi.fn<() => void>().mockResolvedValue(undefined),
+    setActiveConversation: vi.fn(),
+    handleSubmit: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
 }
@@ -127,15 +126,15 @@ function createChatViewModel(overrides = {}) {
 function createChatSessionsViewModel(overrides = {}) {
   return {
     conversationList: [] as ChatConversationItem[],
-    createSession: vi.fn<() => void>().mockResolvedValue({ id: 'session-new' }),
+    createSession: vi.fn().mockResolvedValue({ id: 'session-new' }),
     currentSessionId: 'session-1',
     isCreatingSession: false,
     isDeletingSession: false,
     isSessionMutating: false,
     isSessionsLoading: false,
-    setCurrentSessionId: vi.fn<() => void>(),
-    setSessionLabel: vi.fn<() => void>(),
-    deleteSession: vi.fn<() => void>().mockResolvedValue(true),
+    setCurrentSessionId: vi.fn(),
+    setSessionLabel: vi.fn(),
+    deleteSession: vi.fn().mockResolvedValue(true),
     ...overrides,
   };
 }
