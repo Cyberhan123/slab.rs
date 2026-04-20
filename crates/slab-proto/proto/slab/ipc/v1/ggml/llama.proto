@@ -41,7 +41,9 @@ message GgmlLlamaChatResponse {
   optional string finish_reason = 2;
   optional uint32 tokens_used = 3;
   Usage usage = 4;
+  // Deprecated: use metadata.reasoning_content.
   optional string reasoning_content = 5;
+  ChatMetadata metadata = 6;
 }
 
 message GgmlLlamaChatStreamChunk {
@@ -49,5 +51,7 @@ message GgmlLlamaChatStreamChunk {
   optional bool done = 2;
   optional string finish_reason = 3;
   Usage usage = 4;
+  // Deprecated: use metadata.reasoning_content.
   optional string reasoning_content = 5;
+  ChatMetadata metadata = 6;
 }

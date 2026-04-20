@@ -63,6 +63,42 @@ pub(crate) struct Usage {
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct ChatStopMetadata {
+    pub token_id: Option<i32>,
+    pub token_text: Option<String>,
+    pub token_kind: Option<String>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub(crate) struct ChatMetadata {
+    pub reasoning_content: Option<String>,
+    pub stop: Option<ChatStopMetadata>,
+    pub extra_json: Option<Vec<u8>>,
+}
+
+impl ChatMetadata {
+    fn is_empty(&self) -> bool {
+        self.reasoning_content.is_none() && self.stop.is_none() && self.extra_json.is_none()
+    }
+}
+
+pub(crate) fn encode_chat_metadata(metadata: &ChatMetadata) -> pb::ChatMetadata {
+    pb::ChatMetadata {
+        reasoning_content: metadata.reasoning_content.clone(),
+        stop: metadata.stop.as_ref().map(|stop| pb::ChatStopMetadata {
+            token_id: stop.token_id,
+            token_text: stop.token_text.clone(),
+            token_kind: stop.token_kind.clone(),
+        }),
+        extra_json: metadata.extra_json.clone(),
+    }
+}
+
+pub(crate) fn optional_chat_metadata(metadata: ChatMetadata) -> Option<ChatMetadata> {
+    (!metadata.is_empty()).then_some(metadata)
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct RawImage {
     pub data: Vec<u8>,
     pub width: Option<u32>,
@@ -99,6 +135,7 @@ pub(crate) struct LlamaChatResponse {
     pub tokens_used: Option<u32>,
     pub usage: Option<Usage>,
     pub reasoning_content: Option<String>,
+    pub metadata: Option<ChatMetadata>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -108,6 +145,7 @@ pub(crate) struct LlamaChatStreamChunk {
     pub finish_reason: Option<String>,
     pub usage: Option<Usage>,
     pub reasoning_content: Option<String>,
+    pub metadata: Option<ChatMetadata>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]

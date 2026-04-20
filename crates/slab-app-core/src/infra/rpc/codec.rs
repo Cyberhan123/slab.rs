@@ -4,7 +4,7 @@ use std::path::Path;
 use image::{DynamicImage, ImageFormat};
 use slab_types::diffusion::{
     DiffusionImageBackend, DiffusionImageRequest, DiffusionImageResponse, DiffusionVideoBackend,
-    DiffusionVideoResponse, DiffusionVideoRequest,
+    DiffusionVideoRequest, DiffusionVideoResponse,
 };
 use slab_types::inference::{
     JsonOptions, TextGenerationChunk, TextGenerationRequest, TextGenerationResponse,
@@ -17,6 +17,10 @@ use thiserror::Error;
 use super::pb;
 
 const REASONING_CONTENT_METADATA_KEY: &str = "reasoning_content";
+const STOP_METADATA_KEY: &str = "stop";
+const TOKEN_ID_METADATA_KEY: &str = "token_id";
+const TOKEN_TEXT_METADATA_KEY: &str = "token_text";
+const TOKEN_KIND_METADATA_KEY: &str = "token_kind";
 
 #[derive(Debug, Error)]
 pub enum RpcCodecError {
@@ -138,11 +142,9 @@ pub fn encode_model_load_request(spec: &RuntimeBackendLoadSpec) -> ModelLoadRpcR
 pub fn decode_model_status_response(
     response: &pb::ModelStatusResponse,
 ) -> Result<RuntimeModelStatus, RpcCodecError> {
-    let backend =
-        response.backend.parse::<RuntimeBackendId>().map_err(|error| RpcCodecError::InvalidField {
-            field: "backend",
-            message: error.to_string(),
-        })?;
+    let backend = response.backend.parse::<RuntimeBackendId>().map_err(|error| {
+        RpcCodecError::InvalidField { field: "backend", message: error.to_string() }
+    })?;
 
     Ok(RuntimeModelStatus { backend, status: response.status.clone() })
 }
@@ -176,8 +178,8 @@ pub fn encode_chat_request(
 }
 
 pub fn decode_chat_response(response: &pb::GgmlLlamaChatResponse) -> TextGenerationResponse {
-    let mut metadata = JsonOptions::default();
-    insert_reasoning_content_metadata(&mut metadata, response.reasoning_content.as_deref());
+    let metadata =
+        decode_chat_metadata(response.metadata.as_ref(), response.reasoning_content.as_deref());
 
     TextGenerationResponse {
         text: response.text.clone().unwrap_or_default(),
@@ -189,8 +191,8 @@ pub fn decode_chat_response(response: &pb::GgmlLlamaChatResponse) -> TextGenerat
 }
 
 pub fn decode_chat_stream_chunk(chunk: &pb::GgmlLlamaChatStreamChunk) -> TextGenerationChunk {
-    let mut metadata = JsonOptions::default();
-    insert_reasoning_content_metadata(&mut metadata, chunk.reasoning_content.as_deref());
+    let metadata =
+        decode_chat_metadata(chunk.metadata.as_ref(), chunk.reasoning_content.as_deref());
 
     TextGenerationChunk {
         delta: chunk.delta.clone().unwrap_or_default(),
@@ -321,6 +323,61 @@ fn insert_reasoning_content_metadata(metadata: &mut JsonOptions, reasoning_conte
     );
 }
 
+fn decode_chat_metadata(
+    metadata: Option<&pb::ChatMetadata>,
+    legacy_reasoning_content: Option<&str>,
+) -> JsonOptions {
+    let mut decoded = JsonOptions::default();
+
+    if let Some(metadata) = metadata {
+        insert_extra_json_metadata(&mut decoded, metadata.extra_json.as_deref());
+        insert_stop_metadata(&mut decoded, metadata.stop.as_ref());
+        insert_reasoning_content_metadata(&mut decoded, metadata.reasoning_content.as_deref());
+    }
+
+    if !decoded.contains_key(REASONING_CONTENT_METADATA_KEY) {
+        insert_reasoning_content_metadata(&mut decoded, legacy_reasoning_content);
+    }
+
+    decoded
+}
+
+fn insert_extra_json_metadata(metadata: &mut JsonOptions, extra_json: Option<&[u8]>) {
+    let Some(extra_json) = extra_json else {
+        return;
+    };
+    if extra_json.is_empty() {
+        return;
+    }
+    let Ok(serde_json::Value::Object(extra)) =
+        serde_json::from_slice::<serde_json::Value>(extra_json)
+    else {
+        return;
+    };
+    metadata.extend(extra);
+}
+
+fn insert_stop_metadata(metadata: &mut JsonOptions, stop: Option<&pb::ChatStopMetadata>) {
+    let Some(stop) = stop else {
+        return;
+    };
+    let mut stop_metadata = serde_json::Map::new();
+    if let Some(token_id) = stop.token_id {
+        stop_metadata.insert(TOKEN_ID_METADATA_KEY.into(), serde_json::Value::from(token_id));
+    }
+    if let Some(token_text) = stop.token_text.as_ref().filter(|value| !value.is_empty()) {
+        stop_metadata
+            .insert(TOKEN_TEXT_METADATA_KEY.into(), serde_json::Value::String(token_text.clone()));
+    }
+    if let Some(token_kind) = stop.token_kind.as_ref().filter(|value| !value.is_empty()) {
+        stop_metadata
+            .insert(TOKEN_KIND_METADATA_KEY.into(), serde_json::Value::String(token_kind.clone()));
+    }
+    if !stop_metadata.is_empty() {
+        metadata.insert(STOP_METADATA_KEY.into(), serde_json::Value::Object(stop_metadata));
+    }
+}
+
 fn raw_image_input_to_proto(input: &RawImageInput) -> pb::RawImage {
     pb::RawImage {
         data: input.data.clone(),
@@ -336,30 +393,14 @@ fn raw_image_to_png_bytes(image: &pb::RawImage) -> Result<Vec<u8>, RpcCodecError
     let channels = required_u8(image.channels, "raw_image.channels")?;
 
     let dynamic = match channels {
-        1 => image::ImageBuffer::<image::Luma<u8>, _>::from_raw(
-            width,
-            height,
-            image.data.clone(),
-        )
-        .map(DynamicImage::ImageLuma8),
-        2 => image::ImageBuffer::<image::LumaA<u8>, _>::from_raw(
-            width,
-            height,
-            image.data.clone(),
-        )
-        .map(DynamicImage::ImageLumaA8),
-        3 => image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(
-            width,
-            height,
-            image.data.clone(),
-        )
-        .map(DynamicImage::ImageRgb8),
-        4 => image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(
-            width,
-            height,
-            image.data.clone(),
-        )
-        .map(DynamicImage::ImageRgba8),
+        1 => image::ImageBuffer::<image::Luma<u8>, _>::from_raw(width, height, image.data.clone())
+            .map(DynamicImage::ImageLuma8),
+        2 => image::ImageBuffer::<image::LumaA<u8>, _>::from_raw(width, height, image.data.clone())
+            .map(DynamicImage::ImageLumaA8),
+        3 => image::ImageBuffer::<image::Rgb<u8>, _>::from_raw(width, height, image.data.clone())
+            .map(DynamicImage::ImageRgb8),
+        4 => image::ImageBuffer::<image::Rgba<u8>, _>::from_raw(width, height, image.data.clone())
+            .map(DynamicImage::ImageRgba8),
         other => {
             return Err(RpcCodecError::InvalidField {
                 field: "raw_image.channels",
@@ -393,10 +434,8 @@ fn required_u32(value: Option<u32>, field: &'static str) -> Result<u32, RpcCodec
 
 fn required_u8(value: Option<u32>, field: &'static str) -> Result<u8, RpcCodecError> {
     let value = required_u32(value, field)?;
-    u8::try_from(value).map_err(|error| RpcCodecError::InvalidField {
-        field,
-        message: error.to_string(),
-    })
+    u8::try_from(value)
+        .map_err(|error| RpcCodecError::InvalidField { field, message: error.to_string() })
 }
 
 fn non_empty_string(value: Option<&str>) -> Option<String> {
@@ -421,4 +460,57 @@ fn _assert_diffusion_backend_shapes(
     video_backend: &DiffusionVideoBackend,
 ) {
     let _ = (image_backend.as_ggml(), video_backend.as_ggml());
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn decode_chat_response_prefers_structured_metadata() {
+        let response = pb::GgmlLlamaChatResponse {
+            text: Some("answer".to_owned()),
+            reasoning_content: Some("legacy".to_owned()),
+            metadata: Some(pb::ChatMetadata {
+                reasoning_content: Some("from metadata".to_owned()),
+                stop: Some(pb::ChatStopMetadata {
+                    token_id: Some(42),
+                    token_text: Some("</s>".to_owned()),
+                    token_kind: Some("eos".to_owned()),
+                }),
+                extra_json: Some(
+                    serde_json::to_vec(&json!({ "provider": "ggml" }))
+                        .expect("extra JSON should serialize"),
+                ),
+            }),
+            ..Default::default()
+        };
+
+        let decoded = decode_chat_response(&response);
+
+        assert_eq!(decoded.metadata.get("reasoning_content"), Some(&json!("from metadata")));
+        assert_eq!(decoded.metadata.get("provider"), Some(&json!("ggml")));
+        assert_eq!(
+            decoded.metadata.get("stop").and_then(|stop| stop.get("token_id")),
+            Some(&json!(42))
+        );
+        assert_eq!(
+            decoded.metadata.get("stop").and_then(|stop| stop.get("token_text")),
+            Some(&json!("</s>"))
+        );
+    }
+
+    #[test]
+    fn decode_chat_stream_chunk_falls_back_to_legacy_reasoning() {
+        let chunk = pb::GgmlLlamaChatStreamChunk {
+            reasoning_content: Some("legacy reasoning".to_owned()),
+            ..Default::default()
+        };
+
+        let decoded = decode_chat_stream_chunk(&chunk);
+
+        assert_eq!(decoded.metadata.get("reasoning_content"), Some(&json!("legacy reasoning")));
+    }
 }

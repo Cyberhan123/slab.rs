@@ -20,6 +20,18 @@ message Usage {
   optional bool estimated = 5;
 }
 
+message ChatStopMetadata {
+  optional int32 token_id = 1;
+  optional string token_text = 2;
+  optional string token_kind = 3;
+}
+
+message ChatMetadata {
+  optional string reasoning_content = 1;
+  ChatStopMetadata stop = 2;
+  optional bytes extra_json = 3;
+}
+
 message RawImage {
   bytes data = 1;
   optional uint32 width = 2;
