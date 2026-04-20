@@ -1,6 +1,5 @@
 use std::path::PathBuf;
 
-use slab_proto::convert;
 use slab_types::load_config::{
     GgmlDiffusionLoadConfig, GgmlLlamaLoadConfig, GgmlWhisperLoadConfig,
 };
@@ -14,7 +13,7 @@ use crate::domain::models::{ModelLoadCommand, ModelStatus, UnifiedModel, Unified
 use crate::error::AppCoreError;
 use crate::infra::db::{ModelConfigStateStore, ModelStore};
 use crate::infra::model_packs;
-use crate::infra::rpc::{self, pb};
+use crate::infra::rpc::{self, codec, pb};
 use crate::model_auto_unload::{ModelReplayPlan, build_model_load_request};
 
 use super::{ModelService, catalog, pack};
@@ -228,7 +227,7 @@ fn grpc_status_message(status: &tonic::Status) -> String {
 pub(super) fn decode_model_status(
     response: pb::ModelStatusResponse,
 ) -> Result<ModelStatus, AppCoreError> {
-    let status = convert::decode_model_status_response(&response).map_err(|error| {
+    let status = codec::decode_model_status_response(&response).map_err(|error| {
         AppCoreError::Internal(format!("invalid model status response from runtime: {error}"))
     })?;
 
@@ -319,7 +318,7 @@ async fn load_model_with_state(
         diffusion,
     )?;
     let grpc_req = build_model_load_request(&load_spec);
-    let response = rpc::client::load_model(channel, resolved_target.backend_id, grpc_req)
+    let response = rpc::client::load_model(channel, grpc_req)
         .await
         .map_err(|error| map_grpc_model_error(action, error))?;
     state

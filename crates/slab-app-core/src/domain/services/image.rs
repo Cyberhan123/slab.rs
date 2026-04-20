@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use base64::Engine as _;
-use slab_proto::convert;
 use slab_types::RuntimeBackendId;
 use slab_types::diffusion::{
     DiffusionImageBackend, DiffusionImageRequest, DiffusionRequestCommon, GgmlDiffusionImageParams,
@@ -14,7 +13,7 @@ use crate::domain::models::{
     AcceptedOperation, ImageGenerationCommand, ImageGenerationMode, TaskResult,
 };
 use crate::error::AppCoreError;
-use crate::infra::rpc::{self, pb};
+use crate::infra::rpc::{self, codec};
 #[derive(Clone)]
 pub struct ImageService {
     state: WorkerState,
@@ -96,7 +95,7 @@ impl ImageService {
                 eta: req.eta,
             }),
         };
-        let grpc_req = convert::encode_diffusion_image_request(req.model.clone(), &shared_request);
+        let grpc_req = codec::encode_diffusion_image_request(req.model.clone(), &shared_request);
 
         let worker_state = self.state.clone();
         let model_auto_unload = Arc::clone(self.state.auto_unload());
@@ -129,10 +128,8 @@ impl ImageService {
                     }
 
                     match rpc_result {
-                        Ok(images_json) => {
-                            let payload = match convert::decode_diffusion_image_response(
-                                &pb::ImageResponse { images_json },
-                            ) {
+                        Ok(response) => {
+                            let payload = match codec::decode_diffusion_image_response(&response) {
                                 Ok(value) => value,
                                 Err(error) => {
                                     let message = format!(

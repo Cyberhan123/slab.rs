@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use slab_proto::convert;
 use slab_types::RuntimeBackendId;
 use slab_types::diffusion::{
     DiffusionRequestCommon, DiffusionVideoBackend, DiffusionVideoRequest, GgmlDiffusionVideoParams,
@@ -11,7 +10,7 @@ use tracing::{debug, info, warn};
 use crate::context::{SubmitOperation, WorkerState};
 use crate::domain::models::{AcceptedOperation, TaskResult, VideoGenerationCommand};
 use crate::error::AppCoreError;
-use crate::infra::rpc::{self, pb};
+use crate::infra::rpc::{self, codec};
 
 #[derive(Clone)]
 pub struct VideoService {
@@ -77,7 +76,7 @@ impl VideoService {
                 strength: req.strength,
             }),
         };
-        let grpc_req = convert::encode_diffusion_video_request(req.model.clone(), &grpc_request);
+        let grpc_req = codec::encode_diffusion_video_request(req.model.clone(), &grpc_request);
 
         let model_auto_unload = Arc::clone(self.state.auto_unload());
         let operation_id = self
@@ -118,11 +117,7 @@ impl VideoService {
                         }
                     };
 
-                    let frames = match convert::decode_diffusion_video_response(
-                        &pb::VideoResponse {
-                            frames_json: response,
-                        },
-                    ) {
+                    let frames = match codec::decode_diffusion_video_response(&response) {
                         Ok(value) => value.frames,
                         Err(error) => {
                             let message =
