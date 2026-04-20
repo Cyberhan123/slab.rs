@@ -121,6 +121,9 @@ impl SettingsV2PmidCatalog {
             self.models.download_source(),
             self.models.auto_unload.enabled(),
             self.models.auto_unload.idle_minutes(),
+            self.models.auto_unload.min_free_system_memory_bytes(),
+            self.models.auto_unload.min_free_gpu_memory_bytes(),
+            self.models.auto_unload.max_pressure_evictions_per_load(),
             self.server.address(),
             self.server.logging.level(),
             self.server.logging.json(),
@@ -584,6 +587,18 @@ impl AutoUnloadPmids {
 
     pub fn idle_minutes(self) -> SettingPmid {
         SettingPmid::from_path("models.auto_unload.idle_minutes")
+    }
+
+    pub fn min_free_system_memory_bytes(self) -> SettingPmid {
+        SettingPmid::from_path("models.auto_unload.min_free_system_memory_bytes")
+    }
+
+    pub fn min_free_gpu_memory_bytes(self) -> SettingPmid {
+        SettingPmid::from_path("models.auto_unload.min_free_gpu_memory_bytes")
+    }
+
+    pub fn max_pressure_evictions_per_load(self) -> SettingPmid {
+        SettingPmid::from_path("models.auto_unload.max_pressure_evictions_per_load")
     }
 }
 

@@ -27,6 +27,27 @@
           "format": "uint32",
           "minimum": 0,
           "type": "integer"
+        },
+        "max_pressure_evictions_per_load": {
+          "default": 3,
+          "description": "Maximum number of idle-model evictions attempted for a single model load.",
+          "format": "uint32",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_free_gpu_memory_bytes": {
+          "default": 536870912,
+          "description": "Minimum free GPU memory required before model loads can proceed without eviction.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "min_free_system_memory_bytes": {
+          "default": 1073741824,
+          "description": "Minimum free system memory required before model loads can proceed without eviction.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
         }
       },
       "type": "object"
@@ -418,7 +439,10 @@
           "$ref": "#/$defs/AutoUnloadConfig",
           "default": {
             "enabled": false,
-            "idle_minutes": 10
+            "idle_minutes": 10,
+            "max_pressure_evictions_per_load": 3,
+            "min_free_gpu_memory_bytes": 536870912,
+            "min_free_system_memory_bytes": 1073741824
           }
         },
         "cache_dir": {
@@ -866,7 +890,10 @@
       "default": {
         "auto_unload": {
           "enabled": false,
-          "idle_minutes": 10
+          "idle_minutes": 10,
+          "max_pressure_evictions_per_load": 3,
+          "min_free_gpu_memory_bytes": 536870912,
+          "min_free_system_memory_bytes": 1073741824
         },
         "download_source": "auto"
       }

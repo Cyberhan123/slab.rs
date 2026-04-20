@@ -377,6 +377,39 @@ fn legacy_settings_schema() -> RawSettingsSchema {
                                 None,
                                 20,
                             ),
+                            legacy_integer_property(
+                                PMID.runtime
+                                    .model_auto_unload
+                                    .min_free_system_memory_bytes()
+                                    .into_string(),
+                                "Model Auto Unload Min Free System Memory Bytes",
+                                json!(1_073_741_824u64),
+                                Some(0),
+                                None,
+                                30,
+                            ),
+                            legacy_integer_property(
+                                PMID.runtime
+                                    .model_auto_unload
+                                    .min_free_gpu_memory_bytes()
+                                    .into_string(),
+                                "Model Auto Unload Min Free GPU Memory Bytes",
+                                json!(536_870_912u64),
+                                Some(0),
+                                None,
+                                40,
+                            ),
+                            legacy_integer_property(
+                                PMID.runtime
+                                    .model_auto_unload
+                                    .max_pressure_evictions_per_load()
+                                    .into_string(),
+                                "Model Auto Unload Max Pressure Evictions Per Load",
+                                json!(3),
+                                Some(0),
+                                None,
+                                50,
+                            ),
                         ],
                     ),
                 ],

@@ -54,7 +54,8 @@ impl Interceptor for RequestIdInterceptor {
     }
 }
 
-type InterceptedChannel = tonic::service::interceptor::InterceptedService<Channel, RequestIdInterceptor>;
+type InterceptedChannel =
+    tonic::service::interceptor::InterceptedService<Channel, RequestIdInterceptor>;
 type GgmlLlamaClient = pb::ggml_llama_service_client::GgmlLlamaServiceClient<InterceptedChannel>;
 type GgmlWhisperClient =
     pb::ggml_whisper_service_client::GgmlWhisperServiceClient<InterceptedChannel>;
@@ -69,10 +70,12 @@ type OnnxClient = pb::onnx_service_client::OnnxServiceClient<InterceptedChannel>
 fn ggml_llama_client(channel: Channel) -> (GgmlLlamaClient, String) {
     let interceptor = RequestIdInterceptor::new();
     let request_id = interceptor.id().to_owned();
-    let client =
-        pb::ggml_llama_service_client::GgmlLlamaServiceClient::with_interceptor(channel, interceptor)
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let client = pb::ggml_llama_service_client::GgmlLlamaServiceClient::with_interceptor(
+        channel,
+        interceptor,
+    )
+    .max_decoding_message_size(MAX_MESSAGE_BYTES)
+    .max_encoding_message_size(MAX_MESSAGE_BYTES);
     (client, request_id)
 }
 

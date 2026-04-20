@@ -8698,6 +8698,7 @@ dependencies = [
  "slab-utils",
  "sqlx",
  "strum",
+ "sysinfo",
  "thiserror 2.0.18",
  "tokio",
  "tonic",
@@ -8736,6 +8737,7 @@ dependencies = [
  "slab-libfetch",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -8759,6 +8761,7 @@ dependencies = [
  "slab-utils",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
 ]
 
 [[package]]

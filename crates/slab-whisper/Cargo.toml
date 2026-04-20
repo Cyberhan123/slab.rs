@@ -22,7 +22,7 @@ tracing = { workspace = true, optional = true }
 rand = "0.10.1"
 
 [features]
-default = []
+default = ["tracing_backend"]
 
 test-with-tiny-model = []
 

@@ -19,8 +19,8 @@ use tokio::sync::broadcast;
 use super::contract::{
     CandleDiffusionLoadConfig, GeneratedImage, ImageGenerationRequest, ImageGenerationResponse,
 };
-use super::error::CandleDiffusionWorkerError;
 use super::engine::{CandleDiffusionEngine, GenImageParams};
+use super::error::CandleDiffusionWorkerError;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
@@ -62,8 +62,9 @@ fn build_gen_image_params(
         if steps < 1 {
             return Err(CandleDiffusionWorkerError::contract("sample_steps must be >= 1"));
         }
-        params.steps = usize::try_from(steps)
-            .map_err(|_| CandleDiffusionWorkerError::contract("sample_steps exceeds usize range"))?;
+        params.steps = usize::try_from(steps).map_err(|_| {
+            CandleDiffusionWorkerError::contract("sample_steps exceeds usize range")
+        })?;
     }
     if let Some(guidance_scale) = raw.guidance_scale.or(raw.distilled_guidance) {
         params.cfg_scale = f64::from(guidance_scale);
@@ -84,12 +85,11 @@ fn build_gen_image_params(
 fn decode_png_to_generated_image(
     png_bytes: Vec<u8>,
 ) -> Result<GeneratedImage, CandleDiffusionWorkerError> {
-    let image = image::load_from_memory(&png_bytes)
-        .map_err(|error| {
-            CandleDiffusionWorkerError::inference(format!(
-                "failed to decode candle diffusion PNG output: {error}"
-            ))
-        })?;
+    let image = image::load_from_memory(&png_bytes).map_err(|error| {
+        CandleDiffusionWorkerError::inference(format!(
+            "failed to decode candle diffusion PNG output: {error}"
+        ))
+    })?;
     let (width, height) = image.dimensions();
     let (data, channels) = if image.color().channel_count() == 4 {
         (image.to_rgba8().into_raw(), 4u32)
@@ -224,10 +224,7 @@ impl CandleDiffusionWorker {
         }
     }
 
-    async fn handle_unload_model(
-        &mut self,
-        seq_id: u64,
-    ) -> Result<(), CandleDiffusionWorkerError> {
+    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), CandleDiffusionWorkerError> {
         match self.engine.as_ref() {
             Some(engine) => {
                 engine.unload();
@@ -260,10 +257,9 @@ impl CandleDiffusionWorker {
                 if raw.seed.is_some() {
                     item.seed = item.seed.saturating_add(index as u64);
                 }
-                let png_bytes =
-                    engine.inference(&item).map_err(|error| {
-                        CandleDiffusionWorkerError::inference(error.to_string())
-                    })?;
+                let png_bytes = engine
+                    .inference(&item)
+                    .map_err(|error| CandleDiffusionWorkerError::inference(error.to_string()))?;
                 images.push(decode_png_to_generated_image(png_bytes)?);
             }
             Ok::<Vec<GeneratedImage>, CandleDiffusionWorkerError>(images)
@@ -290,8 +286,8 @@ pub fn spawn_backend(
 mod tests {
     use std::path::PathBuf;
 
-    use super::CandleDiffusionWorker;
     use super::super::contract::CandleDiffusionLoadConfig;
+    use super::CandleDiffusionWorker;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::{
         ControlOpId, DeploymentSnapshot, PeerControlBus, WorkerCommand,

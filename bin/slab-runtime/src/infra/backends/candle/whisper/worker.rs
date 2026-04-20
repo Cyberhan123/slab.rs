@@ -18,8 +18,8 @@ use tokio::sync::broadcast;
 use super::contract::{
     AudioTranscriptionOptions, AudioTranscriptionResponse, CandleWhisperLoadConfig,
 };
-use super::error::CandleWhisperWorkerError;
 use super::engine::CandleWhisperEngine;
+use super::error::CandleWhisperWorkerError;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::spawn_workers;
 use slab_runtime_core::backend::{
@@ -146,10 +146,7 @@ impl CandleWhisperWorker {
         }
     }
 
-    async fn handle_unload_model(
-        &mut self,
-        seq_id: u64,
-    ) -> Result<(), CandleWhisperWorkerError> {
+    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), CandleWhisperWorkerError> {
         match self.engine.as_ref() {
             Some(engine) => {
                 engine.unload();
@@ -183,7 +180,9 @@ impl CandleWhisperWorker {
         };
 
         if samples.is_empty() {
-            return Err(CandleWhisperWorkerError::contract("invalid input: audio samples are empty"));
+            return Err(CandleWhisperWorkerError::contract(
+                "invalid input: audio samples are empty",
+            ));
         }
 
         let result = tokio::task::block_in_place(|| engine.inference(&samples));
@@ -214,8 +213,8 @@ pub fn spawn_backend(
 mod tests {
     use std::path::PathBuf;
 
-    use super::CandleWhisperWorker;
     use super::super::contract::CandleWhisperLoadConfig;
+    use super::CandleWhisperWorker;
     use slab_runtime_core::Payload;
     use slab_runtime_core::backend::{
         ControlOpId, DeploymentSnapshot, PeerControlBus, WorkerCommand,

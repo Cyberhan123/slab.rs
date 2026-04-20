@@ -29,8 +29,8 @@ use std::sync::Arc;
 use tokio::sync::broadcast;
 
 use super::contract::{GgmlLlamaLoadConfig, TextGenerationOptions, TextGenerationResponse};
-use super::error::GGMLLlamaWorkerError;
 use super::engine::{GGMLLlamaEngine, LlamaDispatchOutput, LlamaDispatchRequest};
+use super::error::GGMLLlamaWorkerError;
 use slab_runtime_core::backend::{
     CancelRx, ControlOpId, Input, Options, StreamHandle, Typed, WorkerCommand,
 };
@@ -135,7 +135,10 @@ impl LlamaWorker {
 
     #[on_runtime_control(GlobalUnload)]
     #[on_runtime_control(GlobalLoad)]
-    async fn apply_runtime_control(&mut self, op_id: ControlOpId) -> Result<(), GGMLLlamaWorkerError> {
+    async fn apply_runtime_control(
+        &mut self,
+        op_id: ControlOpId,
+    ) -> Result<(), GGMLLlamaWorkerError> {
         tracing::debug!(op_id = op_id.0, "llama runtime control pre-cleanup");
         // Runtime-level GlobalLoad is treated as a pre-load cleanup signal.
         // The actual model.load request is still driven by the management path.
@@ -227,11 +230,10 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
         };
-        let LlamaDispatchOutput { text, usage, finish_reason, metadata } =
-            engine
-                .dispatch_inference(request)
-                .await
-                .map_err(|error| GGMLLlamaWorkerError::inference(error.to_string()))?;
+        let LlamaDispatchOutput { text, usage, finish_reason, metadata } = engine
+            .dispatch_inference(request)
+            .await
+            .map_err(|error| GGMLLlamaWorkerError::inference(error.to_string()))?;
         Ok(Typed(TextGenerationResponse { text, finish_reason, usage, metadata }))
     }
 
@@ -277,12 +279,11 @@ impl LlamaWorker {
             logit_bias,
             stop_sequences,
         };
-        engine
-            .dispatch_inference_stream(request, cancel.0)
-            .await
-            .map_err(|error: crate::infra::backends::ggml::EngineError| {
+        engine.dispatch_inference_stream(request, cancel.0).await.map_err(
+            |error: crate::infra::backends::ggml::EngineError| {
                 GGMLLlamaWorkerError::inference(error.to_string())
-            })
+            },
+        )
     }
 }
 
@@ -303,8 +304,8 @@ pub fn spawn_backend_with_engine(
 
 #[cfg(test)]
 mod tests {
-    use super::{InferenceOptions, LlamaWorker};
     use super::super::contract::TextGenerationOptions;
+    use super::{InferenceOptions, LlamaWorker};
     use slab_runtime_core::backend::ControlOpId;
 
     // ── infer_add_assistant_prompt ────────────────────────────────────────────

@@ -17,8 +17,8 @@
 use tracing::warn;
 
 use super::contract::{OnnxInferenceRequest, OnnxInferenceResponse, OnnxLoadConfig};
-use super::error::OnnxWorkerError;
 use super::engine::OnnxEngine;
+use super::error::OnnxWorkerError;
 use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, PeerControlBus, Typed};
 use slab_runtime_macros::backend_handler;
 

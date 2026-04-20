@@ -7,6 +7,18 @@ const fn default_flash_attn_enabled() -> bool {
     true
 }
 
+const fn default_model_auto_unload_min_free_system_memory_bytes() -> u64 {
+    1_073_741_824
+}
+
+const fn default_model_auto_unload_min_free_gpu_memory_bytes() -> u64 {
+    536_870_912
+}
+
+const fn default_model_auto_unload_max_pressure_evictions_per_load() -> u32 {
+    3
+}
+
 /// A configured cloud/remote AI provider.
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct CloudProviderConfig {
@@ -122,12 +134,34 @@ pub struct RuntimeWorkerConfig {
 }
 
 /// Model auto-unload settings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema, PartialEq)]
 pub struct RuntimeModelAutoUnloadConfig {
     /// Whether idle models should be unloaded automatically.
     pub enabled: bool,
     /// Minutes of inactivity before a model is unloaded.
     pub idle_minutes: u32,
+    /// Minimum free system memory required before model loads can proceed without eviction.
+    #[serde(default = "default_model_auto_unload_min_free_system_memory_bytes")]
+    pub min_free_system_memory_bytes: u64,
+    /// Minimum free GPU memory required before model loads can proceed without eviction.
+    #[serde(default = "default_model_auto_unload_min_free_gpu_memory_bytes")]
+    pub min_free_gpu_memory_bytes: u64,
+    /// Maximum number of idle-model evictions attempted for a single model load.
+    #[serde(default = "default_model_auto_unload_max_pressure_evictions_per_load")]
+    pub max_pressure_evictions_per_load: u32,
+}
+
+impl Default for RuntimeModelAutoUnloadConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            idle_minutes: 0,
+            min_free_system_memory_bytes: default_model_auto_unload_min_free_system_memory_bytes(),
+            min_free_gpu_memory_bytes: default_model_auto_unload_min_free_gpu_memory_bytes(),
+            max_pressure_evictions_per_load:
+                default_model_auto_unload_max_pressure_evictions_per_load(),
+        }
+    }
 }
 
 // ── Chat settings ─────────────────────────────────────────────────────────────

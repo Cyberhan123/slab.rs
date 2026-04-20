@@ -15,8 +15,8 @@
 use std::time::Instant;
 
 use super::contract::{GgmlDiffusionLoadConfig, ImageGenerationRequest, ImageGenerationResponse};
-use super::error::GGMLDiffusionWorkerError;
 use super::engine::GGMLDiffusionEngine;
+use super::error::GGMLDiffusionWorkerError;
 use slab_runtime_core::Payload;
 use slab_runtime_core::backend::{BroadcastSeq, ControlOpId, Input, PeerControlBus, Typed};
 use slab_runtime_macros::backend_handler;
@@ -62,10 +62,7 @@ impl DiffusionWorker {
     }
 
     #[on_event(UnloadModel)]
-    async fn on_unload_model(
-        &mut self,
-        seq: BroadcastSeq,
-    ) -> Result<(), GGMLDiffusionWorkerError> {
+    async fn on_unload_model(&mut self, seq: BroadcastSeq) -> Result<(), GGMLDiffusionWorkerError> {
         self.handle_unload_model(seq.0).await
     }
 
@@ -139,10 +136,7 @@ impl DiffusionWorker {
 
     // ── model.unload ──────────────────────────────────────────────────────────
 
-    async fn handle_unload_model(
-        &mut self,
-        seq_id: u64,
-    ) -> Result<(), GGMLDiffusionWorkerError> {
+    async fn handle_unload_model(&mut self, seq_id: u64) -> Result<(), GGMLDiffusionWorkerError> {
         match self.engine.as_mut() {
             Some(e) => {
                 e.unload();

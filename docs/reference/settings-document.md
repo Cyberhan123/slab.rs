@@ -29,7 +29,10 @@ The canonical JSON Schema for `SettingsDocumentV2` is published at:
   "models": {
     "auto_unload": {
       "enabled": false,
-      "idle_minutes": 10
+      "idle_minutes": 10,
+      "min_free_system_memory_bytes": 1073741824,
+      "min_free_gpu_memory_bytes": 536870912,
+      "max_pressure_evictions_per_load": 3
     }
   },
   "server": {

@@ -547,16 +547,43 @@ pub struct AutoUnloadConfig {
     /// Idle timeout before unloading a model.
     #[serde(default = "default_idle_minutes")]
     pub idle_minutes: u32,
+    /// Minimum free system memory required before model loads can proceed without eviction.
+    #[serde(default = "default_min_free_system_memory_bytes")]
+    pub min_free_system_memory_bytes: u64,
+    /// Minimum free GPU memory required before model loads can proceed without eviction.
+    #[serde(default = "default_min_free_gpu_memory_bytes")]
+    pub min_free_gpu_memory_bytes: u64,
+    /// Maximum number of idle-model evictions attempted for a single model load.
+    #[serde(default = "default_max_pressure_evictions_per_load")]
+    pub max_pressure_evictions_per_load: u32,
 }
 
 impl Default for AutoUnloadConfig {
     fn default() -> Self {
-        Self { enabled: false, idle_minutes: default_idle_minutes() }
+        Self {
+            enabled: false,
+            idle_minutes: default_idle_minutes(),
+            min_free_system_memory_bytes: default_min_free_system_memory_bytes(),
+            min_free_gpu_memory_bytes: default_min_free_gpu_memory_bytes(),
+            max_pressure_evictions_per_load: default_max_pressure_evictions_per_load(),
+        }
     }
 }
 
 const fn default_idle_minutes() -> u32 {
     10
+}
+
+const fn default_min_free_system_memory_bytes() -> u64 {
+    1_073_741_824
+}
+
+const fn default_min_free_gpu_memory_bytes() -> u64 {
+    536_870_912
+}
+
+const fn default_max_pressure_evictions_per_load() -> u32 {
+    3
 }
 
 /// Server-only settings.

@@ -125,7 +125,7 @@ impl IntoResponse for ServerError {
                     slab_runtime_core::CoreError::DriverNotRegistered { .. } => {
                         "inference backend is not registered".to_owned()
                     }
-                    _ => "inference backend error".to_owned()
+                    _ => "inference backend error".to_owned(),
                 };
                 (StatusCode::INTERNAL_SERVER_ERROR, error_codes::RUNTIME_ERROR, None, message)
             }

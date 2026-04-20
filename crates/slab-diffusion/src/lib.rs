@@ -1,5 +1,6 @@
 mod context;
 mod error;
+mod logging;
 mod params;
 mod upscaler;
 
@@ -13,6 +14,7 @@ use std::sync::Arc;
 
 pub use context::Context;
 pub use error::DiffusionError;
+pub use logging::DiffusionLogLevel;
 pub use params::*;
 pub use upscaler::UpscalerContext;
 
@@ -66,7 +68,9 @@ impl Diffusion {
             slab_diffusion_sys::DiffusionLib,
         >(lib_dir, "stable-diffusion")?;
 
-        Ok(Self { lib: Arc::new(diffusion_lib), _ggml_lib: ggml })
+        let diffusion = Self { lib: Arc::new(diffusion_lib), _ggml_lib: ggml };
+        diffusion.install_logging_hook();
+        Ok(diffusion)
     }
 
     /// Return a string describing the capabilities of the loaded build

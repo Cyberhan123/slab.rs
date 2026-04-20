@@ -1,9 +1,11 @@
 mod backend;
 mod error;
+mod logging;
 
 pub use backend::GGMLBackendDevice;
 pub use backend::GGMLBackendReg;
 pub use error::GGMLError;
+pub use logging::GgmlLogLevel;
 use slab_ggml_sys::GGmlLib;
 use slab_utils::loader::{RuntimeLibrary, load_runtime_library_from_dir};
 use std::ffi::CStr;
@@ -36,7 +38,10 @@ impl GGML {
 
     /// Load the `ggml` shared library from a unified runtime library directory.
     pub fn from_dir<P: AsRef<Path>>(lib_dir: P) -> Result<Self, GGMLError> {
-        load_runtime_library_from_dir::<_, Self>(lib_dir, "ggml").map_err(Into::into)
+        let ggml =
+            load_runtime_library_from_dir::<_, Self>(lib_dir, "ggml").map_err(GGMLError::from)?;
+        ggml.install_logging_hook();
+        Ok(ggml)
     }
 
     /// Load the `ggml` shared library and eagerly register backend plugins from

@@ -19,3 +19,4 @@ slab-ggml-sys = { workspace = true }
 slab-utils = { workspace = true }
 thiserror = { workspace = true }
 libc = { workspace = true }
+tracing = { workspace = true }

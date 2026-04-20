@@ -60,10 +60,12 @@ impl Whisper {
         let (whisper_lib, ggml_lib) =
             load_runtime_with_ggml_sidecar::<_, slab_whisper_sys::WhisperLib>(lib_dir, "whisper")?;
 
-        Ok(Self { lib: Arc::new(whisper_lib), _ggml_lib: ggml_lib })
+        let whisper = Self { lib: Arc::new(whisper_lib), _ggml_lib: ggml_lib };
+        whisper.install_logging_hooks();
+        Ok(whisper)
     }
 
-    /// Redirect all whisper.cpp and GGML logs to logging hooks installed by whisper-rs.
+    /// Redirect all whisper.cpp and GGML logs to Rust logging hooks.
     ///
     /// This will stop most logs from being output to stdout/stderr and will bring them into
     /// `log` or `tracing`, if the `log_backend` or `tracing_backend` features, respectively,
@@ -72,10 +74,10 @@ impl Whisper {
     ///
     /// Note whisper.cpp and GGML do not reliably follow Rust logging conventions.
     /// Use your logging crate's configuration to control how these logs will be output.
-    /// whisper-rs does not currently output any logs, but this may change in the future.
-    /// You should configure by module path and use `whisper_rs::ggml_logging_hook`,
-    /// and/or `whisper_rs::whisper_logging_hook`, to avoid possibly ignoring useful
-    /// `whisper-rs` logs in the future.
+    /// `slab-whisper` does not currently output any logs, but this may change in the future.
+    /// You should configure by module path and use `slab_whisper::ggml_logging_hook`,
+    /// and/or `slab_whisper::whisper_logging_hook`, to avoid possibly ignoring useful
+    /// `slab-whisper` logs in the future.
     ///
     /// Safe to call multiple times. Only has an effect the first time.
     /// (note this means installing your own logging handlers with unsafe functions after this call

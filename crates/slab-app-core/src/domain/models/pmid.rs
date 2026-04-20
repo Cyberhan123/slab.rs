@@ -16,6 +16,10 @@ mod tests {
             PMID.runtime.model_auto_unload.idle_minutes().as_str(),
             "runtime.model_auto_unload.idle_minutes"
         );
+        assert_eq!(
+            PMID.runtime.model_auto_unload.max_pressure_evictions_per_load().as_str(),
+            "runtime.model_auto_unload.max_pressure_evictions_per_load"
+        );
     }
 
     #[test]

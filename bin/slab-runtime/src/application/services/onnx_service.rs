@@ -18,8 +18,7 @@ enum SharedOnnxDeployment<TText, TEmbedding> {
     Embedding(TEmbedding),
 }
 
-type ActiveOnnxDeployment =
-    SharedOnnxDeployment<DomainOnnxTextService, DomainOnnxEmbeddingService>;
+type ActiveOnnxDeployment = SharedOnnxDeployment<DomainOnnxTextService, DomainOnnxEmbeddingService>;
 
 impl ActiveOnnxDeployment {
     async fn unload(self) -> Result<(), CoreError> {

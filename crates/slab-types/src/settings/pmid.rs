@@ -87,6 +87,9 @@ impl PmidCatalog {
             self.runtime.diffusion.num_workers(),
             self.runtime.model_auto_unload.enabled(),
             self.runtime.model_auto_unload.idle_minutes(),
+            self.runtime.model_auto_unload.min_free_system_memory_bytes(),
+            self.runtime.model_auto_unload.min_free_gpu_memory_bytes(),
+            self.runtime.model_auto_unload.max_pressure_evictions_per_load(),
             self.launch.transport(),
             self.launch.queue_capacity(),
             self.launch.backend_capacity(),
@@ -264,6 +267,22 @@ impl RuntimeModelAutoUnloadPmids {
 
     pub fn idle_minutes(self) -> SettingPmid {
         SettingPmid::from_segments(["runtime", "model_auto_unload", "idle_minutes"])
+    }
+
+    pub fn min_free_system_memory_bytes(self) -> SettingPmid {
+        SettingPmid::from_segments(["runtime", "model_auto_unload", "min_free_system_memory_bytes"])
+    }
+
+    pub fn min_free_gpu_memory_bytes(self) -> SettingPmid {
+        SettingPmid::from_segments(["runtime", "model_auto_unload", "min_free_gpu_memory_bytes"])
+    }
+
+    pub fn max_pressure_evictions_per_load(self) -> SettingPmid {
+        SettingPmid::from_segments([
+            "runtime",
+            "model_auto_unload",
+            "max_pressure_evictions_per_load",
+        ])
     }
 }
 
@@ -506,6 +525,10 @@ mod tests {
         assert_eq!(
             PMID.runtime.model_auto_unload.idle_minutes().as_str(),
             "runtime.model_auto_unload.idle_minutes"
+        );
+        assert_eq!(
+            PMID.runtime.model_auto_unload.min_free_system_memory_bytes().as_str(),
+            "runtime.model_auto_unload.min_free_system_memory_bytes"
         );
         assert_eq!(
             PMID.launch.profiles.desktop.runtime_bind_base_port().as_str(),

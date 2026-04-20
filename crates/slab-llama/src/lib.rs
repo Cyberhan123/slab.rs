@@ -44,6 +44,7 @@ mod llama_batch;
 mod llama_context;
 mod llama_model;
 mod llama_sampler;
+mod logging;
 mod model_params;
 pub mod runtime;
 mod token;
@@ -55,6 +56,7 @@ pub use llama_batch::LlamaBatch;
 pub use llama_context::LlamaContext;
 pub use llama_model::LlamaModel;
 pub use llama_sampler::{LlamaSampler, SamplerChainBuilder};
+pub use logging::GgmlLogLevel;
 pub use model_params::LlamaModelParams;
 pub use runtime::{
     LlamaInferenceOutput, LlamaInferenceParams, LlamaLoadConfig, LlamaLogitBias, LlamaRuntime,
@@ -92,7 +94,9 @@ impl Llama {
         let (llama_lib, ggml_lib) =
             load_runtime_with_ggml_sidecar::<_, slab_llama_sys::LlamaLib>(lib_dir, "llama")?;
 
-        Ok(Self { lib: Arc::new(llama_lib), _ggml_lib: ggml_lib })
+        let llama = Self { lib: Arc::new(llama_lib), _ggml_lib: ggml_lib };
+        llama.install_logging_hooks();
+        Ok(llama)
     }
 
     /// Initialise the llama.cpp backend.
