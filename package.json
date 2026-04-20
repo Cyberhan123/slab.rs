@@ -52,7 +52,7 @@
     "oxlint": "^1.60.0",
     "playwright": "^1.59.1",
     "tailwindcss": "^4.2.2",
-    "typescript": "~5.9.3",
+    "typescript": "~6.0.3",
     "vitepress": "^2.0.0-alpha.17",
     "vitest": "^4.1.4",
     "vitest-browser-react": "^2.2.0"
